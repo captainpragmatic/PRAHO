@@ -1,16 +1,10 @@
 """The `company.*` identity settings, asserted where a reader actually sees them.
 
-Nine of the ten keys in the `company` group had no effect test. Their consumer is not Python -
-it is `{% setting "company.x" %}` inside `templates/legal/privacy_policy.html` and
-`templates/legal/terms_of_service.html`, the two pages that carry PRAHO's legal identity for GDPR
-purposes. A wrong legal name, registration number or DPO address on those pages is a compliance
-defect, and nothing asserted that changing the setting changed the page.
-
-These tests request the real page and assert the rendered text, which is the only place the
-`{% setting %}` tag's output can be observed. That shape also drove a fix to the effect detector
-in `scripts/lint_settings_coverage.py`: it required a test to import from another app, and a
-render test imports nothing from `apps.` at all, so it reported these very tests as untested. A
-detector that silently dictates test style under-reports forever.
+The portal's legal pages state who the operator is (ADR-0058): the legal name, registration number,
+address and contacts, which the portal reads from Platform's signed localisation payload. These
+tests write the setting and assert what the portal receives, which is the only place its effect
+on those pages can be observed from Platform. The portal's rendering of the payload is tested in
+the portal (tests/common/test_legal_pages.py).
 
 `company.email_noreply` is the one key here with a Python consumer, and it gets the test its real
 behaviour deserves rather than the one that would look tidier - see `NoReplyAddressPrecedenceTests`.
@@ -18,46 +12,39 @@ behaviour deserves rather than the one that would look tidier - see `NoReplyAddr
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
-from html import unescape
+from typing import Any
 from unittest.mock import patch
 
 from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from django.urls import reverse
-from django.utils.html import strip_tags
-from django.utils.translation import override
+from rest_framework.test import APIRequestFactory
 
+from apps.api.localisation.views import localisation_defaults
 from apps.notifications.models import EmailLog
 from apps.notifications.services import EmailService, NotificationService
 from apps.notifications.tasks import send_email_task
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService, get_company_legal_name
 
-# Every key below is rendered by BOTH legal pages unless noted.
-PRIVACY_KEYS = {
+IDENTITY_KEYS = {
     "company.legal_name": "Effect Test Holdings SRL",
     "company.registration_number": "J40/99999/2099",
     "company.address": "Bulevardul Verificat 42, Cluj-Napoca",
     "company.phone": "+40.99.888.7777",
     "company.email_contact": "contact-effect@example.test",
     "company.email_dpo": "dpo-effect@example.test",
-}
-TERMS_KEYS = {
-    "company.legal_name": "Effect Test Holdings SRL",
-    "company.registration_number": "J40/99999/2099",
-    "company.address": "Bulevardul Verificat 42, Cluj-Napoca",
-    "company.phone": "+40.99.888.7777",
-    "company.email_contact": "contact-effect@example.test",
     "company.email_support": "support-effect@example.test",
+    "company.email_finance": "finance-effect@example.test",
+    "company.email_privacy": "privacy-effect@example.test",
 }
-COOKIE_KEYS = {"company.email_privacy": "privacy-effect@example.test"}
 
 
 @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
-class CompanyIdentityRenderTests(TestCase):
-    """Write the setting, request the page a visitor would read, assert the text changed."""
+class CompanyIdentityPayloadTests(TestCase):
+    """Write the setting, read what the portal's legal pages receive, assert it changed."""
 
     def setUp(self) -> None:
         cache.clear()
@@ -68,111 +55,43 @@ class CompanyIdentityRenderTests(TestCase):
             result = SettingsService.update_setting(key, value)
         self.assertTrue(result.is_ok(), result)
 
-    def assert_page_renders_settings(self, url_name: str, values: dict[str, str]) -> None:
-        """The configured identity replaces the catalog defaults throughout the page."""
-        defaults = {key: str(SettingsService.DEFAULT_SETTINGS[key]) for key in values}
-        for key, value in values.items():
+    def company(self) -> dict[str, Any]:
+        """What the portal's signed localisation request receives (HMAC is verified by middleware)."""
+        request = APIRequestFactory().post("/api/localisation/", {"timestamp": int(time.time())}, format="json")
+        request._portal_authenticated = True  # type: ignore[attr-defined]  # Set by the HMAC middleware
+        response = localisation_defaults(request)
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data["company"]
+
+    def test_the_portal_receives_the_configured_identity(self) -> None:
+        for key, value in IDENTITY_KEYS.items():
             self.set_value(key, value)
-
-        response = self.client.get(reverse(url_name))
-        self.assertEqual(response.status_code, 200)
-        for key, value in values.items():
+        company = self.company()
+        for key, value in IDENTITY_KEYS.items():
             with self.subTest(key=key):
-                self.assertContains(response, value)
-                if defaults[key] and defaults[key] != value:
-                    self.assertNotContains(response, defaults[key])
+                self.assertEqual(company[key.removeprefix("company.")], value)
 
-    def test_privacy_policy_renders_the_configured_identity(self) -> None:
-        self.assert_page_renders_settings("privacy_policy", PRIVACY_KEYS)
-
-    def test_terms_of_service_renders_the_configured_identity(self) -> None:
-        self.assert_page_renders_settings("terms_of_service", TERMS_KEYS)
-
-    def test_cookie_policy_renders_the_configured_privacy_contact(self) -> None:
-        self.assert_page_renders_settings("cookie_policy", COOKIE_KEYS)
-
-    def test_defaults_render_when_nothing_is_configured(self) -> None:
-        """The paired default test: no stored row, and the catalog value reaches the page."""
-        response = self.client.get(reverse("privacy_policy"))
-        self.assertEqual(response.status_code, 200)
-        for key in PRIVACY_KEYS:
-            default = str(SettingsService.DEFAULT_SETTINGS[key])
-            if default:  # `company.address` and `company.phone` ship empty on purpose
+    def test_defaults_reach_the_portal_when_nothing_is_configured(self) -> None:
+        company = self.company()
+        for key in IDENTITY_KEYS:
+            if key != "company.legal_name":  # Inherits the seller name: see below
                 with self.subTest(key=key):
-                    self.assertContains(response, default)
+                    self.assertEqual(company[key.removeprefix("company.")], str(SettingsService.DEFAULT_SETTINGS[key]))
 
     @override_settings(COMPANY_NAME="Seller From Env SRL")
     def test_legal_name_inherits_the_invoice_seller_until_staff_override_it(self) -> None:
         """One name for the operator: the legal pages use COMPANY_NAME until staff store their own."""
         SystemSetting.objects.filter(key="company.legal_name").delete()
-        self.assertContains(self.client.get(reverse("privacy_policy")), "Seller From Env SRL")
+        self.assertEqual(self.company()["legal_name"], "Seller From Env SRL")
         self.set_value("company.legal_name", "Staff Chosen Name SRL")
-        response = self.client.get(reverse("privacy_policy"))
-        self.assertContains(response, "Staff Chosen Name SRL")
-        self.assertNotContains(response, "Seller From Env SRL")
+        self.assertEqual(self.company()["legal_name"], "Staff Chosen Name SRL")
 
     def test_a_changed_value_replaces_the_previous_one_on_the_next_request(self) -> None:
         """Guards the cache: a stale settings cache would serve the first value forever."""
         self.set_value("company.legal_name", "First Name SRL")
-        self.assertContains(self.client.get(reverse("privacy_policy")), "First Name SRL")
+        self.assertEqual(self.company()["legal_name"], "First Name SRL")
         self.set_value("company.legal_name", "Second Name SRL")
-        response = self.client.get(reverse("privacy_policy"))
-        self.assertContains(response, "Second Name SRL")
-        self.assertNotContains(response, "First Name SRL")
-
-
-@override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
-class LegalProseIdentityEffectTests(TestCase):
-    """Every translated prose sentence names the configured legal entity."""
-
-    LEGAL_NAME = "Renamed Entity SRL"
-
-    def setUp(self) -> None:
-        cache.clear()
-        self.addCleanup(cache.clear)
-        with self.captureOnCommitCallbacks(execute=True):
-            result = SettingsService.update_setting("company.legal_name", self.LEGAL_NAME)
-        self.assertTrue(result.is_ok(), result)
-
-    def page_text(self, url_name: str, language: str) -> str:
-        with override(language):
-            response = self.client.get(reverse(url_name), HTTP_ACCEPT_LANGUAGE=language)
-        self.assertEqual(response.status_code, 200)
-        return " ".join(unescape(strip_tags(response.content.decode())).split())
-
-    def test_every_terms_sentence_uses_the_configured_name_in_en_and_ro(self) -> None:
-        sentences = {
-            "en": (
-                f"services provided by {self.LEGAL_NAME}",
-                f"a legally binding agreement between you and {self.LEGAL_NAME}.",
-                f"{self.LEGAL_NAME} provides web hosting and related services",
-                f"{self.LEGAL_NAME} and protected by intellectual property laws.",
-            ),
-            "ro": (
-                f"serviciilor PRAHO Platform furnizate de {self.LEGAL_NAME}",
-                f"un acord legal obligatoriu între dvs. și {self.LEGAL_NAME}.",
-                f"{self.LEGAL_NAME} oferă servicii de găzduire web și servicii conexe",
-                f"{self.LEGAL_NAME} și protejată de legile de proprietate intelectuală.",
-            ),
-        }
-        for language, expected in sentences.items():
-            with self.subTest(language=language):
-                text = self.page_text("terms_of_service", language)
-                for sentence in expected:
-                    with self.subTest(sentence=sentence):
-                        self.assertIn(sentence, text)
-                self.assertNotIn("PragmaticHost SRL", text)
-
-    def test_privacy_sentence_uses_the_configured_name_in_en_and_ro(self) -> None:
-        sentences = {
-            "en": f'{self.LEGAL_NAME} ("we", "us", "our") is committed to protecting your privacy',
-            "ro": f'{self.LEGAL_NAME} ("noi", "ne", "noastre") este angajată să vă protejeze intimitatea',
-        }
-        for language, sentence in sentences.items():
-            with self.subTest(language=language):
-                text = self.page_text("privacy_policy", language)
-                self.assertIn(sentence, text)
-                self.assertNotIn("PragmaticHost SRL", text)
+        self.assertEqual(self.company()["legal_name"], "Second Name SRL")
 
 
 class BrandNameEffectTests(TestCase):

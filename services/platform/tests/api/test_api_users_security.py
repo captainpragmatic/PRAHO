@@ -22,6 +22,7 @@ from apps.customers.models import Customer
 from apps.users.models import APIToken
 from apps.users.pending_registration import PendingRegistration
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 
 User = get_user_model()
 
@@ -360,6 +361,10 @@ class HMACExemptPathsExactMatchTests(TestCase):
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
 class RegistrationRouteTests(HMACTestMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def test_unsigned_registration_is_denied_without_creating_accounts(self) -> None:
         users_before = User.objects.count()
         customers_before = Customer.objects.count()

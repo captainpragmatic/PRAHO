@@ -35,7 +35,6 @@ CONTACT_TEMPLATES = {
     "404.html": ("email_support",),
     "500.html": ("email_support",),
     "billing/proforma_detail.html": ("email_support",),
-    "legal/cookie_policy.html": ("email_privacy",),
     "orders/order_confirmation.html": ("email_support",),
     "services/service_detail.html": ("email_support", "email_finance"),
     "services/service_request_action.html": ("email_support",),
@@ -147,7 +146,7 @@ class PortalCompanyIdentityTests(SimpleTestCase):
                         self.assert_identity(CONFIGURED_COMPANY)
 
     def test_each_contact_template_renders_configured_identity_in_en_and_ro(self) -> None:
-        self.assertEqual(len(CONTACT_TEMPLATES), 10)
+        self.assertEqual(len(CONTACT_TEMPLATES), 9)
         self.assertIn("users/privacy_dashboard.html", CONTACT_TEMPLATES)
         context: dict[str, object] = {
             "service_id": 42,

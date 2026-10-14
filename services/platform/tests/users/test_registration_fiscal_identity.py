@@ -18,12 +18,12 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.billing.fiscal_identity import get_customer_fiscal_identity
 from apps.common.encryption import encrypt_sensitive_data
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.settings.services import SettingsService
 from apps.users import registration_confirmation
 from apps.users.models import User
 from apps.users.pending_registration import PendingRegistration
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 
 CNP = "1900101123457"
 OTHER_CNP = "2900505123403"
@@ -63,6 +63,7 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
+        self.terms = publish_release()
 
     def submit(self, data: dict[str, Any]) -> Any:
         return self.portal_post("/api/customers/register/", data)
@@ -83,7 +84,7 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
             accepts_marketing=False,
             data_processing_consent=True,
             terms_accepted=True,
-            terms_version=TERMS_OF_SERVICE_VERSION,
+            terms_document_id=str(self.terms.pk),
         )
 
     # --- The CNP reaches the customer, and never the plain JSON -------------------------------
@@ -123,8 +124,7 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
 
     def test_the_preview_never_shows_the_cnp(self) -> None:
         row = self.submitted_row(individual())
-        details = registration_confirmation.preview(str(row.pk), row.token())
-        assert details is not None
+        details = registration_confirmation.preview(str(row.pk), row.token()).unwrap()
         self.assertNotIn("cnp", details)
         self.assertNotIn(CNP, str(details))
 
@@ -229,8 +229,7 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
 
     def test_the_preview_shows_the_cui_and_registry_number(self) -> None:
         row = self.submitted_row(registration(cui=CUI, registration_number="J40/1234/2020"))
-        details = registration_confirmation.preview(str(row.pk), row.token())
-        assert details is not None
+        details = registration_confirmation.preview(str(row.pk), row.token()).unwrap()
         self.assertEqual(details["cui"], CUI)
         self.assertEqual(details["registration_number"], "J40/1234/2020")
 

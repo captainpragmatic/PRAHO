@@ -8,7 +8,6 @@ from django.conf import settings
 from django.core import mail
 from django.test import TestCase
 
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer
 from apps.orders.services import OrderService
@@ -16,6 +15,7 @@ from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from services.platform.tests.helpers.hmac import hmac_headers
+from services.platform.tests.helpers.legal import publish_release
 from services.platform.tests.helpers.task_queue import run_queued
 
 CHOSEN = "Registration-pass123!"
@@ -25,6 +25,7 @@ pytestmark = pytest.mark.e2e
 
 class RegistrationCase(TestCase):
     def setUp(self):
+        self.terms = publish_release()
         SystemSetting.objects.update_or_create(
             key="portal.public_base_url",
             defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
@@ -76,7 +77,7 @@ class RegistrationCase(TestCase):
         confirmed = self.signed_post("/api/users/register/confirm/", {
             "registration_id": registration_id, "token": token,
             "password": CHOSEN, "password_confirm": CHOSEN, "data_processing_consent": True,
-            "terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION,
+            "terms_accepted": True, "terms_document_id": str(self.terms.pk),
         })
         self.assertEqual(confirmed.status_code, 201, confirmed.content)
         user = User.objects.get(email="owner@e2e.test")

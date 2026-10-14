@@ -52,7 +52,13 @@ class TestLocalisationParity(TestCase):
     """Pure display policy must behave identically across isolated services."""
 
     def test_localisation_helpers_match(self) -> None:
-        for name in ("localisation.py", "localisation_forms.py", "localisation_middleware.py", "identity_fields.py"):
+        for name in (
+            "localisation.py",
+            "localisation_forms.py",
+            "localisation_middleware.py",
+            "identity_fields.py",
+            "legal_html.py",
+        ):
             with self.subTest(name=name):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())
 

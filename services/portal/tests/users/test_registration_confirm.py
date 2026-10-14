@@ -13,6 +13,7 @@ REGISTRATION_ID = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"
 LINK = f"/register/confirm/{REGISTRATION_ID}/correct-token/"
 PAGE = "/register/confirm/"
 CHOSEN = " Chosen-at-confirm-2026! "
+TERMS_DOCUMENT_ID = "6f0c1b1e-3d2a-4c5b-8e9f-0a1b2c3d4e5f"
 DETAILS = {
     "registration": {
         "email": "new@example.test",
@@ -20,7 +21,14 @@ DETAILS = {
         "last_name": "Marlowe",
         "company_name": "Quill Lantern SRL",
         "vat_number": "RO12345678",
-        "terms_version": "2024-12-27",  # Platform names the version to accept (#670)
+        # Platform names the terms release to accept (ADR-0058).
+        "terms_document": {
+            "document_id": TERMS_DOCUMENT_ID,
+            "kind": "terms",
+            "language": "en",
+            "release": "2024-12-27.1",
+            "sha256": "0" * 64,
+        },
     }
 }
 
@@ -32,6 +40,7 @@ def form(**overrides: object) -> dict[str, object]:
         "confirm_password": CHOSEN,
         "data_processing_consent": "on",
         "terms_accepted": "on",  # Required since the page asks for the Terms of Service
+        "terms_document_id": TERMS_DOCUMENT_ID,  # The release the page linked, sent back
         **overrides,
     }
 
@@ -80,7 +89,7 @@ class RegistrationConfirmViewTests(TestCase):
             data_processing_consent=True,
             marketing_consent=True,
             terms_accepted=True,
-            terms_version="2024-12-27",
+            terms_document_id=TERMS_DOCUMENT_ID,
             client_ip="127.0.0.1",
         )
         self.assertTrue(any("can sign in now" in str(m) for m in get_messages(response.wsgi_request)))

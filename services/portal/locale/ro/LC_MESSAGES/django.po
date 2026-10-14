@@ -4018,80 +4018,11 @@ msgstr "Violație CSP - control pozitiv"
 msgid "Trigger blocked inline handler"
 msgstr "Declanșați handler-ul inline blocat"
 
-#: services/portal/templates/legal/cookie_policy.html:14
-msgid "Last updated: February 2026"
-msgstr "Ultima actualizare: februarie 2026"
-
-#: services/portal/templates/legal/cookie_policy.html:21
-msgid "About Cookies"
-msgstr "Despre Module Cookie"
-
-#: services/portal/templates/legal/cookie_policy.html:24
-msgid ""
-"\n"
-"          This website uses cookies and similar technologies to ensure its proper functioning,\n"
-"          improve your browsing experience, and analyze how you interact with our services.\n"
-"          This policy explains what cookies we use, why we use them, and how you can control them.\n"
-"          "
-msgstr ""
-"\n"
-"          Acest site utilizează module cookie și tehnologii similare pentru a asigura funcționarea corespunzătoare a acestuia, pentru a îmbunătăți experiența dvs. de navigare și pentru a analiza cum interacționați cu serviciile noastre. Această politică explică ce module cookie utilizăm, de ce le utilizăm și cum le puteți controla.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:31
-msgid ""
-"\n"
-"          In accordance with EU Regulation 2016/679 (GDPR) and Romanian Law 506/2004,\n"
-"          we require your explicit consent before placing any non-essential cookies on your device.\n"
-"          "
-msgstr ""
-"\n"
-"          În conformitate cu Regulamentul UE 2016/679 (GDPR) și Legea română 506/2004, vă cerem consimțământul explicit înainte de a plasa orice module cookie non-esențiale pe dispozitivul dvs.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:48
-msgid "Always Active"
-msgstr "Întotdeauna active"
-
-#: services/portal/templates/legal/cookie_policy.html:52
-msgid ""
-"\n"
-"          These cookies are strictly necessary for the website to function and cannot be disabled.\n"
-"          They are set in response to actions made by you, such as logging in or filling in forms.\n"
-"          "
-msgstr ""
-"\n"
-"          Aceste module cookie sunt strict necesare pentru funcționarea site-ului și nu pot fi dezactivate. Sunt setate ca răspuns la acțiunile realizate de dvs., cum ar fi autentificarea sau completarea formularelor.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:58
-#: services/portal/templates/legal/cookie_policy.html:118
-#: services/portal/templates/legal/cookie_policy.html:166
-#: services/portal/templates/legal/cookie_policy.html:208
-msgid "Legal Basis:"
-msgstr "Bază legală:"
-
-#: services/portal/templates/legal/cookie_policy.html:58
-msgid "Legitimate interest (GDPR Art. 6(1)(f)) — necessary for service delivery"
-msgstr "Interes legitim (GDPR Art. 6(1)(f)) — necesar pentru furnizarea serviciilor"
-
-#: services/portal/templates/legal/cookie_policy.html:65
-#: services/portal/templates/legal/cookie_policy.html:125
-#: services/portal/templates/legal/cookie_policy.html:173
-msgid "Cookie Name"
-msgstr "Nume cookie"
-
 #: services/portal/templates/legal/cookie_policy.html:66
 #: services/portal/templates/legal/cookie_policy.html:126
 #: services/portal/templates/legal/cookie_policy.html:174
 msgid "Purpose"
 msgstr "Scop"
-
-#: services/portal/templates/legal/cookie_policy.html:67
-#: services/portal/templates/legal/cookie_policy.html:127
-#: services/portal/templates/legal/cookie_policy.html:175
-msgid "Duration"
-msgstr "Durată"
 
 #: services/portal/templates/legal/cookie_policy.html:68
 #: services/portal/templates/legal/cookie_policy.html:128
@@ -4099,150 +4030,17 @@ msgstr "Durată"
 msgid "Provider"
 msgstr "Furnizor"
 
-#: services/portal/templates/legal/cookie_policy.html:74
-msgid "Cross-site request forgery protection"
-msgstr "Protecție împotriva falsificării cererilor între site-uri"
-
-#: services/portal/templates/legal/cookie_policy.html:75
-#: services/portal/templates/legal/cookie_policy.html:87
-#: services/portal/templates/legal/cookie_policy.html:93
-#: services/portal/templates/legal/cookie_policy.html:135
-#: services/portal/templates/legal/cookie_policy.html:141
-msgid "1 year"
-msgstr "1 an"
-
-#: services/portal/templates/legal/cookie_policy.html:80
-msgid "Maintains your login session"
-msgstr "Menține sesiunea dvs. de autentificare"
-
-#: services/portal/templates/legal/cookie_policy.html:81
-msgid "2 weeks"
-msgstr "2 săptămâni"
-
-#: services/portal/templates/legal/cookie_policy.html:86
-msgid "Stores your cookie preference choices"
-msgstr "Stochează preferințele dvs. privind modulele cookie"
-
-#: services/portal/templates/legal/cookie_policy.html:92
-msgid "Anonymous consent tracking identifier"
-msgstr "Identificator de urmărire a consimțământului anonim"
-
 #: services/portal/templates/legal/cookie_policy.html:107
 #: services/portal/templates/legal/cookie_policy.html:155
 #: services/portal/templates/legal/cookie_policy.html:197
 msgid "Optional"
 msgstr "Opționale"
 
-#: services/portal/templates/legal/cookie_policy.html:111
-msgid ""
-"\n"
-"          These cookies enable enhanced functionality and personalization, such as remembering\n"
-"          your language preference, timezone, and display settings. If you do not allow these\n"
-"          cookies, some or all of these features may not function properly.\n"
-"          "
-msgstr ""
-"\n"
-"          Aceste module cookie permit funcționalități îmbunătățite și personalizare, cum ar fi memorarea preferinței dvs. de limbă, fusul orar și setările de afișare. Dacă nu permiteți aceste module cookie, unele sau toate aceste caracteristici ar putea să nu funcționeze corect.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:118
-#: services/portal/templates/legal/cookie_policy.html:166
-#: services/portal/templates/legal/cookie_policy.html:208
-msgid "Consent (GDPR Art. 6(1)(a))"
-msgstr "Consimțământ (GDPR Art. 6(1)(a))"
-
-#: services/portal/templates/legal/cookie_policy.html:134
-msgid "Remembers your preferred language (RO/EN)"
-msgstr "Memorează limba preferată dvs. (RO/EN)"
-
-#: services/portal/templates/legal/cookie_policy.html:140
-msgid "Display preferences (timezone, theme)"
-msgstr "Preferințe de afișare (fus orar, temă)"
-
-#: services/portal/templates/legal/cookie_policy.html:159
-msgid ""
-"\n"
-"          These cookies help us understand how visitors interact with our website by collecting\n"
-"          and reporting information anonymously. This helps us improve our services and user\n"
-"          experience.\n"
-"          "
-msgstr ""
-"\n"
-"          Aceste module cookie ne ajută să înțelegem cum vizitatorii interacționează cu site-ul nostru, prin colectarea și raportarea anonimă a informațiilor. Aceasta ne ajută să ne îmbunătățim serviciile și experiența utilizatorului.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:182
-msgid "Privacy-focused website analytics (self-hosted)"
-msgstr "Analize website centrate pe confidențialitate (auto-găzduite)"
-
-#: services/portal/templates/legal/cookie_policy.html:183
-msgid "13 months / 30 min"
-msgstr "13 luni / 30 min"
-
-#: services/portal/templates/legal/cookie_policy.html:201
-msgid ""
-"\n"
-"          These cookies may be set through our site by advertising partners. They may be used\n"
-"          by those companies to build a profile of your interests and show you relevant adverts\n"
-"          on other sites. We currently do not use third-party marketing cookies.\n"
-"          "
-msgstr ""
-"\n"
-"          Aceste module cookie pot fi setate pe site-ul nostru de către partenerii publicitari. Acestea pot fi utilizate de acele companii pentru a construi un profil al intereselor dvs. și pentru a vă arăta reclame relevante pe alte site-uri. Actualmente, nu folosim module cookie de marketing de terță parte.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:211
-msgid "No marketing cookies are currently in use."
-msgstr "Actualmente, nu sunt folosite module cookie de marketing."
-
-#: services/portal/templates/legal/cookie_policy.html:220
-msgid "Manage Your Preferences"
-msgstr "Gestionați preferințele dvs."
-
-#: services/portal/templates/legal/cookie_policy.html:222
-msgid ""
-"\n"
-"        You can change your cookie preferences at any time. Withdrawing consent is as easy\n"
-"        as giving it, as required by GDPR Article 7(3).\n"
-"        "
-msgstr ""
-"\n"
-"        Puteți modifica preferințele dvs. privind modulele cookie în orice moment. Retragerea consimțământului este la fel de ușoară ca acordarea acestuia, după cum se cere de GDPR Articolul 7(3).\n"
-"        "
-
-#: services/portal/templates/legal/cookie_policy.html:227
-msgid "Open Cookie Preferences"
-msgstr "Deschideți preferințele cookie"
-
 #: services/portal/templates/legal/cookie_policy.html:235
 #: services/portal/templates/users/consent_history.html:186
 #: services/portal/templates/users/data_export.html:152
 msgid "Legal Information"
 msgstr "Informații juridice"
-
-#: services/portal/templates/legal/cookie_policy.html:238
-msgid ""
-"\n"
-"          This cookie policy complies with EU Regulation 2016/679 (General Data Protection Regulation),\n"
-"          Directive 2002/58/EC (ePrivacy Directive), and Romanian Law 506/2004 on the processing of\n"
-"          personal data and privacy protection in electronic communications.\n"
-"          "
-msgstr ""
-"\n"
-"          Această politică de module cookie respectă Regulamentul UE 2016/679 (Regulamentul general privind protecția datelor), Directiva 2002/58/CE (Directiva ePrivacy) și Legea română 506/2004 privind prelucrarea datelor cu caracter personal și protecția vieții private în comunicațiile electronice.\n"
-"          "
-
-#: services/portal/templates/legal/cookie_policy.html:245
-#, python-format
-msgid ""
-"\n"
-"          For any questions about our use of cookies, please contact our Data Protection Officer\n"
-"          at %(privacy_email)s.\n"
-"          "
-msgstr ""
-"\n"
-"          Pentru orice întrebări cu privire la utilizarea modulelor cookie, vă rugăm să contactați Ofițerul nostru pentru protecția datelor la %(privacy_email)s.\n"
-"          "
 
 #: services/portal/templates/orders/cart_review.html:15
 msgid "Review selected products and proceed to checkout"
@@ -7951,3 +7749,99 @@ msgstr "Codul de TVA al firmei, cu sau fără prefixul țării, dacă este înre
 
 msgid "Six digits in Romania"
 msgstr "Șase cifre în România"
+
+msgid "Registration opens once the Terms of Service are published."
+msgstr "Înregistrarea se deschide după publicarea Termenilor și condițiilor."
+
+msgid "In effect from"
+msgstr "În vigoare din"
+
+msgid "Release"
+msgstr "Versiunea"
+
+msgid "Terms of Service"
+msgstr "Termeni și condiții"
+
+msgid "Privacy Policy"
+msgstr "Politică de confidențialitate"
+
+msgid "%(default)s, or %(remember)s if you choose to stay signed in"
+msgstr "%(default)s sau %(remember)s dacă alegeți să rămâneți autentificat"
+
+msgid "Keeps you signed in"
+msgstr "Vă menține autentificat"
+
+msgid "Protects forms against cross-site request forgery"
+msgstr "Protejează formularele împotriva falsificării cererilor între site-uri"
+
+msgid "Your cookie choices"
+msgstr "Alegerile dvs. privind cookie-urile"
+
+msgid "Links your cookie choices to the record of them"
+msgstr "Leagă alegerile dvs. privind cookie-urile de înregistrarea lor"
+
+msgid "The language you chose"
+msgstr "Limba aleasă de dvs."
+
+msgid "Your cookie choices, kept in local storage until they are recorded"
+msgstr "Alegerile dvs. privind cookie-urile, păstrate în stocarea locală până sunt înregistrate"
+
+msgid "Until recorded"
+msgstr "Până la înregistrare"
+
+msgid "Pages opened in this tab, for the Back button, kept in session storage"
+msgstr "Paginile deschise în această filă, pentru butonul Înapoi, păstrate în stocarea sesiunii"
+
+msgid "Until the tab is closed"
+msgstr "Până la închiderea filei"
+
+msgid "On payment pages only, Stripe sets its own cookies to process the payment and prevent fraud"
+msgstr "Doar pe paginile de plată, Stripe setează propriile cookie-uri pentru a procesa plata și a preveni frauda"
+
+msgid "As Stripe sets them"
+msgstr "Așa cum le setează Stripe"
+
+msgid "Legal document"
+msgstr "Document juridic"
+
+msgid "This page cannot be shown right now. Please try again in a few minutes."
+msgstr "Această pagină nu poate fi afișată acum. Încercați din nou în câteva minute."
+
+msgid "What this site stores in your browser"
+msgstr "Ce stochează acest site în browserul dvs."
+
+msgid "The portal software sets these itself. Nothing else is stored unless you allow it."
+msgstr "Portalul le setează singur. Nimic altceva nu este stocat fără acordul dvs."
+
+msgid "Name"
+msgstr "Nume"
+
+msgid "Kept for"
+msgstr "Păstrat"
+
+msgid "Change your cookie choices"
+msgstr "Schimbați alegerile privind cookie-urile"
+
+msgid "Operator"
+msgstr "Operator"
+
+msgid "Privacy questions"
+msgstr "Întrebări despre confidențialitate"
+
+msgid "Data Protection Officer"
+msgstr "Responsabil cu protecția datelor"
+
+msgid "This document has not been published yet."
+msgstr "Acest document nu a fost publicat încă."
+
+msgid "Your privacy dashboard"
+msgstr "Panoul dvs. de confidențialitate"
+
+msgid "see your data and consents, download a copy, or ask for your account to be erased."
+msgstr "vedeți datele și consimțămintele dvs., descărcați o copie sau cereți ștergerea contului."
+
+msgid "%(count)d day"
+msgid_plural "%(count)d days"
+msgstr[0] "%(count)d zi"
+msgstr[1] "%(count)d zile"
+msgstr[2] "%(count)d de zile"

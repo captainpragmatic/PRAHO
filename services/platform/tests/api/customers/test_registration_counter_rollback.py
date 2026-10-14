@@ -14,11 +14,16 @@ from apps.audit.models import AuditEvent
 from apps.common import counters
 from apps.settings.services import SettingsService
 from apps.users.pending_registration import PendingRegistration
+from tests.helpers.legal import publish_release
 
 COUNTER_KEY = "rate_limit:registration:198.51.100.18"
 
 
 class RegistrationCounterRollbackTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)

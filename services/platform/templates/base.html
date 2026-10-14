@@ -276,10 +276,6 @@
           <a href="{% url 'cookie_policy' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
             {% trans 'Cookie Policy' %}
           </a>
-          <span class="text-slate-600">|</span>
-          <a href="{% url 'data_processors' %}" class="text-slate-400 hover:text-blue-400 transition-colors">
-            {% trans 'Data Processors' %}
-          </a>
           {% if user.is_authenticated %}
           <span class="text-slate-600">|</span>
           <a href="{% url 'audit:gdpr_dashboard' %}" class="text-slate-400 hover:text-blue-400 transition-colors">

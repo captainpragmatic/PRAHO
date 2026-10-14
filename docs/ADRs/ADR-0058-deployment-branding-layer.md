@@ -1,4 +1,4 @@
-# ADR-0058: Deployment Layer — Brand, Company Identity and Fiscal Identity
+# ADR-0058: Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents
 
 - Status: Accepted
 - Date: 2026-10-14
@@ -11,6 +11,7 @@ PRAHO is open source and runs under other operators' names. The repository carri
 - **What customers see**: a name, a logo, a favicon, colours.
 - **Who the operator is publicly**: the legal name and contact addresses on legal pages and in the portal.
 - **Who issues the documents**: the seller name and tax ID on invoices, PDFs, e-Factura and VIES requests.
+- **What customers agree to**: the Terms of Service, Privacy Policy and Cookie Policy. The repository shipped one operator's legal text, which another operator's business could contradict.
 
 ## Decision
 
@@ -31,6 +32,15 @@ The `company.*` catalog settings (legal name, contact and privacy addresses, DPO
 
 `COMPANY_NAME` and `COMPANY_CUI` come from the environment, default to blank, and production refuses to start without them (settings, `deploy.sh` and the Ansible preflight). They name the seller on invoices and PDFs, the e-Factura supplier tax ID falls back to `COMPANY_CUI`, and VIES checks run under that requester (anonymously when it is unset). Environment, not settings: the seller on a fiscal document is deployment configuration that staff accounts must not be able to change.
 
+### Legal documents: what customers agree to
+
+PRAHO ships no legal text. Staff publish the Terms of Service, Privacy Policy and Cookie Policy under Settings → Legal documents, in Markdown, per language, each as a **release** (`apps.common.legal.LegalDocument`):
+- **A release takes effect on a date and never changes.** Its HTML is rendered and sanitised to a legal allowlist when published (`legal_html.py`, the same file in both services), hashed, and audited (`legal_document_published`). Updates, deletes and bulk writes are refused at the ORM; a correction is another release. Releases are numbered `<effective date>.<n>`.
+- **One resolver.** `current_legal_document(kind, language)` is the release in force today on the operator's clock, else the default language's. Registration's preview and confirmation both use it.
+- **The portal renders, Platform stores.** `/terms/`, `/privacy-policy/` and `/cookie-policy/` show the release in force in the visitor's language, read over the signed `POST /api/legal/document/` and sanitised again. `/legal/<id>/` shows one release, as an acceptance names it. Platform's old legal addresses redirect to the portal.
+- **An acceptance names the exact text.** Registration records `User.terms_document`, and the audit event the release's reference: id, kind, language, release and hash. Confirming a release that is no longer in force is refused (`terms_changed`), and while no terms are in force nobody can register.
+- **PRAHO adds only facts it owns**: the cookie page lists what the portal stores in the browser, and the privacy page links the customer's privacy dashboard.
+
 ### Why not the alternatives
 
 | Option | Why not |
@@ -38,9 +48,12 @@ The `company.*` catalog settings (legal name, contact and privacy addresses, DPO
 | A `brand.*` settings group with uploaded logos | Needs a public media view on both services, SVG sanitising and an exception to ADR-0057, for files that change once per deployment. |
 | Brand values in the environment | Staff could not rename the brand without a deploy, and the portal would need its own copy of every value. |
 | One identity source for everything | The seller on fiscal documents must not be staff-editable, while the public contacts must be; they are deliberately two layers, joined only by the legal-name fallback. |
+| Legal text in the repository, versioned by a constant | Every operator would publish PRAHO's text, or fork it; a version string alone cannot say which language or wording was accepted. |
+| Legal text on the operator's website, PRAHO linking out | PRAHO could not show or record the exact release a customer accepted, nor pin it later. |
 
 ## Consequences
 
-- A deployment sets `COMPANY_NAME`, `COMPANY_CUI`, its contact settings, `company.brand_name` and, optionally, `BRAND_DIR`. Nothing in the repository changes.
+- A deployment sets `COMPANY_NAME`, `COMPANY_CUI`, its contact settings, `company.brand_name` and, optionally, `BRAND_DIR`, and publishes its legal documents. Nothing in the repository changes.
+- Until Terms of Service are in force, registration is refused; the development and e2e sample data publish SAMPLE releases. See `docs/deployment/LEGAL_DOCUMENTS.md`.
 - Seeded email templates take the brand and the support address at send time (`{{ brand_name }}`, `{{ support_email }}`), so a brand change needs no re-seed.
 - Compose mounts the brand folder read-only at `/app/brand` (`deploy/brand/` when `BRAND_DIR` is unset); native installs read `BRAND_DIR` from the operator env file.

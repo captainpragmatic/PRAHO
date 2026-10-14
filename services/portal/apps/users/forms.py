@@ -666,11 +666,13 @@ class RegistrationConfirmForm(PasswordResetConfirmForm):
         label=_("Send me news and offers by email."),
         required=False,
     )
-    # The page links the terms; Platform records the version the page showed.
+    # The page links one terms release, and sends that one on: Platform records it, or refuses it
+    # once another is in force.
     terms_accepted = forms.BooleanField(
         label=_("I have read and accept the Terms of Service."),
         required=True,
     )
+    terms_document_id = forms.UUIDField(widget=forms.HiddenInput, required=False)
 
 
 class ChangePasswordForm(forms.Form):

@@ -31,7 +31,7 @@ class PublicDefaults(TypedDict):
 
 
 _COMPANY_FIELDS = frozenset({"legal_name", "email_support", "email_privacy", "email_finance", "phone"})
-# Shown on the privacy policy. Optional, so the portal also reads a Platform that does not send them yet.
+# Shown on the legal pages. Optional, so the portal also reads a Platform that does not send them yet.
 _COMPANY_OPTIONAL_FIELDS = frozenset({"email_dpo", "email_contact", "address", "registration_number", "brand_name"})
 _LOCALISATION_FIELDS = frozenset(LocalisationDefaults().customer_payload())
 
@@ -78,10 +78,15 @@ def _validated_payload(response: object) -> PublicDefaults:
     return {"success": True, "localisation": localisation, "company": company}
 
 
+def platform_cache_key(name: str) -> str:
+    """A cache key scoped to the Platform this portal talks to, so answers from another are never read."""
+    identity = f"{api_client.base_url}|{api_client.portal_id}"
+    return f"{name}:" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+
+
 def get_public_defaults() -> PublicDefaults:
     """Read and cache the entire validated public payload for both consumers."""
-    identity = f"{api_client.base_url}|{api_client.portal_id}"
-    key = "localisation:" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+    key = platform_cache_key("localisation")
     try:
         cached = _validated_payload(cache.get(key))
     except (ValidationError, ValueError, TypeError):

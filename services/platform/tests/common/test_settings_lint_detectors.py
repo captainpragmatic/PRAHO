@@ -199,7 +199,7 @@ class EffectCreditScopeTests(SimpleTestCase):
         self.assertIn("company.legal_name", credited)
 
     def test_a_module_level_key_collection_the_class_uses_counts_as_written(self) -> None:
-        """`PRIVACY_KEYS = {...}` iterated by the class; seven company keys depend on this."""
+        """`IDENTITY_KEYS = {...}` iterated by the class; the company identity keys depend on this."""
         source = (
             "from apps.orders.tasks import process_pending_orders\n"
             f'KEYS = {{"{self.KEY}": 6}}\n'

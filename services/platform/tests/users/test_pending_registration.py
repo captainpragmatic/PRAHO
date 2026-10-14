@@ -11,7 +11,6 @@ from django_q.models import Schedule
 
 from apps.audit.models import AuditEvent
 from apps.common import counters
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.settings.models import SystemSetting
@@ -24,11 +23,10 @@ from apps.users.tasks import (
     setup_user_security_scheduled_tasks,
 )
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 
 PORTAL = "https://customers.example.test"
 PASSWORD = " Chosen-at-confirm-2026! "
-
-TERMS = {"terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION}
 
 
 def pending_customer_data() -> dict[str, str]:
@@ -56,6 +54,8 @@ def pending(email: str = "new@example.test", **overrides: object) -> PendingRegi
 class PortalOriginMixin:
     def setUp(self) -> None:
         cache.clear()
+        self.terms = publish_release()
+        self.accepted_terms = {"terms_accepted": True, "terms_document_id": str(self.terms.pk)}
         SystemSetting.objects.update_or_create(
             key="portal.public_base_url",
             defaults={
@@ -183,8 +183,7 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             password,
             accepts_marketing=True,
             data_processing_consent=True,
-            terms_accepted=True,
-            terms_version=TERMS_OF_SERVICE_VERSION,
+            **self.accepted_terms,
         )
 
     def test_the_confirmer_chooses_the_password_and_the_link_works_once(self) -> None:
@@ -246,13 +245,15 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
     def test_consent_is_required_and_recorded_as_given(self) -> None:
         row = self.sent()
         refused = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False, **TERMS
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False,
+            **self.accepted_terms,
         )
         self.assertEqual(refused.unwrap_err().code, "consent_required")
         row.refresh_from_db()
         self.assertTrue(row.is_usable())
         user, customer = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True, **TERMS
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True,
+            **self.accepted_terms,
         ).unwrap()
         user.refresh_from_db()
         customer.refresh_from_db()
@@ -295,7 +296,7 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             accepts_marketing=False,
             data_processing_consent=True,
             request_ip="203.0.113.7",
-            **TERMS,
+            **self.accepted_terms,
         )
         self.assertTrue(result.is_ok(), result)
         after = counters.peek("rate_limit:registration:203.0.113.7"), counters.peek("rate_limit:registration:")
@@ -347,6 +348,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
 
     def setUp(self) -> None:
         cache.clear()
+        self.terms = publish_release()
         self.row = pending(sent_at=timezone.now())
 
     def body(self, **overrides: object) -> dict[str, object]:
@@ -358,7 +360,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
             "data_processing_consent": True,
             "marketing_consent": False,
             "terms_accepted": True,
-            "terms_version": TERMS_OF_SERVICE_VERSION,
+            "terms_document_id": str(self.terms.pk),
             **overrides,
         }
 
@@ -416,8 +418,8 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 # The company identifiers the confirmer checks; never the CNP.
                 "cui": "",
                 "registration_number": "",
-                # The terms version the confirmer accepts.
-                "terms_version": TERMS_OF_SERVICE_VERSION,
+                # The terms release the confirmer accepts.
+                "terms_document": self.terms.reference(),
             },
         )
         self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)

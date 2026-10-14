@@ -24,6 +24,7 @@ from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
+from tests.helpers.legal import publish_release
 
 REGISTRATION_KEY = "security.registration_rate_limit_per_ip"
 LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "wp18-registration"}}
@@ -41,6 +42,10 @@ def user_data(email: str) -> dict[str, object]:
 
 @override_settings(CACHES=LOCMEM, DISABLE_AUDIT_SIGNALS=True)
 class UsersSettingsEffectTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)

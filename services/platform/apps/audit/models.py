@@ -250,6 +250,7 @@ class AuditEvent(models.Model):
         ("cookie_consent_updated", "Cookie Consent Updated"),
         ("privacy_policy_accepted", "Privacy Policy Accepted"),
         ("terms_of_service_accepted", "Terms of Service Accepted"),
+        ("legal_document_published", "Legal Document Published"),
         # ======================================================================
         # NOTIFICATION PREFERENCES
         # ======================================================================

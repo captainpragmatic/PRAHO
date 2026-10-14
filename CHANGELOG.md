@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The portal footer shows the brand and the legal name instead of the tech stack and a stale version number.
   - **Card payments.** Customers' card statements show the Stripe account's own descriptor instead of a hardcoded "PRAHO". The automatic-payment authorization names "the seller named on my invoices"; its terms version is now `2026-10-14`, so new authorizations record the new wording.
 
+- **Each deployment publishes its own legal documents** (ADR-0058). PRAHO no longer ships Terms of Service, a Privacy Policy, a Cookie Policy or a data-processors page.
+  - **Publishing.** Administrators publish them under Settings → Legal documents, in Markdown and per language, with a preview. Each is a release that takes effect on its date and is never edited or removed; a correction is another release. Publishing is audited. See `docs/deployment/LEGAL_DOCUMENTS.md`.
+  - **The portal shows the release in force** in the visitor's language at `/terms/`, `/privacy-policy/` and `/cookie-policy/`, and any release at `/legal/<id>/`. The staff platform's legal addresses redirect there. The cookie page adds what the portal itself stores in the browser, and the privacy page links the customer's privacy dashboard.
+  - **Registration records the exact release accepted**: the account names it, and the audit event gives its id, language, number and hash. The confirmation page links that release. If a newer one takes effect meanwhile, the customer is asked to read it, and the same link still works. Until Terms of Service are in force, registration is refused.
+  - **Fixed:** the portal refused every confirmation with a 503 whenever its own terms version differed from Platform's, for example during a deploy.
+
 - **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
 
 ### Changed

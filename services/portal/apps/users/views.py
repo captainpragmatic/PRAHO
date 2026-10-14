@@ -17,6 +17,7 @@ from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
@@ -29,7 +30,6 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import (
@@ -815,6 +815,7 @@ def password_reset_confirm_view(
 
 
 _CONFIRM_FIELD_NAMES = {"password": "new_password", "password_confirm": "confirm_password"}
+TERMS_UNAVAILABLE = gettext_lazy("Registration opens once the Terms of Service are published.")
 
 
 def _refusal_notice(exc: PlatformAPIError) -> tuple[str, int, int | None]:
@@ -832,17 +833,20 @@ def _load_registration(
     Fetched once per link and kept with it in the session, so revisiting the page or a rejected
     password does not ask Platform again. None with no notice means the link is gone.
     """
-    if isinstance(link.get("details"), dict) and "terms_version" in link["details"]:
-        # Details without the terms version to accept are fetched again (Platform before #670).
+    if isinstance(link.get("details"), dict) and "terms_document" in link["details"]:
+        # Details from before the terms release they name are fetched again.
         return link["details"], "", 200, None
     try:
         details = api_client.get_pending_registration(
             link["registration_id"], link["token"], client_ip=get_safe_client_ip(request)
         ).get("registration")
     except PlatformAPIError as exc:
-        if (exc.response_data or {}).get("code") == "invalid_link":
+        code = (exc.response_data or {}).get("code")
+        if code == "invalid_link":
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, "", 400, None
+        if code == "terms_unavailable":
+            return None, str(TERMS_UNAVAILABLE), 409, None
         return (None, *_refusal_notice(exc))
     if not isinstance(details, dict):
         return (None, *_refusal_notice(PlatformAPIError("Pending registration answer without details")))
@@ -850,16 +854,19 @@ def _load_registration(
     return details, "", 200, None
 
 
+def _terms_id(registration: dict[str, Any] | None) -> str:
+    """The terms release a registration's details name, for the page to link and send back."""
+    terms = (registration or {}).get("terms_document")
+    return str(terms.get("document_id", "")) if isinstance(terms, dict) else ""
+
+
 def _confirm_registration(
-    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], details: dict[str, Any]
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
-    """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
-    terms_version = str(details.get("terms_version", ""))
-    if terms_version != TERMS_OF_SERVICE_VERSION:
-        # Mid-deploy of new terms: /terms/ shows this portal's version, and Platform would record
-        # its own. Accept only when both name the same document.
-        form.add_error(None, _("The Terms of Service are being updated. Please try again in a few minutes."))
-        return None, 503, None, ""
+    """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice.
+
+    The notice `terms_changed` means the terms release the page showed is no longer the one to accept.
+    """
     try:
         result = api_client.confirm_registration(
             link["registration_id"],
@@ -869,7 +876,7 @@ def _confirm_registration(
             data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
             terms_accepted=form.cleaned_data["terms_accepted"],
-            terms_version=terms_version,
+            terms_document_id=str(form.cleaned_data["terms_document_id"] or ""),
             client_ip=get_safe_client_ip(request),
         )
         if not result.get("success"):
@@ -880,16 +887,16 @@ def _confirm_registration(
         if code in {"invalid_link", "details_unavailable"}:
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, (409 if code == "details_unavailable" else 400), None, code
-        if code == "terms_changed":
-            # Forget the details fetched for the link, so the next submit sends the current version.
+        if code in {"terms_changed", "terms_unavailable"}:
+            # Forget the details fetched for the link: the page is drawn again with the release in force.
             request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {
                 key: value for key, value in link.items() if key != "details"
             }
             form.add_error(None, _("The Terms of Service have changed. Please read them again before confirming."))
-            # The tick was for the previous version: ask for it again.
+            # The tick was for the previous release: ask for it again.
             form.data = form.data.copy()
             form.data.pop("terms_accepted", None)
-            return None, 409, None, ""
+            return None, 409, None, "terms_changed"
         if exc.status_code == HTTPStatus.BAD_REQUEST:
             errors = payload.get("errors")
             for field, field_errors in (errors if isinstance(errors, dict) else {}).items():
@@ -932,17 +939,28 @@ def register_confirm_view(
     link = request.session.get(REGISTRATION_CONFIRM_SESSION_KEY)
     registration, notice, status, retry_after = (None, "", 400, None) if not link else _load_registration(request, link)
     gone = "" if registration is not None or notice else "invalid_link"
-    form = RegistrationConfirmForm(initial={"registration_id": link["registration_id"]} if link else None)
+    form = RegistrationConfirmForm(
+        initial={"registration_id": link["registration_id"], "terms_document_id": _terms_id(registration)}
+        if link
+        else None
+    )
 
     if link and registration is not None and request.method == "POST":
         posted = RegistrationConfirmForm(request.POST)
         if request.POST.get("registration_id") != link["registration_id"]:
             status, notice = 409, _("This page was for an earlier link. Check these details and submit again.")
         elif posted.is_valid():
-            done, status, retry_after, gone = _confirm_registration(request, posted, link, registration)
+            done, status, retry_after, gone = _confirm_registration(request, posted, link)
             if done is not None:
                 return done
             form = posted
+            if gone == "terms_changed":
+                # Show the release now in force, and send that one with the next submit.
+                registration, notice, _status, retry_after = _load_registration(
+                    request, request.session[REGISTRATION_CONFIRM_SESSION_KEY]
+                )
+                form.data = {**form.data, "terms_document_id": _terms_id(registration)}
+                status, gone = 409, "" if registration is not None or notice else "invalid_link"
         else:
             status, form = 400, posted
     if not link and request.method == "GET":

@@ -215,6 +215,7 @@ def seed_baseline() -> dict[str, Any]:
     demo.create_products_from_service_plans()
     demo.create_servers()
     demo.create_domain_foundation()
+    demo.create_sample_legal_documents()
     plan, _ = ServicePlan.objects.get_or_create(
         name="E2E Hosting",
         defaults={

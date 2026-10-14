@@ -23,7 +23,7 @@ from django.views.decorators.debug import sensitive_variables
 
 from apps.common import counters
 from apps.common.encryption import DecryptionError
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
+from apps.common.legal import LegalDocument, current_legal_document
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import SecureInputValidator, log_security_event
 from apps.settings.services import get_brand_name, get_default_from_email
@@ -53,6 +53,7 @@ ConfirmRefusalCode = Literal[
     "unavailable",
     "terms_changed",
     "terms_required",
+    "terms_unavailable",
 ]
 
 
@@ -147,26 +148,32 @@ def _send(recipient: str, subject: str, text_message: str, html_message: str) ->
         raise OSError("Email backend did not accept the registration message")
 
 
-def preview(registration_id: str, token: str) -> dict[str, str] | None:
-    """What a usable link would create, for its holder to check before confirming, or None.
+def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmRefusal]:
+    """What a usable link would create, for its holder to check before confirming.
 
     Someone else can submit any address, so the confirmer sees the submitted details first.
+    Refused as `invalid_link`, or `terms_unavailable` while no Terms of Service are in force.
     """
     row = PendingRegistration.objects.filter(pk=registration_id).first()
     if row is None or not row.token_matches(token) or not row.is_usable():
-        return None
-    return {
-        "email": row.email,
-        "first_name": str(row.user_data.get("first_name", "")),
-        "last_name": str(row.user_data.get("last_name", "")),
-        "company_name": str(row.customer_data.get("company_name", "")),
-        "vat_number": str(row.customer_data.get("vat_number", "")),
-        "cui": str(row.customer_data.get("cui", "")),
-        "registration_number": str(row.customer_data.get("registration_number", "")),
-        # Never the CNP, not even masked: the portal keeps these details in its session.
-        # The terms the confirmer accepts; confirming with another version is refused.
-        "terms_version": TERMS_OF_SERVICE_VERSION,
-    }
+        return Err(ConfirmRefusal("invalid_link"))
+    terms = _terms_in_force(row)
+    if isinstance(terms, Err):
+        return terms
+    return Ok(
+        {
+            "email": row.email,
+            "first_name": str(row.user_data.get("first_name", "")),
+            "last_name": str(row.user_data.get("last_name", "")),
+            "company_name": str(row.customer_data.get("company_name", "")),
+            "vat_number": str(row.customer_data.get("vat_number", "")),
+            "cui": str(row.customer_data.get("cui", "")),
+            "registration_number": str(row.customer_data.get("registration_number", "")),
+            # Never the CNP, not even masked: the portal keeps these details in its session.
+            # The terms release to accept, in the registration's language; confirming another is refused.
+            "terms_document": terms.unwrap().reference(),
+        }
+    )
 
 
 def _refusal_before_creating(
@@ -206,7 +213,7 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     accepts_marketing: bool,
     data_processing_consent: bool,
     terms_accepted: bool = False,
-    terms_version: str = "",
+    terms_document_id: str = "",
     request_ip: str | None = None,
     user_agent: str | None = None,
 ) -> Result[tuple[User, Customer], ConfirmRefusal]:
@@ -216,18 +223,18 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     account is created leaves the row usable, except that a used or expired link stays refused,
     and a row whose CNP cannot be read is spent: that refusal commits on purpose.
 
-    Accepting the terms records the version the confirmer saw (from preview()) and when. A version
-    that is no longer current is refused as `terms_changed`, before anything is written, so the
-    confirmer can read the new terms and use the same link. The acceptance is audited in the same
+    Accepting the terms records the release the confirmer saw (from preview()) and when. A release
+    that is no longer the one in force is refused as `terms_changed`, before anything is written, so
+    the confirmer can read the new terms and use the same link. The acceptance is audited in the same
     transaction as the account: if the audit write fails, no account is created.
     """
     with transaction.atomic():
         row = PendingRegistration.objects.select_for_update().filter(pk=registration_id).first()
         if row is None or not row.token_matches(token) or not row.is_usable():
             return Err(ConfirmRefusal("invalid_link"))
-        terms_refusal = _terms_refusal(terms_accepted, terms_version)
-        if terms_refusal is not None:
-            return Err(terms_refusal)
+        terms = _accepted_terms(row, terms_accepted, terms_document_id)
+        if isinstance(terms, Err):
+            return terms
 
         try:
             cnp = row.cnp()
@@ -246,8 +253,8 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             "accepts_marketing": accepts_marketing,
             "gdpr_consent_date": timezone.now(),
         }
-        if terms_accepted:
-            user_data.update(terms_accepted_at=timezone.now(), terms_version=terms_version)
+        accepted_at = timezone.now()
+        user_data.update(terms_accepted_at=accepted_at, terms_document=terms.unwrap())
         refusal = _refusal_before_creating(row, user_data, data_processing_consent=data_processing_consent)
         if refusal is not None:
             return Err(refusal)
@@ -264,8 +271,7 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             return Err(ConfirmRefusal("unavailable"))
 
         user, customer = result.unwrap()
-        if terms_accepted:
-            _audit_terms_acceptance(user, row, request_ip)
+        _audit_terms_acceptance(user, row, terms.unwrap(), accepted_at, request_ip)
         _spend(row)
         log_security_event(
             "pending_registration_confirmed",
@@ -275,16 +281,27 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
         return Ok((user, customer))
 
 
-def _terms_refusal(terms_accepted: bool, terms_version: str) -> ConfirmRefusal | None:
-    """Why the terms acceptance cannot be recorded, or None: none given, or not the current version."""
+def _terms_in_force(row: PendingRegistration) -> Result[LegalDocument, ConfirmRefusal]:
+    """The Terms of Service release a registration accepts, in its language; refused while none is in force."""
+    terms = current_legal_document(LegalDocument.Kind.TERMS, row.language)
+    return Ok(terms) if terms is not None else Err(ConfirmRefusal("terms_unavailable"))
+
+
+def _accepted_terms(
+    row: PendingRegistration, terms_accepted: bool, terms_document_id: str
+) -> Result[LegalDocument, ConfirmRefusal]:
+    """The release accepted, or why no acceptance can be recorded: none given, none in force, or another."""
     if not terms_accepted:
-        return ConfirmRefusal("terms_required")
-    if terms_version != TERMS_OF_SERVICE_VERSION:
-        return ConfirmRefusal("terms_changed")
-    return None
+        return Err(ConfirmRefusal("terms_required"))
+    terms = _terms_in_force(row)
+    if isinstance(terms, Ok) and str(terms.unwrap().pk) != terms_document_id:
+        return Err(ConfirmRefusal("terms_changed"))
+    return terms
 
 
-def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: str | None) -> None:
+def _audit_terms_acceptance(
+    user: User, row: PendingRegistration, terms: LegalDocument, accepted_at: datetime, request_ip: str | None
+) -> None:
     """Record the acceptance; raises on failure, which rolls the account back with it."""
     from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
 
@@ -294,8 +311,8 @@ def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: st
         content_object=user,
         description="Terms of Service accepted at registration",
         metadata={
-            "terms_version": user.terms_version,
-            "accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+            "terms_document": terms.reference(),
+            "accepted_at": accepted_at.isoformat(),
             "registration_id": str(row.pk),
         },
         ip_address=request_ip,

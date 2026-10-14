@@ -7,7 +7,6 @@ from django.test import TestCase, override_settings
 
 from apps.api.orders.serializers import OrderDetailSerializer
 from apps.billing.models import Currency
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.performance.rate_limiting import RegistrationClientIPThrottle
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -18,6 +17,7 @@ from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 from tests.helpers.task_queue import run_queued
 
 CHOSEN = "Registration-pass123!"
@@ -32,6 +32,7 @@ DELIVER = "apps.users.tasks.deliver_registration"
 class PurchaseIdentityContracts(HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
+        self.terms = publish_release()
         SystemSetting.objects.update_or_create(
             key="portal.public_base_url",
             defaults={
@@ -80,7 +81,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "password_confirm": password,
                 "data_processing_consent": True,
                 "terms_accepted": True,
-                "terms_version": TERMS_OF_SERVICE_VERSION,
+                "terms_document_id": str(self.terms.pk),
             },
         )
 
@@ -153,7 +154,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                         "password_confirm": password,
                         "data_processing_consent": True,
                         "terms_accepted": True,
-                        "terms_version": TERMS_OF_SERVICE_VERSION,
+                        "terms_document_id": str(self.terms.pk),
                     },
                 )
                 self.assertEqual(response.status_code, 400, response.content)

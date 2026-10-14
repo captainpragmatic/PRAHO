@@ -23,7 +23,7 @@ BUCKET = (
     "services/portal/templates/styleguide/index.html",
     "services/portal/templates/services/plans_list.html",
     "services/portal/templates/customers/address_form.html",
-    "services/portal/templates/legal/cookie_policy.html",
+    "services/portal/templates/legal/_praho_cookies.html",
     "services/portal/templates/tickets/ticket_create.html",
     "services/portal/templates/customers/team.html",
     "services/portal/templates/customers/team_invite.html",
@@ -297,13 +297,10 @@ class Wp16SupportBillingTests(SimpleTestCase):
                 self.assertIn('role="alert"', source)
                 self.assertIn("ui-btn", Elements(source).find("a", href="/billing/invoices/")["class"])
 
-    def test_cookie_categories_use_badges_and_keep_their_text(self) -> None:
-        source = self.render("legal/cookie_policy.html")
-        self.assertNotIn("bg-green-700", source)
-        self.assertIn("Always Active", source)
-        self.assertEqual(source.count(">Optional</span>"), 3)
-        self.assertIn("bg-green-100", source)
-        self.assertIn("bg-yellow-100", source)
+    def test_the_cookie_inventory_names_the_cookies_and_offers_the_preferences_button(self) -> None:
+        source = self.render("legal/_praho_cookies.html", {"cookies": [("portal_session", "Keeps you signed in", "1 day")]})
+        self.assertIn("portal_session", source)
+        self.assertIn("ui-btn", Elements(source).find("button", **{"data-action": "cookie-prefs"})["class"])
 
     def test_service_detail_keeps_tabs_usage_and_component_actions(self) -> None:
         source = self.render(

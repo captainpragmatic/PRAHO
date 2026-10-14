@@ -28,7 +28,7 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Coalesce, Greatest
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 from faker import Faker
 
@@ -45,6 +45,8 @@ from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription, SubscriptionItem
 from apps.common.cnp_validator import CNPValidator
 from apps.common.financial_arithmetic import calculate_line_totals
+from apps.common.legal import LegalDocument, publish_legal_document
+from apps.common.utils import operator_local_date
 from apps.customers.models import (
     Customer,
     CustomerAddress,
@@ -400,6 +402,7 @@ class Command(BaseCommand):
         self.create_support_categories()
         self.create_billing_foundation()
         self.create_domain_foundation()
+        self.create_sample_legal_documents()
 
         # Create customers and all their related data
         num_customers = options["customers"]
@@ -743,6 +746,27 @@ class Command(BaseCommand):
                 self.stdout.write(f"  ✓ Server: {server.name}")
 
         return created_servers
+
+    def create_sample_legal_documents(self) -> None:
+        """A SAMPLE release of each legal document in each language that has none: registration needs terms."""
+        bodies = {
+            "en": "# Sample {title}\n\nSample text for development and testing. It is not legal text.",
+            "ro": "# {title} (exemplu)\n\nText de exemplu pentru dezvoltare și testare. Nu este un text juridic.",
+        }
+        for kind, title in LegalDocument.Kind.choices:
+            for language, body in bodies.items():
+                if LegalDocument.objects.filter(kind=kind, language=language).exists():
+                    continue
+                with translation.override(language):
+                    body_markdown = body.format(title=title)
+                publish_legal_document(
+                    kind=kind,
+                    language=language,
+                    effective_on=operator_local_date(timezone.now()),
+                    body_markdown=body_markdown,
+                    published_by=None,
+                ).unwrap()
+        self.stdout.write("  ✓ Sample legal documents published (Settings → Legal documents)")
 
     def create_support_categories(self) -> list[SupportCategory]:
         self.stdout.write("Creating support categories...")

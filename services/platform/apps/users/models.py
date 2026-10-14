@@ -125,10 +125,12 @@ class User(AbstractUser):
     accepts_marketing = models.BooleanField(default=False)
     gdpr_consent_date = models.DateTimeField(null=True, blank=True)
     last_privacy_policy_accepted = models.DateTimeField(null=True, blank=True)
-    # The Terms of Service accepted when the account was confirmed: when, and which version
-    # (apps.common.legal.TERMS_OF_SERVICE_VERSION). Empty for accounts that accepted none.
+    # The Terms of Service accepted when the account was confirmed: when, and the exact release
+    # (apps.common.legal). Empty for accounts that accepted none.
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
-    terms_version = models.CharField(max_length=20, blank=True, default="")
+    terms_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
 
     # Login tracking
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)

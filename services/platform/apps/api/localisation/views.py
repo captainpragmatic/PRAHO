@@ -16,30 +16,29 @@ from apps.common.performance.rate_limiting import (
 from apps.settings.services import SettingsService, get_brand_name, get_company_legal_name
 
 
+def _text(value: object) -> str:
+    return str(value or "")
+
+
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])  # HMAC authentication is required by the service decorator.
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
 @require_portal_service_authentication
 def localisation_defaults(request: HttpRequest, request_data: dict[str, object]) -> Response:
-    # What the portal shows customers. The privacy policy states the controller's identity and the
-    # DPO's contact (GDPR Art. 13(1)(b)), so those are public too; the no-reply sender is not.
+    # What the portal shows customers. The legal pages state the operator's identity, the privacy
+    # contact and the DPO's (GDPR Art. 13(1)(b)), so these are public; the no-reply sender is not.
     company = {
         "legal_name": get_company_legal_name(),
         "brand_name": get_brand_name(),
-        **{
-            field: str(SettingsService.get_setting(f"company.{field}") or "")
-            for field in (
-                "email_support",
-                "email_privacy",
-                "email_finance",
-                "phone",
-                "email_dpo",
-                "email_contact",
-                "address",
-                "registration_number",
-            )
-        },
+        "email_support": _text(SettingsService.get_setting("company.email_support")),
+        "email_privacy": _text(SettingsService.get_setting("company.email_privacy")),
+        "email_finance": _text(SettingsService.get_setting("company.email_finance")),
+        "phone": _text(SettingsService.get_setting("company.phone")),
+        "email_dpo": _text(SettingsService.get_setting("company.email_dpo")),
+        "email_contact": _text(SettingsService.get_setting("company.email_contact")),
+        "address": _text(SettingsService.get_setting("company.address")),
+        "registration_number": _text(SettingsService.get_setting("company.registration_number")),
     }
     return Response(
         {

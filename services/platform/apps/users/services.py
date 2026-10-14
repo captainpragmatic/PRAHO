@@ -26,6 +26,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
 from apps.common import counters
+from apps.common.legal import TERMS_UNAVAILABLE, LegalDocument, current_legal_document
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.request_ip import get_safe_client_ip
@@ -368,6 +369,9 @@ class SecureUserRegistrationService:
         """
         from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: keeps the queue out of import time
 
+        if current_legal_document(LegalDocument.Kind.TERMS, language) is None:
+            # Nobody could confirm the account: there are no terms to accept yet.
+            return Err(str(TERMS_UNAVAILABLE))
         customer_data = dict(customer_data)
         cnp = cnp or str(customer_data.pop("cnp", "") or "")
         customer_data.pop("cnp", None)
@@ -421,7 +425,7 @@ class SecureUserRegistrationService:
                     gdpr_consent_date=consent_date,
                     # Set at creation: a later save would audit as a profile update.
                     terms_accepted_at=user_data.get("terms_accepted_at"),
-                    terms_version=user_data.get("terms_version", ""),
+                    terms_document=user_data.get("terms_document"),
                     # Security: No admin fields can be injected due to validation
                 )
 

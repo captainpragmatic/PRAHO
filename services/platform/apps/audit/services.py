@@ -788,7 +788,7 @@ class AuditService:
             "data_protection": ["data_export_", "data_deletion_"],
             "integration": ["api_", "webhook_"],
             "system_admin": ["system_", "backup_", "configuration_", "user_impersonation"],
-            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule"],
+            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_"],
             "business_operation": [
                 "proforma_",
                 "invoice_",
@@ -1295,7 +1295,7 @@ class GDPRExportService:
                 if user.last_privacy_policy_accepted
                 else None,
                 "terms_accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
-                "terms_version": user.terms_version,
+                "terms_document": user.terms_document.reference() if user.terms_document else None,
                 "account_status": "active" if user.is_active else "inactive",
             }
 
@@ -1619,7 +1619,7 @@ class GDPRDeletionService:
         user.gdpr_consent_date = None
         user.last_privacy_policy_accepted = None
         user.terms_accepted_at = None
-        user.terms_version = ""
+        user.terms_document = None
 
         # Clear sensitive fields
         # The unusable password revokes sessions independently of the MFA credential version.
