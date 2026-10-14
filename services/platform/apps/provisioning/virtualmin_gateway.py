@@ -1140,6 +1140,9 @@ class VirtualminGateway:
             timeout_seconds=request_timeout,
             connect_timeout_seconds=min(10.0, request_timeout) if deadline is not None else 10.0,
             blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
+            # Virtualmin mutates over GET (create-domain, delete-domain), so the adapter's
+            # method check cannot tell a write from a read. Never replay after a reset.
+            retry_connection_errors=False,
         )
 
         return safe_request(

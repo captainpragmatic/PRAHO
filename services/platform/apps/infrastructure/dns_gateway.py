@@ -49,6 +49,7 @@ CLOUDFLARE_POLICY = OutboundPolicy(
     connect_timeout_seconds=10.0,
     verify_tls=True,
     max_retries=0,
+    retry_connection_errors=False,
 )
 
 DNS_RECORD_TTL_SECONDS = 60
