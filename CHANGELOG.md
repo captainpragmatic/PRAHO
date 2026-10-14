@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hosting accounts can be created on Virtualmin 8.** (#498) PRAHO asked for the template "Default" and enabled no features, which Virtualmin 8.3 refuses. It now uses "Default Settings" with the default features, and a retried create of a domain that was never made reads it as absent, not as an error.
+- **Node deploys work on Virtualmin 8, and the nightly node backup runs.** (#498) The deploy installed Virtualmin 7, used commands that do not exist, and hid their failures. It also set the Apache port to Webmin's, so every later account creation failed. The nightly backup was a disabled legacy schedule that made an empty archive. Both now use the commands Virtualmin 8 provides, nothing is ignored, and the schedule is checked after it is written.
+- **Ordinary backups no longer reset the base of a differential backup.** (#498) Full, configuration-only, safety and migration backups are sent as standalone (`no-differential`), so only a backup explicitly made as a base can become one.
 - **Each customer sees and is charged their own VAT rate, not a fixed 21%.** (#689) The staff order item form previewed 21% for every customer, order pages labelled the tax "VAT (21%)" whatever the lines carried, and the Portal's service totals added Romanian VAT for every customer. Reverse-charge, non-EU and custom-rate customers saw amounts that did not match their invoices. The preview now comes from `TaxService` with the customer's tax profile, and writes no audit row.
 - **Backups and restores work on Virtualmin 8.x.** (#498) A real Virtualmin 8.3 refused every full backup, configuration backup and restore PRAHO sent, because the flags did not exist. It also reads domain owners, states, quotas and features under different keys from the ones PRAHO looked for. So restores parked on "owner mismatch", migrations compared nothing, and a domain without mail failed every backup check.
 - **Buttons and links no longer lead nowhere.** (#689) More than twenty pointed at `#`. Each now opens a real page or is gone. A failed Virtualmin job's Retry runs the failed-job sweep, offered only for operations it retries. Five unused templates are deleted.
@@ -112,6 +115,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **SSH and Webmin on hosting nodes are reachable only from an allowlist.** (#498)
+  - **The gap.** The node firewall opened ports 22 and 10000 to the whole internet, so a leaked Webmin password, or the next Webmin bug, could be used from anywhere.
+  - **Now.** A new setting, `infrastructure.node_admin_allowed_cidrs`, lists Platform's addresses and the admin networks. The firewall opens 22 and 10000 only to those, and PRAHO's Webmin API user can log in only from them. Web, mail, DNS, FTP and Usermin stay public.
+  - **Fails closed.** A node is not deployed or hardened while the list is empty, or when the deploy's own connection is not in it. **Set the list before the next node deploy.**
+  - The harden play now always leaves the firewall enabled. Before, a node whose firewall was off stayed off.
+  - ADR-0060 records why the API user must be a Virtualmin master admin, and the controls around it.
+- **Migration snapshots no longer store a domain's password hash or database password.** Listing attributes are kept through an allowlist, and job results drop secret-looking keys.
+- **Backup archives are staged privately on the node.** They were written world-readable under `/tmp`, beside a sidecar file holding plaintext database passwords. They now go to a root-only directory, the fetch refuses one that is not private, and the sidecars are removed after the fetch.
 - **Staff user pages and people's network identity are for administrators only.** (#689)
   - **The gap.** Any staff role (support, billing, manager) could open the user list and user pages, see and search the IP addresses, browser user agents and session keys in the audit log, export the audit log to CSV, read its search suggestions, list every active account's email in its filter, and download any customer's GDPR export.
   - **Now.** All of these need the admin role. Other roles still see audit events, without network identity, and an IP or session filter they send is ignored.
