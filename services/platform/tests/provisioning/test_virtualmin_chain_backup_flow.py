@@ -25,6 +25,7 @@ from apps.provisioning.virtualmin_backup_service import (
     differential_flags,
 )
 from apps.provisioning.virtualmin_gateway import VirtualminResponse
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 from tests.provisioning.test_virtualmin_backup_transport import ARCHIVE_BYTES, BackupNodeFixture
 from tests.provisioning.test_virtualmin_chain_playbook import SNAP_A, SNAP_B, result_line
 
@@ -92,9 +93,15 @@ class ChainBackupFlowTests(BackupNodeFixture):
         self.chain_reply: Callable[[dict[str, Any]], Any] = reply
 
     def _config(self, role: str, **chain: Any) -> BackupConfig:
+        """A chain context whose pins match the account's chain state, as admission would leave it."""
         defaults: dict[str, Any] = {"token": TOKEN, "epoch": 3}
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(chain_epoch=3, chain_base=None)
         if role == CHAIN_ROLE_DIFFERENTIAL:
-            defaults |= {"base_backup_id": "base-1", "base_job_id": "job-1", "expected_fp": SNAP_A}
+            base = VirtualminProvisioningJob.objects.create(
+                operation="backup_domain", account=self.account, server=self.server, status="completed"
+            )
+            VirtualminAccount.objects.filter(pk=self.account.pk).update(chain_base=base, chain_base_fingerprint=SNAP_A)
+            defaults |= {"base_backup_id": "base-1", "base_job_id": str(base.pk), "expected_fp": SNAP_A}
         return BackupConfig(chain_role=role, chain=ChainContext(**{**defaults, **chain}))
 
     def _backup(self, config: BackupConfig) -> Any:

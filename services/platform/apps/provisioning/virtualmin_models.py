@@ -348,6 +348,32 @@ class VirtualminAccount(models.Model):
     current_disk_usage_mb = models.PositiveIntegerField(default=0)
     current_bandwidth_usage_mb = models.PositiveIntegerField(default=0)
 
+    # Differential-backup chain (docs/domain/virtualmin-incremental-contract.md). Virtualmin keeps one
+    # snapshot per domain; the chain is "live" only while this points at the base backup job whose
+    # snapshot is still on the node. Anything that can reset or lose the snapshot (a restore, a new
+    # base, a migration, a delete) clears it in its admission transaction and bumps the epoch, so a
+    # job pinned to an older epoch can never extend a chain that has since been broken.
+    chain_base = models.ForeignKey(
+        "provisioning.VirtualminProvisioningJob",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Differential chain base"),
+        help_text=_("The base backup job a differential would extend; empty when no chain is live"),
+    )
+    chain_base_fingerprint = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Snapshot fingerprint (sha256:size) the base left on the node"),
+    )
+    chain_epoch = models.PositiveIntegerField(
+        default=0, editable=False, help_text=_("Bumped every time the chain is invalidated or restarted")
+    )
+
     # Timestamps
     provisioned_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)

@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
     from .virtualmin_migration_service import MigrationResumeOutcome
 
+from .virtualmin_chain import ROLE_STANDALONE, admit_chain_role, invalidate_chain
 from .virtualmin_migration_models import account_has_active_migration, account_has_active_operation
 
 logger = logging.getLogger(__name__)
@@ -1145,6 +1146,7 @@ class VirtualminProvisioningService:
                 else:
                     admission_refusal = self._delete_refusal(account)
                 if admission_refusal is None:
+                    invalidate_chain(account)  # the domain and its snapshot are about to go
                     job = VirtualminProvisioningJob(
                         operation="delete_domain",
                         server=account.server,
@@ -1331,6 +1333,8 @@ class VirtualminProvisioningService:
         with transaction.atomic():
             VirtualminAccount.objects.select_for_update().get(pk=account.pk)
             busy = account_has_active_operation(account, ignore_job_id=job.pk)
+            if not busy and job.operation == "delete_domain":
+                invalidate_chain(account)
         if not busy:
             return None
         logger.info("✅ [VirtualminService] Active operation blocks lifecycle retry: %s", account.pk)
@@ -1755,7 +1759,7 @@ class VirtualminBackupManagementService:
             logger.error(f"Backup job creation failed: {e}")
             return Err(f"Backup job failed: {e!s}")
 
-    def _admit_job(  # noqa: PLR0913  # Distinct admission refusals + execution-context seams
+    def _admit_job(  # noqa: PLR0911, PLR0913  # Distinct admission refusals + execution-context seams
         self,
         account: VirtualminAccount,
         *,
@@ -1803,6 +1807,14 @@ class VirtualminBackupManagementService:
                 return Err("Account moved to another server since this request began; retry")
             if account_has_active_operation(locked):
                 return Err("Account already has an active migration or backup/restore operation")
+            role = str(parameters.get("chain_role", ROLE_STANDALONE))
+            if operation == "restore_domain":
+                invalidate_chain(locked)  # a restore deletes the node's snapshot (contract Q8)
+            elif role != ROLE_STANDALONE:
+                pins = admit_chain_role(locked, role)
+                if pins.is_err():
+                    return Err(pins.unwrap_err())
+                parameters = {**parameters, **pins.unwrap()}
             job = VirtualminProvisioningJob.objects.create(
                 operation=operation,
                 account=locked,

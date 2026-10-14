@@ -823,16 +823,18 @@ def _audit_job(job_id: Any) -> None:
         audit_job_status_transition(job)
 
 
-def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901  # Cohesive claim→run→terminal pipeline
+def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912  # Cohesive claim→run→terminal pipeline
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
 
     from .virtualmin_backup_service import (  # noqa: PLC0415
         CHAIN_ROLE_STANDALONE,
         BackupConfig,
+        ChainContext,
         RestoreConfig,
         VirtualminBackupService,
     )
+    from .virtualmin_chain import complete_chain_job  # noqa: PLC0415
 
     try:
         job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
@@ -862,6 +864,21 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
 
     service = VirtualminBackupService(job.server)
     params = job.parameters
+
+    def persist_note(note: dict[str, Any]) -> None:
+        # Token-fenced parameter merge: evidence (e.g. the safety backup id, a chain job's domain
+        # id) is durable BEFORE any destructive dispatch, and a superseded runner cannot write it.
+        current = (
+            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
+            .values_list("parameters", flat=True)
+            .first()
+        )
+        if current is None:
+            return
+        VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
+            parameters={**current, **note}, updated_at=timezone.now()
+        )
+
     if operation == "backup_domain":
         config = BackupConfig(
             backup_type=str(params.get("backup_type", "full")),
@@ -872,8 +889,21 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             # Jobs admitted before roles existed carry none: they were standalone.
             # Any other value is refused by the service before dispatch.
             chain_role=str(params.get("chain_role", CHAIN_ROLE_STANDALONE)),
+            chain=(
+                ChainContext(
+                    token=str(params.get("chain_token", "")),
+                    epoch=int(params.get("chain_epoch", 0)),
+                    base_backup_id=str(params.get("base_backup_id", "")),
+                    base_job_id=str(params.get("base_job_id", "")),
+                    expected_fp=str(params.get("expected_fp", "")),
+                )
+                if str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE
+                else None
+            ),
         )
-        result = service.backup_domain(account=job.account, config=config, progress_key=str(job.pk), ownership=owns)
+        result = service.backup_domain(
+            account=job.account, config=config, progress_key=str(job.pk), ownership=owns, note_sink=persist_note
+        )
     else:
         restore_config = RestoreConfig(
             backup_id=str(params.get("backup_id", "")),
@@ -883,21 +913,6 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             restore_ssl=bool(params.get("restore_ssl", True)),
             force_restore=bool(params.get("force_restore", False)),
         )
-
-        def persist_note(note: dict[str, Any]) -> None:
-            # Token-fenced parameter merge: evidence (e.g. the safety backup id)
-            # is durable BEFORE any destructive dispatch, and a superseded
-            # runner cannot write it.
-            current = (
-                VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
-                .values_list("parameters", flat=True)
-                .first()
-            )
-            if current is None:
-                return
-            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
-                parameters={**current, **note}, updated_at=timezone.now()
-            )
 
         result = service.restore_domain(
             account=job.account,
@@ -926,6 +941,13 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             _audit_job(job.pk)
         logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
         return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
+    if operation == "backup_domain" and str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE:
+        # Link the base (or finish the differential) in the one fenced transaction.
+        final_status = complete_chain_job(job, token, dict(result.unwrap()))
+        if final_status != "superseded":
+            _audit_job(job.pk)
+        logger.info("✅ [BackupJobs] chain %s job %s -> %s", operation, job_id, final_status)
+        return {"status": final_status, "job_id": job_id}
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
     if rows:
         _audit_job(job.pk)

@@ -19,6 +19,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
 from .virtualmin_backup_service import CHAIN_ROLE_STANDALONE, REMOTE_ARCHIVE_DIR, differential_flags
+from .virtualmin_chain import invalidate_chain
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
@@ -313,6 +314,7 @@ class VirtualminMigrationService:
                 self._local_preflight(account, target)
                 if reason not in VirtualminMigration.Reason.values:
                     raise ValueError("Invalid migration reason")
+                invalidate_chain(account)  # the retained source copy keeps a snapshot the account no longer owns
                 migration = VirtualminMigration.objects.create(
                     account=account,
                     source_server=account.server,

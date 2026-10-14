@@ -39,6 +39,13 @@ from apps.common.security_decorators import (
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
+from .virtualmin_chain import (
+    ROLE_BASE,
+    ROLE_DIFFERENTIAL,
+    ROLE_STANDALONE,
+    invalidate_chain_if_epoch,
+    pins_hold,
+)
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
@@ -61,9 +68,9 @@ except ImportError:
 # Base and differential backups never go through remote.cgi: each is one locked
 # node-side step (virtualmin_chain_backup.yml) that binds the archive to the
 # snapshot fingerprint it was made against.
-CHAIN_ROLE_STANDALONE = "standalone"
-CHAIN_ROLE_BASE = "base"
-CHAIN_ROLE_DIFFERENTIAL = "differential"
+CHAIN_ROLE_STANDALONE = ROLE_STANDALONE
+CHAIN_ROLE_BASE = ROLE_BASE
+CHAIN_ROLE_DIFFERENTIAL = ROLE_DIFFERENTIAL
 CHAIN_ROLES = frozenset({CHAIN_ROLE_STANDALONE, CHAIN_ROLE_BASE, CHAIN_ROLE_DIFFERENTIAL})
 CHAIN_PLAYBOOK = "virtualmin_chain_backup.yml"
 # Manifests written from here on carry this version. A manifest without the field is
@@ -127,6 +134,26 @@ def differential_flags(chain_role: str) -> dict[str, str]:
     if chain_role != CHAIN_ROLE_STANDALONE:
         raise ValueError(f"A {chain_role!r} backup runs as a node-side chain step, not through remote.cgi")
     return {"no-differential": ""}
+
+
+def manifest_restore_refusal(metadata: dict[str, Any]) -> str | None:
+    """Why a manifest cannot be restored on its own, or None.
+
+    A manifest without ``manifest_version`` is a legacy backup (standalone, or a base written
+    before versioning). A version or role this code does not know is refused, never read as
+    legacy. A differential holds only what changed since its base, so restored alone it would
+    recreate a domain with most of its files missing (contract Q7); until a pair is restored
+    from its lineage, it is refused.
+    """
+    version = metadata.get("manifest_version")
+    if version is not None and version not in KNOWN_MANIFEST_VERSIONS:
+        return f"Backup manifest version {version!r} is not understood by this release; restore refused"
+    role = metadata.get("chain_role", CHAIN_ROLE_STANDALONE)
+    if role not in CHAIN_ROLES or (version is None and role == CHAIN_ROLE_DIFFERENTIAL):
+        return f"Backup has an unknown chain role {role!r}; restore refused"
+    if role == CHAIN_ROLE_DIFFERENTIAL:
+        return "A differential backup holds only the changes since its base and cannot be restored on its own"
+    return None
 
 
 _CHAIN_FP_RE = re.compile(r"^(|ABSENT|[0-9a-f]{64}:[0-9]+)$")
@@ -355,7 +382,7 @@ class VirtualminBackupService:
             return Err("Backup execution superseded; no remote work performed")
 
         if config.chain_role != CHAIN_ROLE_STANDALONE:
-            prepared = self._prepare_chain_dispatch(account, backup_metadata, note_sink)
+            prepared = self._prepare_chain_dispatch(account, config, backup_metadata, note_sink)
             if prepared.is_err():
                 self._update_backup_progress(backup_id, "failed", 100)
                 return Err(prepared.unwrap_err(), retriability=retriability_of(prepared))
@@ -569,6 +596,10 @@ class VirtualminBackupService:
                     "Backup domain does not match the target account; restore refused",
                     retriability=Retriability.NOT_RETRIABLE,
                 )
+
+            lineage_refusal = manifest_restore_refusal(metadata)
+            if lineage_refusal is not None:
+                return Err(lineage_refusal, retriability=Retriability.NOT_RETRIABLE)
 
             # Target ownership/state gate (force can NEVER override ownership).
             self._update_restore_progress(restore_id, "verifying_target", 25)
@@ -1261,14 +1292,33 @@ class VirtualminBackupService:
     def _prepare_chain_dispatch(
         self,
         account: VirtualminAccount,
+        config: BackupConfig,
         metadata: dict[str, Any],
         note_sink: Callable[[dict[str, Any]], None] | None,
     ) -> Result[None, str]:
         """Everything a chain step needs from the node, durable BEFORE the step is dispatched.
 
-        The domain id is recorded on the job first: if the step is later cancelled, the
-        cancel marker needs the id, and a step that never recorded one never ran.
+        The chain is re-read first: if it moved since admission (a restore, a migration, a
+        delete, another base), nothing is dispatched. The domain id is then recorded on the
+        job: if the step is later cancelled, the cancel marker needs the id, and a step
+        that never recorded one never ran.
         """
+        chain = config.chain
+        state = (
+            VirtualminAccount.objects.filter(pk=account.pk)
+            .values("chain_epoch", "chain_base_id", "chain_base_fingerprint")
+            .first()
+        )
+        pinned: dict[str, Any] = (
+            {"chain_epoch": chain.epoch, "base_job_id": chain.base_job_id, "expected_fp": chain.expected_fp}
+            if chain is not None
+            else {}
+        )
+        if chain is None or state is None or not pins_hold(state, config.chain_role, pinned):
+            return Err(
+                "The differential chain changed since this backup was admitted; no remote work performed",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         domain_id = self._read_domain_id(account)
         if domain_id.is_err():
             return Err(domain_id.unwrap_err(), retriability=retriability_of(domain_id))
@@ -1333,6 +1383,12 @@ class VirtualminBackupService:
         self._chain_step_state = "settled"
         step = outcome.unwrap()
         metadata.update({"fp_before": step.fp_before, "fp_after": step.fp_after})
+        if config.chain_role == CHAIN_ROLE_DIFFERENTIAL and (
+            (not step.ran and step.reason == "fingerprint_mismatch") or (step.ran and step.snapshot_moved)
+        ):
+            # The snapshot is gone, different, or moved by this very step: no differential can
+            # be trusted against it any more. Fenced, so only THIS job's chain is cleared.
+            invalidate_chain_if_epoch(account.pk, chain.epoch)
         if step.outcome != "ok":
             retriability = Retriability.RETRIABLE if step.reason == "lock_busy" else Retriability.NOT_RETRIABLE
             where = "refused" if not step.ran else "failed on the node"
