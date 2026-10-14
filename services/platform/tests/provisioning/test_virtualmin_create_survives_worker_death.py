@@ -173,3 +173,107 @@ class WorkerDeathAfterRemoteCreateTests(TransactionTestCase):
 
         self.assertTrue(outcome["success"], outcome)
         self.assertEqual(seen, [False], "the create-domain call must run outside any transaction")
+
+    def test_worker_death_between_activation_and_counter_still_counts_the_domain(self) -> None:
+        """The account, the server's domain count and the job complete together, or not at all.
+
+        If the worker dies after the account is saved as active but before the server's count is
+        raised, recovery sees an active account and skips the increment, so the server admits more
+        domains than its limit.
+        """
+        from django.db import models  # noqa: PLC0415
+
+        real_f = models.F
+
+        def die_on_counter(name: str, *args: object, **kwargs: object) -> object:
+            if name == "current_domains":
+                raise WorkerDied
+            return real_f(name, *args, **kwargs)
+
+        params = cast(
+            "VirtualminProvisioningParams",
+            {"service_id": self.service.pk, "domain": self.service.domain, "server_id": str(self.server.pk)},
+        )
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http),
+            patch("apps.provisioning.virtualmin_service.models.F", side_effect=die_on_counter),
+            self.assertRaises(WorkerDied),
+        ):
+            provision_virtualmin_account(params)
+
+        account = VirtualminAccount.objects.get(service=self.service)
+        job = VirtualminProvisioningJob.objects.get(account=account, operation="create_domain")
+        later = timezone.now() + timedelta(hours=1)
+        VirtualminProvisioningJob.recover_expired_claims(later, later, now=later)
+        job.refresh_from_db()
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http),
+            patch(
+                "apps.provisioning.virtualmin_gateway.VirtualminGateway.get_domain_owner",
+                return_value=Ok(account.virtualmin_username),
+            ),
+        ):
+            outcome = VirtualminProvisioningService(self.server).retry_job(job)
+
+        self.assertTrue(outcome.is_ok(), outcome)
+        self.server.refresh_from_db()
+        account.refresh_from_db()
+        self.assertEqual(account.status, "active")
+        self.assertEqual(self.server.current_domains, 1, "the created domain must be counted exactly once")
+        self.assertEqual(self.creates(), 1)
+
+    def test_worker_death_during_delete_bookkeeping_leaves_the_count_untouched(self) -> None:
+        """The server's count, the account's terminated status and the job move together.
+
+        A worker that died after the count went down but before the account was marked terminated
+        left the domain uncounted while the account still looked live, and a retried delete took
+        the count down again.
+        """
+        VirtualminServer.objects.filter(pk=self.server.pk).update(current_domains=2)
+        self.server.refresh_from_db()
+        account = VirtualminAccount.objects.create(
+            domain=self.service.domain,
+            service=self.service,
+            server=self.server,
+            virtualmin_username="crashexample",
+            template_name="Default",
+            status="error",
+            protected_from_deletion=False,
+            praho_customer_id=self.service.customer_id,
+            praho_service_id=self.service.id,
+        )
+        real_save = VirtualminAccount.save
+
+        def save_or_die(instance: VirtualminAccount, *args: object, **kwargs: object) -> None:
+            if instance.status == "terminated":
+                raise WorkerDied
+            real_save(instance, *args, **kwargs)
+
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http),
+            patch.object(VirtualminAccount, "save", autospec=True, side_effect=save_or_die),
+            self.assertRaises(WorkerDied),
+        ):
+            VirtualminProvisioningService(self.server).delete_account(account)
+
+        self.server.refresh_from_db()
+        account.refresh_from_db()
+        self.assertEqual(account.status, "error")
+        self.assertEqual(self.server.current_domains, 2, "the count must not drop without the account's status")
+
+    def test_a_failed_create_bookkeeping_does_not_take_the_count_down_twice(self) -> None:
+        """The transaction already undoes the increment, so the error path must not revert it again."""
+        VirtualminServer.objects.filter(pk=self.server.pk).update(current_domains=3)
+        params = cast(
+            "VirtualminProvisioningParams",
+            {"service_id": self.service.pk, "domain": self.service.domain, "server_id": str(self.server.pk)},
+        )
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http),
+            patch.object(VirtualminProvisioningJob, "mark_completed", side_effect=RuntimeError("database went away")),
+        ):
+            outcome = provision_virtualmin_account(params)
+
+        self.assertFalse(outcome["success"], outcome)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.current_domains, 3, "a create that was undone must leave the count as it was")
