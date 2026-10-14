@@ -463,15 +463,12 @@ class NodeDeploymentService:
             # register_node stores it in the vault, so the first API call — and verify_and_activate
             # below — authenticate. Threaded via a 0600 vars file, never the ansible command line.
             #
-            # #348 finding #8: REUSE an existing vault credential for this node so a re-deploy is
-            # convergent ONCE A CREDENTIAL ALREADY EXISTS IN THE VAULT. create-admin tolerates an
-            # already-existing praho-api user WITHOUT resetting its password, so minting a fresh
-            # password every deploy would leave the node on the OLD password while the vault stored the
-            # NEW one -> verify_and_activate 401 -> disabled. The vault is the credential source of
-            # truth (ADR-0033). Residual edge (NOT converged): if a prior deploy created the node user
-            # but failed BEFORE the vault store, no vault entry exists, a fresh password is generated,
-            # and the node stays safely DISABLED (never active with a mismatch) until create-admin is
-            # reset on the node.
+            # #348 finding #8: REUSE an existing vault credential for this node; the vault is the
+            # credential source of truth (ADR-0033). The node playbook's API-user helper
+            # (praho-webmin-api-user) sets the password it is given on every run, also for an
+            # existing user, so the node converges to whatever password is passed here. That also
+            # covers a prior deploy that created the user but failed before the vault store: the
+            # fresh password generated below replaces the node's on the re-deploy.
             from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
                 get_credential_vault,
             )
