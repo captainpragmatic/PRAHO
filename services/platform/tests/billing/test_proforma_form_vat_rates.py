@@ -23,7 +23,7 @@ from apps.billing.models import Currency, ProformaInvoice, ProformaLine
 from apps.billing.tax_models import TaxRule
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
-from apps.users.models import User
+from apps.users.models import User, UserProfile
 
 
 def _customer(name: str, *, country: str, **profile: object) -> Customer:
@@ -293,3 +293,11 @@ class ProformaFormVatRateTests(TestCase):
         config = _form_config(html)
         self.assertEqual(config["labels"]["vat"], "VAT:")
         self.assertEqual(config["labels"]["vatRate"], "VAT ({rate}%):")
+
+    def test_romanian_staff_see_tva(self) -> None:
+        UserProfile.objects.filter(user=self.staff).update(preferred_language="ro")
+
+        config = _form_config(self.client.get(reverse("billing:proforma_create")).content.decode())
+
+        self.assertEqual(config["labels"]["vat"], "TVA:")
+        self.assertEqual(config["labels"]["vatRate"], "TVA ({rate}%):")

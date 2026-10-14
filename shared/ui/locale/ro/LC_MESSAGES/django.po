@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PRAHO shared UI\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 19:27+0300\n"
+"POT-Creation-Date: 2026-10-13 21:45+0300\n"
 "PO-Revision-Date: 2026-10-06 00:00+0300\n"
 "Last-Translator: PRAHO contributors\n"
 "Language-Team: Romanian\n"
@@ -50,8 +50,7 @@ msgstr "Introduceți aici textul de confirmare..."
 
 #: templates/components/dangerous_action_modal.html:95
 #: templates/components/form_actions.html:24
-#: templates/components/form_actions.html:25
-#: templates/components/modal.html:70
+#: templates/components/form_actions.html:25 templates/components/modal.html:70
 msgid "Cancel"
 msgstr "Anulează"
 
@@ -95,7 +94,7 @@ msgid "Go to previous page"
 msgstr "Mergeți la pagina anterioară"
 
 #: templates/components/pagination.html:78
-#: templates/components/pagination.html:85 templates/components/table.html:150
+#: templates/components/pagination.html:85 templates/components/table.html:148
 msgid "Previous"
 msgstr "Anterior"
 
@@ -113,8 +112,7 @@ msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
 #: templates/components/pagination.html:201
-#: templates/components/pagination.html:208
-#: templates/components/table.html:158
+#: templates/components/pagination.html:208 templates/components/table.html:156
 msgid "Next"
 msgstr "Următorul"
 
@@ -141,31 +139,31 @@ msgstr "(etapa curentă)"
 msgid "Back"
 msgstr "Înapoi"
 
-#: templates/components/table.html:47
+#: templates/components/table.html:45
 msgid "Actions"
 msgstr "Acțiuni"
 
-#: templates/components/table.html:117
+#: templates/components/table.html:115
 msgid "No data available"
 msgstr "Nu există date disponibile"
 
-#: templates/components/table.html:118
+#: templates/components/table.html:116
 msgid "No records have been added yet."
 msgstr "Nu au fost adăugate înregistrări încă."
 
-#: templates/components/table.html:167
+#: templates/components/table.html:165
 msgid "Showing"
 msgstr "Se afișează"
 
-#: templates/components/table.html:169
+#: templates/components/table.html:167
 msgid "to"
 msgstr "până la"
 
-#: templates/components/table.html:171
+#: templates/components/table.html:169
 msgid "of"
 msgstr "din"
 
-#: templates/components/table.html:173
+#: templates/components/table.html:171
 msgid "results"
 msgstr "rezultate"
 
@@ -352,9 +350,7 @@ msgstr "Informații de Facturare"
 
 #: templates/legal/privacy_policy_content.html:94
 msgid "Company name, VAT number (CUI/CIF), billing address, payment details"
-msgstr ""
-"Denumirea companiei, cod de TVA (CUI/CIF), adresa de facturare, detalii de "
-"plată"
+msgstr "Denumirea companiei, cod de TVA (CUI/CIF), adresa de facturare, detalii de plată"
 
 #: templates/legal/privacy_policy_content.html:95
 msgid "Service Configuration"
@@ -382,8 +378,7 @@ msgstr "Date tehnice"
 
 #: templates/legal/privacy_policy_content.html:101
 msgid "IP address, browser type, device information, operating system"
-msgstr ""
-"Adresă IP, tip de browser, informații despre dispozitiv, sistem de operare"
+msgstr "Adresă IP, tip de browser, informații despre dispozitiv, sistem de operare"
 
 #: templates/legal/privacy_policy_content.html:102
 msgid "Usage Data"
@@ -391,8 +386,7 @@ msgstr "Date de utilizare"
 
 #: templates/legal/privacy_policy_content.html:102
 msgid "Pages visited, features used, session duration, click patterns"
-msgstr ""
-"Pagini vizitate, caracteristici utilizate, durata sesiunii, modele de clic"
+msgstr "Pagini vizitate, caracteristici utilizate, durata sesiunii, modele de clic"
 
 #: templates/legal/privacy_policy_content.html:103
 msgid "Security Data"
@@ -400,9 +394,7 @@ msgstr "Date de securitate"
 
 #: templates/legal/privacy_policy_content.html:103
 msgid "Login attempts, authentication events, security alerts"
-msgstr ""
-"Încercări de autentificare, evenimente de autentificare, alerte de "
-"securitate"
+msgstr "Încercări de autentificare, evenimente de autentificare, alerte de securitate"
 
 #: templates/legal/privacy_policy_content.html:104
 msgid "Cookie Data"
@@ -435,12 +427,8 @@ msgstr ""
 "                "
 
 #: templates/legal/privacy_policy_content.html:120
-msgid ""
-"Under GDPR Article 6, we process your data based on the following legal "
-"grounds:"
-msgstr ""
-"Conform articolului 6 al GDPR, procesăm datele dvs. pe baza următoarelor "
-"motive legale:"
+msgid "Under GDPR Article 6, we process your data based on the following legal grounds:"
+msgstr "Conform articolului 6 al GDPR, procesăm datele dvs. pe baza următoarelor motive legale:"
 
 #: templates/legal/privacy_policy_content.html:126
 msgid "Processing Activity"
@@ -586,8 +574,7 @@ msgstr "Furnizori de servicii"
 
 #: templates/legal/privacy_policy_content.html:205
 msgid "Payment processors, email providers, infrastructure providers"
-msgstr ""
-"Procesatori de plăți, furnizori de e-mail, furnizori de infrastructură"
+msgstr "Procesatori de plăți, furnizori de e-mail, furnizori de infrastructură"
 
 #: templates/legal/privacy_policy_content.html:206
 msgid "Domain Registrars"
@@ -663,8 +650,7 @@ msgstr "Dreptul la ștergere"
 
 #: templates/legal/privacy_policy_content.html:239
 msgid "Request deletion of your personal data (\"Right to be Forgotten\")."
-msgstr ""
-"Solicitați ștergerea datelor dvs. personale („Dreptul de a fi uitat”)."
+msgstr "Solicitați ștergerea datelor dvs. personale („Dreptul de a fi uitat”)."
 
 #: templates/legal/privacy_policy_content.html:242
 msgid "Right to Restriction"
@@ -688,9 +674,7 @@ msgstr "Dreptul la opoziție"
 
 #: templates/legal/privacy_policy_content.html:251
 msgid "Object to processing based on legitimate interests or for marketing."
-msgstr ""
-"Opuneți-vă procesării bazate pe interese legitime sau în scopuri de "
-"marketing."
+msgstr "Opuneți-vă procesării bazate pe interese legitime sau în scopuri de marketing."
 
 #: templates/legal/privacy_policy_content.html:254
 msgid "Right to Withdraw Consent"
@@ -698,9 +682,7 @@ msgstr "Dreptul de a retrage consimțământul"
 
 #: templates/legal/privacy_policy_content.html:255
 msgid "Withdraw consent at any time for consent-based processing."
-msgstr ""
-"Retrageți consimțământul în orice moment pentru prelucrarea bazată pe "
-"consimțământ."
+msgstr "Retrageți consimțământul în orice moment pentru prelucrarea bazată pe consimțământ."
 
 #: templates/legal/privacy_policy_content.html:260
 msgid "Exercise Your Rights"
@@ -718,9 +700,7 @@ msgstr ""
 
 #: templates/legal/privacy_policy_content.html:267
 msgid "You can exercise your rights through our GDPR Privacy Dashboard."
-msgstr ""
-"Vă puteți exercita drepturile prin intermediul panoului nostru de control al"
-" confidențialității RGPD."
+msgstr "Vă puteți exercita drepturile prin intermediul panoului nostru de control al confidențialității RGPD."
 
 #: templates/legal/privacy_policy_content.html:282
 msgid ""
@@ -1134,22 +1114,16 @@ msgid "3.2 Account Security"
 msgstr "3.2 Securitatea Contului"
 
 #: templates/legal/terms_of_service_content.html:104
-msgid ""
-"You are responsible for maintaining the confidentiality of your account "
-"credentials."
-msgstr ""
-"Sunteți responsabil de menținerea confidențialității acreditărilor dvs. de "
-"cont."
+msgid "You are responsible for maintaining the confidentiality of your account credentials."
+msgstr "Sunteți responsabil de menținerea confidențialității acreditărilor dvs. de cont."
 
 #: templates/legal/terms_of_service_content.html:105
-msgid ""
-"You must immediately notify us of any unauthorized access to your account."
+msgid "You must immediately notify us of any unauthorized access to your account."
 msgstr "Trebuie să ne anunțați imediat orice acces neautorizat la contul dvs."
 
 #: templates/legal/terms_of_service_content.html:106
 msgid "We strongly recommend enabling two-factor authentication (2FA)."
-msgstr ""
-"Vă recomandăm cu insistență activarea autentificării cu doi factori (2FA)."
+msgstr "Vă recomandăm cu insistență activarea autentificării cu doi factori (2FA)."
 
 #: templates/legal/terms_of_service_content.html:107
 msgid "You are responsible for all activities that occur under your account."
@@ -1439,28 +1413,16 @@ msgstr ""
 "                "
 
 #: templates/legal/terms_of_service_content.html:277
-msgid ""
-"We shall not be liable for indirect, incidental, special, or consequential "
-"damages."
-msgstr ""
-"Nu vom fi răspunzători pentru daune indirecte, accidentale, speciale sau "
-"consecutive."
+msgid "We shall not be liable for indirect, incidental, special, or consequential damages."
+msgstr "Nu vom fi răspunzători pentru daune indirecte, accidentale, speciale sau consecutive."
 
 #: templates/legal/terms_of_service_content.html:278
-msgid ""
-"Our total liability shall not exceed the fees paid by you in the 12 months "
-"preceding the claim."
-msgstr ""
-"Răspunderea noastră totală nu va depăși taxele plătite de dvs. în cele 12 "
-"luni anterioare reclamației."
+msgid "Our total liability shall not exceed the fees paid by you in the 12 months preceding the claim."
+msgstr "Răspunderea noastră totală nu va depăși taxele plătite de dvs. în cele 12 luni anterioare reclamației."
 
 #: templates/legal/terms_of_service_content.html:279
-msgid ""
-"We are not liable for data loss; you are responsible for maintaining "
-"backups."
-msgstr ""
-"Nu suntem răspunzători pentru pierderea de date; sunteți responsabil de "
-"menținerea copiilor de siguranță."
+msgid "We are not liable for data loss; you are responsible for maintaining backups."
+msgstr "Nu suntem răspunzători pentru pierderea de date; sunteți responsabil de menținerea copiilor de siguranță."
 
 #: templates/legal/terms_of_service_content.html:287
 msgid "10.1 By Customer"
