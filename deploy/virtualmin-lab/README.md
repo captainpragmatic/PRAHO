@@ -8,7 +8,7 @@ It is not part of `make test`.
 
 ```bash
 make virtualmin-lab-up      # build images if missing, start, register in the lab DB, inject credentials
-make test-virtualmin-lab    # production-path backup + restore round trip (the #498 G1 gate)
+make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data
 make virtualmin-lab-build   # rebuild both images
@@ -128,9 +128,25 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
     - Every backed-up file and row must come back.
     - Files created after the backup survive, because Virtualmin extracts over the live tree. The gate reports them.
 
+- **`virtualmin_lab_checks`** runs after the round trip, on vm-b, with its own domain `labcheck.praho.test`:
+  1. create-domain through `VirtualminProvisioningService`: an absent domain probes as absent, the server gets the "Default Settings" template, the default features and the recovery seed as its description, and a create retry after the server vanished re-creates it;
+  2. a base made by a plain full backup stays byte-identical through the ordinary full backup, the config-only backup and the migration backup parameters;
+  3. the staging directory `/var/lib/praho-transfer` is root 0700, an unprivileged user cannot read a `.dom` sidecar, a verified fetch leaves nothing behind, and a world-readable staging directory makes the fetch refuse;
+  4. `virtualmin_backup.yml`, applied twice, leaves one enabled, non-differential schedule that Webmin cron runs, and running it archives the domain and keeps the base;
+  5. `virtualmin.yml` on the installed node succeeds, and its API user authenticates, can disable and enable a domain, lists the templates, and runs PRAHO's backup (with `mkdir`, master-only) and restore parameters.
+
+### Node deploy from scratch (`praho-debian-node`)
+
+`virtualmin.yml` was run end to end against a fresh `praho-debian-node` container (SSH on 127.0.0.1:2722): the Virtualmin 8 installer installed Virtualmin 8.3.0 / Webmin 2.670, the play finished with `failed=0`, and the API user it created could create and delete a domain over remote.cgi. That run is not part of `make test-virtualmin-lab`. Three things a cloud image has and the bare image lacks had to be added first:
+- `python3`, for Ansible;
+- `iproute2`, or the installer cannot find the primary interface;
+- the removal of `/etc/apt/apt.conf.d/docker-clean`, which deletes downloaded packages before dpkg installs them.
+
+The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. Clear it between rebuilds.
+
 ### Transport adaptations (lab only)
 
-Both nodes publish on 127.0.0.1, which breaks four assumptions in PRAHO's production transport. `lab_transport()` in `apps/provisioning/management/commands/_virtualmin_lab.py` adapts them, and only inside the lab commands. They are also findings about what production assumes:
+Both nodes publish on 127.0.0.1, which breaks four assumptions in PRAHO's production transport. `lab_transport()` in `apps/provisioning/management/commands/_virtualmin_lab.py` adapts them, and only inside the lab commands: it refuses to run at all unless the settings module is `config.settings.lab` with DEBUG on, so no other process can loosen them. `tests/provisioning/test_virtualmin_transport_guard.py` pins the production side. They are also findings about what production assumes:
 
 1. **API hosts must resolve to global addresses.** The SSRF guard refuses private and loopback targets. The exact lab names resolve to 127.0.0.1. Every other name still goes through the real resolver and the guard.
 2. **Ansible always uses port 22.** The generated inventory has no port. Each lab deployment gets its published port as `ansible_port`.

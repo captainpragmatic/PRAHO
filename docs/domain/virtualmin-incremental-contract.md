@@ -9,7 +9,7 @@ line under each question states what the evidence establishes.
 
 ## Environment
 
-- Probe run: 2026-10-13 16:27 UTC
+- Probe run: 2026-10-13 18:31 UTC
 - Node: vm-a.praho.test (container vmlab-a), image praho-virtualmin-lab:8.3.0
 - theme version: 26.70
 - virtualmin version: 8.3.0
@@ -28,13 +28,13 @@ line under each question states what the evidence establishes.
 |---|---|---|
 | Q1: Remote-API parameter names for differential / no-differential backups | **PROVEN** | `differential=` (bare) makes a differential backup, `no-differential=` a standalone full; `incremental`/`no-incremental` are accepted aliases; any value on the flag is rejected |
 | Q2: Where per-domain differential state lives, and what a reset does to it | **PROVEN** | one GNU tar --listed-incremental snapshot per domain at /var/webmin/modules/virtual-server/incremental/<domain id>; every full backup deletes and rewrites it (the new base); a differential restores it after tar |
-| Q3: Does a full backup leave the differential base untouched? | **PROVEN** | `no-differential` leaves the base untouched for the full, config-only and migration parameter sets; without it these reset the base today: PRAHO full, PRAHO config-only, PRAHO safety, migration params |
+| Q3: Does a full backup leave the differential base untouched? | **PROVEN** | `no-differential` leaves the base untouched, and without it a full backup resets the base; PRAHO's full, config-only and migration backups send it and keep the base. The pre-restore safety backup sends it too, but the restore that follows deletes the base (observed) |
 | Q5: Restore order: base full, then the latest differential, with data assertions | **DISPROVEN** | rows and every S2 file match, but the restore is not exact: files deleted after the base come back (['public_html/probe/delete-me.txt']) |
 | Q6: Do files deleted after the base come back after base + differential restore? | **PROVEN** | deleted files are resurrected: Virtualmin extracts the differential over the base without replaying deletions |
 | Q5b: Hazard: a default (base-resetting) full between base and differential | **PROVEN** | an intervening full that resets the base makes base+differential restore silently lose changes |
 | Q7: Restoring a differential alone onto a deleted domain | **PROVEN** | a differential alone recreates the domain and its database but only the files changed since the base; unchanged files are missing, so it must never be restored without its base |
 | Q8: A differential after a restore: is there still a base? | **PROVEN** | a restore deletes the domain's base; the next `differential` then silently runs as a full and becomes the new base |
-| Q4: Schedule discovery after applying the production virtualmin_backup.yml | **PROVEN** | Virtualmin never reads the playbook's `sched` file (it reads /etc/webmin/virtual-server/backups/ and the legacy backup_* config keys). The config's backup_dest line surfaces as legacy schedule 1: enabled=False, domains=None, differential=No (from backup_increment). Cron runs backup.pl: False. A manual `backup.pl --id 1` backed up a domain: False; it changed the differential base: False. So the scheduled nightly node backup never runs. |
+| Q4: Schedule discovery after applying the production virtualmin_backup.yml | **PROVEN** | the production playbook creates one enabled, non-differential scheduled backup through `virtualmin create-scheduled-backup` and removes the legacy `sched` file and backup_* keys; Webmin cron runs it (`backup.pl --id 179191667478547`), and running it archives the domain and leaves the differential base untouched. |
 
 ## Q1: Remote-API parameter names for differential / no-differential backups
 
@@ -90,7 +90,7 @@ line under each question states what the evidence establishes.
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.95 KiB
+Backup completed successfully. Final size was 234.94 KiB
 ```
 
 4. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q1_diff.tar.gz", "all-features": "", "differential": ""} → **success**
@@ -110,7 +110,7 @@ Backup completed successfully. Final size was 234.95 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.42 KiB
+Backup completed successfully. Final size was 35.41 KiB
 ```
 
 5. Dir members, base: ['./public_html/probe/change.txt', './public_html/probe/delete-me.txt', './public_html/probe/keep.txt']; differential: ['./public_html/probe/change.txt']
@@ -132,7 +132,7 @@ Backup completed successfully. Final size was 35.42 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.54 KiB
+Backup completed successfully. Final size was 235.53 KiB
 ```
 
 7. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q1_legacy.tar.gz", "all-features": "", "incremental": ""} → **success**
@@ -148,11 +148,11 @@ Backup completed successfully. Final size was 235.54 KiB
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.41 KiB
+Backup completed successfully. Final size was 35.43 KiB
 ```
 
 8. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q1_legacy_no.tar.gz", "all-features": "", "no-incremental": ""} → **success**
@@ -265,11 +265,11 @@ The source can be one of :
 | Check | Result | Detail |
 |---|---|---|
 | full backup | pass |  |
-| state file created at incremental/<domain id> (17919089057386) | pass | /var/webmin/modules/virtual-server/incremental/17919089057386 |
+| state file created at incremental/<domain id> (179191634260351) | pass | /var/webmin/modules/virtual-server/incremental/179191634260351 |
 | second full backup | pass |  |
 | a full backup rewrites the state (new hash and mtime) | pass |  |
 | differential backup | pass |  |
-| a differential leaves the state as it was (restored after tar) | pass | 0e587ea48d4be749 7645 16:28:44.535201003 |
+| a differential leaves the state as it was (restored after tar) | pass | cd859cabdc3a30a6 7645 18:32:42.568556001 |
 
 ### Steps and output
 
@@ -290,25 +290,25 @@ The source can be one of :
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.09 KiB
+Backup completed successfully. Final size was 234.95 KiB
 ```
 
 2. Files created by the first full backup under /etc/webmin/virtual-server, /var/webmin/modules/virtual-server:
 
 ```text
-/var/webmin/modules/virtual-server/backuplogs/1791908920-8128-1
-/var/webmin/modules/virtual-server/backuplogs/1791908920-8128-1.out
-/var/webmin/modules/virtual-server/incremental/17919089057386
+/var/webmin/modules/virtual-server/backuplogs/1791916358-61104-1
+/var/webmin/modules/virtual-server/backuplogs/1791916358-61104-1.out
+/var/webmin/modules/virtual-server/incremental/179191634260351
 ```
 
 Files changed:
 
 ```text
-/etc/webmin/virtual-server/domains/17919089057386
+/etc/webmin/virtual-server/domains/179191634260351
 /var/webmin/modules/virtual-server/backupsrunning
 ```
 
-3. `file /var/webmin/modules/virtual-server/incremental/17919089057386`: GNU tar incremental snapshot data version 1.34-2
+3. `file /var/webmin/modules/virtual-server/incremental/179191634260351`: GNU tar incremental snapshot data version 1.34-2
 
 4. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q2_full2.tar.gz", "all-features": ""} → **success**
 
@@ -327,12 +327,12 @@ Files changed:
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.89 KiB
+Backup completed successfully. Final size was 234.95 KiB
 ```
 
-5. State after full #1: `fbb91268c974e328 7645 16:28:40.501201001`
+5. State after full #1: `334e212938f50c1e 7645 18:32:38.531288013`
 
-State after full #2: `0e587ea48d4be749 7645 16:28:44.535201003`
+State after full #2: `cd859cabdc3a30a6 7645 18:32:42.568556001`
 
 6. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q2_diff.tar.gz", "all-features": "", "differential": ""} → **success**
 
@@ -351,40 +351,43 @@ State after full #2: `0e587ea48d4be749 7645 16:28:44.535201003`
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.36 KiB
+Backup completed successfully. Final size was 35.4 KiB
 ```
 
-7. State after a differential: `0e587ea48d4be749 7645 16:28:44.535201003`
+7. State after a differential: `cd859cabdc3a30a6 7645 18:32:42.568556001`
 
 
 ## Q3: Does a full backup leave the differential base untouched?
 
-**PROVEN**: `no-differential` leaves the base untouched for the full, config-only and migration parameter sets; without it these reset the base today: PRAHO full, PRAHO config-only, PRAHO safety, migration params
+**PROVEN**: `no-differential` leaves the base untouched, and without it a full backup resets the base; PRAHO's full, config-only and migration backups send it and keep the base. The pre-restore safety backup sends it too, but the restore that follows deletes the base (observed)
 
 ### Assertions
 
 | Check | Result | Detail |
 |---|---|---|
 | establish base (plain full) | pass |  |
-| PRAHO full: a base exists before (non-vacuous) | pass | 44ba7814039b9c67 7645 16:29:08.580275000 |
+| pre-fix full shape (domain, dest, all-features): a base exists before (non-vacuous) | pass | 8d28239459d0c451 7643 18:33:06.058556012 |
+| pre-fix full shape (domain, dest, all-features): backup ran | pass |  |
+| pre-fix full shape (domain, dest, all-features): base RESET | pass | (observed reset) |
+| PRAHO full: a base exists before (non-vacuous) | pass | 68436ab1d44d1857 7645 18:33:09.641556014 |
 | PRAHO full: backup ran | pass |  |
-| PRAHO full: base RESET | pass | (observed reset) |
-| PRAHO config-only: a base exists before (non-vacuous) | pass | 432ddb70830c730a 7643 16:29:15.044275003 |
+| PRAHO full: base UNTOUCHED | pass | (observed untouched) |
+| PRAHO config-only: a base exists before (non-vacuous) | pass | 68436ab1d44d1857 7645 18:33:09.641556014 |
 | PRAHO config-only: backup ran | pass |  |
-| PRAHO config-only: base RESET | pass | (observed reset) |
-| PRAHO safety: base RESET | pass | (observed) |
+| PRAHO config-only: base UNTOUCHED | pass | (observed untouched) |
+| migration params (migration_backup_params): a base exists before (non-vacuous) | pass | 68436ab1d44d1857 7645 18:33:09.641556014 |
+| migration params (migration_backup_params): backup ran | pass |  |
+| migration params (migration_backup_params): base UNTOUCHED | pass | (observed untouched) |
+| PRAHO safety backup + restore: base RESET | pass | (observed) |
 | a restore clears the differential base | pass | (observed) |
 | re-establish base (plain full) | pass |  |
-| migration params (virtualmin_migration_service.py _backup): a base exists before (non-vacuous) | pass | d4fc71bdb7239ea4 7597 16:29:44.619609003 |
-| migration params (virtualmin_migration_service.py _backup): backup ran | pass |  |
-| migration params (virtualmin_migration_service.py _backup): base RESET | pass | (observed reset) |
-| full + no-differential: a base exists before (non-vacuous) | pass | 28ffda1eeb71059b 7597 16:29:48.226609005 |
+| full + no-differential: a base exists before (non-vacuous) | pass | d0b47357aa555e7b 7597 18:33:54.657217006 |
 | full + no-differential: backup ran | pass |  |
 | full + no-differential: base UNTOUCHED | pass | (observed untouched) |
-| config-only params + no-differential: a base exists before (non-vacuous) | pass | 28ffda1eeb71059b 7597 16:29:48.226609005 |
+| config-only params + no-differential: a base exists before (non-vacuous) | pass | d0b47357aa555e7b 7597 18:33:54.657217006 |
 | config-only params + no-differential: backup ran | pass |  |
 | config-only params + no-differential: base UNTOUCHED | pass | (observed untouched) |
-| migration params + no-differential: a base exists before (non-vacuous) | pass | 28ffda1eeb71059b 7597 16:29:48.226609005 |
+| migration params + no-differential: a base exists before (non-vacuous) | pass | d0b47357aa555e7b 7597 18:33:54.657217006 |
 | migration params + no-differential: backup ran | pass |  |
 | migration params + no-differential: base UNTOUCHED | pass | (observed untouched) |
 
@@ -403,26 +406,14 @@ Backup completed successfully. Final size was 35.36 KiB
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.94 KiB
+Backup completed successfully. Final size was 235.11 KiB
 ```
 
-2. PRAHO full (`backup_domain`, include_email=False): Ok
-
-3. PRAHO full: state before `44ba7814039b9c67 7645 16:29:08.580275000` → after `432ddb70830c730a 7643 16:29:15.044275003`
-
-4. PRAHO config-only (`backup_domain`, config_only): Ok
-
-5. PRAHO config-only: state before `432ddb70830c730a 7643 16:29:15.044275003` → after `507c7f11ad883cc6 7643 16:29:23.042275007`
-
-6. PRAHO forced restore of roundtrip.praho.test_20261013_162924_e8af367f_8c3cdfa3d188 (runs the safety backup first): Ok
-
-state before safety+restore `56c879b405163ed0 7645 16:29:27.625275009` → after `absent`
-
-7. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_rebase.tar.gz", "all-features": ""} → **success**
+2. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_prefix.tar.gz", "all-features": ""} → **success**
 
 ```text
 …
@@ -435,36 +426,24 @@ state before safety+restore `56c879b405163ed0 7645 16:29:27.625275009` → after
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.91 KiB
+Backup completed successfully. Final size was 235.14 KiB
 ```
 
-8. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_migration.tar.gz", "all-features": ""} → **success**
+3. pre-fix full shape (domain, dest, all-features): state before `8d28239459d0c451 7643 18:33:06.058556012` → after `68436ab1d44d1857 7645 18:33:09.641556014`
 
-```text
-…
-    .. done
-    Copying MariaDB user details ..
-    .. done
-    Dumping MariaDB database roundtrip ..
-    .. done
-    Backing up Webmin ACL files ..
-    .. done
-    Backing up AWStats configuration file ..
-    .. done
-.. completed in 0 seconds
-Creating final backup archive ..
-.. done
-1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.12 KiB
-```
+4. PRAHO full (`backup_domain`, include_email=False): Ok
 
-9. migration params (virtualmin_migration_service.py _backup): state before `d4fc71bdb7239ea4 7597 16:29:44.619609003` → after `28ffda1eeb71059b 7597 16:29:48.226609005`
+5. PRAHO full: state before `68436ab1d44d1857 7645 18:33:09.641556014` → after `68436ab1d44d1857 7645 18:33:09.641556014`
 
-10. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_full.tar.gz", "all-features": "", "no-differential": ""} → **success**
+6. PRAHO config-only (`backup_domain`, config_only): Ok
+
+7. PRAHO config-only: state before `68436ab1d44d1857 7645 18:33:09.641556014` → after `68436ab1d44d1857 7645 18:33:09.641556014`
+
+8. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/var/lib/praho-transfer/migration_281890e9-0000-0000-0000-000000000000.tar.gz", "all-features": "", "mkdir": "", "no-differential": ""} → **success**
 
 ```text
 …
@@ -484,29 +463,13 @@ Creating final backup archive ..
 Backup completed successfully. Final size was 235.56 KiB
 ```
 
-11. full + no-differential: state before `28ffda1eeb71059b 7597 16:29:48.226609005` → after `28ffda1eeb71059b 7597 16:29:48.226609005`
+9. migration params (migration_backup_params): state before `68436ab1d44d1857 7645 18:33:09.641556014` → after `68436ab1d44d1857 7645 18:33:09.641556014`
 
-12. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_cfg.tar.gz", "feature": ["virtualmin", "dir"], "no-differential": ""} → **success**
+10. PRAHO forced restore of roundtrip.praho.test_20261013_183331_e8af367f_0938543bc0cd (runs the safety backup first): Ok
 
-```text
-Starting backup..
-Testing backup destination local file /tmp/probe_q3_nd_cfg.tar.gz ..
-.. done
-Creating backup for virtual server roundtrip.praho.test ..
-    Copying virtual server configuration ..
-    .. done
-    Creating TAR file of home directory ..
-    .. done
-.. completed in 0 seconds
-Creating final backup archive ..
-.. done
-1 virtual servers backed up successfully
-Backup completed successfully. Final size was 209.48 KiB
-```
+state before safety+restore `68436ab1d44d1857 7645 18:33:09.641556014` → after `absent`
 
-13. config-only params + no-differential: state before `28ffda1eeb71059b 7597 16:29:48.226609005` → after `28ffda1eeb71059b 7597 16:29:48.226609005`
-
-14. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_mig.tar.gz", "all-features": "", "no-differential": ""} → **success**
+11. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_rebase.tar.gz", "all-features": ""} → **success**
 
 ```text
 …
@@ -523,12 +486,74 @@ Backup completed successfully. Final size was 209.48 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.58 KiB
+Backup completed successfully. Final size was 235.11 KiB
 ```
 
-15. migration params + no-differential: state before `28ffda1eeb71059b 7597 16:29:48.226609005` → after `28ffda1eeb71059b 7597 16:29:48.226609005`
+12. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_full.tar.gz", "all-features": "", "no-differential": ""} → **success**
 
-16. Summary: PRAHO full: RESET, PRAHO config-only: RESET, PRAHO safety: RESET, migration params: RESET, full + no-differential: untouched, config-only + no-differential: untouched, migration + no-differential: untouched
+```text
+…
+    .. done
+    Copying MariaDB user details ..
+    .. done
+    Dumping MariaDB database roundtrip ..
+    .. done
+    Backing up Webmin ACL files ..
+    .. done
+    Backing up AWStats configuration file ..
+    .. done
+.. completed in 0 seconds
+Creating final backup archive ..
+.. done
+1 virtual servers backed up successfully
+Backup completed successfully. Final size was 235.54 KiB
+```
+
+13. full + no-differential: state before `d0b47357aa555e7b 7597 18:33:54.657217006` → after `d0b47357aa555e7b 7597 18:33:54.657217006`
+
+14. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_cfg.tar.gz", "feature": ["virtualmin", "dir"], "no-differential": ""} → **success**
+
+```text
+Starting backup..
+Testing backup destination local file /tmp/probe_q3_nd_cfg.tar.gz ..
+.. done
+Creating backup for virtual server roundtrip.praho.test ..
+    Copying virtual server configuration ..
+    .. done
+    Creating TAR file of home directory ..
+    .. done
+.. completed in 1 seconds
+Creating final backup archive ..
+.. done
+1 virtual servers backed up successfully
+Backup completed successfully. Final size was 209.47 KiB
+```
+
+15. config-only params + no-differential: state before `d0b47357aa555e7b 7597 18:33:54.657217006` → after `d0b47357aa555e7b 7597 18:33:54.657217006`
+
+16. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q3_nd_mig.tar.gz", "all-features": "", "no-differential": ""} → **success**
+
+```text
+…
+    .. done
+    Copying MariaDB user details ..
+    .. done
+    Dumping MariaDB database roundtrip ..
+    .. done
+    Backing up Webmin ACL files ..
+    .. done
+    Backing up AWStats configuration file ..
+    .. done
+.. completed in 0 seconds
+Creating final backup archive ..
+.. done
+1 virtual servers backed up successfully
+Backup completed successfully. Final size was 235.55 KiB
+```
+
+17. migration params + no-differential: state before `d0b47357aa555e7b 7597 18:33:54.657217006` → after `d0b47357aa555e7b 7597 18:33:54.657217006`
+
+18. Summary: pre-fix full shape (no flag): RESET, PRAHO full: untouched, PRAHO config-only: untouched, migration params: untouched, PRAHO safety + restore: RESET, full + no-differential: untouched, config-only + no-differential: untouched, migration + no-differential: untouched
 
 
 ## Q5: Restore order: base full, then the latest differential, with data assertions
@@ -565,11 +590,11 @@ Backup completed successfully. Final size was 235.58 KiB
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 1 seconds
+.. completed in 0 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.94 KiB
+Backup completed successfully. Final size was 235.12 KiB
 ```
 
 2. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q5_d1.tar.gz", "all-features": "", "differential": ""} → **success**
@@ -589,7 +614,7 @@ Backup completed successfully. Final size was 234.94 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.49 KiB
+Backup completed successfully. Final size was 35.47 KiB
 ```
 
 3. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q5_n1.tar.gz", "all-features": "", "no-differential": ""} → **success**
@@ -609,7 +634,7 @@ Backup completed successfully. Final size was 35.49 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.54 KiB
+Backup completed successfully. Final size was 235.4 KiB
 ```
 
 4. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q5_d2.tar.gz", "all-features": "", "differential": ""} → **success**
@@ -629,7 +654,7 @@ Backup completed successfully. Final size was 235.54 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.5 KiB
+Backup completed successfully. Final size was 35.49 KiB
 ```
 
 5. State S0 (at F0):
@@ -696,11 +721,11 @@ Restore completed successfully.
 
 ```text
 …
-    .. done
     Restoring Webmin ACL files ..
     .. done
     Restoring AWStats configuration file ..
     .. done
+Domain /etc/webmin/virtual-server/domains/179191645265273 was modified since last read!
     Updating Webmin user ..
     .. done
 Applying webserver configuration ..
@@ -767,7 +792,7 @@ Restore completed successfully.
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
@@ -791,7 +816,7 @@ Backup completed successfully. Final size was 234.93 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.93 KiB
+Backup completed successfully. Final size was 234.9 KiB
 ```
 
 3. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q5b_d.tar.gz", "all-features": "", "differential": ""} → **success**
@@ -811,7 +836,7 @@ Backup completed successfully. Final size was 234.93 KiB
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 35.44 KiB
+Backup completed successfully. Final size was 35.42 KiB
 ```
 
 4. D dir members: ['./public_html/probe/added-h2.txt']
@@ -925,11 +950,11 @@ a6c0b7b5bab12fbce9a1449ae3263b8d88cf3e84200b4b5044a72a71e7d28413  public_html/pr
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 235.08 KiB
+Backup completed successfully. Final size was 235.14 KiB
 ```
 
 2. remote.cgi `backup-domain` {"domain": "roundtrip.praho.test", "dest": "/tmp/probe_q7_d.tar.gz", "all-features": "", "differential": ""} → **success**
@@ -945,7 +970,7 @@ Backup completed successfully. Final size was 235.08 KiB
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 1 seconds
+.. completed in 0 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
@@ -1038,11 +1063,11 @@ After restoring the differential alone:
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 1 seconds
+.. completed in 0 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.94 KiB
+Backup completed successfully. Final size was 234.95 KiB
 ```
 
 2. remote.cgi `restore-domain` {"domain": "roundtrip.praho.test", "source": "/tmp/probe_q8_f0.tar.gz", "all-features": ""} → **success**
@@ -1078,11 +1103,11 @@ Restore completed successfully.
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.89 KiB
+Backup completed successfully. Final size was 234.93 KiB
 ```
 
 4. D dir members: ['./public_html/probe/change.txt', './public_html/probe/delete-me.txt', './public_html/probe/keep.txt']
@@ -1090,7 +1115,7 @@ Backup completed successfully. Final size was 234.89 KiB
 
 ## Q4: Schedule discovery after applying the production virtualmin_backup.yml
 
-**PROVEN**: Virtualmin never reads the playbook's `sched` file (it reads /etc/webmin/virtual-server/backups/ and the legacy backup_* config keys). The config's backup_dest line surfaces as legacy schedule 1: enabled=False, domains=None, differential=No (from backup_increment). Cron runs backup.pl: False. A manual `backup.pl --id 1` backed up a domain: False; it changed the differential base: False. So the scheduled nightly node backup never runs.
+**PROVEN**: the production playbook creates one enabled, non-differential scheduled backup through `virtualmin create-scheduled-backup` and removes the legacy `sched` file and backup_* keys; Webmin cron runs it (`backup.pl --id 179191667478547`), and running it archives the domain and leaves the differential base untouched.
 
 ### Assertions
 
@@ -1098,11 +1123,13 @@ Backup completed successfully. Final size was 234.89 KiB
 |---|---|---|
 | base full before the schedule | pass |  |
 | production playbook applied | pass |  |
-| Virtualmin lists a scheduled backup | pass |  |
-| the scheduled backup ran | FAIL |  |
-| it reset the differential base | FAIL | (observed) |
-| the listed schedule is enabled | FAIL |  |
-| a cron job runs backup.pl | FAIL |  |
+| the legacy schedule inputs are gone | pass |  |
+| Virtualmin lists exactly one scheduled backup | pass | ['179191667478547'] |
+| the listed schedule is enabled | pass |  |
+| the listed schedule is not differential | pass | No |
+| Webmin cron runs backup.pl for it | pass |  |
+| the scheduled backup ran and archived the domain | pass | 2026-10-13/roundtrip.praho.test.tar.gz 240548 bytes, members: 669 2026-10-13/virtualmin.tar.gz 10432 bytes, members: 16 |
+| it left the differential base untouched | pass | 88e9b43fc6dcaef4 7645 18:37:48.611177003 → 88e9b43fc6dcaef4 7645 18:37:48.611177003 |
 
 ### Steps and output
 
@@ -1119,152 +1146,123 @@ Backup completed successfully. Final size was 234.89 KiB
     .. done
     Backing up AWStats configuration file ..
     .. done
-.. completed in 0 seconds
+.. completed in 1 seconds
 Creating final backup archive ..
 .. done
 1 virtual servers backed up successfully
-Backup completed successfully. Final size was 234.91 KiB
+Backup completed successfully. Final size was 234.95 KiB
 ```
 
 2. `virtualmin list-scheduled-backups --multiline` before:
 
 ```text
-(empty)
+179191626657823
+    Domains: All
+    Include sub-servers: No
+    Virtualmin configs: config templates email custom scripts scheds chroot mailserver
+    Destination: /var/backups/virtualmin/%Y-%m-%d
+    Delete old backups after: 7 days
+    Features: All
+    Format: One file per server
+    Differential: No
+    Enabled: Yes
+    Send email to: root
+    Send email: Only on failure
+    Notify domain owners: No
+    Running: No
 ```
 
 3. `AnsibleService.run_playbook(virtualmin_backup.yml)` → **success**
 
 ```text
 …
-Tuesday 13 October 2026  19:33:29 +0300 (0:00:00.040)       0:00:03.825 *******
+ok: [dev-sha-lab-ro-vmla-001]
+Tuesday 13 October 2026  21:37:57 +0300 (0:00:00.495)       0:00:06.554 *******
+TASK [Schedule backup cleanup cron job] ****************************************
+ok: [dev-sha-lab-ro-vmla-001]
+Tuesday 13 October 2026  21:37:57 +0300 (0:00:00.272)       0:00:06.826 *******
 TASK [Create backup configuration marker] **************************************
-changed: [dev-sha-lab-ro-vmla-001]
-Tuesday 13 October 2026  19:33:30 +0300 (0:00:00.441)       0:00:04.267 *******
-RUNNING HANDLER [Restart virtualmin] *******************************************
-changed: [dev-sha-lab-ro-vmla-001]
+ok: [dev-sha-lab-ro-vmla-001]
 PLAY RECAP *********************************************************************
-dev-sha-lab-ro-vmla-001    : ok=12   changed=9    unreachable=0    failed=0    skipped=5    rescued=0    ignored=0
+dev-sha-lab-ro-vmla-001    : ok=12   changed=2    unreachable=0    failed=0    skipped=4    rescued=0    ignored=0
 PLAYBOOK RECAP *****************************************************************
 Playbook run took 0 days, 0 hours, 0 minutes, 7 seconds
 TASKS RECAP ********************************************************************
-Tuesday 13 October 2026  19:33:33 +0300 (0:00:03.282)       0:00:07.549 *******
+Tuesday 13 October 2026  21:37:57 +0300 (0:00:00.354)       0:00:07.181 *******
 ===============================================================================
-Restart virtualmin ------------------------------------------------------ 3.28s
-Gathering Facts --------------------------------------------------------- 0.92s
-Configure backup features ----------------------------------------------- 0.58s
-Create Virtualmin backup schedule --------------------------------------- 0.57s
-Create backup configuration marker -------------------------------------- 0.44s
-Create backup cleanup script -------------------------------------------- 0.38s
-Create backup directory ------------------------------------------------- 0.28s
-Test backup configuration ----------------------------------------------- 0.27s
+Delete this play's previous schedule ------------------------------------ 1.53s
+Create the nightly full backup schedule --------------------------------- 1.52s
+Remove the legacy single-schedule config keys --------------------------- 1.03s
+Read the scheduled backups ---------------------------------------------- 0.67s
+Create backup cleanup script -------------------------------------------- 0.50s
+Create backup directory ------------------------------------------------- 0.47s
+Read the scheduled backups again ---------------------------------------- 0.46s
+Create backup configuration marker -------------------------------------- 0.35s
 Schedule backup cleanup cron job ---------------------------------------- 0.27s
-Configure backup retention ---------------------------------------------- 0.25s
-Set backup destination -------------------------------------------------- 0.15s
-Display backup destinations --------------------------------------------- 0.04s
-Schedule S3 backup sync cron job ---------------------------------------- 0.02s
-Create S3 backup sync script -------------------------------------------- 0.02s
+Remove the unread schedule file ----------------------------------------- 0.19s
+Require exactly the configured schedule --------------------------------- 0.04s
+Find this play's schedules ---------------------------------------------- 0.04s
+Schedule S3 backup sync cron job ---------------------------------------- 0.03s
 Install AWS CLI for S3 backups ------------------------------------------ 0.02s
-Set S3 backup destination in Virtualmin --------------------------------- 0.02s
-Create AWS credentials directory ---------------------------------------- 0.01s
+Create S3 backup sync script -------------------------------------------- 0.02s
+Create AWS credentials directory ---------------------------------------- 0.02s
 ```
 
-4. /etc/webmin/virtual-server/sched as written:
+4. Legacy `sched` file and backup_* config keys after the play:
 
 ```text
-# Virtualmin backup schedule configuration
-# Managed by PRAHO - do not edit manually
-#
-# Schedule: 0 2 * * * (X X * * *)
-# Storage: local
-# Retention: 7 days
-
-# Field format: name=value
-id=1
-enabled=1
-sched=0 2 * * *
-dest=/var/backups/virtualmin
-strftime=%Y%m%d_%H%M%S
-mkdir=1
-all_doms=1
-feature_web=1
-feature_mail=1
-feature_mysql=1
-feature_dns=1
-feature_ssl=1
-feature_dir=1
-feature_unix=1
-feature_webmin=1
-onebyone=1
-compression=gzip
-email_err=root
-```
-
-backup_* keys in config:
-
-```text
-backup_onebyone=1
-backup_strftime=%Y%m%d_%H%M%S
-backup_dest=/var/backups/virtualmin
-backup_virtualmin=1
-backup_compression=1
-backup_increment=0
+(none)
 ```
 
 5. `virtualmin list-scheduled-backups --multiline` after:
 
 ```text
-1
-    Domains: None
+179191667478547
+    Domains: All
     Include sub-servers: No
-    Virtualmin configs: 1
-    Destination: /var/backups/virtualmin
-    Delete old backups after: Never
+    Virtualmin configs: config templates email custom scripts scheds chroot mailserver
+    Destination: /var/backups/virtualmin/%Y-%m-%d
+    Delete old backups after: 7 days
     Features: All
     Format: One file per server
     Differential: No
-    Enabled: No
-    Send email: Always
+    Enabled: Yes
+    Send email to: root
+    Send email: Only on failure
     Notify domain owners: No
     Running: No
 ```
 
-6. How Virtualmin finds scheduled backups (backups-lib.pl):
+6. Webmin cron entry for schedule 179191667478547:
 
 ```text
-5:sub list_scheduled_backups
-6-{
-7-my @rv;
-8-
-9-# Add old single schedule, from config file
-10-if ($config{'backup_dest'}) {
-11-	my %backup = ( 'id' => 1,
-12-			  'dest' => $config{'backup_dest'},
-13-			  'fmt' => $config{'backup_fmt'},
-14-			  'mkdir' => $config{'backup_mkdir'},
-15-			  'errors' => $config{'backup_errors'},
-16-			  'increment' => $config{'backup_increment'},
-17-			  'compression' => $config{'backup_compression'},
-18-			  'strftime' => $config{'backup_strftime'},
-19-			  'onebyone' => $config{'backup_onebyone'},
+func=run_cron_script
+mins=0
+id=1791916674785470
+arg0=backup.pl
+module=virtual-server
+active=1
+interval=
+arg1=--id 179191667478547
+months=*
+days=*
+user=root
+special=
+hours=2
+weekdays=*
 ```
 
-7. Cron entries for backups:
-
-```text
-#Ansible: PRAHO backup cleanup
-30 4 * * * /usr/local/bin/praho-backup-cleanup.sh >> /var/log/praho-backup-cleanup.log 2>&1
-```
-
-8. `backup.pl --id 1` with the cron wrapper's environment (what cron would run):
+7. `backup.pl --id 179191667478547` with the cron wrapper's environment (what cron runs):
 
 ```text
 exit 0
 ```
 
-Archives in /var/backups/virtualmin afterwards:
+Archives under /var/backups/virtualmin afterwards:
 
 ```text
-virtualmin.tar.gz 20 bytes, members: 0
+2026-10-13/roundtrip.praho.test.tar.gz 240548 bytes, members: 669
+2026-10-13/virtualmin.tar.gz 10432 bytes, members: 16
 ```
 
-state `eacc7dc57b18465c 7645 16:33:24.424387008` → `eacc7dc57b18465c 7645 16:33:24.424387008`
+state `88e9b43fc6dcaef4 7645 18:37:48.611177003` → `88e9b43fc6dcaef4 7645 18:37:48.611177003`

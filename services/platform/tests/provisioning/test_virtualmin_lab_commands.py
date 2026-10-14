@@ -27,7 +27,7 @@ def _state() -> LabState:
 
 class LabCommandRefusalTests(SimpleTestCase):
     def test_commands_refuse_outside_lab_settings(self) -> None:
-        for command in ("virtualmin_lab_bootstrap", "virtualmin_lab_roundtrip"):
+        for command in ("virtualmin_lab_bootstrap", "virtualmin_lab_roundtrip", "virtualmin_lab_checks"):
             for module, debug in (
                 ("config.settings.prod", False),
                 ("config.settings.staging", False),
@@ -42,6 +42,7 @@ class LabCommandRefusalTests(SimpleTestCase):
                     call_command(command)
 
 
+@override_settings(SETTINGS_MODULE="config.settings.lab", DEBUG=True)
 class LabTransportScopeTests(SimpleTestCase):
     def test_only_lab_names_resolve_to_loopback(self) -> None:
         with patch.object(outbound_http, "_resolve_dns", return_value=["203.0.113.9"]) as real:

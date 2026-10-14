@@ -71,8 +71,9 @@ class Recorder:
         assert self.current is not None
         self.current.steps.append(text)
 
-    def check(self, name: str, passed: bool, detail: str = "") -> bool:
+    def check(self, name: str, passed: bool, detail: object = "") -> bool:
         assert self.current is not None
+        detail = str(detail)
         self.current.checks.append(Check(name, passed, detail))
         print(f"   {'✅' if passed else '❌'} {name} {detail}".rstrip(), flush=True)
         return passed
@@ -477,22 +478,34 @@ class Probe:
             return True
 
         def migration_params() -> bool:
-            return self.backup(self.tmp("q3_migration"), {})  # verbatim: domain, dest, all-features=""
+            from apps.provisioning.virtualmin_migration_service import migration_backup_params
+
+            archive = f"migration_{secrets.token_hex(4)}-0000-0000-0000-000000000000.tar.gz"
+            params = migration_backup_params(archive)
+            ok, _ = self.api("backup-domain", {"domain": self.domain, **params})
+            self.script('rm -f "$1" "$1.dom" "$1.info"', str(params["dest"]))
+            return ok
 
         self.safety_reset = False
+        # The parameter shapes PRAHO sent before it passed no-differential.
+        results["pre-fix full shape (no flag)"] = self._state_preserved(
+            "pre-fix full shape (domain, dest, all-features)", lambda: self.backup(self.tmp("q3_prefix"), {})
+        )
         results["PRAHO full"] = self._state_preserved("PRAHO full", praho_full)
         results["PRAHO config-only"] = self._state_preserved("PRAHO config-only", praho_config_only)
+        results["migration params"] = self._state_preserved(
+            "migration params (migration_backup_params)", migration_params
+        )
         praho_safety()
-        results["PRAHO safety"] = not self.safety_reset
-        self.rec.check("PRAHO safety: base " + ("RESET" if self.safety_reset else "UNTOUCHED"), True, "(observed)")
+        results["PRAHO safety + restore"] = not self.safety_reset
+        self.rec.check(
+            "PRAHO safety backup + restore: base " + ("RESET" if self.safety_reset else "UNTOUCHED"), True, "(observed)"
+        )
         # Any dir restore clears the base (feature-dir.pl: "differential file is
         # no longer valid"), so the forced restore above leaves none. Record it,
         # then re-establish a base for the remaining measurements.
         self.rec.check("a restore clears the differential base", self.file_state(self.ifile) == "absent", "(observed)")
         self.rec.check("re-establish base (plain full)", self.backup(self.tmp("q3_rebase"), {}))
-        results["migration params"] = self._state_preserved(
-            "migration params (virtualmin_migration_service.py _backup)", migration_params
-        )
         nd = {"no-differential": ""}
         results["full + no-differential"] = self._state_preserved(
             "full + no-differential", lambda: self.backup(self.tmp("q3_nd_full"), nd)
@@ -507,18 +520,18 @@ class Probe:
         self.cleanup_tmp()
         summary = ", ".join(f"{name}: {'untouched' if kept else 'RESET'}" for name, kept in results.items())
         self.rec.step(f"Summary: {summary}")
-        resets_today = [
-            name
-            for name in ("PRAHO full", "PRAHO config-only", "PRAHO safety", "migration params")
-            if not results[name]
-        ]
+        praho_sets = ("PRAHO full", "PRAHO config-only", "migration params")
+        praho_keeps = all(results[name] for name in praho_sets)
         no_diff_keeps = all(results[name] for name in results if "no-differential" in name)
+        flag_matters = not results["pre-fix full shape (no flag)"]
         self.q3_results = results
-        if no_diff_keeps:
+        if no_diff_keeps and praho_keeps and flag_matters:
             self.rec.verdict(
                 "PROVEN",
-                "`no-differential` leaves the base untouched for the full, config-only and migration parameter sets; "
-                f"without it these reset the base today: {', '.join(resets_today) or 'none'}",
+                "`no-differential` leaves the base untouched, and without it a full backup resets the base; PRAHO's "
+                "full, config-only and migration backups send it and keep the base. The pre-restore safety backup "
+                "sends it too, but the restore that follows deletes the base"
+                + (" (observed)" if not results["PRAHO safety + restore"] else ""),
             )
         else:
             self.rec.verdict("DISPROVEN", summary)
@@ -708,64 +721,67 @@ class Probe:
             f"`AnsibleService.run_playbook(virtualmin_backup.yml)` → **{'success' if played else 'failure'}**\n\n{fence(detail)}"
         )
         self.rec.check("production playbook applied", played)
-        sched = self.script("cat /etc/webmin/virtual-server/sched 2>&1 || true")
-        config = self.script(
-            "grep -E '^backup_(increment|dest|strftime|virtualmin|onebyone|compression|sched|enabled|all)' /etc/webmin/virtual-server/config || true"
-        )
-        self.rec.step(
-            f"/etc/webmin/virtual-server/sched as written:\n\n{fence(sched)}\n\nbackup_* keys in config:\n\n{fence(config)}"
-        )
+        leftovers = self.script(
+            "ls /etc/webmin/virtual-server/sched 2>/dev/null; "
+            "grep -E '^backup_(increment|dest|strftime|virtualmin|onebyone|compression)=' "
+            "/etc/webmin/virtual-server/config || true"
+        ).strip()
+        self.rec.step(f"Legacy `sched` file and backup_* config keys after the play:\n\n{fence(leftovers or '(none)')}")
+        self.rec.check("the legacy schedule inputs are gone", not leftovers, leftovers)
         listing = self.sh("virtualmin", "list-scheduled-backups", "--multiline")
         self.rec.step(f"`virtualmin list-scheduled-backups --multiline` after:\n\n{fence(listing or '(empty)')}")
-        reader = self.script(
-            "grep -n -A14 '^sub list_scheduled_backups' /usr/share/webmin/virtual-server/backups-lib.pl || true"
-        )
-        self.rec.step(f"How Virtualmin finds scheduled backups (backups-lib.pl):\n\n{fence(reader)}")
+        ids = self.sh("virtualmin", "list-scheduled-backups", "--id-only").split()
+        self.rec.check("Virtualmin lists exactly one scheduled backup", len(ids) == 1, ids)
+        schedule_id = ids[0] if ids else ""
         cron = self.script(
-            "crontab -l 2>/dev/null | grep -i backup || true; grep -l backup.pl /etc/webmin/webmincron/crons/*.cron 2>/dev/null || true"
+            'grep -l "^arg1=--id $1$" /etc/webmin/webmincron/crons/*.cron 2>/dev/null | xargs -r cat',
+            schedule_id or "none",
         )
-        self.rec.step(f"Cron entries for backups:\n\n{fence(cron or '(none)')}")
-        listed = bool(listing.strip())
-        self.rec.check("Virtualmin lists a scheduled backup", listed)
-        before_state = self.file_state(self.ifile)
-        # The environment Webmin's cron wrapper sets before running backup.pl.
-        self.script("rm -rf /var/backups/virtualmin/* 2>/dev/null || true")
-        run = self.script(
-            "cd /usr/share/webmin/virtual-server && WEBMIN_CONFIG=/etc/webmin WEBMIN_VAR=/var/webmin "
-            '/usr/share/webmin/virtual-server/backup.pl --id 1 2>&1; echo "exit $?"'
-        )
-        after_state = self.file_state(self.ifile)
-        produced = self.script(
-            'cd /var/backups/virtualmin 2>/dev/null && for f in *.tar.gz; do [ -e "$f" ] || continue; '
-            'echo "$f $(stat -c %s "$f") bytes, members: $(tar -tzf "$f" 2>/dev/null | wc -l)"; done'
-        ).strip()
-        self.rec.step(
-            f"`backup.pl --id 1` with the cron wrapper's environment (what cron would run):\n\n{fence(tail(run, 20))}\n\n"
-            f"Archives in /var/backups/virtualmin afterwards:\n\n{fence(produced or '(none)')}\n\n"
-            f"state `{before_state}` → `{after_state}`"
-        )
-        ran = self.domain in self.script(
-            'cd /var/backups/virtualmin 2>/dev/null && for f in *.tar.gz; do [ -e "$f" ] && tar -tzf "$f"; done; true'
-        )
-        self.rec.check("the scheduled backup ran", ran)
-        self.rec.check("it reset the differential base", before_state != after_state, "(observed)")
+        self.rec.step(f"Webmin cron entry for schedule {schedule_id or '(none)'}:\n\n{fence(cron or '(none)')}")
         enabled = "Enabled: Yes" in listing
-        domains = next((line.split(":", 1)[1].strip() for line in listing.splitlines() if "Domains:" in line), "-")
         differential = next(
             (line.split(":", 1)[1].strip() for line in listing.splitlines() if "Differential:" in line), "-"
         )
-        backup_cron = "backup.pl" in cron
         self.rec.check("the listed schedule is enabled", enabled)
-        self.rec.check("a cron job runs backup.pl", backup_cron)
-        self.rec.verdict(
-            "PROVEN",
-            "Virtualmin never reads the playbook's `sched` file (it reads /etc/webmin/virtual-server/backups/ and the "
-            f"legacy backup_* config keys). The config's backup_dest line surfaces as legacy schedule 1: enabled={enabled}, "
-            f"domains={domains}, differential={differential} (from backup_increment). Cron runs backup.pl: {backup_cron}. "
-            f"A manual `backup.pl --id 1` backed up a domain: {ran}; it changed the differential base: "
-            f"{before_state != after_state}."
-            + ("" if enabled or backup_cron else " So the scheduled nightly node backup never runs."),
+        self.rec.check("the listed schedule is not differential", differential == "No", differential)
+        self.rec.check("Webmin cron runs backup.pl for it", "arg0=backup.pl" in cron)
+        before_state = self.file_state(self.ifile)
+        self.script("rm -rf /var/backups/virtualmin/* 2>/dev/null || true")
+        # The environment Webmin's cron wrapper sets before running backup.pl.
+        run = self.script(
+            "cd /usr/share/webmin/virtual-server && WEBMIN_CONFIG=/etc/webmin WEBMIN_VAR=/var/webmin "
+            '/usr/share/webmin/virtual-server/backup.pl --id "$1" 2>&1; echo "exit $?"',
+            schedule_id or "none",
         )
+        after_state = self.file_state(self.ifile)
+        produced = self.script(
+            'cd /var/backups/virtualmin 2>/dev/null && for f in */*.tar.gz; do [ -e "$f" ] || continue; '
+            'echo "$f $(stat -c %s "$f") bytes, members: $(tar -tzf "$f" 2>/dev/null | wc -l)"; done'
+        ).strip()
+        self.rec.step(
+            f"`backup.pl --id {schedule_id}` with the cron wrapper's environment (what cron runs):\n\n"
+            f"{fence(tail(run, 20))}\n\nArchives under /var/backups/virtualmin afterwards:\n\n{fence(produced or '(none)')}"
+            f"\n\nstate `{before_state}` → `{after_state}`"
+        )
+        ran = f"{self.domain}.tar.gz" in produced and "members: 0" not in produced
+        kept = before_state == after_state
+        self.rec.check("the scheduled backup ran and archived the domain", ran, produced)
+        self.rec.check("it left the differential base untouched", kept, f"{before_state} → {after_state}")
+        if played and not leftovers and len(ids) == 1 and enabled and differential == "No" and ran and kept:
+            self.rec.verdict(
+                "PROVEN",
+                "the production playbook creates one enabled, non-differential scheduled backup through "
+                "`virtualmin create-scheduled-backup` and removes the legacy `sched` file and backup_* keys; Webmin cron "
+                f"runs it (`backup.pl --id {schedule_id}`), and running it archives the domain and leaves the differential "
+                "base untouched.",
+            )
+        else:
+            self.rec.verdict(
+                "DISPROVEN",
+                f"played={played} leftovers={bool(leftovers)} schedules={len(ids)} enabled={enabled} "
+                f"differential={differential} ran={ran} base_kept={kept}",
+            )
+        self.script("rm -rf /var/backups/virtualmin/* 2>/dev/null || true")
         self.cleanup_tmp()
 
 

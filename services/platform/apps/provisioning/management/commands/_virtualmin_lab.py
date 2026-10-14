@@ -115,7 +115,13 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 @contextmanager
 def lab_transport(state: LabState) -> Iterator[None]:
-    """Route PRAHO's production transport to the lab nodes (see module docstring)."""
+    """Route PRAHO's production transport to the lab nodes (see module docstring).
+
+    Refuses outside the lab settings itself, so no caller (a script, a shell,
+    a future command) can loosen the SSRF guard or the port-22 assumptions of
+    a production process by importing it.
+    """
+    refuse_unless_lab_settings()
     from apps.common import outbound_http  # noqa: PLC0415
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415
 

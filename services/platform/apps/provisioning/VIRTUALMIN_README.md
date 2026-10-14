@@ -297,10 +297,32 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
 - `VirtualminBackupManagementService.create_backup_job` / `create_restore_job`
   admit under the account-operation lock and run in Django-Q tasks (the CLI
   `manage.py virtualmin_backup` uses the same job layer with inline execution).
-- Backups: `backup-domain` writes to the node's `/tmp` under a UUID archive
-  name → the `virtualmin_backup_fetch.yml` playbook pulls it into the private
-  transfer spool (checksum-evidenced, remote temp deleted) → the manifest is
-  finalized → archive then metadata land in S3 (`backup.*` settings).
+- Backups: `backup-domain` writes a UUID-named archive into the node's
+  private staging directory `/var/lib/praho-transfer` → the
+  `virtualmin_backup_fetch.yml` playbook pulls it into the private transfer
+  spool (checksum-evidenced; the remote archive and its sidecars deleted) →
+  the manifest is finalized → archive then metadata land in S3 (`backup.*`
+  settings).
+- Staging: Virtualmin writes every archive and its `.dom`/`.info` sidecars
+  0644 whatever the destination, and the `.dom` sidecar holds the domain's
+  database passwords. Only the parent directory keeps them private, so the
+  staging directory (`REMOTE_ARCHIVE_DIR`) is root-owned 0700 and outside
+  the world-writable `/tmp`.
+  - Backup calls send `mkdir`, so Virtualmin creates it 0700 when it is
+    missing; the push playbooks create it the same way.
+  - The fetch playbooks refuse to move an archive unless the directory is a
+    root-owned 0700 directory (a refused fetch removes the archive).
+  - The fetch and cleanup playbooks remove the sidecars. The migration source
+    keeps its archive by design, but not the sidecars.
+- Differential base: Virtualmin keeps one differential base per domain, and
+  any full backup sent without `no-differential` replaces it (contract Q2/Q3).
+  `BackupConfig.chain_role` is `standalone` by default, and every standalone
+  backup-domain call sends `no-differential`: the ordinary full and
+  config-only backups, the pre-restore safety backup and the migration backup
+  (`migration_backup_params`). Only a complete full backup explicitly marked
+  `base` omits it; config-only or partial backups cannot be a base. The role
+  is stored in the job parameters (a job without one is standalone) and in the
+  manifest. Any restore still deletes the base (contract Q8).
 - Restores: fail-closed gates (backup↔account authorization, target-ownership
   that `force_restore` can never override, live-domain force requirement,
   pre-restore safety backup) → push playbook → `restore-domain` with an
@@ -319,11 +341,45 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
   - Neither sends `newformat`, which needs a directory destination.
 - The 8.x JSON listings key attributes in snake_case (`username`, `disabled`).
   Read them through `listing_attribute()` and `listing_enabled()`.
+  - A full row also carries `hashed_password` and `password_for_mysql`.
+    `list_migration_domains()` keeps only `SNAPSHOT_ATTRIBUTES` (the
+    migration snapshot is persisted), and job results pass through
+    `without_secrets()` before they are stored.
+  - `list-domains --domain <absent>` answers with the failure
+    "Virtual server <domain> does not exist". `get_domain_state()` and
+    `get_domain_owner()` read exactly that envelope as "absent", so a create
+    retry is idempotent; any other failure stays an error.
+- `create-domain` on 8.x:
+  - the built-in template is "Default Settings" (`DEFAULT_VIRTUALMIN_TEMPLATE`);
+    there is no template "Default";
+  - nothing is enabled without a feature flag, so PRAHO sends
+    `default-features` (the node playbook pins the default-on set to unix,
+    dir, web, ssl, logrotate, mysql and webmin);
+  - there is no `--comment`: the recovery seed goes in `--desc`, which refuses
+    ":", so the seed is `PRAHO=<uuid>|CID=<id>|STATUS=<status>`
+    (`parse_recovery_seed()` still reads the old ":" form).
+- Node playbooks (`infrastructure/ansible/playbooks/`), checked on 8.3.0:
+  - `virtualmin.yml` installs with the Virtualmin 8 installer
+    (`download.virtualmin.com`; the old `software.virtualmin.com/gpl/scripts`
+    URL serves the Virtualmin 7 installer). It creates the API user with
+    `files/praho-webmin-api-user.pl`: a Webmin user whose only module is
+    virtual-server, with Virtualmin master rights (remote.cgi runs most
+    programs only for the master administrator), password on stdin, reset on
+    every deploy. `create-admin` makes per-domain extra admins and
+    `modify-config` does not exist.
+  - `virtualmin_backup.yml` creates the nightly backup with
+    `virtualmin create-scheduled-backup` (all servers, all features,
+    `--no-differential`, dated directory under `backup_local_path`, `--purge`
+    for retention) and removes the `sched` file and `backup_*` keys earlier
+    versions wrote, which Virtualmin never ran.
 - `backup.s3_endpoint_url` points the archive store at S3-compatible storage
   such as MinIO; the client then uses path-style addressing.
 - Proving ground: `deploy/virtualmin-lab/` provides two Virtualmin 8.3.0
   nodes plus MinIO.
-  - `make test-virtualmin-lab` runs the full backup and restore round trip.
+  - `make test-virtualmin-lab` runs the full backup and restore round trip,
+    then `virtualmin_lab_checks` on vm-b: create-domain through the
+    provisioning service, the differential base kept by every standalone
+    backup, private staging, and both node playbooks.
   - `make virtualmin-probe` refreshes the differential-backup evidence in
     `docs/domain/virtualmin-incremental-contract.md`.
 

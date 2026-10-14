@@ -1223,6 +1223,9 @@ test-virtualmin-lab:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_roundtrip
 	@echo "✅ [Virtualmin lab] Round trip passed"
+	@echo "🧪 [Virtualmin lab] Provisioning, differential-base, staging and node-playbook checks on vm-b..."
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_checks
+	@echo "✅ [Virtualmin lab] Checks passed"
 
 virtualmin-probe:
 	@echo "🔬 [Virtualmin lab] Incremental-backup contract probe (needs make virtualmin-lab-up)..."
