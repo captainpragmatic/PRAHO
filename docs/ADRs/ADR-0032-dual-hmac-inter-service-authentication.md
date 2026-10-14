@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-03-06
+**Amended:** 2026-10-13
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0031 (API Token Authentication Strategy)
 
@@ -28,11 +29,11 @@ Portal signs every outbound API request to Platform using a canonical string sch
 
 | Property | Value |
 |----------|-------|
-| **Secret** | `PLATFORM_API_SECRET` / `HMAC_SECRET` (same value, two setting names) |
+| **Secret** | Per-portal `PORTAL_HMAC_SECRET` on the portal, resolved by `X-Portal-Id` against the `PORTAL_HMAC_CREDENTIALS` keyring on the platform. The shared `PLATFORM_API_SECRET` (`HMAC_SECRET` in the environment) is the fallback, see the amendment below |
 | **Algorithm** | HMAC-SHA256 over a 7-field canonical string |
 | **Headers sent** | `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash`, `X-Signature` |
 | **Replay protection** | Per-nonce claim in the shared counter table (`apps.common.counters.claim`, atomic; a cache could evict a live nonce) |
-| **Timestamp window** | 300 seconds (5 minutes), with 2-second forward skew tolerance for NTP jitter |
+| **Timestamp window** | 300 seconds (5 minutes), with 2-second forward skew tolerance for NTP jitter. Fractional timestamps are accepted and truncated with `int(float())`, so a portal on an older release keeps verifying during a rolling deploy |
 | **Nonce requirements** | 32-256 characters, UUID4 recommended |
 | **User identity** | Signed in JSON body (`user_id` field), not in headers |
 | **Rate limiting** | Applied after signature validation, keyed on verified `portal_id` |
@@ -65,10 +66,10 @@ Platform signs outbound payment notification webhooks to Portal using a simpler 
 | **Secret** | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` (separate from System 1) |
 | **Algorithm** | HMAC-SHA256 over `str(int(ts)) + "." + body` |
 | **Headers sent** | `X-Platform-Signature` (64-char lowercase hex), `X-Platform-Timestamp` (integer Unix) |
-| **Replay protection** | Per-process dedup via `cache.add()` (LocMemCache, per-worker) |
+| **Replay protection** | Per-signature claim in the portal's shared counter table (`counters.claim`, atomic across workers, held for the full acceptance window) |
 | **Timestamp window** | 300 seconds (5 minutes), with 2-second forward skew tolerance |
 | **Signature format** | Pre-validated: exactly 64 lowercase hex characters |
-| **Endpoint** | `POST /orders/payment/webhook/` (CSRF-exempt) |
+| **Endpoint** | `POST /order/payment/webhook/` (CSRF-exempt). The portal mounts the orders app at `order/` |
 | **Fail-secure** | Empty or missing secret rejects all webhooks |
 
 **Code locations:**
@@ -129,7 +130,7 @@ Standard OAuth2 flow where Portal obtains short-lived access tokens from Platfor
 | Property | Implementation |
 |----------|---------------|
 | **Timing-safe comparison** | `hmac.compare_digest()` — prevents timing side-channels |
-| **Integer timestamps only** | Float timestamps rejected; prevents precision-based attacks |
+| **Timestamp parsing** | System 2 accepts integer timestamps only. System 1 accepts a fractional value and truncates it with `int(float())`. In both, the truncated value must fall inside the window |
 | **Future timestamp rejection** | `0 <= (now - ts) <= window` with small NTP skew allowance |
 | **Startup validation** | Both `prod.py` settings files raise `ValueError` on missing secrets |
 | **Constant names** | `HMAC_TIMESTAMP_WINDOW_SECONDS` (300s) and `HMAC_NTP_SKEW_SECONDS` (2s) in `apps.common.constants` |
@@ -150,21 +151,46 @@ Standard OAuth2 flow where Portal obtains short-lived access tokens from Platfor
 | Property | Implementation |
 |----------|---------------|
 | **Signature format validation** | 64-char lowercase hex pre-filter before HMAC computation |
-| **Per-process replay dedup** | LocMemCache `cache.add()` with signature prefix as key |
-| **Idempotent handler** | Webhook handler is safe for per-process dedup (logs + session hint only) |
+| **Shared replay dedup** | `counters.claim` keyed on the signature. Only the owning delivery may release a failed attempt, and a successful delivery keeps its claim until expiry. A store failure answers 503 |
+| **Idempotent handler** | The handler logs and leaves a session hint only, so a redelivery after a failed attempt is harmless |
 | **Fail-secure on missing secret** | Empty `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` rejects all webhooks |
 
 ---
 
 ## Known Limitations
 
-1. **System 2 replay dedup is per-process**: Portal uses LocMemCache, so each Gunicorn worker has its own replay cache. A replayed webhook could succeed if it hits a different worker than the original. This is acceptable because the handler is idempotent (it updates a session hint, not a database record) and the 5-minute timestamp window bounds the replay risk.
+1. **No automatic secret rotation for System 2**: `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` is a single static value. Rotation requires a coordinated restart of both services. System 1 does not share this limit, see the amendment.
 
-2. **No automatic secret rotation**: Both secrets are static environment variables. Rotation requires coordinated restart of both services. A future improvement could implement graceful rotation by accepting two secrets during a transition window.
+2. **No request signing on System 2**: The webhook only signs `timestamp.body`, not the HTTP method or path. This is acceptable because the endpoint is fixed (`POST /order/payment/webhook/`) and CSRF-exempt, so method/path confusion is not a practical attack vector.
 
-3. **Single Portal ID**: System 1 currently supports a single portal instance (`X-Portal-Id`). Multi-portal deployments would need per-portal secrets or a registry.
+3. **System 1 timestamp parsing is looser than System 2**: System 1 truncates fractional timestamps. This is deliberate for rolling deploys and costs nothing, because the truncated value is still held to the window and the nonce is still single-use.
 
-4. **No request signing on System 2**: The webhook only signs `timestamp.body`, not the HTTP method or path. This is acceptable because the endpoint is fixed (`POST /orders/payment/webhook/`) and CSRF-exempt, so method/path confusion is not a practical attack vector.
+---
+
+## Amendment (2026-10-13)
+
+The decision above stands. Several details drifted as the code moved on, and this section brings the record back to the code. The tables above were corrected in place. Nothing here reverses a decision.
+
+### System 1 now has per-portal secrets, a keyring and a rollout mode
+
+- The portal signs with `PORTAL_HMAC_SECRET` when it is set. It falls back to the shared `PLATFORM_API_SECRET` only when the per-portal setting is absent. An explicitly empty value raises instead of degrading silently (`services/portal/apps/api_client/services.py`, `_resolve_portal_signing_secret`).
+- The platform resolves the verifying secret by the signed `X-Portal-Id` from `PORTAL_HMAC_CREDENTIALS`, a keyring of the form `{portal_id: [secret, ...]}` (`services/platform/apps/common/portal_hmac.py`). A keyring holds up to three secrets, so rotation is make-before-break: add the new secret, roll the portal, drop the old one.
+- `PORTAL_HMAC_MODE` selects how the registry is used. `legacy` (the default) verifies against the shared secret for any well-formed portal id and ignores the registry. `audit` tries the registry first, falls back to the shared secret, and logs a warning only when that fallback succeeds. `enforce` uses the registry alone and rejects an unregistered id. Startup validation refuses `enforce` with an empty registry.
+- Every candidate secret is evaluated with no short-circuit, so the position of a key does not leak through timing.
+
+This retires two of the original limitations. There is rotation for System 1, and more than one portal can be registered. The shared secret and `legacy` mode remain the defaults until each deployment opts in.
+
+### System 2 replay protection is shared, not per process
+
+The portal gained its own counter table (ADR-0050). `_verify_platform_webhook` claims the signature with `counters.claim` for the acceptance window plus the skew allowance. The earlier text described a per-worker `LocMemCache`, and the per-process limitation that followed from it no longer applies.
+
+### Timestamp parsing differs between the systems
+
+System 1 reads the timestamp with `int(float(value))` (`PortalServiceHMACMiddleware._validate_hmac_signature`) and accepts fractional values. System 2 reads it with `int(value)` and rejects them (`_verify_platform_webhook`). The older line "float timestamps rejected" was true only for System 2.
+
+### The webhook endpoint
+
+The portal mounts the orders app at `order/`, so the endpoint is `POST /order/payment/webhook/`. Earlier text and the dev and e2e settings defaults said `/orders/...`, which the portal does not serve. A root integration test now resolves each default against the portal URLconf.
 
 ---
 
