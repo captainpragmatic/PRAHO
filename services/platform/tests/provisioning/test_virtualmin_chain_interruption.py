@@ -410,50 +410,6 @@ class NodeLostTests(ChainFixtures, ExclusionCase):
         self.account.refresh_from_db()
         return response
 
-    def deployment(self, status: str) -> None:
-        from apps.infrastructure.models import (  # noqa: PLC0415
-            CloudProvider,
-            NodeDeployment,
-            NodeRegion,
-            NodeSize,
-            PanelType,
-        )
-
-        provider = CloudProvider.objects.create(
-            name="Lost provider", provider_type="hetzner", code="lst", credential_identifier="lost-test"
-        )
-        NodeDeployment.objects.create(
-            provider=provider,
-            node_size=NodeSize.objects.create(
-                provider=provider,
-                name="Lost small",
-                display_name="Small",
-                provider_type_id="cpx21",
-                vcpus=2,
-                memory_gb=4,
-                disk_gb=40,
-                hourly_cost_eur="0.01",
-                monthly_cost_eur="5.00",
-            ),
-            region=NodeRegion.objects.create(
-                provider=provider,
-                name="Falkenstein",
-                provider_region_id="fsn1",
-                normalized_code="fsn1",
-                country_code="de",
-                city="Falkenstein",
-            ),
-            panel_type=PanelType.objects.create(
-                name="Lost Virtualmin", panel_type="virtualmin", ansible_playbook="virtualmin.yml"
-            ),
-            hostname="prd-lst-het-de-fsn1-001",
-            node_number=1,
-            ipv4_address="203.0.113.77",
-            virtualmin_server=self.server,
-            status=status,
-        )
-        self.server.refresh_from_db()
-
     def test_a_node_that_is_still_usable_cannot_be_declared_lost(self) -> None:
         for server_status in ("active", "maintenance", "disabled"):
             with self.subTest(server_status=server_status):

@@ -846,7 +846,8 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         RestoreConfig,
         VirtualminBackupService,
     )
-    from .virtualmin_chain import complete_chain_job, is_chain_job  # noqa: PLC0415
+    from .virtualmin_chain import chain_state_after_failure, complete_chain_job, is_chain_job  # noqa: PLC0415
+    from .virtualmin_chain_schedule import note_chain_failure  # noqa: PLC0415
 
     try:
         job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
@@ -953,12 +954,18 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
                 _audit_job(job.pk)
             logger.warning("⚠️ [BackupJobs] restore job %s parked for attention: %s", job_id, error)
             return {"status": "attention" if rows else "superseded", "job_id": job_id, "error": error}
-        rows = VirtualminProvisioningJob.finish_execution(
-            job.pk, token, "failed", error, {"retriability": retriability_of(result).value}
-        )
+        failed_result: dict[str, Any] = {"retriability": retriability_of(result).value}
+        chain_job = is_chain_job(operation, params)
+        if chain_job:
+            # Whether the node's evidence ended the chain or the failure left it alone: the schedule
+            # backs off and alerts on the second kind only, and takes a base after the first.
+            failed_result["chain_state"] = chain_state_after_failure(job)
+        rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "failed", error, failed_result)
         if rows:
             _audit_job(job.pk)
             _queue_reconcile_after_pair(job, params)
+            if chain_job:
+                note_chain_failure(job.pk)
         logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
         return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
     if operation == "backup_domain" and str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE:
@@ -993,6 +1000,21 @@ def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
 
 def run_virtualmin_restore(job_id: str) -> dict[str, Any]:
     return _run_backup_restore_job(job_id, "restore_domain")
+
+
+def schedule_virtualmin_chain_backups() -> dict[str, Any]:
+    """Hourly: admit the base or differential backup each account's chain is due for (ADR-0059).
+
+    A no-op while ``provisioning.incremental_backups_enabled`` is off. Never raises: a Django-Q
+    schedule that raised would only be retried into the same failure.
+    """
+    from .virtualmin_chain_schedule import run_chain_backup_sweep  # noqa: PLC0415
+
+    try:
+        return run_chain_backup_sweep()
+    except Exception as e:
+        logger.exception("💥 [VirtualminTask] Chain backup schedule failed: %s", e)
+        return {"success": False, "error": str(e)}
 
 
 _SPOOL_ORPHAN_MAX_AGE_HOURS = 48
@@ -1967,6 +1989,20 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         },
     )
     tasks_created["reconcile_divergence"] = "created" if created else "updated"
+
+    # Differential-chain backups, hourly. Registered whatever the flag says: the task itself does
+    # nothing while provisioning.incremental_backups_enabled is off, so turning the flag on needs no
+    # second setup run. UPSERT by name, like the sweeps above, so a drifted row is repaired.
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-chain-backups",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.schedule_virtualmin_chain_backups",
+            "schedule_type": "I",
+            "minutes": 60,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["chain_backups"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

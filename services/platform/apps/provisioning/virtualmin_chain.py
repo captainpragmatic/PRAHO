@@ -109,6 +109,23 @@ def invalidate_chain_if_epoch(account_id: Any, epoch: int) -> int:
     return rows
 
 
+def base_backup_id(account: VirtualminAccount) -> str:
+    """The backup id a differential would be taken against, or "" when the base left no usable evidence.
+
+    The live base must have recorded both its backup id and the fingerprint of the snapshot it left,
+    and that fingerprint must be the one the account pins. Admission and the scheduler ask the same
+    question, so a differential the admission would refuse is never scheduled.
+    """
+    base = account.chain_base
+    if base is None or not account.chain_base_fingerprint:
+        return ""
+    result = base.result or {}
+    backup_id = str(result.get("backup_id", ""))
+    if not backup_id or result.get("fp_after") != account.chain_base_fingerprint:
+        return ""
+    return backup_id
+
+
 def admit_chain_role(locked: VirtualminAccount, role: str) -> Result[dict[str, object], str]:
     """The pins a base or differential job is admitted with; invalidates first for a base.
 
@@ -120,8 +137,8 @@ def admit_chain_role(locked: VirtualminAccount, role: str) -> Result[dict[str, o
     base = locked.chain_base
     if base is None or not locked.chain_base_fingerprint:
         return Err("This account has no live base backup; take a base backup first")
-    backup_id = str((base.result or {}).get("backup_id", ""))
-    if not backup_id or (base.result or {}).get("fp_after") != locked.chain_base_fingerprint:
+    backup_id = base_backup_id(locked)
+    if not backup_id:
         return Err("The base backup left no usable evidence for its snapshot; take a new base backup")
     return Ok(
         {
@@ -148,6 +165,34 @@ def pins_hold(account: Mapping[str, Any], role: str, parameters: Mapping[str, An
         and str(account["chain_base_id"]) == str(parameters.get("base_job_id"))
         and account["chain_base_fingerprint"] == parameters.get("expected_fp")
     )
+
+
+CHAIN_STATE_INTACT = "intact"
+CHAIN_STATE_MOVED = "moved"
+
+
+def chain_state_after_failure(job: VirtualminProvisioningJob) -> str:
+    """Whether a failed chain job left the account's chain as it found it.
+
+    ``intact``: the chain still matches the pins the job was admitted against, so the failure was
+    operational (the node was busy, a metadata read failed) and says nothing about the snapshot.
+    ``moved``: the chain no longer matches, because the node's evidence ended it (the snapshot was
+    absent or different) or something else invalidated it while the job ran. The scheduler counts
+    only ``intact`` failures toward its backoff and its alert, and decides what to take next from
+    the chain itself.
+    """
+    if job.account_id is None:
+        return CHAIN_STATE_MOVED
+    state = (
+        VirtualminAccount.objects.filter(pk=job.account_id)
+        .values("chain_epoch", "chain_base_id", "chain_base_fingerprint")
+        .first()
+    )
+    parameters = job.parameters or {}
+    role = str(parameters.get("chain_role", ROLE_STANDALONE))
+    if state is None or not pins_hold(state, role, parameters):
+        return CHAIN_STATE_MOVED
+    return CHAIN_STATE_INTACT
 
 
 def complete_chain_job(job: VirtualminProvisioningJob, token: Any, result: dict[str, Any]) -> str:

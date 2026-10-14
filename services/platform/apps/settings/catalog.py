@@ -2339,6 +2339,37 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="provisioning.chain_base_interval_days",
+        data_type="integer",
+        default=7,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Base backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a new base backup of each account, when differential backups are enabled."
+        ),
+        unit="days",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.chain_differential_interval_hours",
+        data_type="integer",
+        default=24,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Differential backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a differential backup of each account with a live base, "
+            "when differential backups are enabled."
+        ),
+        unit="hours",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="provisioning.migration_backup_timeout_seconds",
         data_type="integer",
         default=1800,
