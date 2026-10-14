@@ -76,6 +76,7 @@ MIDDLEWARE: list[str] = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
     "apps.common.middleware.StaffMFAEnrollmentMiddleware",  # Staff without 2FA can only enrol while the policy is on (before the HMAC staff bypass)
     "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
+    "apps.common.middleware.StoreUnavailableMiddleware",  # 503 when the second-factor counter store fails
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -741,6 +742,8 @@ DEFAULT_THROTTLE_RATES = {
     "auth_reset_ip": "5/minute",
     "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
+    # Per person: password and second-factor checks through the Portal (MFACredentialThrottle).
+    "mfa_credential": "15/hour",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # No throttle class uses this scope: it is validated at startup (apps.common.apps) so DRF's

@@ -591,6 +591,15 @@ class Order(ConcurrentTransitionMixin, models.Model):
     def retry(self) -> None:
         """Retry a failed order (returns to awaiting_payment)."""
 
+    @property
+    def uniform_vat_rate_percent(self) -> str | None:
+        """The VAT percentage when every line carries the same rate ("11", "25.5"); else None (#689).
+
+        Pages name the rate next to the stored tax only when there is one rate to name.
+        """
+        rates = {item.tax_rate for item in self.items.all()}
+        return format((rates.pop() * 100).normalize(), "f") if len(rates) == 1 else None
+
 
 class OrderItem(models.Model):
     """

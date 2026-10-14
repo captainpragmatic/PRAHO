@@ -83,12 +83,6 @@
 
           <!-- Quick Actions -->
           <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 mt-4 lg:mt-0 lg:ml-6">
-            {% if service.status == 'active' %}
-              <!-- Control Panel Access -->
-              {% trans "Control Panel" as action_label %}
-              {% button action_label href="#" variant="primary" icon="settings" %}
-            {% endif %}
-
             <!-- Service Actions -->
             {% if can_manage %}
             <a href="{% url 'services:request_action' service_id=service_id %}"
@@ -721,7 +715,7 @@
               <div class="bg-slate-700/30 rounded-lg p-6 border border-slate-600/50">
                 <h3 class="text-lg font-semibold text-white mb-4">{% trans "Billing Management" %}</h3>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <a href="#" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
+                  <a href="{% url 'billing:invoices_list' %}" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
                     <div class="flex items-center space-x-3">
                       {% icon "document" size="sm" css_class="text-blue-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
                       <span class="text-white">{% trans "View Invoices" %}</span>
@@ -729,18 +723,10 @@
                     <span class="text-blue-400">→</span> {# tmpl-allow TMPL005: needs badge unframed variant #}
                   </a>
 
-                  <a href="#" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
+                  <a href="{% url 'billing:recurring_payments' %}" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
                     <div class="flex items-center space-x-3">
                       {% icon "credit-card" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
-                      <span class="text-white">{% trans "Payment Methods" %}</span>
-                    </div>
-                    <span class="text-blue-400">→</span> {# tmpl-allow TMPL005: needs badge unframed variant #}
-                  </a>
-
-                  <a href="#" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
-                    <div class="flex items-center space-x-3">
-                      {% icon "chart" size="sm" css_class="text-purple-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
-                      <span class="text-white">{% trans "Usage Reports" %}</span>
+                      <span class="text-white">{% trans "Payment Methods and Auto-Renewal" %}</span>
                     </div>
                     <span class="text-blue-400">→</span> {# tmpl-allow TMPL005: needs badge unframed variant #}
                   </a>
@@ -754,14 +740,6 @@
                     <span class="text-blue-400">→</span> {# tmpl-allow TMPL005: needs badge unframed variant #}
                   </a>
                   {% endif %}
-
-                  <a href="#" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">
-                    <div class="flex items-center space-x-3">
-                      {% icon "refresh" size="sm" css_class="text-orange-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
-                      <span class="text-white">{% trans "Auto-Renewal Settings" %}</span>
-                    </div>
-                    <span class="text-blue-400">→</span> {# tmpl-allow TMPL005: needs badge unframed variant #}
-                  </a>
 
                   {% if company.email_finance %}
                   <a href="mailto:{{ company.email_finance }}" class="flex items-center justify-between p-4 bg-slate-600/30 rounded-lg hover:bg-slate-600/50 transition-colors">

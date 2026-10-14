@@ -241,17 +241,19 @@ class AuthenticationRateLimitTests(TestCase):
         session.update({"user_id": 42, "customer_id": 7, "email": self.email})
         session.save()
         key = "auth_reauth_user_42"
+        refused = PlatformAPIError("refused", status_code=400, response_data={"code": "mfa_incorrect"})
+        attempt = {"token": "123456", "password": "Original-secure123!"}
         with patch("apps.users.views.api_client") as platform:
-            platform.verify_totp_mfa.return_value = None
+            platform.verify_totp_mfa.side_effect = refused
+            platform.setup_totp_mfa.return_value = {"qr_code": "", "secret": "PENDINGSECRETABC"}
             for _ in range(5):
-                response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
-                self.assertRedirects(response, reverse("users:mfa_setup_totp"), fetch_redirect_response=False)
+                # The same page comes back, with the same secret and the error (#689).
+                response = self.client.post(reverse("users:mfa_setup_totp"), attempt)
+                self.assertContains(response, "The password or the code is incorrect.")
             self.assertEqual(counters.peek(key), 5)
             self.assertEqual(counters.peek(self.ip_key), 0)
             self.assertEqual(counters.peek(self.account_key), 0)
-            response = self.client.post(
-                reverse("users:mfa_setup_totp"), {"token": "123456"}, HTTP_HX_REQUEST="true"
-            )
+            response = self.client.post(reverse("users:mfa_setup_totp"), attempt, HTTP_HX_REQUEST="true")
             self.assertEqual(response.status_code, 429)
             self.assertEqual(counters.peek(key), 5)
             self.assertEqual(counters.peek(self.ip_key), 0)

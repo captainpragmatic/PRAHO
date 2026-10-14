@@ -13,6 +13,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 
+from apps.audit.models import AuditEvent
 from apps.users.mfa import SecondFactorResult, TOTPService, verify_login_second_factor
 from apps.users.models import User
 
@@ -81,6 +82,16 @@ class VerifyLoginSecondFactorTests(TestCase):
         for code in codes[:6]:
             result = self.verify(code)
             self.assertTrue(result.accepted, f"honest login refused: {result}")
+
+    def test_each_check_is_audited_with_where_it_came_from(self) -> None:
+        self.request.META["REMOTE_ADDR"] = "192.0.2.44"
+        self.assertTrue(self.verify(pyotp.TOTP(self.secret).now()).accepted)
+        self.assertFalse(self.verify("000000").accepted)
+
+        for action in ("2fa_verification_success", "2fa_verification_failed"):
+            with self.subTest(action=action):
+                event = AuditEvent.objects.get(user=self.user, action=action)
+                self.assertEqual(event.ip_address, "192.0.2.44")
 
 
 class VerifyLoginSecondFactorGuardTests(TransactionTestCase):

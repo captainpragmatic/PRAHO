@@ -87,6 +87,8 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) | Portal Sessions Merge Concurrent Writes | Accepted | 2026-10-10 |
 | [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) | The Portal Serves Requests on Threads | Accepted | 2026-10-10 |
 | [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) | Media Lives on the Filesystem, or in a Private Bucket on Container Platforms | Accepted | 2026-10-12 |
+| [ADR-0058](ADR-0058-pending-totp-enrolment.md) | A TOTP Secret Waiting for Its First Code Lives in Its Own Row | Accepted | 2026-10-13 |
+| [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) | The Virtualmin API User Is a Master Administrator, Locked Down | Accepted | 2026-10-14 |
 
 ### 🟡 Partially Superseded
 
@@ -142,6 +144,9 @@ Token & Inter-Service Auth
 Encryption Architecture
   ADR-0033 (AES-256-GCM consolidation) ──extended by──▶ ADR-0040 (row-bound encrypted JSON)
 
+Node Access
+  ADR-0060 (locked-down master-admin API user) ──related──▶ ADR-0033 (vault-held API credential)
+
 Billing Ownership
   ADR-0025 (amounts in cents) ──related──▶ ADR-0038 (proforma convergence)
   ADR-0038 ──extended by──▶ ADR-0039 (PRAHO-owned recurring billing)
@@ -167,6 +172,8 @@ Billing Ownership
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management (superseded by ADR-0033)
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) — Encryption architecture consolidation
 - [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) — Exact row binding and fail-loud encrypted JSON reads
+- [ADR-0058](ADR-0058-pending-totp-enrolment.md) — a TOTP secret waiting for its first code lives encrypted in its own row, reused while fresh; recovery codes are shown once and stored nowhere
+- [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) — the Virtualmin API user must be a master administrator; it is limited to the virtual-server module and locked by a per-user IP allow list and a firewall to the node admin allowlist
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 - [ADR-0031](ADR-0031-api-token-authentication-strategy.md) — Token auth gaps and roadmap
@@ -211,8 +218,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 57 (ADR-0001 through ADR-0057)
-- **Active**: 51 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 59 (ADR-0001 through ADR-0058, and ADR-0060)
+- **Active**: 53 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0058
+- **Next available**: ADR-0059 (reserved for the differential-backup decision, #498), then ADR-0061

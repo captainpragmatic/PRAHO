@@ -18,6 +18,7 @@ from apps.settings.services import SettingsService
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminProvisioningService
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class VirtualminDisasterRecoveryService:
                     "status": account.status,
                     "disk_quota_mb": account.disk_quota_mb,
                     "bandwidth_quota_mb": account.bandwidth_quota_mb,
-                    "template": account.template_name or "Default",
+                    "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                     "action": "recreate_from_praho_data",
                 }
                 for account in praho_accounts

@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
+from django_q.tasks import async_task
 
 from apps.common.decorators import admin_required
 from apps.common.security_decorators import (
@@ -180,7 +181,7 @@ def virtualmin_servers_list(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers"},  # Current page - no URL
     ]
 
@@ -275,7 +276,7 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": server.name},  # Current page - no URL
     ]
@@ -380,7 +381,7 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts"},  # Current page - no URL
     ]
 
@@ -441,7 +442,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain},  # Current page - no URL
     ]
@@ -607,7 +608,7 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
         {"text": "Backup"},  # Current page - no URL
@@ -673,7 +674,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
         {"text": "Restore"},  # Current page - no URL
@@ -764,7 +765,7 @@ def virtualmin_server_create(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Add Server"},  # Current page - no URL
     ]
@@ -802,7 +803,7 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": server.name, "url": reverse("provisioning:virtualmin_server_detail", args=[server.id])},
         {"text": "Edit"},  # Current page - no URL
@@ -1935,7 +1936,7 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": "New Account"},  # Current page - no URL
     ]
@@ -2139,10 +2140,49 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "job": job,
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
-        "can_retry": job.status == "failed" and job.retry_count < job.max_retries,
+        "can_retry": _job_can_be_retried(job),
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)
+
+
+def _job_can_be_retried(job: VirtualminProvisioningJob) -> bool:
+    """Whether the failed-job sweep would retry this job: the operations it recovers, under the limit.
+
+    Backup and restore jobs are not retried by the sweep, so offering them a retry promised
+    something that never happened (#689).
+    """
+    from .virtualmin_tasks import _RETRYABLE_OPERATIONS  # noqa: PLC0415  # Circular: tasks import views' services
+
+    return (
+        job.status == "failed"
+        and job.retry_count < job.max_retries
+        and job.operation in _RETRYABLE_OPERATIONS
+        and job.account_id is not None
+    )
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_job_retry")
+def virtualmin_job_retry(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Retry a failed job now: mark it due and run the failed-job sweep at once.
+
+    The sweep claims the job with its lease and fencing, exactly as the 15-minute schedule does,
+    so there is one retry path, not two.
+    """
+    job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
+    if not _job_can_be_retried(job):
+        messages.error(request, _("This job cannot be retried."))
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    now = timezone.now()
+    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(next_retry_at=now, updated_at=now)
+    transaction.on_commit(
+        lambda: async_task("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"), robust=True
+    )
+    messages.success(request, _("The job is queued for another attempt."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required

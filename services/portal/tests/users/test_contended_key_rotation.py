@@ -35,10 +35,10 @@ class ContendedKeyRotationTests(TestCase):
         self.assertIn("Retry-After", response)
 
     def test_two_factor_setup_lets_a_contended_rotation_through(self) -> None:
-        request = RequestFactory().post("/mfa/setup/totp/")
+        request = RequestFactory().post("/mfa/setup/totp/", {"token": "123456", "password": "Original-secure123!"})
         request.session = MagicMock()
         request.session.cycle_key.side_effect = SessionSaveContended("gave up")
         with patch("apps.users.views.api_client") as platform:
             platform.verify_totp_mfa.return_value = {"success": True, "backup_codes": []}
             with self.assertRaises(SessionSaveContended):
-                _handle_totp_setup_post(request, "456", "123456")
+                _handle_totp_setup_post(request, "456", "user@example.com")

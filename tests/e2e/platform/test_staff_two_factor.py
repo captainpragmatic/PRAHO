@@ -155,7 +155,9 @@ def _enrol(page: Page, password: str) -> tuple[str, list[str]]:
     page.locator('input[name="token"]').fill(pyotp.TOTP(secret).now())
     page.locator('input[name="password"]').fill(password)
     page.get_by_role("button", name="Verify & Enable MFA").click()
-    page.wait_for_url(lambda url: urlsplit(url).path == BACKUP_CODES_PATH)
+    # The codes come in the enrolment's own response, shown once and kept in no session (#689).
+    expect(page.locator("#backup-codes-grid code")).to_have_count(8)
+    assert _path(page) == SETUP_PATH
     codes = page.locator("#backup-codes-grid code").all_text_contents()
     return secret, codes
 
@@ -179,6 +181,9 @@ def _forced_enrolment(page: Page, email: str, password: str) -> tuple[str, list[
     assert enrolled_secret == secret, "the app scanned before the mistyped code must still work"
     assert len(codes) == 8
     expect(page.get_by_text("Your 8 backup codes").first).to_be_visible()
+    # Shown once: the old codes page never shows them again.
+    page.goto(f"{PLATFORM_BASE_URL}{BACKUP_CODES_PATH}")
+    expect(page.locator("#backup-codes-grid code")).to_have_count(0)
     return secret, codes
 
 

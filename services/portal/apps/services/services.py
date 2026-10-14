@@ -148,7 +148,7 @@ class ServicesAPIClient(PlatformAPIClient):
     - Service management (limited customer actions)
     """
 
-    def get_customer_services(  # type: ignore[override]  # noqa: PLR0913 -- explicit filters preserve the existing client API
+    def get_customer_services(  # noqa: PLR0913 -- explicit filters preserve the existing client API
         self,
         customer_id: int,
         user_id: int,

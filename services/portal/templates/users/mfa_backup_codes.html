@@ -14,7 +14,7 @@
   {% endif %}
   <h2 class="text-xl text-white">{% trans 'Generate New Backup Codes' %}</h2>
   <p class="text-slate-300">{% trans 'This invalidates all previous recovery codes. Confirm your password and a current authenticator or recovery code.' %}</p>
-  <form method="post" class="space-y-4">
+  <form method="post" action="{% url 'users:mfa_backup_codes' %}" class="space-y-4">
     {% csrf_token %}
     {% form_error_summary form %}
     {% form_field form.password icon_left="lock" autocomplete="current-password" %}

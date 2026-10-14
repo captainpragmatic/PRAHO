@@ -43,6 +43,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     explicit_rejection,
     has_explicit_success,
+    listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
@@ -50,6 +51,15 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+
+
+# Differential-chain role of a backup (docs/domain/virtualmin-incremental-contract.md).
+# Virtualmin keeps one differential base per domain, and every full backup sent
+# WITHOUT `no-differential` replaces it. A "standalone" backup never touches the
+# base; only a backup explicitly marked "base" may (re)set it.
+CHAIN_ROLE_STANDALONE = "standalone"
+CHAIN_ROLE_BASE = "base"
+CHAIN_ROLES = frozenset({CHAIN_ROLE_STANDALONE, CHAIN_ROLE_BASE})
 
 
 @dataclass
@@ -61,6 +71,30 @@ class BackupConfig:
     include_databases: bool = True
     include_files: bool = True
     include_ssl: bool = True
+    chain_role: str = CHAIN_ROLE_STANDALONE
+
+    def chain_role_error(self) -> str | None:
+        """Why this config cannot run with its chain role, or None when it can."""
+        if self.chain_role not in CHAIN_ROLES:
+            return f"Unknown backup chain role: {self.chain_role!r}"
+        if self.chain_role == CHAIN_ROLE_BASE and not (
+            self.backup_type == "full"
+            and self.include_email
+            and self.include_databases
+            and self.include_files
+            and self.include_ssl
+        ):
+            return "A differential base must be a full backup of every component"
+        return None
+
+
+def differential_flags(chain_role: str) -> dict[str, str]:
+    """remote.cgi flags that keep a non-base backup-domain call off the base.
+
+    `no-differential` is a bare flag (an empty value becomes `--no-differential`);
+    the lab proved it leaves the per-domain base untouched.
+    """
+    return {} if chain_role == CHAIN_ROLE_BASE else {"no-differential": ""}
 
 
 @dataclass
@@ -107,9 +141,15 @@ _DEFAULT_MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB (configurable via 
 BACKUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks for S3 upload (structural)
 S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB threshold for multipart (structural)
 
-# Archive staging path ON THE REMOTE VIRTUALMIN NODE (sent as an API
-# parameter), never a controller-local tempfile.
-_REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108  # Remote node path, not a local tempfile
+# Archive staging directory ON THE REMOTE VIRTUALMIN NODE (sent as an API
+# parameter), never a controller-local tempfile. Virtualmin writes archives
+# and their .dom/.info sidecars (which carry the domain's database passwords)
+# with the default umask, 0644, whatever the destination; only a private
+# parent directory keeps them unreadable. It is root-owned, 0700, outside the
+# world-writable /tmp (where any local user could pre-create it), created by
+# `mkdir` on the backup call or by the push playbooks, and checked by the fetch
+# playbooks before anything leaves the node.
+REMOTE_ARCHIVE_DIR = "/var/lib/praho-transfer"
 
 # A backup archive name is our own UUID-only construction. The RESTORE path
 # reads it back from the (untrusted) S3 manifest, so it must be validated
@@ -161,11 +201,14 @@ class VirtualminBackupService:
         self, config: BackupConfig, account: VirtualminAccount, backup_id: str, backup_metadata: dict[str, Any]
     ) -> Result[Any, str]:
         """Execute backup based on configuration type"""
+        role_error = config.chain_role_error()
+        if role_error is not None:
+            return Err(role_error, retriability=Retriability.NOT_RETRIABLE)
         backup_type = config.backup_type
         if backup_type == "full":
             return self._execute_full_backup(account, backup_id, backup_metadata, config)
         elif backup_type == "config_only":
-            return self._execute_config_backup(account, backup_id, backup_metadata)
+            return self._execute_config_backup(account, backup_id, backup_metadata, config)
         else:
             # Incremental backups were removed in #431 v1: the previous code
             # never passed the chosen base into the command and silently fell
@@ -182,6 +225,12 @@ class VirtualminBackupService:
         if validation_result.is_err():
             self._update_backup_progress(backup_id, "failed", 100)
             return Err(validation_result.unwrap_err())
+
+        # Recorded before dispatch: verification expects members only for the
+        # requested components the domain actually has (None keeps it strict).
+        domain_features = self._domain_features(account)
+        if domain_features is not None:
+            backup_metadata["domain_features"] = domain_features
 
         # Stage boundary: a superseded runner must not dispatch remote work.
         if not self._owns_execution():
@@ -375,8 +424,13 @@ class VirtualminBackupService:
             # Safety backup of the live target BEFORE any destructive dispatch.
             if domain_exists:
                 self._update_restore_progress(restore_id, "safety_backup", 35)
+                # Standalone: the safety copy must not become the differential
+                # base. (The restore that follows deletes the base anyway; see
+                # the contract doc, Q8.)
                 safety = VirtualminBackupService(target_server).backup_domain(
-                    account=account, config=BackupConfig(), ownership=self._ownership
+                    account=account,
+                    config=BackupConfig(chain_role=CHAIN_ROLE_STANDALONE),
+                    ownership=self._ownership,
                 )
                 if safety.is_err():
                     return Err(
@@ -433,8 +487,8 @@ class VirtualminBackupService:
                 "restore-domain",
                 {
                     "domain": account.domain,
-                    "source": f"{_REMOTE_ARCHIVE_DIR}/{archive_name}",
-                    "all-features": True,
+                    "source": f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
+                    "all-features": "",  # bare flag; True would arrive as "--all-features True"
                 },
                 self._backup_command_timeout(),
             )
@@ -701,9 +755,24 @@ class VirtualminBackupService:
             aws_access_key = SettingsService.get_setting("backup.aws_access_key_id")
             aws_secret_key = SettingsService.get_setting("backup.aws_secret_access_key")
             aws_region = SettingsService.get_setting("backup.aws_region", "eu-west-1")
+            # Empty = AWS. A custom endpoint (MinIO, Ceph RGW) is addressed
+            # path-style: virtual-hosted bucket names do not resolve there.
+            endpoint_url = str(SettingsService.get_setting("backup.s3_endpoint_url", "") or "").strip()
+            endpoint_kwargs: dict[str, Any] = {}
+            if endpoint_url:
+                from botocore.config import Config as BotoConfig  # noqa: PLC0415  # Optional dependency
+
+                endpoint_kwargs = {
+                    "endpoint_url": endpoint_url,
+                    "config": BotoConfig(s3={"addressing_style": "path"}),
+                }
 
             self._s3_client = boto3.client(
-                "s3", aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=aws_region
+                "s3",
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key,
+                region_name=aws_region,
+                **endpoint_kwargs,
             )
         return self._s3_client
 
@@ -753,6 +822,7 @@ class VirtualminBackupService:
             "include_databases": config.include_databases,
             "include_files": config.include_files,
             "include_ssl": config.include_ssl,
+            "chain_role": config.chain_role,
             "version": "1.0",
             "status": "in_progress",
             "archive_name": self._generate_archive_name(),
@@ -911,6 +981,55 @@ class VirtualminBackupService:
 
         return Ok(None)
 
+    @staticmethod
+    def _expected_feature_members(metadata: dict[str, Any]) -> list[str]:
+        """Feature members the archive must contain.
+
+        Config-only dispatch requests virtualmin and dir. A full backup expects
+        each requested component, except one the domain does not have:
+        Virtualmin writes a member only for features enabled on the domain.
+        Without the dispatch-time feature record every requested component
+        stays required.
+        """
+        if metadata.get("backup_type") == "config_only":
+            return ["virtualmin", "dir"]
+        domain_features = metadata.get("domain_features")
+        known = set(domain_features) if isinstance(domain_features, list) else None
+        expected: list[str] = []
+        not_on_domain: list[str] = []
+        for flag, feature in (
+            ("include_email", "mail"),
+            ("include_databases", "mysql"),
+            ("include_files", "dir"),
+            ("include_ssl", "ssl"),
+        ):
+            if not metadata.get(flag):
+                continue
+            if known is not None and feature not in known:
+                not_on_domain.append(feature)
+            else:
+                expected.append(feature)
+        if not_on_domain:
+            metadata["components_not_on_domain"] = not_on_domain
+        return expected
+
+    def _domain_features(self, account: VirtualminAccount) -> list[str] | None:
+        """Features enabled on the domain, from its listing; None when unknown."""
+        gateway = VirtualminGateway(VirtualminConfig(server=self.server))
+        result = gateway.call("list-domains", {"domain": account.domain, "multiline": ""})
+        if result.is_err() or not result.unwrap().success:
+            logger.warning("⚠️ [Backup] Could not read features of %s; verifying strictly", account.domain)
+            return None
+        rows = result.unwrap().data.get("data")
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if isinstance(row, dict) and row.get("name") == account.domain:
+                values = row.get("values")
+                features = listing_attribute(values, "Features").split() if isinstance(values, dict) else []
+                return sorted(features) or None
+        return None
+
     def _execute_full_backup(
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
     ) -> Result[str, str]:
@@ -919,27 +1038,34 @@ class VirtualminBackupService:
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
-            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            dest = f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            # remote.cgi turns each parameter into argv: "" -> bare "--flag",
+            # anything else -> "--flag value". A boolean True would reach
+            # backup-domain.pl as "--all-features True" ("Unknown parameter").
+            # --newformat is omitted: it requires dest to be a directory, and
+            # the transport fetches exactly one archive file.
             backup_params: dict[str, Any] = {
                 "domain": account.domain,
                 "dest": dest,
-                "all-features": True,
-                "all-virtualservers": False,
-                "newformat": True,
+                "all-features": "",
+                "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
+                **differential_flags(config.chain_role),
             }
 
-            # Add feature-specific flags
-            if not config.include_email:
-                backup_params["skip-features"] = "mail"
-            if not config.include_databases:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",mysql" if skip_features else "mysql"
-            if not config.include_files:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",dir" if skip_features else "dir"
-            if not config.include_ssl:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",ssl" if skip_features else "ssl"
+            # --except-feature filters the list --all-features built; one
+            # repeated parameter per excluded component, in a stable order.
+            excluded = [
+                feature
+                for included, feature in (
+                    (config.include_email, "mail"),
+                    (config.include_databases, "mysql"),
+                    (config.include_files, "dir"),
+                    (config.include_ssl, "ssl"),
+                )
+                if not included
+            ]
+            if excluded:
+                backup_params["except-feature"] = excluded
 
             # Execute backup
             self._update_backup_progress(backup_id, "backing_up", 30)
@@ -954,19 +1080,23 @@ class VirtualminBackupService:
             return Err(f"Full backup failed: {e!s}")
 
     def _execute_config_backup(
-        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any]
+        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
     ) -> Result[str, str]:
         """Execute configuration-only backup."""
         try:
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
-            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            dest = f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
             backup_params: dict[str, Any] = {
                 "domain": account.domain,
                 "dest": dest,
-                "only-features": "virtualmin,dir",  # Config and basic structure only
-                "newformat": True,
+                # Config and basic structure only: one --feature per feature
+                # (backup-domain has no --only-features option).
+                "feature": ["virtualmin", "dir"],
+                "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
+                # A config-only backup is never a base (chain_role_error refuses it).
+                **differential_flags(config.chain_role),
             }
 
             self._update_backup_progress(backup_id, "backing_up_config", 50)
@@ -1045,19 +1175,7 @@ class VirtualminBackupService:
                 return Err(f"Invalid backup archive: {e}")
 
             # 5. Feature completeness: Virtualmin emits domain_feature members.
-            # Config-only dispatch explicitly requests virtualmin and dir.
-            expected_features: list[str] = []
-            if metadata.get("backup_type") == "config_only":
-                expected_features.extend(("virtualmin", "dir"))
-            else:
-                for flag, feature in (
-                    ("include_email", "mail"),
-                    ("include_databases", "mysql"),
-                    ("include_files", "dir"),
-                    ("include_ssl", "ssl"),
-                ):
-                    if metadata.get(flag):
-                        expected_features.append(feature)
+            expected_features = self._expected_feature_members(metadata)
 
             domain = str(metadata.get("domain", ""))
             feature_members: set[str] = set()

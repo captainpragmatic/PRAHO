@@ -55,7 +55,7 @@
                                 <span class="text-slate-400">System</span>
                             {% endif %}
 
-                            {% if event.ip_address %}
+                            {% if show_network_identity and event.ip_address %}
                                 <span class="font-mono">from {{ event.ip_address }}</span>
                             {% endif %}
 

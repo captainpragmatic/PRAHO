@@ -18,7 +18,8 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_backup_service import CHAIN_ROLE_STANDALONE, REMOTE_ARCHIVE_DIR, differential_flags
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -37,9 +38,20 @@ def _reconcile_after_migration(service_id: str) -> None:
     reconcile_virtualmin_service_state_async(service_id)
 
 
-# Archive staging path ON THE REMOTE VIRTUALMIN NODE (sent as an API parameter),
-# not a local temporary file — S108's local-tempfile race does not apply.
-_REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108
+def migration_backup_params(archive_name: str) -> dict[str, str]:
+    """The source node's backup-domain parameters for one migration archive.
+
+    Standalone (`no-differential`): a migration backup must not replace the
+    source domain's differential base. `mkdir` lets Virtualmin create the
+    private staging directory (0700) on a node that does not have it yet.
+    """
+    return {
+        "dest": f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
+        "all-features": "",
+        "mkdir": "",
+        **differential_flags(CHAIN_ROLE_STANDALONE),
+    }
+
 
 # Recovery policy concerns an INTERRUPTED phase, before invoking execute().
 RESUME_POLICY = {
@@ -79,10 +91,18 @@ def AnsibleService() -> AnsibleRunner:  # noqa: N802  # Lazy constructor preserv
     return Runner()
 
 
-def _scalar(value: object) -> str:
-    if isinstance(value, list):
-        return " ".join(str(item) for item in value).strip()
-    return str(value).strip()
+# The listing attributes a row keeps, in text-label form; the 8.x snake_case
+# form of each is kept too. These are what migration verification compares
+# and what listing_enabled() reads. A full 8.x row also carries
+# `hashed_password`, `password_for_mysql` and other secrets, and rows end up
+# in the persisted pre-migration snapshot, so nothing else is kept.
+SNAPSHOT_ATTRIBUTES = ("Username", "ID", "Status", "Disabled", "Server byte quota", "Bandwidth limit", "Features")
+_SNAPSHOT_KEYS = frozenset(key for label in SNAPSHOT_ATTRIBUTES for key in (label, label.lower().replace(" ", "_")))
+
+
+def snapshot_attributes(values: dict[str, Any]) -> dict[str, Any]:
+    """Only the allowlisted attributes of one listing row."""
+    return {key: value for key, value in values.items() if key in _SNAPSHOT_KEYS}
 
 
 def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
@@ -108,13 +128,12 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
             logger.warning("⚠️ [VirtualminMigration] Skipping malformed listing row: %r", item)
             continue
         values = item["values"]
-        state = _scalar(values.get("Status", "")).lower()
         rows.append(
             {
                 "domain": str(item["name"]),
-                "username": _scalar(values.get("Username", "")),
-                "enabled": True if state.startswith("enable") else False if state.startswith("disable") else None,
-                "attributes": values,
+                "username": listing_attribute(values, "Username"),
+                "enabled": listing_enabled(values),
+                "attributes": snapshot_attributes(values),
             }
         )
     if len({row["domain"] for row in rows}) != len(rows):
@@ -441,8 +460,7 @@ class VirtualminMigrationService:
                 migration,
                 migration.source_server,
                 "backup-domain",
-                dest=f"{_REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
-                **{"all-features": ""},
+                **migration_backup_params(migration.archive_name),
             )
         except DefiniteMigrationFailureError as error:
             self._abort(migration, token, error)
@@ -502,7 +520,7 @@ class VirtualminMigrationService:
                 migration,
                 migration.target_server,
                 "restore-domain",
-                source=f"{_REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
+                source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
                 **{"all-features": ""},
             )
         except DefiniteMigrationFailureError as error:
@@ -516,10 +534,11 @@ class VirtualminMigrationService:
         if target["username"] != source["username"] or target["enabled"] is not False:
             raise ValueError("Restored domain owner or disabled state differs from snapshot")
         for key in ("Server byte quota", "Bandwidth limit", "Features"):
-            if key not in source["attributes"]:
+            # Either key form: text label or the 8.x JSON snake_case key.
+            expected = listing_attribute(source["attributes"], key)
+            if not expected:
                 continue
-            expected = _scalar(source["attributes"][key])
-            actual = _scalar(target["attributes"].get(key, ""))
+            actual = listing_attribute(target["attributes"], key)
             if key == "Features":
                 expected, actual = " ".join(sorted(expected.split())), " ".join(sorted(actual.split()))
             if actual != expected:

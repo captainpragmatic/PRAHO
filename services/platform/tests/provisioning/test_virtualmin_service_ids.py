@@ -81,7 +81,7 @@ class QueuedVirtualminProvisioningTestBase(TestCase):
         elif program == "list-domains":
             payload = {"data": []}
         elif program == "list-templates":
-            payload = {"data": ["Default"]}
+            payload = {"data": ["Default Settings"]}
         else:
             self.assertEqual(program, "create-domain")
             payload = {"output": "Domain created\n"}
@@ -123,7 +123,7 @@ class QueuedVirtualminProvisioningTestBase(TestCase):
         self.assertEqual(job.status, "completed")
         creation = [params for params in self.sent if params["program"] == "create-domain"]
         self.assertEqual(len(creation), 1, self.sent)
-        seed = str(creation[0]["comment"])
+        seed = str(creation[0]["desc"])
         self.assertEqual(VirtualminAccount.parse_recovery_seed(seed)["service_id"], UUID(int=self.service.pk))
         self.assertEqual(job.parameters["recovery_seed"], seed)
         self.assertEqual(seed.split("|", maxsplit=1)[0], account.get_recovery_seed().split("|", maxsplit=1)[0])
@@ -207,7 +207,7 @@ class QueuedVirtualminServiceIdTests(QueuedVirtualminProvisioningTestBase):
         self.assertEqual(account.praho_service_id, UUID(int=self.service.pk))
         creation = [params for params in self.sent if params["program"] == "create-domain"]
         self.assertEqual(len(creation), 1, self.sent)
-        parsed = VirtualminAccount.parse_recovery_seed(str(creation[0]["comment"]))
+        parsed = VirtualminAccount.parse_recovery_seed(str(creation[0]["desc"]))
         self.assertEqual(parsed.get("service_id"), account.praho_service_id)
         self.assertEqual(seed_before_reload, account.get_recovery_seed())
         account_id = str(account.pk)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Generate per-container identity (machine id, SSH host keys, Webmin TLS key)
+DefaultDependencies=no
+After=local-fs.target
+Before=ssh.service webmin.service sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lab-node-identity
+
+[Install]
+WantedBy=sysinit.target

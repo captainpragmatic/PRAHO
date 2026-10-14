@@ -719,7 +719,7 @@ class ProformaEditViewTest(BillingViewsTestBase):
         response = self.client.get(f"/billing/proformas/{proforma.pk}/edit/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["proforma"].pk, proforma.pk)
-        self.assertEqual([row.pk for row in response.context["lines"]], [line.pk])
+        self.assertEqual([row["pk"] for row in response.context["lines"]], [line.pk])
         self.assertContains(response, "Existing proforma hosting")
         self.assertContains(response, proforma.bill_to_name)
         self.assertContains(response, proforma.bill_to_email)

@@ -24,7 +24,7 @@ from django.utils import timezone
 from django.utils.functional import Promise
 
 from apps.audit.models import AuditEvent, audit_mutation_allowed
-from apps.common import counters
+from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
@@ -654,15 +654,16 @@ class MFAServiceTestCase(TestCase):
 
     def test_check_rate_limit(self):
         """Test MFA rate limiting functionality"""
-        # Should pass initially
-        result1 = MFAService._check_rate_limit(self.user)
-        self.assertTrue(result1)
-
-        # Simulate the attempts of a guesser: 6 attempts in 5 minutes
-        counters.increment(f"mfa_attempts:{self.user.id}", 300, delta=6)
-
-        result2 = MFAService._check_rate_limit(self.user)
-        self.assertFalse(result2)
+        # Five checks are allowed in the window, in the counter store (#689); the sixth is refused.
+        for _ in range(MAX_LOGIN_ATTEMPTS):
+            self.assertTrue(MFAService._check_rate_limit(self.user))
+        self.assertFalse(MFAService._check_rate_limit(self.user))
+        # A cache clear does not hand the budget back.
+        cache.clear()
+        self.assertFalse(MFAService._check_rate_limit(self.user))
+        # A verified sign-in does.
+        MFAService._reset_rate_limit(self.user)
+        self.assertTrue(MFAService._check_rate_limit(self.user))
 
     def test_get_available_methods(self):
         """Test getting available MFA methods"""

@@ -1,0 +1,14 @@
+[Unit]
+Description=Virtualmin post-install configuration (installer phase 4, first boot only)
+Wants=network-online.target
+After=network-online.target lab-node-identity.service lab-node-credentials.service mariadb.service webmin.service
+ConditionPathExists=!/var/lib/virtualmin-lab/configured
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=1800
+ExecStart=/usr/local/sbin/virtualmin-lab-firstboot
+
+[Install]
+WantedBy=multi-user.target

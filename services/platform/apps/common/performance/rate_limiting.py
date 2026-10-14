@@ -33,7 +33,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
 from rest_framework.request import Request
-from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
+from rest_framework.throttling import AnonRateThrottle, BaseThrottle, SimpleRateThrottle, UserRateThrottle
 
 from apps.common.request_ip import get_safe_client_ip
 
@@ -403,6 +403,37 @@ class ForwardedClientIPThrottle(EndpointRateThrottle):
         if ip is None:
             return None
         return self.cache_format % {"scope": self.scope, "ident": f"client_{ip}"}
+
+
+class MFACredentialThrottle(BaseThrottle):  # type: ignore[misc]  # DRF throttle base is untyped
+    """Each person's budget for checking a password or a code through the Portal (#689).
+
+    Charged on every call of enrolment verify, disable, backup-code regeneration and password
+    change, before the view runs, in the database counter store: a cache cull or a cache clear
+    cannot hand it back. Keyed on the person the HMAC middleware read from the verified body;
+    authentication accepts only that same person (secure_auth._signed_user_id), so a request
+    that names nobody, or two people, is refused there rather than going uncounted here.
+    """
+
+    scope = "mfa_credential"
+
+    def __init__(self) -> None:
+        self._wait: float | None = None
+
+    def allow_request(self, request: Request, view: Any) -> bool:
+        principal = getattr(request, "_portal_principal", None)
+        if not _is_portal_authenticated(request) or not isinstance(principal, str):
+            return True
+        if not principal.startswith("user:"):
+            return True
+        rest_framework = cast(dict[str, Any], settings.REST_FRAMEWORK)
+        rate = str(rest_framework["DEFAULT_THROTTLE_RATES"][self.scope])
+        limited, retry_after = fixed_window_limited(f"mfa_credential:{principal}", rate)
+        self._wait = float(retry_after) if limited else None
+        return not limited
+
+    def wait(self) -> float | None:
+        return self._wait
 
 
 class LoginClientIPThrottle(ForwardedClientIPThrottle):

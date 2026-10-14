@@ -147,6 +147,12 @@
             {% input_field "token" html_id="token" aria_label=_("Enter verification code from your app:") placeholder="000000" maxlength=6 pattern="[0-9]{6}" autocomplete="one-time-code" required=True css_class="text-center text-lg font-mono tracking-wider" %}
           </div>
 
+          <div>
+            {% trans "Current password" as password_label %}
+            {% input_field "password" input_type="password" html_id="password" label=password_label autocomplete="current-password" required=True %}
+            <p class="mt-1 text-xs text-slate-400">{% trans "Confirm it is you before an authenticator is linked to your account." %}</p>
+          </div>
+
           <div class="flex gap-3">
             <a href="{% url 'users:mfa_management' %}"
                class="flex-1 bg-slate-600 hover:bg-slate-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 text-center">

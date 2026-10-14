@@ -189,7 +189,6 @@ class TokenEndpointSecondFactorTests(TestCase):
         self.assertEqual(APIToken.objects.filter(user=plain).count(), 1)
 
 
-LOCMEM_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
 
 # The configured cache, not the LocMem stand-in above. Which store holds the TOTP replay
@@ -208,9 +207,9 @@ LOCMEM_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMem
 class RefusedIssuanceTOTPReplayTests(TestCase):
     """A token refused at the live-token cap leaves the TOTP code usable once (ADR-0031).
 
-    The replay marker is a cache write. Under DatabaseCache it runs on the default
-    connection inside the issuance transaction, so set_rollback(True) discards it along
-    with the rest of the refused request. A cache on a separate store keeps the marker.
+    The used-code marker is a claim in the counter store (#689), on the default connection
+    inside the issuance transaction, so set_rollback(True) discards it along with the rest of
+    the refused request, and a committed issuance keeps it.
     """
 
     url = "/api/users/token/"
@@ -247,11 +246,12 @@ class RefusedIssuanceTOTPReplayTests(TestCase):
         self.assertEqual(status_code, 200, payload)
         self.assertEqual(APIToken.objects.filter(user=self.user).count(), 1)
 
-    @override_settings(CACHES=LOCMEM_CACHE)
-    def test_a_separate_store_cache_keeps_the_refused_code_spent(self) -> None:
-        # Control for the test above: with the marker outside the transaction, the retry
-        # is a replay. Without this, the test above would also pass if the marker were
-        # never written at all.
-        status_code, payload = self.refuse_at_the_cap_then_retry()
-        self.assertEqual((status_code, payload), (401, {"error": "Invalid credentials"}))
-        self.assertFalse(APIToken.objects.filter(user=self.user).exists())
+    def test_a_code_spent_by_an_issued_token_is_refused_again(self) -> None:
+        # Control for the test above: when the issuance commits, the used-code marker commits
+        # with it and the same code is a replay. Without this, the test above would also pass
+        # if the marker were never written at all.
+        self.existing.delete()
+        with freeze_time("2026-10-02 10:00:05"):
+            code = pyotp.TOTP(self.secret).now()
+            self.assertEqual(self.post(code)[0], 200)
+            self.assertEqual(self.post(code), (401, {"error": "Invalid credentials"}))

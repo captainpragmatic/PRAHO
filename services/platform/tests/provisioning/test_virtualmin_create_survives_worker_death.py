@@ -33,6 +33,7 @@ from apps.provisioning.virtualmin_gateway import VirtualminGateway
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import VirtualminProvisioningParams, provision_virtualmin_account
+from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
@@ -84,7 +85,7 @@ class WorkerDeathAfterRemoteCreateTests(TransactionTestCase):
         elif program == "list-domains":
             payload = {"data": []}
         elif program == "list-templates":
-            payload = {"data": ["Default"]}
+            payload = {"data": [DEFAULT_VIRTUALMIN_TEMPLATE]}
         else:
             payload = {"output": "Domain created\n"}
         response = Response()
@@ -236,7 +237,7 @@ class WorkerDeathAfterRemoteCreateTests(TransactionTestCase):
             service=self.service,
             server=self.server,
             virtualmin_username="crashexample",
-            template_name="Default",
+            template_name=DEFAULT_VIRTUALMIN_TEMPLATE,
             status="error",
             protected_from_deletion=False,
             praho_customer_id=self.service.customer_id,

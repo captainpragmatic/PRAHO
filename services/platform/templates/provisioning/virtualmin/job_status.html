@@ -19,7 +19,10 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if can_retry %}
-                {% trans "Retry Job" as bt1 %}{% button bt1 variant="warning" href="#" %}
+              <form method="post" action="{% url 'provisioning:virtualmin_job_retry' job.id %}">
+                {% csrf_token %}
+                {% trans "Retry Job" as bt1 %}{% button bt1 variant="warning" type="submit" icon="refresh" %}
+              </form>
             {% endif %}
             {% trans "← Back to Jobs" as bt2 %}{% button bt2 variant="secondary" href="/provisioning/virtualmin/servers/" %}
         </div>

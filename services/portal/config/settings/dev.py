@@ -2,6 +2,7 @@
 Development settings for PRAHO Portal Service
 """
 
+import copy
 import logging
 import os
 import sys
@@ -50,6 +51,9 @@ if _env_path is not None:
 
 from .base import *  # noqa: E402, F403
 
+# Levels below are adjusted per environment; work on a copy so base's dict stays as it is.
+LOGGING = copy.deepcopy(LOGGING)
+
 # Debug mode
 DEBUG = True
 # base.py derives these from DEBUG before the line above runs; development serves plain HTTP
@@ -73,16 +77,15 @@ ALLOWED_HOSTS = ["*"]
 # ===============================================================================
 
 # Insert debug toolbar middleware into existing MIDDLEWARE list
-MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")
+# A new list: insert() would also change base.MIDDLEWARE, which `from .base import *` shares.
+MIDDLEWARE = [*MIDDLEWARE[:1], "debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE[1:]]
 
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================
 
 # Add debug toolbar to existing INSTALLED_APPS list
-INSTALLED_APPS += [
-    "debug_toolbar",
-]
+INSTALLED_APPS = [*INSTALLED_APPS, "debug_toolbar"]
 
 # django_extensions is dev-only (not installed in prod Docker images)
 try:
@@ -185,7 +188,8 @@ except Exception as e:
 CSRF_COOKIE_SECURE = False
 
 # CSRF trusted origins for development
-CSRF_TRUSTED_ORIGINS += [
+CSRF_TRUSTED_ORIGINS = [
+    *CSRF_TRUSTED_ORIGINS,
     "http://localhost:8701",
     "http://127.0.0.1:8701",
     "http://claudius-imac:8701",

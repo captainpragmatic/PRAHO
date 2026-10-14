@@ -258,7 +258,7 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
                 job = VirtualminProvisioningJob.objects.create(
                     server=self.server,
                     account=self.account,
-                    operation="backup_domain",
+                    operation="suspend_domain",
                     status="failed",
                     max_retries=limit,
                     retry_count=attempts,
@@ -336,3 +336,34 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
                     )
                     # End the first fixture so the per-server active-drain constraint admits the next one.
                     NodeDrain.objects.filter(pk=drain.pk).update(status="cancelled")
+
+    def test_backup_jobs_are_not_offered_a_retry_the_sweep_never_runs(self) -> None:
+        """#689: the failed-job sweep does not retry backups, so the page must not offer it."""
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server, account=self.account, operation="backup_domain", status="failed", max_retries=3
+        )
+        response = self.client.get(reverse("provisioning:virtualmin_job_status", args=[job.pk]))
+        self.assertFalse(response.context["can_retry"])
+        self.assertNotContains(response, "Retry Job")
+        refused = self.client.post(reverse("provisioning:virtualmin_job_retry", args=[job.pk]))
+        self.assertEqual(refused.status_code, 302)
+        job.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)
+
+    def test_retrying_marks_the_job_due_and_runs_the_sweep_once_committed(self) -> None:
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server,
+            account=self.account,
+            operation="suspend_domain",
+            status="failed",
+            max_retries=3,
+            next_retry_at=timezone.now() + timedelta(hours=1),
+        )
+        with patch("apps.provisioning.virtualmin_views.async_task") as queue, self.captureOnCommitCallbacks(
+            execute=True
+        ):
+            response = self.client.post(reverse("provisioning:virtualmin_job_retry", args=[job.pk]))
+        self.assertEqual(response.status_code, 302)
+        job.refresh_from_db()
+        self.assertLessEqual(job.next_retry_at, timezone.now())
+        queue.assert_called_once_with("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs")

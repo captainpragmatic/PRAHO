@@ -12,7 +12,7 @@ from tests.common._provisioning_queue_isolation import ProvisioningQueueIsolatio
 class VirtualminQueueIsolationTests(ProvisioningQueueIsolationTestCase):
     def test_second_enqueue_failure_preserves_first_and_continues(self) -> None:
         expected: list[tuple[object, ...]] = [
-            ({"service_id": str(service.pk), "domain": service.domain, "template": "Default"},)
+            ({"service_id": str(service.pk), "domain": service.domain, "template": "Default Settings"},)
             for service in (self.services[0], self.services[2])
         ]
         self.assert_jobs_survive(
@@ -51,5 +51,5 @@ class VirtualminQueueIsolationTests(ProvisioningQueueIsolationTestCase):
         self.assertEqual(len(jobs), 1, "Keep the first job; failed entry must stop the batch")
         self.assertEqual(
             jobs[0].args(),
-            ({"service_id": str(self.services[0].pk), "domain": self.services[0].domain, "template": "Default"},),
+            ({"service_id": str(self.services[0].pk), "domain": self.services[0].domain, "template": "Default Settings"},),
         )

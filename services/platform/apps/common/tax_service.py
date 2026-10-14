@@ -151,6 +151,12 @@ class TaxConfiguration:
         "SE": Decimal("25.0"),  # Sweden
     }
 
+    # Reduced rates offered on staff documents, used when no TaxRule in force carries one.
+    # Romania merged its 5% and 9% rates into one 11% rate in August 2025.
+    DEFAULT_REDUCED_VAT_RATES: ClassVar[dict[str, Decimal]] = {
+        "RO": Decimal("11.0"),
+    }
+
     @classmethod
     def get_supplier_country(cls) -> str:
         """The country the deploying operator is established in.
@@ -305,6 +311,41 @@ class TaxConfiguration:
         return None
 
     @classmethod
+    def get_reduced_vat_rate(cls, country_code: str) -> Decimal | None:
+        """The country's reduced VAT rate as a percentage (11.0), or None when none is known.
+
+        Same resolution order as the standard rate: the TaxRule in force today (its reduced_rate),
+        then settings.REDUCED_VAT_RATES, then DEFAULT_REDUCED_VAT_RATES. A rule without a reduced
+        rate does not mean "no reduced rate" - the seed rules never set one - so it falls through.
+        Not cached: it is read only when a staff form offers it.
+        """
+        country_code = country_code.upper().strip() if country_code else cls.get_supplier_country()
+        try:
+            from apps.billing.tax_models import TaxRule  # noqa: PLC0415  # Deferred: avoids circular import
+
+            today = timezone.localdate()
+            rule = (
+                TaxRule.objects.filter(country_code=country_code, tax_type="vat", valid_from__lte=today)
+                .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
+                .order_by("-valid_from", "-created_at")
+                .first()
+            )
+            if rule is not None and rule.reduced_rate is not None:
+                return (rule.reduced_rate * Decimal("100")).quantize(Decimal("0.01"))
+        except Exception as e:
+            logger.debug(f"Database tax rules not available: {e}")
+
+        configured = getattr(settings, "REDUCED_VAT_RATES", {})
+        if country_code in configured:
+            return Decimal(str(configured[country_code]))
+        return cls.DEFAULT_REDUCED_VAT_RATES.get(country_code)
+
+    @staticmethod
+    def percent_text(rate_percent: Decimal) -> str:
+        """A percentage as a form value without trailing zeros: 21.00 -> "21", 25.50 -> "25.5"."""
+        return format(rate_percent.normalize(), "f")
+
+    @classmethod
     def calculate_vat(
         cls, amount_cents: int, country_code: str = "", is_business: bool = False, vat_number: str | None = None
     ) -> VATResult:
@@ -324,6 +365,24 @@ class TaxConfiguration:
         vat_amount = Decimal(amount_cents) * (vat_rate / Decimal("100"))
         vat_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
         return VATResult(vat_cents=vat_cents, total_cents=amount_cents + vat_cents, vat_rate_percent=vat_rate)
+
+    @classmethod
+    def preview_vat_rate(cls, customer_info: CustomerVATInfo) -> tuple[VATScenario, Decimal]:
+        """The VAT rate a document for this customer would carry, as a fraction (0.21), audit-free.
+
+        Unlike calculate_vat it honours the customer's profile overrides in customer_info (VAT
+        payer, custom rate, VIES evidence), so it agrees with the rate a priced document gets.
+        Unlike calculate_vat_for_document it writes no audit row, so a page may show it on every
+        view. The caller supplies vies_verified from vies_refusal_reason, which records nothing.
+        The fraction is the unit OrderItem.tax_rate uses; display code formats the percentage.
+        """
+        scenario, rate_percent, _is_business, _vat_number = cls._determine_vat_scenario(
+            str(customer_info.get("country") or ""),
+            bool(customer_info.get("is_business")),
+            customer_info.get("vat_number"),
+            customer_info=customer_info,
+        )
+        return scenario, (rate_percent / Decimal("100")).quantize(Decimal("0.0001"))
 
     @classmethod
     def invalidate_cache(cls, country_code: str | None = None) -> None:

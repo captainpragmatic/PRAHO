@@ -20,8 +20,7 @@ ansible/
 └── templates/
     ├── jail.local.j2            # Fail2ban configuration
     ├── 50unattended-upgrades.j2 # Auto-updates configuration
-    ├── virtualmin_backup_schedule.j2
-    └── domain_template.j2       # Virtualmin domain defaults
+    └── s3_backup_sync.sh.j2     # Offsite copy of the local archives
 ```
 
 ## Playbook Execution Order
@@ -36,19 +35,23 @@ For a new node deployment, playbooks are executed in this order:
 
 2. **virtualmin.yml** - Virtualmin GPL installation
    - Downloads and runs install script
-   - Configures Virtualmin settings
+   - Sets the default addresses (`defip`), the PHP-FPM limits and the PRAHO feature set
+   - Creates the PRAHO API user (`files/praho-webmin-api-user.pl`)
    - Sets PHP defaults
    - Generates Let's Encrypt certificate
 
 3. **virtualmin_harden.yml** - Security hardening
    - Fail2ban installation and configuration
-   - UFW firewall setup
+   - UFW firewall: SSH (22) and Webmin (10000) only from `node_admin_allowed_cidrs`;
+     web, mail, FTP, DNS and Usermin open; refuses an empty allowlist (ADR-0060)
    - Automatic security updates
    - System hardening (sysctl)
 
 4. **virtualmin_backup.yml** - Backup setup
    - Local backup directory creation
-   - Virtualmin scheduled backup configuration
+   - A real Virtualmin scheduled backup (`virtualmin create-scheduled-backup`):
+     all servers, full, never differential
+   - Removes the `sched` file and `backup_*` keys earlier versions wrote
    - Cleanup cron job for retention
 
 ## Variables

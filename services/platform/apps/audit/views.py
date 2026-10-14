@@ -29,7 +29,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
-from apps.common.decorators import staff_required_strict
+from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.encryption import DecryptionError
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
@@ -46,6 +46,7 @@ from .models import (
     ComplianceLog,
     DataExport,
 )
+from .network_identity import can_see_network_identity, redact_network_identity
 from .services import (
     AuditService,
     ComplianceEventRequest,
@@ -615,13 +616,16 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
 def audit_log(request: HttpRequest) -> HttpResponse:
     """Enhanced audit logs view with advanced search capabilities."""
 
-    # Get available filter options
+    # Get available filter options. Every account and the IP search are for administrators (#689).
+    show_network_identity = can_see_network_identity(request.user)
+    users = User.objects.filter(is_active=True).order_by("email") if show_network_identity else User.objects.none()
     context = {
         "action_choices": AuditEvent.ACTION_CHOICES,
         "category_choices": AuditEvent.CATEGORY_CHOICES,
         "severity_choices": AuditEvent.SEVERITY_CHOICES,
         "content_types": ContentType.objects.all().order_by("app_label", "model"),
-        "users": User.objects.filter(is_active=True).order_by("email"),
+        "users": users,
+        "show_network_identity": show_network_identity,
         "saved_searches": AuditSearchQuery.objects.filter(Q(created_by=request.user) | Q(is_shared=True)).order_by(
             "-last_used_at", "name"
         ),
@@ -679,6 +683,7 @@ def logs_list(request: HttpRequest) -> HttpResponse:
         "total_results": paginator.count,
         "page_size": page_size,
         "extra_params": pagination_query(request),
+        "show_network_identity": can_see_network_identity(request.user),
     }
 
     # Check if HTMX request
@@ -688,7 +693,7 @@ def logs_list(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/partials/logs_list.html", context)
 
 
-@staff_required_strict
+@admin_required
 def export_logs(request: HttpRequest) -> HttpResponse:
     """Export filtered audit logs in multiple formats (CSV, JSON)."""
 
@@ -940,6 +945,8 @@ def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
         "export_requests": export_requests,
         "current_time": timezone.now(),
         "extra_params": pagination_query(request),
+        # A person's full export is for administrators only (#689).
+        "can_download": can_see_network_identity(request.user),
     }
 
     # Check if HTMX request
@@ -1037,6 +1044,8 @@ def gdpr_export_detail(request: HttpRequest, export_id: uuid.UUID) -> HttpRespon
     context = {
         "export_request": export_request,
         "file_exists": file_exists,
+        # A person's full export is for administrators only (#689).
+        "can_download": can_see_network_identity(request.user),
         "current_time": timezone.now(),
         "is_expired": (export_request.status == "completed" and timezone.now() > export_request.expires_at),
     }
@@ -1044,7 +1053,7 @@ def gdpr_export_detail(request: HttpRequest, export_id: uuid.UUID) -> HttpRespon
     return render(request, "audit/partials/gdpr_export_detail.html", context)
 
 
-@staff_required_strict
+@admin_required
 def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResponse:
     """Staff download of user's GDPR export for review/compliance purposes"""
 
@@ -1170,8 +1179,10 @@ def load_saved_search(request: HttpRequest, query_id: uuid.UUID) -> HttpResponse
         # Build URL with query parameters - using urlencode for proper escaping
         # to prevent URL injection attacks (OWASP A03:2021 - Injection)
         base_url = "/audit/logs/"
-        # Filter out empty values and properly encode parameters
-        filtered_params = {k: v for k, v in search_query.query_params.items() if v}
+        # Filter out empty values and properly encode parameters. A search an administrator
+        # shared may name an address or a session, which other roles may not see (#689).
+        hidden_params = set() if can_see_network_identity(request.user) else {"ip_address", "session_key"}
+        filtered_params = {k: v for k, v in search_query.query_params.items() if v and k not in hidden_params}
         query_string = urlencode(filtered_params) if filtered_params else ""
         redirect_url = f"{base_url}?{query_string}" if query_string else base_url
 
@@ -1626,13 +1637,24 @@ def event_detail(request: HttpRequest, event_id: uuid.UUID) -> HttpResponse:
     # Check if this event is part of any alerts
     related_alerts = AuditAlert.objects.filter(related_events=event).order_by("-created_at")[:5]
 
+    # Where someone connected from is for administrators only (#689).
+    show_network_identity = can_see_network_identity(request.user)
+    metadata, old_values, new_values = event.metadata, event.old_values, event.new_values
+    if not show_network_identity:
+        metadata = redact_network_identity(metadata)
+        old_values = redact_network_identity(old_values)
+        new_values = redact_network_identity(new_values)
+
     context = {
         "event": event,
         "related_events": related_events,
         "related_alerts": related_alerts,
-        "event_metadata_json": json.dumps(event.metadata, indent=2) if event.metadata else None,
-        "old_values_json": json.dumps(event.old_values, indent=2) if event.old_values else None,
-        "new_values_json": json.dumps(event.new_values, indent=2) if event.new_values else None,
+        "show_network_identity": show_network_identity,
+        "shown_old_values": old_values,
+        "shown_new_values": new_values,
+        "event_metadata_json": json.dumps(metadata, indent=2) if metadata else None,
+        "old_values_json": json.dumps(old_values, indent=2) if old_values else None,
+        "new_values_json": json.dumps(new_values, indent=2) if new_values else None,
     }
 
     return render(request, "audit/partials/event_detail.html", context)

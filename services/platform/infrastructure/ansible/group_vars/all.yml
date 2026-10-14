@@ -57,11 +57,10 @@ webserver_modules:
   - proxy_fcgi
 
 # Firewall ports (UFW backup to cloud firewall)
+# Open to everyone: the services customers and their visitors use.
 firewall_allowed_tcp_ports:
-  - "22"      # SSH
   - "80"      # HTTP
   - "443"     # HTTPS
-  - "10000"   # Webmin
   - "20000"   # Usermin
   - "25"      # SMTP
   - "465"     # SMTPS
@@ -73,6 +72,13 @@ firewall_allowed_tcp_ports:
 
 firewall_allowed_udp_ports:
   - "53"      # DNS
+
+# Open only to node_admin_allowed_cidrs (Platform's egress addresses plus the
+# admin networks, from the infrastructure.node_admin_allowed_cidrs setting).
+# virtualmin_harden.yml refuses to run while that list is empty (ADR-0060).
+firewall_admin_tcp_ports:
+  - "22"      # SSH (Ansible, archive transfer)
+  - "10000"   # Webmin and the Virtualmin remote API
 
 # PRAHO integration
 praho_managed: true

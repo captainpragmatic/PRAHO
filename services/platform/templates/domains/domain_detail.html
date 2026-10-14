@@ -45,9 +45,6 @@
                     {% url 'domains:renew' domain.id as renew_url %}
                     {% trans "Renew" as bt3 %}{% button bt3 variant="primary" href=renew_url %}
                 {% endif %}
-                {% if can_modify_dns %}
-                    {% trans "DNS" as bt4 %}{% button bt4 variant="secondary" href="#" %}
-                {% endif %}
             </div>
         </div>
     </div>
@@ -243,13 +240,6 @@
                         {% url 'domains:renew' domain.id as renew_url_2 %}
                         {% trans "Renew Domain" as bt5 %}{% button bt5 variant="primary" size="sm" href=renew_url_2 class="w-full" %}
                     {% endif %}
-                    {% if can_transfer %}
-                        {% trans "Transfer Out" as bt6 %}{% button bt6 variant="secondary" size="sm" href="#" class="w-full" %}
-                    {% endif %}
-                    {% if can_modify_dns %}
-                        {% trans "Manage DNS" as bt7 %}{% button bt7 variant="secondary" size="sm" href="#" class="w-full" %}
-                    {% endif %}
-                    {% trans "View Analytics" as bt8 %}{% button bt8 variant="secondary" size="sm" href="#" class="w-full" %}
                 </div>
             </div>
         </div>

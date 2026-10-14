@@ -168,6 +168,26 @@ class ServicePlanSignalTestCase(TestCase):
             # Should log the exception
             mock_logger.exception.assert_called()
 
+    def test_a_plan_created_with_string_values_is_still_audited(self) -> None:
+        """create() keeps the values as given until the row is reloaded, so they can be strings.
+
+        The handler multiplied a string price ("45.00" * 100 repeats the text) and compared it with
+        an integer. The TypeError was caught and logged, so the plan's creation audit event was
+        never written.
+        """
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        for name, price, disk, high_value in (
+            ("String Plan", "45.00", "10", False),
+            ("String Enterprise Plan", "600.00", "500", True),
+        ):
+            with self.subTest(name=name):
+                plan = ServicePlan.objects.create(
+                    name=name, plan_type="shared_hosting", price_monthly=price, disk_space_gb=disk, is_active=True
+                )
+                event = AuditEvent.objects.get(action="service_plan_created", object_id=str(plan.pk))
+                self.assertIs(event.metadata["high_value_plan"], high_value)
+
 
 # ===============================================================================
 # SERVER SIGNAL TESTS

@@ -13,15 +13,7 @@
      data-csrf-token="{{ csrf_token }}">
     <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
     <div class="space-y-3">
-        {% trans "Access Control Panel" as bt1 %}{% button bt1 href="#" variant="primary" icon="external-link" %}
-        {% trans "Reset Password" as bt2 %}{% button bt2 href="#" variant="secondary" icon="key" %}
-        {% trans "Change Plan" as bt3 %}{% button bt3 href="#" variant="secondary" icon="upgrade" %}
-        {% trans "Transfer Account" as bt4 %}{% button bt4 href="#" variant="secondary" icon="transfer" %}
-        {% if account.is_active %}
-            {% trans "Disable Account" as bt5 %}{% button bt5 href="#" variant="danger" icon="pause" %}
-        {% else %}
-            {% trans "Enable Account" as bt6 %}{% button bt6 href="#" variant="success" icon="play" %}
-        {% endif %}
+        {% include "provisioning/virtualmin/partials/account_state_actions.html" %}
 
         <!-- Protection Toggle -->
         {# tmpl-allow TMPL002: @click.prevent="confirmProtectionToggle()" binding; components accept no executable attributes (apps/ui/attributes.py) #}

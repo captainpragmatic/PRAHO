@@ -1,0 +1,6 @@
+#!/bin/bash
+# Healthy once first-boot configuration finished and Webmin answers on 10000.
+set -euo pipefail
+
+test -f /var/lib/virtualmin-lab/configured
+curl -fsk -o /dev/null --max-time 4 https://127.0.0.1:10000/

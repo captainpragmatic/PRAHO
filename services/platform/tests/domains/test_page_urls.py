@@ -54,3 +54,34 @@ class DomainPageUrlTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f"fetch('{reverse('domains:check_availability')}'")
+
+    def test_the_detail_page_offers_no_page_that_does_not_exist(self) -> None:
+        """#689: DNS, Manage DNS, Transfer Out and View Analytics linked to "#"; none has a page."""
+        staff = User.objects.create_user(email="domain-detail-staff@example.test", is_staff=True, staff_role="admin")
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("domains:detail", kwargs={"domain_id": self.domain.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'href="#"')
+        for label in ("Manage DNS", "Transfer Out", "View Analytics"):
+            self.assertNotContains(response, label)
+
+    def test_the_tld_list_names_each_state(self) -> None:
+        """#689: the active, inactive and featured badges had lost their text to an emoji clean-up."""
+        staff = User.objects.create_user(email="tld-staff@example.test", is_staff=True, staff_role="admin")
+        self.client.force_login(staff)
+        TLD.objects.create(
+            extension="old",
+            registration_price_cents=1000,
+            renewal_price_cents=1000,
+            transfer_price_cents=1000,
+            is_active=False,
+            is_featured=True,
+        )
+
+        response = self.client.get(reverse("domains:tld_list"))
+
+        self.assertContains(response, ">Active<")
+        self.assertContains(response, ">Inactive<")
+        self.assertContains(response, ">Featured<")

@@ -36,6 +36,8 @@ class VirtualminJobCoverageTests(VirtualminViewsFixture):
 
     def test_job_status_offers_retry_only_for_failed_job_under_limit(self) -> None:
         job = self.job()
+        # An operation the failed-job sweep retries; it does not retry backups (#689).
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(operation="suspend_domain")
         for status, retries, expected in (
             ("pending", 0, False),
             ("completed", 0, False),

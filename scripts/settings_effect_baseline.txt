@@ -39,6 +39,7 @@ audit.webhook_healthy_response_threshold
 audit.webhook_max_retry_threshold
 audit.webhook_suspicious_retry_threshold
 backup.s3_bucket_name
+backup.s3_endpoint_url
 billing.bank_accounts
 billing.efactura_deadline_warning_hours
 billing.efactura_submission_deadline_days
@@ -117,6 +118,7 @@ efactura.validation.strict_mode
 efactura.validation.xsd_enabled
 infrastructure.auto_drain_enabled
 infrastructure.drain_enabled
+infrastructure.node_admin_allowed_cidrs
 integrations.smartbill_invoice_series
 integrations.smartbill_measuring_unit
 integrations.smartbill_tax_names

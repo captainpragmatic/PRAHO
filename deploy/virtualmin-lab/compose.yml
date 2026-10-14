@@ -1,0 +1,81 @@
+# Two Virtualmin nodes + MinIO with SSE-S3, for local backup/migration testing.
+# Driven by lab.sh (make virtualmin-lab-up / virtualmin-lab-down); lab.sh writes
+# .state/lab.env, which holds the MinIO credentials and KMS key.
+name: virtualmin-lab
+
+x-virtualmin-node: &virtualmin-node
+  image: praho-virtualmin-lab:${VIRTUALMIN_LAB_TAG:-8.3.0}
+  privileged: true
+  cgroup: host
+  tmpfs:
+    - /run
+    - /run/lock
+  stop_signal: SIGRTMIN+3
+
+services:
+  vm-a:
+    <<: *virtualmin-node
+    container_name: vmlab-a
+    hostname: vm-a.praho.test
+    ports:
+      - "127.0.0.1:${LAB_A_SSH_PORT:-2522}:22"
+      - "127.0.0.1:${LAB_A_WEBMIN_PORT:-10101}:10000"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./.state/vm-a/inject:/etc/lab-node/inject:ro
+
+  vm-b:
+    <<: *virtualmin-node
+    container_name: vmlab-b
+    hostname: vm-b.praho.test
+    ports:
+      - "127.0.0.1:${LAB_B_SSH_PORT:-2622}:22"
+      - "127.0.0.1:${LAB_B_WEBMIN_PORT:-10102}:10000"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./.state/vm-b/inject:/etc/lab-node/inject:ro
+
+  minio:
+    # Upstream stopped publishing MinIO images; Chainguard rebuilds it from source.
+    image: cgr.dev/chainguard/minio@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
+    container_name: vmlab-minio
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?run lab.sh up}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?run lab.sh up}
+      # Static KMS key, "<name>:<base64 of 32 bytes>": enables SSE-S3 (AES256).
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?run lab.sh up}
+    ports:
+      - "127.0.0.1:${LAB_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${LAB_MINIO_CONSOLE_PORT:-19001}:9001"
+    tmpfs:
+      - /data:uid=65532,gid=65532
+
+  minio-bucket:
+    # One-shot (`lab.sh up` runs it with retries until MinIO answers). The image
+    # has no shell, so the mc alias comes from MC_HOST_<alias>.
+    image: cgr.dev/chainguard/minio-client@sha256:d8a93c5d335509ff353774eefec8f82fa2a2a975e800139702232d8be3dbe6b9
+    profiles: ["setup"]
+    depends_on:
+      - minio
+    command: ["mb", "--ignore-existing", "lab/${LAB_BUCKET:-praho-backups}"]
+    environment:
+      MC_HOST_lab: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
+
+  # Bare Debian node for provisioning-playbook tests (opt-in profile).
+  debian-node:
+    image: praho-debian-node:12
+    profiles: ["debian-node"]
+    container_name: vmlab-debian-node
+    hostname: node-c.praho.test
+    privileged: true
+    cgroup: host
+    tmpfs:
+      - /run
+      - /run/lock
+    stop_signal: SIGRTMIN+3
+    ports:
+      - "127.0.0.1:${LAB_C_SSH_PORT:-2722}:22"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./.state/node-c/inject:/etc/lab-node/inject:ro

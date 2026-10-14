@@ -160,7 +160,7 @@ class TicketsAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving ticket {ticket_id} for customer {customer_id}: {e}")
             raise
 
-    def create_ticket(self, customer_id: int, user_id: int, request: TicketCreateRequest) -> dict[str, Any]:  # type: ignore[override]
+    def create_ticket(self, customer_id: int, user_id: int, request: TicketCreateRequest) -> dict[str, Any]:
         """
         Create a new support ticket for customer.
 
