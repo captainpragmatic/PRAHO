@@ -126,9 +126,11 @@ class VirtualminSyncPriceTests(VirtualminViewsFixture):
             {"name": f"{username}.example.com", "values": {"Username": [username], "Status": ["Enabled"]}}
         ]
 
-    def test_sync_uses_distinct_active_ron_and_eur_monthly_prices(self) -> None:
+    def test_sync_imports_no_service_for_an_unknown_domain_in_any_selling_currency(self) -> None:
+        # Unknown domains used to become priced services of an arbitrary customer (ADR-0061 P0.5);
+        # they are reported as unassigned whatever prices exist.
         self.currency_prices()
-        for code, expected in (("RON", Decimal("10.00")), ("EUR", Decimal("2.00"))):
+        for code in ("RON", "EUR"):
             with self.subTest(currency=code):
                 changed = SettingsService.update_setting("billing.default_currency", code)
                 self.assertTrue(changed.is_ok(), changed)
@@ -136,28 +138,14 @@ class VirtualminSyncPriceTests(VirtualminViewsFixture):
                 self.listing(username)
                 response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
                 self.assertEqual(response.status_code, 302)
-                service = Service.objects.get(username=username)
-                self.assertEqual(service.currency_id, code)
-                self.assertEqual(service.price, expected)
-                self.assertEqual(VirtualminAccount.objects.get(service=service).server_id, self.server.pk)
+                self.assertFalse(Service.objects.filter(username=username).exists())
+                self.assertFalse(VirtualminAccount.objects.filter(virtualmin_username=username).exists())
+                self.assertIn("1 unassigned", self.messages(response))
 
-    def test_sync_refuses_inactive_and_missing_prices_without_creating_service_or_account(self) -> None:
+    def test_sync_links_an_existing_service_without_repricing_it(self) -> None:
         self.currency_prices()
         changed = SettingsService.update_setting("billing.default_currency", "EUR")
         self.assertTrue(changed.is_ok(), changed)
-        prices = ServicePlanPrice.objects.filter(service_plan=self.plan, currency_id="EUR")
-        prices.update(is_active=False)
-        for state in ("inactive", "missing"):
-            with self.subTest(state=state):
-                if state == "missing":
-                    prices.delete()
-                username = f"import{state}"
-                self.listing(username)
-                response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
-                self.assertEqual(response.status_code, 302)
-                self.assertFalse(Service.objects.filter(username=username).exists())
-                self.assertFalse(VirtualminAccount.objects.filter(virtualmin_username=username).exists())
-                self.assertIn("1 errors occurred", self.messages(response))
         self.account.delete()
         self.listing(self.service.username)
         existing = self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
