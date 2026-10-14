@@ -4,7 +4,7 @@
 <html lang="{{ email_language }}">
   <body>
     <p>{% trans "Hello," %}</p>
-    <p>{% trans "Someone asked to create a PRAHO account with this email address. To finish, open the link below and choose your password." %}</p>
+    <p>{% blocktrans with brand=brand_name %}Someone asked to create a {{ brand }} account with this email address. To finish, open the link below and choose your password.{% endblocktrans %}</p>
     <p><a href="{{ confirm_url }}">{% trans "Finish creating your account" %}</a></p>
     <p>{% trans "The link works for 24 hours and only once." %}</p>
     <p>{% trans "If you did not ask for this, you can ignore this email. No account will be created." %}</p>

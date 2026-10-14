@@ -150,20 +150,21 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
         self.assertEqual(checked, expected_portal_files)
 
     def test_compose_workdirs_and_mounts_match_the_images(self) -> None:
+        brand = "${BRAND_DIR:-./brand}:/app/brand:ro"  # Read-only deployment brand folder (ADR-0058)
         expected_volumes: dict[str, dict[str, list[str]]] = {
             "docker-compose.container-service.yml": {
                 "platform": [],
                 "portal": ["portal_sessions:/app/data"],
             },
             "docker-compose.platform-only.yml": {
-                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"],
+                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs", brand],
             },
             "docker-compose.portal-only.yml": {
-                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
+                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data", brand],
             },
             "docker-compose.single-server.yml": {
-                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs"],
-                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data"],
+                "platform": ["static_files:/app/staticfiles", "media_files:/app/media", "logs:/app/logs", brand],
+                "portal": ["portal_static:/app/staticfiles", "portal_logs:/app/logs", "portal_sessions:/app/data", brand],
             },
         }
         paths = sorted((ROOT / "deploy").glob("docker-compose*.yml"))

@@ -48,7 +48,7 @@ from apps.common.validators import (
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-from apps.settings.services import SettingsService, get_default_from_email
+from apps.settings.services import SettingsService, get_brand_name, get_default_from_email, get_support_email
 
 from .models import APIToken, CustomerMembership, UserSession
 from .pending_registration import PendingRegistration
@@ -225,10 +225,13 @@ def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: s
             "uid": uid,
             "token": token,
             "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-            "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
+            "support_email": get_support_email(),
+            "brand_name": get_brand_name(),
         }
 
-        subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=display_name)
+        subject = _("Welcome to {brand} - Account Created for {customer_name}").format(
+            brand=context["brand_name"], customer_name=display_name
+        )
         text_message = render_to_string("customers/emails/welcome_email.txt", context)
         html_message = render_to_string("customers/emails/welcome_email.html", context)
 
@@ -874,11 +877,12 @@ class SecureCustomerUserService:
                 timeout=7 * 24 * 3600,
             )  # 7 days expiration
 
+            brand = get_brand_name()
             send_mail(
-                subject=_("[PRAHO] Invitation to join {company}").format(company=customer.company_name),
+                subject=_("[{brand}] Invitation to join {company}").format(brand=brand, company=customer.company_name),
                 message=_(
-                    "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
-                ),
+                    "You have been invited to join an organization on {brand}. Please check your dashboard to accept."
+                ).format(brand=brand),
                 from_email=get_default_from_email(),
                 recipient_list=[user.email],
                 fail_silently=True,

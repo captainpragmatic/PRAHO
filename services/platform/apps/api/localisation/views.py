@@ -13,7 +13,7 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
 )
-from apps.settings.services import SettingsService, get_company_legal_name
+from apps.settings.services import SettingsService, get_brand_name, get_company_legal_name
 
 
 @api_view(["POST"])
@@ -26,6 +26,7 @@ def localisation_defaults(request: HttpRequest, request_data: dict[str, object])
     # DPO's contact (GDPR Art. 13(1)(b)), so those are public too; the no-reply sender is not.
     company = {
         "legal_name": get_company_legal_name(),
+        "brand_name": get_brand_name(),
         **{
             field: str(SettingsService.get_setting(f"company.{field}") or "")
             for field in (

@@ -192,8 +192,9 @@ msgid "If an eligible account exists and email delivery is available, you will r
 msgstr "Dacă există un cont eligibil și livrarea prin email este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
 #: apps/api/users/serializers.py:298
-msgid "Password Reset Request - PRAHO Platform"
-msgstr "Solicitare de resetare a parolei - PRAHO Platform"
+#, python-format
+msgid "Password Reset Request - %(brand)s"
+msgstr "Solicitare de resetare a parolei - %(brand)s"
 
 #: apps/api/users/serializers.py:319
 msgid "Failed to send reset email. Please try again later."
@@ -15861,8 +15862,8 @@ msgstr "Maximum de {count} token-uri active per utilizator. Revocați mai întâ
 
 #: apps/users/services.py:190
 #, python-brace-format
-msgid "Welcome to PRAHO - Account Created for {customer_name}"
-msgstr "Bine ați venit în PRAHO - Cont creat pentru {customer_name}"
+msgid "Welcome to {brand} - Account Created for {customer_name}"
+msgstr "Bine ați venit în {brand} - Cont creat pentru {customer_name}"
 
 #: apps/users/services.py:611 apps/users/services.py:1036
 #, python-brace-format
@@ -15887,12 +15888,13 @@ msgstr "Utilizatorul este deja asociat cu această organizație"
 
 #: apps/users/services.py:1074
 #, python-brace-format
-msgid "[PRAHO] Invitation to join {company}"
-msgstr "[PRAHO] Invitație de a vă alătura {company}"
+msgid "[{brand}] Invitation to join {company}"
+msgstr "[{brand}] Invitație de a vă alătura {company}"
 
 #: apps/users/services.py:1076
-msgid "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
-msgstr "Ați fost invitat să vă alăturați unei organizații pe PRAHO. Vă rugăm să verificați panoul de control pentru a accepta."
+#, python-brace-format
+msgid "You have been invited to join an organization on {brand}. Please check your dashboard to accept."
+msgstr "Ați fost invitat să vă alăturați unei organizații pe {brand}. Vă rugăm să verificați panoul de control pentru a accepta."
 
 #: apps/users/views.py:68
 msgid "Too many login attempts. Please wait and try again."
@@ -19665,8 +19667,8 @@ msgstr "Confidențialitate și Consimțământ"
 
 #: templates/customers/emails/welcome_email.html:7
 #, python-format
-msgid "You have been invited to %(customer_name)s on PRAHO"
-msgstr "Ați fost invitat(ă) la %(customer_name)s pe PRAHO"
+msgid "You have been invited to %(customer_name)s on %(brand)s"
+msgstr "Ați fost invitat(ă) la %(customer_name)s pe %(brand)s"
 
 #: templates/customers/emails/welcome_email.html:12
 msgid "To get started, please set your password by clicking the button below:"
@@ -19696,8 +19698,8 @@ msgstr "Dacă nu v-ați așteptat la această invitație, vă rugăm să ne cont
 
 #: templates/customers/emails/welcome_email.txt:2
 #, python-format
-msgid "You have been invited to %(customer_name)s on PRAHO."
-msgstr "Ați fost invitat(ă) la %(customer_name)s pe PRAHO."
+msgid "You have been invited to %(customer_name)s on %(brand)s."
+msgstr "Ați fost invitat(ă) la %(customer_name)s pe %(brand)s."
 
 #: templates/customers/emails/welcome_email.txt:6
 msgid "To get started, please set your password by clicking the link below:"
@@ -19716,8 +19718,9 @@ msgid "Best regards,"
 msgstr "Cu respect,"
 
 #: templates/customers/emails/welcome_email.txt:22
-msgid "The PRAHO Team"
-msgstr "Echipa PRAHO"
+#, python-format
+msgid "The %(brand)s Team"
+msgstr "Echipa %(brand)s"
 
 #: templates/customers/form.html:13
 msgid "Back to customers"
@@ -27584,12 +27587,14 @@ msgid "Pending registrations"
 msgstr "Înregistrări în așteptare"
 
 #: apps/users/registration_confirmation.py
-msgid "You already have a PRAHO account"
-msgstr "Aveți deja un cont PRAHO"
+#, python-format
+msgid "You already have a %(brand)s account"
+msgstr "Aveți deja un cont %(brand)s"
 
 #: apps/users/registration_confirmation.py
-msgid "Confirm your PRAHO account"
-msgstr "Confirmați contul dumneavoastră PRAHO"
+#, python-format
+msgid "Confirm your %(brand)s account"
+msgstr "Confirmați contul dumneavoastră %(brand)s"
 
 #: apps/api/users/views.py
 msgid "This link has expired or was already used."
@@ -27608,8 +27613,9 @@ msgid "Hello,"
 msgstr "Bună ziua,"
 
 #: templates/users/emails/registration_confirm.txt
-msgid "Someone asked to create a PRAHO account with this email address. To finish, open the link below and choose your password."
-msgstr "Cineva a solicitat crearea unui cont PRAHO cu această adresă de e-mail. Pentru a finaliza, deschideți linkul de mai jos și alegeți-vă parola."
+#, python-format
+msgid "Someone asked to create a %(brand)s account with this email address. To finish, open the link below and choose your password."
+msgstr "Cineva a solicitat crearea unui cont %(brand)s cu această adresă de e-mail. Pentru a finaliza, deschideți linkul de mai jos și alegeți-vă parola."
 
 #: templates/users/emails/registration_confirm.txt
 msgid "The link works for 24 hours and only once."
@@ -27624,8 +27630,9 @@ msgid "Finish creating your account"
 msgstr "Finalizați crearea contului"
 
 #: templates/users/emails/registration_existing_account.txt
-msgid "Someone tried to create a new PRAHO account with this email address. It already has an account."
-msgstr "Cineva a încercat să creeze un cont PRAHO nou cu această adresă de e-mail. Adresa are deja un cont."
+#, python-format
+msgid "Someone tried to create a new %(brand)s account with this email address. It already has an account."
+msgstr "Cineva a încercat să creeze un cont %(brand)s nou cu această adresă de e-mail. Adresa are deja un cont."
 
 #: templates/users/emails/registration_existing_account.txt
 msgid "Sign in:"
@@ -28703,3 +28710,11 @@ msgstr "Aplicația afișează coduri pentru alt cont?"
 #: templates/users/mfa_setup.html
 msgid "Start over with a new code"
 msgstr "Începeți din nou cu un cod nou"
+
+#: apps/settings/catalog.py
+msgid "Brand name"
+msgstr "Numele mărcii"
+
+#: apps/settings/catalog.py
+msgid "The name customers see in the portal, in emails and in their authenticator app."
+msgstr "Numele pe care clienții îl văd în portal, în e-mailuri și în aplicația de autentificare."

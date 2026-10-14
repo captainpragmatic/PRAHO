@@ -43,7 +43,7 @@ def _entries(path: Path) -> dict[MessageKey, polib.POEntry]:
 class SharedCatalogTests(SimpleTestCase):
     def test_catalog_covers_every_shared_template_msgid(self) -> None:
         messages = _shared_msgids()
-        self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 27)
+        self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 28)
         # badge "Close" shares the modal msgid; the Terms of Service and Privacy Policy texts, shared
         # since the portal publishes them too, bring 101 and 154.
         self.assertEqual(len(messages), 289)

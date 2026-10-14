@@ -3,7 +3,7 @@
 {% load formatting %}
 {% load ui_components %}
 
-{% block title %}{% trans "Invoice" %} {{ invoice.number }} - PRAHO Portal{% endblock %}
+{% block title %}{% trans "Invoice" %} {{ invoice.number }} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8">

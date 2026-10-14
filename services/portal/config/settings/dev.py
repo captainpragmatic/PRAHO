@@ -50,6 +50,12 @@ if _env_path is not None:
 
 from .base import *  # noqa: E402, F403
 
+# Own copies of the inherited lists: the in-place edits below must never reach base, which other
+# settings modules (and tests that import several of them) share.
+MIDDLEWARE = list(MIDDLEWARE)
+INSTALLED_APPS = list(INSTALLED_APPS)
+CSRF_TRUSTED_ORIGINS = list(CSRF_TRUSTED_ORIGINS)
+
 # Debug mode
 DEBUG = True
 # base.py derives these from DEBUG before the line above runs; development serves plain HTTP

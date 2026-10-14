@@ -2556,8 +2556,9 @@ msgid "If the problem persists, please contact our support team at"
 msgstr "Dacă problema persistă, vă rugăm să contactați echipa noastră de suport la"
 
 #: services/portal/templates/base.html:16
-msgid "PRAHO Customer Portal - Manage your hosting services"
-msgstr "PRAHO Portal Client - Gestionați serviciile dvs. de găzduire"
+#, python-format
+msgid "%(brand)s customer portal - manage your hosting services"
+msgstr "Portalul clienților %(brand)s - gestionați serviciile de găzduire"
 
 #: services/portal/templates/base.html:74
 #: services/portal/templates/billing/invoice_not_found.html:49
@@ -3256,8 +3257,8 @@ msgid "The requested proforma could not be found or you don\\"
 msgstr "Proforma solicitată nu a putut fi găsită sau nu aveți\\"
 
 #: services/portal/templates/billing/recurring_payments.html:13
-msgid "Authorize a card once, then choose which subscriptions PRAHO may collect automatically."
-msgstr "Autorizați un card o singură dată, apoi alegeți ce abonamente poate încasa PRAHO automat."
+msgid "Authorize a card once, then choose which subscriptions are collected automatically."
+msgstr "Autorizați un card o singură dată, apoi alegeți ce abonamente se încasează automat."
 
 #: services/portal/templates/billing/recurring_payments.html:18
 msgid "Automatic-payment settings are temporarily unavailable."
@@ -6361,8 +6362,9 @@ msgid "Login"
 msgstr "Autentificare"
 
 #: services/portal/templates/users/login.html:19
-msgid "PRAHO Portal Login"
-msgstr "Autentificare Portal PRAHO"
+#, python-format
+msgid "Sign in to %(brand)s"
+msgstr "Autentificare în %(brand)s"
 
 #: services/portal/templates/users/login.html:22
 msgid "Customer Portal Access"
@@ -6920,8 +6922,9 @@ msgid "Create Account"
 msgstr "Creați cont"
 
 #: services/portal/templates/users/register.html:18
-msgid "Create Your PragmaticHost Account"
-msgstr "Creați-vă contul PragmaticHost"
+#, python-format
+msgid "Create your %(brand)s account"
+msgstr "Creați-vă contul %(brand)s"
 
 #: services/portal/templates/users/register.html:21
 msgid "Start your hosting journey with Romanian compliance built-in"

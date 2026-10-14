@@ -209,10 +209,14 @@ LOCALE_PATHS = [
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [
+STATICFILES_DIRS: list[Path | tuple[str, Path]] = [
     BASE_DIR / "static",  # Service-specific static files (highest priority)
-    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components and the default brand pack
 ]
+# A deployment's brand folder (logo.svg, favicon.svg, brand.css) is served as static/brand/ ahead of
+# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0058).
+if BRAND_DIR := os.environ.get("BRAND_DIR", "").strip():
+    STATICFILES_DIRS.insert(0, ("brand", Path(BRAND_DIR)))
 
 # Plain names locally; prod and staging switch staticfiles to the manifest storage, which
 # content-hashes names so the year-long immutable cache on /static/ never serves stale files.

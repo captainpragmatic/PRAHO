@@ -949,6 +949,8 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `COMPANY_NAME`, `COMPANY_CUI` | The seller on every invoice; production refuses to start without them | `Example Hosting SRL`, `RO12345674` |
+| `BRAND_DIR` | Optional folder with `logo.svg`, `favicon.svg`, `brand.css` replacing PRAHO's marks (ADR-0058) | `/opt/praho/brand` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@example.com` |
 
 ### Docker Deployment (Compose)
@@ -964,9 +966,14 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 | `PLATFORM_API_SECRET` | Yes | Portal ↔ Platform HMAC (same value as `HMAC_SECRET`) | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Yes | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `PORTAL_DJANGO_SECRET_KEY` | portal-only | The portal's own Django key (single-server uses it when set, else `DJANGO_SECRET_KEY`) | `openssl rand -base64 50` |
-| `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
+| `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY`, `COMPANY_NAME`, `COMPANY_CUI` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
+| `BRAND_DIR` | No | Host folder mounted read-only at `/app/brand` for the platform and portal (`deploy/brand/`, empty, when unset) | `/srv/praho-brand` |
 | `ACME_EMAIL` | Yes | Let's Encrypt email | `admin@example.com` |
 | `VERSION` | No | Image tag (default `latest`) | `v1.2.3` |
+
+### Brand folder
+
+`BRAND_DIR` names a folder holding any of `logo.svg`, `favicon.svg` and `brand.css`; each file present replaces PRAHO's own (ADR-0058). Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
 
 ### Security Variables
 

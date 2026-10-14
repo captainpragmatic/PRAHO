@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load i18n static ui_components formatting %}
 
-{% block title %}{% trans "Checkout" %}{% endblock %}
+{% block title %}{% trans "Checkout" %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">

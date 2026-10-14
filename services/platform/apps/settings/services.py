@@ -981,6 +981,16 @@ def get_default_from_email() -> str:
     return str(stored)
 
 
+def get_brand_name() -> str:
+    """The name customers see (portal, emails, authenticator apps); PRAHO's own until a deployment sets one."""
+    return str(SettingsService.get_setting("company.brand_name") or CATALOG_BY_KEY["company.brand_name"].default)
+
+
+def get_support_email() -> str:
+    """The support address customers are told to write to."""
+    return str(SettingsService.get_setting("company.email_support") or "")
+
+
 def get_company_legal_name() -> str:
     """The operator's public legal name: staff's own, else the seller name invoices are issued under."""
     stored = SettingsService.get_stored_setting("company.legal_name")

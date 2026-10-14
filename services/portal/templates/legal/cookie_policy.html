@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load i18n ui_components %}
 
-{% block title %}{% trans 'Cookie Policy' %} - PragmaticHost{% endblock %}
+{% block title %}{% trans 'Cookie Policy' %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
@@ -73,25 +73,25 @@
                 <td class="py-2 pr-4 font-mono text-xs">csrftoken</td>
                 <td class="py-2 pr-4">{% trans 'Cross-site request forgery protection' %}</td>
                 <td class="py-2 pr-4">{% trans '1 year' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
               <tr class="border-b border-slate-700/50">
                 <td class="py-2 pr-4 font-mono text-xs">sessionid</td>
                 <td class="py-2 pr-4">{% trans 'Maintains your login session' %}</td>
                 <td class="py-2 pr-4">{% trans '2 weeks' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
               <tr class="border-b border-slate-700/50">
                 <td class="py-2 pr-4 font-mono text-xs">cookie_consent</td>
                 <td class="py-2 pr-4">{% trans 'Stores your cookie preference choices' %}</td>
                 <td class="py-2 pr-4">{% trans '1 year' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
               <tr>
                 <td class="py-2 pr-4 font-mono text-xs">cookie_consent_id</td>
                 <td class="py-2 pr-4">{% trans 'Anonymous consent tracking identifier' %}</td>
                 <td class="py-2 pr-4">{% trans '1 year' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
             </tbody>
           </table>
@@ -133,13 +133,13 @@
                 <td class="py-2 pr-4 font-mono text-xs">django_language</td>
                 <td class="py-2 pr-4">{% trans 'Remembers your preferred language (RO/EN)' %}</td>
                 <td class="py-2 pr-4">{% trans '1 year' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
               <tr>
                 <td class="py-2 pr-4 font-mono text-xs">user_preferences</td>
                 <td class="py-2 pr-4">{% trans 'Display preferences (timezone, theme)' %}</td>
                 <td class="py-2 pr-4">{% trans '1 year' %}</td>
-                <td class="py-2">PragmaticHost</td>
+                <td class="py-2">{{ company.brand_name }}</td>
               </tr>
             </tbody>
           </table>
@@ -181,7 +181,7 @@
                 <td class="py-2 pr-4 font-mono text-xs">_pk_id, _pk_ses</td>
                 <td class="py-2 pr-4">{% trans 'Privacy-focused website analytics (self-hosted)' %}</td>
                 <td class="py-2 pr-4">{% trans '13 months / 30 min' %}</td>
-                <td class="py-2">PragmaticHost (Matomo)</td>
+                <td class="py-2">{{ company.brand_name }} (Matomo)</td>
               </tr>
             </tbody>
           </table>

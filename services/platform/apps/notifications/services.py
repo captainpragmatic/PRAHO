@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -44,7 +45,7 @@ from apps.notifications.models import (
     validate_email_subject,
     validate_template_content,
 )
-from apps.settings.services import SettingsService, get_default_from_email
+from apps.settings.services import SettingsService, get_brand_name, get_default_from_email, get_support_email
 
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
@@ -141,8 +142,8 @@ def validate_template_context(context: dict[str, Any]) -> dict[str, Any]:
     return sanitized_context
 
 
-def render_template_safely(template_content: str, context: dict[str, Any]) -> str:
-    """Render template with security validation."""
+def render_template_safely(template_content: str, context: dict[str, Any], *, autoescape: bool = True) -> str:
+    """Render template with security validation; plain-text parts (subjects, text bodies) pass autoescape=False."""
     # Validate template content first
     validate_template_content(template_content)
 
@@ -158,7 +159,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     rendered: str
     try:
         template = Template(template_content)
-        rendered = template.render(Context(sanitized_context))
+        rendered = template.render(Context(sanitized_context, autoescape=autoescape))
     except Exception as e:
         logger.error(f"Template rendering error: {e}")
         # Fallback to simple string replacement
@@ -975,16 +976,22 @@ class EmailService:
                     "company_name": settings.COMPANY_NAME,
                     "company_email": settings.COMPANY_EMAIL,
                     "company_website": settings.COMPANY_WEBSITE,
+                    "brand_name": get_brand_name(),
+                    "support_email": get_support_email(),
                     "current_year": timezone.now().year,
                     "unsubscribe_url": cls._generate_unsubscribe_url(recipient, template_key),
                 }
             )
 
             # Render subject and body
-            subject = render_template_safely(template.subject, safe_context)
+            subject = render_template_safely(template.subject, safe_context, autoescape=False)
             body_html = render_template_safely(template.body_html, safe_context)
             body_text = template.body_text
-            body_text = render_template_safely(body_text, safe_context) if body_text else strip_tags(body_html)
+            body_text = (
+                render_template_safely(body_text, safe_context, autoescape=False)
+                if body_text
+                else html.unescape(strip_tags(body_html))
+            )
 
             # Send the email
             return cls.send_email(

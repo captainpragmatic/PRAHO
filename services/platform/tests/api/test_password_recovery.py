@@ -111,7 +111,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertEqual(message.to, [self.user.email])
-        self.assertEqual(message.subject, "Password Reset Request - PRAHO Platform")
+        self.assertEqual(message.subject, "Password Reset Request - PRAHO")  # The default brand name
         self.assertIn(f"https://customers.example.test/password-reset/confirm/{self.uid}/", message.body)
         self.assertNotIn("localhost:8700", message.body)
         self.assertIn("can only be used once", message.body)

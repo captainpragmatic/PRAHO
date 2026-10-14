@@ -135,7 +135,7 @@ class StornoCommunicationTests(StornoTestCase):
 
         number = self.process(self.refund(original, payment, 1000)).credit_note.number
 
-        self.assertEqual(mail.outbox[0].subject, f"Factură storno {number} - PragmaticHost")
+        self.assertEqual(mail.outbox[0].subject, f"Factură storno {number} - PRAHO")
 
     def test_a_failed_send_stays_visible_and_the_sweep_sends_it_once(self) -> None:
         original = self.original()

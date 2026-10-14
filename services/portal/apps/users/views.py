@@ -164,7 +164,6 @@ def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_emai
             "customer_email": customer_email,
             "customer_id": customer_id,
             "page_title": _("Set Up Authenticator App"),
-            "brand_name": "PRAHO Portal",
         }
         return render(request, "users/mfa_setup_totp.html", context)
 
@@ -412,7 +411,6 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     context = {
         "form": form,
         "page_title": _("Customer Login"),
-        "brand_name": "PRAHO Portal",
         **degraded_context,
     }
 
@@ -519,7 +517,6 @@ def register_view(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "page_title": _("Customer Registration"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/register.html", context)
@@ -681,7 +678,6 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         "customer_email": customer_email,
         "customer_id": customer_id,
         "page_title": _("Account Settings"),
-        "brand_name": "PRAHO Portal",
         "user_memberships": request.session.get("user_memberships", []),
         "selected_customer_id": request.session.get("selected_customer_id", customer_id),
         "selected_customer_name": request.session.get("selected_customer_name", ""),
@@ -1036,7 +1032,6 @@ def privacy_dashboard_view(request: HttpRequest) -> HttpResponse:
         "customer_email": customer_email,
         "customer_id": customer_id,
         "page_title": _("Privacy Dashboard"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/privacy_dashboard.html", context)
@@ -1102,7 +1097,6 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
         "customer_id": customer_id,
         "exports": exports,
         "page_title": _("Export My Data"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/data_export.html", context)
@@ -1181,7 +1175,6 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
         "consent_history": consent_history,
         "cookie_consent_history": cookie_consent_history,
         "page_title": _("Consent History"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/consent_history.html", context)
@@ -1218,7 +1211,6 @@ def mfa_management_view(request: HttpRequest) -> HttpResponse:
         "customer_id": customer_id,
         "mfa_enabled": mfa_enabled,
         "page_title": _("Multi-Factor Authentication"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/mfa_management.html", context)
@@ -1435,7 +1427,6 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
         "company_data": company_data,
         "customer_email": request.session.get("email"),
         "page_title": _("Company Profile"),
-        "brand_name": "PRAHO Portal",
         "selected_customer_id": customer_id,
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
@@ -1581,7 +1572,6 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: C9
         "form": form,
         "customer_email": request.session.get("email"),
         "page_title": _("Edit Company Profile"),
-        "brand_name": "PRAHO Portal",
         "selected_customer_id": customer_id,
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
@@ -1812,7 +1802,6 @@ def create_company_view(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "page_title": _("Create Company"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/create_company.html", context)

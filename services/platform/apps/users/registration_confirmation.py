@@ -26,7 +26,7 @@ from apps.common.encryption import DecryptionError
 from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import SecureInputValidator, log_security_event
-from apps.settings.services import get_default_from_email
+from apps.settings.services import get_brand_name, get_default_from_email
 
 from .models import User
 from .pending_registration import CLEANUP_MARGIN, CONFIRMATION_LINK_LIFETIME, PendingRegistration
@@ -105,15 +105,17 @@ def deliver(registration_id: str) -> dict[str, Any]:
     existing_account = User.objects.filter(email__iexact=row.email).exists()
     if existing_account:
         template, context = "existing_account", {"login_url": f"{base}/login/", "reset_url": f"{base}/password-reset/"}
-        subject = gettext_noop("You already have a PRAHO account")
+        subject = gettext_noop("You already have a %(brand)s account")
     else:
         template, context = "confirm", {"confirm_url": f"{base}/register/confirm/{row.pk}/{row.token()}/"}
-        subject = gettext_noop("Confirm your PRAHO account")
+        subject = gettext_noop("Confirm your %(brand)s account")
+    brand = get_brand_name()
+    context["brand_name"] = brand
 
     with translation.override(row.language):
         text_message = render_to_string(f"users/emails/registration_{template}.txt", context)
         html_message = render_to_string(f"users/emails/registration_{template}.html", context)
-        subject = gettext(subject)
+        subject = gettext(subject) % {"brand": brand}
 
     if existing_account:
         _send(row.email, subject, text_message, html_message)

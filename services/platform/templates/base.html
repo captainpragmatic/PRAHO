@@ -15,13 +15,11 @@
   <!-- Romanian Branding -->
   <meta name="description" content="{% trans 'PRAHO Platform System for Romanian Hosting Providers' %}">
 
-  <!-- Favicon -->
-  {# nosemgrep: missing-integrity — inline data: URL, not external resource #}
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3e%3crect width='100' height='100' fill='%233b82f6'/%3e%3ctext y='75' font-size='80' fill='white'%3eP%3c/text%3e%3c/svg%3e">
-
   <!-- Scripts & Styles - Local Assets -->
   {% load static %}
+  <link rel="icon" type="image/svg+xml" href="{% static 'brand/favicon.svg' %}">
   <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
+  <link rel="stylesheet" href="{% static 'brand/brand.css' %}">
   <script src="{% static 'js/htmx.min.js' %}"></script>
   <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
   <script defer src="{% static 'js/alpine-components.js' %}"></script>
@@ -93,7 +91,7 @@
             <!-- Logo -->
             <div class="w-52 flex-shrink-0">
               <a href="{% url 'dashboard' %}" class="flex items-center hover:opacity-80 transition-opacity">
-                <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8 mr-3">
+                {% include "components/brand_logo.html" with css_class="h-8 w-8 mr-3" %}
                 <h1 class="text-xl font-bold text-blue-400 whitespace-nowrap">
                   PRAHO Platform
                 </h1>
@@ -290,7 +288,7 @@
 
         <div class="text-center text-slate-400 text-sm">
           <p>
-            © {{ current_year }} PRAHO Platform - {% trans 'PRAHO Really Automates Hosting Operations' %}
+            © {% now "Y" %} PRAHO Platform - {% trans 'PRAHO Really Automates Hosting Operations' %}
           </p>
           <p class="mt-2 text-xs">
             <span class="text-blue-400">Django 5.2</span> |

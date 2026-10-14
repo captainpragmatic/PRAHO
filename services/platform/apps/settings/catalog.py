@@ -899,6 +899,16 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("Receives large-refund alerts. Alerts are suppressed while this is empty."),
     ),
     SettingDef(
+        key="company.brand_name",
+        data_type="string",
+        default="PRAHO",
+        group="company",
+        section=_("Identity"),
+        label=_("Brand name"),
+        help_text=_("The name customers see in the portal, in emails and in their authenticator app."),
+        validation={"pattern": r"\S(?:[^\r\n]{0,62}\S)?"},
+    ),
+    SettingDef(
         key="company.legal_name",
         deployment_fallback=True,
         django_setting="COMPANY_NAME",

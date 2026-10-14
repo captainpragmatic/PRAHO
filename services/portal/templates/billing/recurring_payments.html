@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans "Automatic payments" %} - PRAHO{% endblock %}
+{% block title %}{% trans "Automatic payments" %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -10,7 +10,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-white">{% trans "Automatic payments" %}</h1>
     <p class="mt-2 text-slate-300">
-      {% trans "Authorize a card once, then choose which subscriptions PRAHO may collect automatically." %}
+      {% trans "Authorize a card once, then choose which subscriptions are collected automatically." %}
     </p>
   </div>
 

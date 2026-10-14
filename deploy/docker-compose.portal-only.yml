@@ -53,6 +53,7 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3
+      - BRAND_DIR=/app/brand
       # Server settings (services/portal/gunicorn.conf.py); empty means its default.
       - PORTAL_GUNICORN_WORKER_CLASS=${PORTAL_GUNICORN_WORKER_CLASS:-}
       - PORTAL_GUNICORN_WORKERS=${PORTAL_GUNICORN_WORKERS:-}
@@ -61,6 +62,7 @@ services:
       - portal_static:/app/staticfiles
       - portal_logs:/app/logs
       - portal_sessions:/app/data
+      - ${BRAND_DIR:-./brand}:/app/brand:ro  # brand folder (ADR-0058); the empty deploy/brand keeps PRAHO's mark
     restart: unless-stopped
     deploy:
       resources:

@@ -55,6 +55,11 @@ if _env_path is not None:
 
 from .base import *  # noqa: E402, F403  # After django.setup()
 
+# Own copies of the inherited lists: the in-place edits below must never reach base, which other
+# settings modules (and tests that import several of them) share.
+MIDDLEWARE = list(MIDDLEWARE)
+INSTALLED_APPS = list(INSTALLED_APPS)
+
 # ===============================================================================
 # DEVELOPMENT FLAGS
 # ===============================================================================

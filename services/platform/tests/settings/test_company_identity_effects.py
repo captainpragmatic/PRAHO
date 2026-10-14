@@ -175,6 +175,34 @@ class LegalProseIdentityEffectTests(TestCase):
                 self.assertNotIn("PragmaticHost SRL", text)
 
 
+class BrandNameEffectTests(TestCase):
+    """The brand name customers see: in their authenticator app as well as in emails and the portal."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_a_brand_is_one_non_blank_line(self) -> None:
+        for bad in ("", "   ", "Two\nLines", "x" * 65):
+            with self.subTest(value=bad):
+                self.assertFalse(SettingsService.update_setting("company.brand_name", bad).is_ok())
+        self.assertTrue(SettingsService.update_setting("company.brand_name", "Smith & Co Hosting").is_ok())
+
+    def test_brand_name_names_the_customers_authenticator_entry(self) -> None:
+        from urllib.parse import parse_qs, urlsplit  # noqa: PLC0415
+
+        from django.contrib.auth import get_user_model  # noqa: PLC0415
+
+        from apps.api.users.serializers import MFASetupSerializer  # noqa: PLC0415
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = SettingsService.update_setting("company.brand_name", "Acme Hosting")
+        self.assertTrue(result.is_ok(), result)
+        user = get_user_model().objects.create_user(email="brand-2fa@example.test", password="x-Strong-Pass-123")
+        uri = MFASetupSerializer(context={"user": user}).create({})["provisioning_uri"]
+        self.assertEqual(parse_qs(urlsplit(uri).query)["issuer"], ["Acme Hosting"])
+
+
 class CompanyLegalNameResolverTests(TestCase):
     """The public legal name: a stored value wins; unset, it is the seller name invoices carry."""
 

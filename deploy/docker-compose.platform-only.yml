@@ -88,6 +88,7 @@ services:
       - STATIC_ROOT=/app/staticfiles
       # The media_files volume: uploads and generated documents outlive the container, and backups read it.
       - MEDIA_ROOT=/app/media
+      - BRAND_DIR=/app/brand
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
@@ -108,6 +109,7 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
+      - ${BRAND_DIR:-./brand}:/app/brand:ro  # brand folder (ADR-0058); the empty deploy/brand keeps PRAHO's mark
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load localisation_tags i18n ui_components formatting %}
 
-{% block title %}{{ service.service_name }} - {% trans "Service Details" %}{% endblock %}
+{% block title %}{{ service.service_name }} - {% trans "Service Details" %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

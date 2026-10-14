@@ -132,6 +132,7 @@ class LocalisationHMACIntegrationTests(HMACTestMixin, TestCase):
             "email_contact": "contact-contract@example.test",
             "address": "Str. Contract 1, București",
             "registration_number": "J40/1234/2020",
+            "brand_name": "Contract Brand",
         }
         with self.captureOnCommitCallbacks(execute=True):
             for field, value in expected.items():

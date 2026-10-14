@@ -2,7 +2,7 @@
 {% load localisation_tags i18n %}
 {% load ui_components formatting %}
 
-{% block title %}{% trans 'Dashboard' %} - PRAHO Portal{% endblock %}
+{% block title %}{% trans 'Dashboard' %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <!-- Dashboard content with stable dimensions to prevent layout shift -->

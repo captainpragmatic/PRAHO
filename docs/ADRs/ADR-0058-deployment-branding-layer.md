@@ -1,0 +1,46 @@
+# ADR-0058: Deployment Layer — Brand, Company Identity and Fiscal Identity
+
+- Status: Accepted
+- Date: 2026-10-14
+- Authors: PRAHO maintainers
+- Related: ADR-0015 (configuration resolution order), ADR-0042 (settings catalog and consumer contract), ADR-0047 (jurisdiction tax policy), ADR-0057 (media storage)
+
+## Context
+
+PRAHO is open source and runs under other operators' names. The repository carried one deployment's identity in its defaults, templates, seeded emails, fixtures and documentation, so a second operator could only remove it by forking. Three different things were mixed together:
+- **What customers see**: a name, a logo, a favicon, colours.
+- **Who the operator is publicly**: the legal name and contact addresses on legal pages and in the portal.
+- **Who issues the documents**: the seller name and tax ID on invoices, PDFs, e-Factura and VIES requests.
+
+## Decision
+
+The repository holds no deployment identity. A deployment is its environment, its settings and a brand folder, and a test fails if a tracked non-test file names an operator.
+
+### Brand: what customers see
+
+- **`company.brand_name`** (default `PRAHO`) is the name in the portal header, titles and footer, in customer emails and in authenticator apps. It reaches the portal through the existing public identity payload, so the portal has no setting of its own. Read it with `get_brand_name()`.
+- **The brand folder** holds `logo.svg`, `favicon.svg` and `brand.css`. PRAHO's defaults live in `shared/ui/static/brand/`. `BRAND_DIR` names a deployment folder, which both services put first on `STATICFILES_DIRS` under the `brand/` prefix, so each file it holds replaces PRAHO's and `collectstatic` content-hashes it like any static file. `brand.css` loads after the main stylesheet and may override the Tailwind theme variables.
+- **Static, not uploaded.** The marks are deployment files, reviewed like code. An uploaded SVG served from PRAHO's own origin can carry script, and media is private by design (ADR-0057), so logos are not settings.
+- **Staff screens** keep "PRAHO Platform": that is the product's name for the people who run it.
+
+### Company identity: who the operator is publicly
+
+The `company.*` catalog settings (legal name, contact and privacy addresses, DPO, registration number, address) are what legal pages and the portal show. They ship as obvious placeholders (`support@example.com`), and outside DEBUG `migrate` warns (`settings.W001`) while the example contacts are still configured; a warning, because the deploy that seeds them must still finish so staff can change them. The legal name inherits the seller name until staff set their own (`get_company_legal_name()`), so an operator is named once.
+
+### Fiscal identity: who issues the documents
+
+`COMPANY_NAME` and `COMPANY_CUI` come from the environment, default to blank, and production refuses to start without them (settings, `deploy.sh` and the Ansible preflight). They name the seller on invoices and PDFs, the e-Factura supplier tax ID falls back to `COMPANY_CUI`, and VIES checks run under that requester (anonymously when it is unset). Environment, not settings: the seller on a fiscal document is deployment configuration that staff accounts must not be able to change.
+
+### Why not the alternatives
+
+| Option | Why not |
+|---|---|
+| A `brand.*` settings group with uploaded logos | Needs a public media view on both services, SVG sanitising and an exception to ADR-0057, for files that change once per deployment. |
+| Brand values in the environment | Staff could not rename the brand without a deploy, and the portal would need its own copy of every value. |
+| One identity source for everything | The seller on fiscal documents must not be staff-editable, while the public contacts must be; they are deliberately two layers, joined only by the legal-name fallback. |
+
+## Consequences
+
+- A deployment sets `COMPANY_NAME`, `COMPANY_CUI`, its contact settings, `company.brand_name` and, optionally, `BRAND_DIR`. Nothing in the repository changes.
+- Seeded email templates take the brand and the support address at send time (`{{ brand_name }}`, `{{ support_email }}`), so a brand change needs no re-seed.
+- Compose mounts the brand folder read-only at `/app/brand` (`deploy/brand/` when `BRAND_DIR` is unset); native installs read `BRAND_DIR` from the operator env file.

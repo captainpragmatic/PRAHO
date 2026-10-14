@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A deployment brands PRAHO without forking it** (ADR-0058).
+  - **Name.** `company.brand_name` (default "PRAHO") names the portal's header, page titles and footer, customer emails and authenticator-app entries.
+  - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicon and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.
+  - **Emails.** Seeded email templates take the brand and the support address when they are sent, so changing either needs no re-seed. Re-running `setup_email_templates` still adds no duplicates.
+  - The portal footer shows the brand and the legal name instead of the tech stack and a stale version number.
+  - **Card payments.** Customers' card statements show the Stripe account's own descriptor instead of a hardcoded "PRAHO". The automatic-payment authorization names "the seller named on my invoices"; its terms version is now `2026-10-14`, so new authorizations record the new wording.
+
 - **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
 
 ### Changed
@@ -21,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An ampersand in a name reaches email subjects and plain-text emails as `&`,** not `&amp;`. HTML bodies stay escaped.
+- **Email subjects show the invoice, order and ticket number.** Eight seeded subjects wrote `#{invoice_number}` with single braces, which the template engine prints as text.
+- **The staff footer shows the year on every page**, not only the dashboard.
 - **Links in customer emails open the right pages.** Invoice and payment-reminder links pointed at the marketing website and used the invoice's database id; they now open the invoice on the portal by its number. Unsubscribe links open the platform's public unsubscribe page.
 - **VAT numbers are still checked with VIES when the seller's own tax ID is not configured.** The check stopped silently; it now asks VIES anonymously, and never sends a placeholder as the requester.
 - **Staff can add, edit and delete items on the order edit page.**

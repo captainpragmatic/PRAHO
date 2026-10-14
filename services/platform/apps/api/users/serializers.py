@@ -25,7 +25,8 @@ from rest_framework import serializers
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
-from apps.users.mfa import MFAService
+from apps.settings.services import get_brand_name
+from apps.users.mfa import MFAService, TOTPService
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -97,9 +98,8 @@ class MFASetupSerializer(serializers.Serializer):
         user.two_factor_secret = secret
         user.save(update_fields=["_two_factor_secret"])
 
-        # Generate QR code
-        totp = pyotp.TOTP(secret)
-        provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="PRAHO Platform")
+        # Generate QR code: customers see the brand in their authenticator app; staff see "PRAHO Platform"
+        provisioning_uri = TOTPService.generate_qr_code_url(user.email, secret, issuer=get_brand_name())
 
         # Create QR code as SVG
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
