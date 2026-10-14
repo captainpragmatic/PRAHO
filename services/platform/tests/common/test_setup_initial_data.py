@@ -21,6 +21,7 @@ class SetupInitialDataTestCase(TestCase):
 
         called_commands = [c[0][0] for c in mock_call.call_args_list]
         self.assertIn("setup_default_settings", called_commands)
+        self.assertIn("ensure_home_currency", called_commands)
         self.assertIn("setup_scheduled_tasks", called_commands)
         self.assertIn("setup_email_templates", called_commands)
         self.assertIn("ensure_superuser", called_commands)

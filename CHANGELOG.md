@@ -32,12 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Invoice PDFs label each tax ID by its party's country:** CUI/CIF and Nr. Reg. Com. for a Romanian party, "VAT ID" and "Company reg. no." for anyone else. A blank seller tax ID is no longer printed as an empty line.
   - **A customer with no billing country is placed in the operator's country**, not in Romania, for documents, order VAT and VIES. The default country for new customers also follows the operator until staff set one.
   - **A `.ro` domain skips ROTLD for a non-Romanian operator** and goes to the next registrar assigned to the TLD.
+- **The home currency follows the operator** (ADR-0041 addendum). An operator keeps its accounts in its country's national currency, derived from `COMPANY_COUNTRY_CODE`: EUR across the euro area, RON in Romania. No new setting.
+  - **Invoices freeze their rate into that currency and record which one it was.** `exchange_to_ron` is now `exchange_rate_to_home`, with `home_currency_code` beside it. Romanian e-Factura, D390 and SmartBill accept only a rate to RON. `migrate` refuses (`billing.E003`) a country change that would reinterpret rates already issued.
+  - **New sales default to the home currency** when PRAHO can sell in it, otherwise to the euro, and so does a new customer's preferred currency. The single legacy review, refund and high-value limits, the legacy price columns, a credit limit and the legacy bank account are in that default currency, so a Polish operator's legacy limits are in euro. Their labels no longer say RON.
+  - `setup_initial_data` creates the home currency's row (`ensure_home_currency`), so an operator outside the euro area can record its rates. The card payment form names the operator's own country.
+  - `BILLING_DEFAULT_CURRENCY` is removed; nothing read it.
 
 ### Fixed
 
 - **An ampersand in a name reaches email subjects and plain-text emails as `&`,** not `&amp;`. HTML bodies stay escaped.
 - **Email subjects show the invoice, order and ticket number.** Eight seeded subjects wrote `#{invoice_number}` with single braces, which the template engine prints as text.
 - **The staff footer shows the year on every page**, not only the dashboard.
+- **Invoice PDFs in a foreign currency show their exchange rate.** The line read a value nothing ever stored, so it never appeared.
+- **Registering a payment confirms it in the invoice's currency**, not always in RON.
 - **Links in customer emails open the right pages.** Invoice and payment-reminder links pointed at the marketing website and used the invoice's database id; they now open the invoice on the portal by its number. Unsubscribe links open the platform's public unsubscribe page.
 - **VAT numbers are still checked with VIES when the seller's own tax ID is not configured.** The check stopped silently; it now asks VIES anonymously, and never sends a placeholder as the requester.
 - **Staff can add, edit and delete items on the order edit page.**

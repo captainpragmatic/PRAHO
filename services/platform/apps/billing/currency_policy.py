@@ -2,7 +2,8 @@
 
 Settings writers and new-sale transactions lock the same setting row. Readers use
 the database directly so a cached currency can never be paired with a newer revision.
-RON remains the upgrade default because the old environment option was not wired.
+Without a row, new sales default to the operator's home currency when PRAHO can sell in
+it, else to the euro (``default_selling_currency()``); settings migration 0002 seeds the same.
 """
 
 from __future__ import annotations
@@ -16,7 +17,12 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from .currency_service import CurrencyNotIssuableError, assert_currency_issuable, normalize_currency_code
+from .currency_service import (
+    CurrencyNotIssuableError,
+    assert_currency_issuable,
+    default_selling_currency,
+    normalize_currency_code,
+)
 
 if TYPE_CHECKING:
     from apps.settings.models import SystemSetting
@@ -45,11 +51,12 @@ def get_selling_currency_policy(*, lock: bool = False) -> SellingCurrencyPolicy:
     if lock:
         if not connection.in_atomic_block:
             raise RuntimeError("A selling-currency lock requires an enclosing transaction")
+        default = default_selling_currency()
         rows.get_or_create(
             key=SELLING_CURRENCY_KEY,
             defaults={
-                "value": "RON",
-                "default_value": "RON",
+                "value": default,
+                "default_value": default,
                 "name": "Selling currency",
                 "description": "Currency used for new sales; existing financial records retain their currency.",
                 "category": "billing",
@@ -59,7 +66,7 @@ def get_selling_currency_policy(*, lock: bool = False) -> SellingCurrencyPolicy:
         rows = rows.select_for_update(of=("self",))
     setting = rows.filter(key=SELLING_CURRENCY_KEY).first()
     if setting is None:
-        return SellingCurrencyPolicy(currency_code="RON", revision=1)
+        return SellingCurrencyPolicy(currency_code=default_selling_currency(), revision=1)
     return SellingCurrencyPolicy(currency_code=normalize_currency_code(setting.value), revision=setting.revision)
 
 
@@ -195,8 +202,8 @@ def validate_currency_switch(currency_code: str) -> None:
 def prepare_currency_setting_save(setting: SystemSetting) -> None:
     """Guard direct model/admin/setup writes as well as SettingsService writes.
 
-    The caller holds an atomic block through save. The migration supplies the row;
-    creating the historical RON baseline also supports an empty development database.
+    The caller holds an atomic block through save. The migration supplies the row; without
+    one, the baseline is the same default the migration seeds, so an empty database works too.
     """
     from apps.settings.models import SystemSetting  # noqa: PLC0415  # ADR-0007
 
@@ -205,7 +212,7 @@ def prepare_currency_setting_save(setting: SystemSetting) -> None:
     except (ValueError, AttributeError) as exc:
         raise ValidationError({"value": str(exc)}) from exc
     previous = SystemSetting.objects.select_for_update(of=("self",)).filter(key=SELLING_CURRENCY_KEY).first()
-    old_code = previous.value if previous is not None else "RON"
+    old_code = previous.value if previous is not None else default_selling_currency()
     revision = previous.revision if previous is not None else 1
     if code != old_code:
         blockers = currency_switch_blockers(code)

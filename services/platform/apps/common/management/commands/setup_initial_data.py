@@ -3,8 +3,8 @@ Unified initial data seeding for all PRAHO deployment modes.
 
 Orchestrates existing setup commands in two tiers:
 
-- **Core** (always): settings categories, default settings, scheduled tasks,
-  email templates, superuser from env vars.
+- **Core** (always): settings categories, default settings, the home currency,
+  scheduled tasks, email templates, superuser from env vars.
 - **Business** (prod/staging auto-detect): tax rules, dunning policies.
 
 Auto-detects the environment from DJANGO_SETTINGS_MODULE:
@@ -23,6 +23,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 CORE_COMMANDS: list[tuple[str, str]] = [
     ("setup_default_settings", "Settings catalog sync"),
+    ("ensure_home_currency", "Home currency"),
     ("setup_scheduled_tasks", "Scheduled background tasks"),
     ("setup_email_templates", "Email templates"),
     ("ensure_superuser", "Superuser account"),

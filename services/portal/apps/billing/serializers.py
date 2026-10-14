@@ -60,7 +60,6 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
         number=data["number"],
         status=data["status"],
         currency=cast(Currency, currency),
-        exchange_to_ron=None,  # Not provided by list API
         subtotal_cents=data.get("subtotal_cents", 0),  # Not in list API
         tax_cents=data.get("tax_cents", 0),  # Not in list API
         total_cents=data["total_cents"],

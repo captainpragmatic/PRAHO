@@ -472,10 +472,7 @@ class SecureUserRegistrationService:
                 # Step 4: Create billing profile (secure defaults)
                 CustomerBillingProfile.objects.update_or_create(
                     customer=customer,
-                    defaults={
-                        "payment_terms": 30,  # Default 30 days
-                        "preferred_currency": "RON",  # Romanian Lei
-                    },
+                    defaults={"payment_terms": 30},  # The preferred currency takes the model's default
                 )
 
                 # Step 5: Create billing address with validated data

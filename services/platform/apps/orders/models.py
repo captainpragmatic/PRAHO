@@ -119,9 +119,6 @@ class Order(ConcurrentTransitionMixin, models.Model):
 
     # Financial information
     currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, help_text=_("Order currency"))
-    exchange_to_ron = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True, help_text=_("Exchange rate to RON at time of order")
-    )
 
     # Amounts in cents for precision
     subtotal_cents = models.BigIntegerField(default=0, help_text=_("Subtotal before tax in cents"))

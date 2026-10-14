@@ -236,6 +236,13 @@ def csp_nonce(request: HttpRequest) -> dict[str, str]:
     return {"csp_nonce": getattr(request, "csp_nonce", "")}
 
 
+def default_currency(request: HttpRequest) -> dict[str, str]:
+    """The default selling currency, which legacy single-currency prices on staff pages are in."""
+    from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
+
+    return {"default_currency": default_selling_currency()}
+
+
 def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:
     """GDPR compliance context"""
     # Check if session exists (for test environments)

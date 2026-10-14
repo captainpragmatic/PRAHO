@@ -1343,22 +1343,28 @@ class OrderPaymentConfirmationService:
             return Err(f"Failed to confirm order: {e}")
 
     @staticmethod
-    def _get_review_threshold(currency_code: str = "RON") -> int:
-        """Use a limit in the order's currency; unconfigured foreign orders need review."""
-        _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
-        _MAX_THRESHOLD = 100_000_000  # 1,000,000 RON — upper bound guard  # noqa: N806
-        _MIN_SAFE_THRESHOLD = 1000  # 10 RON — below this is likely misconfiguration  # noqa: N806
+    def _get_review_threshold(currency_code: str | None = None) -> int:
+        """Use a limit in the order's currency; unconfigured foreign orders need review.
+
+        The single legacy limit (orders.review_threshold_cents) is in the default selling currency.
+        """
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415  # ADR-0007
+
+        _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 in the default currency  # noqa: N806
+        _MAX_THRESHOLD = 100_000_000  # 1,000,000 — upper bound guard  # noqa: N806
+        _MIN_SAFE_THRESHOLD = 1000  # 10 — below this is likely misconfiguration  # noqa: N806
+        currency_code = currency_code or default_selling_currency()
         try:
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
-            configured = SettingsService.get_setting("orders.review_thresholds_cents", {})
-            threshold = configured.get(currency_code) if isinstance(configured, dict) else None
-            if type(threshold) is not int:
-                threshold = (
-                    SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
-                    if currency_code == "RON"
-                    else 0
-                )
+            threshold = get_currency_threshold_cents(
+                "orders.review_thresholds_cents",
+                currency_code,
+                legacy_threshold=SettingsService.get_integer_setting(
+                    "orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD
+                ),
+            )
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
             clamped = max(0, min(threshold, _MAX_THRESHOLD))
             # M1 fix: Warn when threshold is suspiciously low — likely misconfiguration.
@@ -1375,7 +1381,7 @@ class OrderPaymentConfirmationService:
                 _DEFAULT_REVIEW_THRESHOLD,
                 e,
             )
-            return _DEFAULT_REVIEW_THRESHOLD if currency_code == "RON" else 0
+            return _DEFAULT_REVIEW_THRESHOLD if currency_code == default_selling_currency() else 0
 
 
 # ===============================================================================

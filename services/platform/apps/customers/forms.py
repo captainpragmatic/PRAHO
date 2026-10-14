@@ -17,6 +17,7 @@ from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.cui_validator import normalize_cui_digits
 from apps.common.localisation import country_name
 from apps.common.localisation_forms import CountryDefaultsMixin
@@ -672,7 +673,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         max_digits=10,
         decimal_places=2,
         initial=0,
-        label=_("Credit Limit (RON)"),
+        label=_("Credit Limit"),
         help_text=_("Maximum credit allowed"),
         widget=forms.NumberInput(
             attrs={
@@ -684,7 +685,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
     )
     preferred_currency = forms.ChoiceField(
         choices=CurrencyCode.choices(),
-        initial="RON",
+        initial=default_selling_currency,
         label=_("Preferred Currency"),
         widget=forms.Select(
             attrs={
@@ -790,7 +791,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
                 customer=customer,
                 payment_terms=data["payment_terms"],
                 credit_limit=data["credit_limit"],
-                preferred_currency=data.get("preferred_currency", "RON"),
+                preferred_currency=data["preferred_currency"],
             )
 
             # Create primary address
@@ -984,7 +985,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
         max_digits=10,
         decimal_places=2,
         initial=0,
-        label=_("Credit Limit (RON)"),
+        label=_("Credit Limit"),
         widget=forms.NumberInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
@@ -995,7 +996,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     )
     preferred_currency = forms.ChoiceField(
         choices=CurrencyCode.choices(),
-        initial="RON",
+        initial=default_selling_currency,
         label=_("Preferred Currency"),
         widget=forms.Select(
             attrs={

@@ -516,11 +516,8 @@ def draft_credit_note(
             total_cents=correction.total_cents,
             calculated_at=evidence_at,
         ),
-        # The original's rate, all four fields, so `issue()` consumes it rather than today's rate.
-        exchange_to_ron=original.exchange_to_ron,
-        exchange_rate_as_of=original.exchange_rate_as_of,
-        exchange_rate_source=original.exchange_rate_source,
-        exchange_rate_source_reference=original.exchange_rate_source_reference,
+        # The original's rate, every field, so `issue()` consumes it rather than today's rate.
+        **{field: getattr(original, field) for field in Invoice.FX_SNAPSHOT_FIELDS},
         # A correction inherits the fiscal identity of the document it corrects.
         **{field: getattr(original, field) for field in sorted(Invoice._BILLING_SNAPSHOT_FIELDS)},
         meta={"fiscal_correction_id": str(correction.pk)},

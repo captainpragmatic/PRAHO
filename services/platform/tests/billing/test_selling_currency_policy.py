@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
@@ -76,8 +76,7 @@ class SellingCurrencyPolicyTests(TestCase):
         self.assertIsInstance(result, Ok)
         self.assertEqual((result.unwrap().currency_id, result.unwrap().unit_price_cents), ("EUR", 1100))
 
-    @override_settings(BILLING_DEFAULT_CURRENCY="EUR")
-    def test_upgrade_does_not_activate_previously_ignored_environment_value(self) -> None:
+    def test_a_romanian_operator_sells_in_ron_until_staff_switch(self) -> None:
         self.assertEqual(get_selling_currency_policy().currency_code, "RON")
 
     def test_runtime_switch_changes_only_catalog_currency(self) -> None:

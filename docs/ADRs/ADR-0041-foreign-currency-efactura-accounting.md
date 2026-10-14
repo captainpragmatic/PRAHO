@@ -107,3 +107,25 @@ invoice-snapshot contract.
 - [CIUS-RO BR-RO-030 (OMF 4092/2022)](https://static.anaf.ro/static/10/Anaf/legislatie/OMF_4092_2022.pdf)
 - [Peppol EN16931 BR-53](https://docs.peppol.eu/poacc/billing/3.0/2024-Q2/rules/ubl-tc434/BR-53/)
 - [Peppol UBL-CR-490](https://docs.peppol.eu/poacc/billing/3.0/rules/ubl-tc434/UBL-CR-490/)
+
+## Addendum (2026-10-14): the home currency follows the operator
+
+The snapshot no longer assumes RON. It converts into the operator's home currency: the
+national currency of the EU member state the operator is established in (`home_currency()`,
+derived from `COMPANY_COUNTRY_CODE`), so EUR across the euro area, RON for a Romanian operator.
+No separate setting exists, because an EU operator's accounting currency follows from its
+country, and a setting could only disagree with it. The clock is different: a country does not
+determine one time zone, so `TIME_ZONE` stays an explicit setting.
+
+- `Invoice.exchange_to_ron` is now `exchange_rate_to_home`, and `home_currency_code` records the
+  currency it converts into, stamped on every issued invoice, a home-currency one included.
+  `Invoice.FX_SNAPSHOT_FIELDS` names the five fields that reversals and corrections copy whole.
+- CIUS-RO, D390 and SmartBill read the rate through `Invoice.ron_exchange_rate()`, which returns
+  it only when the snapshot converts into RON. Anything else counts as a missing rate there.
+- The `billing.E003` check, which `migrate` runs, refuses an operator country whose home currency
+  differs from the one recorded on issued invoices, because every frozen rate would be read
+  against the wrong currency.
+- New sales default to the home currency when PRAHO can sell in it (RON, EUR), else to the euro
+  (`default_selling_currency()`). A legacy single-number threshold, price column, credit limit or
+  bank account is in that default currency: the one the operator sells in by default, which is
+  the home currency wherever PRAHO can sell in it.

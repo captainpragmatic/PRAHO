@@ -1531,8 +1531,8 @@ msgid "For a credit note: the invoice it reverses"
 msgstr "Pentru o notă de credit: factura pe care o stornează"
 
 #: apps/billing/invoice_models.py:221
-msgid "Exchange rate to RON at time of invoice"
-msgstr "Curs de schimb la RON la momentul emiterii facturii"
+msgid "Exchange rate to the home currency, frozen at issue"
+msgstr "Cursul de schimb față de moneda de bază, fixat la emitere"
 
 #: apps/billing/invoice_models.py:230 apps/billing/proforma_models.py:116
 msgid "Document-level discount in cents (EN16931 BT-92/BT-107)"
@@ -3141,10 +3141,10 @@ msgstr "Total TVA: {amount} {currency}"
 msgid "Taxare inversă / Reverse charge — {legal_basis}"
 msgstr "Taxare inversă / Reverse charge — {legal_basis}"
 
-#: apps/billing/pdf_generators.py:591
+#: apps/billing/pdf_generators.py
 #, python-brace-format
-msgid "Curs valutar: 1 {currency} = {rate} RON"
-msgstr "Curs valutar: 1 {currency} = {rate} RON"
+msgid "Exchange rate: 1 {currency} = {rate} {home}"
+msgstr "Curs valutar: 1 {currency} = {rate} {home}"
 
 #: apps/billing/pdf_generators.py:602
 #, python-brace-format
@@ -4238,11 +4238,6 @@ msgstr "❌ Generarea XML-ului e-Factura a eșuat: {error}"
 #: apps/billing/views.py:1667
 msgid "Payment could not be applied safely"
 msgstr "Plata nu a putut fi aplicată în siguranță"
-
-#: apps/billing/views.py:1669
-#, python-brace-format
-msgid "✅ Payment of {amount} RON has been registered!"
-msgstr "✅ Plata de {amount} RON a fost înregistrată!"
 
 #: apps/billing/views.py:2073
 msgid "Refund completed."
@@ -8143,10 +8138,6 @@ msgstr "Starea curentă a comenzii"
 #: apps/orders/models.py:121 templates/orders/order_form.html:94
 msgid "Order currency"
 msgstr "Moneda comenzii"
-
-#: apps/orders/models.py:123
-msgid "Exchange rate to RON at time of order"
-msgstr "Curs de schimb la RON la momentul comenzii"
 
 #: apps/orders/models.py:127
 msgid "Subtotal before tax in cents"
@@ -12941,8 +12932,13 @@ msgid "Fetched currency pairs"
 msgstr "Perechi valutare preluate"
 
 #: apps/settings/catalog.py:398
-msgid "Foreign currency codes to fetch daily against RON."
-msgstr "Codurile valutelor străine de preluat zilnic față de RON."
+msgid ""
+"Foreign currencies PRAHO keeps rates for: fetched daily from BNR for a "
+"Romanian operator, and checked for a current rate to the home currency."
+msgstr ""
+"Valutele pentru care PRAHO păstrează cursuri: preluate zilnic de la BNR "
+"pentru un operator din România și verificate pentru un curs curent față de "
+"moneda de bază."
 
 #: apps/settings/catalog.py:408
 msgid "FX staleness window"
@@ -24463,10 +24459,6 @@ msgstr "Gestionați prețuri în mai multe valute pentru afaceri românești"
 msgid "← Back to Product"
 msgstr "← Înapoi la produs"
 
-#: templates/products/product_prices.html:49
-msgid "Romanian Lei"
-msgstr "Lei Românești"
-
 #: templates/products/product_prices.html:56
 msgid "Active Currency"
 msgstr "Monedă activă"
@@ -24533,8 +24525,9 @@ msgid "Romanian Business"
 msgstr "Afaceri românești"
 
 #: templates/products/product_prices.html:212
-msgid "RON pricing is recommended for local customers"
-msgstr "Prețul în RON este recomandat pentru clienții locali"
+#, python-format
+msgid "%(currency)s pricing is recommended for local customers"
+msgstr "Prețul în %(currency)s este recomandat pentru clienții locali"
 
 #: templates/products/product_prices.html:213
 msgid "Set VAT inclusion correctly for tax compliance"
@@ -28728,3 +28721,37 @@ msgstr "Numele mărcii"
 #: apps/settings/catalog.py
 msgid "The name customers see in the portal, in emails and in their authenticator app."
 msgstr "Numele pe care clienții îl văd în portal, în e-mailuri și în aplicația de autentificare."
+
+msgid "Default currency"
+msgstr "Moneda implicită"
+
+msgid "Legacy refund notification threshold"
+msgstr "Prag vechi de notificare pentru rambursări"
+
+msgid "Refunds in the default currency use this floor when it has no explicit threshold."
+msgstr "Rambursările în moneda implicită folosesc acest prag când nu are un prag explicit."
+
+msgid "Legacy review threshold"
+msgstr "Prag vechi de verificare"
+
+msgid "Legacy high value service threshold"
+msgstr "Prag vechi pentru servicii de valoare mare"
+
+msgid "Services and plans in the default currency use this floor when it has no explicit threshold."
+msgstr "Serviciile și planurile în moneda implicită folosesc acest prag când nu are un prag explicit."
+
+msgid "Limită credit"
+msgstr "Limită credit"
+
+msgid "Quarterly Price"
+msgstr "Preț trimestrial"
+
+msgid "Annual Price"
+msgstr "Preț anual"
+
+msgid "Monthly Cost"
+msgstr "Cost lunar"
+
+#, python-brace-format
+msgid "✅ Payment of {amount} {currency} has been registered!"
+msgstr "✅ Plata de {amount} {currency} a fost înregistrată!"

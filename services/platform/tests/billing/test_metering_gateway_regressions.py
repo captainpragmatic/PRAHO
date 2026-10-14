@@ -1631,7 +1631,7 @@ class TestStripeGateway(TestCase):
         mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_idem", client_secret="secret_idem")
         gw = self._make_gateway(mock_stripe)
 
-        result = gw.create_payment_intent("order-idem", 2999, idempotency_key="order:idem:stripe:1")
+        result = gw.create_payment_intent("order-idem", 2999, "RON", idempotency_key="order:idem:stripe:1")
 
         assert result["success"] is True
         assert mock_stripe.PaymentIntent.create.call_args.kwargs["idempotency_key"] == "order:idem:stripe:1"
@@ -1644,6 +1644,7 @@ class TestStripeGateway(TestCase):
         result = gw.create_payment_intent(
             "order-authoritative",
             2999,
+            "RON",
             metadata={"praho_order_id": "attacker-order", "platform": "attacker-platform"},
             idempotency_key="payment-attempt-key",
         )
@@ -1662,6 +1663,7 @@ class TestStripeGateway(TestCase):
         result = gw.create_payment_intent(
             "order-no-vat",
             2999,
+            "RON",
             metadata={"vat_rate": "21%", "invoice_number": "INV-001"},
         )
 
@@ -1674,7 +1676,7 @@ class TestStripeGateway(TestCase):
         mock_stripe = MagicMock()
         mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_x", client_secret="sec")
         gw = self._make_gateway(mock_stripe)
-        result = gw.create_payment_intent("order-2", 1000)
+        result = gw.create_payment_intent("order-2", 1000, "RON")
         assert result["success"] is True
 
     def test_create_payment_intent_stripe_error(self):
@@ -1682,7 +1684,7 @@ class TestStripeGateway(TestCase):
         mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
         mock_stripe.PaymentIntent.create.side_effect = mock_stripe.error.StripeError("card declined")
         gw = self._make_gateway(mock_stripe)
-        result = gw.create_payment_intent("order-3", 500)
+        result = gw.create_payment_intent("order-3", 500, "RON")
         assert result["success"] is False
         assert "card declined" in result["error"]
 
@@ -1691,7 +1693,7 @@ class TestStripeGateway(TestCase):
         mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
         mock_stripe.PaymentIntent.create.side_effect = RuntimeError("network")
         gw = self._make_gateway(mock_stripe)
-        result = gw.create_payment_intent("order-4", 500)
+        result = gw.create_payment_intent("order-4", 500, "RON")
         assert result["success"] is False
         assert "Unexpected" in result["error"]
 

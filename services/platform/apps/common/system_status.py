@@ -433,7 +433,10 @@ def _compute_fx_freshness() -> SubsystemStatus:
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
     pairs = [str(c).strip().upper() for c in SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])]
-    foreign = [c for c in pairs if c and c != "RON"]
+    from apps.billing.currency_service import home_currency  # noqa: PLC0415
+
+    home = home_currency()
+    foreign = [c for c in pairs if c and c != home]
     if not foreign:
         return SubsystemStatus(
             name="FX rates",
@@ -448,7 +451,7 @@ def _compute_fx_freshness() -> SubsystemStatus:
     stale: list[str] = []
     for code in foreign:
         try:
-            snapshot = ExchangeRateService.resolve(code, "RON", today)
+            snapshot = ExchangeRateService.resolve(code, home, today)
         except ExchangeRateError:
             missing.append(code)
             continue

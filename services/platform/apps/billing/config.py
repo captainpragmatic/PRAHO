@@ -169,26 +169,23 @@ def get_event_grace_period_hours() -> int:
         return _get_positive_int("BILLING_EVENT_GRACE_PERIOD_HOURS", _DEFAULT_EVENT_GRACE_PERIOD_HOURS)
 
 
-_DEFAULT_LARGE_REFUND_THRESHOLD_CENTS = 50000  # Legacy 500 RON finance-notification floor
+_DEFAULT_LARGE_REFUND_THRESHOLD_CENTS = 50000  # Legacy finance-notification floor, 500 in the default currency
 
 
-def get_large_refund_threshold_cents(currency_code: str = "RON") -> int:
-    """Finance-notification floor in the refunded document's recorded currency."""
+def get_large_refund_threshold_cents(currency_code: str | None = None) -> int:
+    """Finance-notification floor in the refunded document's recorded currency (default: the selling default)."""
+    from .currency_service import default_selling_currency  # noqa: PLC0415
     from .currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
 
+    code = currency_code or default_selling_currency()
     try:
-        legacy_ron_threshold = (
-            SettingsService.get_integer_setting(
-                "billing.large_refund_notification_threshold_cents",
-                _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS,
-            )
-            if currency_code == "RON"
-            else 0
-        )
         return get_currency_threshold_cents(
             "billing.large_refund_thresholds_cents",
-            currency_code,
-            legacy_ron_threshold=legacy_ron_threshold,
+            code,
+            legacy_threshold=SettingsService.get_integer_setting(
+                "billing.large_refund_notification_threshold_cents",
+                _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS,
+            ),
         )
     except Exception:
         logger.warning(
@@ -197,7 +194,7 @@ def get_large_refund_threshold_cents(currency_code: str = "RON") -> int:
         )
         return (
             _get_positive_int("BILLING_LARGE_REFUND_THRESHOLD_CENTS", _DEFAULT_LARGE_REFUND_THRESHOLD_CENTS)
-            if currency_code == "RON"
+            if code == default_selling_currency()
             else 0
         )
 

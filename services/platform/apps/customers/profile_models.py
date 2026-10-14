@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.cnp_validator import validate_cnp
 from apps.common.cui_validator import CUIValidator, validate_cui
 from apps.common.fields import EncryptedTextField
@@ -181,12 +182,15 @@ class CustomerBillingProfile(SoftDeleteModel):
 
     # Credit Management
     credit_limit = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Limită credit (RON)")
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Limită credit")
     )
 
     # Currency Preferences
     preferred_currency = models.CharField(
-        max_length=3, choices=CurrencyCode.choices(), default="RON", verbose_name=_("Monedă preferată")
+        max_length=3,
+        choices=CurrencyCode.choices(),
+        default=default_selling_currency,
+        verbose_name=_("Monedă preferată"),
     )
 
     # Audit

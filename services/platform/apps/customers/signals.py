@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 # Default business thresholds for Romanian compliance — authoritative source is SettingsService
-_DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 RON threshold for credit limit alerts
+_DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 in the default selling currency
 _DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD = 60  # 60 days - Romanian law threshold
 
 # ===============================================================================
@@ -912,7 +912,7 @@ def _handle_credit_limit_change(billing_profile: CustomerBillingProfile, old_lim
         change_amount = abs(new_limit - old_limit)
 
         logger.info(
-            f"💰 [Customer] Credit limit {change_type} by {change_amount:.2f} RON: {billing_profile.customer.get_display_name()}"
+            f"💰 [Customer] Credit limit {change_type} by {change_amount:.2f}: {billing_profile.customer.get_display_name()}"
         )
 
         # Alert for significant credit limit increases

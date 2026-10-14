@@ -219,9 +219,15 @@ class Invoice(models.Model):
 
     # Currency and amounts (cents for precision)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
-    exchange_to_ron = models.DecimalField(
-        max_digits=18, decimal_places=8, null=True, blank=True, help_text=_("Exchange rate to RON at time of invoice")
+    exchange_rate_to_home = models.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text=_("Exchange rate to the home currency, frozen at issue"),
     )
+    # The operator's home currency when the rate was frozen, so a frozen rate always says what it converts into.
+    home_currency_code = models.CharField(max_length=3, null=True, blank=True)  # noqa: DJ001  # NULL until frozen
     exchange_rate_as_of = models.DateField(null=True, blank=True)
     exchange_rate_source = models.CharField(max_length=32, blank=True)
     exchange_rate_source_reference = models.CharField(max_length=500, blank=True)
@@ -410,6 +416,14 @@ class Invoice(models.Model):
             "bill_to_country",
         }
     )
+    # The frozen exchange-rate evidence, always copied whole: a reversal or correction restates its original's.
+    FX_SNAPSHOT_FIELDS: ClassVar[tuple[str, ...]] = (
+        "exchange_rate_to_home",
+        "home_currency_code",
+        "exchange_rate_as_of",
+        "exchange_rate_source",
+        "exchange_rate_source_reference",
+    )
     _FISCAL_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "number",
@@ -421,10 +435,7 @@ class Invoice(models.Model):
             "vat_evidence",
             "locked_at",
             "currency_id",
-            "exchange_to_ron",
-            "exchange_rate_as_of",
-            "exchange_rate_source",
-            "exchange_rate_source_reference",
+            *FX_SNAPSHOT_FIELDS,
             "issued_at",
             "tax_point_date",
         }
@@ -438,10 +449,7 @@ class Invoice(models.Model):
             "issued_at",
             "locked_at",
             "tax_point_date",
-            "exchange_to_ron",
-            "exchange_rate_as_of",
-            "exchange_rate_source",
-            "exchange_rate_source_reference",
+            *FX_SNAPSHOT_FIELDS,
         }
     )
 
@@ -662,35 +670,44 @@ class Invoice(models.Model):
                 issued_at = timezone.make_aware(issued_at)
             self.tax_point_date = timezone.localdate(issued_at)
 
-        # #103: freeze the RON FX snapshot, or CONSUME one already frozen at the
-        # reversible conversion moment (freeze_fx_snapshot) so a later FXRate row can
-        # never flip an issued invoice's RON VAT total.
+        # #103: freeze the FX snapshot to the home currency, or CONSUME one already frozen at
+        # the reversible conversion moment (freeze_fx_snapshot) so a later FXRate row can
+        # never flip an issued invoice's home-currency VAT total.
         self._freeze_fx()
         self.locked_at = timezone.now()
 
-    def _freeze_fx(self) -> None:
-        """Set — or CONSUME an already-frozen — RON FX snapshot for self.tax_point_date.
+    def ron_exchange_rate(self) -> Decimal | None:
+        """The frozen rate when it converts into RON, for Romanian fiscal readers; None otherwise."""
+        return self.exchange_rate_to_home if self.home_currency_code == "RON" else None
 
-        RON documents carry no snapshot. For a foreign currency, if a COMPLETE snapshot is
-        already frozen (rate + as_of + source + source_reference all present) it is
-        consumed unchanged — all four, because `ExchangeRateService.resolve` refuses to
-        return a rate whose provenance reference is blank, so three-of-four is not
-        something it can produce and is therefore not evidence it vouched for. This
-        is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
-        so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
-        legacy value (a bare ``exchange_to_ron`` from before the old history's migration 0039
-        added the provenance fields) is NOT complete evidence: it is discarded and a fresh provenanced
-        snapshot is resolved at ``tax_point_date`` (fail-closed if none resolves), so the
-        invoice never locks with legally incomplete FX evidence.
+    def _freeze_fx(self) -> None:
+        """Set — or CONSUME an already-frozen — home-currency FX snapshot for self.tax_point_date.
+
+        Every issued invoice records the operator's home currency, so its rate always says what it
+        converts into. A home-currency document carries no rate. For a foreign currency, if a
+        COMPLETE snapshot to the same home currency is already frozen (rate + as_of + source +
+        source_reference all present) it is consumed unchanged — all four, because
+        `ExchangeRateService.resolve` refuses to return a rate whose provenance reference is blank,
+        so three-of-four is not something it can produce and is therefore not evidence it vouched
+        for. This is how ``issue()`` honours a rate frozen earlier at the reversible conversion
+        moment, so a later ``FXRate`` row can never change an issued invoice's home-currency VAT.
+        A partial value is NOT complete evidence: it is discarded and a fresh provenanced snapshot
+        is resolved at ``tax_point_date`` (fail-closed if none resolves), so the invoice never
+        locks with legally incomplete FX evidence.
         """
-        if self.currency_id == "RON":
-            self.exchange_to_ron = None
+        from apps.billing.currency_service import home_currency  # noqa: PLC0415  # ADR-0007
+
+        home = home_currency()
+        if self.currency_id == home:
+            self.exchange_rate_to_home = None
             self.exchange_rate_as_of = None
             self.exchange_rate_source = ""
             self.exchange_rate_source_reference = ""
+            self.home_currency_code = home
             return
         if (
-            self.exchange_to_ron is not None
+            self.home_currency_code == home
+            and self.exchange_rate_to_home is not None
             and self.exchange_rate_as_of is not None
             and self.exchange_rate_source
             and self.exchange_rate_source_reference
@@ -700,18 +717,19 @@ class Invoice(models.Model):
         from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
 
         try:
-            snapshot = ExchangeRateService.resolve(self.currency_id, "RON", self.tax_point_date)
+            snapshot = ExchangeRateService.resolve(self.currency_id, home, self.tax_point_date)
         except ExchangeRateError as exc:
             raise ValidationError(
-                {"exchange_to_ron": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}
+                {"exchange_rate_to_home": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}
             ) from exc
-        self.exchange_to_ron = snapshot.rate
+        self.exchange_rate_to_home = snapshot.rate
+        self.home_currency_code = home
         self.exchange_rate_as_of = snapshot.as_of
         self.exchange_rate_source = snapshot.source
         self.exchange_rate_source_reference = snapshot.source_reference
 
     def freeze_fx_snapshot(self, tax_point_date: date | None = None) -> None:
-        """Freeze the tax point + RON FX snapshot at the reversible conversion moment,
+        """Freeze the tax point + home-currency FX snapshot at the reversible conversion moment,
         BEFORE ``issue()`` (which then consumes it).
 
         ``tax_point_date`` defaults to the RO-local date. The advance-receipt refinement

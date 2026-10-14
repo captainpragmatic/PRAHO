@@ -52,14 +52,13 @@ def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,
 
 
 @register.filter
-def romanian_currency(value: TemplateNumeric, currency: object = "RON") -> str:
+def romanian_currency(value: TemplateNumeric, currency: object) -> str:
     """
     Format currency in Romanian business style
 
     Usage:
-        {{ invoice.total|romanian_currency }}     -> "1.234,56 RON"
-        {{ amount|romanian_currency:"EUR" }}     -> "1.234,56 EUR"
-        {{ hosting_price|romanian_currency }}    -> "49,99 RON"
+        {{ invoice.total|romanian_currency:invoice.currency }}  -> "1.234,56 RON"
+        {{ amount|romanian_currency:"EUR" }}                  -> "1.234,56 EUR"
 
     Args:
         value: Numeric value to format
@@ -98,7 +97,7 @@ def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.21) -> str:
     try:
         decimal_value = Decimal(str(value))
         vat_amount = decimal_value * Decimal(str(vat_rate))
-        formatted_vat = romanian_currency(vat_amount).replace(" RON", "")
+        formatted_vat = romanian_currency(vat_amount, "RON").replace(" RON", "")
         return f"{formatted_vat} RON TVA"
     except (ValueError, TypeError):
         return "0,00 RON TVA"

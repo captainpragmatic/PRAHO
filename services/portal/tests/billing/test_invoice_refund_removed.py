@@ -28,7 +28,6 @@ def _invoice(status: str) -> Invoice:
         number="INV-2026-0100",
         status=status,
         currency=currency,
-        exchange_to_ron=None,
         subtotal_cents=10000,
         tax_cents=2100,
         total_cents=12100,

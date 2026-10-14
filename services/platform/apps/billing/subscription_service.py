@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 from .currency_models import Currency
+from .currency_service import ensure_home_currency_row, home_currency
 from .recurring_locking import lock_recurring_collection_customer
 from .subscription_models import (
     PriceGrandfathering,
@@ -110,9 +111,9 @@ def _resolve_creation_currency(currency_code: str | None) -> Any:
     try:
         return Currency.objects.get(code=currency_code)
     except Currency.DoesNotExist:
-        if currency_code != "RON":
+        if currency_code != home_currency():
             raise _SubscriptionCreationError(f"Currency {currency_code} does not exist") from None
-        return Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
+        return ensure_home_currency_row()
 
 
 def _resolve_creation_service(customer: Any, product: Any, currency: Any, service_id: str | None) -> tuple[Any, Any]:

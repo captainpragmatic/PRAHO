@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # NOTE: VAT rates are NOT constants — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 PRICING_THRESHOLDS: dict[str, Any] = {
     "significant_change_percent": 15,  # Alert when price changes by more than 15%
-    "high_value_product_ron": 500,  # Products over 500 RON need approval tracking
+    "high_value_product_ron": 500,  # Products over 500 (any currency) need approval tracking
     "promotional_discount_limit": 50,  # Maximum promotional discount percentage
     "vat_compliance_check": True,  # Always verify VAT calculations
 }

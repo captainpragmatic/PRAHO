@@ -16,6 +16,7 @@ from django.views.decorators.debug import sensitive_variables
 from rest_framework import serializers
 
 from apps.api.users.serializers import ProfileUpdateSerializer
+from apps.billing.currency_service import default_selling_currency
 from apps.billing.fiscal_identity import billing_country_code
 from apps.common.cnp_validator import CNPValidator
 from apps.common.cui_validator import normalize_cui_digits
@@ -423,7 +424,7 @@ class CustomerBillingProfileSerializer(serializers.Serializer):
     """
 
     payment_terms = serializers.CharField(max_length=50, allow_blank=True)
-    preferred_currency = serializers.CharField(max_length=3, default="RON")
+    preferred_currency = serializers.CharField(max_length=3, default=default_selling_currency)
 
 
 class CustomerDetailSerializer(serializers.ModelSerializer):

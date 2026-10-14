@@ -629,22 +629,11 @@ def whole_document_storno_refusal(correction: FiscalCorrection, original: Invoic
     return None
 
 
-# Copied from the original at creation, and the two that a row created by an older
-# implementation can be missing. `subtotal/tax/total_cents` and the `bill_to_*` set have
-# been written on the create path since the first version, so they cannot be stale.
-_REVERSAL_FIELDS_TO_REPAIR = (
-    "exchange_to_ron",
-    "exchange_rate_as_of",
-    "exchange_rate_source",
-    "exchange_rate_source_reference",
-)
-
-
 def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
     """Restore what an earlier attempt never wrote, while it is still repairable.
 
     A reversal left pending by an interrupted or rate-gated attempt predates the fields
-    added since. `_freeze_fx` consumes a snapshot only when it finds all four fields, so
+    added since. `_freeze_fx` consumes a snapshot only when it finds it complete, so
     a note missing them resolves TODAY's rate at issuance and books the correction against
     a different rate from the document it reverses - the residue the copy exists to
     prevent. The same row can carry `discount_cents=0` against negated GROSS lines, which
@@ -662,7 +651,10 @@ def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
     repairs: dict[str, Any] = {}
     if credit_note.discount_cents != -original.discount_cents:
         repairs["discount_cents"] = -original.discount_cents
-    for field in _REVERSAL_FIELDS_TO_REPAIR:
+    # The FX snapshot and the discount are what an older implementation can have left out.
+    # `subtotal/tax/total_cents` and the `bill_to_*` set have been written on the create path
+    # since the first version, so they cannot be stale.
+    for field in Invoice.FX_SNAPSHOT_FIELDS:
         expected = getattr(original, field)
         if getattr(credit_note, field) != expected:
             repairs[field] = expected
@@ -731,12 +723,9 @@ def _get_or_create_credit_note(original: Invoice, correction: FiscalCorrection) 
         # The original's rate, not today's. A reversal restates the SAME taxable base,
         # so re-resolving at the reversal date books a different RON amount from the
         # document being reversed and leaves a residue that nets to nothing and shows
-        # up on no report. All four fields, because `_freeze_fx` consumes a snapshot
+        # up on no report. Every field, because `_freeze_fx` consumes a snapshot
         # only when it considers it complete.
-        exchange_to_ron=original.exchange_to_ron,
-        exchange_rate_as_of=original.exchange_rate_as_of,
-        exchange_rate_source=original.exchange_rate_source,
-        exchange_rate_source_reference=original.exchange_rate_source_reference,
+        **{field: getattr(original, field) for field in Invoice.FX_SNAPSHOT_FIELDS},
         # The reversal inherits the original's fiscal identity: it is a correction
         # to that document, not a new commercial event. Every snapshot field, so the
         # CNP and trade registry number are carried too.

@@ -99,6 +99,7 @@ TEMPLATES = [
                 "apps.common.context_processors.current_customer",
                 "apps.common.context_processors.navigation_dropdowns",
                 "apps.common.context_processors.csp_nonce",
+                "apps.common.context_processors.default_currency",
                 # Staff maintenance banner (base.html) needs system_status on every
                 # page, not only inside the settings module. Cache-first read: the
                 # warm path costs zero queries (#377 review).
@@ -463,12 +464,10 @@ REGISTRAR_ADAPTERS_VERIFIED = os.environ.get("REGISTRAR_ADAPTERS_VERIFIED", "fal
 # NOTE: VAT rates removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 
 # Currency settings
-# Deprecated compatibility knob: this environment value does not select the selling currency.
-# New sales use the stored billing.default_currency policy; historical records keep their currency.
-# Upgrades retain RON until an explicit validated settings change. Run `make check-currency`
-# after migrations, with DJANGO_SETTINGS_MODULE pointing at the intended deployment database.
+# The selling currency is the stored billing.default_currency policy, seeded from the operator's
+# home currency; historical records keep their currency. Run `make check-currency` after
+# migrations, with DJANGO_SETTINGS_MODULE pointing at the intended deployment database.
 # Ordinary offline system checks do not prove database-backed currency readiness.
-BILLING_DEFAULT_CURRENCY = os.environ.get("BILLING_DEFAULT_CURRENCY", "RON")
 
 # ===============================================================================
 # EXTERNAL INTEGRATIONS

@@ -6,11 +6,11 @@ from django.conf import settings
 
 from apps.settings.services import SettingsService
 
-from .currency_service import normalize_currency_code
+from .currency_service import default_selling_currency, normalize_currency_code
 
 
 def bank_transfer_instructions(
-    currency_code: str, *, ron_fallback: dict[str, str] | None = None
+    currency_code: str, *, legacy_fallback: dict[str, str] | None = None
 ) -> dict[str, str] | None:
     try:
         code = normalize_currency_code(currency_code)
@@ -20,10 +20,11 @@ def bank_transfer_instructions(
     if not isinstance(accounts, dict):
         return None
     account = accounts.get(code)
-    if code == "RON" and code not in accounts:
+    # The single legacy COMPANY_BANK_* account is in the default selling currency.
+    if code == default_selling_currency() and code not in accounts:
         account = (
-            ron_fallback
-            if ron_fallback is not None
+            legacy_fallback
+            if legacy_fallback is not None
             else {
                 "iban": getattr(settings, "COMPANY_BANK_ACCOUNT", ""),
                 "bank_name": getattr(settings, "COMPANY_BANK_NAME", ""),

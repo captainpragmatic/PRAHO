@@ -78,7 +78,8 @@ class StornoTestCase(TestCase):
         invoice = Invoice.objects.create(
             customer=self.owner,
             currency=currency,
-            exchange_to_ron=Decimal("4.97650000") if foreign else None,
+            exchange_rate_to_home=Decimal("4.97650000") if foreign else None,
+            home_currency_code="RON",
             exchange_rate_as_of=timezone.localdate() - timedelta(days=1) if foreign else None,
             exchange_rate_source="bnr" if foreign else "",
             exchange_rate_source_reference="bnr:storno-test" if foreign else "",

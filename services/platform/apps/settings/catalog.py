@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_name
 from apps.common.operator import operator_serves
 
@@ -360,7 +361,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="billing.default_currency",
         data_type="string",
-        default="RON",
+        default=default_selling_currency(),  # Fixed per deployment: COMPANY_COUNTRY_CODE does not change at runtime
         group="billing",
         section=_("Invoicing"),
         label=_("Selling currency"),
@@ -406,7 +407,10 @@ CATALOG: tuple[SettingDef, ...] = (
         group="advanced",
         section=_("Billing"),
         label=_("Fetched currency pairs"),
-        help_text=_("Foreign currency codes to fetch daily against RON."),
+        help_text=_(
+            "Foreign currencies PRAHO keeps rates for: fetched daily from BNR for a Romanian operator, "
+            "and checked for a current rate to the home currency."
+        ),
         input_kind="chips",
         advanced=True,
     ),
@@ -530,9 +534,9 @@ CATALOG: tuple[SettingDef, ...] = (
         default=50000,
         group="advanced",
         section=_("Billing"),
-        label=_("Legacy RON refund notification threshold"),
-        help_text=_("RON refunds use this floor when no explicit RON threshold is configured."),
-        unit="RON cents",
+        label=_("Legacy refund notification threshold"),
+        help_text=_("Refunds in the default currency use this floor when it has no explicit threshold."),
+        unit="cents",
         input_kind="number",
         advanced=True,
         validation={"min": 0},
@@ -2142,7 +2146,7 @@ CATALOG: tuple[SettingDef, ...] = (
         default=500000,
         group="orders",
         section=_("Review policy"),
-        label=_("Legacy RON review threshold"),
+        label=_("Legacy review threshold"),
         unit="cents",
         input_kind="number",
         validation={"min": 0},
@@ -2402,9 +2406,9 @@ CATALOG: tuple[SettingDef, ...] = (
         default=50000,
         group="advanced",
         section=_("Provisioning"),
-        label=_("Legacy RON high value service threshold"),
-        help_text=_("RON service and plan audit records use this floor when no explicit RON threshold is configured."),
-        unit="RON cents",
+        label=_("Legacy high value service threshold"),
+        help_text=_("Services and plans in the default currency use this floor when it has no explicit threshold."),
+        unit="cents",
         input_kind="number",
         advanced=True,
         validation={"min": 0},

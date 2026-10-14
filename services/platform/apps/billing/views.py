@@ -59,7 +59,7 @@ from apps.common.decorators import (
 )
 from apps.common.financial_arithmetic import parse_major_units_to_cents
 from apps.common.mixins import get_search_context
-from apps.common.operator import operator_is_romanian
+from apps.common.operator import operator_country, operator_is_romanian
 from apps.common.pagination import pagination_query
 from apps.common.tax_service import TaxService
 from apps.common.types import Err
@@ -1672,7 +1672,12 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
                 )
                 return JsonResponse({"error": _("Payment could not be applied safely")}, status=409)
 
-        messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+        messages.success(
+            request,
+            _("✅ Payment of {amount} {currency} has been registered!").format(
+                amount=amount, currency=locked_invoice.currency_id
+            ),
+        )
         return JsonResponse({"success": True})
 
     return JsonResponse({"error": "Invalid method"}, status=405)
@@ -2267,7 +2272,6 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
     {
         "order_id": "uuid-string",
         "amount_cents": 2999,
-        "currency": "RON",
         "customer_id": 123,
         "order_number": "ORD-2024-001",
         "gateway": "stripe",
@@ -2288,7 +2292,6 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
         order_id = data.get("order_id")
 
         amount_cents = data.get("amount_cents")
-        currency = data.get("currency", "RON")
         customer_id = data.get("customer_id")
         order_number = data.get("order_number")
         gateway = data.get("gateway", "stripe")
@@ -2317,9 +2320,6 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
                     {"success": False, "error": f"amount_cents must be between 1 and {maximum_amount:,}"}, status=400
                 )
 
-        if currency and currency not in ["RON", "EUR", "USD"]:
-            return JsonResponse({"success": False, "error": "currency must be one of: RON, EUR, USD"}, status=400)
-
         if gateway != "stripe":
             return JsonResponse({"success": False, "error": "gateway must be: stripe"}, status=400)
 
@@ -2330,7 +2330,6 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
         result = PaymentService.create_payment_intent_direct(
             order_id=order_id,
             amount_cents=amount_cents,
-            currency=currency,
             customer_id=customer.id,
             order_number=order_number,
             gateway=gateway,
@@ -2453,7 +2452,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
         config = {
             "publishable_key": publishable_key,
             "currency": get_selling_currency_policy().currency_code,
-            "country": "RO",
+            "country": operator_country(),
             "supported_payment_methods": ["card"],
             "appearance": {
                 "theme": "stripe",

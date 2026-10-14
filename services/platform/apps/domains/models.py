@@ -110,8 +110,9 @@ class TLD(models.Model):
 
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """The existing retail fields continue to edit the original RON price."""
+        """The existing retail fields continue to edit the default-currency price."""
         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
         from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007
 
         get_selling_currency_policy(lock=True)
@@ -125,7 +126,7 @@ class TLD(models.Model):
         if previous is None or previous != saved:
             TLDRetailPrice.objects.update_or_create(
                 tld=self,
-                currency_id="RON",
+                currency_id=default_selling_currency(),
                 defaults={
                     **saved,
                     "whois_privacy_price_cents": SettingsService.get_integer_setting(
@@ -191,13 +192,14 @@ class TLDRetailPrice(models.Model):
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
 
         get_selling_currency_policy(lock=True)
         super().save(*args, **kwargs)
         if kwargs.get("update_fields") is not None and not kwargs["update_fields"]:
             return
         saved = type(self).objects.get(pk=self.pk)
-        if saved.currency_id == "RON":
+        if saved.currency_id == default_selling_currency():
             TLD.objects.filter(pk=saved.tld_id).update(
                 registration_price_cents=saved.registration_price_cents,
                 renewal_price_cents=saved.renewal_price_cents,

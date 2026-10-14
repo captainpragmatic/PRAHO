@@ -23,6 +23,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
@@ -50,7 +51,7 @@ HIGH_COMPLEXITY_FILTER_THRESHOLD = _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
 MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 
 # Business logic constants
-HIGH_VALUE_PLAN_THRESHOLD_RON = 500  # 500 RON threshold for high-value plans
+HIGH_VALUE_PLAN_THRESHOLD_RON = 500  # 500 in the default selling currency, which legacy plan prices use
 SERVER_OVERLOAD_THRESHOLD_PERCENT = 85  # 85% resource usage threshold
 LONG_RUNNING_TASK_THRESHOLD_SECONDS = 1800  # 30 minutes (1800 seconds)
 
@@ -2683,7 +2684,7 @@ class CustomersAuditService:
             "customer_name": billing_profile.customer.get_display_name(),
             "payment_terms": billing_profile.payment_terms,
             "credit_limit": float(billing_profile.credit_limit),
-            "credit_limit_currency": "RON",
+            "credit_limit_currency": default_selling_currency(),
             "preferred_currency": billing_profile.preferred_currency,
             "account_balances": {
                 code: format(amount, ".2f") for code, amount in billing_profile.get_account_balances().items()

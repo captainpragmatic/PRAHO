@@ -1098,7 +1098,7 @@ class EmailService:
             # instant and can be an earlier day; it only stands in when never formally issued.
             "invoice_date": timezone.localtime(invoice.issued_at or invoice.created_at).strftime("%Y-%m-%d"),
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "invoice_url": _portal_invoice_url(invoice),
         }
@@ -1125,7 +1125,7 @@ class EmailService:
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "paid_date": timezone.localtime(invoice.paid_at).strftime("%Y-%m-%d")
             if invoice.paid_at
             else timezone.localtime(timezone.now()).strftime("%Y-%m-%d"),
@@ -1158,7 +1158,7 @@ class EmailService:
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "days_until_due": max(0, days_until_due),
             "payment_url": _portal_invoice_url(invoice),  # The Portal invoice page carries the payment options

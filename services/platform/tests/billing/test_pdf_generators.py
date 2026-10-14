@@ -1226,12 +1226,12 @@ class EN16931PDFComplianceTests(TestCase):
         self.assertIn('EUR', text)
 
     def test_exchange_rate_shown_for_non_ron(self):
-        """Exchange rate must be shown when invoice currency is not RON."""
+        """A foreign-currency invoice shows the rate frozen at issue, into the home currency it recorded."""
         eur_invoice = Invoice.objects.create(
             customer=self.customer, currency=self.currency_eur,
             number='INV-EUR-002', subtotal_cents=10000, tax_cents=2100,
             total_cents=12100, status='issued', bill_to_name='EUR Client',
-            meta={'exchange_rate': '4.9750'},
+            exchange_rate_to_home=Decimal('10.00000000'), home_currency_code='RON',
         )
         InvoiceLine.objects.create(
             invoice=eur_invoice, kind='service', description='EUR service',
@@ -1240,8 +1240,8 @@ class EN16931PDFComplianceTests(TestCase):
         )
         calls = self._get_canvas_calls(invoice=eur_invoice)
         text = ' '.join(calls)
-        self.assertIn('4.9750', text)
-        self.assertIn('Curs valutar', text)
+        self.assertIn('Exchange rate: 1 EUR = 10 RON', text)
+        self.assertNotIn('Exchange rate', ' '.join(self._get_canvas_calls()))  # a RON invoice has none
 
     def test_line_level_en16931_fields(self):
         """EN16931 line-level fields (domain, period, SKU) must be rendered."""

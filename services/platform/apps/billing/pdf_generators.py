@@ -475,7 +475,7 @@ class RomanianDocumentPDFGenerator:
 
         return getattr(self.document, "document_kind", "") == DOCUMENT_KIND_CREDIT_NOTE
 
-    def _render_totals_section(self) -> None:  # noqa: PLR0915  # A totals block: one statement per rendered row
+    def _render_totals_section(self) -> None:
         """Render totals section with the document-level discount and a VAT breakdown that
         reconciles with the e-Factura XML (BG-20 allowance + single net TaxSubtotal)."""
         currency = self._get_currency_code()
@@ -587,20 +587,19 @@ class RomanianDocumentPDFGenerator:
             )
             totals_y -= 0.5 * cm
 
-        # Exchange rate line for non-RON currencies
-        if currency != "RON":
-            meta = self.document.meta or {}
-            exchange_rate = meta.get("exchange_rate")
-            if exchange_rate:
-                self.canvas.setFont(_FONT, 9)
-                self.canvas.drawString(
-                    2 * cm,
-                    totals_y,
-                    str(gettext("Curs valutar: 1 {currency} = {rate} RON")).format(
-                        currency=currency, rate=exchange_rate
-                    ),
-                )
-                totals_y -= 0.5 * cm
+        # The rate frozen at issue, for an invoice in a foreign currency (a proforma has none)
+        exchange_rate = getattr(self.document, "exchange_rate_to_home", None)
+        home_currency = getattr(self.document, "home_currency_code", None)
+        if exchange_rate is not None and home_currency:
+            self.canvas.setFont(_FONT, 9)
+            self.canvas.drawString(
+                2 * cm,
+                totals_y,
+                str(gettext("Exchange rate: 1 {currency} = {rate} {home}")).format(
+                    currency=currency, rate=format(exchange_rate.normalize(), "f"), home=home_currency
+                ),
+            )
+            totals_y -= 0.5 * cm
 
         # Additional status information
         self._render_status_information(totals_y)
