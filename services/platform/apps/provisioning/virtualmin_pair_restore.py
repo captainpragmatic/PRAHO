@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
@@ -63,7 +64,7 @@ PAIR_NODE_MARGIN_SECONDS = 600
 PAIR_VERIFY_MARGIN_SECONDS = 300
 
 # Said to the operator wherever a pair restore can be chosen.
-PAIR_RESTORE_LABEL = (
+PAIR_RESTORE_LABEL = _(
     "Restores the base backup and then the differential. Files deleted after the base was "
     "taken will reappear, and databases come from the differential's full dump. The domain is "
     "taken offline (maintenance page and disabled) until the restore is verified."

@@ -124,8 +124,8 @@ class PairLineageTests(ExclusionCase):
                 self.assertIsNotNone(self.refusal())
 
     def test_the_label_states_the_two_facts_an_operator_must_know(self) -> None:
-        self.assertIn("deleted after the base", pair.PAIR_RESTORE_LABEL)
-        self.assertIn("databases come from the differential", pair.PAIR_RESTORE_LABEL)
+        self.assertIn("deleted after the base", str(pair.PAIR_RESTORE_LABEL))
+        self.assertIn("databases come from the differential", str(pair.PAIR_RESTORE_LABEL))
 
 
 class PairResultTests(SimpleTestCase):

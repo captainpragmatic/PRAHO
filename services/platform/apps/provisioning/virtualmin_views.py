@@ -52,6 +52,7 @@ from .virtualmin_forms import (
     VirtualminBulkFilterForm,
     VirtualminMigrationForm,
     VirtualminRestoreForm,
+    VirtualminRestorePairForm,
     VirtualminServerForm,
 )
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
@@ -474,6 +475,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
+        "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
         "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
@@ -737,6 +739,54 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     }
 
     return render(request, "provisioning/virtualmin/restore_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@audit_service_call("virtualmin_restore_pair_form")
+def virtualmin_account_restore_pair(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🔄 Restore a base backup and the differential taken against it, as one workflow."""
+    from .virtualmin_pair_restore import PAIR_RESTORE_LABEL  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    backups_result = VirtualminBackupService(account.server).list_backups(account=account)
+    listed = backups_result.unwrap() if backups_result.is_ok() else []
+    differentials = [item for item in listed if item.get("chain_role") == "differential" and item.get("base_backup_id")]
+    if not differentials:
+        messages.error(request, _("No differential backups are available for this account."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+
+    if request.method == "POST":
+        form = VirtualminRestorePairForm(request.POST, differentials=differentials)
+        if form.is_valid():
+            chosen = next(item for item in differentials if item["backup_id"] == form.cleaned_data["differential_id"])
+            created = VirtualminBackupManagementService(account.server).create_pair_restore_job(
+                account,
+                str(chosen["base_backup_id"]),
+                str(chosen["backup_id"]),
+                force_restore=True,  # the confirmation checkbox is the explicit consent
+                initiated_by=f"staff:{cast(User, request.user).email}",
+            )
+            if created.is_ok():
+                messages.success(request, _("Pair restore queued."))
+                return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().id)
+            messages.error(request, f"Failed to create pair restore: {created.unwrap_err()}")
+    else:
+        form = VirtualminRestorePairForm(differentials=differentials)
+
+    context = {
+        "page_title": f"Restore pair: {account.domain}",
+        "account": account,
+        "breadcrumb_items": [
+            {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+            {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
+            {"text": "Restore pair"},
+        ],
+        "form": form,
+        "pair_label": PAIR_RESTORE_LABEL,
+        "cancel_url": reverse("provisioning:virtualmin_account_detail", args=[account.id]),
+    }
+    return render(request, "provisioning/virtualmin/restore_pair_form.html", context)
 
 
 # ===============================================================================

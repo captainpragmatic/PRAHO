@@ -57,6 +57,11 @@ urlpatterns = [
         name="virtualmin_account_restore",
     ),
     path(
+        "accounts/<uuid:account_id>/restore-pair/",
+        virtualmin_views.virtualmin_account_restore_pair,
+        name="virtualmin_account_restore_pair",
+    ),
+    path(
         "accounts/<uuid:account_id>/suspend/",
         virtualmin_views.virtualmin_account_suspend,
         name="virtualmin_account_suspend",
