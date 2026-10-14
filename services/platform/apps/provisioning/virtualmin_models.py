@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -31,6 +32,22 @@ HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
 # auto-failed; only auto-failed servers are auto-recovered.
 HEALTH_AUTO_FAIL_THRESHOLD = 6
 _EXECUTION_RECOVERY_MARGIN_SECONDS = 60
+
+# Keys a persisted job result never keeps. Job results hold Virtualmin
+# response envelopes, and 8.x listing rows carry `hashed_password` and
+# `password_for_mysql`; the create-domain parameters carry `pass`.
+_SECRET_KEY_RE = re.compile(
+    r"((^|[-_])pass$|passw|passphrase|secret|token|hashed|private_key|api_key|access_key)", re.I
+)
+
+
+def without_secrets(value: Any) -> Any:
+    """A copy of a JSON-like value with every secret-looking key removed, at any depth."""
+    if isinstance(value, dict):
+        return {key: without_secrets(item) for key, item in value.items() if not _SECRET_KEY_RE.search(str(key))}
+    if isinstance(value, list):
+        return [without_secrets(item) for item in value]
+    return value
 
 
 class VirtualminServer(models.Model):
@@ -702,7 +719,7 @@ class VirtualminProvisioningJob(models.Model):
         result: dict[str, Any] | None = None,
     ) -> int:
         """Token-fenced terminal write; a rotated token makes this a no-op."""
-        payload = dict(result or {})
+        payload = without_secrets(dict(result or {}))
         return cls.objects.filter(pk=job_id, execution_token=token).update(
             status=status,
             status_message=message,
@@ -740,7 +757,7 @@ class VirtualminProvisioningJob(models.Model):
         now = timezone.now()
         self.status = "completed"
         self.completed_at = now
-        self.result = result
+        self.result = without_secrets(dict(result))
 
         # Store rollback operations for potential future use
         if rollback_operations and "rollback_operations" not in self.result:
@@ -778,7 +795,7 @@ class VirtualminProvisioningJob(models.Model):
         self.completed_at = now
 
         if result:
-            self.result = dict(result)
+            self.result = without_secrets(dict(result))
         else:
             self.result = dict(self.result or {})
         self.result["retriability"] = retriability.value

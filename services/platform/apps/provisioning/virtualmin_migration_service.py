@@ -79,6 +79,20 @@ def AnsibleService() -> AnsibleRunner:  # noqa: N802  # Lazy constructor preserv
     return Runner()
 
 
+# The listing attributes a row keeps, in text-label form; the 8.x snake_case
+# form of each is kept too. These are what migration verification compares
+# and what listing_enabled() reads. A full 8.x row also carries
+# `hashed_password`, `password_for_mysql` and other secrets, and rows end up
+# in the persisted pre-migration snapshot, so nothing else is kept.
+SNAPSHOT_ATTRIBUTES = ("Username", "ID", "Status", "Disabled", "Server byte quota", "Bandwidth limit", "Features")
+_SNAPSHOT_KEYS = frozenset(key for label in SNAPSHOT_ATTRIBUTES for key in (label, label.lower().replace(" ", "_")))
+
+
+def snapshot_attributes(values: dict[str, Any]) -> dict[str, Any]:
+    """Only the allowlisted attributes of one listing row."""
+    return {key: value for key, value in values.items() if key in _SNAPSHOT_KEYS}
+
+
 def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
     """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes.
 
@@ -107,7 +121,7 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
                 "domain": str(item["name"]),
                 "username": listing_attribute(values, "Username"),
                 "enabled": listing_enabled(values),
-                "attributes": values,
+                "attributes": snapshot_attributes(values),
             }
         )
     if len({row["domain"] for row in rows}) != len(rows):
