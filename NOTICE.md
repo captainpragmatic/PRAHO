@@ -47,4 +47,4 @@ This software is provided without warranty of any kind, including any warranty o
 fitness for regulatory or fiscal compliance, to the fullest extent permitted by the
 GPL-3.0-or-later license under which it is distributed. See LICENSE.md.
 
-Contact: PRAHO <contact@pragmatichost.com>
+Contact: https://github.com/captainpragmatic/PRAHO/issues

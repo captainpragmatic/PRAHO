@@ -23,7 +23,7 @@ def test_saved_staff_session_requires_successful_protected_page(
 
 def test_invalid_saved_staff_session_requires_real_login(page: Page, _staff_storage_state: str, tmp_path: Path) -> None:
     state = json.loads(Path(_staff_storage_state).read_text())
-    sessions = [cookie for cookie in state["cookies"] if cookie["name"] == "pragmatichost_dev_sessionid"]
+    sessions = [cookie for cookie in state["cookies"] if cookie["name"] == "praho_dev_sessionid"]
     assert len(sessions) == 1, "The saved state must include the staff session cookie"
     sessions[0]["value"] = "expired-e2e-session"
     invalid = tmp_path / "invalid-staff-session.json"

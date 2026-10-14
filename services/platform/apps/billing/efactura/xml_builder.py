@@ -154,7 +154,7 @@ def get_supplier_info() -> CompanyInfo:
     """Return deployment-only supplier identity shared with statutory exports such as D390."""
     return CompanyInfo(
         name=getattr(settings, "COMPANY_NAME", ""),
-        tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
+        tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", "") or settings.COMPANY_CUI,
         registration_number=getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
         street=getattr(settings, "COMPANY_STREET", ""),
         city=getattr(settings, "COMPANY_CITY", ""),

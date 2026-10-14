@@ -226,21 +226,16 @@ def login_floor_seconds(raw: str | None, default: float) -> float:
 
 # Cold-outage defaults mirror Platform's public company catalog entries.
 COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
-    "legal_name": "PragmaticHost SRL",
-    "email_support": "support@pragmatichost.com",
-    "email_privacy": "privacy@pragmatichost.com",
+    "legal_name": "Example Company",
+    "email_support": "support@example.com",
+    "email_privacy": "privacy@example.com",
     "email_finance": "",
     "phone": "",
-    "email_dpo": "dpo@pragmatichost.com",
-    "email_contact": "contact@pragmatichost.com",
+    "email_dpo": "dpo@example.com",
+    "email_contact": "contact@example.com",
     "address": "",
     "registration_number": "",
 }
-
-# Company bank details for bank transfer payment instructions
-COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")
-COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
-COMPANY_BANK_BENEFICIARY = os.environ.get("COMPANY_BANK_BENEFICIARY", "PragmaticHost SRL")
 
 
 # ===============================================================================
@@ -289,7 +284,7 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "portal.pragmatichost.com"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]  # Production and staging set it from the environment
 
 # ===============================================================================
 # SESSION CONFIGURATION 🔐
@@ -312,11 +307,8 @@ CSRF_COOKIE_SECURE = not DEBUG  # HTTPS for CSRF cookies
 CSRF_COOKIE_HTTPONLY = False  # ✅ Allow JS access for AJAX
 CSRF_COOKIE_SAMESITE = "Lax"  # CSRF protection
 
-# CSRF trusted origins (must include scheme + host)
-CSRF_TRUSTED_ORIGINS = [
-    "https://portal.pragmatichost.com",
-    "https://www.pragmatichost.com",
-]
+# CSRF trusted origins (must include scheme + host); production and staging derive them from ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS: list[str] = []
 
 # Security headers
 SECURE_BROWSER_XSS_FILTER = True

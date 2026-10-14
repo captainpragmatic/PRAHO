@@ -12,6 +12,10 @@ from .base import *
 DEBUG = False
 TEMPLATE_DEBUG = False
 
+# A configured seller, as production requires; tests of the unconfigured case override these.
+COMPANY_NAME = "Test Hosting SRL"
+COMPANY_CUI = "RO12345674"
+
 # ===============================================================================
 # DISABLE DEBUG TOOLBAR IN TESTS
 # ===============================================================================

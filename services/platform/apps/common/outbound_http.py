@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_USER_AGENT = "PRAHO-Platform/1.0 (+https://pragmatichost.com)"
+DEFAULT_USER_AGENT = "PRAHO-Platform/1.0"
 
 DANGEROUS_PORTS: frozenset[int] = frozenset(
     {

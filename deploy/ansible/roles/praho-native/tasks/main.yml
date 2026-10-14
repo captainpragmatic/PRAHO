@@ -316,6 +316,8 @@
       - DJANGO_ENCRYPTION_KEY
       - DJANGO_ENCRYPTION_KEY_PREVIOUS
       - CREDENTIAL_VAULT_MASTER_KEY
+      - COMPANY_NAME
+      - COMPANY_CUI
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"

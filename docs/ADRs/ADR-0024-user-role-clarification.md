@@ -63,7 +63,7 @@ class User(AbstractUser):
 
 ### **`admin_role` - Business Role (Our Custom Field)**
 - **Purpose**: What business functions can user perform?
-- **Scope**: PragmaticHost business logic
+- **Scope**: the hosting operator's business logic
 - **Usage**: Customer management, billing, support, etc.
 
 ## **✅ Clear Usage Examples**

@@ -69,7 +69,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "ci-cache",
-        "KEY_PREFIX": "pragmatichost_ci",
+        "KEY_PREFIX": "praho_ci",
         "OPTIONS": {
             "MAX_ENTRIES": 1000,
         },

@@ -222,7 +222,7 @@ if ENABLE_SILK_PROFILER and not is_testing:
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # Email configuration for development
-DEFAULT_FROM_EMAIL = "dev@pragmatichost.com"
+DEFAULT_FROM_EMAIL = "dev@example.com"
 
 # ===============================================================================
 # CACHE (in-memory LocMemCache for development; staging/prod use the database cache)
@@ -315,15 +315,17 @@ LOGGING = {
 # HTTPS SECURITY SETTINGS - DEVELOPMENT/LOCAL 🔒
 # ===============================================================================
 
-# Development security - HTTP only (localhost + Tailscale)
-ALLOWED_HOSTS = ["*"]  # Allow all hosts in development for Tailscale compatibility
+# Development security - HTTP only (localhost, plus any LAN/VPN origins a developer lists)
+ALLOWED_HOSTS = ["*"]  # Allow all hosts in development (other machines on a LAN or VPN)
+# Extra development origins, e.g. another machine on a LAN or VPN, as a comma list in .env:
+# DEV_EXTRA_ORIGINS=http://100.64.0.1:8700,http://100.64.0.1:8701
+_dev_extra_origins = [o.strip() for o in os.environ.get("DEV_EXTRA_ORIGINS", "").split(",") if o.strip()]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8700",
     "http://127.0.0.1:8700",
     "http://localhost:8701",
     "http://127.0.0.1:8701",
-    "http://100.73.13.8:8700",  # Tailscale IP - Platform
-    "http://100.73.13.8:8701",  # Tailscale IP - Portal
+    *_dev_extra_origins,
 ]
 
 # ===============================================================================
@@ -346,7 +348,7 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # Relaxed session settings for development
 SESSION_COOKIE_AGE = 86400  # 24 hours for development convenience
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Allow persistent sessions
-SESSION_COOKIE_NAME = "pragmatichost_dev_sessionid"
+SESSION_COOKIE_NAME = "praho_dev_sessionid"
 SESSION_COOKIE_HTTPONLY = True  # Still prevent XSS in development
 SESSION_COOKIE_PATH = "/"
 SESSION_SAVE_EVERY_REQUEST = False  # Less overhead in development
@@ -371,23 +373,16 @@ SECRET_KEY = "django-insecure-dev-key-change-for-production"
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8701",
     "http://127.0.0.1:8701",
-    "http://100.73.13.8:8701",  # Tailscale IP — parity with CSRF_TRUSTED_ORIGINS
+    *_dev_extra_origins,
 ]
 CORS_ALLOW_CREDENTIALS = True
 
 # ===============================================================================
-# ROMANIAN DEVELOPMENT DEFAULTS
+# DEVELOPMENT FISCAL IDENTITY
 # ===============================================================================
 
-# Test company info for development
-# Update Romanian business context for development
-ROMANIAN_BUSINESS_CONTEXT.update(
-    {
-        "company_name": "PragmaticHost Dev SRL",
-        "company_cui": "RO99999999",
-        "email": "dev@pragmatichost.com",
-    }
-)
+# An obviously fictional seller so local invoices render; the .env still wins.
+COMPANY_NAME = os.environ.get("COMPANY_NAME") or "PRAHO Dev Company"
 
 # ===============================================================================
 # INTER-SERVICE COMMUNICATION

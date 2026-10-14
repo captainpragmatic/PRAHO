@@ -23,3 +23,4 @@ class SystemSettingsConfig(AppConfig):
         # Import signals to register them
         with contextlib.suppress(ImportError):
             from . import signals  # noqa: F401  # Signal registration
+        from . import checks  # noqa: F401  # System check registration

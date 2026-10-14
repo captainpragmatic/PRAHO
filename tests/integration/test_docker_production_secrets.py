@@ -138,6 +138,9 @@ PRODUCTION_KEY_VALUES = {
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "w",
     "DJANGO_ENCRYPTION_KEY": "e",
     "CREDENTIAL_VAULT_MASTER_KEY": "v",
+    # The seller identity printed on invoices.
+    "COMPANY_NAME": "n",
+    "COMPANY_CUI": "c",
 }
 
 
@@ -308,6 +311,8 @@ class TestNativeMigrateEnvironment:
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),
             "DJANGO_ENCRYPTION_KEY": key,
             "CREDENTIAL_VAULT_MASTER_KEY": key,
+            "COMPANY_NAME": "Operator Hosting SRL",
+            "COMPANY_CUI": "RO12345674",
         }
 
     @pytest.mark.integration

@@ -21,17 +21,18 @@ from apps.common.localisation import LocalisationDefaults
 from apps.common.localisation_services import get_localisation_defaults
 
 CATALOG_COMPANY = {
-    "legal_name": "PragmaticHost SRL",
-    "email_support": "support@pragmatichost.com",
-    "email_privacy": "privacy@pragmatichost.com",
+    "legal_name": "Example Company",
+    "email_support": "support@example.com",
+    "email_privacy": "privacy@example.com",
     "email_finance": "",
     "phone": "",
     # Published for the privacy policy (GDPR Art. 13(1)(b)).
-    "email_dpo": "dpo@pragmatichost.com",
-    "email_contact": "contact@pragmatichost.com",
+    "email_dpo": "dpo@example.com",
+    "email_contact": "contact@example.com",
     "address": "",
     "registration_number": "",
 }
+CATALOG_ADDRESSES = frozenset(value for value in CATALOG_COMPANY.values() if "@" in value)
 CONFIGURED_COMPANY = {
     "legal_name": "Portal Identity SRL",
     "email_support": "support-identity@example.test",
@@ -183,14 +184,16 @@ class PortalCompanyIdentityTests(SimpleTestCase):
                         html = render_to_string(template_name, context, request=request)
                         for field in fields:
                             self.assertIn(CONFIGURED_COMPANY[field], html)
-                        self.assertNotIn("@pragmatichost.com", html)
+                        for address in CATALOG_ADDRESSES:
+                            self.assertNotIn(address, html)
 
     def test_no_portal_template_contains_a_hardcoded_contact_address(self) -> None:
+        # Contact addresses come from the company identity context, never from template text.
         root = Path(settings.BASE_DIR) / "templates"
         offenders = sorted(
             str(path.relative_to(root))
             for path in root.rglob("*.html")
-            if "@pragmatichost.com" in path.read_text(encoding="utf-8")
+            if any(address in path.read_text(encoding="utf-8") for address in CATALOG_ADDRESSES)
         )
         self.assertEqual(offenders, [])
 

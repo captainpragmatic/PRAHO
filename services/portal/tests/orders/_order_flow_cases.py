@@ -797,9 +797,6 @@ class TestParseOrderTimestamp(TestCase):
 
 @override_settings(
     **_CACHE_SETTINGS,
-    COMPANY_BANK_IBAN="RO49AAAA1B31007593840000",
-    COMPANY_BANK_NAME="Test Bank",
-    COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
 class TestBankTransferSkipsStripeIntent(TestCase):
     """order_confirmation must NOT fetch Stripe config when payment_method=bank_transfer."""
@@ -841,9 +838,6 @@ class TestBankTransferSkipsStripeIntent(TestCase):
 
 @override_settings(
     **_CACHE_SETTINGS,
-    COMPANY_BANK_IBAN="RO49AAAA1B31007593840000",
-    COMPANY_BANK_NAME="Test Bank",
-    COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
 class TestStripeFailureRedirectsToConfirmation(TestCase):
     """When Stripe config fetch raises, order_confirmation must still render (no 500)."""
@@ -1120,9 +1114,6 @@ class TestNoFloatformatOnMonetaryValues(TestCase):
 
 _BANK_SETTINGS = {
     **_CACHE_SETTINGS,
-    "COMPANY_BANK_IBAN": "RO49AAAA1B31007593840000",
-    "COMPANY_BANK_NAME": "Banca Transilvania",
-    "COMPANY_BANK_BENEFICIARY": "PragmaticHost SRL",
 }
 
 # A fixed UUID used as the order ID in confirmation URL tests.

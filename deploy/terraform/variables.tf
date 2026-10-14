@@ -25,9 +25,9 @@ variable "ssh_public_key" {
 }
 
 variable "domain" {
-  description = "Base domain for reverse DNS (e.g., pragmatichost.com)"
+  description = "Base domain for reverse DNS (e.g., example.com)"
   type        = string
-  default     = "pragmatichost.com"
+  default     = "example.com"
 }
 
 variable "location" {
@@ -104,6 +104,6 @@ locals {
     project     = "praho"
     environment = var.environment
     managed_by  = "terraform"
-    team        = "pragmatichost"
+    team        = "praho"
   }
 }

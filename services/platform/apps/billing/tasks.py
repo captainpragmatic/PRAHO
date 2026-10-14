@@ -400,13 +400,11 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
     logger.info("[VAT] Validating VAT number for tax profile %s", tax_profile_id)
 
     from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
+    from apps.billing.tax_evidence import vat_identity  # noqa: PLC0415
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
     from apps.billing.vies_evidence import normalize_vat_number, profile_vat_identity  # noqa: PLC0415
-    from apps.common.eu_vat_validator import (  # noqa: PLC0415
-        is_eu_country,
-        parse_vat_number,
-        validate_vat_format,
-    )
+    from apps.common.eu_vat_validator import is_eu_country, validate_vat_format  # noqa: PLC0415
+    from apps.common.operator import operator_country  # noqa: PLC0415
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
     try:
@@ -461,7 +459,9 @@ def validate_vat_number(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit va
             }
 
         # Step 3: VIES API verification
-        requester_country, requester_number = parse_vat_number(str(settings.COMPANY_CUI))
+        # The seller's own VAT ID makes the check traceable; without one configured, VIES is asked anonymously.
+        seller_cui = settings.COMPANY_CUI
+        requester_country, requester_number = vat_identity(seller_cui, operator_country()) if seller_cui else ("", "")
         requester_kwargs: dict[str, str] = {}
         if is_eu_country(requester_country) and requester_number:
             requester_kwargs = {

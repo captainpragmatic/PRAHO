@@ -103,15 +103,15 @@ _ROMANIAN_CITIES: list[tuple[str, str]] = [
 # Single source of truth for advertised dev credentials: (label, email, password).
 # Both _print_credentials() and _ensure_credential_passwords() read from this list, so the
 # printed credentials table can never advertise a password that isn't actually set on the row.
-# NOTE: inactive-staff@pragmatichost.com and the bulk user{i}@example.com accounts are
+# NOTE: inactive-staff@praho.test and the bulk user{i}@example.com accounts are
 # intentionally NOT advertised here, so they are left untouched by the credential reset.
 DEV_USER_CREDENTIALS: list[tuple[str, str, str]] = [
-    ("Admin", "admin@pragmatichost.com", "admin123"),
-    ("Support", "john@pragmatichost.com", "support123"),
-    ("Support", "jane@pragmatichost.com", "support123"),
-    ("Support", "mike@pragmatichost.com", "support123"),
-    ("Manager", "manager@pragmatichost.com", "manager123"),
-    ("Customer", "customer@pragmatichost.com", "testpass123"),
+    ("Admin", "admin@praho.test", "admin123"),
+    ("Support", "john@praho.test", "support123"),
+    ("Support", "jane@praho.test", "support123"),
+    ("Support", "mike@praho.test", "support123"),
+    ("Manager", "manager@praho.test", "manager123"),
+    ("Customer", "customer@praho.test", "testpass123"),
     ("Multi-company", "multi-company@example.com", "testpass123"),
     ("Suspended", "suspended@example.com", "testpass123"),
     ("E2E Admin", "e2e-admin@test.local", "test123"),
@@ -391,7 +391,7 @@ class Command(BaseCommand):
         fake = Faker("ro_RO")  # Romanian locale
         Faker.seed(42)  # Consistent data
 
-        self.stdout.write("�� Generating comprehensive test data for PragmaticHost...")
+        self.stdout.write("�� Generating comprehensive test data for PRAHO...")
 
         # Create foundation data first
         self.create_admin_users(fake)
@@ -525,20 +525,20 @@ class Command(BaseCommand):
 
         # Create superuser with consistent credentials for E2E testing
         # Note: These are development/test credentials only - DEBUG mode enforced above
-        if not User.objects.filter(email="admin@pragmatichost.com").exists():
+        if not User.objects.filter(email="admin@praho.test").exists():
             admin_user = User.objects.create_superuser(
                 first_name="Admin",
                 last_name="PRAHO",
-                email="admin@pragmatichost.com",
+                email="admin@praho.test",
                 password="admin123",  # Dev/test only - protected by DEBUG check
             )
             self.stdout.write(f"  ✓ Admin: {admin_user.email}")
 
         # Create support users
         support_users = [
-            ("John", "Doe", "john@pragmatichost.com"),
-            ("Jane", "Smith", "jane@pragmatichost.com"),
-            ("Mike", "Johnson", "mike@pragmatichost.com"),
+            ("John", "Doe", "john@praho.test"),
+            ("Jane", "Smith", "jane@praho.test"),
+            ("Mike", "Johnson", "mike@praho.test"),
         ]
 
         for first, last, email in support_users:
@@ -705,7 +705,7 @@ class Command(BaseCommand):
         servers = [
             {
                 "name": "WEB01",
-                "hostname": "web01.pragmatichost.com",
+                "hostname": "web01.example.com",
                 "server_type": "shared",
                 "primary_ip": "185.123.45.67",
                 "location": "București",
@@ -720,7 +720,7 @@ class Command(BaseCommand):
             },
             {
                 "name": "VPS01",
-                "hostname": "vps01.pragmatichost.com",
+                "hostname": "vps01.example.com",
                 "server_type": "vps_host",
                 "primary_ip": "185.123.45.68",
                 "location": "București",
@@ -984,7 +984,7 @@ class Command(BaseCommand):
             customer = None
 
         # Create the specific test user first if it doesn't exist
-        test_user_email = "customer@pragmatichost.com"
+        test_user_email = "customer@praho.test"
         test_user = None
         try:
             test_user = User.objects.get(email=test_user_email)
@@ -1420,7 +1420,7 @@ class Command(BaseCommand):
 
         # ── Inactive staff user: staff_role but disabled ──
         inactive_staff, _ = User.objects.get_or_create(
-            email="inactive-staff@pragmatichost.com",
+            email="inactive-staff@praho.test",
             defaults={
                 "first_name": "Elena",
                 "last_name": "Vasile",
@@ -1436,7 +1436,7 @@ class Command(BaseCommand):
 
         # ── Manager user: assigned as account manager to some customers ──
         manager_user, _ = User.objects.get_or_create(
-            email="manager@pragmatichost.com",
+            email="manager@praho.test",
             defaults={
                 "first_name": "Dragoș",
                 "last_name": "Marin",
@@ -2727,7 +2727,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.namecheap.com",
                 "api_endpoint": "https://api.namecheap.com/xml.response",
                 "status": "active",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "USD",
             },
             {
@@ -2736,7 +2736,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.rotld.ro",
                 "api_endpoint": "https://rest.rotld.ro",
                 "status": "active",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "RON",
             },
             {
@@ -2745,7 +2745,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.godaddy.com",
                 "api_endpoint": "https://api.godaddy.com/v1",
                 "status": "suspended",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "USD",
             },
         ]
@@ -2814,7 +2814,7 @@ class Command(BaseCommand):
                         "expires_at": registered + timedelta(days=365),
                         "auto_renew": True,
                         "locked": True,
-                        "nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                        "nameservers": ["ns1.example.com", "ns2.example.com"],
                         "last_paid_amount_cents": tld.renewal_price_cents,
                     }
                 )
@@ -2837,7 +2837,7 @@ class Command(BaseCommand):
                     }
                 )
             elif status == "pending":
-                domain_kwargs["nameservers"] = ["ns1.pragmatichost.com", "ns2.pragmatichost.com"]
+                domain_kwargs["nameservers"] = ["ns1.example.com", "ns2.example.com"]
 
             domain = Domain.objects.create(**domain_kwargs)
             domains.append(domain)
@@ -3231,14 +3231,14 @@ class Command(BaseCommand):
                 "event_id": "vm-hook-domain-created-001",
                 "event_type": "domain.created",
                 "status": "processed",
-                "payload": {"action": "domain.created", "domain": "test.pragmatichost.com"},
+                "payload": {"action": "domain.created", "domain": "test.example.com"},
             },
             {
                 "source": "virtualmin",
                 "event_id": "vm-hook-backup-completed-001",
                 "event_type": "backup.completed",
                 "status": "pending",
-                "payload": {"action": "backup.completed", "domain": "test.pragmatichost.com", "size_mb": 250},
+                "payload": {"action": "backup.completed", "domain": "test.example.com", "size_mb": 250},
             },
             {
                 "source": "efactura",

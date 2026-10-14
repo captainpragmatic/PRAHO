@@ -32,8 +32,3 @@ ROOT_URLCONF = "config.e2e_urls"
 # NOTE: keep external DB-driver names out of prose in config/settings* — the
 # portal DB-isolation CI guard greps these files for them by substring.
 PORTAL_EXTRA_PUBLIC_URLS = ["/__e2e__/"]
-
-# Public test-only banking details; no real payment is initiated by the suite.
-COMPANY_BANK_IBAN = "RO49AAAA1B31007593840000"
-COMPANY_BANK_NAME = "E2E Test Bank"
-COMPANY_BANK_BENEFICIARY = "E2E Hosting SRL"

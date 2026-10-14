@@ -248,8 +248,8 @@ PRAHO requires **two separate FQDNs** — one for Portal (customer-facing) and o
 
 | Component | Domain | Access |
 |-----------|--------|--------|
-| **Portal** (customer-facing) | `portal.pragmatichost.com` | Public |
-| **Platform** (staff/admin) | `platform.pragmatichost.com` | IP-restricted (optional) |
+| **Portal** (customer-facing) | `portal.example.com` | Public |
+| **Platform** (staff/admin) | `platform.example.com` | IP-restricted (optional) |
 | **Bare IP** | Server's public IP | 301 redirect to portal domain |
 
 **Security layers (all deployment modes):**
@@ -373,9 +373,9 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP address | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
-| `ACME_EMAIL` | Let's Encrypt notification email | `admin@pragmatichost.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
+| `ACME_EMAIL` | Let's Encrypt notification email | `admin@example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
 | `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
@@ -411,7 +411,7 @@ ssh root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
   source /opt/praho/.venv-linux/bin/activate && \
-  python services/platform/manage.py createsuperuser --email admin@pragmatichost.com'
+  python services/platform/manage.py createsuperuser --email admin@example.com'
 ```
 
 You will be prompted for a password. This is the only time credentials need to be entered manually — they are **not** stored in `.env` files or Ansible logs.
@@ -941,15 +941,15 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
 | `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
+| `ACME_EMAIL` | Let's Encrypt email | `admin@example.com` |
 
 ### Docker Deployment (Compose)
 
@@ -957,8 +957,8 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.pragmatichost.com` |
+| `PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.example.com` |
 | `DB_PASSWORD` | Yes | PostgreSQL password | `openssl rand -base64 32` |
 | `DJANGO_SECRET_KEY` | Yes | Django secret key | `openssl rand -base64 50` |
 | `PLATFORM_API_SECRET` | Yes | Portal ↔ Platform HMAC (same value as `HMAC_SECRET`) | `openssl rand -base64 32` |
@@ -1065,8 +1065,8 @@ docker logs praho_caddy
 journalctl -u caddy -f
 
 # Verify domain DNS is correct
-dig portal.pragmatichost.com
-dig platform.pragmatichost.com
+dig portal.example.com
+dig platform.example.com
 
 # Check if ports 80/443 are open
 sudo ufw status

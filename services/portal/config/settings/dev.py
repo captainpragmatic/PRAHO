@@ -185,12 +185,12 @@ except Exception as e:
 CSRF_COOKIE_SECURE = False
 
 # CSRF trusted origins for development
+# Extra development origins, e.g. another machine on a LAN or VPN, as a comma list in .env:
+# DEV_EXTRA_ORIGINS=http://100.64.0.1:8700,http://100.64.0.1:8701
 CSRF_TRUSTED_ORIGINS += [
     "http://localhost:8701",
     "http://127.0.0.1:8701",
-    "http://claudius-imac:8701",
-    "http://100.73.13.8:8700",  # Tailscale IP - Platform
-    "http://100.73.13.8:8701",  # Tailscale IP - Portal
+    *[o.strip() for o in os.environ.get("DEV_EXTRA_ORIGINS", "").split(",") if o.strip()],
 ]
 
 # Cache (use local memory cache for development)

@@ -73,7 +73,7 @@ class TestDatabaseCacheFunctionality(TestCase):
             f"Expected one of {expected_backends}, got {cache_config['BACKEND']}"
         if cache_config['BACKEND'] == 'django.core.cache.backends.db.DatabaseCache':
             assert cache_config['LOCATION'] == 'django_cache_table'
-            assert cache_config['KEY_PREFIX'] == 'pragmatichost'
+            assert cache_config['KEY_PREFIX'] == 'praho'
 
             options = cache_config.get('OPTIONS', {})
             assert 'MAX_ENTRIES' in options

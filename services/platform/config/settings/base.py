@@ -118,14 +118,14 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "pragmatichost"),
-        "USER": os.environ.get("DB_USER", "pragmatichost"),
+        "NAME": os.environ.get("DB_NAME", "praho"),
+        "USER": os.environ.get("DB_USER", "praho"),
         "PASSWORD": os.environ.get("DB_PASSWORD", "development_password"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,  # Database connection pooling
         "OPTIONS": {
-            "application_name": "pragmatichost_crm",
+            "application_name": "praho_platform",
         },
     }
 }
@@ -232,7 +232,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "django_cache_table",
-        "KEY_PREFIX": "pragmatichost",
+        "KEY_PREFIX": "praho",
         "OPTIONS": {
             "MAX_ENTRIES": 10000,
             "CULL_FREQUENCY": 3,  # Delete 1/3 of cache when MAX_ENTRIES reached
@@ -336,8 +336,8 @@ AUDIT_CHAIN_REQUIRE = os.environ.get("AUDIT_CHAIN_REQUIRE", "false").strip().low
 AUDIT_ANCHOR_SINK = os.environ.get("AUDIT_ANCHOR_SINK", "logfile").strip().lower()
 AUDIT_ANCHOR_LOG_PATH = os.environ.get("AUDIT_ANCHOR_LOG_PATH", str(BASE_DIR / "logs" / "audit_chain_anchors.jsonl"))
 
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@example.com>")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@example.com")
 
 # Email provider configuration
 # Supported: 'smtp', 'amazon_ses', 'sendgrid', 'mailgun', 'console', 'locmem'
@@ -458,16 +458,6 @@ REGISTRAR_ADAPTERS_VERIFIED = os.environ.get("REGISTRAR_ADAPTERS_VERIFIED", "fal
 
 # NOTE: VAT rates removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 
-# Romanian company information
-ROMANIAN_BUSINESS_CONTEXT = {
-    "company_name": os.environ.get("COMPANY_NAME", "PragmaticHost SRL"),
-    "company_cui": os.environ.get("COMPANY_CUI", "RO12345678"),
-    "email": os.environ.get("COMPANY_EMAIL", "contact@pragmatichost.com"),
-    "phone": os.environ.get("COMPANY_PHONE", "+40.21.123.4567"),
-    "address": os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1, Bucuresti, Romania"),
-    "currency": "RON",
-}
-
 # Currency settings
 # Deprecated compatibility knob: this environment value does not select the selling currency.
 # New sales use the stored billing.default_currency policy; historical records keep their currency.
@@ -562,10 +552,13 @@ def validate_production_secret_key(secret_key: str | None) -> None:
 # ===============================================================================
 
 # Company information - override these in environment or local settings
-COMPANY_NAME = os.environ.get("COMPANY_NAME", "PRAHO Platform")
-COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1")
-COMPANY_CITY = os.environ.get("COMPANY_CITY", "București")
-COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name — see COMPANY_COUNTRY_CODE for the code
+# Fiscal identity printed on invoices and sent to VIES. Empty defaults on purpose: an unconfigured
+# deployment must never issue documents under a real-looking placeholder, and production refuses
+# to start without COMPANY_NAME and COMPANY_CUI (config/settings/prod.py).
+COMPANY_NAME = os.environ.get("COMPANY_NAME", "")
+COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "")
+COMPANY_CITY = os.environ.get("COMPANY_CITY", "")
+COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "")  # Display name — see COMPANY_COUNTRY_CODE for the code
 # The operator's jurisdiction as an ISO-3166-1 alpha-2 code. Read by
 # apps.common.localisation.operator_country and by the e-Factura supplier block.
 # Romania is the reference jurisdiction, not a claim that it fits any deployment (ADR-0047).
@@ -573,10 +566,10 @@ COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name 
 # COMPANY_COUNTRY display name must still resolve to its own country rather
 # than being silently treated as Romanian. operator_country() falls back.
 COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "")
-COMPANY_CUI = os.environ.get("COMPANY_CUI", "RO12345678")  # Romanian tax ID
-COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@praho.ro")
-COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
-COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
+COMPANY_CUI = os.environ.get("COMPANY_CUI", "")  # Tax ID (CUI in Romania)
+COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@example.com")
+COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "")
+COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://example.com")
 # These default to empty so an unconfigured deployment never prints a real-looking
 # placeholder IBAN / registration number on a legal fiscal document (the PDF omits
 # each line when its value is blank). Set them via environment to render them.

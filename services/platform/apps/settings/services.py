@@ -981,6 +981,14 @@ def get_default_from_email() -> str:
     return str(stored)
 
 
+def get_company_legal_name() -> str:
+    """The operator's public legal name: staff's own, else the seller name invoices are issued under."""
+    stored = SettingsService.get_stored_setting("company.legal_name")
+    if stored in (None, ""):
+        return str(django_settings.COMPANY_NAME)
+    return str(stored)
+
+
 def _efactura_deployment_value(key: str) -> object:
     """Use the consumer's deployment/default tiers and type conversion without reading a row."""
     from apps.billing.efactura.settings import EFacturaSettings  # noqa: PLC0415  # ADR-0007
@@ -1016,6 +1024,8 @@ def get_deployment_fallback(key: str) -> object:
     try:
         if key == "company.email_noreply":
             return get_default_from_email()
+        if key == "company.legal_name":
+            return get_company_legal_name()
         if key.startswith("efactura.company."):
             from apps.billing.efactura.xml_builder import (  # noqa: PLC0415  # ADR-0007
                 _supplier_setting,

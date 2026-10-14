@@ -79,7 +79,7 @@ the 40-character key in plaintext with one token per user.
 # 1. Obtain token (use a dedicated service-account staff user, minimal role)
 TOKEN=$(curl -s -X POST https://platform.example.com/api/users/token/ \
   -H "Content-Type: application/json" \
-  -d '{"email":"automation@pragmatichost.com","password":"<password>"}' \
+  -d '{"email":"automation@example.com","password":"<password>"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
 # 2. Confirm which user and expiry the token carries

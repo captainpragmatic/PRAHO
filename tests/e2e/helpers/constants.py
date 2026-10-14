@@ -34,11 +34,11 @@ CUSTOMER_EMAIL = "e2e-customer@test.local"
 CUSTOMER_PASSWORD = "test123"
 
 # Legacy credentials (keep for compatibility)
-LEGACY_SUPERUSER_EMAIL = "admin@pragmatichost.com"
+LEGACY_SUPERUSER_EMAIL = "admin@praho.test"
 LEGACY_SUPERUSER_PASSWORD = "admin123"
-LEGACY_CUSTOMER_EMAIL = "customer@pragmatichost.com"
+LEGACY_CUSTOMER_EMAIL = "customer@praho.test"
 LEGACY_CUSTOMER_PASSWORD = "admin123"
-CUSTOMER2_EMAIL = "customer2@pragmatichost.com"
+CUSTOMER2_EMAIL = "customer2@praho.test"
 CUSTOMER2_PASSWORD = "admin123"
 
 # Staff credentials for platform (reuse E2E admin)

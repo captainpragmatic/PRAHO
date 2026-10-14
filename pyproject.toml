@@ -12,7 +12,7 @@ name = "praho-platform"
 version = "0.30.0"
 description = "PRAHO Platform - PRAHO Really Automates Hosting Operations"
 authors = [
-    {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
+    {name = "PRAHO contributors"}
 ]
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.13"

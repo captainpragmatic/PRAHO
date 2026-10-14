@@ -13253,8 +13253,8 @@ msgid "Legal name"
 msgstr "Denumire legală"
 
 #: apps/settings/catalog.py:908
-msgid "Appears on invoices, contracts, and legal pages."
-msgstr "Apare pe facturi, contracte și pagini juridice"
+msgid "Shown on legal pages and in the customer portal. Leave unset to use the seller name on invoices."
+msgstr "Apare pe paginile juridice și în portalul clienților. Dacă nu este setată, se folosește numele vânzătorului de pe facturi."
 
 #: apps/settings/catalog.py:916 apps/settings/catalog.py:1231
 #: apps/tickets/models.py:93 apps/users/forms.py:124 apps/users/forms.py:260

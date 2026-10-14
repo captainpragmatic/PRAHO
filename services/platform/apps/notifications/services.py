@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import Error, transaction
@@ -58,6 +59,19 @@ TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"
 RATE_LIMIT_CACHE_PREFIX = "email_rate:"
+
+
+def _portal_invoice_url(invoice: Invoice) -> str:
+    """The customer's invoice page on the Portal, or "" (with a warning) when the Portal URL is unset."""
+    from apps.users.services import portal_public_origin  # noqa: PLC0415  # ADR-0007 cross-app import
+
+    try:
+        return f"{portal_public_origin()}/billing/invoices/{invoice.number}/"
+    except ImproperlyConfigured:
+        logger.warning(
+            "⚠️ [Email] portal.public_base_url is not configured; invoice %s email has no link", invoice.number
+        )
+        return ""
 
 
 # ===============================================================================
@@ -958,9 +972,9 @@ class EmailService:
             # Add default context variables
             safe_context.update(
                 {
-                    "company_name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
-                    "company_email": getattr(settings, "COMPANY_EMAIL", "contact@pragmatichost.com"),
-                    "company_website": getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com"),
+                    "company_name": settings.COMPANY_NAME,
+                    "company_email": settings.COMPANY_EMAIL,
+                    "company_website": settings.COMPANY_WEBSITE,
                     "current_year": timezone.now().year,
                     "unsubscribe_url": cls._generate_unsubscribe_url(recipient, template_key),
                 }
@@ -1041,8 +1055,10 @@ class EmailService:
 
         token = UnsubscribeToken.objects.create(email=email, template_key=template_key)
         url_path = reverse("notifications:unsubscribe", kwargs={"token_id": token.id})
-        base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
-        return f"{base_url}{url_path}"
+        from apps.users.services import platform_public_origin  # noqa: PLC0415  # ADR-0007 cross-app import
+
+        # The reverse proxy publishes /notifications/unsubscribe/ on the Platform host.
+        return f"{platform_public_origin()}{url_path}"
 
     @staticmethod
     def get_safe_email_preview(template_content: str, context: dict[str, Any]) -> str:
@@ -1077,7 +1093,7 @@ class EmailService:
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
-            "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
+            "invoice_url": _portal_invoice_url(invoice),
         }
 
         return cls.send_template_email(
@@ -1106,7 +1122,7 @@ class EmailService:
             "paid_date": timezone.localtime(invoice.paid_at).strftime("%Y-%m-%d")
             if invoice.paid_at
             else timezone.localtime(timezone.now()).strftime("%Y-%m-%d"),
-            "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
+            "invoice_url": _portal_invoice_url(invoice),
         }
 
         return cls.send_template_email(
@@ -1138,7 +1154,7 @@ class EmailService:
             "currency": invoice.currency.code if invoice.currency else "RON",
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "days_until_due": max(0, days_until_due),
-            "payment_url": f"{settings.COMPANY_WEBSITE}/billing/pay/{invoice.id}/",
+            "payment_url": _portal_invoice_url(invoice),  # The Portal invoice page carries the payment options
         }
 
         template_key = "payment_reminder" if days_until_due >= 0 else "payment_overdue"

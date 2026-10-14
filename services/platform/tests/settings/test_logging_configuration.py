@@ -31,6 +31,8 @@ _PROD_ENV = {
     "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
     "REDIS_URL": "",  # Prod refuses a set REDIS_URL (ADR-0020); a host export must not leak in
     "PLATFORM_LOG_DIR": "/var/log/praho",  # The deployed default; empty would mean console only.
+    "COMPANY_NAME": "Test Hosting SRL",  # Prod refuses a blank seller identity
+    "COMPANY_CUI": "RO12345674",
 }
 
 

@@ -845,7 +845,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_contact",
         data_type="string",
-        default="contact@pragmatichost.com",
+        default="contact@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Contact email"),
@@ -854,7 +854,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_dpo",
         data_type="string",
-        default="dpo@pragmatichost.com",
+        default="dpo@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("DPO email"),
@@ -865,7 +865,7 @@ CATALOG: tuple[SettingDef, ...] = (
         deployment_fallback=True,
         django_setting="DEFAULT_FROM_EMAIL",
         data_type="string",
-        default="noreply@pragmatichost.com",
+        default="noreply@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("No-reply email"),
@@ -874,7 +874,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_privacy",
         data_type="string",
-        default="privacy@pragmatichost.com",
+        default="privacy@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Privacy email"),
@@ -883,7 +883,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_support",
         data_type="string",
-        default="support@pragmatichost.com",
+        default="support@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Support email"),
@@ -900,12 +900,14 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="company.legal_name",
+        deployment_fallback=True,
+        django_setting="COMPANY_NAME",
         data_type="string",
-        default="PragmaticHost SRL",
+        default="",
         group="company",
         section=_("Identity"),
         label=_("Legal name"),
-        help_text=_("Appears on invoices, contracts, and legal pages."),
+        help_text=_("Shown on legal pages and in the customer portal. Leave unset to use the seller name on invoices."),
     ),
     SettingDef(
         key="company.phone",

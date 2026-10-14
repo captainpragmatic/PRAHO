@@ -11,8 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
 
+### Changed
+
+- **PRAHO no longer ships another operator's identity.** Database, cache and cookie defaults are named `praho`, sender and contact defaults use `example.com`, and the company settings start from an obvious placeholder ("Example Company", `support@example.com`). A deployment brings its own identity through its environment and settings.
+  - **Production refuses to start without a seller.** `COMPANY_NAME` and `COMPANY_CUI` default to blank and are required in production, by the settings, `deploy.sh` and the Ansible preflight, so no invoice is ever issued under a placeholder. The e-Factura supplier tax ID falls back to `COMPANY_CUI`, and the public legal name (`company.legal_name`) to `COMPANY_NAME`, so the operator is named once. Outside DEBUG, `migrate` warns (`settings.W001`) while the example support or privacy email is still configured.
+  - **Session cookies are renamed** (`praho_sessionid`, `praho_staging_sessionid`, `praho_dev_sessionid`), so everyone signs in once more after the upgrade.
+  - **Development logins** are `admin@praho.test` / `admin123` and the other `@praho.test` accounts the sample data prints. Extra development origins (another machine on a LAN or VPN) go in `DEV_EXTRA_ORIGINS`.
+  - **Staging hostnames** follow one convention, `portal-staging.<domain>`, which a wildcard certificate covers.
+
 ### Fixed
 
+- **Links in customer emails open the right pages.** Invoice and payment-reminder links pointed at the marketing website and used the invoice's database id; they now open the invoice on the portal by its number. Unsubscribe links open the platform's public unsubscribe page.
+- **VAT numbers are still checked with VIES when the seller's own tax ID is not configured.** The check stopped silently; it now asks VIES anonymously, and never sends a placeholder as the requester.
 - **Staff can add, edit and delete items on the order edit page.**
   - **The bugs.** The order edit page passed no payment methods, so saving a draft posted an empty method over the one it had, and no `can_edit`, so the item script never loaded. That script sent every request to `/app/orders/…`, which does not exist. Opening "Add item" crashed for any product priced in the order's currency. The item form's own script never ran, so the domain field and price fill were dead. The billing period was dropped on save, so every item was saved monthly. And after an add, the list lost its Edit and Delete buttons until a reload.
   - **Now.** The page keeps the payment method, the form offers the catalog price the server accepts for each period, the domain field appears for a product that needs one, the chosen period is saved and repriced through the usual override check, only periods an order can be fulfilled with are offered, the price preview adds the setup fee once, and a refusal or an error page shows in the form instead of "saved".

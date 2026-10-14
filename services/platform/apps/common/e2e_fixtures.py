@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 OWNER = "praho-e2e-v1"
 PASSWORD = "test123"
 CLOSED_TICKET_SEQUENCE = 2
-CUSTOMER_EMAILS = ("e2e-customer@test.local", "customer2@pragmatichost.com")
+CUSTOMER_EMAILS = ("e2e-customer@test.local", "customer2@praho.test")
 
 
 def require_e2e_database() -> None:
@@ -243,7 +243,7 @@ def seed_baseline() -> dict[str, Any]:
         defaults={"monthly_price_cents": 10000, "annual_discount_percent": Decimal("20.00")},
     )
     admin = _user("e2e-admin@test.local", staff=True)
-    _user("admin@pragmatichost.com", staff=True, password="admin123")
+    _user("admin@praho.test", staff=True, password="admin123")
     category = (
         SupportCategory.objects.get(name="Suport Tehnic")
         if SupportCategory.objects.filter(name="Suport Tehnic").exists()
@@ -254,7 +254,7 @@ def seed_baseline() -> dict[str, Any]:
         user = _user(email, password=PASSWORD if index == 1 else "admin123")
         members = [user, admin] if index == 1 else [user]
         if index == 1:
-            members.append(_user("customer@pragmatichost.com", password="admin123"))
+            members.append(_user("customer@praho.test", password="admin123"))
         for member in members:
             CustomerMembership.objects.update_or_create(
                 user=member, customer=customer, defaults={"role": "owner", "is_primary": True, "is_active": True}

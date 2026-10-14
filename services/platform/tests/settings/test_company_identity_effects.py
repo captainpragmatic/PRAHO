@@ -33,7 +33,7 @@ from apps.notifications.models import EmailLog
 from apps.notifications.services import EmailService, NotificationService
 from apps.notifications.tasks import send_email_task
 from apps.settings.models import SystemSetting
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_company_legal_name
 
 # Every key below is rendered by BOTH legal pages unless noted.
 PRIVACY_KEYS = {
@@ -101,6 +101,16 @@ class CompanyIdentityRenderTests(TestCase):
                 with self.subTest(key=key):
                     self.assertContains(response, default)
 
+    @override_settings(COMPANY_NAME="Seller From Env SRL")
+    def test_legal_name_inherits_the_invoice_seller_until_staff_override_it(self) -> None:
+        """One name for the operator: the legal pages use COMPANY_NAME until staff store their own."""
+        SystemSetting.objects.filter(key="company.legal_name").delete()
+        self.assertContains(self.client.get(reverse("privacy_policy")), "Seller From Env SRL")
+        self.set_value("company.legal_name", "Staff Chosen Name SRL")
+        response = self.client.get(reverse("privacy_policy"))
+        self.assertContains(response, "Staff Chosen Name SRL")
+        self.assertNotContains(response, "Seller From Env SRL")
+
     def test_a_changed_value_replaces_the_previous_one_on_the_next_request(self) -> None:
         """Guards the cache: a stale settings cache would serve the first value forever."""
         self.set_value("company.legal_name", "First Name SRL")
@@ -163,6 +173,25 @@ class LegalProseIdentityEffectTests(TestCase):
                 text = self.page_text("privacy_policy", language)
                 self.assertIn(sentence, text)
                 self.assertNotIn("PragmaticHost SRL", text)
+
+
+class CompanyLegalNameResolverTests(TestCase):
+    """The public legal name: a stored value wins; unset, it is the seller name invoices carry."""
+
+    KEY = "company.legal_name"
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    @override_settings(COMPANY_NAME="Seller From Env SRL")
+    def test_stored_name_wins_and_an_unset_one_inherits_the_seller(self) -> None:
+        SystemSetting.objects.filter(key=self.KEY).delete()
+        self.assertEqual(get_company_legal_name(), "Seller From Env SRL")
+        with self.captureOnCommitCallbacks(execute=True):
+            result = SettingsService.update_setting(self.KEY, "Staff Name SRL")
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(get_company_legal_name(), "Staff Name SRL")
 
 
 @override_settings(

@@ -115,7 +115,7 @@ Visit:
 - **Platform**: http://localhost:8700 (staff interface)
 - **Portal**: http://localhost:8701 (customer API)
 
-**Test credentials**: `admin@pragmatichost.com` / `admin123`
+**Test credentials**: `admin@praho.test` / `admin123`
 
 > **Using PostgreSQL instead of SQLite?** Run `make docker-dev` to start Platform + Portal + PostgreSQL in Docker containers with hot reload.
 > Its database starts empty; for the sample data and the test credentials above, run

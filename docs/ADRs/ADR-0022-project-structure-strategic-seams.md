@@ -32,7 +32,7 @@ We choose **Enhanced Option A with Strategic Seams** - a modular monolith struct
 ### Complete Directory Structure
 
 ```bash
-pragmatichost/                  # 🚀 Root directory for Romanian hosting provider PRAHO Platform
+praho/                          # 🚀 Root directory of the PRAHO repository
 ├─ config/                      # ⚙️ Django project configuration (not an app)
 │  ├─ settings/                 # Environment-specific Django settings
 │  │  ├─ base.py               # Shared defaults: DB config, installed apps, middleware

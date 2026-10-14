@@ -163,9 +163,6 @@ class SecurityHeadersMiddleware:
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response["Cross-Origin-Opener-Policy"] = "same-origin"
 
-        # Romanian privacy compliance
-        response["X-Powered-By"] = "PragmaticHost Romania"
-
         return response
 
 

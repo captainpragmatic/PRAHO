@@ -93,6 +93,16 @@ def portal_public_origin() -> str:
     return base
 
 
+def platform_public_origin() -> str:
+    """The Platform's public HTTPS origin from PLATFORM_DOMAIN, or "" where it is unset (development).
+
+    Production and staging refuse to start without PLATFORM_DOMAIN, and the reverse proxy publishes the
+    customer-facing Platform pages (such as unsubscribe) on that host.
+    """
+    domain = getattr(settings, "PLATFORM_DOMAIN", "")
+    return f"https://{domain}" if domain else ""
+
+
 # ===============================================================================
 # API TOKEN SERVICES
 # ===============================================================================

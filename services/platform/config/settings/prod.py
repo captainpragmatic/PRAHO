@@ -106,7 +106,7 @@ if not _allowed_hosts_raw:
     raise ImproperlyConfigured(
         "ALLOWED_HOSTS must be set in production. "
         "Set it to your portal and platform FQDNs, e.g.: "
-        "portal.pragmatichost.com,platform.pragmatichost.com,localhost,127.0.0.1"
+        "portal.example.com,platform.example.com,localhost,127.0.0.1"
     )
 
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
@@ -131,6 +131,21 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
         f"PORTAL_DOMAIN and PLATFORM_DOMAIN must both be set in production. "
         f"Got PORTAL_DOMAIN={PORTAL_DOMAIN!r}, PLATFORM_DOMAIN={PLATFORM_DOMAIN!r}. "
         f"These are used for absolute URL construction in emails and links."
+    )
+
+# Fiscal identity on invoices, PDFs and VIES requests. Read from the environment here, not from base,
+# so the value checked is the value used; a blank one would put no seller, or a placeholder, on documents.
+COMPANY_NAME = os.environ.get("COMPANY_NAME", "").strip()
+COMPANY_CUI = os.environ.get("COMPANY_CUI", "").strip()
+_missing_fiscal_identity = [
+    name for name, value in (("COMPANY_NAME", COMPANY_NAME), ("COMPANY_CUI", COMPANY_CUI)) if not value
+]
+if _missing_fiscal_identity:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        f"{', '.join(_missing_fiscal_identity)} must be set in production: invoices are issued under this "
+        "seller identity. Set the legal name and tax ID (CUI in Romania, VAT number elsewhere)."
     )
 
 # Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),
@@ -219,7 +234,7 @@ CORS_ALLOW_CREDENTIALS = True
 # Enhanced session security for production
 SESSION_COOKIE_AGE = 3600  # 1 hour for production security
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-SESSION_COOKIE_NAME = "pragmatichost_sessionid"
+SESSION_COOKIE_NAME = "praho_sessionid"
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS access to session cookie
 SESSION_COOKIE_PATH = "/"
 SESSION_SAVE_EVERY_REQUEST = True  # Update session on every request
@@ -232,7 +247,7 @@ DATABASES["default"].update(
     {
         "CONN_MAX_AGE": 600,
         "OPTIONS": {
-            "application_name": "pragmatichost_crm_prod",
+            "application_name": "praho_platform_prod",
             "sslmode": os.environ.get("DB_SSLMODE", "require"),
         },
     }
@@ -280,7 +295,7 @@ EMAIL_BACKEND = _email_backends.get(
 EMAIL_USE_TLS = True
 
 # Default from email for production
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@example.com>")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 # ===============================================================================

@@ -143,19 +143,19 @@ class RomanianDocumentPDFGenerator:
         return f"{pct.normalize()}"
 
     def _get_company_info(self) -> dict[str, str]:
-        """Get company information from settings with Romanian defaults."""
+        """Get the seller identity from settings (blank values are omitted from the document)."""
         bank = bank_transfer_instructions(self._get_currency_code()) or {}
         return {
-            "name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
-            "address": getattr(settings, "COMPANY_ADDRESS", "Str. Exemplu Nr. 1"),
-            "city": getattr(settings, "COMPANY_CITY", "București"),
-            "country": getattr(settings, "COMPANY_COUNTRY", "România"),
-            "cui": getattr(settings, "COMPANY_CUI", "RO12345678"),
-            "email": getattr(settings, "COMPANY_EMAIL", "contact@praho.ro"),
-            "registration_number": getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
+            "name": settings.COMPANY_NAME,
+            "address": settings.COMPANY_ADDRESS,
+            "city": settings.COMPANY_CITY,
+            "country": settings.COMPANY_COUNTRY,
+            "cui": settings.COMPANY_CUI,
+            "email": settings.COMPANY_EMAIL,
+            "registration_number": settings.COMPANY_REGISTRATION_NUMBER,
             "bank_name": bank.get("bank_name", ""),
             "bank_account": bank.get("iban", ""),
-            "phone": getattr(settings, "COMPANY_PHONE", ""),
+            "phone": settings.COMPANY_PHONE,
         }
 
     def _setup_document_header(self) -> None:
@@ -200,10 +200,12 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(2 * cm, current_y, company_info["name"])
         current_y -= step
 
-        self.canvas.drawString(
-            2 * cm, current_y, f"{company_info['address']}, {company_info['city']}, {company_info['country']}"
+        seller_address = ", ".join(
+            part for part in (company_info["address"], company_info["city"], company_info["country"]) if part
         )
-        current_y -= step
+        if seller_address:
+            self.canvas.drawString(2 * cm, current_y, seller_address)
+            current_y -= step
 
         self.canvas.drawString(2 * cm, current_y, str(gettext("CUI/CIF: {cui}")).format(cui=company_info["cui"]))
         current_y -= step

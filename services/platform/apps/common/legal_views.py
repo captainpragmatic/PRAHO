@@ -18,6 +18,7 @@ from django.urls import reverse
 from django.utils.translation import gettext as _
 
 from apps.common.legal import TERMS_OF_SERVICE_VERSION
+from apps.settings.services import get_company_legal_name
 
 # A calendar date: shown as the same day in every timezone. The portal's page states the same one.
 PRIVACY_POLICY_DATE = date(2026, 10, 12)
@@ -34,6 +35,7 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
         "effective_date": PRIVACY_POLICY_DATE,
         "rights_url": dashboard if signed_in else f"{reverse('users:login')}?next={dashboard}",
         "rights_label": _("Go to GDPR Dashboard") if signed_in else _("Login to Access GDPR Dashboard"),
+        "legal_name": get_company_legal_name(),
     }
     return render(request, "legal/privacy_policy.html", context)
 
@@ -45,6 +47,7 @@ def terms_of_service(request: HttpRequest) -> HttpResponse:
         "last_updated": effective_date,
         "effective_date": effective_date,
         "terms_version": TERMS_OF_SERVICE_VERSION,
+        "legal_name": get_company_legal_name(),
     }
     return render(request, "legal/terms_of_service.html", context)
 

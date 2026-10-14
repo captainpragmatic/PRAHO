@@ -23,7 +23,8 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "deploy/scripts"
-PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n"
+FISCAL_KEYS = "COMPANY_NAME=Test Hosting SRL\nCOMPANY_CUI=RO12345674\n"
+PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n" + FISCAL_KEYS
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
 RECORDED_ENV = ("PRAHO_ENV_FILE", "DB_HOST", "DB_SSLMODE", "VERSION", "DJANGO_SETTINGS_MODULE", "PORTAL_DJANGO_SECRET_KEY")
@@ -204,7 +205,8 @@ class TestDeployScript:
     )
     def test_production_refuses_to_deploy_without_its_keys(self, project: Project, encryption_line: str) -> None:
         project.write_env(
-            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n" + encryption_line
+            ".env.prod",
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n" + FISCAL_KEYS + encryption_line,
         )
         result = project.run("deploy.sh", "single-server")
         assert result.returncode != 0
@@ -214,9 +216,24 @@ class TestDeployScript:
     @pytest.mark.integration
     @pytest.mark.parametrize("value", ["abc#def", "'abc # def'", '"abc"  # comment', "abc # comment"])
     def test_production_accepts_any_spelling_of_a_set_key(self, project: Project, value: str) -> None:
-        project.write_env(".env.prod", f"DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\nDJANGO_ENCRYPTION_KEY={value}\n")
+        project.write_env(
+            ".env.prod",
+            f"DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n{FISCAL_KEYS}DJANGO_ENCRYPTION_KEY={value}\n",
+        )
         result = project.run("deploy.sh", "single-server")
         assert result.returncode == 0, result.stderr
+
+    @pytest.mark.integration
+    def test_production_refuses_to_deploy_without_a_seller_identity(self, project: Project) -> None:
+        project.write_env(
+            ".env.prod",
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\nDJANGO_ENCRYPTION_KEY=k\n",
+        )
+        result = project.run("deploy.sh", "single-server")
+        assert result.returncode != 0
+        assert "COMPANY_NAME" in result.stderr
+        assert "COMPANY_CUI" in result.stderr
+        assert project.compose_calls() == []
 
     @pytest.mark.integration
     def test_a_production_portal_host_deploys_without_the_platform_keys(self, project: Project) -> None:
