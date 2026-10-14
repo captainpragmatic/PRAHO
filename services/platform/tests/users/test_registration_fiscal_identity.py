@@ -42,7 +42,6 @@ def registration(**customer: Any) -> dict[str, Any]:
             "address_line1": "Str. Victoriei 10",
             "city": "Cluj-Napoca",
             "postal_code": "400001",
-            "data_processing_consent": True,
             # A Romanian company gives a VAT number or a CUI.
             **({} if customer.get("vat_number") or customer.get("customer_type") == "individual" else {"cui": CUI}),
             **customer,
@@ -82,7 +81,6 @@ class RegistrationFiscalIdentityTests(HMACTestMixin, TestCase):
             row.token(),
             NEW_PASSPHRASE,
             accepts_marketing=False,
-            data_processing_consent=True,
             terms_accepted=True,
             terms_document_id=str(self.terms.pk),
         )

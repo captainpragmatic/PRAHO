@@ -1939,14 +1939,18 @@ class GDPRConsentService:
         ip_address: str | None = None,
         user_agent: str = "",
         user_id: int | None = None,
+        language: str = "",
     ) -> Result[CookieConsent, str]:
         """
         Record cookie consent from Portal (via GDPR API).
 
         Handles both anonymous (cookie_id only) and authenticated (user_id) consent.
         When user_id is provided with a cookie_id, also links any prior anonymous
-        CookieConsent records with the same cookie_id to this user.
+        CookieConsent records with the same cookie_id to this user. The choice records the
+        Cookie Policy release in force in the visitor's language.
         """
+        from apps.common.legal import LegalDocument, current_legal_document  # noqa: PLC0415  # ADR-0007
+
         from .signals import (  # noqa: PLC0415  # Deferred: avoids circular import
             cookie_consent_updated,  # Circular: signals<->services  # Deferred: avoids circular import
         )
@@ -1965,6 +1969,7 @@ class GDPRConsentService:
                 with contextlib.suppress(User.DoesNotExist):
                     user = User.objects.get(id=user_id, is_active=True)
 
+            policy = current_legal_document(LegalDocument.Kind.COOKIES, language)
             defaults = {
                 "status": consent_status,
                 "essential_cookies": True,
@@ -1973,7 +1978,8 @@ class GDPRConsentService:
                 "marketing_cookies": marketing,
                 "ip_address": ip_address,
                 "user_agent": (user_agent or "")[:500],
-                "consent_version": "1.0",
+                "cookie_document": policy,
+                "consent_version": policy.release if policy else "",
             }
 
             # Always use cookie_id as the SOLE lookup key — one cookie_id = one row.

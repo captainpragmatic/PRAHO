@@ -56,7 +56,6 @@ class RegistrationCase(TestCase):
                 "county": "București",
                 "postal_code": "010061",
                 "country": "România",
-                "data_processing_consent": True,
             },
         }
 
@@ -72,7 +71,7 @@ class RegistrationCase(TestCase):
         ).groups()
         confirmed = self.signed_post("/api/users/register/confirm/", {
             "registration_id": registration_id, "token": token,
-            "password": CHOSEN, "password_confirm": CHOSEN, "data_processing_consent": True,
+            "password": CHOSEN, "password_confirm": CHOSEN,
             "terms_accepted": True, "terms_document_id": str(self.terms.pk),
         })
         self.assertEqual(confirmed.status_code, 201, confirmed.content)
@@ -104,15 +103,10 @@ class TestSignupWorkflow(RegistrationCase):
         self.assertEqual(customer.billing_profile.preferred_currency, "RON")
         self.assertTrue(customer.addresses.get().is_billing)
 
-    def test_signup_requires_gdpr_consent(self):
-        payload = self.payload()
-        payload["customer_data"]["data_processing_consent"] = False
-        response = self.post_registration(payload)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("data_processing_consent", response.content.decode())
-        self.assertFalse(PendingRegistration.objects.exists())
-        self.assertFalse(User.objects.exists())
-        self.assertFalse(Customer.objects.exists())
+    def test_signup_asks_for_no_data_processing_consent(self):
+        # Processing the account's data performs the contract; the privacy notice informs, nobody ticks a box.
+        _, customer = self.register()
+        self.assertTrue(customer.data_processing_consent)  # Derived from when the notice was acknowledged
 
     def test_signup_with_multiple_addresses(self):
         user, customer = self.register()

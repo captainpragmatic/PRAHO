@@ -37,7 +37,11 @@
       {% form_error_summary form %}
       {% form_field form.new_password icon_left="lock" autocomplete="new-password" %}
       {% form_field form.confirm_password icon_left="lock" autocomplete="new-password" %}
-      {% form_checkbox form.data_processing_consent %}
+      <p class="text-sm text-slate-400">
+        {% if registration.privacy_document %}{% url 'legal_document' registration.privacy_document.document_id as privacy_url %}{% else %}{% url 'privacy_policy' as privacy_url %}{% endif %}
+        {% trans "By creating an account you acknowledge the" %}
+        <a href="{{ privacy_url }}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>. {# tmpl-allow TMPL005: needs button inline_link #}
+      </p>
       {% form_checkbox form.marketing_consent %}
       {% form_checkbox form.terms_accepted %}
       <p class="-mt-4 ml-8 text-sm text-slate-400">

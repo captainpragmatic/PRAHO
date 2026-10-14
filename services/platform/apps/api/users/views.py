@@ -849,13 +849,6 @@ def _refusal_answer(refusal: "ConfirmRefusal | None") -> tuple[int, dict[str, An
             status.HTTP_400_BAD_REQUEST,
             {"code": "invalid_link", "error": _("This link has expired or was already used.")},
         ),
-        "consent_required": (
-            status.HTTP_400_BAD_REQUEST,
-            {
-                "code": "validation_failed",
-                "errors": {"data_processing_consent": [_("Data processing consent is required.")]},
-            },
-        ),
         "password_rejected": (
             status.HTTP_400_BAD_REQUEST,
             {"code": "validation_failed", "errors": {"password": [] if refusal is None else refusal.messages}},
@@ -961,7 +954,6 @@ def registration_confirm_api(request: HttpRequest) -> Response:
         "token": "<hex>",
         "password": "...",
         "password_confirm": "...",
-        "data_processing_consent": true,
         "marketing_consent": false
     }
 
@@ -986,7 +978,6 @@ def registration_confirm_api(request: HttpRequest) -> Response:
             data["token"],
             data["password"],
             accepts_marketing=data["marketing_consent"],
-            data_processing_consent=data["data_processing_consent"],
             terms_accepted=data["terms_accepted"],
             terms_document_id=str(data["terms_document_id"] or ""),
             request_ip=forwarded_client_ip(request),

@@ -51,7 +51,6 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "county": "București",
                 "postal_code": "010061",
                 "country": "România",
-                "data_processing_consent": True,
             },
         }
 
@@ -69,7 +68,6 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "token": row.token(),
                 "password": password,
                 "password_confirm": password,
-                "data_processing_consent": True,
                 "terms_accepted": True,
                 "terms_document_id": str(self.terms.pk),
             },
@@ -142,7 +140,6 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                         "token": row.token(),
                         "password": password,
                         "password_confirm": password,
-                        "data_processing_consent": True,
                         "terms_accepted": True,
                         "terms_document_id": str(self.terms.pk),
                     },
@@ -182,7 +179,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
         self.assertEqual(PendingRegistration.objects.filter(consumed_at__isnull=True).count(), 0)
 
     def test_invalid_registration_is_atomic(self):
-        for field, value in (("address_line1", ""), ("data_processing_consent", False)):
+        for field, value in (("address_line1", ""), ("city", "")):
             data = self.registration()
             data["customer_data"][field] = value
             response = self.submit(data)

@@ -53,6 +53,8 @@ class CookieConsentProxyTests(SimpleTestCase):
         self.assertIn('cookie_id', call_args)
         self.assertIn('ip_address', call_args)
         self.assertIn('user_agent', call_args)
+        # Platform records the Cookie Policy release in force in the visitor's language.
+        self.assertEqual(call_args['language'], 'en')
 
     @patch('apps.common.views.api_client')
     def test_consent_endpoint_includes_user_id_from_session(self, mock_client: MagicMock) -> None:

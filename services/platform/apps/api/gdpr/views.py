@@ -69,6 +69,7 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
         ip_address=request_data.get("ip_address"),
         user_agent=request_data.get("user_agent", ""),
         user_id=request_data.get("user_id"),
+        language=str(request_data.get("language") or ""),
     )
 
     if result.is_err():

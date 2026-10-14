@@ -121,7 +121,6 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     registration_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
     # Sent by the portal; only the acceptance of whoever confirms the link is recorded.
     terms_accepted = serializers.BooleanField(required=False)
-    data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
 
     # Fixed messages: none of them repeats what was submitted.
@@ -196,12 +195,6 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         """Normalise only. Uniqueness is checked when the registration is confirmed."""
         return value.strip()
 
-    def validate_data_processing_consent(self, value: bool) -> bool:
-        """GDPR consent is required"""
-        if not value:
-            raise serializers.ValidationError(_("Data processing consent is required."))
-        return value
-
 
 class RegistrationRateLimitError(serializers.ValidationError):
     """Retain typed rate-limit metadata without changing serializer validation contracts."""
@@ -227,7 +220,6 @@ class CustomerRegistrationSerializer(serializers.Serializer):
         customer_data = dict(validated_data["customer_data"])
         # Consent to the rest is collected from whoever confirms the link.
         customer_data.pop("marketing_consent", None)
-        customer_data.pop("data_processing_consent", None)
         customer_data.pop("terms_accepted", None)
         # Stored encrypted, apart from the rest (apps.users.pending_registration).
         cnp = customer_data.pop("cnp", "")

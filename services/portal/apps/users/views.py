@@ -873,7 +873,6 @@ def _confirm_registration(
             link["token"],
             form.cleaned_data["new_password"],
             form.cleaned_data["confirm_password"],
-            data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
             terms_accepted=form.cleaned_data["terms_accepted"],
             terms_document_id=str(form.cleaned_data["terms_document_id"] or ""),

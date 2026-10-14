@@ -171,7 +171,6 @@ class ConfirmRegistrationTests(PublishedTermsMixin, TestCase):
             row.token() if token is None else token,
             password,
             accepts_marketing=True,
-            data_processing_consent=True,
             **self.accepted_terms,
         )
 
@@ -231,24 +230,25 @@ class ConfirmRegistrationTests(PublishedTermsMixin, TestCase):
         self.assertFalse(User.objects.filter(email="other@example.test").exists())
         self.assertFalse(Customer.objects.filter(company_name="Unrelated Ferry SRL").exists())
 
-    def test_consent_is_required_and_recorded_as_given(self) -> None:
+    def test_the_privacy_notice_replaces_a_forced_consent_and_is_recorded_with_the_terms(self) -> None:
+        """No box asks for consent to process the account's data: that processing performs the contract.
+
+        The confirmer is shown the Privacy Policy release in force; the record names it.
+        """
+        privacy = publish_release(kind="privacy", body_markdown="Sample privacy notice, not legal text.")
         row = self.sent()
-        refused = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False,
-            **self.accepted_terms,
-        )
-        self.assertEqual(refused.unwrap_err().code, "consent_required")
-        row.refresh_from_db()
-        self.assertTrue(row.is_usable())
+        preview = registration_confirmation.preview(str(row.pk), row.token()).unwrap()
+        self.assertEqual(preview["privacy_document"], privacy.reference())
         user, customer = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True,
-            **self.accepted_terms,
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, **self.accepted_terms
         ).unwrap()
         user.refresh_from_db()
         customer.refresh_from_db()
         self.assertFalse(user.accepts_marketing)
         self.assertFalse(customer.marketing_consent)
-        self.assertTrue(customer.data_processing_consent)
+        self.assertIsNotNone(user.gdpr_consent_date)  # When the notice was acknowledged
+        [event] = AuditEvent.objects.filter(action="terms_of_service_accepted", user=user)
+        self.assertEqual(event.metadata["privacy_notice"], privacy.reference())
 
     def test_an_account_that_cannot_be_created_now_keeps_the_link(self) -> None:
         row = self.sent()
@@ -283,7 +283,6 @@ class ConfirmRegistrationTests(PublishedTermsMixin, TestCase):
             row.token(),
             PASSWORD,
             accepts_marketing=False,
-            data_processing_consent=True,
             request_ip="203.0.113.7",
             **self.accepted_terms,
         )
@@ -346,7 +345,6 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
             "token": self.row.token(),
             "password": PASSWORD,
             "password_confirm": PASSWORD,
-            "data_processing_consent": True,
             "marketing_consent": False,
             "terms_accepted": True,
             "terms_document_id": str(self.terms.pk),
@@ -380,7 +378,6 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         cases = [
             ({"token": "0" * 64}, 400, "invalid_link"),
             ({"password_confirm": "Something-else-2026!"}, 400, "validation_failed"),
-            ({"data_processing_consent": False}, 400, "validation_failed"),
             ({"password": "new@example.test12", "password_confirm": "new@example.test12"}, 400, "validation_failed"),
         ]
         for overrides, status, code in cases:
@@ -407,8 +404,9 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 # The company identifiers the confirmer checks; never the CNP.
                 "cui": "",
                 "registration_number": "",
-                # The terms release the confirmer accepts.
+                # The terms release the confirmer accepts, and the privacy notice (none published here).
                 "terms_document": self.terms.reference(),
+                "privacy_document": None,
             },
         )
         self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)

@@ -16,8 +16,9 @@ The portal shows the releases at `/terms/`, `/privacy-policy/` and `/cookie-poli
 
 ## What PRAHO records
 
-- **Registration**: the Terms of Service release the customer accepted (`User.terms_document`), when, and an audit event naming the release by id, language, number and hash. If a newer release takes effect while someone is confirming their account, they are asked to read it first.
+- **Registration**: the Terms of Service release the customer accepted (`User.terms_document`), when, and an audit event naming the release by id, language, number and hash, together with the Privacy Policy release shown as a notice. Nobody is asked to tick a box consenting to the processing of their account's data: that processing performs the contract, and the privacy notice informs (GDPR Art. 13). If a newer terms release takes effect while someone is confirming their account, they are asked to read it first.
 - **Ordering**: the Terms of Service release the checkout page linked (`Order.terms_document`) and, for an EU consumer, when they asked for the services to start within the 14-day withdrawal period (`Order.early_start_requested_at`), each with an audit event. The confirmation email attaches that release and states the request: the customer's durable copy.
+- **Cookie choices**: the Cookie Policy release in force in the visitor's language (`CookieConsent.cookie_document`, its number in `consent_version`).
 - **Publishing**: an audit event with the same reference and the publishing staff account.
 
 ## What the portal stores in the browser

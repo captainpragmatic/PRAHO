@@ -47,7 +47,6 @@ RECIPIENT_DAILY_LIMIT = 5
 
 ConfirmRefusalCode = Literal[
     "invalid_link",
-    "consent_required",
     "password_rejected",
     "details_unavailable",
     "unavailable",
@@ -160,6 +159,7 @@ def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmR
     terms = _terms_in_force(row)
     if isinstance(terms, Err):
         return terms
+    privacy = current_legal_document(LegalDocument.Kind.PRIVACY, row.language)
     return Ok(
         {
             "email": row.email,
@@ -172,18 +172,16 @@ def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmR
             # Never the CNP, not even masked: the portal keeps these details in its session.
             # The terms release to accept, in the registration's language; confirming another is refused.
             "terms_document": terms.unwrap().reference(),
+            # The privacy notice the page links, if one is published.
+            "privacy_document": privacy.reference() if privacy else None,
         }
     )
 
 
-def _refusal_before_creating(
-    row: PendingRegistration, user_data: dict[str, Any], *, data_processing_consent: bool
-) -> ConfirmRefusal | None:
+def _refusal_before_creating(row: PendingRegistration, user_data: dict[str, Any]) -> ConfirmRefusal | None:
     """Why a valid link still cannot become an account now, or None."""
     from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app model at call time
 
-    if not data_processing_consent:
-        return ConfirmRefusal("consent_required")
     candidate = User(
         email=row.email, first_name=user_data.get("first_name", ""), last_name=user_data.get("last_name", "")
     )
@@ -211,7 +209,6 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     password: str,
     *,
     accepts_marketing: bool,
-    data_processing_consent: bool,
     terms_accepted: bool = False,
     terms_document_id: str = "",
     request_ip: str | None = None,
@@ -251,15 +248,17 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             "email": row.email,
             "password": password,
             "accepts_marketing": accepts_marketing,
+            # When the confirmer was shown the privacy notice (GDPR Art. 13). It is information,
+            # not a consent: the account's data is processed to perform the contract.
             "gdpr_consent_date": timezone.now(),
         }
         accepted_at = timezone.now()
         user_data.update(terms_accepted_at=accepted_at, terms_document=terms.unwrap())
-        refusal = _refusal_before_creating(row, user_data, data_processing_consent=data_processing_consent)
+        refusal = _refusal_before_creating(row, user_data)
         if refusal is not None:
             return Err(refusal)
 
-        customer_data = {**row.customer_data, "data_processing_consent": True}
+        customer_data = dict(row.customer_data)
         if cnp:
             customer_data["cnp"] = cnp
         result = SecureUserRegistrationService.create_customer_owner_unchecked(
@@ -305,6 +304,7 @@ def _audit_terms_acceptance(
     """Record the acceptance; raises on failure, which rolls the account back with it."""
     from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
 
+    privacy = current_legal_document(LegalDocument.Kind.PRIVACY, row.language)
     AuditService.log_simple_event(
         "terms_of_service_accepted",
         user=user,
@@ -312,6 +312,8 @@ def _audit_terms_acceptance(
         description="Terms of Service accepted at registration",
         metadata={
             "terms_document": terms.reference(),
+            # The privacy notice shown with them: acknowledged, not consented to.
+            "privacy_notice": privacy.reference() if privacy else None,
             "accepted_at": accepted_at.isoformat(),
             "registration_id": str(row.pk),
         },

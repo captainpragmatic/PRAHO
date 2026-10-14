@@ -648,7 +648,7 @@ def form_checkbox(field: Any, **kwargs: Any) -> dict[str, Any]:
 
     Usage:
         {% form_checkbox form.remember_me %}
-        {% form_checkbox form.data_processing_consent %}
+        {% form_checkbox form.marketing_consent %}
     """
     _reject_unknown("form_checkbox", kwargs)
     name: str = field.html_name

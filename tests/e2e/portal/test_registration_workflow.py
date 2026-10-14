@@ -32,7 +32,6 @@ def test_registration_is_finished_from_the_emailed_link(page: Page, run_queued_t
     chosen = " Chosen-on-the-page-2026! "
     page.locator('input[name="new_password"]').fill(chosen)
     page.locator('input[name="confirm_password"]').fill(chosen)
-    page.locator('input[name="data_processing_consent"]').check()
     page.locator('input[name="terms_accepted"]').check()
     page.get_by_role("button", name="Create my account").click()
     expect(page).to_have_url(f"{BASE_URL}/login/")

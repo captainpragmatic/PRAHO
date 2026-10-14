@@ -275,16 +275,10 @@ class RegistrationConfirmSerializer(serializers.Serializer):
     token = serializers.CharField(max_length=128, write_only=True)
     password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
-    data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
     # The Terms of Service accepted, and the release the confirmer was shown (from the preview).
     terms_accepted = serializers.BooleanField(default=False)
     terms_document_id = serializers.UUIDField(required=False, allow_null=True, default=None)
-
-    def validate_data_processing_consent(self, value: bool) -> bool:
-        if not value:
-            raise serializers.ValidationError(_("Data processing consent is required."))
-        return value
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         if data["password"] != data["password_confirm"]:

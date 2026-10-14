@@ -132,7 +132,6 @@ def test_signup_page_loads_correctly(page: Page) -> None:
             ('input[name="cui"]', "CUI field"),
             ('input[name="trade_registry_number"]', "Trade registry number field"),
             ('input[name="cnp"]', "CNP field"),
-            ('input[name="data_processing_consent"]', "GDPR consent checkbox"),
             ('input[name="terms_accepted"]', "Terms of Service checkbox"),
         ]
 
@@ -211,10 +210,10 @@ def test_signup_page_has_romanian_business_context(page: Page) -> None:
             assert expected in option_values, f"Customer type should include {expected}"
         print(f"    Customer type includes Romanian business types: {option_values}")
 
-        # Verify GDPR consent checkbox is present and required
-        gdpr_checkbox = page.locator('input[name="data_processing_consent"]')
-        assert gdpr_checkbox.is_visible(), "GDPR consent checkbox should be visible"
-        print("    GDPR consent checkbox is present")
+        # The privacy notice replaces a consent checkbox: nobody is asked to tick one
+        assert page.locator('input[name="data_processing_consent"]').count() == 0, "No consent checkbox"
+        assert page.get_by_text("By creating an account you acknowledge the").is_visible()
+        print("    Privacy notice is shown")
 
         print("  Romanian business context elements are correct")
 
@@ -229,7 +228,7 @@ def test_signup_form_validation_required_fields(page: Page) -> None:
     page.get_by_role("button", name="Create Account", exact=True).click()
     expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
     assert page.locator('input[name="first_name"]').evaluate("el => el.validity.valueMissing")
-    for field in ("email", "company_name", "address_line1", "data_processing_consent", "terms_accepted"):
+    for field in ("email", "company_name", "address_line1", "terms_accepted"):
         expect(page.locator(f'input[name="{field}"]')).to_have_attribute("required", "")
     expect(page.locator('input[type="password"]')).to_have_count(0)
 

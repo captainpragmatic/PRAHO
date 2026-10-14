@@ -68,7 +68,6 @@ class ConfirmTermsTests(TestCase):
             "correct-token",
             CHOSEN,
             CHOSEN,
-            data_processing_consent=True,
             marketing_consent=False,
             terms_accepted=True,
             terms_document_id=TERMS_ID,

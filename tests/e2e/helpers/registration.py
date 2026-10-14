@@ -68,7 +68,6 @@ def fill_registration(page: Page, email: str, company: str) -> None:
     page.locator('input[name="city"]').fill("București")
     page.locator('input[name="county"]').fill("București")
     page.locator('input[name="postal_code"]').fill("010061")
-    page.locator('input[name="data_processing_consent"]').check()
     page.locator('input[name="terms_accepted"]').check()
 
 
@@ -100,7 +99,6 @@ def open_confirmation(page: Page, link: str, company: str) -> None:
 def fill_confirmation(page: Page, password: str, confirm_password: str | None = None) -> None:
     page.locator('input[name="new_password"]').fill(password)
     page.locator('input[name="confirm_password"]').fill(password if confirm_password is None else confirm_password)
-    page.locator('input[name="data_processing_consent"]').check()
     page.locator('input[name="terms_accepted"]').check()
     page.get_by_role("button", name="Create my account").click()
 

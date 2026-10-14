@@ -61,6 +61,8 @@ def cookie_consent_view(request: HttpRequest) -> HttpResponse:
         "marketing": bool(data.get("marketing", False)),
         "ip_address": get_safe_client_ip(request),
         "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
+        # Platform records the Cookie Policy release in force in this language with the choice.
+        "language": get_language(),
     }
 
     # Include user_id from session if authenticated

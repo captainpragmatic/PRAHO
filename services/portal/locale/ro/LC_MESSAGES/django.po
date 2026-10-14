@@ -1764,14 +1764,6 @@ msgstr "Cod poștal"
 msgid "Country"
 msgstr "Țară"
 
-#: services/portal/apps/users/forms.py:290
-msgid "I agree to data processing according to GDPR"
-msgstr "Sunt de acord cu prelucrarea datelor conform GDPR"
-
-#: services/portal/apps/users/forms.py:291
-msgid "Required: Agreement to process personal data according to GDPR."
-msgstr "Obligatoriu: Acordul de a procesa datele personale conform GDPR."
-
 #: services/portal/apps/users/forms.py:298
 msgid "I agree to receive marketing communications"
 msgstr "Sunt de acord să primesc comunicări de marketing"
@@ -6753,10 +6745,6 @@ msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
 #: apps/users/forms.py
-msgid "I agree to the processing of my personal data for this account."
-msgstr "Sunt de acord cu prelucrarea datelor mele personale pentru acest cont."
-
-#: apps/users/forms.py
 msgid "Send me news and offers by email."
 msgstr "Trimiteți-mi noutăți și oferte prin e-mail."
 
@@ -7859,3 +7847,6 @@ msgstr "Începeți serviciile acum. Dacă mă retrag în 14 zile, plătesc ce a 
 
 msgid "You may withdraw from this contract within 14 days. Your services start as soon as the order is paid, so we need your request to begin within that period."
 msgstr "Vă puteți retrage din acest contract în 14 zile. Serviciile încep imediat ce comanda este plătită, așa că avem nevoie de cererea dvs. pentru a începe în această perioadă."
+
+msgid "By creating an account you acknowledge the"
+msgstr "Prin crearea unui cont luați la cunoștință"

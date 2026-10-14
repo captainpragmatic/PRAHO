@@ -1419,8 +1419,12 @@ class CookieConsent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Consent version (for tracking policy updates)
-    consent_version = models.CharField(max_length=20, default="1.0")
+    # The Cookie Policy release in force when the choice was made (ADR-0058), and its number;
+    # empty while none is published.
+    cookie_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    consent_version = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
         db_table = "audit_cookie_consents"

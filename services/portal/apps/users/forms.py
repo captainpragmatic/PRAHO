@@ -305,14 +305,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     # GDPR COMPLIANCE
     # ===============================================================================
 
-    data_processing_consent = forms.BooleanField(
-        label=_("I agree to data processing according to GDPR"),
-        help_text=_("Required: Agreement to process personal data according to GDPR."),
-        widget=forms.CheckboxInput(
-            attrs={"class": "h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-600 rounded bg-slate-800"}
-        ),
-    )
-
     terms_accepted = forms.BooleanField(
         label=_("I accept the terms and conditions"),
         help_text=_("Required: Agreement to terms of service."),
@@ -449,7 +441,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "county": self.cleaned_data["county"],
                     "postal_code": self.cleaned_data["postal_code"],
                     "country": self.cleaned_data["country"],
-                    "data_processing_consent": self.cleaned_data["data_processing_consent"],
                     "terms_accepted": self.cleaned_data.get("terms_accepted", False),
                 },
                 "language": "ro" if (get_language() or "").startswith("ro") else "en",
@@ -658,10 +649,6 @@ class RegistrationConfirmForm(PasswordResetConfirmForm):
     # Which registration the page showed. Compared with the session's link, never sent on.
     registration_id = forms.CharField(widget=forms.HiddenInput, required=False)
 
-    data_processing_consent = forms.BooleanField(
-        label=_("I agree to the processing of my personal data for this account."),
-        required=True,
-    )
     marketing_consent = forms.BooleanField(
         label=_("Send me news and offers by email."),
         required=False,

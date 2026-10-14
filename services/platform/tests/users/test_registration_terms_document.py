@@ -62,7 +62,6 @@ class TermsDocumentTests(HMACTestMixin, TestCase):
             row.token(),
             NEW_PASSPHRASE,
             accepts_marketing=False,
-            data_processing_consent=True,
             **terms,
         )
 
@@ -125,7 +124,6 @@ class TermsDocumentTests(HMACTestMixin, TestCase):
                 "city": "Berlin",
                 "postal_code": "10115",
                 "country": "DE",
-                "data_processing_consent": True,
             },
         }
         with patch("apps.users.services.current_legal_document", return_value=None):
@@ -167,7 +165,6 @@ class TermsDocumentTests(HMACTestMixin, TestCase):
             "token": self.row.token(),
             "password": NEW_PASSPHRASE,
             "password_confirm": NEW_PASSPHRASE,
-            "data_processing_consent": True,
             **overrides,
         }
         return self.portal_post("/api/users/register/confirm/", body)

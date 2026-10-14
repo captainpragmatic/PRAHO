@@ -58,10 +58,6 @@ msgstr "O companie cu acest nume există deja."
 msgid "VAT number must start with RO followed by digits."
 msgstr "Numărul de TVA trebuie să înceapă cu RO urmat de cifre."
 
-#: apps/api/customers/serializers.py:138
-msgid "Data processing consent is required."
-msgstr "Consimțământul pentru prelucrarea datelor este obligatoriu."
-
 #: apps/api/customers/serializers.py:209
 msgid "Registration failed"
 msgstr "Înregistrarea a eșuat"
@@ -15641,10 +15637,6 @@ msgstr "București"
 #: apps/users/forms.py:597
 msgid "I agree to data processing"
 msgstr "Accept prelucrarea datelor"
-
-#: apps/users/forms.py:598
-msgid "Required: Agreement to process personal data according to GDPR."
-msgstr "Obligatoriu: Acord privind prelucrarea datelor personale în conformitate cu GDPR."
 
 #: apps/users/forms.py:605
 msgid "I agree to receive marketing communications"
