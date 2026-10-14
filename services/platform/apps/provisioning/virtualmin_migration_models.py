@@ -167,6 +167,7 @@ def account_has_active_migration(account: VirtualminAccount) -> bool:
 # "attention" is non-terminal by design: an uncertain mutation keeps ownership
 # until an operator resolves it.
 _ACTIVE_JOB_STATUSES = ("pending", "running", "attention")
+ACTIVE_JOB_STATUSES = _ACTIVE_JOB_STATUSES
 
 # Operations that take the account exclusion: backups and restores, and deletion
 # (a delete mutates the very domain a backup or restore is reading or writing).

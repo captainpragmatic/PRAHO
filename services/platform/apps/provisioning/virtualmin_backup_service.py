@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from django.core.cache import cache
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -156,6 +157,24 @@ def manifest_restore_refusal(metadata: dict[str, Any]) -> str | None:
     if role == CHAIN_ROLE_DIFFERENTIAL:
         return "A differential backup holds only the changes since its base and cannot be restored on its own"
     return None
+
+
+def manifest_lineage_role(metadata: object) -> Result[str, str]:
+    """The chain role of a manifest, or Err when it cannot be understood.
+
+    Lineage decisions (what a deletion or a retention sweep may remove) are made on this, so a
+    manifest that is not an object, or carries a version or role this release does not know, is
+    an Err and never read as "standalone".
+    """
+    if not isinstance(metadata, dict):
+        return Err("manifest is not an object")
+    version = metadata.get("manifest_version")
+    if version is not None and version not in KNOWN_MANIFEST_VERSIONS:
+        return Err(f"manifest version {version!r} is not understood by this release")
+    role = metadata.get("chain_role", CHAIN_ROLE_STANDALONE)
+    if role not in CHAIN_ROLES or (version is None and role != CHAIN_ROLE_STANDALONE):
+        return Err(f"manifest has an unknown chain role {role!r}")
+    return Ok(str(role))
 
 
 _CHAIN_FP_RE = re.compile(r"^(|ABSENT|[0-9a-f]{64}:[0-9]+)$")
@@ -904,6 +923,10 @@ class VirtualminBackupService:
                         except Exception as e:
                             logger.warning(f"Failed to parse backup metadata {obj['Key']}: {e}")
 
+            # Retention extends the base: a base outlives its age while a retained differential
+            # names it, because the differential cannot be restored without it.
+            self._extend_retention_to_bases(s3_client, bucket_name, backups, account, backup_type)
+
             # Sort by creation date (newest first)
             backups.sort(key=lambda x: x["created_at"], reverse=True)
 
@@ -913,8 +936,96 @@ class VirtualminBackupService:
             logger.error(f"Failed to list backups: {e}")
             return Err(f"Failed to list backups: {e!s}")
 
-    def delete_backup(self, backup_id: str) -> Result[dict[str, Any], str]:
-        """Delete backup from S3 storage."""
+    def _read_manifest(self, s3_client: Any, bucket_name: str, key: str) -> Result[dict[str, Any], str]:
+        """One manifest from storage; anything unreadable is an Err (deletion decisions fail closed)."""
+        try:
+            parsed = json.loads(s3_client.get_object(Bucket=bucket_name, Key=key)["Body"].read())
+        except Exception as error:
+            return Err(f"manifest {key} could not be read: {error}")
+        if not isinstance(parsed, dict):
+            return Err(f"manifest {key} is not an object")
+        return Ok(parsed)
+
+    def _differentials_naming(self, s3_client: Any, bucket_name: str, base_id: str) -> Result[list[str], str]:
+        """Every stored differential that names ``base_id``, found WITHOUT any list filter.
+
+        Account, age and type filters belong to listings; a lineage question must see every
+        manifest, so one that cannot be read or understood is an Err, not "no lineage".
+        """
+        naming: list[str] = []
+        paginator = s3_client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name, Prefix="virtualmin-backups/"):
+            for obj in page.get("Contents", []):
+                if not obj["Key"].endswith(".json"):
+                    continue
+                manifest = self._read_manifest(s3_client, bucket_name, obj["Key"])
+                if manifest.is_err():
+                    return Err(manifest.unwrap_err())
+                role = manifest_lineage_role(manifest.unwrap())
+                if role.is_err():
+                    return Err(f"{obj['Key']}: {role.unwrap_err()}")
+                if role.unwrap() == CHAIN_ROLE_DIFFERENTIAL and manifest.unwrap().get("base_backup_id") == base_id:
+                    naming.append(str(manifest.unwrap().get("backup_id", obj["Key"])))
+        return Ok(naming)
+
+    @staticmethod
+    def _deletion_pin(backup_id: str, account: VirtualminAccount | None) -> str | None:
+        """Why a backup may not be deleted right now (an active restore or the live chain base), or None."""
+        from .virtualmin_migration_models import ACTIVE_JOB_STATUSES  # noqa: PLC0415
+        from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
+
+        pinned = VirtualminProvisioningJob.objects.filter(
+            operation="restore_domain", status__in=ACTIVE_JOB_STATUSES
+        ).filter(
+            models.Q(parameters__backup_id=backup_id)
+            | models.Q(parameters__base_backup_id=backup_id)
+            | models.Q(parameters__differential_backup_id=backup_id)
+        )
+        if pinned.exists():
+            return f"Backup {backup_id} is named by a restore that has not finished"
+        if (
+            account is not None
+            and account.chain_base is not None
+            and str((account.chain_base.result or {}).get("backup_id", "")) == backup_id
+        ):
+            return f"Backup {backup_id} is the live base of the account's differential chain"
+        return None
+
+    def _extend_retention_to_bases(
+        self,
+        s3_client: Any,
+        bucket_name: str,
+        backups: list[dict[str, Any]],
+        account: VirtualminAccount | None,
+        backup_type: str | None,
+    ) -> None:
+        """Append, in place, the base of every listed differential that expired on its own age."""
+        listed = {str(item.get("backup_id")) for item in backups}
+        for item in list(backups):
+            base_id = str(item.get("base_backup_id") or "")
+            if item.get("chain_role") != CHAIN_ROLE_DIFFERENTIAL or not base_id or base_id in listed:
+                continue
+            manifest = self._read_manifest(s3_client, bucket_name, f"virtualmin-backups/{base_id}/metadata.json")
+            if manifest.is_err():
+                logger.warning("⚠️ [Backup] Base %s of retained %s is unreadable", base_id, item.get("backup_id"))
+                continue
+            base = manifest.unwrap()
+            if manifest_lineage_role(base).is_err():
+                continue
+            same_service = account is None or str(base.get("praho_service_id")) == str(account.service_id)
+            if same_service and (not backup_type or base.get("backup_type") == backup_type):
+                backups.append(base)
+                listed.add(base_id)
+
+    def delete_backup(self, backup_id: str) -> Result[dict[str, Any], str]:  # noqa: PLR0911  # One exit per refusal
+        """Delete backup from S3 storage.
+
+        Fails closed: an unreadable manifest, a base that a retained differential names, a backup
+        an unfinished restore names and the live chain base are all refused. The pin check and the
+        deletion share one transaction holding the owning account's row lock, which is the same
+        lock restore admission takes, so a restore cannot be admitted between the check and the
+        delete.
+        """
         try:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
@@ -932,8 +1043,41 @@ class VirtualminBackupService:
             if not objects_to_delete:
                 return Err(f"Backup {backup_id} not found")
 
-            # HTTP success can still contain individual object failures.
-            response = s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects_to_delete})
+            manifest = self._read_manifest(s3_client, bucket_name, prefix + "metadata.json")
+            if manifest.is_err():
+                return Err(f"Backup {backup_id} not deleted: {manifest.unwrap_err()}")
+            role = manifest_lineage_role(manifest.unwrap())
+            if role.is_err():
+                return Err(f"Backup {backup_id} not deleted: {role.unwrap_err()}")
+
+            try:
+                service_id: int | None = int(str(manifest.unwrap().get("praho_service_id")))
+            except ValueError:
+                service_id = None
+            with transaction.atomic():
+                account = (
+                    VirtualminAccount.objects.select_for_update()
+                    .select_related("chain_base")
+                    .filter(service_id=service_id)
+                    .first()
+                    if service_id is not None
+                    else None
+                )
+                pin = self._deletion_pin(backup_id, account)
+                if pin is not None:
+                    return Err(pin)
+                if role.unwrap() == CHAIN_ROLE_BASE:
+                    naming = self._differentials_naming(s3_client, bucket_name, backup_id)
+                    if naming.is_err():
+                        return Err(f"Backup {backup_id} not deleted: {naming.unwrap_err()}")
+                    if naming.unwrap():
+                        return Err(
+                            f"Backup {backup_id} is the base of retained differential backup(s) "
+                            f"{', '.join(naming.unwrap())}; delete those first"
+                        )
+
+                # HTTP success can still contain individual object failures.
+                response = s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects_to_delete})
             errors = response.get("Errors", [])
             if errors:
                 details = "; ".join(
