@@ -7,7 +7,7 @@ Tests for GDPR compliance implementation covering:
 - Data export (Article 20 - Right to data portability)
 - Data deletion/anonymization (Article 17 - Right to erasure)
 - Consent management (Articles 6, 7 - Lawful basis and consent)
-- Romanian Law 190/2018 compliance
+- GDPR Articles 15 and 20 as the export's legal basis
 - Security and access controls
 """
 
@@ -340,7 +340,7 @@ class GDPRSecurityTest(TestCase):
 
         # Should contain proper legal basis
         self.assertIn("legal_basis", export_data["metadata"])
-        self.assertIn("Romanian Law 190/2018", export_data["metadata"]["legal_basis"])
+        self.assertEqual(export_data["metadata"]["legal_basis"], "GDPR Articles 15 and 20")  # No jurisdiction claim
 
 
 class DataExportOrphanedRequesterTestCase(TestCase):

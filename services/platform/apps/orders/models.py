@@ -130,7 +130,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
     customer_email = models.EmailField(help_text=_("Customer email at time of order"))
     customer_name = models.CharField(max_length=255, help_text=_("Customer name at time of order"))
     customer_company = models.CharField(max_length=255, blank=True, help_text=_("Company name if business customer"))
-    customer_vat_id = models.CharField(max_length=50, blank=True, help_text=_("VAT ID for Romanian compliance"))
+    customer_vat_id = models.CharField(max_length=50, blank=True, help_text=_("Customer VAT ID at time of order"))
 
     # Billing address snapshot
     billing_address = models.JSONField(default=dict, help_text=_("Billing address snapshot"))

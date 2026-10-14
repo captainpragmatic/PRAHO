@@ -1270,7 +1270,7 @@ class GDPRExportService:
                 "export_type": "gdpr_data_portability",
                 "praho_platform_version": "1.0.0",
                 "gdpr_article": "Articles 15 and 20 - Right of access and right to data portability",
-                "legal_basis": "Romanian Law 190/2018, GDPR Articles 15 and 20",
+                "legal_basis": "GDPR Articles 15 and 20",
             },
             "user_profile": {},
             "customers": [],

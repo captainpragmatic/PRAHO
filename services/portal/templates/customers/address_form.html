@@ -58,11 +58,11 @@
             <!-- City & County -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
                 <div>
-                    {% trans "City" as field_label %}{% trans "București" as field_placeholder %}
+                    {% trans "City" as field_label %}{% trans "City" as field_placeholder %}
                     {% input_field "city" input_type="text" html_id="city" label=field_label value=values.city|default:'' required=True placeholder=field_placeholder %}
                 </div>
                 <div>
-                    {% trans "County" as field_label %}{% trans "București" as field_placeholder %}
+                    {% trans "County" as field_label %}{% trans "County or region" as field_placeholder %}
                     {% input_field "county" input_type="text" html_id="county" label=field_label value=values.county|default:'' placeholder=field_placeholder %}
                 </div>
             </div>

@@ -35,23 +35,23 @@
     </h1>
     <p class="mt-2 text-slate-400">
       {% if action == 'create' %}
-        {% trans "Add a new product to your Romanian hosting catalog" %}
+        {% trans "Add a new product to your hosting catalog" %}
       {% else %}
         {% trans "Update product information and settings" %}
       {% endif %}
     </p>
   </div>
 
-  <!-- Romanian Business Notice -->
+  <!-- Pricing and tax notice -->
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
         <span class="text-blue-300">{% icon "flag" size="md" %}</span>
       </div>
       <div class="ml-3">
-        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Compliance' %}</h3>
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'Pricing and tax' %}</h3>
         <div class="mt-1 text-sm text-blue-300">
-          <p>{% trans 'Ensure VAT inclusion settings are correct for Romanian tax compliance. Product pricing will be used for e-Factura generation.' %}</p>
+          <p>{% trans 'Check that the VAT inclusion setting is correct: product prices are used on invoices.' %}</p>
         </div>
       </div>
     </div>
@@ -168,9 +168,9 @@
       </div>
     </div>
 
-    <!-- Romanian Business Settings -->
+    <!-- Tax settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-      <h2 class="text-xl font-semibold text-white mb-6">{% icon "flag" size="lg" %} {% trans 'Romanian Business Settings' %}</h2>
+      <h2 class="text-xl font-semibold text-white mb-6">{% icon "file-text" size="lg" %} {% trans 'Tax settings' %}</h2>
 
       {% checkbox_field "includes_vat" label="Prices include 21% Romanian VAT" html_id="id_includes_vat" checked=form.includes_vat.value help_text="Important for e-Factura compliance and tax reporting" %}
     </div>

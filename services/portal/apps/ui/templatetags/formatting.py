@@ -23,7 +23,6 @@ from apps.common.constants import (
     ROMANIAN_POSTAL_CODE_LENGTH,
     ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
     ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
-    ROMANIAN_VAT_RATE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
@@ -74,34 +73,6 @@ def romanian_currency(value: TemplateNumeric, currency: str | None = "RON") -> s
         return f"{romanian_formatted} {currency}"
     except (ValueError, TypeError, decimal.InvalidOperation):
         return unavailable
-
-
-@register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float | None = None) -> str:
-    """
-    Calculate and format VAT amount in Romanian style
-
-    Usage:
-        {{ subtotal|romanian_vat }}        -> "105,00 RON TVA" (21% rate)
-        {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA" (custom rate)
-
-    Args:
-        value: Base amount for VAT calculation
-        vat_rate: VAT rate (defaults to Romanian standard rate from constants)
-    """
-    if value is None:
-        return "0,00 RON TVA"
-
-    try:
-        # Use Romanian VAT rate from constants if not specified
-        effective_vat_rate = vat_rate if vat_rate is not None else float(ROMANIAN_VAT_RATE)
-
-        decimal_value = Decimal(str(value))
-        vat_amount = decimal_value * Decimal(str(effective_vat_rate))
-        formatted_vat = romanian_currency(vat_amount).replace(" RON", "")
-        return f"{formatted_vat} RON TVA"
-    except (ValueError, TypeError):
-        return "0,00 RON TVA"
 
 
 # Romanian date formatting constants
@@ -387,31 +358,6 @@ def contract_number_format(value: str) -> str:
         return f"CRM-{year}-{contract_num.zfill(6)}"
 
     return contract_num
-
-
-@register.simple_tag
-def romanian_business_hours() -> str:
-    """
-    Display Romanian business hours
-
-    Usage:
-        {% romanian_business_hours %}  -> "Luni-Vineri: 09:00-18:00"
-    """
-    return "Luni-Vineri: 09:00-18:00"
-
-
-@register.simple_tag
-def romanian_legal_notice() -> str:
-    """
-    Standard Romanian legal notice for business documents
-
-    Usage:
-        {% romanian_legal_notice %}
-    """
-    return mark_safe(  # nosec B308 B703 - Static legal text, no user input
-        "Această factură este emisă în conformitate cu Legea 227/2015 "
-        "privind Codul fiscal și HG 1/2016 pentru aplicarea Codului fiscal."
-    )
 
 
 @register.filter

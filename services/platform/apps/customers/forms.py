@@ -564,7 +564,7 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
         max_length=20,
         required=False,
         label=_("VAT Number"),
-        help_text=_("Romanian VAT registration number"),
+        help_text=_("VAT registration number, with or without the country prefix"),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",

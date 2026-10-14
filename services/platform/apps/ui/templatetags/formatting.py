@@ -75,31 +75,6 @@ def romanian_currency(value: TemplateNumeric, currency: object) -> str:
         return unavailable
 
 
-@register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float = 0.21) -> str:
-    """
-    Calculate and format VAT amount in Romanian style
-
-    Usage:
-        {{ subtotal|romanian_vat }}        -> "105,00 RON TVA"
-        {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA"
-
-    Args:
-        value: Base amount for VAT calculation
-        vat_rate: VAT rate (default 21% for Romania)
-    """
-    if value is None:
-        return "0,00 RON TVA"
-
-    try:
-        decimal_value = Decimal(str(value))
-        vat_amount = decimal_value * Decimal(str(vat_rate))
-        formatted_vat = romanian_currency(vat_amount, "RON").replace(" RON", "")
-        return f"{formatted_vat} RON TVA"
-    except (ValueError, TypeError):
-        return "0,00 RON TVA"
-
-
 # Romanian date formatting constants
 ROMANIAN_MONTH_SHORT = {
     1: "ian.",
@@ -383,31 +358,6 @@ def contract_number_format(value: str) -> str:
         return f"CRM-{year}-{contract_num.zfill(6)}"
 
     return contract_num
-
-
-@register.simple_tag
-def romanian_business_hours() -> str:
-    """
-    Display Romanian business hours
-
-    Usage:
-        {% romanian_business_hours %}  -> "Luni-Vineri: 09:00-18:00"
-    """
-    return "Luni-Vineri: 09:00-18:00"
-
-
-@register.simple_tag
-def romanian_legal_notice() -> str:
-    """
-    Standard Romanian legal notice for business documents
-
-    Usage:
-        {% romanian_legal_notice %}
-    """
-    return mark_safe(  # nosec B308 B703 - Static legal text, no user input
-        "Această factură este emisă în conformitate cu Legea 227/2015 "
-        "privind Codul fiscal și HG 1/2016 pentru aplicarea Codului fiscal."
-    )
 
 
 @register.filter

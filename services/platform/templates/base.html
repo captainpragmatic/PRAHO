@@ -12,8 +12,8 @@
   <!-- Security Headers (X-Frame-Options and X-XSS-Protection set in middleware) -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
 
-  <!-- Romanian Branding -->
-  <meta name="description" content="{% trans 'PRAHO Platform System for Romanian Hosting Providers' %}">
+  <!-- Branding -->
+  <meta name="description" content="{% trans 'PRAHO, the platform that runs a hosting business' %}">
 
   <!-- Scripts & Styles - Local Assets -->
   {% load static %}
@@ -296,7 +296,7 @@
             <span class="text-cyan-400">{% trans 'Version' %} {{ app_version|default:"0.30.0" }}</span>
           </p>
           <p class="mt-2 text-xs text-slate-500">
-            {% trans 'GDPR Compliant' %} | {% trans 'Romanian Law 190/2018' %}
+            {% trans 'GDPR Compliant' %}
           </p>
         </div>
       </div>

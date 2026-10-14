@@ -14,7 +14,7 @@
         {% icon "lock" %} {% trans 'Privacy & Data Protection' %}
       </h1>
       <p class="text-slate-300 text-lg">
-        {% trans 'Manage your personal data and exercise your GDPR rights as a Romanian hosting customer.' %}
+        {% trans 'Manage your personal data and exercise your GDPR rights.' %}
       </p>
     </div>
 
@@ -231,7 +231,7 @@
     <div class="mt-8 p-4 bg-slate-800 border border-slate-700 rounded-lg">
       <h3 class="text-lg font-medium text-white mb-2">{% icon "document" %} {% trans 'Legal Information' %}</h3>
       <p class="text-slate-300 text-sm mb-2">
-        {% trans 'Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements.' %}
+        {% trans 'Your personal data is processed according to the GDPR (EU 2016/679).' %}
       </p>
       <div class="flex flex-wrap gap-4 text-xs">
         <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
@@ -318,7 +318,7 @@
       <form hx-post="{% url 'audit:request_data_deletion' %}" hx-target="body">
         {% csrf_token %}
         <div class="space-y-4">
-          {% alert "This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
+          {% trans "This action cannot be undone. Your account will be anonymized; records the law requires us to keep, such as invoices, are retained." as erasure_warning %}{% alert erasure_warning variant="danger" %}
 
           <div>
             <label for="deletion-type" class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>

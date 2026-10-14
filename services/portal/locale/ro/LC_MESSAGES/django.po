@@ -3180,10 +3180,6 @@ msgstr "Ofertă pentru aprobarea dumneavoastră"
 msgid "Becomes invoice when accepted"
 msgstr "Devine factură când este acceptată"
 
-#: services/portal/templates/billing/proforma_detail.html:311
-msgid "Romanian business compliant"
-msgstr "Conformă cu legislația românească"
-
 #: services/portal/templates/billing/proforma_detail.html:315
 msgid "Contact us to proceed"
 msgstr "Contactați-ne pentru a proceda"
@@ -4183,10 +4179,6 @@ msgstr "politica de confidențialitate"
 msgid "for hosting services."
 msgstr "serviciilor noastre de hosting."
 
-#: services/portal/templates/orders/checkout.html:196
-msgid "Your order data will be retained for the period required by Romanian accounting law (5 years from 1 July of the year after the financial year). For details, see our"
-msgstr "Datele comenzii dvs. vor fi păstrate pe durata prevăzută de legislația contabilă română (5 ani de la 1 iulie a anului următor exercițiului financiar). Pentru detalii, consultați"
-
 #: services/portal/templates/orders/checkout.html:205
 msgid "Back to cart"
 msgstr "Înapoi la coș"
@@ -4562,10 +4554,6 @@ msgstr "Adăugați produse pentru a continua"
 msgid "Explore Products"
 msgstr "Explorați produsele"
 
-#: services/portal/templates/orders/partials/cart_totals.html:50
-msgid "Prices include VAT according to Romanian legislation"
-msgstr "Prețurile includ TVA conform legislației române"
-
 #: services/portal/templates/orders/partials/cart_totals.html:58
 #: services/portal/templates/orders/partials/cart_totals.html:61
 msgid "Continue to checkout"
@@ -4646,10 +4634,6 @@ msgstr "TVA inclusă"
 #: services/portal/templates/orders/partials/trust_signals.html:13
 msgid "24/7 Support"
 msgstr "Suport 24/7"
-
-#: services/portal/templates/orders/partials/trust_signals.html:15
-msgid "Romanian Data Center"
-msgstr "Centru de date din România"
 
 #: services/portal/templates/orders/product_catalog.html:4
 #: services/portal/templates/orders/product_catalog.html:16
@@ -5301,10 +5285,6 @@ msgstr "Suport facturare"
 msgid "VAT Information"
 msgstr "Informații TVA"
 
-#: services/portal/templates/services/service_detail.html:783
-msgid "Romanian VAT Details"
-msgstr "Detalii TVA România"
-
 #: services/portal/templates/services/service_detail.html:786
 msgid "VAT Rate"
 msgstr "Rata TVA"
@@ -5312,10 +5292,6 @@ msgstr "Rata TVA"
 #: services/portal/templates/services/service_detail.html:787
 msgid "Shown on each invoice"
 msgstr "Afișat pe fiecare factură"
-
-#: services/portal/templates/services/service_detail.html:790
-msgid "VAT Registration"
-msgstr "Înregistrare TVA"
 
 #: services/portal/templates/services/service_detail.html:794
 msgid "Invoice Currency"
@@ -5993,10 +5969,6 @@ msgstr "Retragerea consimțământului nu afectează legalitatea prelucrării ba
 msgid "Essential communications (billing, security, service updates) cannot be disabled as they are necessary for service delivery."
 msgstr "Comunicările esențiale (facturare, securitate, actualizări de servicii) nu pot fi dezactivate deoarece sunt necesare pentru furnizarea serviciilor."
 
-#: services/portal/templates/users/consent_history.html:200
-msgid "GDPR Article 7 - Conditions for consent | Romanian Law 190/2018"
-msgstr "Articolul 7 GDPR - Condiții pentru consimțământ | Legea română 190/2018"
-
 #: services/portal/templates/users/consent_history.html:209
 #: services/portal/templates/users/data_export.html:102
 msgid "Back to Privacy Dashboard"
@@ -6017,14 +5989,6 @@ msgstr "Detalii companie"
 #: services/portal/templates/users/create_company.html:35
 msgid "Ready to Use"
 msgstr "Gata de utilizare"
-
-#: services/portal/templates/users/create_company.html:283
-msgid "Romanian Business Compliance"
-msgstr "Conformitate cu legislația comercială românească"
-
-#: services/portal/templates/users/create_company.html:284
-msgid "As the company owner, you'll be able to manage all business settings, invite team members with different access levels, and handle invoicing. VAT number (CUI) and complete address information are required for proper tax compliance and invoicing."
-msgstr "Ca proprietar al companiei, veți putea gestiona toate setările afacerii, invita membri de echipă cu niveluri de acces diferite și gestiona facturarea. Numărul TVA (CUI) și informațiile complete de adresă sunt necesare pentru conformitatea fiscală adecvată și facturare."
 
 #: services/portal/templates/users/data_export.html:9
 msgid "Request a copy of your personal data in machine-readable format (GDPR Article 20)"
@@ -6138,10 +6102,6 @@ msgstr "Acest export de date este furnizat conform Articolului 20 din GDPR (Drep
 #: services/portal/templates/users/data_export.html:160
 msgid "The export includes personal data you provided and data generated through your use of our services."
 msgstr "Exportul include datele personale pe care le-ați furnizat și datele generate prin utilizarea serviciilor noastre."
-
-#: services/portal/templates/users/data_export.html:163
-msgid "In compliance with Romanian Law 190/2018 and EU Regulation 2016/679"
-msgstr "În conformitate cu Legea 190/2018 și cu Regulamentul UE 2016/679"
 
 #: services/portal/templates/users/login.html:5
 msgid "Login"
@@ -6698,10 +6658,6 @@ msgstr "Descărcați o copie a datelor dvs. personale"
 msgid "View and manage your consent preferences"
 msgstr "Vizualizați și gestionați preferințele de consimțământ"
 
-#: services/portal/templates/users/profile.html:294
-msgid "GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679"
-msgstr "Conformă cu GDPR conform Legii Române 190/2018 și Regulamentului UE 2016/679"
-
 #: services/portal/templates/users/register.html:6
 #: services/portal/templates/users/register.html:118
 msgid "Create Account"
@@ -6711,10 +6667,6 @@ msgstr "Creați cont"
 #, python-format
 msgid "Create your %(brand)s account"
 msgstr "Creați-vă contul %(brand)s"
-
-#: services/portal/templates/users/register.html:21
-msgid "Start your hosting journey with Romanian compliance built-in"
-msgstr "Porniți-vă călătoria de găzduire cu conformitate română integrată"
 
 #: services/portal/templates/users/register.html:59
 msgid "Business Information"
@@ -7850,3 +7802,33 @@ msgstr "Vă puteți retrage din acest contract în 14 zile. Serviciile încep im
 
 msgid "By creating an account you acknowledge the"
 msgstr "Prin crearea unui cont luați la cunoștință"
+
+msgid "Start your hosting journey"
+msgstr "Începeți cu găzduirea"
+
+msgid "GDPR compliant according to EU Regulation 2016/679"
+msgstr "Conform GDPR, Regulamentul UE 2016/679"
+
+msgid "In compliance with EU Regulation 2016/679"
+msgstr "În conformitate cu Regulamentul UE 2016/679"
+
+msgid "GDPR Article 7 - Conditions for consent"
+msgstr "GDPR articolul 7 - Condiții privind consimțământul"
+
+msgid "Invoicing details"
+msgstr "Date de facturare"
+
+msgid "As the company owner, you'll be able to manage all business settings, invite team members with different access levels, and handle invoicing. A complete address, and a VAT number where you have one, are needed to invoice you correctly."
+msgstr "Ca proprietar al firmei, veți putea gestiona toate setările, invita membri în echipă cu niveluri de acces diferite și administra facturarea. O adresă completă și, dacă aveți, un cod de TVA sunt necesare pentru a vă factura corect."
+
+msgid "Your order data is kept for the period accounting law requires. For details, see our"
+msgstr "Datele comenzii dvs. sunt păstrate pe perioada cerută de legislația contabilă. Pentru detalii, consultați"
+
+msgid "Prices include VAT"
+msgstr "Prețurile includ TVA"
+
+msgid "VAT Details"
+msgstr "Detalii TVA"
+
+msgid "County or region"
+msgstr "Județ sau regiune"

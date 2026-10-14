@@ -5418,10 +5418,6 @@ msgstr "Format: RO12345678 (6-10 cifre după RO)"
 msgid "VAT Number"
 msgstr "Număr TVA"
 
-#: apps/customers/forms.py:579
-msgid "Romanian VAT registration number"
-msgstr "Număr de înregistrare TVA românesc"
-
 #: apps/customers/forms.py:589 apps/customers/forms.py:930
 #: templates/customers/detail.html:403
 msgid "VAT Payer"
@@ -16111,10 +16107,6 @@ msgstr "Nu s-au găsit alerte."
 msgid "Privacy & Data Protection"
 msgstr "Confidențialitate și Protecția Datelor"
 
-#: templates/audit/gdpr_dashboard.html:17
-msgid "Manage your personal data and exercise your GDPR rights as a Romanian hosting customer."
-msgstr "Gestionați-vă datele personale și exercitați drepturile GDPR ca client de găzduire român."
-
 #: templates/audit/gdpr_dashboard.html:28
 msgid "Privacy Consent Status"
 msgstr "Status consimțământ privind confidențialitatea"
@@ -16254,10 +16246,6 @@ msgstr "Nicio modificare recentă a consimțământului"
 #: templates/audit/gdpr_dashboard.html:230
 msgid "Legal Information"
 msgstr "Informații Juridice"
-
-#: templates/audit/gdpr_dashboard.html:232
-msgid "Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements."
-msgstr "Datele dvs. personale sunt procesate în conformitate cu GDPR (UE 2016/679) și Legea Română 190/2018. Ca furnizor de găzduire român, asigurăm conformitatea cu cerințele naționale de protecție a datelor."
 
 #: templates/audit/gdpr_dashboard.html:235 templates/base.html:274
 #: templates/legal/cookie_policy.html:242
@@ -16562,10 +16550,6 @@ msgstr "Solicitări de export GDPR"
 #: templates/audit/gdpr_management_dashboard.html:215
 msgid "Loading GDPR export requests..."
 msgstr "Se încarcă solicitările de export GDPR..."
-
-#: templates/audit/gdpr_management_dashboard.html:225
-msgid "This GDPR management system complies with Romanian Law 190/2018 and EU Regulation 2016/679. All data processing activities are logged for audit purposes."
-msgstr "Acest sistem de gestionare GDPR este conform cu Legea 190/2018 și Regulamentul UE 2016/679. Toate activitățile de prelucrare a datelor sunt înregistrate în scopuri de audit."
 
 #: templates/audit/gdpr_management_dashboard.html:257
 #: templates/audit/logs.html:211
@@ -17182,10 +17166,6 @@ msgstr "Următorul"
 msgid "No flagged events match these filters."
 msgstr "Niciun eveniment marcat nu corespunde acestor filtre."
 
-#: templates/base.html:16
-msgid "PRAHO Platform System for Romanian Hosting Providers"
-msgstr "Sistemul Platformei PRAHO pentru Furnizori de Găzduire Români"
-
 #: templates/base.html:130
 msgid "My Invoices"
 msgstr "Facturile Mele"
@@ -17242,10 +17222,6 @@ msgstr "PRAHO - Automatizare Reală a Operațiunilor de Găzduire"
 msgid "GDPR Compliant"
 msgstr "Conformă cu GDPR"
 
-#: templates/base.html:308
-msgid "Romanian Law 190/2018"
-msgstr "Legea Română 190/2018"
-
 #: templates/base.html:321 templates/billing/invoice_detail.html:603
 #: templates/billing/proforma_detail.html:448
 #: templates/orders/order_detail.html:909
@@ -17256,20 +17232,9 @@ msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 msgid "Billing Management"
 msgstr "Gestionare Facturare"
 
-#: templates/billing/billing_list.html:17
-msgid "Manage proformas and invoices following Romanian business practices"
-msgstr "Gestionează proforme și facturi urmând practicile de afaceri românești"
-
 #: templates/billing/billing_list.html:22 templates/dashboard.html:325
 msgid "New Proforma"
 msgstr "Proformă Nouă"
-
-#: templates/billing/billing_list.html:33
-#: templates/billing/proforma_convert.html:33
-#: templates/billing/proforma_detail.html:357
-#: templates/billing/proforma_form.html:50
-msgid "Romanian Business Practice"
-msgstr "Practică de Afaceri Românească"
 
 #: templates/billing/billing_list.html:35
 #: templates/billing/proforma_form.html:52
@@ -18015,10 +17980,6 @@ msgstr "Creați o factură nouă"
 msgid "Edit this draft invoice for"
 msgstr "Editați această factură ciornă pentru"
 
-#: templates/billing/invoice_form.html:25
-msgid "Create a new invoice for a customer with Romanian VAT compliance"
-msgstr "Creați o nouă factură pentru un client cu conformitate TVA în România"
-
 #: templates/billing/invoice_form.html:40
 msgid "Issuance reconciliation"
 msgstr "Reconcilierea emiterii"
@@ -18101,11 +18062,6 @@ msgstr "Sumar factură"
 #: templates/billing/invoice_form.html:204
 msgid "Totals are recalculated when you save."
 msgstr "Totalurile sunt recalculate când salvați."
-
-#: templates/billing/invoice_form.html:211
-#: templates/orders/order_detail.html:183
-msgid "Romanian Compliance"
-msgstr "Conformitate Românească"
 
 #: templates/billing/invoice_form.html:217
 msgid "Sequential numbering"
@@ -18534,12 +18490,6 @@ msgstr "Se transformă în factură oficială la plată"
 msgid "Sequential numbering maintained"
 msgstr "Numerotarea secvențială menținută"
 
-#: templates/billing/proforma_detail.html:375
-#: templates/orders/partials/financial_summary.html:35
-#: templates/orders/partials/order_items_list.html:214
-msgid "Romanian VAT compliant"
-msgstr "Conformă cu TVA-ul român"
-
 #: templates/billing/proforma_detail.html:404
 msgid "Send to Customer"
 msgstr "Trimiteți clientului"
@@ -18613,10 +18563,6 @@ msgstr "Creați proformă nouă"
 #: templates/billing/proforma_form.html:35
 msgid "Edit the existing proforma invoice details and line items"
 msgstr "Editați detaliile și rândurile proformei existente"
-
-#: templates/billing/proforma_form.html:37
-msgid "Create a new proforma invoice (Romanian business practice - invoices are generated automatically when paid)"
-msgstr "Creați o nouă proformă (practică comercială română - facturile sunt generate automat la plată)"
 
 #: templates/billing/proforma_form.html:84
 msgid "Choose a customer..."
@@ -18719,10 +18665,6 @@ msgstr "Se convertește automat în factură când este plătită"
 #: templates/billing/proforma_form.html:329
 msgid "Sequential numbering (PRO-XXXXXX)"
 msgstr "Numerotare secvențială (PRO-XXXXXX)"
-
-#: templates/billing/proforma_form.html:333
-msgid "Romanian VAT compliance"
-msgstr "Conformitate TVA românească"
 
 #: templates/billing/proforma_form.html:346
 msgid "Update Proforma"
@@ -18898,10 +18840,6 @@ msgstr "Alte rapoarte"
 msgid "D390 review — outgoing EU services"
 msgstr "Verificare D390 — servicii prestate în UE"
 
-#: templates/billing/reports.html:49
-msgid "VAT report — Romanian tax compliance"
-msgstr "Raport TVA — conformitate fiscală română"
-
 #: templates/billing/reports.html:57
 msgid "Revenue by month"
 msgstr "Venituri pe luni"
@@ -18947,10 +18885,6 @@ msgstr "Salvați politica"
 #: templates/billing/vat_report.html:5 templates/billing/vat_report.html:13
 msgid "VAT Report"
 msgstr "Raport TVA"
-
-#: templates/billing/vat_report.html:16
-msgid "VAT summary for Romanian tax compliance"
-msgstr "Rezumat TVA pentru conformitate fiscală română"
 
 #: templates/billing/vat_report.html:26
 msgid "Start Date"
@@ -19249,14 +19183,6 @@ msgstr "Atribuirile de utilizator vor fi eliminate"
 #: templates/customers/delete_confirm.html:95
 msgid "This action is logged for GDPR compliance"
 msgstr "Această acțiune este înregistrată pentru conformitatea GDPR"
-
-#: templates/customers/delete_confirm.html:104
-msgid "Romanian Business Records"
-msgstr "Evidențe comerciale românești"
-
-#: templates/customers/delete_confirm.html:106
-msgid "Per Romanian fiscal regulations, invoice and order records must be preserved for the legally required period. Only the customer profile will be deactivated."
-msgstr "Conform reglementărilor fiscale române, înregistrările de facturi și comenzi trebuie păstrate pentru perioada legală necesară. Doar profilul clientului va fi dezactivat."
 
 #: templates/customers/delete_confirm.html:119
 msgid "Type the customer name to confirm deletion:"
@@ -19642,11 +19568,6 @@ msgstr "← Înapoi la clienți"
 #: templates/customers/edit.html:18
 msgid "Update customer information and all related profiles"
 msgstr "Actualizarea informațiilor clientului și ale tuturor profilelor asociate"
-
-#: templates/customers/edit.html:58 templates/customers/form.html:143
-#: templates/customers/tax_profile_form.html:37
-msgid "Romanian Tax Information"
-msgstr "Informații Fiscale Românești"
 
 #: templates/customers/edit.html:80
 msgid "Staff Configuration"
@@ -21797,10 +21718,6 @@ msgstr "Creați comanda"
 msgid "Create Order with Item"
 msgstr "Creați comanda cu articol"
 
-#: templates/orders/order_form.html:181 templates/products/product_form.html:52
-msgid "Romanian Business Compliance"
-msgstr "Conformitate Afaceri Românești"
-
 #: templates/orders/order_form.html:186
 msgid "First Item (optional)"
 msgstr "Primul Articol (opțional)"
@@ -21822,10 +21739,6 @@ msgstr "Domeniu (dacă este necesar)"
 #: templates/orders/order_form.html:225
 msgid "Select a product and period to preview totals."
 msgstr "Selectați un produs și o perioadă pentru a previzualiza totalurile."
-
-#: templates/orders/order_form.html:229
-msgid "Orders are automatically configured for Romanian business compliance:"
-msgstr "Comenzile sunt configurate automat pentru conformitatea afacerilor românești:"
 
 #: templates/orders/order_form.html:235
 msgid "Customer billing address snapshot"
@@ -21858,10 +21771,6 @@ msgstr "Adăugați articol de comandă"
 #: templates/orders/order_item_form.html:18
 msgid "Edit Order Item"
 msgstr "Editați articolul de comandă"
-
-#: templates/orders/order_item_form.html:29
-msgid "Romanian VAT Compliance"
-msgstr "Conformitate TVA Română"
 
 #: templates/orders/order_item_form.html:31
 #, python-format
@@ -21928,10 +21837,6 @@ msgstr "Vizualizați comenzile dvs. și urmăriți starea acestora"
 #: templates/orders/order_list.html:27
 msgid "New Order"
 msgstr "Comandă nouă"
-
-#: templates/orders/order_list.html:40
-msgid "Romanian Hosting Business"
-msgstr "Afaceri de Hosting Românești"
 
 #: templates/orders/order_list.html:42
 #, python-format
@@ -22388,17 +22293,9 @@ msgstr "Creează Produs"
 msgid "Create New Product"
 msgstr "Creează Produs Nou"
 
-#: templates/products/product_form.html:38
-msgid "Add a new product to your Romanian hosting catalog"
-msgstr "Adaugă un produs nou în catalogul tău de hosting românesc"
-
 #: templates/products/product_form.html:40
 msgid "Update product information and settings"
 msgstr "Actualizați informațiile și setările produsului"
-
-#: templates/products/product_form.html:54
-msgid "Ensure VAT inclusion settings are correct for Romanian tax compliance. Product pricing will be used for e-Factura generation."
-msgstr "Asigurați-vă că setările de includere a TVA sunt corecte pentru conformitatea fiscală română. Prețul produsului va fi utilizat pentru generarea e-Facturii."
 
 #: templates/products/product_form.html:98
 msgid "Provisioning Settings"
@@ -22416,10 +22313,6 @@ msgstr "Configurația modulului"
 msgid "Status & Visibility"
 msgstr "Status și Vizibilitate"
 
-#: templates/products/product_form.html:173
-msgid "Romanian Business Settings"
-msgstr "Setări Afaceri Românești"
-
 #: templates/products/product_form.html:180
 msgid "SEO Settings"
 msgstr "Setări SEO"
@@ -22432,10 +22325,6 @@ msgstr "Metadate suplimentare"
 #: templates/products/product_list.html:13
 msgid "Product Catalog"
 msgstr "Catalog de Produse"
-
-#: templates/products/product_list.html:16
-msgid "Manage hosting products and services for Romanian business compliance"
-msgstr "Gestionează produsele și serviciile de hosting pentru conformitatea cu afacerile românești"
 
 #: templates/products/product_list.html:21
 msgid "New Product"
@@ -22601,10 +22490,6 @@ msgstr "Prețul promoțional afectează prețul lunar de bază. Perioadele de fa
 msgid "Pricing Management"
 msgstr "Gestionarea prețurilor"
 
-#: templates/products/product_prices.html:22
-msgid "Manage multi-currency pricing for Romanian business"
-msgstr "Gestionați prețuri în mai multe valute pentru afaceri românești"
-
 #: templates/products/product_prices.html:27
 msgid "← Back to Product"
 msgstr "← Înapoi la produs"
@@ -22670,10 +22555,6 @@ msgstr "Adăugați primul preț"
 msgid "Pricing Guidelines"
 msgstr "Orientări de prețuri"
 
-#: templates/products/product_prices.html:210
-msgid "Romanian Business"
-msgstr "Afaceri românești"
-
 #: templates/products/product_prices.html:212
 #, python-format
 msgid "%(currency)s pricing is recommended for local customers"
@@ -22682,10 +22563,6 @@ msgstr "Prețul în %(currency)s este recomandat pentru clienții locali"
 #: templates/products/product_prices.html:213
 msgid "Set VAT inclusion correctly for tax compliance"
 msgstr "Setați corect includerea TVA pentru conformitate fiscală"
-
-#: templates/products/product_prices.html:214
-msgid "Consider e-Factura integration requirements"
-msgstr "Luați în considerare cerințele de integrare e-Factura"
 
 #: templates/products/product_prices.html:218
 msgid "Best Practices"
@@ -25683,10 +25560,6 @@ msgstr "Istoricul Consimțământului"
 msgid "View your consent changes in privacy dashboard"
 msgstr "Vedeți modificările consimțământului în panoul de confidențialitate"
 
-#: templates/users/profile.html:286
-msgid "GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679"
-msgstr "Conform GDPR, Legii 190/2018 și Regulamentului UE 2016/679"
-
 #: templates/users/profile.html:299
 msgid "Customer Access"
 msgstr "Acces Client"
@@ -27013,3 +26886,78 @@ msgstr "Pentru a plasa comanda, cereți ca serviciile să înceapă acum, în pe
 
 msgid "When the customer asked for the services to start within the withdrawal period"
 msgstr "Când clientul a cerut ca serviciile să înceapă în perioada de retragere"
+
+msgid "Add a new product to your hosting catalog"
+msgstr "Adăugați un produs nou în catalogul de găzduire"
+
+msgid "Business Records"
+msgstr "Evidențe comerciale"
+
+msgid "Check that the VAT inclusion setting is correct: product prices are used on invoices."
+msgstr "Verificați că setarea de includere a TVA este corectă: prețurile produselor apar pe facturi."
+
+msgid "Create a new invoice for a customer"
+msgstr "Creați o factură nouă pentru un client"
+
+msgid "Create a new proforma invoice (an invoice is issued automatically when it is paid)"
+msgstr "Creați o factură proformă nouă (factura se emite automat la plată)"
+
+msgid "Customer VAT ID at time of order"
+msgstr "Codul de TVA al clientului la data comenzii"
+
+msgid "Fiscal rules require invoice and order records to be kept for the legally required period. Only the customer profile will be deactivated."
+msgstr "Regulile fiscale cer ca evidențele facturilor și comenzilor să fie păstrate pe perioada prevăzută de lege. Doar profilul clientului va fi dezactivat."
+
+msgid "GDPR compliant according to EU Regulation 2016/679"
+msgstr "Conform GDPR, Regulamentul UE 2016/679"
+
+msgid "How billing works"
+msgstr "Cum funcționează facturarea"
+
+msgid "Manage hosting products and services"
+msgstr "Gestionați produsele și serviciile de găzduire"
+
+msgid "Manage multi-currency pricing"
+msgstr "Gestionați prețurile în mai multe monede"
+
+msgid "Manage proformas and invoices"
+msgstr "Gestionați proformele și facturile"
+
+msgid "Manage your personal data and exercise your GDPR rights."
+msgstr "Gestionați-vă datele personale și exercitați-vă drepturile conform GDPR."
+
+msgid "Orders and billing"
+msgstr "Comenzi și facturare"
+
+msgid "Orders are automatically configured for compliance:"
+msgstr "Comenzile sunt configurate automat pentru conformitate:"
+
+msgid "Orders carry the VAT their customer is charged and become proformas and invoices for billing."
+msgstr "Comenzile poartă TVA-ul aplicat clientului și devin proforme și facturi pentru facturare."
+
+msgid "PRAHO, the platform that runs a hosting business"
+msgstr "PRAHO, platforma care administrează o afacere de găzduire"
+
+msgid "Pricing and tax"
+msgstr "Prețuri și taxe"
+
+msgid "Tax settings"
+msgstr "Setări fiscale"
+
+msgid "This GDPR management system follows EU Regulation 2016/679. All data processing activities are logged for audit purposes."
+msgstr "Acest sistem de gestionare GDPR respectă Regulamentul UE 2016/679. Toate activitățile de prelucrare a datelor sunt înregistrate în scop de audit."
+
+msgid "This action cannot be undone. Your account will be anonymized; records the law requires us to keep, such as invoices, are retained."
+msgstr "Această acțiune nu poate fi anulată. Contul dvs. va fi anonimizat; evidențele pe care legea ne obligă să le păstrăm, precum facturile, sunt păstrate."
+
+msgid "VAT registration number, with or without the country prefix"
+msgstr "Codul de înregistrare în scopuri de TVA, cu sau fără prefixul țării"
+
+msgid "VAT report"
+msgstr "Raport TVA"
+
+msgid "VAT summary for tax reporting"
+msgstr "Sumar TVA pentru raportarea fiscală"
+
+msgid "Your personal data is processed according to the GDPR (EU 2016/679)."
+msgstr "Datele dvs. personale sunt prelucrate conform GDPR (UE 2016/679)."

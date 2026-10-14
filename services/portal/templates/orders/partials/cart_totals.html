@@ -1,6 +1,6 @@
 {% load i18n ui_components formatting %}
 
-<!-- Cart Totals with Romanian VAT Breakdown -->
+<!-- Cart Totals with VAT Breakdown -->
 <div id="cart-totals" class="p-6">
   <h3 class="text-lg font-medium text-white mb-4">{% trans "Order Summary" %}</h3>
 
@@ -21,7 +21,7 @@
       </span>
     </div>
 
-  <!-- VAT (Romanian) -->
+  <!-- VAT -->
     <div class="flex justify-between items-center">
       <span class="text-slate-400">{% trans "VAT" %} ({{ calculation.vat_rate_percent|floatformat:"-2" }}%)</span>
       <span class="text-white font-mono">
@@ -47,7 +47,7 @@
   <div class="bg-slate-700/50 rounded-lg p-3 mb-6 text-xs text-slate-400">
     <p class="flex items-center">
       {% icon "info" size="sm" css_class="mr-2" %}
-      {% trans "Prices include VAT according to Romanian legislation" %}
+      {% trans "Prices include VAT" %}
     </p>
   </div>
 
