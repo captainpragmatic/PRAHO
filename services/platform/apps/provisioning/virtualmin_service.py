@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
     from .virtualmin_migration_service import MigrationResumeOutcome
 
-from .virtualmin_migration_models import account_has_active_migration
+from .virtualmin_migration_models import account_has_active_migration, account_has_active_operation
 
 logger = logging.getLogger(__name__)
 
@@ -1061,6 +1061,32 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
+    @staticmethod
+    def _delete_refusal(account: VirtualminAccount) -> Result[bool, str] | None:
+        """The deletion preconditions that depend only on the account row, or None to proceed.
+
+        Evaluated twice: cheaply before the idempotency key is taken, and again on the
+        row-locked account, so a status change in between cannot slip past.
+        """
+        # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
+        if account.protected_from_deletion:
+            error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+
+        # Idempotency check - already terminated
+        if account.status == "terminated":
+            logger.info(f"⏭️ [VirtualminService] Account {account.domain} already terminated (idempotent)")
+            return Ok(True)
+
+        # Additional safety check - only allow deletion of terminated/error accounts
+        # Note: We check for 'error' status separately since terminated is handled above
+        if account.status not in ["error"]:
+            error_msg = f"Account {account.domain} must be terminated or in error state before deletion (current: {account.status})"
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+        return None
+
     def delete_account(  # Complexity: multi-step business logic  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
@@ -1085,23 +1111,9 @@ class VirtualminProvisioningService:
             logger.info("✅ [VirtualminService] Migration lock blocks deletion: %s", account.pk)
             return Err("Account has an active migration")
 
-        # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
-        if account.protected_from_deletion:
-            error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
-            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
-            return Err(error_msg)
-
-        # Idempotency check - already terminated
-        if account.status == "terminated":
-            logger.info(f"⏭️ [VirtualminService] Account {account.domain} already terminated (idempotent)")
-            return Ok(True)
-
-        # Additional safety check - only allow deletion of terminated/error accounts
-        # Note: We check for 'error' status separately since terminated is handled above
-        if account.status not in ["error"]:
-            error_msg = f"Account {account.domain} must be terminated or in error state before deletion (current: {account.status})"
-            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
-            return Err(error_msg)
+        refusal = self._delete_refusal(account)
+        if refusal is not None:
+            return refusal
 
         idempotency_key: str | None = None
         try:
@@ -1120,17 +1132,32 @@ class VirtualminProvisioningService:
                     logger.warning(f"⚠️ [VirtualminService] Delete operation already in progress for {account.domain}")
                     return Err("Operation already in progress")
 
-            gateway = self._get_gateway(account.server)
+            # Admission joins the account exclusion: the row lock serialises it against
+            # backup/restore/migration admission, and the job row is created inside the
+            # same transaction so no competing operation can slip in before it exists.
+            job: VirtualminProvisioningJob | None = None
+            with transaction.atomic():
+                VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+                account.refresh_from_db()  # decisions below use the locked, current row
+                admission_refusal: Result[bool, str] | None
+                if account_has_active_operation(account):
+                    admission_refusal = Err("Account has an active migration or backup/restore/delete operation")
+                else:
+                    admission_refusal = self._delete_refusal(account)
+                if admission_refusal is None:
+                    job = VirtualminProvisioningJob(
+                        operation="delete_domain",
+                        server=account.server,
+                        account=account,
+                        parameters=self._job_parameters({"domain": account.domain}),
+                        correlation_id=f"delete_domain_{account.id}",
+                    )
+                    job.save()
+            if admission_refusal is not None or job is None:
+                _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
+                return admission_refusal if admission_refusal is not None else Err("Delete admission failed")
 
-            # Create provisioning job
-            job = VirtualminProvisioningJob(
-                operation="delete_domain",
-                server=account.server,
-                account=account,
-                parameters=self._job_parameters({"domain": account.domain}),
-                correlation_id=f"delete_domain_{account.id}",
-            )
-            job.save()
+            gateway = self._get_gateway(account.server)
             job.mark_started()
 
             # Make API call
@@ -1293,6 +1320,24 @@ class VirtualminProvisioningService:
             return Err(creation_result.unwrap_err())
         return Ok(True)
 
+    @staticmethod
+    def _lifecycle_exclusion_refusal(account: VirtualminAccount, job: VirtualminProvisioningJob) -> Err[str] | None:
+        """A retry is an admission like any other.
+
+        The account row lock serialises it against backup/restore/delete admission, and
+        only ANOTHER active operation refuses it (the retried job is itself the account's
+        operation). Refused, the job returns to the retry pool instead of staying running.
+        """
+        with transaction.atomic():
+            VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            busy = account_has_active_operation(account, ignore_job_id=job.pk)
+        if not busy:
+            return None
+        logger.info("✅ [VirtualminService] Active operation blocks lifecycle retry: %s", account.pk)
+        message = "Account has an active migration or backup/restore/delete operation"
+        job.mark_failed(message, retriability=Retriability.RETRIABLE)
+        return Err(message, retriability=Retriability.RETRIABLE)
+
     def _execute_lifecycle_operation(  # Distinct guard exits: migration lock + per-operation outcomes  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
@@ -1300,6 +1345,9 @@ class VirtualminProvisioningService:
         if account_has_active_migration(account):
             logger.info("✅ [VirtualminService] Migration lock blocks lifecycle retry: %s", account.pk)
             return Err("Account has an active migration")
+        exclusion = self._lifecycle_exclusion_refusal(account, job)
+        if exclusion is not None:
+            return exclusion
         operations = {
             "suspend_domain": ("disable-domain", "suspended"),
             "unsuspend_domain": ("enable-domain", "active"),
@@ -1701,12 +1749,13 @@ class VirtualminBackupManagementService:
                 parameters=parameters,
                 task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_backup",
                 execute_inline=execute_inline,
+                source_bound=True,
             )
         except Exception as e:
             logger.error(f"Backup job creation failed: {e}")
             return Err(f"Backup job failed: {e!s}")
 
-    def _admit_job(  # Distinct admission refusals
+    def _admit_job(  # noqa: PLR0913  # Distinct admission refusals + execution-context seams
         self,
         account: VirtualminAccount,
         *,
@@ -1714,8 +1763,14 @@ class VirtualminBackupManagementService:
         parameters: dict[str, Any],
         task_path: str,
         execute_inline: bool,
+        source_bound: bool,
     ) -> Result[VirtualminProvisioningJob, str]:
         """Durable admission: account lock + exclusion + pending row + queued task.
+
+        ``source_bound`` jobs (backups) run where the account lives: the node comes
+        from the LOCKED account row, and admission refuses when the account moved
+        since this service was built. A restore names its target node explicitly
+        (``self.server``), so it is not source-bound.
 
         The job row and its queue message commit in one transaction (the ORM
         broker shares the business DB); sync=False keeps django-q's sync mode
@@ -1727,7 +1782,6 @@ class VirtualminBackupManagementService:
 
         from .spool import estimated_transfer_bytes  # noqa: PLC0415  # Circular
         from .virtualmin_backup_service import backup_task_timeout  # noqa: PLC0415  # Circular
-        from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
         estimated = estimated_transfer_bytes(account.current_disk_usage_mb or 0)
         budget = backup_task_timeout(estimated)
@@ -1742,13 +1796,17 @@ class VirtualminBackupManagementService:
 
         parameters = {**parameters, "estimated_bytes": estimated, "task_budget_seconds": budget}
         with transaction.atomic():
+            # Lock only the account row: a select_related join would also lock the server row
+            # (PostgreSQL locks joined rows), out of order with migration admission.
             locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            if source_bound and locked.server_id != self.server.pk:
+                return Err("Account moved to another server since this request began; retry")
             if account_has_active_operation(locked):
                 return Err("Account already has an active migration or backup/restore operation")
             job = VirtualminProvisioningJob.objects.create(
                 operation=operation,
                 account=locked,
-                server=self.server,
+                server=locked.server if source_bound else self.server,
                 parameters=parameters,
                 status="pending",
             )
@@ -1807,6 +1865,7 @@ class VirtualminBackupManagementService:
                     parameters=parameters,
                     task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
                     execute_inline=execute_inline,
+                    source_bound=False,
                 )
             finally:
                 self.server = original_server

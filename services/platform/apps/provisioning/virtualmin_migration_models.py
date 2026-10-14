@@ -163,23 +163,34 @@ def account_has_active_migration(account: VirtualminAccount) -> bool:
     return VirtualminMigration.objects.filter(account_id=account.pk).exclude(status__in=_TERMINAL_STATUSES).exists()
 
 
-# Backup/restore job statuses that hold the account-operation exclusion.
+# Job statuses that hold the account-operation exclusion.
 # "attention" is non-terminal by design: an uncertain mutation keeps ownership
 # until an operator resolves it.
 _ACTIVE_JOB_STATUSES = ("pending", "running", "attention")
 
+# Operations that take the account exclusion: backups and restores, and deletion
+# (a delete mutates the very domain a backup or restore is reading or writing).
+_EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain")
 
-def account_has_active_operation(account: VirtualminAccount) -> bool:
-    """Two-sided admission: migrations and backup/restore jobs mutually exclude."""
+
+def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: uuid.UUID | None = None) -> bool:
+    """Two-sided admission: migrations, backups, restores and deletes mutually exclude.
+
+    ``ignore_job_id`` names the job asking: a retried job is itself the account's
+    operation and must not refuse itself.
+    """
     from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
     if account_has_active_migration(account):
         return True
-    return VirtualminProvisioningJob.objects.filter(
+    active = VirtualminProvisioningJob.objects.filter(
         account_id=account.pk,
-        operation__in=("backup_domain", "restore_domain"),
+        operation__in=_EXCLUSIVE_JOB_OPERATIONS,
         status__in=_ACTIVE_JOB_STATUSES,
-    ).exists()
+    )
+    if ignore_job_id is not None:
+        active = active.exclude(pk=ignore_job_id)
+    return active.exists()
 
 
 class SpoolRoot(models.Model):
