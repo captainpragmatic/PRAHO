@@ -42,9 +42,27 @@ class NodeDeployPlaybookTests(SimpleTestCase):
         self.assertIs(task["no_log"], True)
         self.assertNotIn("failed_when", task)
 
+    def test_api_user_is_locked_to_the_node_admin_allowlist(self) -> None:
+        """ADR-0060: the master-admin API user may log in only from the allowlist."""
+        task = task_named("virtualmin.yml", "Create or update the PRAHO API user")
+        argv = task["ansible.builtin.command"]["argv"]
+        self.assertIsInstance(argv, str)
+        self.assertIn("node_admin_allowed_cidrs", argv)
+        guard = task_named("virtualmin.yml", "Refuse an empty node admin allowlist")
+        self.assertIn("node_admin_allowed_cidrs | length > 0", guard["ansible.builtin.assert"]["that"])
+        titles = [t.get("name") for t in tasks("virtualmin.yml")]
+        self.assertLess(
+            titles.index("Refuse an empty node admin allowlist"), titles.index("Create or update the PRAHO API user")
+        )
+        helper = (PLAYBOOKS / "files" / "praho-webmin-api-user.pl").read_text()
+        # The networks become the Webmin user's own IP allow list; none means refuse.
+        self.assertIn("$user->{'allow'} = join(' ', @networks);", helper)
+        self.assertIn("$user->{'deny'} = '';", helper)
+        self.assertIn('@networks || die "no allowed networks given', helper)
+
     def test_helper_grants_only_the_virtualmin_module(self) -> None:
         helper = (PLAYBOOKS / "files" / "praho-webmin-api-user.pl").read_text()
-        self.assertIn("'modules' => [ 'virtual-server' ]", helper)
+        self.assertIn("$user->{'modules'} = [ 'virtual-server' ];", helper)
         self.assertIn("<STDIN>", helper)
         self.assertIn("$acl{'noconfig'} = 0;", helper)
 
