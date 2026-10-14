@@ -257,11 +257,24 @@ _SSH_SETUP_MARGIN_SECONDS = 240
 _S3_COMPLETION_MARGIN_SECONDS = 300
 
 
-def backup_task_timeout(estimated_bytes: int) -> int:
+# A chain job makes a second Ansible invocation before the fetch: the node-side step. It may wait
+# for the per-domain lock, and the controller allows it a margin beyond the backup command itself.
+CHAIN_LOCK_WAIT_SECONDS = 60
+CHAIN_STEP_MARGIN_SECONDS = 120
+
+
+def chain_step_timeout(backup_command_timeout: int) -> int:
+    """Subprocess limit for one node-side chain step (lock wait + the backup + a margin)."""
+    return backup_command_timeout + CHAIN_LOCK_WAIT_SECONDS + CHAIN_STEP_MARGIN_SECONDS
+
+
+def backup_task_timeout(estimated_bytes: int, *, chain: bool = False) -> int:
     """Size-derived task budget: backup-domain + fetch + S3 upload + margins.
 
     Uses the JOB'S OWN size estimate (never the 50GB global ceiling, which
     would exceed the broker visibility window and reject every admission).
+    A chain job also covers its node-side step: one more SSH setup, the lock wait
+    and the step's margin.
     """
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
@@ -269,7 +282,10 @@ def backup_task_timeout(estimated_bytes: int) -> int:
     transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
     mib_s = max(1, SettingsService.get_integer_setting("provisioning.backup_min_transfer_mib_s", 10))
     s3_stage = estimated_bytes // (mib_s * 1024 * 1024) + _S3_COMPLETION_MARGIN_SECONDS
-    return backup_timeout + transfer_timeout + _SSH_SETUP_MARGIN_SECONDS + s3_stage + 300
+    budget = backup_timeout + transfer_timeout + _SSH_SETUP_MARGIN_SECONDS + s3_stage + 300
+    if chain:
+        budget += _SSH_SETUP_MARGIN_SECONDS + CHAIN_LOCK_WAIT_SECONDS + CHAIN_STEP_MARGIN_SECONDS
+    return budget
 
 
 BACKUP_VERIFICATION_TIMEOUT = 300  # 5 minutes for verification (structural)
@@ -1340,8 +1356,8 @@ class VirtualminBackupService:
                 "chain backups are unavailable",
                 retriability=Retriability.NOT_RETRIABLE,
             )
-        lock_wait = int(variables.get("chain_lock_wait_seconds", 60))
-        timeout = self._backup_command_timeout() + lock_wait + 120
+        lock_wait = int(variables.get("chain_lock_wait_seconds", CHAIN_LOCK_WAIT_SECONDS))
+        timeout = chain_step_timeout(self._backup_command_timeout()) - CHAIN_LOCK_WAIT_SECONDS + lock_wait
         result = AnsibleService().run_playbook(deployment, CHAIN_PLAYBOOK, variables, timeout_seconds=timeout)
         if result.is_err():
             return Err(f"Chain step could not run: {result.unwrap_err()}", retriability=Retriability.UNKNOWN)

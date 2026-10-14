@@ -1821,7 +1821,9 @@ class VirtualminBackupManagementService:
         from .virtualmin_backup_service import backup_task_timeout  # noqa: PLC0415  # Circular
 
         estimated = estimated_transfer_bytes(account.current_disk_usage_mb or 0)
-        budget = backup_task_timeout(estimated)
+        budget = backup_task_timeout(
+            estimated, chain=parameters.get("chain_role", CHAIN_ROLE_STANDALONE) != CHAIN_ROLE_STANDALONE
+        )
         retry_window = int(str(settings.Q_CLUSTER.get("retry", 0)))
         if budget + 60 >= retry_window:
             return Err(

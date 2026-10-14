@@ -433,3 +433,23 @@ class ManifestReaderGuardTests(ChainFixtures, ExclusionCase):
             with self.subTest(manifest=label):
                 result = self.restore(**manifest)
                 self.assertEqual(self.last_gate_calls, 1, result)
+
+
+class ChainBudgetTests(ChainFixtures, ExclusionCase):
+    """A chain job runs two Ansible invocations (the step, then the fetch); its budget covers both."""
+
+    def test_a_chain_admission_budget_covers_the_step_and_the_fetch(self) -> None:
+        from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
+            _SSH_SETUP_MARGIN_SECONDS,
+            CHAIN_LOCK_WAIT_SECONDS,
+            CHAIN_STEP_MARGIN_SECONDS,
+        )
+        account = self._account()
+        self.enable_incremental_backups()
+        management = VirtualminBackupManagementService(self.server)
+        with patch("django_q.tasks.async_task"):
+            standalone = management.create_backup_job(account).unwrap()
+            VirtualminProvisioningJob.objects.filter(pk=standalone.pk).update(status="completed")
+            base = management.take_base_backup(account).unwrap()
+        extra = base.parameters["task_budget_seconds"] - standalone.parameters["task_budget_seconds"]
+        self.assertEqual(extra, CHAIN_LOCK_WAIT_SECONDS + CHAIN_STEP_MARGIN_SECONDS + _SSH_SETUP_MARGIN_SECONDS)
