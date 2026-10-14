@@ -49,8 +49,10 @@ object identity, `description`, `old_values`, `new_values`, `category`,
 - Cutover runbook: provision `AUDIT_INTEGRITY_SECRET` → deploy (all v1
   writers gone) → `manage.py restamp_audit_integrity` (pk-batched, resumable,
   idempotent, self-asserting) → `manage.py audit_compliance verify-integrity`.
-- #313's chaining/external-anchoring tier remains open; this ships the keyed
-  tier.
+- #313's chaining tier is shipped separately from this keyed tier: the
+  append-only `AuditChainLink` ledger, and `AuditChainAnchor`, the local record
+  of each chain head published to an external sink under the separate
+  `audit-anchor` key domain.
 
 ### 2. Immutability enforced, not described
 

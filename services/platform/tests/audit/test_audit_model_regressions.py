@@ -111,6 +111,9 @@ def _receiver_audits(receiver: object) -> bool:
 def _has_audit_signal(model: type) -> bool:
     """Check if any signal receiver for this model actually writes audit events."""
     for sig in AUDIT_SIGNALS:
+        # The public Signal.has_listeners(sender) only says that SOME receiver exists, which is the
+        # check this test replaced because a cache-invalidating receiver passed it. Reading the
+        # receivers themselves to see whether they audit has no public API, hence the private call.
         raw_receivers = sig._live_receivers(model)
         receivers = (
             [*raw_receivers[0], *raw_receivers[1]] if isinstance(raw_receivers, tuple) else list(raw_receivers)

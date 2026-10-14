@@ -41,11 +41,11 @@ A static analysis script that runs during `make lint` and pre-commit hooks. It p
 8. **Deprecated audit API** — flags calls to `log_event_legacy()` (medium severity).
 9. **Direct audit model access** — flags `AuditEvent.objects.create()` outside `apps/audit/` (medium severity).
 
-### Tier 2: Django Introspection Test (`tests/audit/test_audit_model_coverage.py`)
+### Tier 2: Django Introspection Test (`tests/audit/test_audit_model_regressions.py`)
 
 A Django test that uses `django.apps.apps.get_models()` to introspect all registered models at runtime. Every concrete, non-proxy model in `apps.*` must either:
 
-1. Have a `post_save`, `pre_save`, `post_delete`, or `pre_delete` signal connected, OR
+1. Have a `post_save`, `pre_save`, `post_delete`, or `pre_delete` receiver whose defining module references the audit API by name (a receiver that only invalidates a cache does not count), OR
 2. Be listed in the allowlist with a documented justification comment
 
 Additional checks: stale allowlist entries (entries that don't match any installed model) and uncommented entries (missing justification) also cause test failures.
