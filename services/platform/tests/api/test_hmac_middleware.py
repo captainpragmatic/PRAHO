@@ -377,6 +377,11 @@ class HMACAuthBucketRoutingTests(HMACTestMixin, TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
+        # The limiter counts in fixed windows. A burst that straddles a window boundary starts a
+        # fresh count, so these tests run at a fixed instant in the middle of one window.
+        window = 60
+        middle = (time.time() // window) * window + window / 2
+        self.enterContext(patch("apps.common.middleware.time.time", return_value=middle))
 
     def test_signed_auth_paths_share_a_bucket_without_charging_general_traffic(self) -> None:
         login = self.portal_post("/api/users/login/", {})
