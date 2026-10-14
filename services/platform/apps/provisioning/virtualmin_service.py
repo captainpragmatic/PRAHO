@@ -19,11 +19,12 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import connection, models, transaction
+from django.db import models, transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
@@ -1709,7 +1710,7 @@ class VirtualminBackupManagementService:
                 f"Task budget {budget}s does not fit under the broker visibility timeout {retry_window}s; "
                 "raise Q_CLUSTER retry or provisioning.backup_min_transfer_mib_s"
             )
-        if execute_inline and (connection.in_atomic_block or not transaction.get_autocommit()):
+        if execute_inline and not is_outside_transaction():
             return Err("Inline execution requires autocommit; run outside any transaction")
 
         parameters = {**parameters, "estimated_bytes": estimated, "task_budget_seconds": budget}
