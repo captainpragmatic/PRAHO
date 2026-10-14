@@ -12,7 +12,12 @@ from django.test import override_settings
 
 from apps.common.types import Retriability, retriability_of
 from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeRegion, NodeSize, PanelType
-from apps.provisioning.virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
+from apps.provisioning.virtualmin_backup_service import (
+    REMOTE_ARCHIVE_DIR,
+    BackupConfig,
+    RestoreConfig,
+    VirtualminBackupService,
+)
 from apps.settings.services import SettingsService
 from tests.provisioning.test_cov_virtualmin_gateway_listing import http_response
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
@@ -115,7 +120,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
             ):
                 metadata = self.backups._initialize_backup_metadata(self.account, "full", "full-id", config)
                 result = self.backups._execute_backup_by_type(config, self.account, "full-id", metadata)
-            self.assertEqual(result.unwrap(), f"/tmp/{metadata['archive_name']}")  # noqa: S108  # Remote node path.
+            self.assertEqual(result.unwrap(), f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
             self.assertEqual(sent[-1]["domain"], self.account.domain)
             self.assertEqual(sent[-1]["dest"], result.unwrap())
             self.assertEqual(sent[-1].get("except-feature"), skipped)
@@ -134,7 +139,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
         metadata = self.backups._initialize_backup_metadata(self.account, "config_only", "config-id", config)
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport):
             result = self.backups._execute_backup_by_type(config, self.account, "config-id", metadata)
-        self.assertEqual(result.unwrap(), f"/tmp/{metadata['archive_name']}")  # noqa: S108  # Remote node path.
+        self.assertEqual(result.unwrap(), f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
         self.assertEqual(sent[0]["feature"], ["virtualmin", "dir"])
         self.assertNotIn("all-features", sent[0])
         self.assertEqual(self.backups.get_backup_status("config-id")["status"], "backing_up_config")

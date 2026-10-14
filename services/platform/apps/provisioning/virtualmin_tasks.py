@@ -820,7 +820,12 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
 
-    from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService  # noqa: PLC0415
+    from .virtualmin_backup_service import (  # noqa: PLC0415
+        CHAIN_ROLE_STANDALONE,
+        BackupConfig,
+        RestoreConfig,
+        VirtualminBackupService,
+    )
 
     try:
         job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
@@ -857,6 +862,9 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             include_databases=bool(params.get("include_databases", True)),
             include_files=bool(params.get("include_files", True)),
             include_ssl=bool(params.get("include_ssl", True)),
+            # Jobs admitted before roles existed carry none: they were standalone.
+            # Any other value is refused by the service before dispatch.
+            chain_role=str(params.get("chain_role", CHAIN_ROLE_STANDALONE)),
         )
         result = service.backup_domain(account=job.account, config=config, progress_key=str(job.pk), ownership=owns)
     else:

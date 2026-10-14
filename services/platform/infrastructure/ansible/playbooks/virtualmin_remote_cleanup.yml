@@ -3,6 +3,9 @@
   hosts: all
   gather_facts: false
   become: false
+  vars:
+    # Must match REMOTE_ARCHIVE_DIR in apps/provisioning/virtualmin_backup_service.py.
+    remote_archive_dir: /var/lib/praho-transfer
   tasks:
     - name: Validate single-host cleanup inputs
       ansible.builtin.assert:
@@ -10,7 +13,10 @@
           - ansible_play_hosts_all | length == 1
           - archive_name is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
 
-    - name: Remove the remote temporary archive
+    # The .dom/.info sidecars Virtualmin writes beside a backup carry the
+    # domain's database passwords: they go with the archive.
+    - name: Remove the remote temporary archive and its sidecars
       ansible.builtin.file:
-        path: "/tmp/{{ archive_name }}"
+        path: "{{ remote_archive_dir }}/{{ archive_name }}{{ item }}"
         state: absent
+      loop: ["", ".dom", ".info"]

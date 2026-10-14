@@ -1672,6 +1672,9 @@ class VirtualminBackupManagementService:
             # Use default config if none provided
             if config is None:
                 config = BackupConfig()
+            role_error = config.chain_role_error()
+            if role_error is not None:
+                return Err(role_error)
 
             parameters = {
                 "backup_type": config.backup_type,
@@ -1679,6 +1682,7 @@ class VirtualminBackupManagementService:
                 "include_databases": config.include_databases,
                 "include_files": config.include_files,
                 "include_ssl": config.include_ssl,
+                "chain_role": config.chain_role,
                 "initiated_by": initiated_by,
             }
             return self._admit_job(

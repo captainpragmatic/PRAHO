@@ -18,6 +18,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
+from .virtualmin_backup_service import CHAIN_ROLE_STANDALONE, REMOTE_ARCHIVE_DIR, differential_flags
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
@@ -37,9 +38,20 @@ def _reconcile_after_migration(service_id: str) -> None:
     reconcile_virtualmin_service_state_async(service_id)
 
 
-# Archive staging path ON THE REMOTE VIRTUALMIN NODE (sent as an API parameter),
-# not a local temporary file — S108's local-tempfile race does not apply.
-_REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108
+def migration_backup_params(archive_name: str) -> dict[str, str]:
+    """The source node's backup-domain parameters for one migration archive.
+
+    Standalone (`no-differential`): a migration backup must not replace the
+    source domain's differential base. `mkdir` lets Virtualmin create the
+    private staging directory (0700) on a node that does not have it yet.
+    """
+    return {
+        "dest": f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
+        "all-features": "",
+        "mkdir": "",
+        **differential_flags(CHAIN_ROLE_STANDALONE),
+    }
+
 
 # Recovery policy concerns an INTERRUPTED phase, before invoking execute().
 RESUME_POLICY = {
@@ -448,8 +460,7 @@ class VirtualminMigrationService:
                 migration,
                 migration.source_server,
                 "backup-domain",
-                dest=f"{_REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
-                **{"all-features": ""},
+                **migration_backup_params(migration.archive_name),
             )
         except DefiniteMigrationFailureError as error:
             self._abort(migration, token, error)
@@ -509,7 +520,7 @@ class VirtualminMigrationService:
                 migration,
                 migration.target_server,
                 "restore-domain",
-                source=f"{_REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
+                source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
                 **{"all-features": ""},
             )
         except DefiniteMigrationFailureError as error:
