@@ -12,7 +12,7 @@ A release is never edited or removed. To correct one, publish another: the newes
 
 Publish each document at least in the default language (`system.default_language`): a language without its own release shows the default language's.
 
-The portal shows the releases at `/terms/`, `/privacy-policy/` and `/cookie-policy/`. The staff platform's old addresses for them redirect there, so `portal.public_base_url` must be set.
+The portal shows the releases at `/terms/`, `/privacy-policy/` and `/cookie-policy/`. The staff platform's old addresses for them redirect there: to `https://` and `PORTAL_DOMAIN`, or to the customer portal URL staff set.
 
 ## What PRAHO records
 

@@ -49,7 +49,13 @@ from apps.common.validators import (
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-from apps.settings.services import SettingsService, get_brand_name, get_default_from_email, get_support_email
+from apps.settings.services import (
+    SettingsService,
+    get_brand_name,
+    get_default_from_email,
+    get_portal_public_base_url,
+    get_support_email,
+)
 
 from .models import APIToken, CustomerMembership, UserSession
 from .pending_registration import PendingRegistration
@@ -73,9 +79,10 @@ def portal_public_origin() -> str:
     """The Portal origin that customer email links point at, or ImproperlyConfigured.
 
     Only an HTTPS origin qualifies (HTTP only for loopback): no credentials, path, query or fragment,
-    so a link can never carry a token to another host. Read on every use, because staff can change it.
+    so a link can never carry a token to another host. Staff can set it; unset, it is https:// and the
+    deployment's PORTAL_DOMAIN. Read on every use, because staff can change it.
     """
-    base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
+    base = get_portal_public_base_url().strip().rstrip("/")
     try:
         parsed = urlsplit(base)
     except ValueError as exc:

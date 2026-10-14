@@ -12,7 +12,6 @@ from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.services import OrderService, StatusChangeData
 from apps.products.models import Product, ProductPrice
-from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
@@ -33,16 +32,6 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
         self.terms = publish_release()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": "https://customers.example.test",
-                "default_value": "",
-            },
-        )
 
     def registration(self, email="purchase@example.com", phone="+40722123456"):
         return {

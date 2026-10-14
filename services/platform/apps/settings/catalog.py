@@ -2638,6 +2638,8 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="portal.public_base_url",
+        deployment_fallback=True,
+        django_setting="PORTAL_DOMAIN",
         data_type="string",
         default="",
         group="platform",
@@ -2645,7 +2647,8 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("Customer portal URL"),
         help_text=_(
             "Public base URL of the customer portal, e.g. https://portal.example.com. "
-            "Used in customer-facing links such as password reset emails."
+            "Used in customer-facing links such as password reset emails. "
+            "Leave unset to use https:// and the deployment's PORTAL_DOMAIN."
         ),
         critical=True,
     ),

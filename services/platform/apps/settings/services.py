@@ -1003,6 +1003,15 @@ def get_default_country() -> str:
     return str(stored)
 
 
+def get_portal_public_base_url() -> str:
+    """Where customer links point: staff's own URL, else https:// and the deployment's PORTAL_DOMAIN."""
+    stored = SettingsService.get_stored_setting("portal.public_base_url")
+    if stored in (None, ""):
+        domain = str(getattr(django_settings, "PORTAL_DOMAIN", "") or "").strip()
+        return f"https://{domain}" if domain else ""
+    return str(stored)
+
+
 def get_company_legal_name() -> str:
     """The operator's public legal name: staff's own, else the seller name invoices are issued under."""
     stored = SettingsService.get_stored_setting("company.legal_name")
@@ -1039,6 +1048,7 @@ def _efactura_deployment_value(key: str) -> object:
 _RESOLVED_FALLBACKS: dict[str, Callable[[], object]] = {
     "company.email_noreply": get_default_from_email,
     "company.legal_name": get_company_legal_name,
+    "portal.public_base_url": get_portal_public_base_url,
     "system.default_country": get_default_country,
 }
 

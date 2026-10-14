@@ -14256,8 +14256,8 @@ msgid "Customer portal URL"
 msgstr "URL portal client"
 
 #: apps/settings/catalog.py:2651
-msgid "Public base URL of the customer portal, e.g. https://portal.example.com. Used in customer-facing links such as password reset emails."
-msgstr "URL de bază public al portalului client, de ex. https://portal.example.com. Utilizat în linkuri destinate clienților, cum ar fi emailurile de reinițializare a parolei."
+msgid "Public base URL of the customer portal, e.g. https://portal.example.com. Used in customer-facing links such as password reset emails. Leave unset to use https:// and the deployment's PORTAL_DOMAIN."
+msgstr "URL de bază public al portalului client, de ex. https://portal.example.com. Utilizat în linkuri destinate clienților, cum ar fi emailurile de reinițializare a parolei. Lăsați-l necompletat pentru a folosi https:// și PORTAL_DOMAIN al implementării."
 
 #: apps/settings/catalog.py:2661
 msgid "Availability"

@@ -4,7 +4,6 @@ import json
 import time
 from io import StringIO
 
-from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
@@ -44,12 +43,6 @@ class E2EFixtureTests(TestCase):
         self.assertFalse(Customer.objects.exists())
 
     def test_queued_task_runner_runs_only_the_named_task(self):
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
-                      "value": "https://customers.example.test", "default_value": ""},
-        )
-        cache.clear()
         async_task(RESET_TASK, "nobody@example.test", time.time())
         async_task("apps.users.tasks.reconcile_session_index")
         output = StringIO()

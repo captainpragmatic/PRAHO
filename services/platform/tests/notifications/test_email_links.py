@@ -19,7 +19,6 @@ from django.utils import timezone
 
 from apps.billing.invoice_models import Invoice
 from apps.notifications.services import EmailResult, EmailService
-from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from tests.billing import _fiscal_correction_helpers as h
 
@@ -29,16 +28,6 @@ PORTAL = "https://portal.example.test"
 class CustomerEmailLinkTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": PORTAL,
-                "default_value": "",
-            },
-        )
         call_command("setup_email_templates", stdout=StringIO())
         self.invoice = h.issued_invoice(h.customer())
         Invoice.objects.filter(pk=self.invoice.pk).update(due_at=timezone.now() + timedelta(days=5))

@@ -13,7 +13,6 @@ from apps.audit.models import AuditEvent
 from apps.common import counters
 from apps.common.types import Err
 from apps.customers.models import Customer
-from apps.settings.models import SystemSetting
 from apps.users import registration_confirmation
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
@@ -24,8 +23,9 @@ from apps.users.tasks import (
 )
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 from tests.helpers.legal import publish_release
+from tests.helpers.portal import set_portal_origin
 
-PORTAL = "https://customers.example.test"
+PORTAL = "https://portal.example.test"  # From the test settings' PORTAL_DOMAIN
 PASSWORD = " Chosen-at-confirm-2026! "
 
 
@@ -51,24 +51,14 @@ def pending(email: str = "new@example.test", **overrides: object) -> PendingRegi
     return PendingRegistration.objects.create(**fields)
 
 
-class PortalOriginMixin:
+class PublishedTermsMixin:
     def setUp(self) -> None:
         cache.clear()
         self.terms = publish_release()
         self.accepted_terms = {"terms_accepted": True, "terms_document_id": str(self.terms.pk)}
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": PORTAL,
-                "default_value": "",
-            },
-        )
 
 
-class DeliverRegistrationTests(PortalOriginMixin, TestCase):
+class DeliverRegistrationTests(PublishedTermsMixin, TestCase):
     def test_a_new_address_gets_its_confirmation_link_and_no_submitted_text(self) -> None:
         row = pending()
         self.assertEqual(deliver_registration(str(row.pk)), {"sent": True, "kind": "confirm"})
@@ -164,15 +154,14 @@ class DeliverRegistrationTests(PortalOriginMixin, TestCase):
         self.assertEqual(len(mail.outbox), registration_confirmation.RECIPIENT_DAILY_LIMIT)
 
     def test_a_broken_portal_origin_sends_nothing(self) -> None:
-        SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://customers.example.test")
-        cache.clear()
+        set_portal_origin("http://customers.example.test")
         row = pending()
         with self.assertLogs("apps.users.registration_confirmation", level="ERROR"):
             self.assertEqual(deliver_registration(str(row.pk)), {"sent": False, "reason": "configuration"})
         self.assertEqual(len(mail.outbox), 0)
 
 
-class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
+class ConfirmRegistrationTests(PublishedTermsMixin, TestCase):
     def sent(self, email: str = "new@example.test", **overrides: object) -> PendingRegistration:
         return pending(email, **{"sent_at": timezone.now(), **overrides})
 

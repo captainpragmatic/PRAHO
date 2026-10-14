@@ -11,11 +11,11 @@ from django.test import TestCase
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer
 from apps.orders.services import OrderService
-from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from services.platform.tests.helpers.hmac import hmac_headers
 from services.platform.tests.helpers.legal import publish_release
+from services.platform.tests.helpers.portal import set_portal_origin
 from services.platform.tests.helpers.task_queue import run_queued
 
 CHOSEN = "Registration-pass123!"
@@ -26,11 +26,7 @@ pytestmark = pytest.mark.e2e
 class RegistrationCase(TestCase):
     def setUp(self):
         self.terms = publish_release()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
-                      "value": "https://customers.e2e.test", "default_value": ""},
-        )
+        set_portal_origin("https://customers.e2e.test")
 
     def signed_post(self, path, payload):
         body = json.dumps(payload).encode()

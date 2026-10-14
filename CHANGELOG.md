@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Customer links work on a fresh deployment.** The customer portal URL used in registration and password-reset emails, invoice links and the legal-page redirects now defaults to `https://` and `PORTAL_DOMAIN`, which production already requires. Before, it started blank, and those emails failed until staff typed the same domain into Settings. A URL staff set still wins.
+
 - **PRAHO no longer ships another operator's identity.** Database, cache and cookie defaults are named `praho`, sender and contact defaults use `example.com`, and the company settings start from an obvious placeholder ("Example Company", `support@example.com`). A deployment brings its own identity through its environment and settings.
   - **Production refuses to start without a seller.** `COMPANY_NAME` and `COMPANY_CUI` default to blank and are required in production, by the settings, `deploy.sh` and the Ansible preflight, so no invoice is ever issued under a placeholder. The e-Factura supplier tax ID falls back to `COMPANY_CUI`, and the public legal name (`company.legal_name`) to `COMPANY_NAME`, so the operator is named once. Outside DEBUG, `migrate` warns (`settings.W001`) while the example support or privacy email is still configured.
   - **Session cookies are renamed** (`praho_sessionid`, `praho_staging_sessionid`, `praho_dev_sessionid`), so everyone signs in once more after the upgrade.

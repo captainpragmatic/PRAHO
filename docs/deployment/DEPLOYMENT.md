@@ -373,7 +373,7 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP address | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.example.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN; customer email links point at `https://` and this domain unless staff set Settings → Customer portal URL | `portal.example.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
 | `ACME_EMAIL` | Let's Encrypt notification email | `admin@example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
@@ -941,7 +941,7 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.example.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN; customer email links point at `https://` and this domain unless staff set Settings → Customer portal URL | `portal.example.com` |
 | `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |

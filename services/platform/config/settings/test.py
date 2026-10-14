@@ -243,6 +243,10 @@ DISABLE_AUDIT_SIGNALS = False
 # Enable account lockout in tests to ensure security features work properly
 DISABLE_ACCOUNT_LOCKOUT = False
 
+# The portal's domain, as production requires it: customer links point at https://portal.example.test
+# unless a test stores its own portal URL.
+PORTAL_DOMAIN = "portal.example.test"
+
 # ===============================================================================
 # TEST DATABASE CONFIGURATION
 # ===============================================================================
