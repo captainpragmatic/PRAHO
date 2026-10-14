@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import DataError, IntegrityError, transaction
 from django.utils.translation import gettext_lazy as _
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from .invoice_models import InvoiceSequence
 from .payment_models import PaymentRetryPolicy
@@ -258,7 +258,7 @@ def adopt_provider_document(
                 number=number,
                 operator_note=actor.reason,
             )
-        except TransitionNotAllowed as exc:
+        except (TransitionNotAllowed, ConcurrentTransition) as exc:
             # `reconcile_confirmed_issued` settles the ISSUANCE's state under lock and never the
             # invoice's, while `invoice.issue()` is `source="draft"`. An invoice that moved on
             # since the ambiguous attempt raised straight through the view. Not about the number,

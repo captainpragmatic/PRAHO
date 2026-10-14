@@ -18,7 +18,7 @@ from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
-from django_fsm import FSMField, TransitionNotAllowed, transition
+from django_fsm import ConcurrentTransition, ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
 
 from apps.billing.document_adjustments import (
     UnsupportedDocumentAdjustmentError,
@@ -156,7 +156,7 @@ def _document_is_collectable(instance: models.Model) -> bool:
     return cast("Invoice", instance)._is_collectable()
 
 
-class Invoice(models.Model):
+class Invoice(ConcurrentTransitionMixin, models.Model):
     """
     Romanian compliant invoice model with address snapshots.
     Immutable once issued - separate from proforma invoices.
@@ -829,7 +829,7 @@ class Invoice(models.Model):
             try:
                 self.mark_as_paid()
                 self.save(update_fields=["status", "paid_at"])
-            except TransitionNotAllowed:
+            except (TransitionNotAllowed, ConcurrentTransition):
                 logger.warning(f"⚠️ [Invoice] Cannot transition {self.number} to paid from status '{self.status}'")
         elif remaining < self.total_cents:
             logger.info(
