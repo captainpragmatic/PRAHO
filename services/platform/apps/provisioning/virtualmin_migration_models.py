@@ -193,6 +193,26 @@ def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: u
     return active.exists()
 
 
+def account_blocks_reconcile(account: VirtualminAccount) -> bool:
+    """True when the state reconciler must leave the account alone.
+
+    Narrower than ``account_has_active_operation`` (which admission uses): the reconciler writes
+    the domain's enabled state, so it yields to what writes or deletes the domain - a migration,
+    a restore or delete in any active state, and any job currently running. A backup that is
+    queued, or a chain job parked in attention, does not write the domain, so a suspend or an
+    unsuspend after payment must not wait for an operator to resolve it.
+    """
+    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
+
+    if account_has_active_migration(account):
+        return True
+    return VirtualminProvisioningJob.objects.filter(
+        models.Q(operation__in=("restore_domain", "delete_domain"), status__in=_ACTIVE_JOB_STATUSES)
+        | models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status="running"),
+        account_id=account.pk,
+    ).exists()
+
+
 class SpoolRoot(models.Model):
     """Singleton lock row: spool-capacity admission serializes on it.
 

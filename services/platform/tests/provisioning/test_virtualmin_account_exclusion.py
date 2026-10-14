@@ -182,8 +182,12 @@ class ReconcileSkipsBusyAccountsTests(ExclusionCase):
         force_status(self.service, "suspended")
         cases = (
             ("backup_domain", "running"),
+            ("restore_domain", "pending"),
+            ("restore_domain", "running"),
             ("restore_domain", "attention"),
             ("delete_domain", "pending"),
+            ("delete_domain", "running"),
+            ("delete_domain", "attention"),
         )
         for operation, status in cases:
             with self.subTest(operation=operation, status=status):
@@ -194,6 +198,29 @@ class ReconcileSkipsBusyAccountsTests(ExclusionCase):
                 account.refresh_from_db()
                 self.assertEqual(account.status, "active")
                 VirtualminProvisioningJob.objects.filter(pk=job.pk).delete()
+
+    def test_a_parked_or_queued_backup_does_not_block_a_suspend_or_unsuspend(self) -> None:
+        # A chain job parked in attention (or a backup not yet started) reads the node but does not
+        # write the domain's enabled state; holding reconcile off for it would leave a customer who
+        # has not paid enabled, or one who has paid disabled, until an operator resolves the job.
+        account = self._account()
+        force_status(self.service, "suspended")
+        for status in ("pending", "attention"):
+            with self.subTest(status=status):
+                self.requests.clear()
+                VirtualminAccount.objects.filter(pk=account.pk).update(status="active")
+                job = self._job(account, "backup_domain", status)
+                result = virtualmin_tasks.reconcile_virtualmin_service_state(str(self.service.pk))
+                self.assertEqual(result["action"], "suspended")
+                self.assertEqual(self._programs(), ["disable-domain"])
+                VirtualminProvisioningJob.objects.filter(pk=job.pk).delete()
+
+    def test_unsuspend_after_payment_is_not_blocked_by_a_parked_chain_job(self) -> None:
+        account = self._account("suspended")
+        self._job(account, "backup_domain", "attention")
+        result = virtualmin_tasks.reconcile_virtualmin_service_state(str(self.service.pk))
+        self.assertEqual(result["action"], "unsuspended")
+        self.assertEqual(self._programs(), ["enable-domain"])
 
     def test_reconcile_converges_once_the_operation_has_ended(self) -> None:
         account = self._account()

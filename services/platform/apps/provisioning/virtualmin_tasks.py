@@ -37,7 +37,7 @@ from .security_utils import (
     sanitize_log_parameters,
 )
 from .virtualmin_drain_service import NodeDrainService
-from .virtualmin_migration_models import NodeDrain, account_has_active_operation
+from .virtualmin_migration_models import NodeDrain, account_blocks_reconcile
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminProvisioningJob,
@@ -1159,9 +1159,10 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
     if account is not None and _migration_locked(account):
         return {"success": True, "action": "migration_locked"}
-    # Any in-flight backup, restore or delete owns the account: converging its enabled state
-    # now could re-enable a domain a restore keeps disabled, or race a deletion.
-    if account is not None and account_has_active_operation(account):
+    # A restore, a delete or any running job owns the account: converging its enabled state
+    # now could re-enable a domain a restore keeps disabled, or race a deletion. A parked or
+    # queued backup does not (account_blocks_reconcile).
+    if account is not None and account_blocks_reconcile(account):
         logger.info("✅ [VirtualminTask] Active operation: account=%s", account.pk)
         return {"success": True, "action": "operation_active"}
 
