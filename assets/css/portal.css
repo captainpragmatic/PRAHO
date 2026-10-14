@@ -45,14 +45,15 @@
   --color-blue-950: var(--color-primary-950);
 
   /* Graphite neutrals in place of Tailwind's blue-tinted slate: the page is 900, cards 800,
-     soft lines 700, muted text 400. brand.css may override --color-slate-* as well. */
+     soft lines 700, input borders 600 (3:1 on a card), muted and secondary text 400 and 500
+     (4.5:1, WCAG AA). brand.css may override --color-slate-* as well. */
   --color-slate-50: #f4f6f8;
   --color-slate-100: #e7ecf2;
   --color-slate-200: #dde2e8;
   --color-slate-300: #c4cbd4;
   --color-slate-400: #a6b0bc;
-  --color-slate-500: #65707e;
-  --color-slate-600: #48525f;
+  --color-slate-500: #808a98;
+  --color-slate-600: #65707e;
   --color-slate-700: #263040;
   --color-slate-800: #171e27;
   --color-slate-900: #0f141b;

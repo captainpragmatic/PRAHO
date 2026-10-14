@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The staff footer shows the year on every page**, not only the dashboard.
 - **Invoice PDFs in a foreign currency show their exchange rate.** The line read a value nothing ever stored, so it never appeared.
 - **Registering a payment confirms it in the invoice's currency**, not always in RON.
+- **Portal text and form borders meet WCAG AA contrast** on the default palette, the sign-in options no longer break mid-label on a phone, and the staff sign-in page shows the brand mark instead of a drawn "P".
 - **Links in customer emails open the right pages.** Invoice and payment-reminder links pointed at the marketing website and used the invoice's database id; they now open the invoice on the portal by its number. Unsubscribe links open the platform's public unsubscribe page.
 - **VAT numbers are still checked with VIES when the seller's own tax ID is not configured.** The check stopped silently; it now asks VIES anonymously, and never sends a placeholder as the requester.
 - **Staff can add, edit and delete items on the order edit page.**
