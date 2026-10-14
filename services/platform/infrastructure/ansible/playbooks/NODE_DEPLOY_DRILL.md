@@ -9,6 +9,9 @@ auto-deploy is customer-ready.
 ## Prerequisites
 - A Hetzner Cloud API token (project-scoped) configured in PRAHO (provider token / vault).
 - PRAHO platform running with node-deployment settings configured.
+- `infrastructure.node_admin_allowed_cidrs` set to Platform's egress addresses plus your admin network
+  (ADR-0060). `virtualmin.yml` and `virtualmin_harden.yml` refuse to run while it is empty, and the harden
+  play refuses when its own SSH connection comes from outside it.
 - Configure the Cloudflare API token, zone ID and deployment DNS zone. The deployment pipeline now creates and owns its public A/AAAA records. Run `panel_cert_preflight --provider-id <id>` before the paid drill.
 - Follow the canonical [panel-certificate drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436-drill-gated) for #436. This credential-seam checklist does not prove certificate issuance or authorize enabling fatal issuance. The current installer can make a production ACME request; prepare and verify the isolated staging path first.
 
@@ -23,6 +26,11 @@ Given a Hetzner key, `deploy_node` produces an **active, credentialed** `Virtual
    Virtualmin master rights, because remote.cgi runs most programs only for the master administrator.
    (`virtualmin create-admin` makes per-domain extra administrators and cannot serve PRAHO.) SSH to the node:
    - `grep '^praho-api:' /etc/webmin/webmin.acl` → `praho-api: virtual-server`.
+   - `grep '^praho-api:' /etc/webmin/miniserv.users | cut -d: -f5` → `allow <your allowlist>` (the per-user
+     IP lock, ADR-0060).
+   - `ufw status` → 22/tcp and 10000/tcp `ALLOW IN` only from the allowlist entries; 80, 443, mail, FTP, DNS
+     and 20000 from Anywhere.
+   - From a host outside the allowlist, port 10000 must not answer.
    - Let PRAHO's own diagnostic prove auth — do NOT hand-auth with `curl -k`. Step 4 below
      (`status=active`) is the real auth proof: `verify_and_activate` authenticates over the pinned-cert TLS
      with the vault credential, the exact production path.

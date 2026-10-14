@@ -363,10 +363,15 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
     (`download.virtualmin.com`; the old `software.virtualmin.com/gpl/scripts`
     URL serves the Virtualmin 7 installer). It creates the API user with
     `files/praho-webmin-api-user.pl`: a Webmin user whose only module is
-    virtual-server, with Virtualmin master rights (remote.cgi runs most
-    programs only for the master administrator), password on stdin, reset on
+    virtual-server, with Virtualmin master rights, password on stdin, reset on
     every deploy. `create-admin` makes per-domain extra admins and
     `modify-config` does not exist.
+  - Why master, and how it is contained: ADR-0060. The user may log in only
+    from `infrastructure.node_admin_allowed_cidrs` (Platform's egress
+    addresses plus admin networks), through Webmin's per-user IP allow list,
+    and `virtualmin_harden.yml` opens ports 22 and 10000 only to the same
+    list. Both plays refuse to run while the setting is empty, and the harden
+    play also refuses when its own SSH connection comes from outside it.
   - `virtualmin_backup.yml` creates the nightly backup with
     `virtualmin create-scheduled-backup` (all servers, all features,
     `--no-differential`, dated directory under `backup_local_path`, `--purge`
@@ -379,7 +384,8 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
   - `make test-virtualmin-lab` runs the full backup and restore round trip,
     then `virtualmin_lab_checks` on vm-b: create-domain through the
     provisioning service, the differential base kept by every standalone
-    backup, private staging, and both node playbooks.
+    backup, private staging, both node playbooks, and the access lock (the
+    API user and port 10000 refused from a host outside the allowlist).
   - `make virtualmin-probe` refreshes the differential-backup evidence in
     `docs/domain/virtualmin-incremental-contract.md`.
 

@@ -42,7 +42,8 @@ For a new node deployment, playbooks are executed in this order:
 
 3. **virtualmin_harden.yml** - Security hardening
    - Fail2ban installation and configuration
-   - UFW firewall setup
+   - UFW firewall: SSH (22) and Webmin (10000) only from `node_admin_allowed_cidrs`;
+     web, mail, FTP, DNS and Usermin open; refuses an empty allowlist (ADR-0060)
    - Automatic security updates
    - System hardening (sysctl)
 
