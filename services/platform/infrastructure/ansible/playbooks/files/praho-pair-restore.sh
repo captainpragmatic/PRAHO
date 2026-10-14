@@ -5,8 +5,10 @@
 # Run by virtualmin_pair_restore.yml as root on the node. Under the per-domain chain lock
 # (the same lock the backup chain steps take, so no chain backup interleaves):
 #
-#   1. barrier layer (a): a maintenance virtual host answering 503 for the domain's names,
-#      written to an Apache include that restore-domain never touches, loaded and verified;
+#   1. barrier layer (a): a server-level Apache section answering 503 for the domain's names (and
+#      only those), in a configuration file of its own that restore-domain never rewrites,
+#      loaded and verified. It is deliberately NOT a virtual host: Virtualmin recognises a virtual
+#      host that serves the domain and rewrites it during a restore, which let requests through;
 #   2. barrier layer (b): disable-domain, verified;
 #   3. restore the base, then re-apply and verify both layers;
 #   4. restore the differential, then re-apply and verify both layers;
@@ -26,6 +28,7 @@
 #   PRAHO_STEP_HOLD       seconds to wait between the two restores (0-60, default 0): a window in
 #                         which a cancel marker can land
 #   PRAHO_RUN_DIR, PRAHO_APACHE_DIR, PRAHO_HTTP_PORT, PRAHO_HTTPS_PORT   optional, tests only
+#                         (PRAHO_APACHE_DIR defaults to /etc/apache2/conf-enabled)
 #
 # Output: exactly one line, PAIR_RESULT=<base64 of a JSON object>, with exit status 0 whenever
 # the result is trustworthy. Any other exit status means the outcome is uncertain.
@@ -33,7 +36,7 @@ set -euo pipefail
 umask 077
 
 RUN_DIR=${PRAHO_RUN_DIR:-/run/praho}
-APACHE_DIR=${PRAHO_APACHE_DIR:-/etc/apache2/sites-enabled}
+APACHE_DIR=${PRAHO_APACHE_DIR:-/etc/apache2/conf-enabled}
 HTTP_PORT=${PRAHO_HTTP_PORT:-80}
 HTTPS_PORT=${PRAHO_HTTPS_PORT:-443}
 readonly RUN_DIR APACHE_DIR HTTP_PORT HTTPS_PORT
@@ -69,11 +72,9 @@ fi
 
 lock_file="$RUN_DIR/chain-$domain_id.lock"
 cancel_marker="$RUN_DIR/chain-$domain_id.cancelled.$token"
-maint_conf="$APACHE_DIR/000-praho-maint-$domain_id.conf"
-maint_pem="$RUN_DIR/maint-$domain_id.pem"
+maint_conf="$APACHE_DIR/zz-praho-maint-$domain_id.conf"
 progress="$RUN_DIR/pair-$domain_id.progress"
 checkpoints=""
-domain_ip=""
 
 now() {
   local t
@@ -100,7 +101,7 @@ http_code() { # SCHEME PORT
   # $insecure is deliberately unquoted: empty means no argument at all.
   # shellcheck disable=SC2086
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 $insecure \
-    --resolve "$domain:$port:${domain_ip:-127.0.0.1}" "$scheme://$domain:$port/" 2>/dev/null || printf '000'
+    --resolve "$domain:$port:127.0.0.1" "$scheme://$domain:$port/" 2>/dev/null || printf '000'
 }
 
 ssl_loaded() { apache2ctl -M 2>/dev/null | grep -q 'ssl_module'; }
@@ -124,31 +125,17 @@ barrier_holds() {
 reload_apache() { apache2ctl graceful >/dev/null 2>&1; }
 
 barrier_up() {
-  local listen80="*:$HTTP_PORT" listen443="*:$HTTPS_PORT"
-  domain_ip=$(virtualmin list-domains --domain "$domain" --multiline 2>/dev/null | sed -n 's/^[[:space:]]*IP address:[[:space:]]*//p' | head -n 1)
-  if [[ $domain_ip =~ ^[0-9.]+$ ]]; then
-    listen80="$domain_ip:$HTTP_PORT $listen80"
-    listen443="$domain_ip:$HTTPS_PORT $listen443"
-  else
-    domain_ip=""
-  fi
+  local escaped=${domain//./\\.}
+  # Server-level, so every virtual host inherits it, whatever Virtualmin does to them.
   {
-    printf '<VirtualHost %s>\n  ServerName %s\n  ServerAlias www.%s\n' "$listen80" "$domain" "$domain"
-    printf '  RewriteEngine On\n  RewriteRule ^ - [R=503,L]\n  ErrorDocument 503 "Restore in progress"\n</VirtualHost>\n'
-    if ssl_loaded; then
-      if [[ ! -f $maint_pem ]]; then
-        openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=$domain" -keyout "$maint_pem" -out "$maint_pem" >/dev/null 2>&1
-      fi
-      printf '<VirtualHost %s>\n  ServerName %s\n  ServerAlias www.%s\n' "$listen443" "$domain" "$domain"
-      printf '  SSLEngine on\n  SSLCertificateFile %s\n  SSLCertificateKeyFile %s\n' "$maint_pem" "$maint_pem"
-      printf '  RewriteEngine On\n  RewriteRule ^ - [R=503,L]\n  ErrorDocument 503 "Restore in progress"\n</VirtualHost>\n'
-    fi
+    printf '<If "%%{HTTP_HOST} =~ /^(www\\.)?%s(:[0-9]+)?$/">\n' "$escaped"
+    printf '  RewriteEngine On\n  RewriteRule ^ - [R=503,L]\n  ErrorDocument 503 "Restore in progress"\n</If>\n'
   } >"$maint_conf"
   reload_apache
 }
 
 barrier_down() {
-  rm -f -- "$maint_conf" "$maint_pem"
+  rm -f -- "$maint_conf"
   reload_apache
 }
 
@@ -222,8 +209,14 @@ reapply() {
   if ! is_disabled; then
     virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
   fi
+  # A restore rewrites the domain's Apache configuration and reloads Apache: layer (a) is written
+  # again (idempotent) and reloaded before it is verified.
+  barrier_up
   checkpoint "$1"
-  barrier_holds || fail "barrier_lost_after_$1"
+  if ! barrier_holds; then
+    { ls -l "$APACHE_DIR"; apache2ctl configtest; } >"$RUN_DIR/pair-$domain_id.diag" 2>&1 || true
+    fail "barrier_lost_after_$1"
+  fi
 }
 
 restore_step() { # LABEL ARCHIVE SHA

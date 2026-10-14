@@ -40,7 +40,7 @@ case $cmd in
     case $mode in
       id) echo "$FAKE_DOMAIN_ID" ;;
       disabled) if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi ;;
-      multi) echo "    IP address: 10.9.8.7" ;;
+      multi) echo "    IP address: 10.9.8.7 (Shared)" ;;
       name) if [[ ${FAKE_DOMAIN_GONE:-0} != 1 ]]; then echo "$FAKE_DOMAIN"; fi ;;
     esac
     ;;
@@ -53,7 +53,7 @@ case $cmd in
     {
       printf 'restore %s source=%s ' "$n" "$(basename "$source")"
       [[ -e $state/disabled ]] && printf 'disabled=yes ' || printf 'disabled=no '
-      [[ -e $PRAHO_APACHE_DIR/000-praho-maint-$FAKE_DOMAIN_ID.conf ]] && printf 'maint=yes\n' || printf 'maint=no\n'
+      [[ -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]] && printf 'maint=yes\n' || printf 'maint=no\n'
     } >>"$state/calls"
     if [[ ${FAKE_RESTORE_ENABLES:-0} == 1 ]]; then rm -f "$state/disabled"; fi
     if [[ ${FAKE_RESTORE_FAIL_ON:-0} == "$n" ]]; then echo "restore blew up" >&2; exit 1; fi
@@ -64,7 +64,7 @@ esac
     # 503 while the maintenance include exists, 200 otherwise; FAKE_NO_503 simulates a barrier that never takes.
     "curl": (
         "#!/bin/bash\n"
-        'if [[ ${FAKE_NO_503:-0} != 1 && -e $PRAHO_APACHE_DIR/000-praho-maint-$FAKE_DOMAIN_ID.conf ]]; then printf 503; else printf 200; fi\n'
+        'if [[ ${FAKE_NO_503:-0} != 1 && -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]]; then printf 503; else printf 200; fi\n'
     ),
     "apache2ctl": (
         "#!/bin/bash\n"
@@ -98,7 +98,7 @@ class PairRestoreScriptTests(SimpleTestCase):
         for name, content in ((BASE, b"base-bytes"), (DIFF, b"diff-bytes")):
             (self.staging / name).write_bytes(content)
             self.shas[name] = hashlib.sha256(content).hexdigest()
-        self.maint = self.apache / f"000-praho-maint-{DOMAIN_ID}.conf"
+        self.maint = self.apache / f"zz-praho-maint-{DOMAIN_ID}.conf"
 
     def run_script(self, **overrides: str) -> subprocess.CompletedProcess[str]:
         env = {
