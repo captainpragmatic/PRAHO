@@ -108,6 +108,7 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
   It also:
   - writes the port-keyed `known_hosts`;
   - sets `backup.s3_endpoint_url`, `backup.s3_bucket_name`, `backup.aws_*` and `provisioning.migration_spool_dir` for the lab;
+  - sets `infrastructure.node_admin_allowed_cidrs` to the compose network gateway (`<gateway>/32`). Platform reaches every node through Docker's port publishing, so the nodes see all of its API and SSH traffic from that address; the nodes' own addresses stay outside the list;
   - creates the customer, service and `VirtualminAccount` for `roundtrip.praho.test`.
 
   Re-running it rotates the node passwords and keys, so run `lab.sh apply-credentials` afterwards. `make virtualmin-lab-up` does both.
@@ -134,6 +135,9 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
   3. the staging directory `/var/lib/praho-transfer` is root 0700, an unprivileged user cannot read a `.dom` sidecar, a verified fetch leaves nothing behind, and a world-readable staging directory makes the fetch refuse;
   4. `virtualmin_backup.yml`, applied twice, leaves one enabled, non-differential schedule that Webmin cron runs, and running it archives the domain and keeps the base;
   5. `virtualmin.yml` on the installed node succeeds, and its API user authenticates, can disable and enable a domain, lists the templates, and runs PRAHO's backup (with `mkdir`, master-only) and restore parameters.
+  6. the access lock (ADR-0060), with vm-a standing in for any host outside the allowlist:
+     - the API user works from Platform; from vm-a, remote.cgi answers 403 and a login-form session gets 403 on every page; with vm-a added to the user's allow list the same calls succeed, so the refusal is the lock;
+     - with UFW off, vm-a reaches vm-b:10000; after `virtualmin_harden.yml` (run twice, over SSH from Platform) it cannot, port 80 stays open, and Platform still reaches the API.
 
 ### Node deploy from scratch (`praho-debian-node`)
 

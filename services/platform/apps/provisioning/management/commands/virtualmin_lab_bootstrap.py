@@ -35,6 +35,7 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     LAB_LOOPBACK,
     LabNode,
     LabState,
+    container_address,
     lab_state_dir,
     read_env_file,
     refuse_unless_lab_settings,
@@ -230,6 +231,9 @@ class Command(BaseCommand):
             "backup.aws_secret_access_key": lab_env["MINIO_ROOT_PASSWORD"],
             "backup.aws_region": "us-east-1",
             "provisioning.migration_spool_dir": str(spool),
+            # Platform reaches every lab node from the compose network gateway
+            # (ADR-0060 allowlist); the nodes' own addresses stay outside it.
+            "infrastructure.node_admin_allowed_cidrs": [f"{container_address(NODES[0].container, 'Gateway')}/32"],
         }
         for key, value in values.items():
             result = SettingsService.update_setting(key, value)

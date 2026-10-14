@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
@@ -101,6 +102,29 @@ def load_state() -> LabState:
     raw: dict[str, Any] = json.loads(path.read_text())
     nodes = tuple(LabNode(**node) for node in raw.pop("nodes"))
     return LabState(nodes=nodes, **raw)
+
+
+def container_address(container: str, field: str = "IPAddress") -> str:
+    """One address of a lab container on its compose network (`IPAddress` or `Gateway`).
+
+    Platform reaches the lab nodes through Docker's port publishing, so a node
+    sees every Platform call (API and SSH) coming from the network `Gateway`.
+    That address is the lab's node admin allowlist; the other node's
+    `IPAddress` is a host on the same network that is deliberately not on it.
+    """
+    if field not in {"IPAddress", "Gateway"}:
+        raise CommandError(f"Unknown container address field {field!r}")
+    result = subprocess.run(  # Fixed argv against a local lab container
+        ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{." + field + "}} {{end}}", container],  # noqa: S607  # docker from PATH, dev-only command
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    addresses = result.stdout.split()
+    if result.returncode != 0 or len(addresses) != 1:
+        raise CommandError(f"Cannot read the {field} of {container}: {result.stderr.strip() or addresses}")
+    return addresses[0]
 
 
 def read_env_file(path: Path) -> dict[str, str]:

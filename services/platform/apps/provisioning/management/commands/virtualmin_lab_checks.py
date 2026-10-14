@@ -23,8 +23,19 @@ never touches the round-trip domain on vm-a. Each check fails the command:
 5. Node deploy (virtualmin.yml post-install tasks on an installed node): the
    play succeeds, and the API user it creates authenticates, can disable and
    enable a domain, lists the templates, and runs PRAHO's own backup (with
-   mkdir, which only a master administrator may) and restore parameters. (A from-scratch install on praho-debian-node is the
-   nightly drill, not part of this gate.)
+   mkdir, which only a master administrator may) and restore parameters. (A
+   from-scratch install on praho-debian-node is the nightly drill, not part
+   of this gate.)
+6. Access lock (ADR-0060). Platform reaches the lab nodes from the compose
+   network gateway, which is the lab's whole node admin allowlist; vm-a sits
+   on the same network outside it, so it stands in for "any other host":
+   - the API user's credentials work from Platform and are refused from vm-a,
+     on remote.cgi and on every page behind a login-form session. With vm-a
+     added to the user's allow list the same calls from vm-a succeed, so the
+     refusal is the lock, not the network or the password;
+   - before virtualmin_harden.yml, vm-a reaches vm-b's port 10000; after it,
+     it does not, while port 80 stays open and Platform still reaches both
+     the API and SSH (the play runs twice).
 """
 
 from __future__ import annotations
@@ -32,6 +43,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import subprocess
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -41,6 +53,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.provisioning.management.commands._virtualmin_lab import (
     LabNode,
+    container_address,
     lab_transport,
     load_state,
     refuse_unless_lab_settings,
@@ -70,7 +83,9 @@ class Command(BaseCommand):
             try:
                 base = self._check_differential_base_and_staging(account, node)
                 self._check_node_backup_playbook(server, node, base)
-                self._check_node_deploy_playbook(server)
+                user, password, api_gateway = self._check_node_deploy_playbook(server)
+                self._check_api_user_lock(node, user, password, api_gateway)
+                self._check_firewall(server, node, api_gateway)
             finally:
                 self._reset(server)
         self.stdout.write(self.style.SUCCESS("Lab checks OK"))
@@ -335,7 +350,7 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------- check 5
 
-    def _check_node_deploy_playbook(self, server: Any) -> None:
+    def _check_node_deploy_playbook(self, server: Any) -> tuple[str, str, Any]:
         """virtualmin.yml's post-install tasks succeed and its API user can provision."""
         import secrets  # noqa: PLC0415
 
@@ -361,6 +376,7 @@ class Command(BaseCommand):
             templates,
         )
         self._check_api_user_backup_and_restore(gateway)
+        return user, password, gateway
 
     def _check_api_user_backup_and_restore(self, gateway: Any) -> None:
         """PRAHO's own backup and restore parameters, sent as the deployed API user.
@@ -404,3 +420,123 @@ class Command(BaseCommand):
             restored,
         )
         node_exec(node.container, "rm", "-f", archive, f"{archive}.dom", f"{archive}.info")
+
+    # ------------------------------------------------------------- check 6
+
+    @staticmethod
+    def _docker(*argv: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # Fixed argv against local lab containers
+            ["docker", *argv],  # noqa: S607  # docker from PATH, dev-only command
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    def _probe_from_vm_a(self, node: LabNode, user: str, password: str) -> str:
+        """remote.cgi, then a login-form session, as `user` from vm-a to vm-b.
+
+        Returns "api=<status> session=<yes|no> page=<status>". Webmin answers a
+        login from a refused address with a session, then refuses every page
+        behind it, so the page status is what proves the lock.
+        """
+        target = f"https://{container_address(node.container)}:10000"
+        result = self._docker("exec", "vmlab-a", "bash", "-c", _LOCK_PROBE, "lock-probe", user, password, target)
+        if result.returncode != 0:
+            raise CommandError(f"lock probe from vm-a failed: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    def _set_user_allow(self, node: LabNode, user: str, password: str, networks: list[str]) -> None:
+        """Re-run the deployed helper on the node with another allow list."""
+        result = self._docker(
+            "exec",
+            "-i",
+            node.container,
+            "/usr/local/sbin/praho-webmin-api-user",
+            user,
+            *networks,
+            stdin=password + "\n",
+        )
+        if result.returncode != 0:
+            raise CommandError(f"praho-webmin-api-user failed: {result.stderr.strip()}")
+
+    def _check_api_user_lock(self, node: LabNode, user: str, password: str, gateway: Any) -> None:
+        self.stdout.write("Check 6a: the API user logs in only from the node admin allowlist")
+        # No firewall during this check (a previous run's harden play leaves one),
+        # so what refuses vm-a here can only be the per-user lock. Check 6b
+        # applies the firewall again.
+        node_exec(node.container, "sh", "-c", "if command -v ufw >/dev/null; then ufw --force disable; fi")
+        platform = container_address("vmlab-a", "Gateway")
+        other = container_address("vmlab-a")
+        listed = gateway.call("list-domains", {"multiline": ""})
+        self._ok(f"from Platform ({platform}) remote.cgi works", listed.is_ok() and listed.unwrap().success, listed)
+        refused = self._probe_from_vm_a(node, user, password)
+        self._ok(
+            f"from vm-a ({other}) remote.cgi and every page are refused",
+            refused.startswith("api=403") and refused.endswith("page=403"),
+            refused,
+        )
+        self._set_user_allow(node, user, password, [f"{platform}/32", f"{other}/32"])
+        try:
+            allowed = self._probe_from_vm_a(node, user, password)
+            self._ok(
+                "with vm-a on the user's allow list the same calls succeed",
+                allowed == "api=200 session=yes page=200",
+                allowed,
+            )
+        finally:
+            self._set_user_allow(node, user, password, [f"{platform}/32"])
+        again = self._probe_from_vm_a(node, user, password)
+        self._ok("taken off again, vm-a is refused again", again.startswith("api=403"), again)
+
+    def _check_firewall(self, server: Any, node: LabNode, gateway: Any) -> None:
+        self.stdout.write("Check 6b: SSH and Webmin open only to the allowlist (virtualmin_harden.yml)")
+        address = container_address(node.container)
+
+        def reach(port: int, scheme: str) -> str:
+            result = self._docker(
+                "exec",
+                "vmlab-a",
+                "curl",
+                "-sk",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "5",
+                f"{scheme}://{address}:{port}/",
+            )
+            return result.stdout.strip() or "000"
+
+        # Baseline without a firewall, so the refusal below is the play's doing.
+        node_exec(node.container, "sh", "-c", "if command -v ufw >/dev/null; then ufw --force disable; fi")
+        before = reach(10000, "https")
+        self._ok("before the play, vm-a reaches vm-b:10000", before != "000", before)
+        for run in (1, 2):
+            # The play itself runs over SSH from Platform: a second run proves
+            # port 22 is still open to Platform after the first.
+            self._run_playbook(server, "virtualmin_harden.yml")
+            self.stdout.write(f"    harden run {run} done")
+        after = reach(10000, "https")
+        self._ok("after the play, vm-a cannot reach vm-b:10000", after == "000", after)
+        web = reach(80, "http")
+        self._ok("port 80 stays open to vm-a", web == "200", web)
+        listed = gateway.call("list-domains", {"multiline": ""})
+        self._ok("Platform still reaches the API", listed.is_ok() and listed.unwrap().success, listed)
+
+
+_LOCK_PROBE = r"""
+set -uo pipefail
+user="$1"; pass="$2"; target="$3"
+jar="$(mktemp)"
+trap 'rm -f "${jar}"' EXIT
+api="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -u "${user}:${pass}" \
+  "${target}/virtual-server/remote.cgi?program=list-domains&json=1")"
+curl -sk --max-time 10 -o /dev/null -c "${jar}" -b 'testing=1' \
+  --data-urlencode "user=${user}" --data-urlencode "pass=${pass}" "${target}/session_login.cgi"
+if grep -q $'\tsid\t' "${jar}"; then session=yes; else session=no; fi
+page="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -b "${jar}" "${target}/sysinfo.cgi")"
+echo "api=${api} session=${session} page=${page}"
+"""
