@@ -20,6 +20,11 @@ never touches the round-trip domain on vm-a. Each check fails the command:
 4. Node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
    non-differential schedule and no legacy one; Webmin cron runs it; running
    it as cron does writes a non-empty archive and keeps the differential base.
+4c. Chain state through the service entry points (take_base_backup, take_differential_backup,
+   confirm stopped): a base links chain_base to a fresh snapshot, a second base replaces
+   it, a differential extends it without moving the snapshot, and a restore ends it; a
+   parked differential is confirmed stopped by writing its cancel marker, after which
+   its token refuses to run.
 4b. Chain step (virtualmin_chain_backup.yml, through AnsibleService): a base resets
    the snapshot to a fresh fingerprint, and a base with nothing changed still
    changes it (so a fingerprint can tell two bases apart); a differential passes
@@ -91,6 +96,7 @@ class Command(BaseCommand):
                 base = self._check_differential_base_and_staging(account, node)
                 self._check_node_backup_playbook(server, node, base)
                 self._check_chain_node_step(server, node)
+                self._check_chain_state(account, node)
                 user, password, api_gateway = self._check_node_deploy_playbook(server)
                 self._check_api_user_lock(node, user, password, api_gateway)
                 self._check_firewall(server, node, api_gateway)
@@ -541,6 +547,143 @@ class Command(BaseCommand):
                 node.container, "rm", "-f", f"{home}/chain-keep.txt", f"{home}/chain-edit.txt", f"{home}/chain-new.txt"
             )
         logger.info("✅ [VirtualminLab] Chain step checks passed")
+
+    # ------------------------------------------------------------- check 4c
+
+    def _check_chain_state(self, account: Any, node: LabNode) -> None:  # noqa: PLR0915  # One linear lab scenario
+        """take_base_backup / take_differential_backup through the job layer, and confirm-stopped."""
+        from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
+            REMOTE_ARCHIVE_DIR,
+            RestoreConfig,
+        )
+        from apps.provisioning.virtualmin_chain import resolve_chain_job  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        self.stdout.write("Check 4c: chain state through take_base_backup / take_differential_backup")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+        management = VirtualminBackupManagementService(account.server)
+        flag = "provisioning.incremental_backups_enabled"
+
+        def reload() -> Any:
+            return VirtualminAccount.objects.get(pk=account.pk)
+
+        refused = management.take_base_backup(account)
+        self._ok(
+            "with the flag off a base is refused", refused.is_err() and "disabled" in refused.unwrap_err(), refused
+        )
+        SettingsService.update_setting(flag, True)
+        try:
+            before = self._fingerprint(node, domain_id)
+            first = management.take_base_backup(account, execute_inline=True)
+            self._ok("take_base_backup completes through the job layer", first.is_ok(), first)
+            base_one = first.unwrap()
+            state = reload()
+            self._ok("the base installs chain_base", state.chain_base_id == base_one.pk, state.chain_base_id)
+            fresh = self._fingerprint(node, domain_id)
+            self._ok("a fresh snapshot is on the node", fresh not in ("ABSENT", before), (before, fresh))
+            self._ok(
+                "the account pins exactly that fingerprint",
+                state.chain_base_fingerprint == fresh,
+                state.chain_base_fingerprint,
+            )
+            self._ok("nothing left staged after the base", not self._staged(node), self._staged(node))
+
+            second = management.take_base_backup(account, execute_inline=True).unwrap()
+            state = reload()
+            self._ok(
+                "a second base replaces the first (new snapshot, new epoch)",
+                state.chain_base_id == second.pk and state.chain_base_fingerprint != fresh and state.chain_epoch > 1,
+                (state.chain_base_id, state.chain_epoch),
+            )
+            epoch = state.chain_epoch
+            pinned = state.chain_base_fingerprint
+
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf changed > "$1" && chown "$2" "$1"',
+                "sh",
+                f"{home}/chain-state.txt",
+                CHECK_USER,
+            )
+            diff = management.take_differential_backup(account, execute_inline=True)
+            self._ok("take_differential_backup completes through the job layer", diff.is_ok(), diff)
+            state = reload()
+            self._ok(
+                "a differential extends the chain without moving the snapshot",
+                (state.chain_base_id, state.chain_epoch, state.chain_base_fingerprint) == (second.pk, epoch, pinned)
+                and self._fingerprint(node, domain_id) == pinned,
+                (state.chain_base_id, state.chain_epoch),
+            )
+            self._ok(
+                "the differential recorded its lineage",
+                diff.unwrap().result.get("fp_after") == pinned,
+                diff.unwrap().result,
+            )
+
+            # Confirm stopped: a parked differential's token can never run once resolved.
+            token = str(uuid.uuid4())
+            parked = VirtualminProvisioningJob.objects.create(
+                operation="backup_domain",
+                account=state,
+                server=account.server,
+                status="attention",
+                parameters={
+                    "chain_role": "differential",
+                    "chain_token": token,
+                    "chain_epoch": epoch,
+                    "virtualmin_domain_id": domain_id,
+                },
+                result={"retriability": "unknown"},
+            )
+            resolved = resolve_chain_job(parked, resolved_by="lab", note="lab check")
+            self._ok("confirm stopped succeeds on a reachable node", resolved.is_ok(), resolved)
+            parked.refresh_from_db()
+            state = reload()
+            self._ok(
+                "it cleared the chain and released the job",
+                parked.status == "failed" and state.chain_base_id is None and state.chain_epoch == epoch + 1,
+                (parked.status, state.chain_base_id, state.chain_epoch),
+            )
+            late = self._chain_step(account.server, node, "differential", token, expected_fp=pinned)
+            self._ok(
+                "the resolved token refuses to run, even for a delayed invocation",
+                (late.outcome, late.reason, late.ran) == ("refused", "cancelled", False),
+                late,
+            )
+
+            # A restore ends the chain too.
+            third = management.take_base_backup(account, execute_inline=True).unwrap()
+            self._ok("a new base starts a new chain", reload().chain_base_id == third.pk)
+            restore = management.create_restore_job(
+                account, RestoreConfig(backup_id="lab-check", force_restore=True), execute_inline=False
+            )
+            self._ok("restore admission clears the chain", restore.is_ok() and reload().chain_base_id is None, restore)
+            if restore.is_ok():
+                VirtualminProvisioningJob.objects.filter(
+                    pk=restore.unwrap().pk
+                ).update(  # fsm-bypass: lab cleanup of a job that never ran
+                    status="failed"
+                )
+        finally:
+            SettingsService.update_setting(flag, False)
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f "$1"/chain-state.txt /run/praho/chain-"$2".* "$3"/virtualmin_backup_*',
+                "sh",
+                home,
+                domain_id,
+                REMOTE_ARCHIVE_DIR,
+            )
+        logger.info("✅ [VirtualminLab] Chain state checks passed")
 
     def _fingerprint(self, node: LabNode, domain_id: str) -> str:
         """The node's snapshot fingerprint, computed independently of the step's script."""
