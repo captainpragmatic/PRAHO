@@ -547,8 +547,10 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
     actor = request.user.email if request.user.is_authenticated else "system"
-    # fsm-bypass: CharField job status; attention -> failed is the only edge.
-    rows = VirtualminProvisioningJob.objects.filter(pk=job.pk, status="attention").update(
+    # CharField job status; attention -> failed is the only edge.
+    rows = VirtualminProvisioningJob.objects.filter(
+        pk=job.pk, status="attention"
+    ).update(  # fsm-bypass: CharField status
         status="failed",
         status_message=f"Manually resolved by {actor}: {note}",
         next_retry_at=None,

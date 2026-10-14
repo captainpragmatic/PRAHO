@@ -19,11 +19,12 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import connection, models, transaction
+from django.db import models, transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
@@ -277,7 +278,7 @@ class VirtualminProvisioningService:
                 logger.error(f"❌ [VirtualminService] Failed to create account {domain}: {error_msg}")
 
                 # Update account status
-                account.status = "error"
+                account.status = "error"  # fsm-bypass: CharField status
                 account.status_message = error_msg
                 account.save(update_fields=["status", "status_message", "updated_at"])
 
@@ -314,6 +315,7 @@ class VirtualminProvisioningService:
                 # Rotate password — the pre-loss secret cannot be recovered.
                 account.set_password(self._generate_secure_password())  # nosemgrep: unvalidated-password
                 account.server = server
+                # fsm-bypass: CharField status
                 account.status = "provisioning"
                 account.status_message = "Reprovisioning from PRAHO (disaster recovery)"
                 account.save(update_fields=["encrypted_password", "server", "status", "status_message", "updated_at"])
@@ -341,7 +343,7 @@ class VirtualminProvisioningService:
 
             error_msg = provisioning_result.unwrap_err()
             logger.error(f"❌ [VirtualminService] Failed to reprovision {account.domain}: {error_msg}")
-            account.status = "error"
+            account.status = "error"  # fsm-bypass: CharField status
             account.status_message = error_msg
             account.save(update_fields=["status", "status_message", "updated_at"])
             return Err(error_msg, retriability=retriability_of(provisioning_result))
@@ -429,6 +431,7 @@ class VirtualminProvisioningService:
                         # One transaction: recovery reads an active account as "already counted",
                         # so the account must never be active without the server's count raised.
                         with transaction.atomic():
+                            # fsm-bypass: CharField status
                             account.status = "active"
                             account.provisioned_at = timezone.now()
                             account.save(update_fields=["status", "provisioned_at", "updated_at"])
@@ -760,6 +763,7 @@ class VirtualminProvisioningService:
                 logger.error(f"🚨 [VirtualminService] Rollback failed for {account.domain}")
 
             restored = rollback_status == "success" and previous_status is not None
+            # fsm-bypass: CharField status
             account.status = previous_status if restored and previous_status is not None else "error"
             account.status_message = (
                 previous_status_message if restored else str(_("Provisioning failed - rollback executed"))
@@ -859,7 +863,7 @@ class VirtualminProvisioningService:
 
                     try:
                         with transaction.atomic():
-                            account.status = "suspended"
+                            account.status = "suspended"  # fsm-bypass: CharField status
                             account.status_message = reason
                             account.save(update_fields=["status", "status_message", "updated_at"])
                             job.mark_completed(response.data)
@@ -996,6 +1000,7 @@ class VirtualminProvisioningService:
 
                     try:
                         with transaction.atomic():
+                            # fsm-bypass: CharField status
                             account.status = "active"
                             account.status_message = ""
                             account.save(update_fields=["status", "status_message", "updated_at"])
@@ -1137,7 +1142,7 @@ class VirtualminProvisioningService:
                             account.server.refresh_from_db(fields=["current_domains"])
 
                             # Mark account as terminated (don't delete for audit trail)
-                            account.status = "terminated"
+                            account.status = "terminated"  # fsm-bypass: CharField status
                             account.save(update_fields=["status", "updated_at"])
 
                             job.mark_completed(response.data)
@@ -1257,6 +1262,7 @@ class VirtualminProvisioningService:
             # original create succeeded past the response. Finalize in place.
             previously_active = account.status == "active"
             with transaction.atomic():
+                # fsm-bypass: CharField status
                 account.status = "active"
                 account.status_message = ""
                 if account.provisioned_at is None:
@@ -1344,6 +1350,7 @@ class VirtualminProvisioningService:
 
         previous_status = account.status
         with transaction.atomic():
+            # fsm-bypass: CharField status
             account.status = target_status
             reason = (job.parameters or {}).get("reason", "")
             account.status_message = reason
@@ -1536,7 +1543,9 @@ class VirtualminServerManagementService:
                 server.save(update_fields=update_fields)
                 recovered = VirtualminServer.objects.filter(
                     pk=server.pk, status="failed", failed_by_health_check=True
-                ).update(status="active", failed_by_health_check=False, updated_at=timezone.now())
+                ).update(  # fsm-bypass: CharField status
+                    status="active", failed_by_health_check=False, updated_at=timezone.now()
+                )
                 if recovered:
                     server.refresh_from_db()
                     logger.info(f"✅ [ServerManagement] Auto-recovered {server.hostname} to active")
@@ -1719,7 +1728,7 @@ class VirtualminBackupManagementService:
                 f"Task budget {budget}s does not fit under the broker visibility timeout {retry_window}s; "
                 "raise Q_CLUSTER retry or provisioning.backup_min_transfer_mib_s"
             )
-        if execute_inline and (connection.in_atomic_block or not transaction.get_autocommit()):
+        if execute_inline and not is_outside_transaction():
             return Err("Inline execution requires autocommit; run outside any transaction")
 
         parameters = {**parameters, "estimated_bytes": estimated, "task_budget_seconds": budget}

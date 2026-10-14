@@ -35,6 +35,7 @@ from apps.common.constants import (
 )
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import STORE_UNAVAILABLE_RETRY_AFTER_SECONDS, store_unavailable_response
 
 # Security constants
 HMAC_NONCE_MIN_LENGTH = 32
@@ -401,21 +402,6 @@ class HMACStoreUnavailable(Exception):  # noqa: N818  # names the condition, lik
     """
 
 
-# Within the portal's immediate-retry cap (PLATFORM_API_MAX_RETRY_WAIT_SECONDS, 2.5 s), so a brief
-# store outage is absorbed by one retry instead of failing the page.
-HMAC_STORE_RETRY_AFTER_SECONDS = 2
-
-
-def _store_unavailable_response() -> HttpResponse:
-    response = HttpResponse(
-        json.dumps({"success": False, "error": "Platform temporarily unavailable", "status": 503}),
-        status=503,
-        content_type="application/json",
-    )
-    response["Retry-After"] = str(HMAC_STORE_RETRY_AFTER_SECONDS)
-    return response
-
-
 class PortalServiceHMACMiddleware:
     """
     🔐 HMAC authentication middleware for portal service API requests.
@@ -681,7 +667,7 @@ class PortalServiceHMACMiddleware:
         try:
             is_limited, retry_after = self._rate_limited(portal_id, client_ip, path=request.path, principal=principal)
         except HMACStoreUnavailable:
-            return _store_unavailable_response()
+            return store_unavailable_response()
         if not is_limited:
             return None
         logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id} ip={client_ip}")
@@ -723,7 +709,7 @@ class PortalServiceHMACMiddleware:
                 is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
             except HMACStoreUnavailable:
                 logger.error("🔥 [HMAC Auth] Nonce store unavailable — answering 503 to %s", client_ip, exc_info=True)
-                return _store_unavailable_response()
+                return store_unavailable_response()
 
             if not is_valid:
                 # Allow session-authenticated staff users to access specific API paths
@@ -977,7 +963,7 @@ class StoreUnavailableMiddleware:
             return None
         logger.error("🔥 [MFA] Counter store unavailable during a second-factor check on %s", request.path)
         if request.path.startswith("/api/"):
-            return _store_unavailable_response()
+            return store_unavailable_response()
         # Inline, like MaintenanceModeMiddleware: rendering base.html while the database is
         # degraded could turn this 503 into a 500.
         response = HttpResponse(
@@ -991,7 +977,7 @@ class StoreUnavailableMiddleware:
             status=503,
             content_type="text/html",
         )
-        response["Retry-After"] = str(HMAC_STORE_RETRY_AFTER_SECONDS)
+        response["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
         return response
 
 

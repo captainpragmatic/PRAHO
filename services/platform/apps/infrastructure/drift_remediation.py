@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_ipv4_address, validate_ipv6_address
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils import timezone
 
+from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import CloudProviderGateway, get_cloud_gateway
@@ -752,7 +753,7 @@ class DriftRemediationService:
         # an enclosing atomic block OR disabled autocommit would let an outer
         # rollback erase the phase-1/phase-3 markers while the provider
         # snapshot exists (a billable orphan with no PRAHO trace).
-        if connection.in_atomic_block or not transaction.get_autocommit():
+        if not is_outside_transaction():
             return Err(
                 "Snapshot three-phase protocol requires autocommit; never wrap "
                 "execute_remediation in transaction.atomic() or disable autocommit"

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.common.types import Err, Ok, Result
 
@@ -755,7 +755,7 @@ class SubscriptionLifecycleService:
                             update_fields.append("status")
                         service.save(update_fields=update_fields)
                 finalized += 1
-            except TransitionNotAllowed:
+            except (TransitionNotAllowed, ConcurrentTransition):
                 logger.warning(
                     "Subscription %s could not finalize period-end cancellation because its state changed",
                     subscription_id,

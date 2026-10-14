@@ -14,6 +14,7 @@ from apps.common import counters
 from apps.common.models import Counter
 from apps.common.performance.rate_limiting import (
     LoginClientIPThrottle,
+    RateLimitStoreUnavailable,
     ResetClientIPThrottle,
     fixed_window_limited,
     forwarded_client_ip,
@@ -112,16 +113,16 @@ class FixedWindowLimitTests(TestCase):
                 self.assertEqual(fixed_window_limited("k", "2/minute", charge=False), (False, 0))
             self.assertEqual(Counter.objects.count(), 0)
 
-    def test_fixed_window_fails_closed_on_cache_errors(self) -> None:
+    def test_fixed_window_reports_an_unreachable_store_instead_of_a_throttle(self) -> None:
         for operation in ("increment", "peek"):
             with self.subTest(operation=operation):
                 counters.reset(f"k:{int(time.time() // 60)}")
                 self.assertEqual(fixed_window_limited("k", "1/minute"), (False, 0))
-                with patch(
-                    f"apps.common.counters.{operation}",
-                    side_effect=OperationalError("Counter store unavailable"),
+                with (
+                    patch(
+                        f"apps.common.counters.{operation}",
+                        side_effect=OperationalError("Counter store unavailable"),
+                    ),
+                    self.assertRaises(RateLimitStoreUnavailable),
                 ):
-                    self.assertEqual(
-                        fixed_window_limited("k", "1/minute", charge=operation != "peek"),
-                        (True, 60),
-                    )
+                    fixed_window_limited("k", "1/minute", charge=operation != "peek")

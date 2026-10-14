@@ -330,3 +330,20 @@ class BackupJobDurabilityTests(TransactionTestCase):
         self.assertEqual(job.status, "completed")
         # The transport/S3 body must never run inside a transaction.
         self.assertFalse(seen["in_atomic"])
+
+    def test_inline_execution_refuses_disabled_autocommit(self) -> None:
+        """Autocommit off outside an atomic block is a transaction too: admission would not commit."""
+        helper = self._account()
+        management = VirtualminBackupManagementService(helper.server)
+
+        connection.set_autocommit(False)
+        try:
+            self.assertFalse(connection.in_atomic_block)
+            refused = management.create_backup_job(helper.account, execute_inline=True)
+        finally:
+            connection.rollback()
+            connection.set_autocommit(True)
+
+        self.assertTrue(refused.is_err())
+        self.assertIn("autocommit", refused.unwrap_err())
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(account=helper.account).exists())

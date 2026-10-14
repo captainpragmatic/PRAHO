@@ -15,11 +15,11 @@ Issue #96 documented a concrete bypass: `confirm_order` does direct `order.statu
 |-------|-----|--------|-------------|
 | Order | orders | 9 | Yes |
 | OrderItem (provisioning_status) | orders | 5 | No |
-| Invoice | billing | 6 | No |
+| Invoice | billing | 6 | Yes |
 | ProformaInvoice | billing | 4 | No |
 | Payment | billing | 5 | Yes |
-| Refund | billing | 7 | No |
-| Subscription | billing | 7 | No |
+| Refund | billing | 7 | Yes |
+| Subscription | billing | 7 | Yes |
 | Service | provisioning | 7 | Yes |
 | Domain | domains | 7 | Yes |
 | Ticket | tickets | 4 | No |
@@ -66,7 +66,7 @@ Adopt **django-fsm-2** v4.x with `FSMField(protected=True)` on all 10 models, co
 - Illegal state transitions fail loudly at runtime
 - Transition rules are declarative and discoverable on the model class
 - Audit trail is automatic via `post_transition` signal
-- Race conditions handled by `ConcurrentTransitionMixin` on Order, Service, Payment, and Domain
+- Race conditions handled by `ConcurrentTransitionMixin` on Order, Service, Payment, Domain, Invoice, Refund, and Subscription
 
 ### Negative
 - Test setup must use `force_status()` or `Model.objects.create(status="xxx")` instead of direct assignment

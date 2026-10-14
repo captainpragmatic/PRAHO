@@ -26,7 +26,8 @@ from .currency_models import Currency
 logger = logging.getLogger(__name__)
 
 # All statuses from which a payment MUST NOT transition.
-# Includes "cancelled"/"canceled" for safety (Stripe uses "canceled", some legacy code uses "cancelled").
+# Stripe spells its own status "canceled"; the gateway layer maps that to a failed payment, so a
+# payment is only ever "cancelled".
 TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
     {
         "succeeded",
@@ -34,7 +35,6 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
         "refunded",
         "partially_refunded",
         "cancelled",
-        "canceled",
         "disputed",
     }
 )
@@ -42,7 +42,7 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
 # Subset: states from which no gateway-initiated transitions are possible.
 # "succeeded" excluded — has outbound refund_payment(), partially_refund().
 # "partially_refunded" excluded — has outbound complete_refund().
-_GATEWAY_TERMINAL_STATUSES: frozenset[str] = frozenset({"failed", "refunded", "cancelled", "canceled", "disputed"})
+_GATEWAY_TERMINAL_STATUSES: frozenset[str] = frozenset({"failed", "refunded", "cancelled", "disputed"})
 
 
 # TypedDict definitions for private tracking attributes
@@ -83,7 +83,6 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         ("refunded", _("Refunded")),
         ("partially_refunded", _("Partially Refunded")),
         ("cancelled", _("Cancelled")),
-        ("canceled", _("Canceled")),  # Stripe uses US spelling
         ("disputed", _("Disputed")),
     )
 
@@ -181,7 +180,6 @@ class Payment(ConcurrentTransitionMixin, models.Model):
                         "refunded",
                         "partially_refunded",
                         "cancelled",
-                        "canceled",
                         "disputed",
                     ]
                 ),

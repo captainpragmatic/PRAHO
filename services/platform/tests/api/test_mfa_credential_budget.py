@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.test import TestCase, override_settings
 
+from apps.common import counters
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
@@ -70,6 +73,20 @@ class MFACredentialBudgetTests(HMACTestMixin, TestCase):
                 self.assertEqual(self.call(guesser, suffix, data).status_code, TOO_MANY)
                 # Another person's budget is their own.
                 self.assertNotEqual(self.call(bystander, suffix, data).status_code, TOO_MANY)
+
+    def test_an_unreachable_counter_store_answers_503_not_429(self) -> None:
+        """A budget that cannot be read is not an exhausted budget: the Portal must not say "too many"."""
+        real_increment = counters.increment
+
+        def increment(key: str, *args: Any, **kwargs: Any) -> int:
+            if key.startswith("mfa_credential:"):
+                raise DatabaseError("counter store unreachable")
+            return real_increment(key, *args, **kwargs)
+
+        for index, (suffix, data) in enumerate(CREDENTIAL_ENDPOINTS.items()):
+            with self.subTest(endpoint=suffix), patch.object(counters, "increment", side_effect=increment):
+                response = self.call(self.person(f"outage{index}@example.com"), suffix, data)
+                self.assertEqual(response.status_code, 503, response.content)
 
     def test_clearing_the_cache_does_not_hand_the_budget_back(self) -> None:
         guesser = self.person("guesser@example.com")

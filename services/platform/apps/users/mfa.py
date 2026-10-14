@@ -33,6 +33,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
+from apps.common import counters
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.common.request_ip import get_safe_client_ip
 
@@ -234,7 +235,6 @@ def _counters_call[T](operation: Callable[[], T]) -> T:
 
 def _claim_used_code(user_id: int, token: str) -> bool:
     """Mark a code used for this person; False when another request already did (a replay)."""
-    from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
 
     # The claim's token is a constant, never the code: claim() stores its token in plain text.
     return _counters_call(lambda: counters.claim(f"totp_used:{user_id}:{token}", _USED_CODE_SECONDS, "used"))
@@ -1108,7 +1108,6 @@ class MFAService:
         """
         🚦 Rate limit MFA verification attempts
         """
-        from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
 
         # In the counter store, not the cache: a cull or a cache clear must not hand the budget back.
         attempts = _counters_call(lambda: counters.increment(f"mfa_attempts:{user.id}", _ATTEMPT_WINDOW_SECONDS))
@@ -1120,8 +1119,6 @@ class MFAService:
     @staticmethod
     def _reset_rate_limit(user: "User") -> None:
         """Give back the attempt budget after a verified login, so honest logins never drain it."""
-        from apps.common import counters  # noqa: PLC0415  # Deferred: the counter model loads with apps
-
         _counters_call(lambda: counters.reset(f"mfa_attempts:{user.id}"))
 
     @staticmethod

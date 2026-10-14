@@ -16,6 +16,7 @@ from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
@@ -1696,6 +1697,96 @@ class ConcurrentTransitionTests(FSMTestMixin, TestCase):
         stale_order.submit()
         with self.assertRaises(ConcurrentTransition):
             stale_order.save()
+
+    def _make_invoice(self) -> Invoice:
+        return Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"CONC-INV-{Invoice.objects.count() + 1:04d}",
+        )
+
+    def _make_refund(self) -> Refund:
+        invoice = self._make_invoice()
+        force_status(invoice, "paid")
+        payment = Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            currency=self.currency,
+            amount_cents=10000,
+            payment_method="stripe",
+        )
+        force_status(payment, "succeeded")
+        return Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            currency=self.currency,
+            amount_cents=5000,
+            original_amount_cents=10000,
+            reason="Concurrent refund",
+        )
+
+    def _make_subscription(self) -> Subscription:
+        now = timezone.now()
+        return Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=self.currency,
+            unit_price_cents=5000,
+            billing_cycle="monthly",
+            current_period_start=now,
+            current_period_end=now + timezone.timedelta(days=30),
+            next_billing_date=now + timezone.timedelta(days=30),
+        )
+
+    def test_concurrent_invoice_transition_raises(self) -> None:
+        """Voiding an invoice that was issued elsewhere must not overwrite the issue."""
+        invoice = self._make_invoice()
+        stale = Invoice.objects.get(pk=invoice.pk)
+
+        invoice.issue()
+        invoice.save()
+
+        stale.void()
+        with self.assertRaises(ConcurrentTransition):
+            stale.save(update_fields=["status"])
+        self.assertEqual(Invoice.objects.get(pk=invoice.pk).status, "issued")
+
+    def test_concurrent_refund_transition_raises(self) -> None:
+        refund = self._make_refund()
+        stale = Refund.objects.get(pk=refund.pk)
+
+        refund.start_processing()
+        refund.save(update_fields=["status"])
+
+        stale.cancel()
+        with self.assertRaises(ConcurrentTransition), transaction.atomic():
+            stale.save(update_fields=["status"])
+        self.assertEqual(Refund.objects.get(pk=refund.pk).status, "processing")
+
+    def test_concurrent_subscription_transition_raises(self) -> None:
+        subscription = self._make_subscription()
+        stale = Subscription.objects.get(pk=subscription.pk)
+
+        subscription._activate_now()
+        subscription.save(update_fields=["status"])
+
+        stale._cancel_now()
+        with self.assertRaises(ConcurrentTransition), transaction.atomic():
+            stale.save(update_fields=["status"])
+        self.assertEqual(Subscription.objects.get(pk=subscription.pk).status, "active")
+
+    def test_a_refreshed_copy_can_transition_and_save(self) -> None:
+        """refresh_from_db re-reads the status the mixin guards, so a refreshed copy is current."""
+        invoice = self._make_invoice()
+        stale = Invoice.objects.get(pk=invoice.pk)
+        invoice.issue()
+        invoice.save()
+
+        stale.refresh_from_db()
+        stale.void()
+        stale.save(update_fields=["status"])
+        self.assertEqual(Invoice.objects.get(pk=invoice.pk).status, "void")
 
 
 class SignalTransitionFailureSafetyTests(FSMTestMixin, TestCase):
