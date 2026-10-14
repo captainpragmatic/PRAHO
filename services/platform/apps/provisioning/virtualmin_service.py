@@ -345,8 +345,7 @@ class VirtualminProvisioningService:
 
             provisioning_result = self._execute_domain_creation(account, job)
             if provisioning_result.is_ok():
-                # The create commits the server with the active state; this covers a create path that did not.
-                account.save(update_fields=["server", "updated_at"])
+                # The create already stored the server with the active state, in its own transaction.
                 committed = True
                 logger.info(f"✅ [VirtualminService] Reprovisioned account {account.domain}")
                 return Ok(account)

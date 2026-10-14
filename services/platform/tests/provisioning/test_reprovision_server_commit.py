@@ -75,7 +75,7 @@ class ReprovisionServerCommitTests(VirtualminTaskTestBase):
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(seen["in_memory"], self.target.pk)  # the create is driven against the target
         self.assertEqual(seen["stored"], self.server.pk)  # but nothing was stored yet
-        self.assertEqual(self._stored_server_id(), self.target.pk)  # committed once the create is verified
+        # Storing it is the create's own job, with the active state (see the verified-create test).
 
     def test_a_verified_create_commits_the_server_with_the_active_state(self) -> None:
         def transport(method: str, url: str, **kwargs: object) -> requests.Response:
@@ -94,6 +94,27 @@ class ReprovisionServerCommitTests(VirtualminTaskTestBase):
         self.assertEqual((stored.server_id, stored.status), (self.target.pk, "active"))
         self.target.refresh_from_db()
         self.assertEqual(self.target.current_domains, 1)
+
+    def test_a_verified_create_records_the_server_move_once(self) -> None:
+        """The create stores the server with the active state; a second save would audit the move twice."""
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        def transport(method: str, url: str, **kwargs: object) -> requests.Response:
+            params = cast("dict[str, object]", kwargs["params"])
+            return http_response({"status": "success", "command": params.get("program")})
+
+        service = VirtualminProvisioningService(self.target)
+        with (
+            patch.object(service, "_validate_provisioning_preconditions", return_value=Ok(True)),
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport),
+        ):
+            result = service.reprovision_virtualmin_account(self.account, self.target)
+
+        self.assertTrue(result.is_ok(), result)
+        moves = AuditEvent.objects.filter(
+            action="virtualmin_account_server_migrated", object_id=str(self.account.pk)
+        ).count()
+        self.assertEqual(moves, 1)
 
     def test_a_rejected_create_on_the_target_leaves_the_old_server(self) -> None:
         def transport(method: str, url: str, **kwargs: object) -> requests.Response:
