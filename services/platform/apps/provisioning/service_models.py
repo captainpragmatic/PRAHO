@@ -18,6 +18,7 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+from apps.common.utils import operator_local_date
 
 
 class ServicePlan(models.Model):
@@ -438,7 +439,7 @@ class Service(ConcurrentTransitionMixin, models.Model):
         if not self.activated_at:
             return None
 
-        base_date = self.activated_at.date()
+        base_date = operator_local_date(self.activated_at)  # the operator's day, not the UTC one
 
         if self.billing_cycle == "monthly":
             return base_date + relativedelta(months=1)

@@ -684,3 +684,27 @@ def check_operator_jurisdiction(app_configs: Any = None, **kwargs: Any) -> list[
             id="common.E003",
         )
     ]
+
+
+@register(Tags.compatibility)
+def check_operator_clock(app_configs: Any = None, **kwargs: Any) -> list[Any]:
+    """TIME_ZONE must be a real zone, and Bucharest for an operator in Romania (ADR-0041 addendum).
+
+    Production settings refuse a wrong zone when they load; this check also covers staging, and it
+    catches an unknown zone in an image without the system zoneinfo that Django's own test reads.
+    """
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: PLC0415
+
+    from apps.common.operator import operator_is_romanian  # noqa: PLC0415
+
+    try:
+        ZoneInfo(settings.TIME_ZONE)
+    except (ZoneInfoNotFoundError, ValueError):
+        problem = f"TIME_ZONE={settings.TIME_ZONE!r} is not an IANA time zone."
+    else:
+        if settings.DEBUG or not operator_is_romanian() or settings.TIME_ZONE == "Europe/Bucharest":
+            return []
+        problem = (
+            "An operator in Romania runs on Europe/Bucharest: e-Factura dates and the VAT tax point are Romanian days."
+        )
+    return [Error(problem, hint="Set TIME_ZONE to the operator's IANA zone, e.g. Europe/Berlin.", id="common.E004")]

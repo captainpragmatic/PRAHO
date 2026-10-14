@@ -319,6 +319,7 @@
       - COMPANY_NAME
       - COMPANY_CUI
       - COMPANY_COUNTRY_CODE
+      - TIME_ZONE
       - BRAND_DIR
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
@@ -372,6 +373,7 @@
     # Production portal settings refuse to import without it (see the platform task above).
     praho_passthrough:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+      - TIME_ZONE
       - BRAND_DIR
     praho_portal_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/portal"

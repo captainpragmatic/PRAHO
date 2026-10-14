@@ -26,7 +26,7 @@ from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.proforma_service import ProformaService, send_proforma_email
 from apps.billing.services import ProformaConversionService
 from apps.common.types import Err, Result
-from apps.common.utils import format_romanian_date
+from apps.common.utils import format_document_date
 from apps.customers.models import Customer
 from apps.notifications.services import EmailResult
 from apps.orders import signals
@@ -549,7 +549,7 @@ class BankTransferDeadlineTests(TestCase):
         self.set_value("billing.proforma_validity_days", 30)
         order, proforma = self.create_proforma("bank_transfer", now)
         deadline = order.created_at + timedelta(hours=72)
-        expected_date = format_romanian_date(deadline)
+        expected_date = format_document_date(deadline)
         request = RequestFactory().get("/billing/proformas/")
         request.user = AnonymousUser()
         with override("en"):

@@ -12779,8 +12779,13 @@ msgid "Display timezone"
 msgstr "Fus orar pentru afișare"
 
 #: apps/settings/catalog.py:180
-msgid "Timezone for web timestamps when a user follows the system default. Accounting dates keep their existing rules."
-msgstr "Fusul orar pentru orele afișate în interfața web când utilizatorul urmează valoarea implicită. Datele contabile își păstrează regulile existente."
+msgid ""
+"Timezone for web timestamps when a user follows the system default. Document "
+"and accounting dates follow the operator's TIME_ZONE."
+msgstr ""
+"Fusul orar pentru orele afișate în interfața web când utilizatorul urmează "
+"valoarea implicită. Datele documentelor și cele contabile urmează TIME_ZONE "
+"al operatorului."
 
 #: apps/settings/catalog.py:189 apps/settings/catalog.py:201
 msgid "Date display"

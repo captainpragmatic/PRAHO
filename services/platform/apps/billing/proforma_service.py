@@ -15,9 +15,9 @@ from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from apps.billing.efactura.settings import ro_local_date
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.types import Err, Ok, Result
+from apps.common.utils import operator_local_date
 from apps.common.validators import log_security_event
 
 # ---------------------------------------------------------------------------
@@ -240,12 +240,11 @@ class ProformaService:
             sort_order = 0
             for item in order_items:
                 billing_period = getattr(item, "billing_period", "") or ""
-                # Period bounds are DateFields emitted VERBATIM into the e-Factura XML as
-                # InvoicePeriod (BT-134/135), so the Romanian calendar day must be fixed here
-                # at derivation — raw .date() yields the UTC day, one behind for orders
-                # placed between 00:00 and 02:00/03:00 Romanian time (#220, #286).
-                period_start = ro_local_date(order.created_at)
-                period_end = ro_local_date(order.created_at + _period_delta(billing_period))
+                # Period bounds are the operator's calendar days, fixed here at derivation, and
+                # the e-Factura XML emits them VERBATIM as InvoicePeriod (BT-134/135). Raw .date()
+                # yields the UTC day, one behind just after the operator's midnight (#220, #286).
+                period_start = operator_local_date(order.created_at)
+                period_end = operator_local_date(order.created_at + _period_delta(billing_period))
                 sort_order += 1
                 line = ProformaLine(
                     proforma=proforma,

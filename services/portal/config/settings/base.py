@@ -244,7 +244,8 @@ COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
 # ===============================================================================
 
 LANGUAGE_CODE = "en"
-TIME_ZONE = "Europe/Bucharest"  # Romanian timezone
+# The operator's clock; set the same TIME_ZONE as the platform.
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip() or "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True
 

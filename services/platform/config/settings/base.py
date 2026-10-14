@@ -189,7 +189,9 @@ ACCOUNT_LOCKOUT_THRESHOLD = 5
 # ===============================================================================
 
 LANGUAGE_CODE = "en"  # English default, with Romanian support
-TIME_ZONE = "Europe/Bucharest"
+# The operator's clock: billing periods, document dates and reports follow it. A Romanian operator
+# keeps Europe/Bucharest, which e-Factura dates and the VAT tax point need (prod.py enforces it).
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip() or "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True
 

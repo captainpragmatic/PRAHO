@@ -46,7 +46,6 @@ from django_fsm import TransitionNotAllowed
 from rest_framework.response import Response
 
 from apps.api.secure_auth import BILLING_ROLES, get_authenticated_customer, require_portal_authentication
-from apps.billing.efactura.settings import ROMANIA_TIMEZONE, ro_local_date
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import (
@@ -63,7 +62,7 @@ from apps.common.operator import operator_country, operator_is_romanian
 from apps.common.pagination import pagination_query
 from apps.common.tax_service import TaxService
 from apps.common.types import Err
-from apps.common.utils import json_error, json_success
+from apps.common.utils import json_error, json_success, operator_local_date
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket
 from apps.ui.table_helpers import prepare_billing_table_data
@@ -1113,10 +1112,10 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
                 sort_order=line_counter,
                 unit_code="C62",
                 tax_category_code=tax_category,
-                # Romanian calendar day, not the UTC one: this DateField reaches the e-Factura
+                # The operator's calendar day, not the UTC one: this DateField reaches the e-Factura
                 # InvoicePeriod verbatim (#220, #286). period_end needs no conversion — Django's
                 # DateField coercion already casts aware datetimes via the default timezone.
-                period_start=ro_local_date(proforma.created_at) if proforma.created_at else None,
+                period_start=operator_local_date(proforma.created_at) if proforma.created_at else None,
                 period_end=proforma.valid_until,
             )
 
@@ -1690,19 +1689,20 @@ _ISSUED_DOCUMENT_STATUSES = ("issued", "overdue", "paid", "refunded", "partially
 
 
 def _document_fiscal_date() -> Coalesce:
-    """The day a document declares on: its tax point, else the Romanian calendar date of issue.
+    """The day a document declares on: its tax point, else the operator's calendar date of issue.
 
-    The Romanian date, not the server's or UTC's: an invoice issued at 00:30 in Bucharest is 22:30
+    The operator's date, not the server's or UTC's: an invoice issued at 00:30 in Bucharest is 22:30
     the previous day in UTC, and a month boundary there moves the sale into the wrong period.
 
     `issue()` sets both, so the creation date is reached only by a row that never went through it
     (legacy or imported data). It is there so such a row is reported on some date rather than
     dropped from every period.
     """
+    zone = timezone.get_default_timezone()
     return Coalesce(
         "tax_point_date",
-        TruncDate("issued_at", tzinfo=ROMANIA_TIMEZONE),
-        TruncDate("created_at", tzinfo=ROMANIA_TIMEZONE),
+        TruncDate("issued_at", tzinfo=zone),
+        TruncDate("created_at", tzinfo=zone),
         output_field=DateField(),
     )
 
@@ -1714,11 +1714,12 @@ def _credit_note_fiscal_date() -> Coalesce:
     carried that date (`attached`, or linked to none) has only its own tax point, so it keeps it.
     On an invoice the correction join is empty and this is `_document_fiscal_date`.
     """
+    zone = timezone.get_default_timezone()
     return Coalesce(
         "settled_fiscal_correction__fiscal_date",
         "tax_point_date",
-        TruncDate("issued_at", tzinfo=ROMANIA_TIMEZONE),
-        TruncDate("created_at", tzinfo=ROMANIA_TIMEZONE),
+        TruncDate("issued_at", tzinfo=zone),
+        TruncDate("created_at", tzinfo=zone),
         output_field=DateField(),
     )
 
@@ -1751,11 +1752,12 @@ def _with_a_period() -> Q:
     return _dated_by_own_date() | _dated_by_sending()
 
 
-def _bucharest_day_bounds(first: date, last: date) -> tuple[datetime, datetime]:
-    """The instants that open `first` and close `last` (exclusive) in Bucharest."""
+def _operator_day_bounds(first: date, last: date) -> tuple[datetime, datetime]:
+    """The instants that open `first` and close `last` (exclusive) on the operator's clock."""
+    zone = timezone.get_default_timezone()
     return (
-        datetime.combine(first, time.min, tzinfo=ROMANIA_TIMEZONE),
-        datetime.combine(last + timedelta(days=1), time.min, tzinfo=ROMANIA_TIMEZONE),
+        datetime.combine(first, time.min, tzinfo=zone),
+        datetime.combine(last + timedelta(days=1), time.min, tzinfo=zone),
     )
 
 
@@ -1763,10 +1765,10 @@ def _own_date_between(first: date, last: date) -> Q:
     """`_document_fiscal_date()` within [first, last], written so each fallback can use an index.
 
     One branch per fallback of the Coalesce, each comparing a bare column: the tax point, else the
-    issue instant within the Romanian days' bounds, else the creation instant. Filtering on the
+    issue instant within the operator's days' bounds, else the creation instant. Filtering on the
     computed date instead made every period scan the whole history of documents.
     """
-    since, until = _bucharest_day_bounds(first, last)
+    since, until = _operator_day_bounds(first, last)
     return (
         Q(tax_point_date__range=(first, last))
         | Q(tax_point_date__isnull=True, issued_at__gte=since, issued_at__lt=until)
@@ -1914,7 +1916,7 @@ def _undated_corrections(customer_ids: list[Any], *, settled_by: date | None = N
     the customer has not received), counted per note: a tender command's legs share one. A refund
     answers to its own correction or, as a tender leg, to its command's.
 
-    With `settled_by`, only refunds settled on or before that Romanian calendar date: a period that
+    With `settled_by`, only refunds settled on or before that calendar date on the operator's clock: a period that
     ended before the money went back cannot receive that refund's note.
     """
     from .fiscal_correction_models import (  # noqa: PLC0415
@@ -1934,8 +1936,8 @@ def _undated_corrections(customer_ids: list[Any], *, settled_by: date | None = N
         ),
     )
     if settled_by is not None:
-        # Settled on or before that Romanian day, on bare columns so an index can serve it.
-        _since, until = _bucharest_day_bounds(settled_by, settled_by)
+        # Settled on or before that day on the operator's clock, on bare columns so an index can serve it.
+        _since, until = _operator_day_bounds(settled_by, settled_by)
         refunds = refunds.filter(Q(processed_at__lt=until) | Q(processed_at__isnull=True, created_at__lt=until))
     unsettled = refunds.filter(
         Q(correction_state__isnull=True)
@@ -1999,7 +2001,7 @@ def vat_report(request: HttpRequest) -> HttpResponse:
 
     # VAT calculations for the selected period. The default period is the local calendar month.
     #
-    # `localdate()`, not `now().date()`: the period is a Romanian calendar range while `now()` is
+    # `localdate()`, not `now().date()`: the period is a calendar range on the operator's clock while `now()` is
     # UTC. Between 21:00 and 24:00 UTC the two disagree by a day, so a range that ended "today" in
     # UTC left out everything issued after local midnight - this compliance screen silently
     # reported nothing for three hours every night and returned 200 throughout.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
@@ -95,7 +95,7 @@ class LocalisationDefaults:
 
     default_language: str = "en"
     default_country: str = "RO"
-    timezone: str = "Europe/Bucharest"
+    timezone: str = field(default_factory=timezone.get_default_timezone_name)  # The service's TIME_ZONE
     staff_date_format: str = "%d.%m.%Y"
     customer_date_format: str = "%d.%m.%Y"
 

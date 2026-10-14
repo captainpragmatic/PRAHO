@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **New sales default to the home currency** when PRAHO can sell in it, otherwise to the euro, and so does a new customer's preferred currency. The single legacy review, refund and high-value limits, the legacy price columns, a credit limit and the legacy bank account are in that default currency, so a Polish operator's legacy limits are in euro. Their labels no longer say RON.
   - `setup_initial_data` creates the home currency's row (`ensure_home_currency`), so an operator outside the euro area can record its rates. The card payment form names the operator's own country.
   - `BILLING_DEFAULT_CURRENCY` is removed; nothing read it.
+- **PRAHO runs on the operator's clock.** `TIME_ZONE` comes from the environment in both services. Production keeps `Europe/Bucharest` for an operator in Romania, because e-Factura dates and the VAT tax point are Romanian days, and requires any other operator to set its own zone. Billing periods, document dates on PDFs and emails, correction dates and the billing reports follow it, and so does the default display timezone. e-Factura, SmartBill, BNR, ROTLD and EC sales stay on Bucharest time. Outside DEBUG, `common.E004` refuses an unknown zone, or any zone but Bucharest for an operator in Romania, on staging too.
 
 ### Fixed
 
@@ -45,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The staff footer shows the year on every page**, not only the dashboard.
 - **Invoice PDFs in a foreign currency show their exchange rate.** The line read a value nothing ever stored, so it never appeared.
 - **Registering a payment confirms it in the invoice's currency**, not always in RON.
+- **"Today's redemptions" and a service's next billing date use the operator's calendar day**, not the UTC one, which was a day behind just after midnight.
 - **Portal text and form borders meet WCAG AA contrast** on the default palette, the sign-in options no longer break mid-label on a phone, and the staff sign-in page shows the brand mark instead of a drawn "P".
 - **Links in customer emails open the right pages.** Invoice and payment-reminder links pointed at the marketing website and used the invoice's database id; they now open the invoice on the portal by its number. Unsubscribe links open the platform's public unsubscribe page.
 - **VAT numbers are still checked with VIES when the seller's own tax ID is not configured.** The check stopped silently; it now asks VIES anonymously, and never sends a placeholder as the requester.

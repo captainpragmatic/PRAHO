@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
@@ -182,13 +183,14 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="system.timezone",
         data_type="string",
-        default="Europe/Bucharest",
+        default=settings.TIME_ZONE,  # Fixed per deployment, like the operator's country
         group="localisation",
         section=_("Defaults"),
         label=_("Display timezone"),
         input_kind="select",
         help_text=_(
-            "Timezone for web timestamps when a user follows the system default. Accounting dates keep their existing rules."
+            "Timezone for web timestamps when a user follows the system default. Document and accounting dates "
+            "follow the operator's TIME_ZONE."
         ),
         validation={"choices": sorted(TIMEZONES)},
     ),

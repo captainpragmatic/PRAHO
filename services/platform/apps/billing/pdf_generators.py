@@ -27,7 +27,7 @@ from apps.billing.models import Invoice, ProformaInvoice
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country, operator_is_romanian
-from apps.common.utils import format_romanian_date
+from apps.common.utils import format_document_date
 
 logger = logging.getLogger(__name__)
 
@@ -674,21 +674,21 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 self.height - 5.5 * cm,
-                str(gettext("Issue date: {date}")).format(date=format_romanian_date(self.invoice.issued_at)),
+                str(gettext("Issue date: {date}")).format(date=format_document_date(self.invoice.issued_at)),
             )
 
         if self.invoice.due_at:
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
-                str(gettext("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
+                str(gettext("Due date: {date}")).format(date=format_document_date(self.invoice.due_at)),
             )
 
         # Art. 330 requires a correction to reference the invoice it corrects. A credit note has no
         # due date, so the reference takes that line.
         original = self.invoice.reverses_invoice if self._is_credit_note() else None
         if original is not None:
-            original_date = format_romanian_date(original.issued_at) if original.issued_at else ""
+            original_date = format_document_date(original.issued_at) if original.issued_at else ""
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
@@ -718,7 +718,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
             due_date_str = (
-                format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(gettext("undefined"))
+                format_document_date(self.invoice.due_at) if self.invoice.due_at else str(gettext("undefined"))
             )
             self.canvas.drawString(
                 2 * cm, totals_y - 0.5 * cm, str(gettext("Unpaid invoice - Due: {date}")).format(date=due_date_str)
@@ -728,7 +728,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 totals_y - 0.5 * cm,
-                str(gettext("Invoice paid on: {date}")).format(date=format_romanian_date(self.invoice.paid_at)),
+                str(gettext("Invoice paid on: {date}")).format(date=format_document_date(self.invoice.paid_at)),
             )
 
 
@@ -760,12 +760,12 @@ class RomanianProformaPDFGenerator(RomanianDocumentPDFGenerator):
         self.canvas.drawString(
             2 * cm,
             self.height - 5.5 * cm,
-            str(gettext("Date: {date}")).format(date=format_romanian_date(self.proforma.created_at)),
+            str(gettext("Date: {date}")).format(date=format_document_date(self.proforma.created_at)),
         )
         self.canvas.drawString(
             2 * cm,
             self.height - 6 * cm,
-            str(gettext("Valid until: {date}")).format(date=format_romanian_date(self.proforma.valid_until)),
+            str(gettext("Valid until: {date}")).format(date=format_document_date(self.proforma.valid_until)),
         )
 
 

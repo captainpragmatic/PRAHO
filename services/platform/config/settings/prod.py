@@ -158,6 +158,27 @@ if _missing_fiscal_identity:
         "ISO country code the seller is established in."
     )
 
+# The operator's clock, read here like the fiscal identity. A Romanian operator keeps Bucharest time:
+# e-Factura dates and the VAT tax point are Romanian calendar days. Any other operator names its own
+# zone, because a country does not determine one (Portugal and Spain each span two).
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip()
+if COMPANY_COUNTRY_CODE.upper() == "RO":
+    if TIME_ZONE not in ("", "Europe/Bucharest"):
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"TIME_ZONE={TIME_ZONE!r} is not allowed for an operator in Romania: keep Europe/Bucharest, "
+            "because e-Factura dates and the VAT tax point are Romanian calendar days."
+        )
+    TIME_ZONE = "Europe/Bucharest"
+elif not TIME_ZONE:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "TIME_ZONE must be set in production for an operator outside Romania, e.g. Europe/Berlin: "
+        "billing periods, document dates and reports follow it."
+    )
+
 # Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),
 # CSPNonce before SecurityHeaders (nonce generated before CSP header is built).
 MIDDLEWARE = [

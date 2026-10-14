@@ -15,7 +15,7 @@ from apps.billing.efactura.settings import efactura_enabled
 from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.issuers.policy import default_issuer_provider
 from apps.billing.vies_evidence import profile_vat_identity
-from apps.common.checks import check_operator_jurisdiction
+from apps.common.checks import check_operator_clock, check_operator_jurisdiction
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.operator import operator_in_eu, operator_is_romanian, operator_serves
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -62,6 +62,17 @@ class OperatorJurisdictionCheckTests(SimpleTestCase):
     @override_settings(**GERMAN)
     def test_an_eu_operator_passes(self) -> None:
         self.assertEqual(check_operator_jurisdiction(), [])
+
+    def test_an_operator_in_romania_runs_on_bucharest_time(self) -> None:
+        self.assertEqual(check_operator_clock(), [])
+        with override_settings(TIME_ZONE="Europe/Berlin"):
+            self.assertEqual([m.id for m in check_operator_clock()], ["common.E004"])
+        with override_settings(TIME_ZONE="Europe/Berlin", **GERMAN):
+            self.assertEqual(check_operator_clock(), [])
+
+    @override_settings(TIME_ZONE="Europe/Atlantis", **GERMAN)
+    def test_an_unknown_zone_is_refused(self) -> None:
+        self.assertEqual([m.id for m in check_operator_clock()], ["common.E004"])
 
 
 class RomanianFeatureGateTests(TestCase):

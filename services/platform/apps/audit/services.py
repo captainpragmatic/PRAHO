@@ -14,7 +14,6 @@ from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
-from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -4706,12 +4705,12 @@ class AuditRetentionService:
     def financial_retention_cutoff(cls, now: datetime | None = None) -> datetime:
         """The instant before which financial evidence may be removed.
 
-        A record drawn up in year Y is kept until 1 July of Y+1+5, Romanian time. So from 1 July
+        A record drawn up in year Y is kept until 1 July of Y+1+5, on the operator's clock. So from 1 July
         of year N, records from N-6 and earlier are past it (cutoff 1 January of N-5); before
         1 July, records from N-7 and earlier (cutoff 1 January of N-6). The configured time zone
         is used explicitly, not the active one, which a request or task may have changed.
         """
-        zone = ZoneInfo(settings.TIME_ZONE)
+        zone = timezone.get_default_timezone()
         local = (now or timezone.now()).astimezone(zone)
         years_back = (
             cls.FINANCIAL_RETENTION_YEARS if (local.month, local.day) >= (7, 1) else cls.FINANCIAL_RETENTION_YEARS + 1

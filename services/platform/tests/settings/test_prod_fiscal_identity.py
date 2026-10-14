@@ -28,7 +28,13 @@ class ProdFiscalIdentityTests(SimpleTestCase):
 
     def test_configured_identity_is_what_production_uses(self) -> None:
         prod = _settings_module(
-            _PROD, {"COMPANY_NAME": "Acme Hosting SRL", "COMPANY_CUI": "DE811115368", "COMPANY_COUNTRY_CODE": " DE "}
+            _PROD,
+            {
+                "COMPANY_NAME": "Acme Hosting SRL",
+                "COMPANY_CUI": "DE811115368",
+                "COMPANY_COUNTRY_CODE": " DE ",
+                "TIME_ZONE": "Europe/Berlin",
+            },
         )
         self.assertEqual(prod.COMPANY_NAME, "Acme Hosting SRL")
         self.assertEqual(prod.COMPANY_CUI, "DE811115368")
