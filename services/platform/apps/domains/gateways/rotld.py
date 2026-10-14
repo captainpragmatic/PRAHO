@@ -58,6 +58,7 @@ ROTLD_POLICY = OutboundPolicy(
 
 
 class ROTLDGateway(BaseRegistrarGateway):
+    jurisdiction: ClassVar[str] = "RO"  # ROTLD partners are Romanian operators
     registration_sets_nameservers: ClassVar[bool] = False
     registration_requires_contact: ClassVar[bool] = True
 

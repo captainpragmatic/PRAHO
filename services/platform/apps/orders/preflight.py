@@ -15,6 +15,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.financial_arithmetic import calculate_document_totals
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 
 from .models import Order
 from .vat_rules import CustomerVATInfo, OrderVATCalculator
@@ -58,7 +59,7 @@ class OrderPreflightValidationService:
         company_name = str(billing.get("company_name", "")).strip()
         vat_number = str(billing.get("vat_number", billing.get("vat_id", ""))).strip()
         is_business = bool(company_name)
-        country = normalize_country_code(billing.get("country")) or "RO"
+        country = normalize_country_code(billing.get("country")) or operator_country()
 
         if is_business and country == "RO" and not vat_number:
             warnings.append(str(_("Romanian business without VAT number - verify tax profile")))

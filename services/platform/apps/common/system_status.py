@@ -17,6 +17,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
 
+from apps.common.operator import operator_is_romanian
+
 logger = logging.getLogger(__name__)
 
 CACHE_KEY = "system_status_results"
@@ -501,7 +503,7 @@ def check_all_subsystems() -> list[SubsystemStatus]:
         _check_hmac(),
         _check_email(),
         _check_stripe(),
-        _check_efactura(),
+        *([_check_efactura()] if operator_is_romanian() else []),
         _check_encryption(),
         _check_credential_vault(),
         _check_sentry(),

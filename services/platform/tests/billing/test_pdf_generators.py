@@ -1125,6 +1125,32 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(calls)
         self.assertIn('J40/555/2023', text)
 
+    def _german_buyer_invoice(self, number):
+        return Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur, number=number,
+            subtotal_cents=10000, tax_cents=0, total_cents=10000, status='issued',
+            bill_to_name='Kunde GmbH', bill_to_tax_id='DE123456789',
+            bill_to_registration_number='HRB 98765', bill_to_country='DE',
+        )
+
+    @override_settings(COMPANY_COUNTRY_CODE='DE', COMPANY_CUI='DE811115368', COMPANY_REGISTRATION_NUMBER='HRB 12345')
+    def test_german_operator_and_buyer_get_generic_labels_and_no_romanian_fiscal_mention(self):
+        """Tax-ID labels follow each party's country; art. 319 binds only a Romanian operator."""
+        text = ' '.join(self._get_canvas_calls(self._german_buyer_invoice('INV-DE-001')))
+        self.assertIn('VAT ID: DE811115368', text)
+        self.assertIn('Company reg. no.: HRB 12345', text)
+        self.assertIn('VAT ID: DE123456789', text)
+        self.assertIn('Company reg. no.: HRB 98765', text)
+        self.assertNotIn('CUI/CIF', text)
+        self.assertNotIn('Nr. Reg. Com.', text)
+        self.assertNotIn('art. 319', text)
+
+    def test_romanian_operator_labels_a_foreign_buyer_by_its_own_country(self):
+        text = ' '.join(self._get_canvas_calls(self._german_buyer_invoice('INV-DE-002')))
+        self.assertIn(f'CUI/CIF: {settings.COMPANY_CUI}', text)
+        self.assertIn('VAT ID: DE123456789', text)
+        self.assertIn('art. 319', text)
+
     def test_client_tax_id_rendered(self):
         """Client section must show CUI/CIF."""
         calls = self._get_canvas_calls()

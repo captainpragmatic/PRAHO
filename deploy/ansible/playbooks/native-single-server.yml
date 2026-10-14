@@ -79,11 +79,12 @@
           # The seller identity printed on invoices; production refuses to start without it.
           - praho_env != 'prod' or (preflight_env.COMPANY_NAME | default('') | trim | length > 0)
           - praho_env != 'prod' or (preflight_env.COMPANY_CUI | default('') | trim | length > 0)
+          - praho_env != 'prod' or (preflight_env.COMPANY_COUNTRY_CODE | default('') | trim | length > 0)
         fail_msg: >
           Missing required variables in {{ env_file_path }}.
           Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, DJANGO_SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set,
           and for prod also PLATFORM_TO_PORTAL_WEBHOOK_SECRET, DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY,
-          COMPANY_NAME and COMPANY_CUI.
+          COMPANY_NAME, COMPANY_CUI and COMPANY_COUNTRY_CODE.
 
     # -------------------------------------------------------------------
     # Deploy method + version resolution

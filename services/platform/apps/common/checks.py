@@ -656,3 +656,31 @@ def check_counter_table(app_configs: Any, **kwargs: Any) -> list[Any]:
             )
         ]
     return []
+
+
+@register(Tags.compatibility)
+def check_operator_jurisdiction(app_configs: Any = None, **kwargs: Any) -> list[Any]:
+    """Refuse an operator country PRAHO cannot tax for (ADR-0047): unknown, or outside the EU.
+
+    The tax engine assumes an EU supplier, so outside the EU it would charge the wrong VAT. Development
+    is spared so a local checkout can model any jurisdiction while the jurisdiction pack is built.
+    """
+    from apps.common.localisation import normalize_country_code  # noqa: PLC0415
+    from apps.common.operator import operator_in_eu  # noqa: PLC0415
+
+    if settings.DEBUG:
+        return []
+    configured = str(getattr(settings, "COMPANY_COUNTRY_CODE", "") or "").strip()
+    if configured and not normalize_country_code(configured):
+        problem = f"COMPANY_COUNTRY_CODE={configured!r} is not an ISO 3166-1 country code."
+    elif not operator_in_eu():
+        problem = "PRAHO's VAT handling supports operators established in the EU only."
+    else:
+        return []
+    return [
+        Error(
+            problem,
+            hint="Set COMPANY_COUNTRY_CODE to the operator's country of establishment (ADR-0047).",
+            id="common.E003",
+        )
+    ]

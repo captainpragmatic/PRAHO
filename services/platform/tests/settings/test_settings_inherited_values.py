@@ -106,7 +106,10 @@ class SettingsReviewFollowupTests(TestCase):
     def test_country_inheritance_uses_the_normalized_operator_fallback(self) -> None:
         supplier = BaseUBLBuilder(InvoiceFactory(status="draft"))._get_supplier_info()
         self.assertEqual(supplier.country_code, "DE")
-        self.assertEqual(self.field(self.page(), "efactura.company.country_code").get("value"), supplier.country_code)
+        # The inherited value the settings page renders, resolved the way the page resolves it.
+        self.assertEqual(CATALOG_BY_KEY["efactura.company.country_code"].deployment_default(), supplier.country_code)
+        # The page itself is Romanian-only (ADR-0047 addendum), so this German operator never sees it.
+        self.assertEqual(self.client.get(reverse("settings:group", args=["efactura"])).status_code, 404)
 
     @override_settings(EFACTURA_ENABLED="false", EFACTURA_POLLING_BATCH_SIZE="invalid")
     def test_generic_inheritance_uses_the_consumers_type_conversion(self) -> None:

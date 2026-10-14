@@ -21,6 +21,7 @@ from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_name
+from apps.common.operator import operator_serves
 
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
@@ -44,6 +45,7 @@ class GroupDef:
     label: LazyLabel
     description: LazyLabel = ""
     section_order: tuple[str, ...] = ()
+    jurisdiction: str = ""  # Shown only to operators established there (ADR-0047 addendum)
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class SettingDef:
     advanced: bool = False
     deployment_fallback: bool = False  # No row preserves deployment configuration; never seed the catalog default.
     django_setting: str = ""
+    jurisdiction: str = ""  # Shown only to operators established there (ADR-0047 addendum)
     validation: dict[str, Any] | None = field(default=None, hash=False)
     choice_labels: dict[str, LazyLabel] = field(default_factory=dict, hash=False)
 
@@ -113,6 +116,7 @@ GROUPS: tuple[GroupDef, ...] = (
         "SmartBill",
         _("External invoice issuer: credentials, series, and the VAT-name mapping"),
         section_order=("Issuer", "Credentials", "Document defaults"),
+        jurisdiction="RO",
     ),
     GroupDef(
         "virtualmin",
@@ -126,6 +130,7 @@ GROUPS: tuple[GroupDef, ...] = (
         ZONE_INTEGRATIONS,
         "e-Factura (ANAF)",
         "Romanian e-invoicing: OAuth, company profile, submission policy",
+        jurisdiction="RO",
     ),
     GroupDef(
         "node-deployment", ZONE_INTEGRATIONS, _("Node Deployment"), _("Terraform, DNS, and node backup configuration")
@@ -158,13 +163,18 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="system.default_country",
+        deployment_fallback=True,
+        django_setting="COMPANY_COUNTRY_CODE",
         data_type="string",
         default="RO",
         group="localisation",
         section=_("Defaults"),
         label=_("Default country"),
         input_kind="select",
-        help_text=_("Initial country for new customer addresses. Existing addresses and tax rules are preserved."),
+        help_text=_(
+            "Initial country for new customer addresses. Leave unset to use the operator's own country. "
+            "Existing addresses and tax rules are preserved."
+        ),
         validation={"choices": sorted(COUNTRIES)},
         choice_labels={code: lazy(country_name, str)(code) for code in sorted(COUNTRIES)},
     ),
@@ -376,6 +386,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.fx.bnr_fetch_enabled",
+        jurisdiction="RO",
         data_type="boolean",
         default=False,
         group="advanced",
@@ -436,6 +447,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_api_max_retries",
+        jurisdiction="RO",
         data_type="integer",
         default=3,
         group="advanced",
@@ -448,6 +460,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_api_timeout_seconds",
+        jurisdiction="RO",
         data_type="integer",
         default=30,
         group="advanced",
@@ -461,6 +474,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_batch_size",
+        jurisdiction="RO",
         data_type="integer",
         default=100,
         group="advanced",
@@ -473,6 +487,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_deadline_warning_hours",
+        jurisdiction="RO",
         data_type="integer",
         default=24,
         group="billing",
@@ -485,6 +500,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_submission_deadline_days",
+        jurisdiction="RO",
         data_type="integer",
         default=5,
         group="billing",
@@ -2814,13 +2830,22 @@ CRITICAL_KEYS: frozenset[str] = frozenset(d.key for d in CATALOG if d.critical)
 
 
 def defs_for_group(slug: str) -> list[SettingDef]:
-    """Catalog entries for one group, in stable key order"""
-    return [d for d in CATALOG if d.group == slug]
+    """Catalog entries for one group that apply to this operator, in stable key order"""
+    return [d for d in CATALOG if d.group == slug and is_visible(d)]
+
+
+def is_visible(definition: GroupDef | SettingDef) -> bool:
+    """Whether a group or setting applies to this operator; a setting also needs its group.
+
+    Presentation only: each feature enforces its jurisdiction at its own chokepoint.
+    """
+    group = GROUPS_BY_SLUG[definition.group] if isinstance(definition, SettingDef) else definition
+    return operator_serves(group.jurisdiction) and operator_serves(definition.jurisdiction)
 
 
 def groups_in_zone(zone: str) -> list[GroupDef]:
-    """Groups belonging to one UI zone, in declaration order"""
-    return [g for g in GROUPS if g.zone == zone]
+    """Visible groups belonging to one UI zone, in declaration order"""
+    return [g for g in GROUPS if g.zone == zone and is_visible(g)]
 
 
 def is_sensitive_key(key: str) -> bool:

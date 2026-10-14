@@ -135,17 +135,27 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
 
 # Fiscal identity on invoices, PDFs and VIES requests. Read from the environment here, not from base,
 # so the value checked is the value used; a blank one would put no seller, or a placeholder, on documents.
+# The country code decides which jurisdiction's features apply; blank would silently mean Romania.
+# Its value is validated by the common.E003 system check, which runs at migrate.
 COMPANY_NAME = os.environ.get("COMPANY_NAME", "").strip()
 COMPANY_CUI = os.environ.get("COMPANY_CUI", "").strip()
+COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "").strip()
 _missing_fiscal_identity = [
-    name for name, value in (("COMPANY_NAME", COMPANY_NAME), ("COMPANY_CUI", COMPANY_CUI)) if not value
+    name
+    for name, value in (
+        ("COMPANY_NAME", COMPANY_NAME),
+        ("COMPANY_CUI", COMPANY_CUI),
+        ("COMPANY_COUNTRY_CODE", COMPANY_COUNTRY_CODE),
+    )
+    if not value
 ]
 if _missing_fiscal_identity:
     from django.core.exceptions import ImproperlyConfigured
 
     raise ImproperlyConfigured(
         f"{', '.join(_missing_fiscal_identity)} must be set in production: invoices are issued under this "
-        "seller identity. Set the legal name and tax ID (CUI in Romania, VAT number elsewhere)."
+        "seller identity. Set the legal name, the tax ID (CUI in Romania, VAT number elsewhere) and the "
+        "ISO country code the seller is established in."
     )
 
 # Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),

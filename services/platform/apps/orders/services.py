@@ -15,6 +15,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
 from apps.products.models import Product
@@ -311,16 +312,16 @@ class OrderCalculationService:
 
         # Determine customer context for VAT calculation
         if billing_address:
-            country = normalize_country_code(billing_address.get("country")) or "RO"
+            country = normalize_country_code(billing_address.get("country")) or operator_country()
             vat_number = billing_address.get("vat_number") or billing_address.get("vat_id")
             is_business = bool(billing_address.get("company_name")) or bool(vat_number)
         elif customer:
-            country = normalize_country_code(getattr(customer, "country", "RO")) or "RO"
+            country = normalize_country_code(getattr(customer, "country", "")) or operator_country()
             is_business = bool(getattr(customer, "company_name", ""))
             vat_number = getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else ""
         else:
-            # Default to Romanian business for consistency
-            country = "RO"
+            # Default to a business in the operator's country
+            country = operator_country()
             is_business = True
             vat_number = ""
 
@@ -486,7 +487,7 @@ class OrderService:
             city=address.city if address else "",
             county=address.county if address else "",
             postal_code=address.postal_code if address else "",
-            country=(normalize_country_code(address.country) or address.country) if address else "RO",
+            country=(normalize_country_code(address.country) or address.country) if address else operator_country(),
             fiscal_code=getattr(customer.tax_profile, "cui", "") if hasattr(customer, "tax_profile") else "",
             registration_number=getattr(customer, "registration_number", ""),
             vat_number=getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else "",
@@ -574,7 +575,7 @@ class OrderService:
                     )
 
                     # Extract customer VAT context from billing address snapshot
-                    customer_country = normalize_country_code(data.billing_address.get("country")) or "RO"
+                    customer_country = normalize_country_code(data.billing_address.get("country")) or operator_country()
                     vat_number = str(data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or "")
                     is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
 

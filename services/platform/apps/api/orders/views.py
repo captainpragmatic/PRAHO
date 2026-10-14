@@ -34,6 +34,7 @@ from apps.billing.currency_policy import (
 )
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
@@ -327,7 +328,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
 
         # Use the same current billing address and tax profile as order creation.
         billing_address = OrderService.build_billing_address_from_customer(customer)
-        customer_country = normalize_country_code(billing_address.get("country")) or "RO"
+        customer_country = normalize_country_code(billing_address.get("country")) or operator_country()
         vat_number = str(billing_address.get("vat_number") or "")
         is_business = bool(billing_address.get("company_name")) or bool(vat_number)
 
@@ -582,7 +583,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         # Calculate VAT using the VAT calculator
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
-        country = normalize_country_code(billing_address.get("country")) or "RO"
+        country = normalize_country_code(billing_address.get("country")) or operator_country()
         is_business = bool(company_name) or bool(vat_number)
 
         logger.info(

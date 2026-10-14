@@ -366,15 +366,13 @@ class RegistrarService:
 
     @staticmethod
     def select_best_registrar_for_tld(tld: TLD) -> Registrar | None:
-        """🎯 Select best available registrar for TLD"""
-        # Try primary first
-        primary = RegistrarService.get_primary_registrar_for_tld(tld)
-        if primary:
-            return primary
+        """🎯 The primary registrar, else the highest-priority backup, skipping any this operator may not use"""
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # Fall back to highest priority backup
-        fallbacks = RegistrarService.get_fallback_registrars_for_tld(tld)
-        return fallbacks.first()
+        primary = RegistrarService.get_primary_registrar_for_tld(tld)
+        candidates = [primary] if primary else []
+        candidates.extend(RegistrarService.get_fallback_registrars_for_tld(tld))
+        return next((r for r in candidates if RegistrarGatewayFactory.serves_operator(r)), None)
 
     @staticmethod
     def sync_all_registrars() -> int:

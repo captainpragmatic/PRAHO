@@ -104,11 +104,11 @@ praho_load_env() {
 
 # Production settings refuse to import without these keys. The compose files only default them
 # to empty (staging runs without them), so a production deploy checks them here, before Compose.
-# COMPANY_NAME and COMPANY_CUI are the seller identity printed on every invoice.
+# COMPANY_NAME, COMPANY_CUI and COMPANY_COUNTRY_CODE are the seller identity printed on every invoice.
 praho_require_production_keys() {
     local key missing=""
     [[ "$PRAHO_SETTINGS_MODULE" == "config.settings.prod" ]] || return 0
-    for key in DJANGO_ENCRYPTION_KEY CREDENTIAL_VAULT_MASTER_KEY COMPANY_NAME COMPANY_CUI; do
+    for key in DJANGO_ENCRYPTION_KEY CREDENTIAL_VAULT_MASTER_KEY COMPANY_NAME COMPANY_CUI COMPANY_COUNTRY_CODE; do
         [[ -n "$(praho_env_value "$key")" ]] || missing="${missing} ${key}"
     done
     [[ -z "$missing" ]] || praho_die "Production settings need${missing} in ${PRAHO_ENV_FILE}"

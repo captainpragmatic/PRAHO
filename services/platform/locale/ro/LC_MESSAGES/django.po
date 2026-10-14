@@ -2981,11 +2981,6 @@ msgstr "Rulări de Colectare a Plăților"
 msgid "Supplier:"
 msgstr "Furnizor:"
 
-#: apps/billing/pdf_generators.py:208
-#, python-brace-format
-msgid "CUI/CIF: {cui}"
-msgstr "CUI/CIF: {cui}"
-
 #: apps/billing/pdf_generators.py:215 apps/billing/pdf_generators.py:296
 #, python-brace-format
 msgid "Nr. Reg. Com.: {reg}"
@@ -3019,6 +3014,16 @@ msgstr "Client:"
 #, python-brace-format
 msgid "CUI/CIF: {tax_id}"
 msgstr "CUI/CIF: {tax_id}"
+
+#: apps/billing/pdf_generators.py
+#, python-brace-format
+msgid "VAT ID: {tax_id}"
+msgstr "Cod TVA: {tax_id}"
+
+#: apps/billing/pdf_generators.py
+#, python-brace-format
+msgid "Company reg. no.: {reg}"
+msgstr "Nr. de înregistrare: {reg}"
 
 #: apps/billing/pdf_generators.py:319 apps/provisioning/service_models.py:41
 #: apps/settings/models.py:54 apps/tickets/models.py:27
@@ -12770,8 +12775,13 @@ msgid "Default country"
 msgstr "Țara implicită"
 
 #: apps/settings/catalog.py:167
-msgid "Initial country for new customer addresses. Existing addresses and tax rules are preserved."
-msgstr "Țara inițială pentru adresele noi ale clienților. Adresele existente și regulile fiscale sunt păstrate."
+msgid ""
+"Initial country for new customer addresses. Leave unset to use the "
+"operator's own country. Existing addresses and tax rules are preserved."
+msgstr ""
+"Țara inițială pentru adresele noi ale clienților. Lăsați necompletat pentru "
+"a folosi țara operatorului. Adresele existente și regulile fiscale sunt "
+"păstrate."
 
 #: apps/settings/catalog.py:177
 msgid "Display timezone"

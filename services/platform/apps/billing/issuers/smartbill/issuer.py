@@ -47,6 +47,7 @@ def payload_digest(payload: dict[str, object]) -> str:
 
 class SmartBillIssuer(InvoiceIssuerGateway):
     provider = ISSUER_SMARTBILL
+    jurisdiction = "RO"  # SmartBill issues Romanian fiscal documents only
 
     def __init__(
         self,

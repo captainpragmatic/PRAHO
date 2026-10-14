@@ -39,6 +39,7 @@ from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.financial_arithmetic import MAX_AMOUNT_CENTS, parse_major_units_to_cents
 from apps.common.mixins import get_search_context
+from apps.common.operator import operator_country
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.utils import json_error, json_success
@@ -685,7 +686,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
                             "city": "",
                             "county": "",
                             "postal_code": "",
-                            "country": "România",  # Default to Romania
+                            "country": operator_country(),
                             "vat_id": tax_profile.vat_number if tax_profile else "",
                             "contact_person": customer.get_display_name(),
                             "contact_email": customer.primary_email,
@@ -940,7 +941,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     "city": "",
                     "county": "",
                     "postal_code": "",
-                    "country": "România",
+                    "country": operator_country(),
                     "vat_id": tax_profile.vat_number if tax_profile else "",
                     "contact_person": customer.get_display_name(),
                     "contact_email": customer.primary_email,

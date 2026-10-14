@@ -141,6 +141,7 @@ PRODUCTION_KEY_VALUES = {
     # The seller identity printed on invoices.
     "COMPANY_NAME": "n",
     "COMPANY_CUI": "c",
+    "COMPANY_COUNTRY_CODE": "RO",
 }
 
 
@@ -313,6 +314,7 @@ class TestNativeMigrateEnvironment:
             "CREDENTIAL_VAULT_MASTER_KEY": key,
             "COMPANY_NAME": "Operator Hosting SRL",
             "COMPANY_CUI": "RO12345674",
+            "COMPANY_COUNTRY_CODE": "RO",
         }
 
     @pytest.mark.integration

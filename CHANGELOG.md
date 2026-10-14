@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Session cookies are renamed** (`praho_sessionid`, `praho_staging_sessionid`, `praho_dev_sessionid`), so everyone signs in once more after the upgrade.
   - **Development logins** are `admin@praho.test` / `admin123` and the other `@praho.test` accounts the sample data prints. Extra development origins (another machine on a LAN or VPN) go in `DEV_EXTRA_ORIGINS`.
   - **Staging hostnames** follow one convention, `portal-staging.<domain>`, which a wildcard certificate covers.
+- **Romanian features follow the operator's country** (ADR-0047 addendum). e-Factura, the D390 report, the SmartBill issuer, BNR rates and the ROTLD registrar apply only when `COMPANY_COUNTRY_CODE` is `RO`. For any other operator their settings pages are hidden, the D390 report answers 404, SmartBill and ROTLD are refused, and the invoice PDF leaves out the art. 319 Cod fiscal mention.
+  - **Production requires `COMPANY_COUNTRY_CODE`** (settings, `deploy.sh`, Ansible preflight). Outside DEBUG, `migrate` refuses (`common.E003`) a code that is not an EU member state, because VAT handling still assumes an EU seller.
+  - **Invoice PDFs label each tax ID by its party's country:** CUI/CIF and Nr. Reg. Com. for a Romanian party, "VAT ID" and "Company reg. no." for anyone else. A blank seller tax ID is no longer printed as an empty line.
+  - **A customer with no billing country is placed in the operator's country**, not in Romania, for documents, order VAT and VIES. The default country for new customers also follows the operator until staff set one.
+  - **A `.ro` domain skips ROTLD for a non-Romanian operator** and goes to the next registrar assigned to the TLD.
 
 ### Fixed
 

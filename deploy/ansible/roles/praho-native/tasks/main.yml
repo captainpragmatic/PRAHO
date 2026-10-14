@@ -318,6 +318,7 @@
       - CREDENTIAL_VAULT_MASTER_KEY
       - COMPANY_NAME
       - COMPANY_CUI
+      - COMPANY_COUNTRY_CODE
       - BRAND_DIR
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"

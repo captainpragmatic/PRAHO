@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from apps.billing.invoice_models import ISSUER_BUILTIN
 from apps.common.types import Err, Ok, Result
 
-from .base import InvoiceIssuerGateway, get_invoice_issuer, get_registered_issuers
+from .base import InvoiceIssuerGateway, get_invoice_issuer, issuer_serves_operator
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -92,11 +92,11 @@ def default_issuer_provider() -> str:
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
     configured = str(SettingsService.get_setting("billing.invoice_issuer", ISSUER_BUILTIN) or ISSUER_BUILTIN)
-    if configured in get_registered_issuers():
+    if issuer_serves_operator(configured):
         return configured
 
     logger.error(
-        f"🔥 [Issuer] Configured invoice issuer {configured!r} is not registered; "
+        f"🔥 [Issuer] Configured invoice issuer {configured!r} is not registered for this operator; "
         f"stamping {ISSUER_BUILTIN!r} instead. New documents are being numbered by "
         f"PRAHO's own sequence, which is a fiscal act - check billing.invoice_issuer."
     )

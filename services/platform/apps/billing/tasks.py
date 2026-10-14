@@ -26,6 +26,7 @@ from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
 from apps.billing.models import Invoice
+from apps.common.operator import operator_is_romanian
 from apps.common.performance.async_tasks import DistributedLock
 
 logger = logging.getLogger(__name__)
@@ -2359,6 +2360,8 @@ def fetch_bnr_exchange_rates() -> dict[str, Any]:
     """
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
+    if not operator_is_romanian():
+        return {"success": True, "skipped": "not_applicable"}
     if not SettingsService.get_boolean_setting("billing.fx.bnr_fetch_enabled", False):
         return {"success": True, "skipped": "disabled"}
 

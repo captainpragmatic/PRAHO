@@ -13,6 +13,8 @@ from django.db.models.functions import Replace, Upper
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.operator import operator_country
+
 logger = logging.getLogger(__name__)
 
 # Legal forms, connectors and generic trade words carry no identity. Tokens shorter than
@@ -95,7 +97,7 @@ def profile_vat_identity(tax_profile: CustomerTaxProfile) -> tuple[str, str]:
     from apps.billing.tax_evidence import vat_identity  # noqa: PLC0415
 
     billing_address = tax_profile.customer.get_billing_address()
-    country = (billing_address.country if billing_address else "") or "RO"
+    country = (billing_address.country if billing_address else "") or operator_country()
     return vat_identity(str(tax_profile.vat_number or ""), country)
 
 

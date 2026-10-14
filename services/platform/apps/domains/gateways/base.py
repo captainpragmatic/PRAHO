@@ -21,6 +21,8 @@ from django.db import Error
 from django.utils.translation import gettext as _
 
 from apps.common import counters
+from apps.common.localisation import country_name
+from apps.common.operator import operator_serves
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
@@ -191,6 +193,9 @@ class BaseRegistrarGateway(ABC):
     The base class provides: circuit breaker, idempotency, retry with backoff,
     SSRF-safe HTTP via OutboundPolicy, and audit logging.
     """
+
+    # The only jurisdiction whose operators may use this registrar; "" for any (ADR-0047 addendum).
+    jurisdiction: ClassVar[str] = ""
 
     def __init__(self, registrar: Registrar) -> None:
         self.registrar = registrar
@@ -1084,7 +1089,18 @@ class RegistrarGatewayFactory:
         gateway_cls = cls._gateways.get(registrar.name)
         if not gateway_cls:
             raise ValueError(f"No gateway registered for registrar: {registrar.name}")
+        if not cls.serves_operator(registrar):
+            raise ValueError(
+                f"The {registrar.name} registrar is available only to operators established in "
+                f"{country_name(gateway_cls.jurisdiction, 'en')}"
+            )
         return gateway_cls(registrar)
+
+    @classmethod
+    def serves_operator(cls, registrar: Registrar) -> bool:
+        """Whether this operator may use the registrar; one bound to another country (ROTLD) is skipped."""
+        gateway_cls = cls._gateways.get(registrar.name)
+        return gateway_cls is None or operator_serves(gateway_cls.jurisdiction)
 
     @classmethod
     def list_available_gateways(cls) -> list[str]:

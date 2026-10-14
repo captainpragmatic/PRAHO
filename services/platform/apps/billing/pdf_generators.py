@@ -25,6 +25,8 @@ from apps.billing.bank_transfer import bank_transfer_instructions
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
+from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country, operator_is_romanian
 from apps.common.utils import format_romanian_date
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,13 @@ logger = logging.getLogger(__name__)
 _FONT = "DejaVuSans"
 _FONT_BOLD = "DejaVuSans-Bold"
 _FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+
+
+def _tax_identity_labels(country: str) -> tuple[str, str]:
+    """Tax-ID and registration labels for a party: Romanian CUI/CIF and Nr. Reg. Com., else generic ones."""
+    if country == "RO":
+        return str(gettext("CUI/CIF: {tax_id}")), str(gettext("Nr. Reg. Com.: {reg}"))
+    return str(gettext("VAT ID: {tax_id}")), str(gettext("Company reg. no.: {reg}"))
 
 
 def _register_fonts() -> None:
@@ -207,14 +216,14 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(2 * cm, current_y, seller_address)
             current_y -= step
 
-        self.canvas.drawString(2 * cm, current_y, str(gettext("CUI/CIF: {cui}")).format(cui=company_info["cui"]))
-        current_y -= step
+        tax_id_label, registration_label = _tax_identity_labels(operator_country())
+        if company_info["cui"]:
+            self.canvas.drawString(2 * cm, current_y, tax_id_label.format(tax_id=company_info["cui"]))
+            current_y -= step
 
         if company_info["registration_number"]:
             self.canvas.drawString(
-                2 * cm,
-                current_y,
-                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=company_info["registration_number"]),
+                2 * cm, current_y, registration_label.format(reg=company_info["registration_number"])
             )
             current_y -= step
 
@@ -283,19 +292,16 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(x_pos, current_y, self.document.bill_to_country)
             current_y -= step
 
-        # Tax ID
+        tax_id_label, registration_label = _tax_identity_labels(
+            normalize_country_code(self.document.bill_to_country) or operator_country()
+        )
         if self.document.bill_to_tax_id:
-            self.canvas.drawString(
-                x_pos, current_y, str(gettext("CUI/CIF: {tax_id}")).format(tax_id=self.document.bill_to_tax_id)
-            )
+            self.canvas.drawString(x_pos, current_y, tax_id_label.format(tax_id=self.document.bill_to_tax_id))
             current_y -= step
 
-        # Registration number
         if self.document.bill_to_registration_number:
             self.canvas.drawString(
-                x_pos,
-                current_y,
-                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=self.document.bill_to_registration_number),
+                x_pos, current_y, registration_label.format(reg=self.document.bill_to_registration_number)
             )
             current_y -= step
 
@@ -612,7 +618,8 @@ class RomanianDocumentPDFGenerator:
         company_info = self._get_company_info()
 
         self.canvas.setFont(_FONT, 8)
-        self.canvas.drawString(2 * cm, 2 * cm, str(self._get_legal_disclaimer()))
+        if disclaimer := str(self._get_legal_disclaimer()):
+            self.canvas.drawString(2 * cm, 2 * cm, disclaimer)
         self.canvas.drawString(
             2 * cm,
             1.5 * cm,
@@ -646,6 +653,9 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         return f"{prefix}_{self.invoice.display_number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
+        # The mention the Romanian Fiscal Code requires on an invoice; other jurisdictions have none.
+        if not operator_is_romanian():
+            return ""
         return gettext("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")
 
     def _get_total_label(self) -> str:

@@ -33,6 +33,7 @@ _PROD_ENV = {
     "PLATFORM_LOG_DIR": "/var/log/praho",  # The deployed default; empty would mean console only.
     "COMPANY_NAME": "Test Hosting SRL",  # Prod refuses a blank seller identity
     "COMPANY_CUI": "RO12345674",
+    "COMPANY_COUNTRY_CODE": "RO",
 }
 
 

@@ -23,7 +23,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "deploy/scripts"
-FISCAL_KEYS = "COMPANY_NAME=Test Hosting SRL\nCOMPANY_CUI=RO12345674\n"
+FISCAL_KEYS = "COMPANY_NAME=Test Hosting SRL\nCOMPANY_CUI=RO12345674\nCOMPANY_COUNTRY_CODE=RO\n"
 PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n" + FISCAL_KEYS
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
@@ -233,6 +233,7 @@ class TestDeployScript:
         assert result.returncode != 0
         assert "COMPANY_NAME" in result.stderr
         assert "COMPANY_CUI" in result.stderr
+        assert "COMPANY_COUNTRY_CODE" in result.stderr
         assert project.compose_calls() == []
 
     @pytest.mark.integration

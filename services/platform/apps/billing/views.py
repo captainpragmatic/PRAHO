@@ -59,6 +59,7 @@ from apps.common.decorators import (
 )
 from apps.common.financial_arithmetic import parse_major_units_to_cents
 from apps.common.mixins import get_search_context
+from apps.common.operator import operator_is_romanian
 from apps.common.pagination import pagination_query
 from apps.common.tax_service import TaxService
 from apps.common.types import Err
@@ -1957,6 +1958,7 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
         "monthly_stats": _monthly_revenue(customer_ids),
         "revenue_by_currency": _revenue_by_currency(customer_ids),
         "undated_corrections": _undated_corrections(customer_ids),
+        "show_d390": operator_is_romanian(),
     }
 
     return render(request, "billing/reports.html", context)
