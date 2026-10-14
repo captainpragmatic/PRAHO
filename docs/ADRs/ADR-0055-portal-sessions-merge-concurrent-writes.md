@@ -53,8 +53,9 @@ Docker portals already run two worker processes. Threaded workers make the race 
     - Such a change applies only if no other request changed the group since this one loaded it.
     - If one did, that change wins. Stale details never revert a concurrent switch or a new password hash, and never mix with them.
     - The skipped detail is refreshed by the next request that needs it.
-- **Record maps** (`order_checkout_attempts`, `gift_purchase_forms`) merge per record, so two tabs
-  keep both purchases in progress.
+- **Record maps** (`order_checkout_attempts`, `gift_purchase_forms`, `service_request_submissions`,
+  `gift_payment_requests`) merge per record, so two tabs keep both purchases or submissions in
+  progress. `RECORD_MAPS` in `apps/common/session_store.py` is the list.
 - **Other lists and dicts**, including the cart, are one value. A concurrent edit to the same value is
   last-writer-wins.
 

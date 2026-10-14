@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import OperationalError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -76,6 +77,40 @@ class LoginClientIPLimitsTests(HMACTestMixin, TestCase):
             self.assertEqual(response.status_code, 200, response.content)
             self.assertTrue(response.json()["success"])
         self.assertEqual(counters.peek(self.login_cache_key), 0)
+
+    def test_an_unreachable_counter_store_is_a_503_not_a_429(self) -> None:
+        real_peek = counters.peek
+
+        def peek(key: str) -> int:
+            if key.startswith("login_ip:"):
+                raise OperationalError("Counter store unavailable")
+            return real_peek(key)
+
+        with (
+            patch("apps.common.counters.peek", side_effect=peek),
+            patch("apps.api.users.views.authenticate", side_effect=AssertionError("credential work")),
+        ):
+            response = self.portal_post(
+                self.login_path, {"email": self.user.email, "password": self.password, "client_ip": self.client_ip}
+            )
+        self.assertEqual(response.status_code, 503, response.content)
+        self.assertEqual(response["Retry-After"], "2")
+        self.assertEqual(
+            response.json(), {"success": False, "error": "Platform temporarily unavailable", "status": 503}
+        )
+
+    def test_a_store_failure_while_charging_a_wrong_password_still_answers_401(self) -> None:
+        with patch("apps.common.counters.increment", side_effect=self._fail_login_counter_only):
+            response = self.portal_post(
+                self.login_path, {"email": self.user.email, "password": "wrong", "client_ip": self.client_ip}
+            )
+        self.assertEqual(response.status_code, 401, response.content)
+
+    @staticmethod
+    def _fail_login_counter_only(key: str, window: int, *, delta: int = 1) -> int:
+        if key.startswith("login_ip:"):
+            raise OperationalError("Counter store unavailable")
+        return 1
 
     def test_throttled_login_does_no_credential_work(self) -> None:
         self.exhaust_client_limit()

@@ -24,6 +24,7 @@ from django.utils import timezone
 from django.utils.functional import Promise
 
 from apps.audit.models import AuditEvent, audit_mutation_allowed
+from apps.common import counters
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
@@ -657,9 +658,8 @@ class MFAServiceTestCase(TestCase):
         result1 = MFAService._check_rate_limit(self.user)
         self.assertTrue(result1)
 
-        # Mock cache to simulate rate limit exceeded
-        cache_key = f"mfa_attempts:{self.user.id}"
-        cache.set(cache_key, 6, 300)  # 6 attempts in 5 minutes
+        # Simulate the attempts of a guesser: 6 attempts in 5 minutes
+        counters.increment(f"mfa_attempts:{self.user.id}", 300, delta=6)
 
         result2 = MFAService._check_rate_limit(self.user)
         self.assertFalse(result2)

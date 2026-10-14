@@ -17,6 +17,7 @@ from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
+from apps.common import counters
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.users.mfa import (
     MFAService,
@@ -754,15 +755,14 @@ class EnhancedMFAServiceTest(TestCase):
         # WebAuthn credentials should be deleted
         self.assertEqual(WebAuthnCredential.objects.filter(user=self.user).count(), 0)
 
-    @patch("apps.users.mfa.cache")
-    def test_rate_limiting(self, mock_cache: Mock) -> None:
+    def test_rate_limiting(self) -> None:
         """Test MFA verification rate limiting"""
         request = self.factory.post("/")
         request.user = self.user
         request.META["REMOTE_ADDR"] = "192.168.1.1"
 
-        # Mock cache to simulate rate limit exceeded
-        mock_cache.get.return_value = MAX_LOGIN_ATTEMPTS + 1
+        # Simulate a guesser who has already used up the budget
+        counters.increment(f"mfa_attempts:{self.user.id}", 300, delta=MAX_LOGIN_ATTEMPTS + 1)
 
         result = self.mfa_service.verify_second_factor(request, self.user, "totp", "123456")
 

@@ -1,4 +1,4 @@
-"""Savepoint isolation for optional database effects."""
+"""Savepoint isolation for optional database effects, and the no-transaction guard (ADR-0045)."""
 
 import logging
 from collections.abc import Callable, Iterator
@@ -9,6 +9,19 @@ from typing import Self
 
 from django.db import DatabaseError, InterfaceError, transaction
 from django.db.transaction import TransactionManagementError
+
+
+def is_outside_transaction(using: str | None = None) -> bool:
+    """True when a write commits immediately: no atomic block and autocommit on.
+
+    Provider mutations are only sound when each phase commits on its own (ADR-0045): inside an
+    enclosing atomic block a claim is only a savepoint, so an outer rollback erases the record of
+    a call the provider already saw. Django also lets a caller turn autocommit off with
+    ``set_autocommit(False)`` without opening an atomic block, so checking ``in_atomic_block``
+    alone lets that case through.
+    """
+    connection = transaction.get_connection(using)
+    return connection.get_autocommit() and not connection.in_atomic_block
 
 
 class _SuppressingContextDecorator(ContextDecorator, AbstractContextManager[None, bool]):

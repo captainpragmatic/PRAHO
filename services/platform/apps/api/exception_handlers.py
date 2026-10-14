@@ -11,7 +11,9 @@ from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
+from apps.common.performance.rate_limiting import RateLimitStoreUnavailable
 from apps.common.retry_after import coerce_retry_after_seconds
+from apps.common.store_unavailable import STORE_UNAVAILABLE_RETRY_AFTER_SECONDS, store_unavailable_body
 
 
 def platform_exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
@@ -21,6 +23,12 @@ def platform_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     Keeps DRF's `detail` field for compatibility while guaranteeing an
     explicit `error` and `retry_after` payload contract.
     """
+    if isinstance(exc, RateLimitStoreUnavailable):
+        # The same answer the HMAC middleware gives when the counter store is down.
+        unavailable = Response(store_unavailable_body(), status=HTTPStatus.SERVICE_UNAVAILABLE)
+        unavailable["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+        return unavailable
+
     response = exception_handler(exc, context)
     if response is None:
         return None

@@ -11,9 +11,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils import timezone
 
+from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .gateways import RegistrarAPIError, RegistrarGatewayFactory
@@ -38,7 +39,7 @@ def renewal_intent_key(years: int, token: str | None) -> str:
 
 
 def require_autocommit() -> bool:
-    return connection.get_autocommit() and not connection.in_atomic_block
+    return is_outside_transaction()
 
 
 class DomainOperationService:
