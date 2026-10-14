@@ -2458,7 +2458,7 @@ def api_stripe_config(request: HttpRequest) -> JsonResponse:
             "appearance": {
                 "theme": "stripe",
                 "variables": {
-                    "colorPrimary": "#0570de",
+                    "colorPrimary": "#2451b2",  # PRAHO's accent on light surfaces (ADR-0058)
                 },
             },
         }

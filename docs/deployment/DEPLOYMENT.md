@@ -973,7 +973,7 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 ### Brand folder
 
-`BRAND_DIR` names a folder holding any of `logo.svg`, `favicon.svg` and `brand.css`; each file present replaces PRAHO's own (ADR-0058). Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
+`BRAND_DIR` names a folder holding any of `logo.svg` (drawn for PRAHO's dark screens), `favicon.svg`, `favicon.ico`, `apple-touch-icon.png` and `brand.css`; each file present replaces PRAHO's own (ADR-0058). In `brand.css`, `--color-primary-50` to `--color-primary-950` recolour the portal's accent and `--color-slate-*` its neutrals. Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
 
 ### Security Variables
 

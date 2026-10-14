@@ -4,9 +4,9 @@
    See platform.css for why the design system is defined in CSS rather than in a
    tailwind.config.js: Tailwind v4's CLI has no --config flag and never read them.
 
-   Only referenced-but-unemitted tokens are restored here — see platform.css for
-   the reasoning on why the old config's overrides of Tailwind defaults are
-   deliberately not ported, and why dark mode stays on prefers-color-scheme.
+   The portal's @theme carries PRAHO's default customer palette below; see
+   platform.css for why dark mode stays on prefers-color-scheme. A deployment
+   recolours it through its brand folder's brand.css, never by editing this file.
    =============================================================================== */
 
 @import "tailwindcss";
@@ -16,16 +16,45 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  /* Customer-facing primary — 210 hue, a softer blue than Platform's 220. */
-  --color-primary-50: hsl(210 100% 97%);
-  --color-primary-100: hsl(210 100% 94%);
-  --color-primary-200: hsl(210 100% 87%);
-  --color-primary-300: hsl(210 100% 78%);
-  --color-primary-400: hsl(210 100% 67%);
-  --color-primary-500: hsl(210 100% 56%);
-  --color-primary-600: hsl(210 100% 45%);
-  --color-primary-700: hsl(210 100% 36%);
-  --color-primary-800: hsl(210 100% 28%);
-  --color-primary-900: hsl(210 100% 22%);
-  --color-primary-950: hsl(210 100% 14%);
+  /* PRAHO's default customer palette (ADR-0058). The accent is one scale, primary: links
+     are 400, buttons 600 with white text, rings and borders 500. The templates' blue-*
+     utilities resolve to it, so a deployment's brand.css recolours the portal by overriding
+     --color-primary-* alone. */
+  --color-primary-50: #f1f5fc;
+  --color-primary-100: #e3eaf8;
+  --color-primary-200: #c9d8f8;
+  --color-primary-300: #afc6ff;
+  --color-primary-400: #8fb0ff;
+  --color-primary-500: #4a72db;
+  --color-primary-600: #345fcc;
+  --color-primary-700: #2451b2;
+  --color-primary-800: #1e4397;
+  --color-primary-900: #1b3366;
+  --color-primary-950: #1b2a47;
+
+  --color-blue-50: var(--color-primary-50);
+  --color-blue-100: var(--color-primary-100);
+  --color-blue-200: var(--color-primary-200);
+  --color-blue-300: var(--color-primary-300);
+  --color-blue-400: var(--color-primary-400);
+  --color-blue-500: var(--color-primary-500);
+  --color-blue-600: var(--color-primary-600);
+  --color-blue-700: var(--color-primary-700);
+  --color-blue-800: var(--color-primary-800);
+  --color-blue-900: var(--color-primary-900);
+  --color-blue-950: var(--color-primary-950);
+
+  /* Graphite neutrals in place of Tailwind's blue-tinted slate: the page is 900, cards 800,
+     soft lines 700, muted text 400. brand.css may override --color-slate-* as well. */
+  --color-slate-50: #f4f6f8;
+  --color-slate-100: #e7ecf2;
+  --color-slate-200: #dde2e8;
+  --color-slate-300: #c4cbd4;
+  --color-slate-400: #a6b0bc;
+  --color-slate-500: #65707e;
+  --color-slate-600: #48525f;
+  --color-slate-700: #263040;
+  --color-slate-800: #171e27;
+  --color-slate-900: #0f141b;
+  --color-slate-950: #0a0e13;
 }

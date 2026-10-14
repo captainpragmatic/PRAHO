@@ -1,2 +1,2 @@
-{% load static %}{# The deployment's mark: static/brand/logo.svg, PRAHO's own unless BRAND_DIR replaces it (ADR-0058). #}
+{% load static %}{# The deployment's mark, drawn for PRAHO's dark screens: static/brand/logo.svg, PRAHO's own unless BRAND_DIR replaces it (ADR-0058). #}
 <img src="{% static 'brand/logo.svg' %}" alt="{{ company.brand_name|default:'PRAHO' }}" class="{{ css_class|default:'h-8 w-8' }}">

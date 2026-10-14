@@ -1,4 +1,4 @@
-# PRAHO Platform - PRAHO Really Automates Hosting Operations
+# <picture><source media="(prefers-color-scheme: dark)" srcset="shared/ui/static/brand/logo.svg"><img src="shared/ui/static/brand/logo-light.svg" alt="" width="32" height="32"></picture> PRAHO Platform - PRAHO Really Automates Hosting Operations
 
 > **Pre-release software (v0.30.0-alpha)** - Under active development. Not yet recommended for production use.
 

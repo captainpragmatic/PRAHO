@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A deployment brands PRAHO without forking it** (ADR-0058).
   - **Name.** `company.brand_name` (default "PRAHO") names the portal's header, page titles and footer, customer emails and authenticator-app entries.
-  - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicon and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.
+  - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicons and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.
+  - **PRAHO has a mark of its own**, a P with a signal dot, in the favicon (SVG, ICO and Apple touch icon), the staff and portal headers and the README. `scripts/brand/build_praho_mark.py` regenerates the SVGs.
+  - **The portal has a new default palette:** a platform-blue accent and graphite neutrals in place of Tailwind's slate. Its accent is one scale, `--color-primary-*`, so a deployment's `brand.css` recolours the portal by overriding that scale and `--color-slate-*`. The card payment form uses the same accent.
   - **Emails.** Seeded email templates take the brand and the support address when they are sent, so changing either needs no re-seed. Re-running `setup_email_templates` still adds no duplicates.
   - The portal footer shows the brand and the legal name instead of the tech stack and a stale version number.
   - **Card payments.** Customers' card statements show the Stripe account's own descriptor instead of a hardcoded "PRAHO". The automatic-payment authorization names "the seller named on my invoices"; its terms version is now `2026-10-14`, so new authorizations record the new wording.
