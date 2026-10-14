@@ -199,6 +199,9 @@ class OrderCreationMessageLocalisationTests(TestCase):
         cart.cart = {"created_at": "2026-01-01T00:00:00Z"}
         cart.get_cart_version.return_value = "v1"
         cart.get_warnings.return_value = []
+        # The selling currency is unchanged, so creation reaches Platform. A Mock's truthy return
+        # stopped it at "prices changed" before, and the old catch-all hid that.
+        cart.ensure_selling_policy.return_value = False
 
         exploding_client = Mock()
         exploding_client.post.side_effect = PlatformAPIError("Order currency not set")

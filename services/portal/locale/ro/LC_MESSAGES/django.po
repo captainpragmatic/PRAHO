@@ -4191,10 +4191,6 @@ msgstr "politica de confidențialitate"
 msgid "for hosting services."
 msgstr "serviciilor noastre de hosting."
 
-#: services/portal/templates/orders/checkout.html:189
-msgid "By requesting immediate service activation, you acknowledge and agree to waive the 14-day right of withdrawal once your service is provisioned, in accordance with EU Directive 2011/83/EU."
-msgstr "Prin solicitarea activării imediate a serviciului, recunoașteți și sunteți de acord să renunțați la dreptul de retragere de 14 zile odată ce serviciul este activat, în conformitate cu Directiva UE 2011/83/UE."
-
 #: services/portal/templates/orders/checkout.html:196
 msgid "Your order data will be retained for the period required by Romanian accounting law (5 years from 1 July of the year after the financial year). For details, see our"
 msgstr "Datele comenzii dvs. vor fi păstrate pe durata prevăzută de legislația contabilă română (5 ani de la 1 iulie a anului următor exercițiului financiar). Pentru detalii, consultați"
@@ -7845,3 +7841,21 @@ msgid_plural "%(count)d days"
 msgstr[0] "%(count)d zi"
 msgstr[1] "%(count)d zile"
 msgstr[2] "%(count)d de zile"
+
+msgid "Accept the Terms of Service to place the order."
+msgstr "Acceptați Termenii și condițiile pentru a plasa comanda."
+
+msgid "The Terms of Service have changed. Please read them again before ordering."
+msgstr "Termenii și condițiile s-au schimbat. Vă rugăm să le citiți din nou înainte de a comanda."
+
+msgid "Ordering opens once the Terms of Service are published."
+msgstr "Comenzile se deschid după publicarea Termenilor și condițiilor."
+
+msgid "Ask for your services to start now, within the 14-day withdrawal period, to place the order."
+msgstr "Pentru a plasa comanda, cereți ca serviciile să înceapă acum, în perioada de retragere de 14 zile."
+
+msgid "Start my services now. If I withdraw within 14 days, I pay for what was provided until then."
+msgstr "Începeți serviciile acum. Dacă mă retrag în 14 zile, plătesc ce a fost furnizat până atunci."
+
+msgid "You may withdraw from this contract within 14 days. Your services start as soon as the order is paid, so we need your request to begin within that period."
+msgstr "Vă puteți retrage din acest contract în 14 zile. Serviciile încep imediat ce comanda este plătită, așa că avem nevoie de cererea dvs. pentru a începe în această perioadă."

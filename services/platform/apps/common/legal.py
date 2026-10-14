@@ -17,6 +17,7 @@ import markdown
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+from django.utils.html import escape
 from django.utils.safestring import SafeString
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
@@ -116,6 +117,15 @@ class LegalDocument(models.Model):
     def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
         _refuse("delete()")
 
+    def attachment(self) -> tuple[str, bytes, str]:
+        """The release as a standalone HTML file: what an email attaches as the durable copy."""
+        title = escape(f"{self.get_kind_display()} {self.release}")
+        page = (
+            f'<!doctype html><html lang="{escape(self.language)}"><head><meta charset="utf-8"><title>{title}</title>'
+            f"</head><body><h1>{title}</h1><p>{escape(self.effective_on.isoformat())}</p>{self.body_html}</body></html>"
+        )
+        return f"{self.kind}-{self.release}.html", page.encode(), "text/html"
+
     def reference(self) -> LegalDocumentReference:
         return {
             "document_id": str(self.pk),
@@ -143,6 +153,19 @@ def current_legal_document(kind: str, language: str) -> LegalDocument | None:
         default_language = SettingsService.get_setting("system.default_language")
         if default_language != language:
             document = in_force.filter(language=default_language).first()
+    return document
+
+
+def any_legal_document_in_force(kind: str) -> bool:
+    """Whether a release of this document is in force today, in any language."""
+    return LegalDocument.objects.in_force(operator_local_date(timezone.now())).filter(kind=kind).exists()
+
+
+def legal_document_in_force(document_id: uuid.UUID, kind: str) -> LegalDocument | None:
+    """The release with this id if it is the one in force for its own language, else None."""
+    document = LegalDocument.objects.filter(pk=document_id, kind=kind).first()
+    if document is None or current_legal_document(kind, document.language) != document:
+        return None
     return document
 
 

@@ -788,7 +788,7 @@ class AuditService:
             "data_protection": ["data_export_", "data_deletion_"],
             "integration": ["api_", "webhook_"],
             "system_admin": ["system_", "backup_", "configuration_", "user_impersonation"],
-            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_"],
+            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_", "early_performance_"],
             "business_operation": [
                 "proforma_",
                 "invoice_",

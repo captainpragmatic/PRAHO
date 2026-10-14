@@ -6,6 +6,7 @@ Session-based cart management with platform API integration.
 import hashlib
 import json
 import logging
+import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -15,6 +16,7 @@ from typing import Any, cast
 from django.core.exceptions import ValidationError
 from django.db import Error as DatabaseError
 from django.utils import timezone
+from django.utils.translation import get_language, gettext_lazy
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
@@ -696,6 +698,29 @@ class CartCalculationService:
             raise ValidationError(_("Error calculating totals")) from e
 
 
+# What Platform answers when an order's consents are refused (apps.orders.checkout_consents).
+CONSENT_REFUSALS = {
+    "terms_required": gettext_lazy("Accept the Terms of Service to place the order."),
+    "terms_changed": gettext_lazy("The Terms of Service have changed. Please read them again before ordering."),
+    "terms_unavailable": gettext_lazy("Ordering opens once the Terms of Service are published."),
+    "early_start_required": gettext_lazy(
+        "Ask for your services to start now, within the 14-day withdrawal period, to place the order."
+    ),
+}
+
+
+def _checkout_requirements(value: object) -> dict[str, Any]:
+    """Platform's checkout requirements, or none to show: then nothing can be ordered (see preflight errors)."""
+    none: dict[str, Any] = {"terms_document": None, "early_start_required": False}
+    if not isinstance(value, dict) or not isinstance(terms := value.get("terms_document"), dict):
+        return none
+    try:
+        uuid.UUID(str(terms.get("document_id")))
+    except ValueError:
+        return none
+    return {"terms_document": terms, "early_start_required": value.get("early_start_required") is True}
+
+
 class OrderCreationService:
     """Service for creating orders from cart via platform API"""
 
@@ -787,6 +812,7 @@ class OrderCreationService:
 
             # Prepare preflight payload (same as order creation)
             preflight_data = {
+                "language": get_language(),  # Platform answers with the terms release in this language
                 "customer_id": customer_id,
                 "items": cart.get_api_items(),
                 "coupon_codes": cart.get_coupon_codes(),
@@ -848,6 +874,7 @@ class OrderCreationService:
                 "errors": errors,
                 "warnings": warnings,
                 "preflight_data": result.get("preflight_data", {}),
+                "checkout": _checkout_requirements(result.get("checkout")),
             }
 
         except PlatformAPIError as e:
@@ -888,8 +915,10 @@ class OrderCreationService:
         api_client_factory: type[PlatformAPIClient] | None = None,
         payment_method: str = "",
         promotion_quote: str = "",
+        terms_document_id: str = "",
+        early_start_requested: bool = False,
     ) -> dict[str, Any]:
-        """Create draft order from cart items"""
+        """Create draft order from cart items, with the consents the checkout page collected"""
 
         attempt = OrderCreationService.pending_attempt(cart, customer_id, user_id)
         if not attempt and not cart.has_items():
@@ -916,11 +945,12 @@ class OrderCreationService:
                 "promotion_quote": promotion_quote,
                 "notes": notes,
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
+                # The terms release the page showed, and an EU consumer's early-start request.
+                "terms_document_id": terms_document_id,
+                "early_start_requested": early_start_requested,
             }
 
             # 🔒 SECURITY: Generate idempotency key to prevent race conditions and duplicate orders
-            import uuid  # noqa: PLC0415
-
             effective_idempotency_key = idempotency_key or uuid.uuid4().hex
             order_data["idempotency_key"] = effective_idempotency_key
 
@@ -952,9 +982,13 @@ class OrderCreationService:
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Order creation failed: {e}")
             details = getattr(e, "response_data", {}) or {}
-            if details.get("code") in {"currency_changed", "PROMOTION_QUOTE_CHANGED", "INVALID_ORDER"}:
+            code = details.get("code")
+            if code in {"currency_changed", "PROMOTION_QUOTE_CHANGED", "INVALID_ORDER", *CONSENT_REFUSALS}:
+                # A refused attempt is never replayed: the next checkout sends what its page shows.
                 OrderCreationService._clear_attempt(cart, customer_id)
-            if e.status_code == HTTPStatus.CONFLICT and details.get("code") == "currency_changed":
+            if code in CONSENT_REFUSALS:
+                raise ValidationError(CONSENT_REFUSALS[code]) from e
+            if e.status_code == HTTPStatus.CONFLICT and code == "currency_changed":
                 cart.apply_selling_policy(details)
                 raise ValidationError(currency_review_message()) from e
             if "PROMOTION_QUOTE_CHANGED" in str(details):

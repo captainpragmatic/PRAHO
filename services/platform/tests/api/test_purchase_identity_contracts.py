@@ -15,6 +15,7 @@ from apps.products.models import Product, ProductPrice
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
+from tests.helpers.checkout import checkout_consents
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 from tests.helpers.legal import publish_release
 from tests.helpers.task_queue import run_queued
@@ -203,6 +204,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "customer_id": customer.pk,
                 "user_id": user.pk,
                 "idempotency_key": "bank-order-contract",
+                **checkout_consents(),
                 "currency": "RON",
                 "currency_revision": 1,
                 "payment_method": "bank_transfer",

@@ -193,6 +193,15 @@ class Order(ConcurrentTransitionMixin, models.Model):
         help_text=_("Client-provided idempotency key to prevent duplicate orders"),
     )
 
+    # What the customer accepted at checkout (apps.orders.checkout_consents). Empty for orders
+    # staff created, which no customer accepted through the portal.
+    terms_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    early_start_requested = models.BooleanField(
+        default=False, help_text=_("The customer asked for the services to start within the withdrawal period")
+    )
+
     # Metadata
     meta = models.JSONField(default=dict, blank=True, help_text=_("Additional order metadata"))
 

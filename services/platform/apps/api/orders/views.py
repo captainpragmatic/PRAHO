@@ -42,6 +42,7 @@ from apps.common.performance.rate_limiting import (
 )
 from apps.common.types import CurrencyCode, Err, Ok
 from apps.customers.models import Customer
+from apps.orders.checkout_consents import ORDERING_UNAVAILABLE, accepted_checkout_consents, checkout_requirements
 from apps.orders.models import Order
 from apps.orders.preflight import OrderPreflightValidationService
 from apps.orders.price_sealing import PriceSealingService
@@ -630,6 +631,9 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         # Convert errors to strings
         error_messages = [str(error) for error in errors]
         warning_messages = [str(warning) for warning in warnings]
+        # What the checkout page shows and sends back with the order (apps.orders.checkout_consents).
+        checkout, checkout_errors = checkout_requirements(customer, request.data.get("language"))
+        error_messages += checkout_errors
 
         success = len(error_messages) == 0
 
@@ -655,6 +659,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                 "success": success,
                 "errors": error_messages,
                 "warnings": warning_messages,
+                "checkout": checkout,
                 "preview": {
                     "currency": currency.code,
                     "subtotal_cents": subtotal_cents,
@@ -678,6 +683,21 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# Status and message for each reason an order request's consents are refused.
+_CHECKOUT_REFUSALS = {
+    "terms_required": (status.HTTP_400_BAD_REQUEST, _("Accept the Terms of Service to place the order.")),
+    "terms_changed": (
+        status.HTTP_409_CONFLICT,
+        _("The Terms of Service have changed. Please read them again before ordering."),
+    ),
+    "terms_unavailable": (status.HTTP_409_CONFLICT, ORDERING_UNAVAILABLE),
+    "early_start_required": (
+        status.HTTP_400_BAD_REQUEST,
+        _("Ask for your services to start now, within the 14-day withdrawal period, to place the order."),
+    ),
+}
 
 
 @api_view(["POST"])
@@ -770,6 +790,15 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
     accepted_order = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
     if accepted_order is not None:
         return Response({"success": True, "order": OrderDetailSerializer(accepted_order).data, "duplicate": True})
+
+    # Before anything is written: an early answer here must not commit a partial order.
+    consents = accepted_checkout_consents(
+        customer, validated_data["terms_document_id"], validated_data["early_start_requested"]
+    )
+    if isinstance(consents, Err):
+        code = consents.unwrap_err()
+        answer_status, message = _CHECKOUT_REFUSALS[code]
+        return Response({"error": str(message), "code": code}, status=answer_status)
 
     try:
         require_current_selling_policy(validated_data["currency"], validated_data.get("currency_revision"))
@@ -896,6 +925,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             coupon_codes=validated_data.get("coupon_codes", []),
             promotion_quote=validated_data.get("promotion_quote", ""),
             gift_code=validated_data.get("gift_code", ""),
+            consents=consents.unwrap(),
         )
 
         # Create order using platform service (idempotency_key set atomically in create_order)

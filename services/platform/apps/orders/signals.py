@@ -686,38 +686,62 @@ def _send_proforma_email_for_order(order: Order) -> None:
             logger.info("📧 [Order] Sent proforma email for order %s", order.order_number)
 
 
-def _send_order_confirmation_email(order: Order) -> None:
-    """Send order confirmation email"""
-    try:
-        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
-        )
+def _order_email_context(order: Order) -> dict[str, Any]:
+    """The values the order email templates name, from the order as committed."""
+    from apps.common.utils import format_document_date  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.users.services import portal_link  # noqa: PLC0415  # ADR-0007
 
+    return {
+        "customer_name": order.customer_name,
+        "order_number": order.order_number,
+        "order_date": format_document_date(order.created_at),
+        "order_status": str(order.get_status_display()),
+        "total_amount": str(order.total),
+        "currency": order.currency.code,
+        "order_items": ", ".join(f"{item.quantity} x {item.product_name}" for item in order.items.all()),
+        "order_url": portal_link(f"/order/confirmation/{order.pk}/"),  # "": the template leaves it out
+        "early_start_requested": order.early_start_requested,
+        "terms_release": order.terms_document.release if order.terms_document else "",
+    }
+
+
+def _send_order_confirmation_email(order: Order) -> None:
+    """Send the order confirmation, the customer's durable copy of what they accepted (ADR-0058).
+
+    It attaches the Terms of Service release the order names and states an early-start request.
+    """
+    from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007
+    from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+    )
+
+    with best_effort_atomic(logger=logger, scope="Order", message="Failed to send confirmation email"):
+        order.refresh_from_db()  # Totals are recalculated as the items are added after the order row
         EmailService.send_template_email(
             template_key="order_placed",
             recipient=order.customer_email,
-            context={"order": order, "customer": order.customer, "order_items": order.items.all()},
+            context=_order_email_context(order),
+            locale=get_customer_locale(order.customer),
             priority="high",
+            attachments=[order.terms_document.attachment()] if order.terms_document else None,
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Order] Failed to send confirmation email: {e}")
 
 
 def _send_order_completed_email(order: Order) -> None:
     """Send order completion email"""
-    try:
-        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
-        )
+    from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007
+    from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+    )
 
+    with best_effort_atomic(logger=logger, scope="Order", message="Failed to send completion email"):
         EmailService.send_template_email(
             template_key="order_completed",
             recipient=order.customer_email,
-            context={"order": order, "customer": order.customer},
+            context=_order_email_context(order),
+            locale=get_customer_locale(order.customer),
             priority="normal",
         )
-    except Exception as e:
-        logger.exception(f"🔥 [Order] Failed to send completion email: {e}")
 
 
 def _send_order_cancelled_email(order: Order) -> None:

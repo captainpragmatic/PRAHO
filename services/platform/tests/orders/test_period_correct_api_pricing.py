@@ -17,6 +17,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.price_sealing import create_sealed_price_for_product_price
 from apps.products.models import Product, ProductPrice
+from tests.helpers.checkout import checkout_consents
 
 
 @override_settings(PRICE_SEALING_SECRET="period-pricing-test-secret-key-at-least-32-characters")
@@ -53,7 +54,7 @@ class PeriodCorrectAPIOrderPricingTests(TestCase):
         self.factory = RequestFactory()
 
     def _post(self, path: str, data: dict[str, Any], **headers: str) -> Any:
-        data = {"currency_revision": 1, **data}
+        data = {"currency_revision": 1, **checkout_consents(), **data}
         return self.factory.post(
             path,
             data=json.dumps(data, default=str).encode(),

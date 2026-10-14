@@ -27006,3 +27006,18 @@ msgstr "În vigoare"
 
 msgid "Nothing is published yet. Until Terms of Service are in force, customers cannot register."
 msgstr "Nu este nimic publicat încă. Până când Termenii și condițiile sunt în vigoare, clienții nu se pot înregistra."
+
+msgid "Accept the Terms of Service to place the order."
+msgstr "Acceptați Termenii și condițiile pentru a plasa comanda."
+
+msgid "The Terms of Service have changed. Please read them again before ordering."
+msgstr "Termenii și condițiile s-au schimbat. Vă rugăm să le citiți din nou înainte de a comanda."
+
+msgid "Ordering opens once the Terms of Service are published."
+msgstr "Comenzile se deschid după publicarea Termenilor și condițiilor."
+
+msgid "Ask for your services to start now, within the 14-day withdrawal period, to place the order."
+msgstr "Pentru a plasa comanda, cereți ca serviciile să înceapă acum, în perioada de retragere de 14 zile."
+
+msgid "When the customer asked for the services to start within the withdrawal period"
+msgstr "Când clientul a cerut ca serviciile să înceapă în perioada de retragere"

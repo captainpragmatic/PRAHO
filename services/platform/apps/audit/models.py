@@ -325,6 +325,8 @@ class AuditEvent(models.Model):
         ("billing_address_updated", "Billing Address Updated"),
         ("tax_information_updated", "Tax Information Updated"),
         ("order_placed", "Order Placed"),
+        ("order_terms_accepted", "Order Terms Accepted"),
+        ("early_performance_requested", "Early Performance Requested"),
         ("order_cancelled", "Order Cancelled"),
         ("service_activated", "Service Activated"),
         ("service_suspended", "Service Suspended"),

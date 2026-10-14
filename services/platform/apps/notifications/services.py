@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import Error, transaction
@@ -64,15 +63,9 @@ RATE_LIMIT_CACHE_PREFIX = "email_rate:"
 
 def _portal_invoice_url(invoice: Invoice) -> str:
     """The customer's invoice page on the Portal, or "" (with a warning) when the Portal URL is unset."""
-    from apps.users.services import portal_public_origin  # noqa: PLC0415  # ADR-0007 cross-app import
+    from apps.users.services import portal_link  # noqa: PLC0415  # ADR-0007 cross-app import
 
-    try:
-        return f"{portal_public_origin()}/billing/invoices/{invoice.number}/"
-    except ImproperlyConfigured:
-        logger.warning(
-            "⚠️ [Email] portal.public_base_url is not configured; invoice %s email has no link", invoice.number
-        )
-        return ""
+    return portal_link(f"/billing/invoices/{invoice.number}/")
 
 
 # ===============================================================================

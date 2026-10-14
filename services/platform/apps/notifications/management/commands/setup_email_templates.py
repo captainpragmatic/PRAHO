@@ -535,7 +535,9 @@ class Command(BaseCommand):
                         <li>Veți primi detaliile de acces pe email</li>
                     </ol>
                 </div>
-                <p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Comanda</a></p>
+                {% if early_start_requested %}<p>Ați cerut să începem furnizarea serviciilor acum, în perioada de retragere de 14 zile. Dacă vă retrageți, plătiți ce a fost furnizat până atunci.</p>{% endif %}
+                {% if terms_release %}<p>Termenii și condițiile pe care le-ați acceptat (versiunea {{terms_release}}) sunt atașați acestui email.</p>{% endif %}
+                {% if order_url %}<p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Comanda</a></p>{% endif %}
                 <p>Pentru întrebări, contactați-ne la {{support_email}}</p>
                 <p>Mulțumim că ați ales {{brand_name}}!</p>
                 <p>Echipa {{brand_name}}</p>
@@ -580,7 +582,9 @@ class Command(BaseCommand):
                         <li>You will receive access details via email</li>
                     </ol>
                 </div>
-                <p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Order</a></p>
+                {% if early_start_requested %}<p>You asked us to start your services now, within the 14-day withdrawal period. If you withdraw, you pay for what was provided until then.</p>{% endif %}
+                {% if terms_release %}<p>The Terms of Service you accepted (release {{terms_release}}) are attached to this email.</p>{% endif %}
+                {% if order_url %}<p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Order</a></p>{% endif %}
                 <p>For questions, contact us at {{support_email}}</p>
                 <p>Thank you for choosing {{brand_name}}!</p>
                 <p>The {{brand_name}} Team</p>

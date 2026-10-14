@@ -176,8 +176,10 @@ class CheckoutContext:
     cart_version: str
     notes: str
     idempotency_key: str
-    agree_terms: bool
     retry_pending: bool = False
+    # The terms release the page showed, and an EU consumer's early-start request.
+    terms_document_id: str = ""
+    early_start_requested: bool = False
 
 
 def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpResponse:
@@ -207,7 +209,6 @@ def _pending_checkout_context(
         cart_version=attempt["cart_version"],
         notes=payload["notes"],
         idempotency_key=payload["idempotency_key"],
-        agree_terms=True,
         retry_pending=True,
     )
 
@@ -277,8 +278,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         return redirect("orders:checkout")
 
     # Validate EU compliance terms acceptance
-    agree_terms = request.POST.get("agree_terms", "") == "on"
-    if not agree_terms:
+    if request.POST.get("agree_terms", "") != "on":
         messages.error(request, _("You must agree to the terms and conditions."))
         return redirect("orders:checkout")
 
@@ -290,7 +290,8 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         cart_version=cart_version,
         notes=request.POST.get("notes", "").strip(),
         idempotency_key=request.POST.get("idempotency_key", "").strip(),
-        agree_terms=agree_terms,
+        terms_document_id=request.POST.get("terms_document_id", "").strip(),
+        early_start_requested=request.POST.get("early_start_requested", "") == "on",
     )
 
 
@@ -428,6 +429,8 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 promotion_quote=request.POST.get("promotion_quote", ""),
                 payment_method=ctx.payment_method,
                 api_client_factory=PlatformAPIClient,
+                terms_document_id=ctx.terms_document_id,
+                early_start_requested=ctx.early_start_requested,
             )
 
             if result.get("error"):
@@ -559,6 +562,10 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
     except SessionSaveContended:
         raise  # The session middleware answers 503 with Retry-After (ADR-0055).
+    except ValidationError as exc:
+        # The order service words each refusal for the customer: a changed currency, offer or terms.
+        messages.error(request, exc.messages[0])
+        return redirect("orders:checkout")
     except Exception:
         # With the traceback: a session save failing here (UpdateError) has no message of its own.
         logger.exception("🔥 [Orders] Unexpected error creating order")
@@ -1134,6 +1141,8 @@ def checkout(request: HttpRequest) -> HttpResponse:
         "calculation": calculation_result,
         "warnings": cart.get_warnings(),
         "preflight": preflight_result,
+        # The terms release to link and send back, and whether to ask for an early start.
+        "checkout": (preflight_result or {}).get("checkout") or {},
         "can_submit": preflight_result.get("valid", False) if preflight_result else False,
         "order_steps": ORDER_STEPS,
         "current_step": 3,

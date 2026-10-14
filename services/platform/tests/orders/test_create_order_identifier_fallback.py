@@ -17,6 +17,7 @@ from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.products.models import Product, ProductPrice
+from tests.helpers.checkout import checkout_consents
 
 BILLING_PERIOD = "monthly"
 
@@ -70,6 +71,7 @@ def _call_create_order(customer: Customer, items: list[dict], currency: str = "R
             "currency": currency,
             "currency_revision": 1,
             "Idempotency-Key": idempotency_key,
+            **checkout_consents(),
         },
         default=str,
     ).encode()

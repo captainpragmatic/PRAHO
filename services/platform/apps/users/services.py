@@ -101,6 +101,15 @@ def portal_public_origin() -> str:
     return base
 
 
+def portal_link(path: str) -> str:
+    """A link to a portal page for a customer email, or "" (with a warning) while the portal URL is unset."""
+    try:
+        return f"{portal_public_origin()}{path}"
+    except ImproperlyConfigured:
+        logger.warning("⚠️ [Email] The portal URL is not configured; %s has no link", path)
+        return ""
+
+
 def platform_public_origin() -> str:
     """The Platform's public HTTPS origin from PLATFORM_DOMAIN, or "" where it is unset (development).
 

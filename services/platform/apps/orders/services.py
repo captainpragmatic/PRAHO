@@ -24,6 +24,7 @@ from apps.provisioning.service_models import Service, ServicePlan
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
     from apps.customers.models import Customer
+    from apps.orders.checkout_consents import CheckoutConsents
     from apps.users.models import User
 
     from .models import Order
@@ -248,6 +249,8 @@ class OrderCreateData:
     promotion_quote: str = ""
     gift_code: str = ""
     currency_revision: int | None = None
+    # What the customer accepted at checkout; staff-created orders carry none.
+    consents: CheckoutConsents | None = None
 
 
 @dataclass
@@ -494,6 +497,27 @@ class OrderService:
         )
 
     @staticmethod
+    def _audit_checkout_consents(order: Order, user: User | None) -> None:
+        """Record what the customer accepted, in the order's transaction: no order without its record."""
+        from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
+
+        if order.terms_document is not None:
+            AuditService.log_simple_event(
+                "order_terms_accepted",
+                user=user,
+                content_object=order,
+                description=f"Terms of Service accepted with order {order.order_number}",
+                metadata={"terms_document": order.terms_document.reference()},
+            )
+        if order.early_start_requested:
+            AuditService.log_simple_event(
+                "early_performance_requested",
+                user=user,
+                content_object=order,
+                description=f"Services asked to start within the withdrawal period for order {order.order_number}",
+            )
+
+    @staticmethod
     @transaction.atomic
     def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:  # noqa: C901, PLR0915  # Atomic order and quote reservation
         """Create new order with validation and audit trail"""
@@ -552,9 +576,12 @@ class OrderService:
                 else "",
                 # Billing address as JSON
                 billing_address=dict(data.billing_address),
+                terms_document=data.consents.terms if data.consents else None,
+                early_start_requested=bool(data.consents and data.consents.early_start_requested),
                 # Financial totals
                 **totals,
             )
+            OrderService._audit_checkout_consents(order, created_by)
 
             # Resolve product snapshots once for the whole cart, including repeated products.
             products = Product.objects.only("id", "name", "slug", "product_type").in_bulk(
