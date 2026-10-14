@@ -16,6 +16,9 @@
 #   PRAHO_EXPECTED_FP     the snapshot fingerprint a differential requires (differential only)
 #   PRAHO_LOCK_WAIT       seconds to wait for the lock
 #   PRAHO_STAGING_DIR     the private staging directory
+#   PRAHO_SNAPSHOT_DIR    optional: where Virtualmin keeps its differential snapshots (tests only;
+#                         the playbook never sets it)
+#   PRAHO_RUN_DIR         optional: where the lock, markers and log live (tests only)
 #
 # Output: exactly one line, CHAIN_RESULT=<base64 of a JSON object>. Exit status 0 means the
 # result line is trustworthy, including every refusal. Any other exit status means the
@@ -23,8 +26,15 @@
 set -euo pipefail
 umask 077
 
-readonly SNAPSHOT_DIR=/var/webmin/modules/virtual-server/incremental
-readonly RUN_DIR=/run/praho
+# The two directories default to the real ones. They can be overridden so the script can run
+# against a fake node in a temporary directory; an override must be an absolute path made of a
+# safe alphabet with no "..", exactly like every other input.
+SNAPSHOT_DIR=${PRAHO_SNAPSHOT_DIR:-/var/webmin/modules/virtual-server/incremental}
+RUN_DIR=${PRAHO_RUN_DIR:-/run/praho}
+readonly SNAPSHOT_DIR RUN_DIR
+safe_dir='^/[A-Za-z0-9._/-]+$'
+[[ $SNAPSHOT_DIR =~ $safe_dir && $SNAPSHOT_DIR != *..* ]] || exit 64
+[[ $RUN_DIR =~ $safe_dir && $RUN_DIR != *..* ]] || exit 64
 
 action=${PRAHO_CHAIN_ACTION:?}
 mode=${PRAHO_CHAIN_MODE:-}

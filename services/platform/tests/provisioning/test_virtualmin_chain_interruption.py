@@ -9,6 +9,7 @@ lock, invalidates the chain, and only then releases the exclusion.
 from __future__ import annotations
 
 import uuid
+from contextlib import ExitStack
 from datetime import timedelta
 from typing import Any
 from unittest.mock import patch
@@ -223,8 +224,8 @@ class ConfirmStoppedTests(ChainFixtures, ExclusionCase):
         self.assertEqual(self.calls[0]["kwargs"], {"token": self.token, "mode": "cancel", "domain_id": DOMAIN_ID})
 
 
-class MissedNoteTests(ChainFixtures, ExclusionCase):
-    """A step is dispatched only when the evidence a cancel needs is durable and the job is still ours."""
+class ChainRunnerCase(ChainFixtures, ExclusionCase):
+    """Admits real chain jobs for an account, to be run through the real runner and service."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -240,6 +241,10 @@ class MissedNoteTests(ChainFixtures, ExclusionCase):
             return VirtualminBackupManagementService(self.server).create_backup_job(
                 self.account, BackupConfig(chain_role=role)
             ).unwrap()
+
+
+class MissedNoteTests(ChainRunnerCase):
+    """A step is dispatched only when the evidence a cancel needs is durable and the job is still ours."""
 
     def run_job(self, job: VirtualminProvisioningJob, *, during_domain_id_read: Any = None) -> Any:
         """Run the job through the real runner and service, with only the node and the listing faked."""
@@ -452,3 +457,64 @@ class NodeLostTests(ChainFixtures, ExclusionCase):
         after = self.client.get(page).content.decode()
         self.assertIn(self.url, after)
         self.assertEqual(after.count("hx-confirm="), 2, "both resolutions ask for confirmation")
+
+
+class SettledStepErrorTests(ChainRunnerCase):
+    """UNKNOWN parks a chain job only while a dispatched node step is itself uncertain.
+
+    A bare error before dispatch, or a failed fetch after the step reported its fingerprints, says
+    nothing about the node step, so the job fails and releases the account instead of holding it.
+    """
+
+    def run_with(self, job: VirtualminProvisioningJob, **overrides: dict[str, Any]) -> None:
+        """Run the real runner and service; ``overrides`` replace the default fakes by method name."""
+        fakes: dict[str, dict[str, Any]] = {
+            "_validate_backup_preconditions": {"return_value": Ok(None)},
+            "_domain_features": {"return_value": None},
+            "_read_domain_id": {"return_value": Ok(DOMAIN_ID)},
+            **overrides,
+        }
+        with ExitStack() as contexts:
+            for name, options in fakes.items():
+                contexts.enter_context(patch.object(VirtualminBackupService, name, **options))
+            virtualmin_tasks.run_virtualmin_backup(str(job.pk))
+        job.refresh_from_db()
+
+    def test_a_fetch_failure_after_a_settled_step_fails_the_job_and_releases_the_account(self) -> None:
+        job = self.admit("base")
+        settled = Ok(
+            ChainStepResult(
+                outcome="ok",
+                reason="completed",
+                ran=True,
+                mode="base",
+                fp_before="ABSENT",
+                fp_after=SNAP_A,
+                backup_rc=0,
+                sha256="d" * 64,
+                size=10,
+                detail="",
+                archive="x",
+            )
+        )
+        self.run_with(
+            job,
+            run_chain_step={"return_value": settled},
+            _fetch_archive_to_spool={"return_value": Err("fetch lost", retriability=Retriability.UNKNOWN)},
+        )
+        self.assertEqual(job.status, "failed")
+        self.assertFalse(account_has_active_operation(self.account))
+
+    def test_a_bare_error_before_dispatch_fails_the_job_and_releases_the_account(self) -> None:
+        for role in ("base", "differential"):
+            with self.subTest(role=role):
+                job = self.admit(role)
+                self.run_with(job, _validate_backup_preconditions={"return_value": Err("not ready")})
+                self.assertEqual(job.status, "failed")
+                self.assertFalse(account_has_active_operation(self.account))
+
+    def test_an_unknown_error_from_the_dispatched_step_still_parks_the_job(self) -> None:
+        job = self.admit("base")
+        self.run_with(job, run_chain_step={"return_value": Err("playbook timed out", retriability=Retriability.UNKNOWN)})
+        self.assertEqual(job.status, "attention")
+        self.assertTrue(account_has_active_operation(self.account))
