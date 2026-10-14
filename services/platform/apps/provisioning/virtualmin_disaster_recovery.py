@@ -109,7 +109,10 @@ class VirtualminDisasterRecoveryService:
                         "server": target_server.hostname,
                         "accounts_to_rebuild": len(rebuild_plan),
                         "rebuild_plan": rebuild_plan,
-                        "message": "🔍 Dry run complete. Use dry_run=False to execute rebuild.",
+                        "message": (
+                            "🔍 Dry run complete. Executing this rebuild is not available: it would recreate "
+                            "empty domains. Recover from backups instead."
+                        ),
                     }
                 )
 

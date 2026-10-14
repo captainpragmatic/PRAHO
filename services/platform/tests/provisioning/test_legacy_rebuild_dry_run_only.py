@@ -47,6 +47,12 @@ class LegacyRebuildDryRunOnlyTests(VirtualminTaskTestBase):
             self.assertEqual(result.unwrap()["accounts_to_rebuild"], 1)
             self.assertTrue(result.unwrap()["dry_run"])
 
+    def test_the_dry_run_never_points_operators_at_the_refused_real_run(self) -> None:
+        message = VirtualminDisasterRecoveryService().rebuild_server_from_praho(self.server).unwrap()["message"]
+
+        self.assertNotIn("dry_run=False", message)
+        self.assertIn("not available", message.lower())
+
     def test_the_readiness_report_still_runs_its_dry_run(self) -> None:
         with patch.object(
             VirtualminDisasterRecoveryService, "rebuild_server_from_praho", return_value=Ok({"accounts_to_rebuild": 0, "rebuild_plan": []})
