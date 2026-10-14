@@ -262,24 +262,30 @@ class UnrecognisedRefusalNeverLicensesAReplayTests(SimpleTestCase):
                     Verdict.REJECTED,
                 )
 
-    def test_a_recognised_refusal_survives_arriving_with_a_throttle_status(self) -> None:
-        """Branch ORDER, not branch logic.
+    def test_throttle_reply_with_errorText_on_write_is_ambiguous(self) -> None:  # noqa: N802  # Names the body field
+        """Any 429 on a write is ambiguous, even when the body carries an `errorText`.
 
-        The V1 rule is that `errorText` is the verdict whatever the status says. The
-        429 check runs first, so a documented refusal that happens to arrive with a
-        throttle status was being answered "we cannot say" - sending a provably
-        correctable validation failure into manual reconciliation instead.
+        No real SmartBill 429 body has been observed, so nothing shows that an `errorText`
+        riding on a throttle status is a refusal made before invoicing. The request may
+        have been processed before the throttle answered. REJECTED here would mark the
+        submission failed, and the sweep resubmits failed ones, which could issue a second
+        legally numbered invoice. The throttle must still be recorded, because the client
+        blocks the token off this code.
         """
         body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": ""})
         result = _classify(429, body, is_write=True)
 
-        self.assertIs(result.verdict, Verdict.REJECTED)
-        self.assertIn("Seria nu a fost gasita", result.error_text)
+        self.assertIs(result.verdict, Verdict.AMBIGUOUS)
         self.assertIn(
             "rate_limit_exceeded",
             result.error_codes,
             "the throttle must still be recorded: the client blocks the token off this code",
         )
+
+    def test_throttle_reply_with_error_text_on_read_stays_cheap(self) -> None:
+        body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": ""})
+
+        self.assertIs(_classify(429, body, is_write=False).verdict, Verdict.REJECTED)
 
     def test_a_throttled_reply_that_contradicts_itself_stays_ambiguous(self) -> None:
         """An envelope plus a document number is contradictory, at any status."""
