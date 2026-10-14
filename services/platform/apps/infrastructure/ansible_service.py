@@ -524,6 +524,9 @@ ansible_python_interpreter=/usr/bin/python3
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,
             "inventory_hostname_short": deployment.hostname,
+            # inventory_hostname is Ansible's magic variable (the short inventory name) and outranks
+            # extra vars, so the FQDN the panel installer and Let's Encrypt need travels under its own name.
+            "node_fqdn": deployment.fqdn,
             # Backup settings
             "backup_enabled": backup_enabled,
             "backup_storage": backup_storage,

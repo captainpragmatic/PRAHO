@@ -26,6 +26,15 @@
       - webmin
 
   tasks:
+    # The installer and Let's Encrypt need the node's fully qualified name, which the
+    # short inventory_hostname is not. PRAHO passes it as node_fqdn (-e from a vars file).
+    - name: Refuse a missing node FQDN
+      ansible.builtin.assert:
+        that:
+          - node_fqdn is defined
+          - node_fqdn | length > 0
+        fail_msg: "node_fqdn is required: pass the node's fully qualified domain name"
+
     - name: Check if Virtualmin is already installed
       ansible.builtin.stat:
         path: /usr/share/webmin/virtual-server
@@ -41,7 +50,7 @@
     - name: Run Virtualmin installation
       ansible.builtin.command: >
         /root/virtualmin-install.sh
-        --hostname {{ inventory_hostname }}
+        --hostname {{ node_fqdn }}
         --minimal
         --force
       args:
@@ -161,11 +170,11 @@
     - name: Generate Let's Encrypt certificate for Virtualmin
       ansible.builtin.command: >
         virtualmin generate-letsencrypt-cert
-        --host {{ inventory_hostname }}
+        --host {{ node_fqdn }}
         --web
         --renew
       args:
-        creates: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+        creates: /etc/webmin/letsencrypt-cert-{{ node_fqdn }}
       register: letsencrypt_result
       # Fatal ONLY when letsencrypt_fatal is explicitly passed true (default false ==
       # today's non-fatal behavior, byte-for-byte). The #436 staging drill flips this on
@@ -192,7 +201,7 @@
     - name: Configure Webmin to use Let's Encrypt certificate
       ansible.builtin.command: >
         /usr/share/webmin/webmin/letsencrypt.cgi
-        --host {{ inventory_hostname }}
+        --host {{ node_fqdn }}
       when:
         - letsencrypt_result.changed | default(false)
         - letsencrypt_cgi.stat.exists
@@ -209,7 +218,7 @@
 
     - name: Record successful certificate issuance and installation
       ansible.builtin.file:
-        path: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+        path: /etc/webmin/letsencrypt-cert-{{ node_fqdn }}
         state: touch
         mode: '0644'
       when:
