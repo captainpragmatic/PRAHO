@@ -155,7 +155,7 @@ def test_customer_password_change_workflow(account_page) -> None:
 def test_customer_2fa_setup_access_and_flow(account_page) -> None:
     """An enrolled account needs a second factor; disabling requires step-up credentials."""
     page, account = account_page
-    codes = _enable_totp(page)
+    codes = _enable_totp(page, account["password"])
     ensure_fresh_session(page)
     assert not login_user(page, account["email"], account["password"])
     page.goto(f"{BASE_URL}/login/")
@@ -370,8 +370,9 @@ def test_customer_mfa_backup_codes(account_page) -> None:
     page.goto(f"{BASE_URL}/mfa/backup-codes/")
     expect(page).to_have_url(re.compile(r"/mfa/$"))
     expect(page.locator("body")).to_contain_text("enable 2FA first")
-    codes = _enable_totp(page)
-    page.reload()
+    codes = _enable_totp(page, account["password"])
+    # Shown once: the codes page itself never shows them again.
+    page.goto(f"{BASE_URL}/mfa/backup-codes/")
     expect(page.locator("code")).to_have_count(0)
     expect(page.locator("#main-content")).to_contain_text("cannot be displayed again")
     page.locator('input[name="password"]').fill(account["password"])
@@ -497,16 +498,21 @@ def test_profile_shows_member_since_date(monitored_customer_page: Page) -> None:
     expect(value).not_to_have_text("N/A")
 
 
-def _enable_totp(page: Page) -> list[str]:
+def _enable_totp(page: Page, password: str) -> list[str]:
+    """Enrol with the shown secret and the current password; the codes come in that same response.
 
+    They are shown once, in the response that made them, and kept in no session (#689), so the page
+    does not move to /mfa/backup-codes/.
+    """
     page.goto(f"{BASE_URL}/mfa/setup/totp/")
     secret = page.locator("#secret-key").text_content().strip()
     assert len(secret) >= 16
     assert page.locator('img[alt="MFA QR Code"]').evaluate("(img) => img.complete && img.naturalWidth > 0")
     page.locator('input[name="token"]').fill(pyotp.TOTP(secret).now())
+    page.locator('input[name="password"]').fill(password)
     page.get_by_role("button", name="Verify & Enable MFA", exact=True).click()
-    expect(page).to_have_url(re.compile(r"/mfa/backup-codes/$"))
     expect(page.locator("code")).to_have_count(8)
+    expect(page).to_have_url(re.compile(r"/mfa/setup/totp/$"))
     codes = page.locator("code").all_text_contents()
     assert len(set(codes)) == 8
     assert all(re.fullmatch(r"[0-9]{8}", code) for code in codes)
