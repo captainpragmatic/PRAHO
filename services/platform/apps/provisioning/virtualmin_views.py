@@ -38,7 +38,13 @@ from apps.users.models import User
 from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
-from .virtualmin_chain import is_chain_job, resolve_chain_job
+from .virtualmin_chain import (
+    is_chain_domain,
+    is_chain_job,
+    node_lost_refusal,
+    resolve_chain_job,
+    resolve_chain_job_node_lost,
+)
 from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
@@ -576,6 +582,27 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         messages.success(request, _("Job marked resolved. The account is unlocked."))
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_job_node_lost")
+def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Operator resolution of a chain job in attention whose node is lost (failed or decommissioned)."""
+    job = get_object_or_404(VirtualminProvisioningJob.objects.select_related("server", "account"), pk=job_id)
+    note = request.POST.get("note", "").strip() or _("operator confirmed the node is lost")
+    actor = request.user.email if request.user.is_authenticated else "system"
+    resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
+    if resolved.is_err():
+        messages.error(request, resolved.unwrap_err())
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+    job.refresh_from_db()
+    audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
+    messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
@@ -1724,6 +1751,12 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
                 if not domain_name or not username:
                     continue
+                if not is_chain_domain(domain_name):
+                    # The domain later reaches the node's chain scripts as a strict-alphabet input.
+                    error_msg = f"Skipped {username}: {domain_name!r} is not a valid domain name"
+                    sync_results["errors"].append(error_msg)
+                    logger.warning("⚠️ [AccountSync] %s", error_msg)
+                    continue
 
                 if username not in accounts_by_username:
                     accounts_by_username[username] = {
@@ -2165,6 +2198,12 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
         "can_retry": _job_can_be_retried(job),
+        "can_resolve": job.status == "attention",
+        "can_resolve_node_lost": (
+            job.status == "attention"
+            and is_chain_job(job.operation, job.parameters or {})
+            and node_lost_refusal(job.server) is None
+        ),
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)

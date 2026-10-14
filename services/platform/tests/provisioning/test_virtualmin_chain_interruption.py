@@ -20,7 +20,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.virtualmin_backup_service import ChainStepResult, VirtualminBackupService
 from apps.provisioning.virtualmin_migration_models import account_has_active_operation
-from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
+from apps.provisioning.virtualmin_models import VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 from apps.users.models import User
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
@@ -304,3 +304,151 @@ class MissedNoteTests(ChainFixtures, ExclusionCase):
         ):
             virtualmin_tasks.run_virtualmin_backup(str(job.pk))
         self.assertEqual(self.step_calls, [DOMAIN_ID], "the id is durable before the step runs")
+
+
+class NodeLostTests(ChainFixtures, ExclusionCase):
+    """A chain job on a node that is gone is released without the node, but only when the node is gone."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.account = self._account()
+        self.staff = User.objects.create_user(
+            email="node-lost@example.com", password="node-lost-test-password", staff_role="admin"
+        )
+        self.client.force_login(self.staff)
+        self.base = self.live_chain(self.account, epoch=2)
+        self.token = uuid.uuid4()
+        self.job = VirtualminProvisioningJob.objects.create(
+            operation="backup_domain",
+            account=self.account,
+            server=self.server,
+            status="attention",
+            execution_token=self.token,
+            parameters={
+                "chain_role": "differential",
+                "chain_token": str(uuid.uuid4()),
+                "chain_epoch": 2,
+                "virtualmin_domain_id": DOMAIN_ID,
+            },
+        )
+        self.url = reverse("provisioning:virtualmin_job_node_lost", args=[self.job.pk])
+
+    def declare_lost(self) -> Any:
+        with patch.object(VirtualminBackupService, "run_chain_step") as node:
+            response = self.client.post(self.url, {"note": "datacentre fire"})
+        node.assert_not_called()
+        self.job.refresh_from_db()
+        self.account.refresh_from_db()
+        return response
+
+    def deployment(self, status: str) -> None:
+        from apps.infrastructure.models import (  # noqa: PLC0415
+            CloudProvider,
+            NodeDeployment,
+            NodeRegion,
+            NodeSize,
+            PanelType,
+        )
+
+        provider = CloudProvider.objects.create(
+            name="Lost provider", provider_type="hetzner", code="lst", credential_identifier="lost-test"
+        )
+        NodeDeployment.objects.create(
+            provider=provider,
+            node_size=NodeSize.objects.create(
+                provider=provider,
+                name="Lost small",
+                display_name="Small",
+                provider_type_id="cpx21",
+                vcpus=2,
+                memory_gb=4,
+                disk_gb=40,
+                hourly_cost_eur="0.01",
+                monthly_cost_eur="5.00",
+            ),
+            region=NodeRegion.objects.create(
+                provider=provider,
+                name="Falkenstein",
+                provider_region_id="fsn1",
+                normalized_code="fsn1",
+                country_code="de",
+                city="Falkenstein",
+            ),
+            panel_type=PanelType.objects.create(
+                name="Lost Virtualmin", panel_type="virtualmin", ansible_playbook="virtualmin.yml"
+            ),
+            hostname="prd-lst-het-de-fsn1-001",
+            node_number=1,
+            ipv4_address="203.0.113.77",
+            virtualmin_server=self.server,
+            status=status,
+        )
+        self.server.refresh_from_db()
+
+    def test_a_node_that_is_still_usable_cannot_be_declared_lost(self) -> None:
+        for server_status in ("active", "maintenance", "disabled"):
+            with self.subTest(server_status=server_status):
+                VirtualminServer.objects.filter(pk=self.server.pk).update(status=server_status)
+                response = self.declare_lost()
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.job.status, "attention")
+                self.assertEqual(self.job.execution_token, self.token)
+                self.assertEqual((self.account.chain_base_id, self.account.chain_epoch), (self.base.pk, 2))
+                self.assertTrue(account_has_active_operation(self.account))
+
+    def test_a_failed_server_releases_the_job_rotates_its_token_and_clears_the_chain(self) -> None:
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        self.declare_lost()
+        self.assertEqual(self.job.status, "failed")
+        self.assertIn("Node lost", self.job.status_message)
+        self.assertIn("node-lost@example.com", self.job.status_message)
+        self.assertNotEqual(self.job.execution_token, self.token)
+        self.assertEqual((self.account.chain_base, self.account.chain_epoch), (None, 3))
+        self.assertFalse(account_has_active_operation(self.account))
+
+    def test_a_destroyed_deployment_counts_as_decommissioned(self) -> None:
+        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+
+        self.deployment("completed")
+        for status, allowed in (("completed", False), ("destroying", True), ("destroyed", True)):
+            with self.subTest(deployment=status):
+                NodeDeployment.objects.update(status=status)
+                self.server.refresh_from_db()
+                self.declare_lost()
+                self.assertEqual(self.job.status, "failed" if allowed else "attention")
+                VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="attention")
+
+    def test_a_late_runner_of_a_lost_job_can_neither_publish_nor_link(self) -> None:
+        from apps.provisioning.virtualmin_chain import complete_chain_job  # noqa: PLC0415
+
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        self.declare_lost()
+        self.assertFalse(VirtualminProvisioningJob.owns_execution(self.job.pk, self.token))
+        outcome = complete_chain_job(self.job, self.token, {"backup_id": "late", "fp_before": "", "fp_after": SNAP_A})
+        self.assertEqual(outcome, "superseded")
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, "failed")
+        self.assertEqual(VirtualminProvisioningJob.finish_execution(self.job.pk, self.token, "completed", ""), 0)
+
+    def test_only_chain_jobs_in_attention_can_be_resolved_this_way(self) -> None:
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        restore = VirtualminProvisioningJob.objects.create(
+            operation="restore_domain", account=self.account, server=self.server, status="attention"
+        )
+        self.client.post(reverse("provisioning:virtualmin_job_node_lost", args=[restore.pk]))
+        restore.refresh_from_db()
+        self.assertEqual(restore.status, "attention")
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="completed")
+        self.declare_lost()
+        self.assertEqual(self.job.status, "completed")
+        self.assertEqual(self.account.chain_epoch, 2, "a refused resolution must not touch the chain")
+
+    def test_the_status_page_offers_node_lost_only_when_it_is_allowed(self) -> None:
+        page = reverse("provisioning:virtualmin_job_status", args=[self.job.pk])
+        before = self.client.get(page).content.decode()
+        self.assertIn(reverse("provisioning:virtualmin_job_resolve", args=[self.job.pk]), before)
+        self.assertNotIn(self.url, before)
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        after = self.client.get(page).content.decode()
+        self.assertIn(self.url, after)
+        self.assertEqual(after.count("hx-confirm="), 2, "both resolutions ask for confirmation")

@@ -43,7 +43,9 @@ from .virtualmin_chain import (
     ROLE_BASE,
     ROLE_DIFFERENTIAL,
     ROLE_STANDALONE,
+    chain_step_input_error,
     invalidate_chain_if_epoch,
+    is_chain_domain,
     pins_hold,
 )
 from .virtualmin_gateway import (
@@ -1340,6 +1342,11 @@ class VirtualminBackupService:
                 "The differential chain changed since this backup was admitted; no remote work performed",
                 retriability=Retriability.NOT_RETRIABLE,
             )
+        if not is_chain_domain(account.domain):
+            return Err(
+                f"Domain {account.domain!r} is not a name the node step accepts; no remote work performed",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         domain_id = self._read_domain_id(account)
         if domain_id.is_err():
             return Err(domain_id.unwrap_err(), retriability=retriability_of(domain_id))
@@ -1362,6 +1369,11 @@ class VirtualminBackupService:
         """Run virtualmin_chain_backup.yml once; every non-conclusive outcome is UNKNOWN."""
         from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
 
+        # An input the playbook or the node script would refuse is refused here, definitively:
+        # reaching the node with it would only end as an exit status nobody can interpret.
+        input_error = chain_step_input_error(variables)
+        if input_error is not None:
+            return Err(input_error, retriability=Retriability.NOT_RETRIABLE)
         deployment = getattr(self.server, "node_deployment", None)
         if deployment is None:
             return Err(
@@ -1384,7 +1396,7 @@ class VirtualminBackupService:
             )
         return parse_chain_step_result(run.stdout, token=token, mode=mode, domain_id=domain_id)
 
-    def _execute_chain_backup(
+    def _execute_chain_backup(  # noqa: PLR0911  # One exit per refusal before the node is touched
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
     ) -> Result[str, str]:
         """Base or differential: one locked node-side step, never remote.cgi."""
@@ -1404,6 +1416,9 @@ class VirtualminBackupService:
         }
         if config.chain_role == CHAIN_ROLE_DIFFERENTIAL:
             variables["chain_expected_fp"] = chain.expected_fp
+        input_error = chain_step_input_error(variables)
+        if input_error is not None:
+            return Err(input_error, retriability=Retriability.NOT_RETRIABLE)
         # The last gate before the node is touched: a superseded runner must not start a step.
         if not self._owns_execution():
             return Err("Backup execution superseded; no remote work performed", retriability=Retriability.NOT_RETRIABLE)

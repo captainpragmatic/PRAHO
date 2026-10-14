@@ -21,6 +21,7 @@ Callers that mutate chain state hold the account row lock (``select_for_update``
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +30,7 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
 
-from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,6 +42,46 @@ ROLE_BASE = "base"
 ROLE_DIFFERENTIAL = "differential"
 
 _NO_SNAPSHOT = ("", "ABSENT")
+
+# The input alphabets of the node step. The playbook asserts them and the node script
+# re-validates them before touching anything; a value either rejects is refused here, in
+# Python, before dispatch, so a bad domain can never park a job as "uncertain" for an input
+# error. A test pins that all three copies are the same strings.
+CHAIN_DOMAIN_PATTERN = r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$"
+CHAIN_DOMAIN_ID_PATTERN = r"^[0-9]{1,30}$"
+CHAIN_RUN_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+CHAIN_ARCHIVE_PATTERN = r"^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$"
+# A differential needs a real snapshot: ABSENT is never an acceptable expectation.
+CHAIN_EXPECTED_FP_PATTERN = r"^[0-9a-f]{64}:[0-9]+$"
+CHAIN_ROLES_ON_NODE = ("base", "differential")
+
+
+def is_chain_domain(value: object) -> bool:
+    """True when ``value`` is a domain name the node step accepts."""
+    return isinstance(value, str) and re.fullmatch(CHAIN_DOMAIN_PATTERN, value) is not None
+
+
+def chain_step_input_error(variables: Mapping[str, Any]) -> str | None:
+    """Why the node step would refuse these playbook variables, or None when it would accept them."""
+    checks: list[tuple[str, str]] = [
+        ("chain_domain", CHAIN_DOMAIN_PATTERN),
+        ("chain_domain_id", CHAIN_DOMAIN_ID_PATTERN),
+        ("chain_token", CHAIN_RUN_ID_PATTERN),
+    ]
+    action = variables.get("chain_action")
+    if action not in ("run", "cancel"):
+        return f"Unknown chain action {action!r}"
+    if action == "run":
+        checks.append(("chain_archive", CHAIN_ARCHIVE_PATTERN))
+        if variables.get("chain_mode") not in CHAIN_ROLES_ON_NODE:
+            return f"Unknown chain mode {variables.get('chain_mode')!r}"
+        if variables.get("chain_mode") == ROLE_DIFFERENTIAL:
+            checks.append(("chain_expected_fp", CHAIN_EXPECTED_FP_PATTERN))
+    for name, pattern in checks:
+        value = variables.get(name)
+        if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
+            return f"The chain step input {name} is not acceptable to the node"
+    return None
 
 
 def invalidate_chain(locked: VirtualminAccount) -> int:
@@ -179,18 +220,17 @@ def resolve_chain_job(job: VirtualminProvisioningJob, *, resolved_by: str, note:
     domain_id = str(parameters.get("virtualmin_domain_id", ""))
     token = str(parameters.get("chain_token", ""))
     step_concluded = bool((job.result or {}).get("fp_after"))
-    if domain_id and token and not step_concluded and job.account is not None:
+    cancel_variables = {
+        "chain_action": "cancel",
+        "chain_domain": job.account.domain if job.account is not None else "",
+        "chain_domain_id": domain_id,
+        "chain_token": token,
+        "chain_lock_wait_seconds": 30,
+    }
+    # Inputs the node refuses were refused by dispatch too, so no step of that job ever ran.
+    if domain_id and token and not step_concluded and chain_step_input_error(cancel_variables) is None:
         stopped = VirtualminBackupService(job.server).run_chain_step(
-            {
-                "chain_action": "cancel",
-                "chain_domain": job.account.domain,
-                "chain_domain_id": domain_id,
-                "chain_token": token,
-                "chain_lock_wait_seconds": 30,
-            },
-            token=token,
-            mode="cancel",
-            domain_id=domain_id,
+            cancel_variables, token=token, mode="cancel", domain_id=domain_id
         )
         if stopped.is_err() or stopped.unwrap().outcome != "cancelled":
             detail = stopped.unwrap_err() if stopped.is_err() else stopped.unwrap().reason
@@ -209,4 +249,56 @@ def resolve_chain_job(job: VirtualminProvisioningJob, *, resolved_by: str, note:
             transaction.set_rollback(True)
             return Err("Only a job awaiting attention can be resolved.")
         invalidate_chain(locked)
+    return Ok(True)
+
+
+def node_lost_refusal(server: VirtualminServer) -> str | None:
+    """Why this node may NOT be declared lost, or None when it may.
+
+    A node is lost when PRAHO has itself marked its server failed, or its deployment has been
+    destroyed (decommissioned). Any other state means the node may still be running the step,
+    and only "confirm stopped" (which proves it with a cancel marker) can release the job.
+    """
+    if server.status == "failed":
+        return None
+    deployment = getattr(server, "node_deployment", None)
+    if deployment is not None and deployment.is_destroyed:
+        return None
+    return "The node is not marked failed or decommissioned; confirm the step stopped instead"
+
+
+def resolve_chain_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: str, note: str) -> Result[bool, str]:
+    """Operator "node lost" for a chain job in attention whose node can no longer be reached.
+
+    "Confirm stopped" needs the node to write a cancel marker, which a lost node cannot. This
+    path is allowed only while the job's server is failed or its deployment destroyed. In one
+    transaction under the account lock it fails the job, ROTATES the job's execution token
+    (a late runner that comes back can no longer publish or link anything) and invalidates the
+    chain, so a base or differential made later starts from a fresh epoch.
+    """
+    if job.account_id is None:
+        return Err("The job has no account")
+    if not is_chain_job(job.operation, job.parameters or {}):
+        return Err("Only a base or differential backup can be resolved as node lost")
+    with transaction.atomic():
+        locked = VirtualminAccount.objects.select_for_update().get(pk=job.account_id)
+        server = VirtualminServer.objects.select_related("node_deployment").get(pk=job.server_id)
+        refusal = node_lost_refusal(server)
+        if refusal is not None:
+            transaction.set_rollback(True)
+            return Err(refusal)
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField job status; attention -> failed is the only edge
+            status="failed",
+            status_message=f"Node lost; resolved by {resolved_by}: {note}",
+            execution_token=uuid.uuid4(),
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
+        if not rows:
+            transaction.set_rollback(True)
+            return Err("Only a job awaiting attention can be resolved.")
+        invalidate_chain(locked)
+    logger.warning("⚠️ [Chain] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
     return Ok(True)

@@ -9,7 +9,8 @@
 # and prints one result line. Snapshot writers outside PRAHO are unsupported (ADR-0059).
 #
 #   chain_action=run     chain_mode=base          no differential flag: resets the snapshot
-#                        chain_mode=differential  --differential: requires chain_expected_fp
+#                        chain_mode=differential  --differential: requires chain_expected_fp, a real
+#                                                 snapshot fingerprint (never ABSENT)
 #   chain_action=cancel  writes the cancel marker for chain_token under the lock, so a
 #                        delayed or waiting run of that token can never start afterwards
 - name: Run or cancel one differential-chain backup step
@@ -29,13 +30,13 @@
         that:
           - ansible_play_hosts_all | length == 1
           - chain_action in ['run', 'cancel']
-          - chain_domain is match('^[A-Za-z0-9][A-Za-z0-9.-]*$')
+          - chain_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
           - chain_domain_id is match('^[0-9]{1,30}$')
           - chain_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - chain_lock_wait_seconds | string is match('^[0-9]{1,4}$')
           - chain_action == 'cancel' or chain_mode in ['base', 'differential']
           - chain_action == 'cancel' or chain_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
-          - chain_mode != 'differential' or chain_expected_fp is match('^([0-9a-f]{64}:[0-9]+|ABSENT)$')
+          - chain_mode != 'differential' or chain_expected_fp is match('^[0-9a-f]{64}:[0-9]+$')
 
     - name: Ensure the private staging directory
       ansible.builtin.file:

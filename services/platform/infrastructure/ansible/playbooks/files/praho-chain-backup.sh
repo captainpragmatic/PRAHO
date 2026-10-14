@@ -45,7 +45,7 @@ if [[ $action == run ]]; then
   [[ $mode =~ ^(base|differential)$ ]] || exit 64
   [[ $archive =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ ]] || exit 64
   if [[ $mode == differential ]]; then
-    [[ $expected_fp =~ ^([0-9a-f]{64}:[0-9]+|ABSENT)$ ]] || exit 64
+    [[ $expected_fp =~ ^[0-9a-f]{64}:[0-9]+$ ]] || exit 64
   fi
 else
   mode=cancel

@@ -20,6 +20,7 @@ from django.test import SimpleTestCase
 from apps.common.types import Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.provisioning import virtualmin_backup_service as backup_service
+from apps.provisioning import virtualmin_chain
 from tests.provisioning.test_virtualmin_transfer_playbooks import PLAYBOOKS, load, task_named, tasks
 
 PLAYBOOK = "virtualmin_chain_backup.yml"
@@ -113,6 +114,54 @@ class ChainPlaybookShapeTests(SimpleTestCase):
         self.assertEqual(len(re.findall(r"--differential", text)), 1)
         self.assertNotIn("--no-differential", text)
         self.assertIn("backup_args+=(--differential)", text)
+
+
+class ChainInputPatternsAgreeTests(SimpleTestCase):
+    """The playbook, the node script and the Python pre-dispatch check accept exactly the same inputs."""
+
+    def playbook_assertions(self) -> str:
+        return " ".join(task_named(PLAYBOOK, "Validate chain step inputs")["ansible.builtin.assert"]["that"])
+
+    def test_every_pattern_is_the_same_string_in_the_playbook_and_in_python(self) -> None:
+        checks = self.playbook_assertions()
+        for name, pattern in (
+            ("chain_domain", virtualmin_chain.CHAIN_DOMAIN_PATTERN),
+            ("chain_domain_id", virtualmin_chain.CHAIN_DOMAIN_ID_PATTERN),
+            ("chain_token", virtualmin_chain.CHAIN_RUN_ID_PATTERN),
+            ("chain_archive", virtualmin_chain.CHAIN_ARCHIVE_PATTERN),
+            ("chain_expected_fp", virtualmin_chain.CHAIN_EXPECTED_FP_PATTERN),
+        ):
+            with self.subTest(name=name):
+                self.assertIn(f"{name} is match('{pattern}')", checks)
+
+    def test_every_pattern_is_the_same_string_in_the_node_script(self) -> None:
+        text = SCRIPT.read_text()
+        for name, pattern in (
+            ("domain", virtualmin_chain.CHAIN_DOMAIN_PATTERN),
+            ("domain_id", virtualmin_chain.CHAIN_DOMAIN_ID_PATTERN),
+            ("token", virtualmin_chain.CHAIN_RUN_ID_PATTERN),
+            ("archive", virtualmin_chain.CHAIN_ARCHIVE_PATTERN),
+            ("expected_fp", virtualmin_chain.CHAIN_EXPECTED_FP_PATTERN),
+        ):
+            with self.subTest(name=name):
+                self.assertIn(f"[[ ${name} =~ {pattern} ]]", text)
+
+    def test_a_differential_cannot_expect_an_absent_snapshot_anywhere(self) -> None:
+        self.assertNotIn("ABSENT", self.playbook_assertions())
+        differential_check = next(line for line in SCRIPT.read_text().splitlines() if "expected_fp =~" in line)
+        self.assertNotIn("ABSENT", differential_check)
+        error = virtualmin_chain.chain_step_input_error(
+            {
+                "chain_action": "run",
+                "chain_mode": "differential",
+                "chain_domain": "example.com",
+                "chain_domain_id": "17",
+                "chain_token": TOKEN,
+                "chain_archive": "virtualmin_backup_" + "c" * 32 + ".tar.gz",
+                "chain_expected_fp": "ABSENT",
+            }
+        )
+        self.assertIn("chain_expected_fp", str(error))
 
 
 class ChainResultParsingTests(SimpleTestCase):

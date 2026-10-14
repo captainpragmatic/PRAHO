@@ -229,6 +229,29 @@ class ChainBackupFlowTests(BackupNodeFixture):
                 self.assertEqual(self.played, [])
                 self.assertNotIn("backup-domain", self.programs)
 
+    def test_a_domain_the_node_script_would_reject_never_reaches_the_node(self) -> None:
+        # The playbook's own assertion is looser than the script's: these pass the playbook, fail
+        # the script with exit 64, and would park the job as an uncertain node step.
+        for domain in ("example.com-", "example.com.", "-example.com", "exa mple.com", "a" * 254):
+            with self.subTest(domain=domain):
+                self.played.clear()
+                self.noted.clear()
+                VirtualminAccount.objects.filter(pk=self.account.pk).update(domain=domain)
+                self.account.refresh_from_db()
+                result = self._backup(self._config(CHAIN_ROLE_BASE))
+                self.assertTrue(result.is_err(), result)
+                self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
+                self.assertEqual(self.played, [], "nothing may be dispatched for an input the node refuses")
+                self.assertEqual(self.noted, [])
+
+    def test_a_differential_is_never_dispatched_expecting_an_absent_snapshot(self) -> None:
+        config = self._config(CHAIN_ROLE_DIFFERENTIAL, expected_fp="ABSENT")
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(chain_base_fingerprint="ABSENT")
+        result = self._backup(config)
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
+        self.assertEqual(self.played, [])
+
     def test_remote_cgi_flags_exist_only_for_standalone_backups(self) -> None:
         self.assertEqual(differential_flags("standalone"), {"no-differential": ""})
         for role in (CHAIN_ROLE_BASE, CHAIN_ROLE_DIFFERENTIAL):

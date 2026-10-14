@@ -79,6 +79,11 @@ urlpatterns = [
         virtualmin_views.virtualmin_job_resolve,
         name="virtualmin_job_resolve",
     ),
+    path(
+        "jobs/<uuid:job_id>/node-lost/",
+        virtualmin_views.virtualmin_job_node_lost,
+        name="virtualmin_job_node_lost",
+    ),
     path("jobs/<uuid:job_id>/retry/", virtualmin_views.virtualmin_job_retry, name="virtualmin_job_retry"),
     path("jobs/<uuid:job_id>/logs/", virtualmin_views.virtualmin_job_logs, name="virtualmin_job_logs"),
     path("bulk-actions/", virtualmin_views.virtualmin_bulk_actions, name="virtualmin_bulk_actions"),
