@@ -31,7 +31,13 @@ from apps.common.validators import SecureInputValidator
 from .domain_veto import domain_disables_hosting
 from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
-from .virtualmin_backup_service import BackupConfig, RestoreConfig
+from .virtualmin_backup_service import (
+    CHAIN_ROLE_BASE,
+    CHAIN_ROLE_DIFFERENTIAL,
+    CHAIN_ROLE_STANDALONE,
+    BackupConfig,
+    RestoreConfig,
+)
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
@@ -1737,6 +1743,8 @@ class VirtualminBackupManagementService:
             role_error = config.chain_role_error()
             if role_error is not None:
                 return Err(role_error)
+            if config.chain_role != CHAIN_ROLE_STANDALONE and not self._incremental_backups_enabled():
+                return Err("Differential backups are disabled (provisioning.incremental_backups_enabled)")
 
             parameters = {
                 "backup_type": config.backup_type,
@@ -1758,6 +1766,31 @@ class VirtualminBackupManagementService:
         except Exception as e:
             logger.error(f"Backup job creation failed: {e}")
             return Err(f"Backup job failed: {e!s}")
+
+    @staticmethod
+    def _incremental_backups_enabled() -> bool:
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
+
+        return SettingsService.get_boolean_setting("provisioning.incremental_backups_enabled", False)
+
+    def take_base_backup(
+        self, account: VirtualminAccount, *, initiated_by: str = "system", execute_inline: bool = False
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Start a new differential chain: a full backup that resets the node's snapshot."""
+        return self._take_chain_backup(account, CHAIN_ROLE_BASE, initiated_by, execute_inline)
+
+    def take_differential_backup(
+        self, account: VirtualminAccount, *, initiated_by: str = "system", execute_inline: bool = False
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Back up only what changed since the account's live base."""
+        return self._take_chain_backup(account, CHAIN_ROLE_DIFFERENTIAL, initiated_by, execute_inline)
+
+    def _take_chain_backup(
+        self, account: VirtualminAccount, role: str, initiated_by: str, execute_inline: bool
+    ) -> Result[VirtualminProvisioningJob, str]:
+        return self.create_backup_job(
+            account, BackupConfig(chain_role=role), initiated_by=initiated_by, execute_inline=execute_inline
+        )
 
     def _admit_job(  # noqa: PLR0911, PLR0913  # Distinct admission refusals + execution-context seams
         self,

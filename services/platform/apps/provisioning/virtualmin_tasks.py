@@ -834,7 +834,7 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         RestoreConfig,
         VirtualminBackupService,
     )
-    from .virtualmin_chain import complete_chain_job  # noqa: PLC0415
+    from .virtualmin_chain import complete_chain_job, is_chain_job  # noqa: PLC0415
 
     try:
         job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
@@ -925,8 +925,10 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
 
     if result.is_err():
         error = str(result.unwrap_err())
-        if operation == "restore_domain" and retriability_of(result) is Retriability.UNKNOWN:
-            # Uncertain mutation: park for operator attention; exclusion holds.
+        uncertain_mutation = operation == "restore_domain" or is_chain_job(operation, params)
+        if uncertain_mutation and retriability_of(result) is Retriability.UNKNOWN:
+            # Uncertain mutation (a restore, or a base/differential step that may still be
+            # running on the node): park for operator attention; exclusion holds.
             rows = VirtualminProvisioningJob.finish_execution(
                 job.pk, token, "attention", error, {"retriability": retriability_of(result).value}
             )
@@ -991,6 +993,7 @@ def _sweep_spool_orphans(counts: dict[str, int]) -> None:
 
 def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
     """Two-clock recovery: dispatch window for pending, own deadline for running."""
+    from .virtualmin_chain import is_chain_job  # noqa: PLC0415
     from .virtualmin_migration_models import SpoolReservation  # noqa: PLC0415
 
     now = timezone.now()
@@ -1019,9 +1022,14 @@ def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
     )[:_RECLAIM_BATCH]
     for job in overdue:
         # A killed restore worker is an UNCERTAIN mutation: park for operator
-        # attention (retains the account-operation exclusion). Backups are
-        # read-only remotely; failed is honest.
-        takeover_status = "attention" if job.operation == "restore_domain" else "failed"
+        # attention (retains the account-operation exclusion). So is a killed base or
+        # differential: its node step may still be running or waiting for the lock. A
+        # standalone backup is read-only remotely; failed is honest.
+        takeover_status = (
+            "attention"
+            if job.operation == "restore_domain" or is_chain_job(job.operation, job.parameters)
+            else "failed"
+        )
         rows = VirtualminProvisioningJob.take_over_execution(
             job.pk, takeover_status, "Worker interrupted; execution deadline exceeded"
         )

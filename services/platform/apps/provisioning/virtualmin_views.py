@@ -38,6 +38,7 @@ from apps.users.models import User
 from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
+from .virtualmin_chain import is_chain_job, resolve_chain_job
 from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
@@ -547,15 +548,24 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
     actor = request.user.email if request.user.is_authenticated else "system"
-    # CharField job status; attention -> failed is the only edge.
-    rows = VirtualminProvisioningJob.objects.filter(
-        pk=job.pk, status="attention"
-    ).update(  # fsm-bypass: CharField status
-        status="failed",
-        status_message=f"Manually resolved by {actor}: {note}",
-        next_retry_at=None,
-        updated_at=timezone.now(),
-    )
+    if job.status == "attention" and is_chain_job(job.operation, job.parameters):
+        # A base or differential step may still be running on the node: confirm it is stopped
+        # (cancel marker under the lock), clear the chain, then release.
+        resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    else:
+        # CharField job status; attention -> failed is the only edge.
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField status
+            status="failed",
+            status_message=f"Manually resolved by {actor}: {note}",
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
     if rows:
         from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
 

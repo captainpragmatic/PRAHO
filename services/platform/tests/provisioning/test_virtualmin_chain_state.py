@@ -34,6 +34,11 @@ from tests.provisioning.test_virtualmin_migration_service import MigrationTestBa
 class ChainFixtures:
     """Helpers shared by the chain tests (mixed into a TestCase that has self.server)."""
 
+    def enable_incremental_backups(self) -> None:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        assert SettingsService.update_setting("provisioning.incremental_backups_enabled", True).is_ok()
+
     def live_chain(self, account: VirtualminAccount, *, epoch: int = 2, fingerprint: str = SNAP_A) -> Any:
         base = VirtualminProvisioningJob.objects.create(
             operation="backup_domain",
@@ -54,6 +59,7 @@ class AdmissionTransitionTests(ChainFixtures, ExclusionCase):
     def setUp(self) -> None:
         super().setUp()
         self.account = self._account()
+        self.enable_incremental_backups()
         self.management = VirtualminBackupManagementService(self.server)
 
     def admit(self, role: str) -> Any:
@@ -327,6 +333,7 @@ class RunnerChainWiringTests(ChainFixtures, ExclusionCase):
     def setUp(self) -> None:
         super().setUp()
         self.account = self._account()
+        self.enable_incremental_backups()
         self.management = VirtualminBackupManagementService(self.server)
 
     def admit_and_run(self, role: str, outcome: Any) -> tuple[VirtualminProvisioningJob, list[BackupConfig]]:

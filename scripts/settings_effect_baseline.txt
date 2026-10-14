@@ -149,6 +149,7 @@ promotions.max_code_generation_attempts
 promotions.max_discount_percent
 promotions.new_offers_enabled
 provisioning.cache_timeout
+provisioning.incremental_backups_enabled
 provisioning.max_backup_size_gb
 provisioning.max_concurrent_health_checks
 provisioning.max_error_display

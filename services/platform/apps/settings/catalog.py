@@ -2325,6 +2325,20 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="provisioning.incremental_backups_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Enable differential backups"),
+        help_text=_(
+            "Allow base and differential Virtualmin backups. Turning it off stops new base and "
+            "differential backups; restores, standalone backups and existing backups are unaffected."
+        ),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
         key="provisioning.migration_backup_timeout_seconds",
         data_type="integer",
         default=1800,

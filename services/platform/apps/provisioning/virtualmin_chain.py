@@ -25,6 +25,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from django.db import models, transaction
+from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
 
@@ -152,3 +153,59 @@ def complete_chain_job(job: VirtualminProvisioningJob, token: Any, result: dict[
             transaction.set_rollback(True)
             return "superseded"
     return "completed"
+
+
+def is_chain_job(operation: str, parameters: Mapping[str, Any]) -> bool:
+    """True for a base or differential backup job: remotely mutating, never read-only."""
+    return operation == "backup_domain" and str(parameters.get("chain_role", ROLE_STANDALONE)) != ROLE_STANDALONE
+
+
+def resolve_chain_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: str) -> Result[bool, str]:
+    """Operator "confirm stopped" for a chain job parked in attention.
+
+    In this order: the job's cancel marker is written on the node under the per-domain lock
+    (a delayed or waiting run of that token can then never start), the chain is invalidated,
+    and only then is the account released, the last two in one transaction. If the marker
+    cannot be written, nothing changes and the account stays held. A job that never recorded a
+    domain id never dispatched a step, and one whose step already concluded has nothing left to
+    cancel; neither needs the node.
+    """
+    from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415  # Circular
+
+    if job.account_id is None:
+        return Err("The job has no account")
+    parameters = job.parameters or {}
+    domain_id = str(parameters.get("virtualmin_domain_id", ""))
+    token = str(parameters.get("chain_token", ""))
+    step_concluded = bool((job.result or {}).get("fp_after"))
+    if domain_id and token and not step_concluded and job.account is not None:
+        stopped = VirtualminBackupService(job.server).run_chain_step(
+            {
+                "chain_action": "cancel",
+                "chain_domain": job.account.domain,
+                "chain_domain_id": domain_id,
+                "chain_token": token,
+                "chain_lock_wait_seconds": 30,
+            },
+            token=token,
+            mode="cancel",
+            domain_id=domain_id,
+        )
+        if stopped.is_err() or stopped.unwrap().outcome != "cancelled":
+            detail = stopped.unwrap_err() if stopped.is_err() else stopped.unwrap().reason
+            return Err(f"Could not confirm the node step is stopped ({detail}); the account stays held")
+    with transaction.atomic():
+        locked = VirtualminAccount.objects.select_for_update().get(pk=job.account_id)
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField job status; attention -> failed is the only edge
+            status="failed",
+            status_message=f"Manually resolved by {resolved_by}: {note}",
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
+        if not rows:
+            transaction.set_rollback(True)
+            return Err("Only a job awaiting attention can be resolved.")
+        invalidate_chain(locked)
+    return Ok(True)
