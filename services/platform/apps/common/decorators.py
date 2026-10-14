@@ -10,11 +10,11 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 
+from apps.common import counters
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import User
 
@@ -307,8 +307,13 @@ def staff_rate_limit(
                 rate_key = f"rate_limit_ip_{client_ip}_{view_func.__name__}"
                 identifier = f"IP {client_ip}"
 
-            # Get current request count
-            current_requests = cache.get(rate_key, 0)
+            # Reserve this request atomically in the shared counter store: a get-then-set on the
+            # default cache loses concurrent requests, and that cache can cull a live count away.
+            try:
+                current_requests = counters.increment(rate_key, 60) - 1
+            except Exception:
+                logger.exception("🔥 [Rate Limit] Counter store failure for %s — denying request", view_func.__name__)
+                return HttpResponse("Service temporarily unavailable", status=503, content_type="text/plain")
 
             # Check if rate limit exceeded
             if current_requests >= requests_per_minute:
@@ -323,9 +328,6 @@ def staff_rate_limit(
                 )
                 response["Retry-After"] = "60"  # Suggest retry after 60 seconds
                 return response
-
-            # Increment request count (expire after 60 seconds)
-            cache.set(rate_key, current_requests + 1, 60)
 
             # Log rate limit usage for monitoring
             if current_requests + 1 >= requests_per_minute * 0.8:  # Warn at 80% threshold

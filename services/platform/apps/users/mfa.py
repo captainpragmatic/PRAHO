@@ -33,6 +33,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
+from apps.common import counters
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.common.request_ip import get_safe_client_ip
 
@@ -1066,20 +1067,23 @@ class MFAService:
         """
         🚦 Rate limit MFA verification attempts
         """
-        cache_key = f"mfa_attempts:{user.id}"
-        attempts = cache.get(cache_key, 0)
+        try:
+            # Reserved atomically in the shared counter store: a get-then-set on the default cache
+            # loses concurrent guesses, and that cache can cull a live count away.
+            attempts = counters.increment(f"mfa_attempts:{user.id}", 300) - 1  # 5 minute window
+        except Exception:
+            logger.exception("🔥 [MFA] Rate limit store unavailable — denying the attempt")
+            return False
 
         if attempts >= MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes
             logger.error(f"🔥 [MFA] Rate limit exceeded for user {user.email}")
             return False
-
-        cache.set(cache_key, attempts + 1, 300)  # 5 minute window
         return True
 
     @staticmethod
     def _reset_rate_limit(user: "User") -> None:
         """Give back the attempt budget after a verified login, so honest logins never drain it."""
-        cache.delete(f"mfa_attempts:{user.id}")
+        counters.reset(f"mfa_attempts:{user.id}")
 
     @staticmethod
     def _get_available_methods(user: "User") -> list[str]:

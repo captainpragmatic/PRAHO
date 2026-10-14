@@ -358,11 +358,10 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
     for identifier in identifiers:
         cache_key = f"rate_limit:{key_prefix}:{identifier}"
         try:
-            # Registration uses atomic, shared counters; other decorators retain their cache policy.
-            if key_prefix == "registration":
-                current_count = counters.increment(cache_key, 3600) - 1
-            else:
-                current_count = cache.get(cache_key, 0)
+            # Reserve the attempt atomically in the shared counter store, then compare: a
+            # get-then-set on the default cache loses concurrent attempts, and that cache can
+            # cull a live count away.
+            current_count = counters.increment(cache_key, 3600) - 1
 
             if current_count >= limit:
                 try:
@@ -380,14 +379,6 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
                     else _("Rate limit exceeded")
                 )
                 raise RateLimitValidationError(RateLimitFailure(str(message), status_code=429, retry_after=3600))
-
-            if key_prefix != "registration":
-                # Preserve the existing cache policy for unrelated security decorators.
-                new_count = current_count + 1
-                try:
-                    cache.set(cache_key, new_count, timeout=3600)
-                except Exception as cache_err:
-                    logger.warning(f"🚨 [Security] Cache set failed for rate limiting key: {cache_key}: {cache_err}")
         except ValidationError:
             # Re-raise ValidationError (rate limit exceeded)
             raise
