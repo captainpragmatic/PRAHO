@@ -54,6 +54,8 @@ VULTR_POLICY = OutboundPolicy(
     name="vultr",
     allowed_domains=frozenset({"api.vultr.com"}),
     timeout_seconds=VULTR_TIMEOUT_SECONDS,
+    # Instance creation is a POST with no idempotency key: a replay would bill a second server.
+    retry_connection_errors=False,
 )
 
 

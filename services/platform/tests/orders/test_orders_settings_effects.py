@@ -27,7 +27,6 @@ from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.orders.tasks import (
-    generate_invoice_for_order_async,
     process_pending_orders,
     process_pending_orders_async,
     provision_order_item_async,
@@ -171,7 +170,19 @@ class OrdersSettingsEffectTests(TestCase):
         self.set_value(SEARCH_LENGTH_KEY, 0)
         self.assertEqual(_sanitize_search_query("abc"), "")
 
-    def test_all_six_enqueue_sites_persist_the_current_budget_and_leave_old_tasks_unchanged(self) -> None:
+    def test_order_tasks_expose_no_invoice_generator_that_never_attaches_the_invoice(self) -> None:
+        """The only invoice path for an order is proforma then payment convergence (ADR-0038).
+
+        A task that called InvoiceService.create_from_order directly never set order.invoice, so
+        a second run issued a second legally numbered invoice. Nothing enqueued it, and nothing
+        should be able to.
+        """
+        from apps.orders import tasks  # noqa: PLC0415
+
+        self.assertFalse(hasattr(tasks, "generate_invoice_for_order"))
+        self.assertFalse(hasattr(tasks, "generate_invoice_for_order_async"))
+
+    def test_all_five_enqueue_sites_persist_the_current_budget_and_leave_old_tasks_unchanged(self) -> None:
         broker = ORM(list_key="wp18-orders")
         original_task = ""
         with patch("django_q.tasks.get_broker", return_value=broker), patch.object(Conf, "SYNC", False):
@@ -180,11 +191,6 @@ class OrdersSettingsEffectTests(TestCase):
                 jobs = (
                     (process_pending_orders_async(), "apps.orders.tasks.process_pending_orders", ()),
                     (sync_order_payment_status_async(), "apps.orders.tasks.sync_order_payment_status", ()),
-                    (
-                        generate_invoice_for_order_async("order-id"),
-                        "apps.orders.tasks.generate_invoice_for_order",
-                        ("order-id",),
-                    ),
                     (provision_order_item_async("item-id"), "apps.orders.tasks.provision_order_item", ("item-id",)),
                 )
                 free = self.order(total=0)

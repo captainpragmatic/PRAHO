@@ -242,7 +242,14 @@ def _execute_provisioning_transaction(
     context: ProvisioningContext, server_id: str | None, *, task_budget_seconds: int | None = None
 ) -> dict[str, Any]:
     """
-    Execute provisioning within atomic transaction.
+    Provision a Virtualmin account without holding a transaction across the remote create.
+
+    A short transaction validates the service under a row lock and releases it. The account
+    and job rows are then committed by the provisioning service BEFORE the HTTP call that
+    creates the domain, and the call itself runs with no transaction or lock open. If the
+    worker dies after the server accepted the create, those rows survive in a running job,
+    the recovery sweep fails it into the retry pool, and the convergent retry adopts the
+    remote domain instead of creating it twice.
 
     Args:
         context: Provisioning context with validated parameters
@@ -269,28 +276,28 @@ def _execute_provisioning_transaction(
             # Get server for provisioning
             server = _get_provisioning_server_secure(server_id)
 
-            # Create execution params
-            exec_params = ProvisioningExecutionParams(
-                service=service,
-                domain=context.domain,
-                username=context.username,
-                template=context.template,
-                server=server,
-                correlation_id=context.correlation_id,
-                safe_log_ctx=context.safe_log_ctx,
-                task_budget_seconds=task_budget_seconds,
-            )
+        # The lock is released here. Everything below may talk to the server.
+        exec_params = ProvisioningExecutionParams(
+            service=service,
+            domain=context.domain,
+            username=context.username,
+            template=context.template,
+            server=server,
+            correlation_id=context.correlation_id,
+            safe_log_ctx=context.safe_log_ctx,
+            task_budget_seconds=task_budget_seconds,
+        )
 
-            # Execute provisioning with rollback capability
-            result = _execute_virtualmin_provisioning_with_params(exec_params)
+        # Execute provisioning with rollback capability
+        result = _execute_virtualmin_provisioning_with_params(exec_params)
 
-            # Update idempotency with result
-            if result["success"]:
-                IdempotencyManager.complete(context.idempotency_key, result)
-            else:
-                IdempotencyManager.clear(context.idempotency_key)
+        # Update idempotency with result
+        if result["success"]:
+            IdempotencyManager.complete(context.idempotency_key, result)
+        else:
+            IdempotencyManager.clear(context.idempotency_key)
 
-            return result
+        return result
 
     except RetryableProvisioningError as retry_error:
         IdempotencyManager.clear(context.idempotency_key)

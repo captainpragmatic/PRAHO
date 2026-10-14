@@ -36,7 +36,7 @@ PLATFORM_API_SECRET = "local-e2e-shared-secret-do-not-use-in-production"  # noqa
 PORTAL_HMAC_MODE = "legacy"
 PORTAL_HMAC_CREDENTIALS = None
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = "local-e2e-webhook-secret-do-not-use-in-production"  # noqa: S105 -- local public test key
-PORTAL_PAYMENT_WEBHOOK_URL = "http://localhost:8701/billing/webhooks/payment-status/"
+PORTAL_PAYMENT_WEBHOOK_URL = "http://localhost:8701/order/payment/webhook/"
 ENCRYPTION_KEYS = ["MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="]
 EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
 EMAIL_FILE_PATH = BASE_DIR.parent.parent / "logs" / "e2e-mail"

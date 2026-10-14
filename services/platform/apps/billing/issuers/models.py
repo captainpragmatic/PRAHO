@@ -204,12 +204,6 @@ class ProviderIssuance(models.Model):
     provider_number = models.CharField(max_length=50, blank=True)
     provider_document_id = models.CharField(max_length=100, blank=True)
 
-    # Forensic only. The provider's next-number counter before and after an
-    # ambiguous attempt is evidence, never proof: the accountant can issue manually
-    # in the web UI at any moment, so a moved counter does not establish ownership.
-    observed_next_number_before = models.CharField(max_length=50, blank=True)
-    observed_next_number_after = models.CharField(max_length=50, blank=True)
-
     attempts = models.PositiveIntegerField(default=0)
     # Counted separately from `attempts`, which increments on claim - before pacing -
     # so a deferral that sent nothing would consume a retry budget. This one advances

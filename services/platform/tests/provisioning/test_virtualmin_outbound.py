@@ -40,6 +40,25 @@ class VirtualminOutboundTests(TestCase):
         self.assertEqual(policy.allowed_schemes, frozenset({"https"}))
         self.assertEqual(policy.tls_cert_fingerprint, "a" * 64)
 
+    @patch("apps.provisioning.virtualmin_gateway.safe_request")
+    def test_write_over_get_is_not_replayed_after_a_connection_reset(self, mock_safe_request: MagicMock) -> None:
+        """Virtualmin creates and deletes domains with GET requests.
+
+        The adapter's method check cannot tell those from reads, so the policy itself
+        must forbid a resend to another address after a reset. A replayed create-domain
+        would otherwise run against a server that already acted on the first one.
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-length": "20"}
+        mock_response.iter_content.return_value = iter([b'{"status":"success"}'])
+        mock_safe_request.return_value = mock_response
+
+        self._gateway()._execute_http_request({"program": "create-domain", "domain": "example.com"})
+
+        policy = mock_safe_request.call_args.kwargs["policy"]
+        self.assertFalse(policy.retry_connection_errors)
+
     def _gateway(
         self,
         *,

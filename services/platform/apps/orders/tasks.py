@@ -12,6 +12,7 @@ from collections.abc import MutableMapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, cast
 
+from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
@@ -22,7 +23,6 @@ from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
 from apps.billing.models import Payment
-from apps.billing.services import InvoiceService
 from apps.common.types import Result
 from apps.orders.models import Order
 from apps.orders.services import (
@@ -670,8 +670,8 @@ def _convert_proforma_or_create_invoice(order: Order, order_result: dict[str, An
     the proforma to an invoice via ProformaPaymentService.record_payment_and_convert().
     If the proforma exists but no succeeded payment has arrived yet, skip — the
     webhook or confirm_order endpoint will convert it when payment succeeds.
-    If no proforma exists, fall through to legacy _create_order_invoice() (edge-case
-    recovery — the proforma-creation fallback above should have already created one).
+    If no proforma exists the order is left untouched and the problem is recorded, because
+    an invoice for an unpaid order would bypass the proforma path.
     """
     if order.proforma is not None:
         # Check for a succeeded payment linked to this proforma
@@ -722,32 +722,46 @@ def _convert_proforma_or_create_invoice(order: Order, order_result: dict[str, An
             logger.error("🔥 [OrderProcessor] Failed to convert proforma for order %s: %s", order.order_number, e)
             results["errors"].append(f"Proforma conversion error for {order.order_number}: {e}")
     else:
-        # No proforma — fall back to legacy direct invoice creation (edge-case recovery)
-        _create_order_invoice(order, order_result, results)
+        _record_missing_proforma(order, order_result, results)
 
 
-def _create_order_invoice(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Create invoice for orders that need payment."""
-    try:
-        invoice_service = InvoiceService()
-        invoice_result = invoice_service.create_from_order(order)
+def _record_missing_proforma(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
+    """Leave an unpaid order without a proforma exactly as it is, and make that visible.
 
-        if invoice_result.is_ok():
-            invoice = invoice_result.unwrap()
-            order.invoice = invoice
-            order.save(update_fields=["invoice", "updated_at"])
+    ADR-0038 allows one road to an invoice: proforma first, invoice when payment lands. An
+    order that still has no proforma here has not been paid for, so issuing a numbered
+    invoice would bypass that road. The order stays awaiting payment for the next run or
+    for staff, and the problem is logged and written to the audit trail once.
+    """
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Cross-app model: ADR-0007 defers it
 
-            order_result["action"] = "invoice_created"
-            order_result["status"] = "awaiting_payment"
+    message = f"Order {order.order_number} has no proforma and none could be created"
+    logger.error("🔥 [Orders] %s; no invoice is issued for an unpaid order", message)
+    results["errors"].append(message)
+    order_result["action"] = "proforma_unavailable"
+    order_result["status"] = order.status
 
-            logger.info(f"📄 [OrderProcessor] Created invoice {invoice.number} for order {order.order_number}")
-        else:
-            error = invoice_result.unwrap_err()
-            results["errors"].append(f"Invoice creation failed for order {order.order_number}: {error}")
-
-    except Exception as e:
-        logger.error(f"🔥 [OrderProcessor] Failed to create invoice for order {order.order_number}: {e}")
-        results["errors"].append(f"Invoice creation error for {order.order_number}: {e}")
+    already_recorded = AuditEvent.objects.filter(
+        action="order_proforma_unavailable",
+        content_type=ContentType.objects.get_for_model(Order),
+        object_id=str(order.pk),
+    ).exists()
+    if already_recorded:
+        return
+    AuditService.log_simple_event(
+        event_type="order_proforma_unavailable",
+        user=None,
+        content_object=order,
+        description=message,
+        actor_type="system",
+        metadata={
+            "order_id": str(order.id),
+            "order_number": order.order_number,
+            "customer_id": str(order.customer_id),
+            "total_cents": order.total_cents,
+            "source_app": "orders",
+        },
+    )
 
 
 def _process_free_order(
@@ -950,77 +964,6 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
     return tasks_created
 
 
-def generate_invoice_for_order(order_id: str) -> dict[str, Any]:
-    """
-    Generate invoice for an order asynchronously.
-
-    Args:
-        order_id: Order UUID to generate invoice for
-
-    Returns:
-        Dictionary with invoice generation result
-    """
-    logger.info(f"📋 [OrderInvoice] Generating invoice for order {order_id}")
-
-    try:
-        order = Order.objects.get(id=order_id)
-
-        if order.invoice:
-            logger.info(f"📋 [OrderInvoice] Order {order.order_number} already has invoice {order.invoice.number}")
-            return {
-                "success": True,
-                "order_id": str(order.id),
-                "invoice_id": str(order.invoice.id),
-                "message": "Order already has invoice",
-            }
-
-        # Generate invoice using InvoiceService
-        invoice_service = InvoiceService()
-        result = invoice_service.create_from_order(order)
-
-        if result.is_ok():
-            invoice = result.unwrap()
-            logger.info(f"📋 [OrderInvoice] Generated invoice {invoice.number} for order {order.order_number}")
-
-            # Log the invoice generation
-            AuditService.log_simple_event(
-                event_type="invoice_generated_from_order",
-                user=None,
-                content_object=order,
-                description=f"Invoice {invoice.number} generated for order {order.order_number}",
-                actor_type="system",
-                metadata={
-                    "order_id": str(order.id),
-                    "order_number": order.order_number,
-                    "invoice_id": str(invoice.id),
-                    "invoice_number": invoice.number,
-                    "customer_id": str(order.customer.id),
-                    "amount_cents": invoice.total_cents,
-                    "source_app": "orders",
-                },
-            )
-
-            return {
-                "success": True,
-                "order_id": str(order.id),
-                "invoice_id": str(invoice.id),
-                "invoice_number": invoice.number,
-                "message": "Invoice generated successfully",
-            }
-        else:
-            error_msg = result.unwrap_err()
-            logger.error(f"❌ [OrderInvoice] Failed to generate invoice for order {order.order_number}: {error_msg}")
-            return {"success": False, "error": error_msg}
-
-    except Order.DoesNotExist:
-        error_msg = f"Order {order_id} not found"
-        logger.error(f"❌ [OrderInvoice] {error_msg}")
-        return {"success": False, "error": error_msg}
-    except Exception as e:
-        logger.exception(f"💥 [OrderInvoice] Error generating invoice for order {order_id}: {e}")
-        return {"success": False, "error": str(e)}
-
-
 def provision_order_item(item_id: str) -> dict[str, Any]:
     """
     Provision an individual order item asynchronously.
@@ -1094,11 +1037,6 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
 # ===============================================================================
 # ADDITIONAL ASYNC WRAPPER FUNCTIONS
 # ===============================================================================
-
-
-def generate_invoice_for_order_async(order_id: str) -> str:
-    """Queue invoice generation task for order."""
-    return async_task("apps.orders.tasks.generate_invoice_for_order", order_id, timeout=get_task_time_limit())
 
 
 def provision_order_item_async(item_id: str) -> str:
