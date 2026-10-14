@@ -277,3 +277,34 @@ class WorkerDeathAfterRemoteCreateTests(TransactionTestCase):
         self.assertFalse(outcome["success"], outcome)
         self.server.refresh_from_db()
         self.assertEqual(self.server.current_domains, 3, "a create that was undone must leave the count as it was")
+
+    def test_a_service_suspended_during_the_create_ends_with_hosting_off(self) -> None:
+        """No lock spans the create, so the service can change meanwhile; the account must follow it.
+
+        The suspension's own reconcile sees the account still provisioning and leaves it alone, so
+        provisioning must reconcile once it has marked the account active.
+        """
+        from apps.provisioning.virtualmin_tasks import reconcile_virtualmin_service_state  # noqa: PLC0415
+
+        def suspend_during_create(method: str, url: str, **kwargs: object) -> Response:
+            if cast("dict[str, object]", kwargs["params"])["program"] == "create-domain":
+                Service.objects.filter(pk=self.service.pk).update(status="suspended")
+            return self.http(method, url, **kwargs)
+
+        params = cast(
+            "VirtualminProvisioningParams",
+            {"service_id": self.service.pk, "domain": self.service.domain, "server_id": str(self.server.pk)},
+        )
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=suspend_during_create),
+            patch(
+                "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async",
+                side_effect=reconcile_virtualmin_service_state,
+            ),
+        ):
+            outcome = provision_virtualmin_account(params)
+
+        self.assertTrue(outcome["success"], outcome)
+        account = VirtualminAccount.objects.get(service=self.service)
+        self.assertEqual(account.status, "suspended")
+        self.assertIn("disable-domain", [params["program"] for params in self.sent])
