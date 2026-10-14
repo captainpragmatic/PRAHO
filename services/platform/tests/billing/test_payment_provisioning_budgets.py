@@ -68,7 +68,7 @@ class PaymentProvisioningBudgetTests(TestCase):
                 self.assertCountEqual(
                     [task["args"] for task in tasks],
                     [
-                        ({"service_id": str(service.pk), "domain": service.domain, "template": "Default"},)
+                        ({"service_id": str(service.pk), "domain": service.domain, "template": "Default Settings"},)
                         for service in services
                     ],
                 )

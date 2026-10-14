@@ -112,7 +112,7 @@ class VirtualminMigrationFoundationTests(TestCase):
             service=service,
             server=VirtualminServer.objects.get(pk=self.server.pk),
             virtualmin_username=username,
-            template_name="Default",
+            template_name="Default Settings",
             status="error",
             praho_customer_id=self.customer.pk,
             praho_service_id=service.pk,

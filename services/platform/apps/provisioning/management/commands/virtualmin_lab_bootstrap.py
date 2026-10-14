@@ -39,6 +39,7 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     read_env_file,
     refuse_unless_lab_settings,
 )
+from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +276,7 @@ class Command(BaseCommand):
                 "service": service,
                 "server": server,
                 "virtualmin_username": LAB_DOMAIN_USER,
-                "template_name": "Default",
+                "template_name": DEFAULT_VIRTUALMIN_TEMPLATE,
                 "status": "active",
                 "praho_customer_id": customer.id,
             },

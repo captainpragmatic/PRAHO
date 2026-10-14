@@ -16,7 +16,7 @@ from tests.provisioning.test_cov_virtualmin_tasks_signals import VirtualminCover
 class VirtualminServiceCoverageCase(VirtualminCoverageCase):
     def setUp(self) -> None:
         self.payloads: dict[str, dict[str, object]] = {
-            "list-templates": {"status": "success", "templates": ["Default"]},
+            "list-templates": {"status": "success", "templates": ["Default Settings"]},
             "create-domain": {"status": "success", "message": "Domain created"},
         }
         super().setUp()
@@ -64,13 +64,14 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
         self.assertEqual(job.status, "completed")
         self.assertEqual(job.parameters["task_budget_seconds"], 777)
         self.assertEqual(
-            {key: value for key, value in self.requests[-1].items() if key != "comment"},
+            {key: value for key, value in self.requests[-1].items() if key != "desc"},
             {
                 "program": "create-domain",
                 "domain": account.domain,
                 "user": account.virtualmin_username,
                 "pass": "CoveragePass123!",
-                "template": "Default",
+                "template": "Default Settings",
+                "default-features": "",
                 "json": "1",
             },
         )
@@ -253,7 +254,7 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
     def test_missing_template_fails_preflight_without_domain_creation(self) -> None:
         self.payloads["list-templates"] = {"status": "success", "templates": ["Other"]}
         result = self.provisioning.create_virtualmin_account(self._creation())
-        self.assertIn("Template Default not found on server", result.unwrap_err())
+        self.assertIn("Template Default Settings not found on server", result.unwrap_err())
         self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
         self.assertEqual(VirtualminAccount.objects.get(service=self.service).status, "error")
         self.assertNotIn("create-domain", self._programs())

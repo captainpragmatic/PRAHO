@@ -291,7 +291,7 @@ class TestCreateAccountPreflight(VirtualminTaskTestBase):
     failed at 'self.health_check_server' (wrong class) and the conflict/
     template checks read response keys the parser never produces."""
 
-    def _creation_data(self, domain: str = "new.example.com", template: str = "Default"):
+    def _creation_data(self, domain: str = "new.example.com", template: str = "Default Settings"):
         service2 = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,

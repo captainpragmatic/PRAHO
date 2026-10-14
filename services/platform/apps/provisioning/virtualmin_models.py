@@ -20,6 +20,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 from apps.common.types import Retriability
+from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +294,9 @@ class VirtualminAccount(models.Model):
         help_text=_("Unique Virtualmin virtual server username"),
     )
     encrypted_password = models.BinaryField(verbose_name=_("Encrypted Password"))
-    template_name = models.CharField(max_length=50, default="Default", verbose_name=_("Virtualmin Template"))
+    template_name = models.CharField(
+        max_length=50, default=DEFAULT_VIRTUALMIN_TEMPLATE, verbose_name=_("Virtualmin Template")
+    )
 
     # All domains managed by this account
     domains = models.JSONField(default=list, help_text=_("All domains managed by this Virtualmin account"))
@@ -376,27 +379,30 @@ class VirtualminAccount(models.Model):
 
     def get_recovery_seed(self) -> str:
         """
-        Generate recovery seed for Virtualmin comment field.
+        Generate the recovery seed stored as the Virtualmin server description.
 
-        Limited to ~200 chars due to Virtualmin comment field limitations.
-        Format: "PRAHO:service_id|CID:customer_id|STATUS:status"
+        Format: "PRAHO=service_id|CID=customer_id|STATUS=status", at most 200
+        characters. create-domain takes it as --desc, which refuses ":"
+        (Virtualmin 8.x has no --comment option at all).
         """
         parts = []
 
         if self.praho_service_id:
-            parts.append(f"PRAHO:{self.praho_service_id}")
+            parts.append(f"PRAHO={self.praho_service_id}")
 
         if self.praho_customer_id:
-            parts.append(f"CID:{self.praho_customer_id}")
+            parts.append(f"CID={self.praho_customer_id}")
 
-        parts.append(f"STATUS:{self.status}")
+        parts.append(f"STATUS={self.status}")
 
         return "|".join(parts)[:200]  # Truncate to fit Virtualmin comment limit
 
     @classmethod
     def parse_recovery_seed(cls, seed: str) -> dict[str, Any]:
         """
-        Parse recovery seed from Virtualmin comment field.
+        Parse a recovery seed from the Virtualmin server description.
+
+        Accepts the current "KEY=value" form and the older "KEY:value" one.
 
         Args:
             seed: Recovery seed string from Virtualmin
@@ -406,14 +412,15 @@ class VirtualminAccount(models.Model):
         """
         data: dict[str, uuid.UUID | int | str] = {}
 
-        if not seed or "PRAHO:" not in seed:
+        if not seed or not ("PRAHO=" in seed or "PRAHO:" in seed):
             return data
 
         try:
             parts = seed.split("|")
             for part in parts:
-                if ":" in part:
-                    key, value = part.split(":", 1)
+                separator = "=" if "=" in part else ":"
+                if separator in part:
+                    key, value = part.split(separator, 1)
 
                     if key == "PRAHO":
                         with contextlib.suppress(ValueError):

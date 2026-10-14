@@ -43,7 +43,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
-from .virtualmin_validators import VirtualminValidator
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -116,7 +116,7 @@ class VirtualminAccountCreationData:
     domain: str
     username: str | None = None
     password: str | None = None
-    template: str = "Default"
+    template: str = DEFAULT_VIRTUALMIN_TEMPLATE
     server: Any | None = None  # VirtualminServer
 
 
@@ -326,7 +326,7 @@ class VirtualminProvisioningService:
                         {
                             "domain": account.domain,
                             "username": account.virtualmin_username,
-                            "template": account.template_name or "Default",
+                            "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                             "recovery_seed": account.get_recovery_seed(),
                         }
                     ),
@@ -392,7 +392,13 @@ class VirtualminProvisioningService:
                 "user": account.virtualmin_username,
                 "pass": account.get_password(),
                 "template": account.template_name,
-                "comment": account.get_recovery_seed(),  # Store recovery seed
+                # The recovery seed, as the server description (8.x has no --comment).
+                "desc": account.get_recovery_seed(),
+                # Virtualmin 8.x enables no feature unless asked ("No virtual
+                # server features enabled"). PRAHO plans carry no feature list,
+                # so a server gets the node's default-on set, which the node
+                # playbook pins to unix dir web ssl logrotate mysql webmin.
+                "default-features": "",
             }
 
             # Virtualmin expects disk quotas in KiB and bandwidth in bytes.

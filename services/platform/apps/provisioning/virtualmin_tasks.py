@@ -48,6 +48,7 @@ from .virtualmin_service import (
     VirtualminProvisioningService,
     VirtualminServerManagementService,
 )
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class VirtualminProvisioningConfig:
     domain: str
     username: str | None = None
     password: str | None = None
-    template: str = "Default"
+    template: str = DEFAULT_VIRTUALMIN_TEMPLATE
     server_id: str | None = None
 
 
@@ -179,7 +180,7 @@ def _validate_provisioning_parameters(
         validated_domain = ProvisioningParametersValidator.validate_domain(domain)
         validated_username = ProvisioningParametersValidator.validate_username(decrypted_params.get("username"))
         validated_template = ProvisioningParametersValidator.validate_template(
-            decrypted_params.get("template", "Default")
+            decrypted_params.get("template", DEFAULT_VIRTUALMIN_TEMPLATE)
         )
 
         # Initialize correlation and logging context

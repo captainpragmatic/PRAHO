@@ -23,6 +23,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
+from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +293,7 @@ class ProvisioningParametersValidator:
             ValidationError: If template name is invalid
         """
         if not template:
-            return "Default"
+            return DEFAULT_VIRTUALMIN_TEMPLATE
 
         template = str(template).strip()
 

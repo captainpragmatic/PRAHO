@@ -19,6 +19,9 @@ MIN_PASSWORD_STRENGTH_TYPES = 3
 MAX_EMAIL_LENGTH = 254  # RFC 5321 limit
 MAX_EMAIL_LOCAL_LENGTH = 64  # RFC 5321 limit
 MAX_TEMPLATE_NAME_LENGTH = 50
+# Virtualmin 8.x names its built-in server template "Default Settings" (ID 0);
+# there is no template called "Default" (create-domain: "Unknown template name").
+DEFAULT_VIRTUALMIN_TEMPLATE = "Default Settings"
 MAX_PARAMETER_VALUE_LENGTH = 1000
 MIN_DOMAIN_LENGTH = 3
 MAX_DOMAIN_LENGTH = 253  # RFC 1035 limit
@@ -117,7 +120,8 @@ class VirtualminValidator:
     EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
     # Template name validation
-    TEMPLATE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,50}$")
+    # Words of letters, digits, "_" and "-", separated by single spaces.
+    TEMPLATE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+(?: [a-zA-Z0-9_-]+)*$")
 
     @staticmethod
     def validate_domain_name(domain: str) -> str:
@@ -383,7 +387,7 @@ class VirtualminValidator:
             ValidationError: If template name is invalid
         """
         if not template:
-            return "Default"  # Virtualmin default template
+            return DEFAULT_VIRTUALMIN_TEMPLATE
 
         # Input validation and security check
         if not isinstance(template, str):
@@ -398,7 +402,9 @@ class VirtualminValidator:
 
         # Pattern validation
         if not VirtualminValidator.TEMPLATE_PATTERN.match(template):
-            raise ValidationError(_("Template name can only contain letters, numbers, hyphens, and underscores"))
+            raise ValidationError(
+                _("Template name can only contain letters, numbers, hyphens, underscores and single spaces")
+            )
 
         return template
 

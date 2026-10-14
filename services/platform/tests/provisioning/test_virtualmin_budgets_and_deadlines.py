@@ -100,7 +100,7 @@ class ProvisioningDeepReviewTests(TestCase):
             server=self.server,
             domain=self.service.domain,
             virtualmin_username="reviewuser",
-            template_name="Default",
+            template_name="Default Settings",
             status="active",
             protected_from_deletion=False,
         )
@@ -126,7 +126,7 @@ class ProvisioningDeepReviewTests(TestCase):
         if program == "list-domains":
             return response(program, data=[])
         if program == "list-templates":
-            return response(program, data=["Default"])
+            return response(program, data=["Default Settings"])
         if self.observe_recovery:
             job = VirtualminProvisioningJob.objects.get(account__domain=self.service.domain, status="running")
             self.observed_budget = job.parameters.get("task_budget_seconds")

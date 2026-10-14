@@ -50,6 +50,7 @@ from .security_utils import (
     sanitize_log_parameters,
 )
 from .virtualmin_tasks import VirtualminProvisioningParams, provision_virtualmin_account_async
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def audit_service_plan_price(
 
 
 # Constants for magic values used in signal handlers
-DEFAULT_TEMPLATE_NAME = "Default"
+DEFAULT_TEMPLATE_NAME = DEFAULT_VIRTUALMIN_TEMPLATE
 
 # ===============================================================================
 # BUSINESS CONSTANTS

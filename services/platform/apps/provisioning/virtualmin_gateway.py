@@ -577,6 +577,22 @@ def explicit_rejection(raw: str) -> str | None:
     return None
 
 
+def is_absent_domain_rejection(response: VirtualminResponse, domain: str) -> bool:
+    """True only for Virtualmin's own "no such domain" answer to a single-domain listing.
+
+    Virtualmin 8.x answers `list-domains --domain <absent>` with a JSON failure
+    whose error is exactly "Virtual server <domain> does not exist" (observed in
+    deploy/virtualmin-lab). That one envelope proves absence; any other failure,
+    or the same text for another domain, stays an error, so a create retry never
+    re-creates on a guess.
+    """
+    return (
+        not response.success
+        and bool(domain)
+        and explicit_rejection(response.raw_response) == f"Virtual server {domain} does not exist"
+    )
+
+
 def has_explicit_success(response: VirtualminResponse) -> bool:
     """A mutating command succeeded only with an explicit synchronous marker."""
     return response.data.get("status") == "success" or response.data.get("success") is True
@@ -1413,6 +1429,8 @@ class VirtualminGateway:
         if result.is_err():
             return Err(f"Domain state probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
+        if is_absent_domain_rejection(response, domain):
+            return Ok({"exists": False, "enabled": None, "owner": ""})
         if not response.success:
             return Err(
                 f"Domain state probe rejected: {response.data.get('error', 'Unknown error')}",
@@ -1445,6 +1463,8 @@ class VirtualminGateway:
         if result.is_err():
             return Err(f"Ownership probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
+        if is_absent_domain_rejection(response, domain):
+            return Ok(None)
         if not response.success:
             return Err(
                 f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}",
