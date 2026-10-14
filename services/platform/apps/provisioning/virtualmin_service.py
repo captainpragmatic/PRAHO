@@ -306,19 +306,25 @@ class VirtualminProvisioningService:
         (`_execute_domain_creation`) against the existing account: it rotates to a fresh
         password (the old one is unrecoverable after a server loss), optionally retargets
         the server, resets the account to `provisioning`, and drives a new provisioning job.
+
+        The target server is only staged on the instance while the domain is created; it is stored
+        (with the account turning active, in one transaction) once the create is verified. A failed
+        create leaves the stored server, and the caller's instance, on the node that held the domain.
         """
+        previous_server = account.server
+        committed = False
         try:
             # account.server is a non-nullable FK, so this is always a real server.
-            server = target_server or account.server
+            server = target_server or previous_server
 
             with transaction.atomic():
                 # Rotate password — the pre-loss secret cannot be recovered.
                 account.set_password(self._generate_secure_password())  # nosemgrep: unvalidated-password
-                account.server = server
+                account.server = server  # staged: not in update_fields below
                 # fsm-bypass: CharField status
                 account.status = "provisioning"
                 account.status_message = "Reprovisioning from PRAHO (disaster recovery)"
-                account.save(update_fields=["encrypted_password", "server", "status", "status_message", "updated_at"])
+                account.save(update_fields=["encrypted_password", "status", "status_message", "updated_at"])
 
                 job = VirtualminProvisioningJob(
                     operation="create_domain",
@@ -338,6 +344,9 @@ class VirtualminProvisioningService:
 
             provisioning_result = self._execute_domain_creation(account, job)
             if provisioning_result.is_ok():
+                # The create commits the server with the active state; this covers a create path that did not.
+                account.save(update_fields=["server", "updated_at"])
+                committed = True
                 logger.info(f"✅ [VirtualminService] Reprovisioned account {account.domain}")
                 return Ok(account)
 
@@ -353,6 +362,9 @@ class VirtualminProvisioningService:
         except Exception as e:
             logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
+        finally:
+            if not committed:
+                account.server = previous_server
 
     def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
@@ -434,7 +446,9 @@ class VirtualminProvisioningService:
                             # fsm-bypass: CharField status
                             account.status = "active"
                             account.provisioned_at = timezone.now()
-                            account.save(update_fields=["status", "provisioned_at", "updated_at"])
+                            # "server" is stored here, with the active state: a reprovision stages its
+                            # target on the instance and only a verified create may persist it.
+                            account.save(update_fields=["status", "provisioned_at", "server", "updated_at"])
 
                             # Update server stats (track for rollback)
                             old_domain_count = account.server.current_domains
