@@ -87,9 +87,15 @@ class AttemptBudgetTests(TestCase):
         for _ in range(5):
             self.assertTrue(MFAService._check_rate_limit(self.user))
 
-    def test_mfa_store_failure_denies_the_attempt(self) -> None:
-        with patch("apps.common.counters.increment", side_effect=OperationalError("store down")):
-            self.assertFalse(MFAService._check_rate_limit(self.user))
+    def test_mfa_store_failure_is_unavailable_not_a_wrong_code(self) -> None:
+        """Nothing was decided, so the request answers 503 and charges nothing (#689)."""
+        from apps.users.mfa import MFAStoreUnavailable  # noqa: PLC0415
+
+        with (
+            patch("apps.common.counters.increment", side_effect=OperationalError("store down")),
+            self.assertRaises(MFAStoreUnavailable),
+        ):
+            MFAService._check_rate_limit(self.user)
 
     def _staff_view(self) -> Callable[..., HttpResponse]:
         @staff_rate_limit(3, per_user=True)
