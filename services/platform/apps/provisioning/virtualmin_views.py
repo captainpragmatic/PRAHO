@@ -476,6 +476,10 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        # Offered only while differential backups may be created; the pair restore above is not gated.
+        "incremental_backups_enabled": VirtualminBackupManagementService.incremental_backups_enabled(),
+        "take_base_url": reverse("provisioning:virtualmin_account_take_base", args=[account.id]),
+        "take_differential_url": reverse("provisioning:virtualmin_account_take_differential", args=[account.id]),
         "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
@@ -672,6 +676,30 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     }
 
     return render(request, "provisioning/virtualmin/backup_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_chain_backup")
+def virtualmin_account_chain_backup(request: HttpRequest, account_id: str, role: str) -> HttpResponse:
+    """💾 Take a base or a differential backup of one account (never in bulk)."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    if role not in ("base", "differential"):
+        return HttpResponseBadRequest("Unknown backup role")
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+    management = VirtualminBackupManagementService(account.server)
+    take = management.take_base_backup if role == "base" else management.take_differential_backup
+    created = take(account, initiated_by=f"staff:{cast(User, request.user).email}")
+    if created.is_err():
+        messages.error(request, _("The backup could not be started: {error}").format(error=created.unwrap_err()))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    job = created.unwrap()
+    messages.success(request, _("Base backup queued.") if role == "base" else _("Differential backup queued."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required

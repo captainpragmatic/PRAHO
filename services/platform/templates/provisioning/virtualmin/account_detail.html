@@ -57,6 +57,26 @@
             {% endif %}
             {% trans "Backup Now" as bt4 %}{% button bt4 href=backup_url variant="primary" %}
             {% trans "Restore pair" as bt4b %}{% button bt4b href=restore_pair_url variant="secondary" %}
+            {% if incremental_backups_enabled %}
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                        hx-post="{{ take_base_url }}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                        hx-confirm="{% trans 'Take a base backup? It is a complete backup of this account and starts a new chain: differential backups taken after it hold only what changed since it.' %}"
+                        hx-swap="outerHTML"
+                        hx-target="body">
+                    {% trans "Take base backup" %}
+                </button>
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                        hx-post="{{ take_differential_url }}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                        hx-confirm="{% trans 'Take a differential backup? It holds only what changed since the base backup, so restoring it needs that base backup as well.' %}"
+                        hx-swap="outerHTML"
+                        hx-target="body">
+                    {% trans "Take differential backup" %}
+                </button>
+            {% endif %}
         </div>
     </div>
 

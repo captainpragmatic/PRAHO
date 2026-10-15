@@ -1744,7 +1744,7 @@ class VirtualminBackupManagementService:
             role_error = config.chain_role_error()
             if role_error is not None:
                 return Err(role_error)
-            if config.chain_role != CHAIN_ROLE_STANDALONE and not self._incremental_backups_enabled():
+            if config.chain_role != CHAIN_ROLE_STANDALONE and not self.incremental_backups_enabled():
                 return Err("Differential backups are disabled (provisioning.incremental_backups_enabled)")
 
             parameters = {
@@ -1769,7 +1769,8 @@ class VirtualminBackupManagementService:
             return Err(f"Backup job failed: {e!s}")
 
     @staticmethod
-    def _incremental_backups_enabled() -> bool:
+    def incremental_backups_enabled() -> bool:
+        """Whether base and differential backups may be created (provisioning.incremental_backups_enabled)."""
         from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
 
         return SettingsService.get_boolean_setting("provisioning.incremental_backups_enabled", False)

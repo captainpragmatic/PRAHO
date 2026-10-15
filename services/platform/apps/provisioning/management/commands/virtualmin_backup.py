@@ -29,6 +29,16 @@ class Command(BaseCommand):
         backup_parser.add_argument("--no-files", action="store_true", help="Exclude web files")
         backup_parser.add_argument("--no-ssl", action="store_true", help="Exclude SSL certificates")
         backup_parser.add_argument("--server", help="Specific server hostname")
+        backup_parser.add_argument(
+            "--chain-role",
+            choices=["standalone", "base", "differential"],
+            default="standalone",
+            help=(
+                "standalone (default), base (a complete backup that starts a differential chain) or "
+                "differential (only what changed since the live base). base and differential are "
+                "refused while provisioning.incremental_backups_enabled is off."
+            ),
+        )
 
         # Restore command
         restore_parser = subparsers.add_parser("restore", help="Restore domain from backup")
@@ -44,6 +54,14 @@ class Command(BaseCommand):
         restore_parser.add_argument("--no-files", action="store_true", help="Skip files restore")
         restore_parser.add_argument("--no-ssl", action="store_true", help="Skip SSL restore")
         restore_parser.add_argument("--target-server", help="Target server hostname")
+        restore_parser.add_argument(
+            "--differential-backup-id",
+            help=(
+                "Restore BACKUP_ID (a base backup) together with this differential backup as one pair. "
+                "Files deleted after the base was taken reappear, databases come from the differential's "
+                "full dump, and the domain is offline until the restore is verified. Needs --force-restore."
+            ),
+        )
 
         # List backups command
         list_parser = subparsers.add_parser("list", help="List available backups")
@@ -114,6 +132,7 @@ class Command(BaseCommand):
             include_databases=not options.get("no_databases", False),
             include_files=not options.get("no_files", False),
             include_ssl=not options.get("no_ssl", False),
+            chain_role=options.get("chain_role") or "standalone",
         )
         management = VirtualminBackupManagementService(server)
         result = management.create_backup_job(account=account, config=config, initiated_by="cli", execute_inline=True)
@@ -153,6 +172,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Starting restore for domain: {domain}")
         self.stdout.write(f"From backup: {backup_id}")
 
+        if options.get("differential_backup_id"):
+            self._handle_pair_restore(account, target_server, options)
+            return
+
         restore_config = RestoreConfig(
             backup_id=backup_id,
             force_restore=bool(options.get("force_restore", False)),
@@ -178,6 +201,35 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Restore completed successfully!"))
         self.stdout.write(f"Job ID: {job.pk}")
         self.stdout.write(f"Restore ID: {restore_info.get('restore_id', 'n/a')}")
+
+    def _handle_pair_restore(
+        self, account: VirtualminAccount, target_server: VirtualminServer, options: dict[str, Any]
+    ) -> None:
+        """Restore a base and its differential as one workflow.
+
+        Not gated by provisioning.incremental_backups_enabled: that flag stops new bases and
+        differentials being created, and existing pairs must stay restorable whatever it says.
+        """
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
+
+        if any(options.get(skip) for skip in ("no_email", "no_databases", "no_files", "no_ssl")):
+            raise CommandError("A pair restore restores every component; drop the --no-* options")
+        management = VirtualminBackupManagementService(target_server)
+        result = management.create_pair_restore_job(
+            account,
+            options["backup_id"],
+            options["differential_backup_id"],
+            target_server=target_server,
+            initiated_by="cli",
+            force_restore=bool(options.get("force_restore", False)),
+            execute_inline=True,
+        )
+        if result.is_err():
+            raise CommandError(f"Pair restore failed: {result.unwrap_err()}")
+        job = result.unwrap()
+        self.stdout.write(self.style.SUCCESS("Pair restore completed successfully!"))
+        self.stdout.write(f"Job ID: {job.pk}")
+        self.stdout.write(f"Restore ID: {(job.result or {}).get('restore_id', 'n/a')}")
 
     def _find_account_by_domain(self, domain: str) -> VirtualminAccount | None:
         """Find VirtualminAccount by domain name."""

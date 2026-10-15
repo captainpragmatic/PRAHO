@@ -52,6 +52,18 @@ urlpatterns = [
         name="virtualmin_account_backup",
     ),
     path(
+        "accounts/<uuid:account_id>/backup/base/",
+        virtualmin_views.virtualmin_account_chain_backup,
+        {"role": "base"},
+        name="virtualmin_account_take_base",
+    ),
+    path(
+        "accounts/<uuid:account_id>/backup/differential/",
+        virtualmin_views.virtualmin_account_chain_backup,
+        {"role": "differential"},
+        name="virtualmin_account_take_differential",
+    ),
+    path(
         "accounts/<uuid:account_id>/restore/",
         virtualmin_views.virtualmin_account_restore,
         name="virtualmin_account_restore",
