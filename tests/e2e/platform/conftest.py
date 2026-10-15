@@ -106,6 +106,7 @@ def lab_bench() -> Iterator[Bench]:
         load_state,
         refuse_unless_lab_settings,
     )
+    from apps.provisioning.virtualmin_backup_service import REMOTE_ARCHIVE_DIR  # noqa: PLC0415
     from tests.virtualmin_lab.workflows.harness import build_bench  # noqa: PLC0415
 
     refuse_unless_lab_settings()
@@ -115,6 +116,10 @@ def lab_bench() -> Iterator[Bench]:
         bench.reset_meters()
         bench.refresh_health()  # placement and migration only accept servers that read healthy
         bench.remove_leftovers()
+        # Archives an interrupted or refused run left in the nodes' staging directory: the tests assert that a
+        # backup or restore leaves nothing behind, so they start from an empty one.
+        for node_lab in bench.labs.values():
+            node_lab.exec("sh", "-c", 'rm -f "$1"/virtualmin_backup_* "$1"/migration_*', "sh", REMOTE_ARCHIVE_DIR)
         try:
             yield bench
         finally:
