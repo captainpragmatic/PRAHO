@@ -26,8 +26,31 @@
   no_log: true
 
 # ---------------------------------------------------------------------------
-# 1. PostgreSQL 15
+# 1. PostgreSQL 16
 # ---------------------------------------------------------------------------
+
+# Inspect registered clusters before installing a new major or changing any database settings.
+- name: Detect existing PostgreSQL cluster tool
+  stat:
+    path: /usr/bin/pg_lsclusters
+  register: postgres_cluster_tool
+
+- name: Inspect registered PostgreSQL clusters
+  command: /usr/bin/pg_lsclusters --no-header
+  register: postgres_clusters
+  changed_when: false
+  when: postgres_cluster_tool.stat.exists
+
+- name: Record existing PostgreSQL major versions
+  set_fact:
+    postgres_major_versions: "{{ postgres_clusters.stdout_lines | default([]) | map('split') | map('first') | map('int') | list }}"
+
+- name: Refuse implicit native PostgreSQL major upgrades
+  assert:
+    that:
+      - postgres_major_versions | reject('equalto', 16) | list | length == 0
+      - (deployed_env.DB_PORT | default('5432') | string) == '5432'
+    fail_msg: "Native deployment targets PostgreSQL 16 on port 5432. Migrate and retire legacy clusters explicitly first; see docs/deployment/POSTGRESQL_16_UPGRADE.md."
 
 - name: Create keyrings directory
   file:
@@ -46,11 +69,11 @@
     repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
     state: present
 
-- name: Install PostgreSQL 15
+- name: Install PostgreSQL 16
   apt:
     name:
-      - postgresql-15
-      - postgresql-client-15
+      - postgresql-16
+      - postgresql-client-16
       - libpq-dev
     state: present
     update_cache: yes
@@ -666,7 +689,7 @@
       Platform:  https://{{ deployed_env.PLATFORM_DOMAIN }}
       Local:     http://localhost:{{ platform_port }} / http://localhost:{{ portal_port }}
       Q-Cluster: service enabled (verify actual queued work separately)
-      Database:  PostgreSQL 15 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
+      Database:  PostgreSQL 16 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
       Method:    {{ deploy_method }}
       Version:   {{ deploy_git_version + ' (' + deployed_sha.stdout + ')' if deploy_method == 'git' else 'rsync (local)' }}
       Env file:  {{ env_file_path }}

@@ -319,7 +319,7 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 ```
 
 **What it installs:**
-- PostgreSQL 15 (from official APT repo)
+- PostgreSQL 16 (from official APT repo)
 - Python 3.13 (from deadsnakes PPA)
 - uv (Python package manager)
 - Caddy (automatic HTTPS via Let's Encrypt)
@@ -912,6 +912,12 @@ make rollback VERSION=v1.2.3
 ```
 
 **Native installs rolling back past the log rotation change** (releases before Platform and the portal stopped rotating their own log files): remove `/etc/logrotate.d/praho-platform` and `/etc/logrotate.d/praho-portal` first. The older release rotates those files in process again, and logrotate moving them as well would race it. The next deploy of a current release installs them again.
+
+### PostgreSQL version and existing data
+
+Fresh bundled/native installations use PostgreSQL 16. Existing 15 data requires an explicit
+[migration procedure](POSTGRESQL_16_UPGRADE.md); preflight refuses an implicit image or cluster-major
+replacement before startup. Docker preflight uses Python 3.9+ and a read-only volume inspection.
 
 ### Backup recovery metadata
 
