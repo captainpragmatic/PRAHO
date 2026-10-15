@@ -146,18 +146,27 @@ def job_id_from(page: Page) -> str:
     return match.group(1)
 
 
-def wait_for_job(page: Page, *, timeout: float = JOB_TIMEOUT_S, final: str = "Completed") -> str:
+def status_of(page: Page) -> str:
+    """The status badge's words (its icon contributes a line of its own)."""
+    lines = [line.strip() for line in page.locator(JOB_STATUS).first.inner_text().splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def wait_for_job(
+    page: Page, *, timeout: float = JOB_TIMEOUT_S, final: str = "Completed", also_in_flight: tuple[str, ...] = ()
+) -> str:
     """Reload a job page until its status badge reads `final`; fail at once on any other settled status.
 
     The status badge is rendered once per page load (only the log pane polls), so the page is reloaded.
-    A Failed job fails the test immediately with the page's own error text instead of after the timeout.
+    A Failed job fails the test immediately with the page's own error text instead of after the timeout,
+    unless `also_in_flight` names it (a job just sent back for another attempt still reads Failed for a moment).
     """
     deadline = time.monotonic() + timeout
     while True:
-        status = page.locator(JOB_STATUS).first.inner_text().strip()
+        status = status_of(page)
         if status == final:
             return status
-        if status not in JOB_IN_FLIGHT:
+        if status not in (*JOB_IN_FLIGHT, *also_in_flight):
             detail = page.locator("main").first.inner_text()[:800]
             raise AssertionError(f"the job settled as {status!r}, not {final!r}: {detail!r}")
         if time.monotonic() >= deadline:
