@@ -70,7 +70,8 @@ RUN keydir="$(mktemp -d)" \
       > /etc/apt/sources.list.d/virtualmin-stable.list
 
 # An empty version argument installs the repository's latest package of that name: the nightly drift check
-# (`VIRTUALMIN_LAB_UNPINNED=1 lab.sh build`) builds that way. The pinned build expands to exactly `name=version`.
+# (`VIRTUALMIN_LAB_UNPINNED=1 lab.sh build`) builds that way. webmin-virtual-server is the exception: its version
+# argument is the glob `*-gpl`, because the repository also carries a licensed `-pro` build with a higher version. The pinned build expands to exactly `name=version`.
 #
 # Installer phase 3, exactly as virtualmin-install.sh runs it for
 # `--minimal --bundle LAMP`: webmin first, then virtualmin-core plus the
