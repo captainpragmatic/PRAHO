@@ -6,6 +6,7 @@
 
 set -euo pipefail
 export PGPASSFILE="{{ project_root }}/credentials/postgresql.pgpass"
+umask 077
 
 BACKUP_DIR="{{ backup_directory }}"
 RETENTION_DAYS={{ backup_retention_days }}
@@ -26,12 +27,26 @@ trap 'rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"' EXIT
 
 echo "[$(date)] Starting native PostgreSQL backup..."
 
-mkdir -p "${BACKUP_DIR}"
+# Refuse a linked directory and change only this user's regular backup artifacts.
+if [ -L "$BACKUP_DIR" ]; then
+    echo "ERROR: Backup directory must not be a symlink" >&2
+    exit 1
+fi
+mkdir -p "$BACKUP_DIR"
+if [ ! -O "$BACKUP_DIR" ]; then
+    echo "ERROR: Backup directory must belong to the backup user" >&2
+    exit 1
+fi
+chmod 0700 "$BACKUP_DIR"
+find "$BACKUP_DIR" -maxdepth 1 -type f -user "$(id -un)" \
+    \( -name 'praho_backup_*.sql.gz' -o -name 'praho_backup_*.dump' \
+       -o -name 'praho_backup_*.metadata.json' -o -name 'praho_backup_*.media.tar.gz' \
+       -o -name 'praho_backup_*.partial' \) -exec chmod 0600 {} +
 
 # A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned; one
 # being written changes as the dump streams in. Before the dump, so a string of interrupted runs
 # cannot pile them up either.
-find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.partial" -mmin +1440 -delete
 
 # Direct pg_dump (no Docker)
 pg_dump \
@@ -67,8 +82,8 @@ fi
 # Cleanup old backups, and the media archives that go with them. Also after a media failure, so a
 # lasting one does not pile dumps up.
 echo "[$(date)] Cleaning up backups older than ${RETENTION_DAYS} days..."
-find "${BACKUP_DIR}" -name "praho_backup_*.dump" -mtime "+${RETENTION_DAYS}" -delete
-find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime "+${RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.dump" -mtime "+${RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.media.tar.gz" -mtime "+${RETENTION_DAYS}" -delete
 
 if [ "${MEDIA_STATUS}" -gt 1 ]; then
     # The database dump is complete and kept; the run still fails, so cron notices.
