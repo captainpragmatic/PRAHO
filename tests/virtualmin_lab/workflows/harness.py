@@ -104,7 +104,10 @@ class Bench:
     def set_setting(self, key: str, value: Any) -> None:
         """Change a setting for the run; `put_back` puts every one back."""
         if key not in self.saved_settings:
-            self.saved_settings[key] = SettingsService.get_setting(key)
+            # A setting never written reads as None, which update_setting refuses: put back the type's zero
+            # (False for the flags), which is what the code reads while the row is absent.
+            original = SettingsService.get_setting(key)
+            self.saved_settings[key] = type(value)() if original is None else original
         result = SettingsService.update_setting(key, value)
         assert result.is_ok(), f"{key}: {result.unwrap_err()}"
 
@@ -118,8 +121,11 @@ class Bench:
         server.save(update_fields=[*fields, "updated_at"])
 
     def put_back(self) -> None:
+        failures = []
         for key, value in self.saved_settings.items():
-            SettingsService.update_setting(key, value)
+            result = SettingsService.update_setting(key, value)
+            if result.is_err():
+                failures.append(f"{key} -> {value!r}: {result.unwrap_err()}")
         self.saved_settings.clear()
         for key, fields in self.saved_servers.items():
             server = self.server(key)
@@ -129,6 +135,7 @@ class Bench:
         self.saved_servers.clear()
         for key, count in self.initial_domain_counts.items():
             VirtualminServer.objects.filter(hostname=self.state.node(key).server_hostname).update(current_domains=count)
+        assert not failures, f"settings not put back: {failures}"
 
     # ---------------------------------------------------------------- queue
 
