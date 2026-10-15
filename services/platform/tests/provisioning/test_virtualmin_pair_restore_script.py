@@ -28,6 +28,8 @@ DOMAIN = "node.example.com"
 DOMAIN_ID = "17919754553303"
 BASE = "virtualmin_backup_" + "b" * 32 + ".tar.gz"
 DIFF = "virtualmin_backup_" + "d" * 32 + ".tar.gz"
+NEW_DOCROOT = "/home/node/restored_html"
+NEW_ALIAS = f"old-shop.{DOMAIN}"
 
 _PAIR_SHIMS = {
     "virtualmin": r"""#!/bin/bash
@@ -41,9 +43,13 @@ case $cmd in
       id) echo "$FAKE_DOMAIN_ID" ;;
       disabled) if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi ;;
       multi)
+        # What a restore rewrote (state/docroot, state/hostnames) wins over the environment defaults.
+        if [[ -e $state/listing_broken ]]; then echo "list-domains: cannot read the domain" >&2; exit 1; fi
+        docroot=${FAKE_DOCROOT:-/home/node/public_html}; [[ ! -e $state/docroot ]] || docroot=$(<"$state/docroot")
+        names=${FAKE_HOSTNAMES-$FAKE_DOMAIN www.$FAKE_DOMAIN mail.$FAKE_DOMAIN}; [[ ! -e $state/hostnames ]] || names=$(<"$state/hostnames")
         echo "    IP address: 10.9.8.7 (Shared)"
-        [[ ${FAKE_NO_DOCROOT:-0} == 1 ]] || echo "    HTML directory: ${FAKE_DOCROOT:-/home/node/public_html}"
-        echo "    Website hostnames: ${FAKE_HOSTNAMES-$FAKE_DOMAIN www.$FAKE_DOMAIN mail.$FAKE_DOMAIN}"
+        [[ ${FAKE_NO_DOCROOT:-0} == 1 ]] || echo "    HTML directory: $docroot"
+        echo "    Website hostnames: $names"
         ;;
       name) if [[ ${FAKE_DOMAIN_GONE:-0} != 1 ]]; then echo "$FAKE_DOMAIN"; fi ;;
     esac
@@ -64,20 +70,40 @@ case $cmd in
     } >>"$state/calls"
     cp "$PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf" "$state/maint.$n.conf" 2>/dev/null || true
     if [[ ${FAKE_RESTORE_ENABLES:-0} == 1 ]]; then rm -f "$state/disabled"; fi
+    # A historical backup brings back the Apache configuration it was taken with: another document
+    # root and another website alias than the live domain has, or no longer an alias it has.
+    if [[ -n ${FAKE_RESTORE_NEW_DOCROOT:-} ]]; then printf '%s' "$FAKE_RESTORE_NEW_DOCROOT" >"$state/docroot"; fi
+    if [[ -n ${FAKE_RESTORE_NEW_HOSTNAMES:-} ]]; then printf '%s' "$FAKE_RESTORE_NEW_HOSTNAMES" >"$state/hostnames"; fi
+    if [[ ${FAKE_RESTORE_BREAKS_LISTING:-0} == "$n" ]]; then : >"$state/listing_broken"; fi
     if [[ ${FAKE_RESTORE_FAIL_ON:-0} == "$n" ]]; then echo "restore blew up" >&2; exit 1; fi
     if [[ ${FAKE_CANCEL_AFTER:-0} == "$n" ]]; then : >"$PRAHO_RUN_DIR/chain-$FAKE_DOMAIN_ID.cancelled.$FAKE_TOKEN"; fi
     ;;
 esac
 """,
-    # 503 while the maintenance include exists, 200 otherwise; FAKE_NO_503 simulates a barrier that never takes.
+    # The fake vhost answers every probed host from the domain's CURRENT document root, as Apache does for
+    # a name-based virtual host, and the barrier answers 503 only for a request its own rules match: the
+    # RewriteCond lines of the maintenance file are evaluated (host case-insensitively), so a name or a
+    # document root the file does not list is answered 200. FAKE_NO_503 simulates a barrier that never takes.
     # Every probed host is recorded; FAKE_OPEN_HOST names one spelling the barrier does not cover.
     "curl": r"""#!/bin/bash
 host=""
 while (($#)); do case $1 in --resolve) host=${2%%:*}; shift ;; esac; shift; done
 echo "$host" >>"$FAKE_STATE/probed"
-if [[ -n ${FAKE_OPEN_HOST:-} && $host == "$FAKE_OPEN_HOST" ]]; then printf 200; exit 0; fi
-if [[ -n ${FAKE_OPEN_AFTER_RESTORE:-} && -e $FAKE_STATE/restore_count && $host == "$FAKE_OPEN_AFTER_RESTORE" ]]; then printf 200; exit 0; fi
-if [[ ${FAKE_NO_503:-0} != 1 && -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]]; then printf 503; else printf 200; fi
+answer() { echo "$host $1 restores=$(cat "$FAKE_STATE/restore_count" 2>/dev/null || echo 0)" >>"$FAKE_STATE/answers"; printf '%s' "$1"; }
+if [[ -n ${FAKE_OPEN_HOST:-} && $host == "$FAKE_OPEN_HOST" ]]; then answer 200; exit 0; fi
+if [[ -n ${FAKE_OPEN_AFTER_RESTORE:-} && -e $FAKE_STATE/restore_count && $host == "$FAKE_OPEN_AFTER_RESTORE" ]]; then answer 200; exit 0; fi
+conf=$PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf
+covered=0
+if [[ ${FAKE_NO_503:-0} != 1 && -e $conf ]]; then
+  docroot=${FAKE_DOCROOT:-/home/node/public_html}; [[ ! -e $FAKE_STATE/docroot ]] || docroot=$(<"$FAKE_STATE/docroot")
+  while IFS= read -r line; do
+    case $line in
+      "RewriteCond %{DOCUMENT_ROOT} "*) rx=${line#"RewriteCond %{DOCUMENT_ROOT} "}; rx=${rx%" [OR]"}; [[ $docroot =~ $rx ]] && covered=1 ;;
+      "RewriteCond %{HTTP_HOST} "*) rx=${line#"RewriteCond %{HTTP_HOST} "}; rx=${rx%" [NC]"}; shopt -s nocasematch; [[ $host =~ $rx ]] && covered=1; shopt -u nocasematch ;;
+    esac
+  done <"$conf"
+fi
+if [[ $covered == 1 ]]; then answer 503; else answer 200; fi
 """,
     "apache2ctl": (
         "#!/bin/bash\n"
@@ -248,6 +274,76 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(len(self.restores()), 1, "the differential was never restored")
         self.assertEqual(result.checkpoints[-1].odd_hosts, "200")
         self.assertTrue(self.maint.exists() and self.disabled(), "both layers stay up for an operator")
+
+    def answers(self) -> list[tuple[str, str, str]]:
+        """(host, code, restores run so far) for every probe, in order."""
+        rows = [line.split() for line in (self.state / "answers").read_text().splitlines()]
+        return [(host, code, restores) for host, code, restores in rows]
+
+    def test_a_restore_that_brings_back_another_docroot_and_alias_is_covered_before_the_next_step(self) -> None:
+        # The backup restores Apache configuration the live domain did not have: another document root and
+        # a website alias. Until the barrier is rebuilt from what the restore left, that alias serves the
+        # half-restored site while every probe taken from the pre-restore picture still sees 503.
+        result = self.step(
+            FAKE_RESTORE_NEW_DOCROOT=NEW_DOCROOT,
+            FAKE_RESTORE_NEW_HOSTNAMES=f"{DOMAIN} www.{DOMAIN} {NEW_ALIAS}",
+        )
+        self.assertEqual((result.outcome, result.ran), ("ok", True))
+        conf = (self.state / "maint.2.conf").read_text()  # the 503 section as the differential restore began
+        self.assertIn(f"RewriteCond %{{DOCUMENT_ROOT}} ^{NEW_DOCROOT}(/|$) [OR]", conf)
+        self.assertIn("RewriteCond %{DOCUMENT_ROOT} ^/home/node/public_html(/|$) [OR]", conf, "never shrinks")
+        host_condition = next(line for line in conf.splitlines() if line.startswith("RewriteCond %{HTTP_HOST}"))
+        self.assertIn(r"old-shop\.node\.example\.com", host_condition)
+        after_base = [a for a in self.answers() if a[2] == "restores=1"]
+        self.assertIn((NEW_ALIAS, "503", "restores=1"), after_base, "the new alias is probed at the checkpoint after the base")
+        self.assertEqual({code for _, code, _ in after_base}, {"503"})
+        for checkpoint in result.checkpoints[:-1]:
+            self.assertTrue(checkpoint.barrier_holds, checkpoint.step)
+
+    def test_the_barrier_never_shrinks_when_a_restore_drops_an_alias_or_moves_the_docroot(self) -> None:
+        result = self.step(FAKE_RESTORE_NEW_DOCROOT=NEW_DOCROOT, FAKE_RESTORE_NEW_HOSTNAMES=DOMAIN)
+        self.assertEqual(result.outcome, "ok")
+        conf = (self.state / "maint.2.conf").read_text()
+        self.assertIn("^/home/node/public_html(/|$) [OR]", conf)
+        self.assertIn(f"^{NEW_DOCROOT}(/|$) [OR]", conf)
+        self.assertIn(r"www\.node\.example\.com", conf, "a name the restore dropped stays covered")
+        after_base = {host for host, _, restores in self.answers() if restores == "restores=1"}
+        self.assertIn(f"www.{DOMAIN}", after_base, "and stays probed")
+
+    def test_a_failed_restore_that_changed_the_configuration_is_still_covered(self) -> None:
+        result = self.step(
+            FAKE_RESTORE_FAIL_ON="1",
+            FAKE_RESTORE_NEW_DOCROOT=NEW_DOCROOT,
+            FAKE_RESTORE_NEW_HOSTNAMES=f"{DOMAIN} {NEW_ALIAS}",
+        )
+        self.assertEqual((result.outcome, result.reason), ("failed", "restore_base_failed"))
+        conf = self.maint.read_text()
+        self.assertIn(f"^{NEW_DOCROOT}(/|$) [OR]", conf)
+        self.assertIn(r"old-shop\.node\.example\.com", conf)
+        self.assertEqual([c.step for c in result.checkpoints], ["barrier_up", "base_failed"])
+        self.assertTrue(result.checkpoints[-1].barrier_holds)
+        self.assertIn((NEW_ALIAS, "503", "restores=1"), self.answers())
+        self.assertTrue(self.disabled())
+
+    def test_a_restore_whose_result_cannot_be_read_back_fails_closed_with_the_barrier_up(self) -> None:
+        cases = (
+            ("listing_fails_after_base", {"FAKE_RESTORE_BREAKS_LISTING": "1"}, "surface_unreadable_after_after_base", 1),
+            (
+                "listing_fails_after_differential",
+                {"FAKE_RESTORE_BREAKS_LISTING": "2"},
+                "surface_unreadable_after_after_differential",
+                2,
+            ),
+            ("docroot_not_a_path", {"FAKE_RESTORE_NEW_DOCROOT": "public_html"}, "surface_unreadable_after_after_base", 1),
+        )
+        for name, overrides, reason, restores in cases:
+            with self.subTest(case=name):
+                self.state_reset()
+                result = self.step(**overrides)
+                self.assertEqual((result.outcome, result.reason, result.ran), ("failed", reason, True))
+                self.assertEqual(len(self.restores()), restores, "nothing further was restored")
+                self.assertTrue(self.maint.exists() and self.disabled(), "both layers stay up for an operator")
+                self.assertNotEqual(result.checkpoints[-1].step, "barrier_down")
 
     def test_a_domain_whose_document_root_is_unknown_is_refused_untouched(self) -> None:
         result = self.step(FAKE_NO_DOCROOT="1")

@@ -12,10 +12,13 @@
 #      dot, and they run before the virtual host's own rewrite rules (Apache 2.4.8 or later,
 #      RewriteOptions InheritDownBefore). It is deliberately NOT a virtual host: Virtualmin
 #      recognises a virtual host that serves the domain and rewrites it during a restore, which let
-#      requests through;
+#      requests through. A backup brings back the Apache configuration it was taken with, so after
+#      every restore the document root and website hostnames are read again and the matchers and
+#      the probe list become the UNION of everything seen so far: they never shrink while a restore
+#      is in flight, and a restore whose result cannot be read back fails closed, barrier up;
 #   2. barrier layer (b): disable-domain, verified;
-#   3. restore the base, then re-apply and verify both layers;
-#   4. restore the differential, then re-apply and verify both layers;
+#   3. restore the base, then re-read what reaches the virtual host, re-apply and verify both layers;
+#   4. restore the differential, then do the same;
 #   5. verify, and only then take the 503 section down.
 #
 # The domain is left DISABLED on success: enabling it again belongs to PRAHO's reconcile
@@ -79,10 +82,9 @@ cancel_marker="$RUN_DIR/chain-$domain_id.cancelled.$token"
 maint_conf="$APACHE_DIR/zz-praho-maint-$domain_id.conf"
 progress="$RUN_DIR/pair-$domain_id.progress"
 checkpoints=""
-docroot=""
-docroot_regex=""
-probe_hosts=()
-name_regex=""
+docroot_regexes=()   # one per document root the domain's virtual host has had since this job began
+probe_hosts=()       # every spelling of every name it has answered to since then, probed at each checkpoint
+name_regex=""        # the same names as one alternation, for the barrier's Host condition
 CP_ODD=none
 
 now() {
@@ -167,7 +169,10 @@ barrier_up() {
   # nothing at all) or any spelling of the domain's names; nothing else on the node is touched.
   {
     printf 'RewriteOptions InheritDownBefore\nRewriteEngine On\n'
-    printf 'RewriteCond %%{DOCUMENT_ROOT} ^%s(/|$) [OR]\n' "$docroot_regex"
+    local root_regex
+    for root_regex in "${docroot_regexes[@]}"; do
+      printf 'RewriteCond %%{DOCUMENT_ROOT} ^%s(/|$) [OR]\n' "$root_regex"
+    done
     printf 'RewriteCond %%{HTTP_HOST} ^(%s)\\.?(:[0-9]+)?$ [NC]\n' "$name_regex"
     printf 'RewriteRule ^ - [R=503,L]\nErrorDocument 503 "Restore in progress"\n'
   } >"$maint_conf"
@@ -222,44 +227,62 @@ if ! listed_id=$(virtualmin list-domains --domain "$domain" --id-only 2>/dev/nul
 fi
 
 # ---- what reaches the domain's virtual host: its document root and every name it answers to ----
-domain_info=$(virtualmin list-domains --domain "$domain" --multiline 2>/dev/null || true)
-docroot=$(sed -n 's/^ *HTML directory: *//p' <<<"$domain_info")
-docroot=${docroot%%$'\n'*}
-docroot=${docroot%/}
-hostnames=$(sed -n 's/^ *Website hostnames: *//p' <<<"$domain_info")
-hostnames=${hostnames%%$'\n'*}
-if [[ ! $docroot =~ $safe_dir || $docroot == *..* ]]; then
-  emit refused docroot_unknown false
-  exit 0
-fi
 host_ok='^(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 name_alternatives=()
 seen_hosts=" "
+seen_names=" "
+seen_roots=" "
 add_probe_host() { # HOST : once per exact spelling (the upper-case spelling is a probe of its own)
   [[ $seen_hosts != *" $1 "* ]] || return 0
   seen_hosts+="$1 "
   probe_hosts+=("$1")
 }
-# read, not an unquoted expansion: a wildcard alias must not be globbed against the working directory.
-read -r -a listed_names <<<"$hostnames"
-for name in "$domain" "www.$domain" "mail.$domain" ${listed_names[@]+"${listed_names[@]}"}; do
-  [[ $name =~ $host_ok ]] || continue
-  escaped_name=${name//./\\.}
-  if [[ $name == \*.* ]]; then
-    # A wildcard alias: any prefix, probed with a made-up one.
-    name_alternatives+=("[A-Za-z0-9.-]+\\.${escaped_name#\*\\.}")
-    add_probe_host "wildcard-probe.${name#\*.}"
-  else
-    name_alternatives+=("$escaped_name")
-    add_probe_host "$name"
+
+# read_surface : read the domain's HTML directory and website hostnames NOW and fold them into the
+# barrier's matchers and the probe list. Only ever adds: what an earlier read found stays covered
+# and probed, so a restore that drops or moves something never narrows the barrier mid-flight.
+# Returns 1, changing nothing, when the document root cannot be read as a safe absolute path.
+read_surface() {
+  local info root hostnames name escaped_name
+  local -a listed_names
+  info=$(virtualmin list-domains --domain "$domain" --multiline 2>/dev/null) || return 1
+  root=$(sed -n 's/^ *HTML directory: *//p' <<<"$info")
+  root=${root%%$'\n'*}
+  root=${root%/}
+  [[ $root =~ $safe_dir && $root != *..* ]] || return 1
+  hostnames=$(sed -n 's/^ *Website hostnames: *//p' <<<"$info")
+  hostnames=${hostnames%%$'\n'*}
+
+  if [[ $seen_roots != *" $root "* ]]; then
+    seen_roots+="$root "
+    docroot_regexes+=("${root//./\\.}")
   fi
-done
-add_probe_host "$(printf '%s' "$domain" | tr '[:lower:]' '[:upper:]')"
-add_probe_host "$domain."
-printf -v name_regex '%s|' "${name_alternatives[@]}"
-name_regex=${name_regex%|}
-docroot_regex=${docroot//./\\.}
-readonly docroot name_regex docroot_regex
+  # read, not an unquoted expansion: a wildcard alias must not be globbed against the working directory.
+  read -r -a listed_names <<<"$hostnames"
+  for name in "$domain" "www.$domain" "mail.$domain" ${listed_names[@]+"${listed_names[@]}"}; do
+    [[ $name =~ $host_ok ]] || continue
+    [[ $seen_names != *" $name "* ]] || continue
+    seen_names+="$name "
+    escaped_name=${name//./\\.}
+    if [[ $name == \*.* ]]; then
+      # A wildcard alias: any prefix, probed with a made-up one.
+      name_alternatives+=("[A-Za-z0-9.-]+\\.${escaped_name#\*\\.}")
+      add_probe_host "wildcard-probe.${name#\*.}"
+    else
+      name_alternatives+=("$escaped_name")
+      add_probe_host "$name"
+    fi
+  done
+  add_probe_host "$(printf '%s' "$domain" | tr '[:lower:]' '[:upper:]')"
+  add_probe_host "$domain."
+  printf -v name_regex '%s|' "${name_alternatives[@]}"
+  name_regex=${name_regex%|}
+}
+
+if ! read_surface; then
+  emit refused docroot_unknown false
+  exit 0
+fi
 
 # ---- layer (a): the server-level 503 section; layer (b): disable-domain -----------------------
 pre_disabled=false
@@ -290,15 +313,23 @@ fail() {
   exit 0
 }
 
-# reapply STEP : a restore may re-enable the domain; both layers are put back and verified.
+# reapply STEP : a restore may re-enable the domain and may bring back Apache configuration the live
+# domain did not have (another document root, another website alias). The domain's surface is read
+# again and widened first, layer (a) is written from the widened picture and reloaded, then both
+# layers are verified with the widened probe list. If the surface cannot be read the barrier is still
+# put back (on what is known) and the job stops with it up.
 reapply() {
+  local surface_read=true
+  read_surface || surface_read=false
+  barrier_up
   if ! is_disabled; then
     virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
   fi
-  # A restore rewrites the domain's Apache configuration and reloads Apache: layer (a) is written
-  # again (idempotent) and reloaded before it is verified.
-  barrier_up
   checkpoint "$1"
+  if [[ $surface_read == false ]]; then
+    printf 'could not read the document root and website hostnames after %s\n' "$1" >>"$RUN_DIR/pair-$domain_id.diag"
+    fail "surface_unreadable_after_$1"
+  fi
   if ! barrier_holds; then
     { ls -l "$APACHE_DIR"; apache2ctl configtest; } >"$RUN_DIR/pair-$domain_id.diag" 2>&1 || true
     fail "barrier_lost_after_$1"
@@ -310,6 +341,10 @@ restore_step() { # LABEL ARCHIVE SHA
   verify_archive "$2" "$3" || fail "archive_not_verified_before_$1"
   printf '%s\n' "$1" >"$progress.step"
   if ! virtualmin restore-domain --domain "$domain" --source "$staging/$2" --all-features >"$RUN_DIR/pair-$domain_id.log" 2>&1; then
+    # A restore that stops midway may already have rewritten the Apache configuration: cover what it
+    # left (best effort, the job is parked either way) before the checkpoint probes it.
+    read_surface || true
+    barrier_up
     checkpoint "${1}_failed"
     fail "restore_${1}_failed"
   fi
