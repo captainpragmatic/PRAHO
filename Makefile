@@ -1176,14 +1176,16 @@ watch-css: check-css-tooling
 # DOCKER SERVICES DEPLOYMENT 🐳
 # ===============================================================================
 
+DOCKER_IMAGE_TAG ?= latest
+
 docker-build:
 	@echo "🐳 [Docker] Building services images..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  Building Platform service..."
-	@docker build -f deploy/platform/Dockerfile -t praho-platform:latest .
+	@docker build -f deploy/platform/Dockerfile -t praho-platform:$(DOCKER_IMAGE_TAG) .
 	@echo ""
 	@echo "🌐 Building Portal service..."
-	@docker build -f deploy/portal/Dockerfile -t praho-portal:latest .
+	@docker build -f deploy/portal/Dockerfile -t praho-portal:$(DOCKER_IMAGE_TAG) .
 	@echo "✅ All service images built successfully!"
 
 docker-dev:

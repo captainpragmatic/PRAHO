@@ -30,6 +30,10 @@ COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN uv sync --group platform --group prod --frozen --no-dev
 
+# Node provisioning runs inside Platform and qcluster, not on the deployment laptop.
+COPY services/platform/infrastructure/ansible/requirements.yml /build/runtime-ansible.yml
+RUN /app/.venv/bin/ansible-galaxy collection install -r /build/runtime-ansible.yml -p /opt/praho-ansible/collections
+
 # ---------------------------------------------------------------------------
 # Development target for `make docker-dev` (--target dev). A build without a target ends at the
 # runtime stage below, so production images contain none of this.
@@ -50,6 +54,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=config.settings.dev \
     SERVICE_NAME=platform \
+    ANSIBLE_COLLECTIONS_PATH=/opt/praho-ansible/collections \
+    ANSIBLE_HOME=/tmp/praho-ansible \
+    ANSIBLE_LOCAL_TEMP=/tmp \
     PRAHO_SKIP_DOTENV=1
 
 RUN apt-get update \
@@ -58,10 +65,12 @@ RUN apt-get update \
         libpq5 \
         curl \
         gettext \
+        openssh-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dev-builder /opt/venv /opt/venv
+COPY --from=builder /opt/praho-ansible/collections /opt/praho-ansible/collections
 # The repository layout, as in the runtime image: REPO_ROOT is /app, so shared/ sits at /app/shared.
 WORKDIR /app/services/platform
 EXPOSE 8700
@@ -83,7 +92,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=config.settings.prod \
     PYTHONPATH=/app/services/platform \
     SERVICE_NAME=platform \
-    PLATFORM_LOG_DIR=""
+    PLATFORM_LOG_DIR="" \
+    ANSIBLE_COLLECTIONS_PATH=/opt/praho-ansible/collections \
+    ANSIBLE_HOME=/tmp/praho-ansible \
+    ANSIBLE_LOCAL_TEMP=/tmp
 
 # Runtime-only system packages (no build-essential, no git, no uv)
 RUN apt-get update \
@@ -93,6 +105,7 @@ RUN apt-get update \
         curl \
         netcat-traditional \
         gettext \
+        openssh-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -100,6 +113,7 @@ WORKDIR /app/services/platform
 
 # Copy pre-built venv from builder stage
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /opt/praho-ansible/collections /opt/praho-ansible/collections
 
 # Activate venv — bare `python` resolves to .venv/bin/python
 ENV PATH="/app/.venv/bin:$PATH"
