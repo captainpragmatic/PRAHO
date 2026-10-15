@@ -429,7 +429,10 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
   - `make test-virtualmin-lab` runs the full backup and restore round trip,
     then `virtualmin_lab_checks` on vm-b: create-domain through the
     provisioning service, the differential base kept by every standalone
-    backup, private staging, both node playbooks, and the access lock (the
+    backup, private staging, both node playbooks, the differential chain (base,
+    differential, confirm stopped, the hourly schedule taking a base again after
+    the node loses the snapshot, and a pair restore behind the write barrier with
+    a probe on ports 80 and 443), and the access lock (the
     API user and port 10000 refused from a host outside the allowlist).
   - `make virtualmin-probe` refreshes the differential-backup evidence in
     `docs/domain/virtualmin-incremental-contract.md`.

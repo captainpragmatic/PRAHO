@@ -100,6 +100,7 @@ class Command(BaseCommand):
                 self._check_node_backup_playbook(server, node, base)
                 self._check_chain_node_step(server, node)
                 self._check_chain_state(account, node)
+                self._check_chain_schedule(account, node)
                 self._check_pair_restore(account, node)
                 user, password, api_gateway = self._check_node_deploy_playbook(server)
                 self._check_api_user_lock(node, user, password, api_gateway)
@@ -552,6 +553,123 @@ class Command(BaseCommand):
                 node.container, "rm", "-f", f"{home}/chain-keep.txt", f"{home}/chain-edit.txt", f"{home}/chain-new.txt"
             )
         logger.info("✅ [VirtualminLab] Chain step checks passed")
+
+    # ------------------------------------------------------------- check 4e
+
+    def _check_chain_schedule(self, account: Any, node: LabNode) -> None:
+        """The hourly schedule on the lab account: a base, then a differential, then a base after the node loses the snapshot."""
+        from datetime import timedelta  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.provisioning import virtualmin_tasks  # noqa: PLC0415
+        from apps.provisioning.virtualmin_chain_schedule import run_chain_backup_sweep  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        self.stdout.write("Check 4e: the hourly schedule takes a base, then a differential, then a base again")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+        flag = "provisioning.incremental_backups_enabled"
+        only_this_account = VirtualminAccount.objects.filter(pk=account.pk)
+        start = timezone.now()
+
+        def reload() -> Any:
+            return VirtualminAccount.objects.get(pk=account.pk)
+
+        def sweep_and_run(ahead: timedelta) -> tuple[list[dict[str, Any]], list[Any]]:
+            """One schedule pass, then run what it admitted in-process (the lab has no worker)."""
+            with patch("django_q.tasks.async_task"):
+                outcome = run_chain_backup_sweep(now=start + ahead, accounts=only_this_account)
+            jobs = []
+            for admitted in outcome["admitted"]:
+                virtualmin_tasks.run_virtualmin_backup(admitted["job_id"])
+                jobs.append(VirtualminProvisioningJob.objects.get(pk=admitted["job_id"]))
+            return outcome["admitted"], jobs
+
+        SettingsService.update_setting(flag, False)
+        admitted, _ = sweep_and_run(timedelta(0))
+        self._ok("with the flag off the schedule admits nothing", admitted == [], admitted)
+
+        SettingsService.update_setting(flag, True)
+        try:
+            admitted, jobs = sweep_and_run(timedelta(0))
+            self._ok(
+                "an account with no chain gets a base",
+                [row["role"] for row in admitted] == ["base"] and jobs[0].status == "completed",
+                (admitted, [job.status_message for job in jobs]),
+            )
+            state = reload()
+            self._ok("the base is the live chain", state.chain_base_id == jobs[0].pk, state.chain_base_id)
+            pinned = state.chain_base_fingerprint
+
+            admitted, _ = sweep_and_run(timedelta(minutes=5))
+            self._ok("a fresh chain is left alone", admitted == [], admitted)
+
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf scheduled > "$1" && chown "$2" "$1"',
+                "sh",
+                f"{home}/chain-schedule.txt",
+                CHECK_USER,
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=25))
+            self._ok(
+                "a day later it takes a differential, which leaves the snapshot where it was",
+                [row["role"] for row in admitted] == ["differential"]
+                and jobs[0].status == "completed"
+                and self._fingerprint(node, domain_id) == pinned,
+                (admitted, [job.status_message for job in jobs]),
+            )
+
+            # The node loses the snapshot (somebody restored the domain in Virtualmin directly).
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f /var/webmin/modules/virtual-server/incremental/"$1"',
+                "sh",
+                domain_id,
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=50))
+            self._ok(
+                "it admitted a differential for the missing snapshot",
+                [row["role"] for row in admitted] == ["differential"],
+                admitted,
+            )
+            self._ok(
+                "the node refuses it and the chain ends",
+                jobs[0].status == "failed"
+                and "fingerprint_mismatch" in jobs[0].status_message
+                and reload().chain_base_id is None,
+                (jobs[0].status, jobs[0].status_message),
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=50, minutes=1))
+            self._ok(
+                "the next pass takes a base at once, with no backoff",
+                [row["role"] for row in admitted] == ["base"]
+                and jobs[0].status == "completed"
+                and bool(reload().chain_base_id),
+                (admitted, [job.status_message for job in jobs]),
+            )
+            self._ok("nothing is left staged by the schedule", not self._staged(node), self._staged(node))
+        finally:
+            SettingsService.update_setting(flag, False)
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f "$1"/chain-schedule.txt /run/praho/chain-"$2".*',
+                "sh",
+                home,
+                domain_id,
+            )
+        logger.info("✅ [VirtualminLab] Chain schedule checks passed")
 
     # ------------------------------------------------------------- check 4c
 

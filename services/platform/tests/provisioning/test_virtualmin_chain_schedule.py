@@ -194,6 +194,20 @@ class DueSelectionTests(ScheduleCase):
         )
         self.assertEqual(self.roles(self.sweep()), ["differential"])
 
+    def test_a_sweep_can_be_narrowed_to_some_accounts(self) -> None:
+        other = VirtualminAccount.objects.create(
+            service=self._service_for(500),
+            server=self.server,
+            domain="narrow.example.com",
+            virtualmin_username="narrow",
+            status="active",
+            praho_customer_id=self.customer.pk,
+        )
+        with patch("django_q.tasks.async_task"):
+            outcome = run_chain_backup_sweep(now=self.now, accounts=VirtualminAccount.objects.filter(pk=other.pk))
+        self.assertEqual([admitted["domain"] for admitted in outcome["admitted"]], ["narrow.example.com"])
+        self.assertEqual({job.account_id for job in self.chain_jobs()}, {other.pk})
+
     def test_one_sweep_takes_one_job_per_account_and_never_a_second_while_it_is_pending(self) -> None:
         self.assertEqual(self.roles(self.sweep()), ["base"])
         again = self.sweep()

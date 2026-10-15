@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -33,6 +33,9 @@ from .domain_veto import domain_disables_hosting
 from .virtualmin_chain import ROLE_BASE, ROLE_DIFFERENTIAL, base_backup_id
 from .virtualmin_migration_models import account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+
+if TYPE_CHECKING:
+    from django.db.models import QuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -250,19 +253,25 @@ def _consider(account: VirtualminAccount, now: datetime, outcome: dict[str, Any]
     _alert_admission_refused(account, decision.role, str(result.unwrap_err()))
 
 
-def run_chain_backup_sweep(now: datetime | None = None) -> dict[str, Any]:
-    """One pass over the accounts: admit the base or differential each is due for."""
+def run_chain_backup_sweep(
+    now: datetime | None = None, *, accounts: QuerySet[VirtualminAccount] | None = None
+) -> dict[str, Any]:
+    """One pass over the accounts: admit the base or differential each is due for.
+
+    ``accounts`` narrows the pass (the lab proves the schedule on one account); production passes none.
+    """
     outcome: dict[str, Any] = {"success": True, "enabled": False, "admitted": [], "skipped": {}, "errors": 0}
     if not SettingsService.get_boolean_setting("provisioning.incremental_backups_enabled", False):
         return outcome
     outcome["enabled"] = True
     now = now or timezone.now()
-    accounts = (
-        VirtualminAccount.objects.filter(status="active", server__status="active", server__is_draining=False)
+    candidates = (
+        (accounts if accounts is not None else VirtualminAccount.objects.all())
+        .filter(status="active", server__status="active", server__is_draining=False)
         .select_related("server", "server__node_deployment", "service", "chain_base")
         .order_by("pk")
     )
-    for account in accounts.iterator(chunk_size=200):
+    for account in candidates.iterator(chunk_size=200):
         if len(outcome["admitted"]) >= MAX_ADMISSIONS_PER_SWEEP:
             outcome["deferred"] = True
             break
