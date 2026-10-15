@@ -1044,6 +1044,30 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 ### Portal-Specific Variables
 
+Native Portal identity upgrade (planned maintenance, existing hosts):
+
+1. Take and verify a private backup of the Portal SQLite session/counter store and logs. Record the
+   configured `SESSION_DB_PATH`; the previous default was `/opt/praho/src/services/portal/portal.sqlite3`.
+2. Stop `praho-portal` and disable its counter-cull cron job while moving state. Ensure no Portal
+   process is writing; checkpoint SQLite WAL with the matching SQLite tool before moving the database,
+   and retain any WAL/SHM sidecars with the safety copy. Do not start with an empty database by accident.
+3. Create the system account/group `praho-portal` (nologin, no shared supplementary groups). Create
+   `/var/lib/praho-portal` and `/var/log/praho/portal` owned by that account with mode 0700. Move the
+   existing database to `/var/lib/praho-portal/portal.sqlite3`, set ownership to `praho-portal:praho-portal`
+   and mode 0600, and migrate existing Portal log ownership while stopped. Inspect symlinks before
+   changing individual files; do not recursively chown the application tree or Platform credentials.
+4. Set `SESSION_DB_PATH=/var/lib/praho-portal/portal.sqlite3` and a distinct
+   `PORTAL_DJANGO_SECRET_KEY` in the operator configuration. The key change invalidates old sessions;
+   preserving the counter database retains replay/idempotency history. Deploy normally. Preflight
+   refuses a legacy session path or log/database files still owned by the shared identity.
+5. Verify Portal can create sessions/counters and write its logs, and that it cannot read Platform's
+   `.env`, credential passfile or media, or write the source/venv. Verify Platform, worker and Caddy
+   health separately. Retain the safety copy privately until the maintenance is accepted.
+
+Fresh hosts use the private directories automatically. Portal's source and collected static files
+remain readable and owned by the deployment account, and systemd permits Portal writes only in its
+state/log directories. No live account, ownership or session migration is performed by this change.
+
 Native Portal uses `/opt/praho/.portal.env`, generated from the same filtered values used for
 its migrations and static collection. It contains Portal API credentials and its own
 `PORTAL_DJANGO_SECRET_KEY` (mapped to Django's `DJANGO_SECRET_KEY`), but excludes the Platform

@@ -23,7 +23,7 @@ def portal_environment(root: Path, profile: str) -> dict[str, str]:
     task = next(task for task in tasks if task["name"] == "Set Portal Django environment")
     template = Environment(undefined=StrictUndefined)  # noqa: S701 -- Ansible env values, not HTML.
     context = {
-        "project_root": str(root), "platform_port": 8700,
+        "project_root": str(root), "platform_port": 8700, "portal_state_directory": str(root / "portal-state"),
         "django_settings_module": f"config.settings.{profile}",
         "deployed_env": {"PORTAL_DOMAIN": "portal.example.test", "PORTAL_DJANGO_SECRET_KEY": PORTAL_KEY,
                          "DJANGO_SECRET_KEY": "s" * 60, "DB_PASSWORD": "private-platform-password",
@@ -77,7 +77,7 @@ def test_unit_and_counter_cron_only_read_filtered_environment() -> None:
     tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
     install = next(task for task in tasks if task["name"] == "Install filtered Portal runtime environment")
     assert install["copy"]["content"] == "{{ portal_django_env | native_systemd_env }}"
-    assert install["no_log"] and install["diff"] is False and install["copy"]["mode"] == "0600"
+    assert install["no_log"] and install["diff"] is False and install["copy"]["mode"] == "0640"
     cron = next(task for task in tasks if task["name"] == "Setup Portal counter cull cron job")
     assert ".portal.env" in cron["cron"]["job"]
     assert ". {{ project_root }}/.env " not in cron["cron"]["job"]

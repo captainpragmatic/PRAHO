@@ -25,6 +25,59 @@
     deployed_env: "{{ native_configuration['env'] }}"
   no_log: true
 
+# Existing hosts must move their session store while stopped before changing identities.
+- name: Inspect legacy Portal session store
+  stat:
+    path: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+  register: legacy_portal_session
+
+- name: Require explicit Portal state migration on existing hosts
+  assert:
+    that:
+      - not legacy_portal_session.stat.exists or (deployed_env.SESSION_DB_PATH | default('')) == portal_state_directory + '/portal.sqlite3'
+      - (deployed_env.SESSION_DB_PATH | default(portal_state_directory + '/portal.sqlite3')) == portal_state_directory + '/portal.sqlite3'
+    fail_msg: "Move Portal state while stopped and set SESSION_DB_PATH as described in docs/deployment/DEPLOYMENT.md before changing its OS identity."
+
+- name: Inspect existing Portal log ownership
+  find:
+    paths: /var/log/praho/portal
+    recurse: false
+    file_type: any
+    hidden: true
+  register: legacy_portal_logs
+
+- name: Require explicit Portal log migration on existing hosts
+  assert:
+    that:
+      - legacy_portal_logs.files | rejectattr('pw_name', 'equalto', portal_user) | list | length == 0
+      - not legacy_portal_session.stat.exists or legacy_portal_session.stat.pw_name == portal_user
+    fail_msg: "Stop Portal and migrate its session/log ownership according to docs/deployment/DEPLOYMENT.md before deploying the isolated identity."
+
+- name: Create isolated Portal group
+  group:
+    name: "{{ portal_group }}"
+    system: true
+
+- name: Create isolated Portal user
+  user:
+    name: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    system: true
+    create_home: false
+    home: "{{ portal_state_directory }}"
+    shell: /usr/sbin/nologin
+
+- name: Create private Portal writable directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    mode: "0700"
+  loop:
+    - "{{ portal_state_directory }}"
+    - /var/log/praho/portal
+
 # ---------------------------------------------------------------------------
 # 1. PostgreSQL 16
 # ---------------------------------------------------------------------------
@@ -173,7 +226,6 @@
     - "{{ project_root }}/media"
     - "{{ project_root }}/logs"
     - /var/log/praho
-    - /var/log/praho/portal
 
 - name: Install logrotate
   apt:
@@ -449,16 +501,16 @@
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/portal-static"
       PORTAL_LOG_DIR: /var/log/praho/portal
-      SESSION_DB_PATH: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+      SESSION_DB_PATH: "{{ portal_state_directory + '/portal.sqlite3' }}"
       PORTAL_TRUSTED_PROXY_CIDRS: "{{ deployed_env.PORTAL_TRUSTED_PROXY_CIDRS | default('127.0.0.1/32,::1/128') }}"
 
 - name: Install filtered Portal runtime environment
   copy:
     content: "{{ portal_django_env | native_systemd_env }}"
     dest: "{{ project_root }}/.portal.env"
-    owner: "{{ project_user }}"
-    group: "{{ project_group }}"
-    mode: "0600"
+    owner: root
+    group: "{{ portal_group }}"
+    mode: "0640"
   no_log: true
   diff: false
   notify: restart praho-portal
@@ -467,8 +519,8 @@
   file:
     path: "{{ portal_django_env.SESSION_DB_PATH | dirname }}"
     state: directory
-    owner: "{{ project_user }}"
-    group: "{{ project_group }}"
+    owner: "{{ portal_user }}"
+    group: "{{ portal_group }}"
     mode: "0700"
 
 - name: Run Portal migrations
@@ -485,7 +537,7 @@
     - common
   args:
     chdir: "{{ project_root }}/src/services/portal"
-  become_user: "{{ project_user }}"
+  become_user: "{{ portal_user }}"
   environment: "{{ portal_django_env }}"
 
 - name: Check Portal deployment
@@ -493,7 +545,7 @@
   command: "{{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR"
   args:
     chdir: "{{ project_root }}/src/services/portal"
-  become_user: "{{ project_user }}"
+  become_user: "{{ portal_user }}"
   environment: "{{ portal_django_env }}"
   changed_when: false
 
@@ -676,8 +728,8 @@
       PYTHONPATH={{ project_root }}/src/services/portal
       DJANGO_SETTINGS_MODULE={{ django_settings_module }}
       {{ project_root }}/.venv-linux/bin/python manage.py cull_counters
-      >> {{ project_root }}/logs/portal-cull.log 2>&1
-    user: "{{ project_user }}"
+      >> /var/log/praho/portal/cull.log 2>&1
+    user: "{{ portal_user }}"
 
 # ---------------------------------------------------------------------------
 # 11. Health check
@@ -773,10 +825,10 @@
 # there (an app.log.2.gz pointing at a system file) would write through it.
 - name: Hand log backups left by in-process rotation over to logrotate
   become: yes
-  become_user: "{{ project_user }}"
+  become_user: "{{ item.user }}"
   shell: |
     set -eu
-    find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
+    find "{{ item.path }}" -maxdepth 1 -type f -regextype posix-extended \
       -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' |
       while IFS= read -r backup; do
         if [ -e "$backup.gz" ]; then
@@ -787,8 +839,13 @@
         fi
         echo "$backup"
       done
-    find /var/log/praho/portal -maxdepth 1 -type f -regextype posix-extended \
+    if [ "{{ item.portal }}" = "yes" ]; then
+      find "{{ item.path }}" -maxdepth 1 -type f -regextype posix-extended \
       -regex '.*/[a-z]+\.log\.(1[5-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\.gz' -print -delete
+    fi
+  loop:
+    - {path: /var/log/praho, user: "{{ project_user }}", portal: "no"}
+    - {path: /var/log/praho/portal, user: "{{ portal_user }}", portal: "yes"}
   register: legacy_log_backups
   changed_when: legacy_log_backups.stdout | length > 0
 

@@ -29,3 +29,8 @@ qcluster_memory_max: 512M
 # Staff access uses the immediate peer IP; override with staff/VPN CIDRs at upgrade.
 # An empty list also falls back to loopback; it never enables unrestricted access.
 platform_allowed_ips: ["127.0.0.1/32", "::1/128"]
+
+# Portal has no access to Platform credentials or writable business data.
+portal_user: praho-portal
+portal_group: praho-portal
+portal_state_directory: /var/lib/praho-portal

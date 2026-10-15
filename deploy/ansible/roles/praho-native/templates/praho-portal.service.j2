@@ -10,8 +10,8 @@ Wants=praho-platform.service
 Type=notify
 # Files the portal creates (its log files, re-created after rotation) are not world-readable.
 UMask=0027
-User={{ project_user }}
-Group={{ project_group }}
+User={{ portal_user }}
+Group={{ portal_group }}
 WorkingDirectory={{ project_root }}/src/services/portal
 EnvironmentFile={{ project_root }}/.portal.env
 # Read by services/portal/gunicorn.conf.py; the filtered EnvironmentFile overrides these.
@@ -38,7 +38,8 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ project_root }}/logs /var/log/praho/portal {{ project_root }}/src/services/portal "{{ portal_django_env.SESSION_DB_PATH | dirname }}"
+ReadWritePaths=/var/log/praho/portal {{ portal_state_directory }}
+InaccessiblePaths={{ project_root }}/.env {{ project_root }}/credentials {{ project_root }}/media
 
 [Install]
 WantedBy=multi-user.target

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker backup pairs now record private checksums, source application image IDs and PostgreSQL major-version metadata for explicit recovery compatibility checks.
 - Full Docker rollback requires an explicit checksum-verified backup pair matching the target images and database major, and selects the old images before any restored application starts.
 - Native Portal now collects and serves its own static files using a filtered runtime environment and a distinct Django signing key.
+- Native Portal runs under its own OS identity with private session and log directories; existing hosts require an explicit stopped-service state migration.
 
 - **Docker deployments wait for the task worker correctly.** The worker inherited Platform's HTTP health check even though it serves no HTTP, so Compose could report an unhealthy deployment while the worker was running. All three worker definitions now disable that inherited probe; the web services retain their HTTP checks.
 - Docker development runs a task worker after Platform setup completes; deployment health checks now respect host topology and fail on unknown or starting health states.
