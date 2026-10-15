@@ -855,11 +855,17 @@ class Command(BaseCommand):
         from apps.provisioning import virtualmin_tasks  # noqa: PLC0415
         from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
-        from apps.provisioning.virtualmin_pair_restore import release_restore_hold, resolve_pair_job  # noqa: PLC0415
+        from apps.provisioning.virtualmin_pair_restore import (  # noqa: PLC0415
+            PAIR_PLAYBOOK,
+            release_restore_hold,
+            resolve_pair_job,
+        )
         from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
         self.stdout.write("Check 4d: pair restore behind the write barrier")
+        # The scenario below runs the pair through production code; this ties it to the playbook by name.
+        self._ok("the pair restore runs virtualmin_pair_restore.yml", PAIR_PLAYBOOK == "virtualmin_pair_restore.yml")
         domain_id = node_exec(
             node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
         ).strip()

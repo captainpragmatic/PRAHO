@@ -97,8 +97,6 @@ virtualmin_tasks.py       # Async operations
 
 ### Advanced Features
 - `create-alias` - Domain aliases and redirects
-- `create-subdomain` - Subdomain management
-- `request-letsencrypt-cert` - SSL automation
 - `create-user` / `delete-user` - Mailbox management
 - `backup-domain` / `restore-domain` - Backup operations
 

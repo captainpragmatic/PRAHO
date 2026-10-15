@@ -1,0 +1,51 @@
+{
+  "cases": {
+    "no_such_user": {
+      "body": {
+        "command": "modify-user",
+        "error": "No user named ghost was found in the server contract.praho.test",
+        "full_error": "No user named ghost was found in the server contract.praho.test\n\nModifies a mail, FTP or database user in a Virtualmin domain.\n\nvirtualmin modify-user --domain domain.name\n                       --user username\n                      [--pass \"new-password\" | --passfile password-file]\n                      [--ssh-pubkey \"key\" | pubkey-file <--ssh-pubkey-id id]\n                      [--disable | --enable]\n                      [--real real-name]\n                      [--add-mysql database]\n                      [--remove-mysql database]\n                      [--add-webserver-dir path]*\n                      [--remove-webserver-dir path]*\n                      [--newuser new-username]\n                      [--enable-ftp]\n                      [--disable-ftp]\n                      [--add-group group]*\n                      [--del-group group]*\n                      [--send-update-email]\n                      [--add-forward address]*\n                      [--del-forward address]*\n                      [--local | --no-local]\n                      [--autoreply \"messsage\" | --no-autoreply]\n                      [--autoreply-start time | --no-autoreply-start]\n                      [--autoreply-end time | --no-autoreply-end]\n                      [--autoreply-period secs | --no-autoreply-period]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No user named ghost was found in the server contract.praho.test",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a user that is not there",
+      "params": {
+        "domain": "contract.praho.test",
+        "real": "x",
+        "user": "ghost"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "modify-user",
+        "output": "User erin@contract.praho.test updated successfully\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a real-name change",
+      "params": {
+        "domain": "contract.praho.test",
+        "real": "Erin Smith",
+        "user": "erin"
+      }
+    }
+  },
+  "program": "modify-user",
+  "virtualmin_version": "8.3.0"
+}

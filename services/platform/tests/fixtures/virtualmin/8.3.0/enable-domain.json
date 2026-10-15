@@ -1,0 +1,68 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "enable-domain",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\nEnables all disabled features in the specified virtual server.\n\nvirtualmin enable-domain --domain domain.name\n                        [--subservers]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "not_disabled": {
+      "body": {
+        "command": "enable-domain",
+        "error": "Virtual server contract-enable.praho.test is not disabled",
+        "full_error": "Virtual server contract-enable.praho.test is not disabled\nEnables all disabled features in the specified virtual server.\n\nvirtualmin enable-domain --domain domain.name\n                        [--subservers]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-enable.praho.test is not disabled",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "an enabled domain",
+      "params": {
+        "domain": "contract-enable.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "enable-domain",
+        "output": "Enabling virtual server contract-enable.praho.test ..\n\nRestoring administration user's password ..\n.. done\n\nRemoving error page from website ..\n.. done\n\nRemoving error page from SSL website ..\n.. done\n\nRestoring MariaDB user's password ..\n.. done\n\nSaving server details ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nAll done!\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a disabled domain",
+      "params": {
+        "domain": "contract-enable.praho.test"
+      }
+    }
+  },
+  "program": "enable-domain",
+  "virtualmin_version": "8.3.0"
+}

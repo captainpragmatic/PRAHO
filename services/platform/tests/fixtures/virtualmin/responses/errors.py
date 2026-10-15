@@ -16,7 +16,7 @@ def auth_failure(program: str = "list-domains") -> dict[str, Any]:
     }
 
 
-def not_found(resource: str = "example.com", program: str = "get-domain") -> dict[str, Any]:
+def not_found(resource: str = "example.com", program: str = "list-domains") -> dict[str, Any]:
     """Resource not found response."""
     return {
         "command": program,

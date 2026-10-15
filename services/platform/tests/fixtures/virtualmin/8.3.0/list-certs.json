@@ -1,0 +1,71 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "list-certs",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nOutputs the certificates and keys for one or more virtual servers.\n\nvirtualmin list-certs --all-domains | --domain name | --user username\n                     [--cert | --key | --ca | --csr | --newkey]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "list-certs",
+        "data": [
+          {
+            "name": "contract.praho.test",
+            "value": ""
+          },
+          {
+            "name": "<pem>",
+            "values": {}
+          },
+          {
+            "name": "contract.praho.test:",
+            "values": {
+              "file": [
+                "/etc/ssl/virtualmin/<id>/ssl.key"
+              ],
+              "type": [
+                "key"
+              ]
+            }
+          },
+          {
+            "name": "<pem>",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a domain with a certificate",
+      "params": {
+        "domain": "contract.praho.test"
+      }
+    }
+  },
+  "program": "list-certs",
+  "virtualmin_version": "8.3.0"
+}

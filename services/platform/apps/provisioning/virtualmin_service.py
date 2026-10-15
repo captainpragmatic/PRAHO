@@ -72,6 +72,35 @@ MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
 
 
+def create_domain_params(  # noqa: PLR0913  # One keyword per remote.cgi parameter
+    *,
+    domain: str,
+    username: str,
+    password: str,
+    template: str,
+    recovery_seed: str,
+    disk_quota_mb: int | None,
+    bandwidth_quota_mb: int | None,
+) -> dict[str, str]:
+    """The create-domain parameters for one account (the contract suite sends exactly these)."""
+    params = {
+        "domain": domain,
+        "user": username,
+        "pass": password,
+        "template": template,
+        # The recovery seed, as the server description (8.x has no --comment).
+        "desc": recovery_seed,
+        # Virtualmin 8.x enables no feature unless asked ("No virtual
+        # server features enabled"). PRAHO plans carry no feature list,
+        # so a server gets the node's default-on set, which the node
+        # playbook pins to unix dir web ssl logrotate mysql webmin.
+        "default-features": "",
+    }
+    # Disk in KiB and bandwidth in bytes; zero and the -1 sentinel mean unlimited (shared with recovery).
+    params.update(quota_parameters(disk_quota_mb, bandwidth_quota_mb))
+    return params
+
+
 def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domain: str) -> None:
     """Best-effort cleanup that preserves and exposes the primary failure."""
     if not idempotency_key:
@@ -374,7 +403,7 @@ class VirtualminProvisioningService:
             if not committed:
                 account.server = previous_server
 
-    def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Complexity: cohesive workflow
+    def _execute_domain_creation(  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
@@ -408,23 +437,15 @@ class VirtualminProvisioningService:
             # ===============================================================================
             rollback_operations: list[dict[str, Any]] = []
 
-            # Prepare domain creation parameters
-            params = {
-                "domain": account.domain,
-                "user": account.virtualmin_username,
-                "pass": account.get_password(),
-                "template": account.template_name,
-                # The recovery seed, as the server description (8.x has no --comment).
-                "desc": account.get_recovery_seed(),
-                # Virtualmin 8.x enables no feature unless asked ("No virtual
-                # server features enabled"). PRAHO plans carry no feature list,
-                # so a server gets the node's default-on set, which the node
-                # playbook pins to unix dir web ssl logrotate mysql webmin.
-                "default-features": "",
-            }
-
-            # Disk in KiB and bandwidth in bytes; zero and the -1 sentinel mean unlimited (shared with recovery).
-            params.update(quota_parameters(account.disk_quota_mb, account.bandwidth_quota_mb))
+            params = create_domain_params(
+                domain=account.domain,
+                username=account.virtualmin_username,
+                password=account.get_password(),
+                template=account.template_name,
+                recovery_seed=account.get_recovery_seed(),
+                disk_quota_mb=account.disk_quota_mb,
+                bandwidth_quota_mb=account.bandwidth_quota_mb,
+            )
 
             # Make API call
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)

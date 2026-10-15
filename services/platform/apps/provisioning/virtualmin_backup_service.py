@@ -139,6 +139,59 @@ def differential_flags(chain_role: str) -> dict[str, str]:
     return {"no-differential": ""}
 
 
+# Backup components a caller can leave out of a full backup, as Virtualmin names the feature.
+BACKUP_COMPONENT_FEATURES: tuple[tuple[str, str], ...] = (
+    ("include_email", "mail"),
+    ("include_databases", "mysql"),
+    ("include_files", "dir"),
+    ("include_ssl", "ssl"),
+)
+
+
+def full_backup_params(*, domain: str, dest: str, chain_role: str, excluded_features: list[str]) -> dict[str, Any]:
+    """backup-domain parameters for the ordinary (standalone) full backup.
+
+    remote.cgi turns each parameter into argv: "" -> bare "--flag", anything else -> "--flag value".
+    A boolean True would reach backup-domain.pl as "--all-features True" ("Unknown parameter").
+    --newformat is omitted: it requires dest to be a directory, and the transport fetches exactly one
+    archive file. --except-feature filters the list --all-features built: one repeated parameter per
+    excluded component, in a stable order.
+    """
+    params: dict[str, Any] = {
+        "domain": domain,
+        "dest": dest,
+        "all-features": "",
+        "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
+        **differential_flags(chain_role),
+    }
+    if excluded_features:
+        params["except-feature"] = list(excluded_features)
+    return params
+
+
+def config_backup_params(*, domain: str, dest: str, chain_role: str) -> dict[str, Any]:
+    """backup-domain parameters for the configuration-only backup.
+
+    Config and basic structure only: one --feature per feature (backup-domain has no --only-features
+    option). A config-only backup is never a base (chain_role_error refuses it).
+    """
+    return {
+        "domain": domain,
+        "dest": dest,
+        "feature": ["virtualmin", "dir"],
+        "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
+        **differential_flags(chain_role),
+    }
+
+
+def restore_domain_params(*, domain: str, source: str) -> dict[str, str]:
+    """restore-domain parameters: the archive on the node, every feature it holds.
+
+    `all-features` is a bare flag; True would arrive as "--all-features True".
+    """
+    return {"domain": domain, "source": source, "all-features": ""}
+
+
 def manifest_restore_refusal(metadata: dict[str, Any]) -> str | None:
     """Why a manifest cannot be restored on its own, or None.
 
@@ -723,11 +776,7 @@ class VirtualminBackupService:
             restore_result = self._call_checked(
                 gateway,
                 "restore-domain",
-                {
-                    "domain": account.domain,
-                    "source": f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
-                    "all-features": "",  # bare flag; True would arrive as "--all-features True"
-                },
+                restore_domain_params(domain=account.domain, source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}"),
                 self._backup_command_timeout(),
             )
             if restore_result.is_err():
@@ -1398,12 +1447,7 @@ class VirtualminBackupService:
         known = set(domain_features) if isinstance(domain_features, list) else None
         expected: list[str] = []
         not_on_domain: list[str] = []
-        for flag, feature in (
-            ("include_email", "mail"),
-            ("include_databases", "mysql"),
-            ("include_files", "dir"),
-            ("include_ssl", "ssl"),
-        ):
+        for flag, feature in BACKUP_COMPONENT_FEATURES:
             if not metadata.get(flag):
                 continue
             if known is not None and feature not in known:
@@ -1440,33 +1484,10 @@ class VirtualminBackupService:
             gateway = VirtualminGateway(vm_config)
 
             dest = f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
-            # remote.cgi turns each parameter into argv: "" -> bare "--flag",
-            # anything else -> "--flag value". A boolean True would reach
-            # backup-domain.pl as "--all-features True" ("Unknown parameter").
-            # --newformat is omitted: it requires dest to be a directory, and
-            # the transport fetches exactly one archive file.
-            backup_params: dict[str, Any] = {
-                "domain": account.domain,
-                "dest": dest,
-                "all-features": "",
-                "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
-                **differential_flags(config.chain_role),
-            }
-
-            # --except-feature filters the list --all-features built; one
-            # repeated parameter per excluded component, in a stable order.
-            excluded = [
-                feature
-                for included, feature in (
-                    (config.include_email, "mail"),
-                    (config.include_databases, "mysql"),
-                    (config.include_files, "dir"),
-                    (config.include_ssl, "ssl"),
-                )
-                if not included
-            ]
-            if excluded:
-                backup_params["except-feature"] = excluded
+            excluded = [feature for flag, feature in BACKUP_COMPONENT_FEATURES if not getattr(config, flag)]
+            backup_params = full_backup_params(
+                domain=account.domain, dest=dest, chain_role=config.chain_role, excluded_features=excluded
+            )
 
             # Execute backup
             self._update_backup_progress(backup_id, "backing_up", 30)
@@ -1642,16 +1663,7 @@ class VirtualminBackupService:
             gateway = VirtualminGateway(vm_config)
 
             dest = f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
-            backup_params: dict[str, Any] = {
-                "domain": account.domain,
-                "dest": dest,
-                # Config and basic structure only: one --feature per feature
-                # (backup-domain has no --only-features option).
-                "feature": ["virtualmin", "dir"],
-                "mkdir": "",  # creates REMOTE_ARCHIVE_DIR 0700 when absent
-                # A config-only backup is never a base (chain_role_error refuses it).
-                **differential_flags(config.chain_role),
-            }
+            backup_params = config_backup_params(domain=account.domain, dest=dest, chain_role=config.chain_role)
 
             self._update_backup_progress(backup_id, "backing_up_config", 50)
             backup_result = self._call_checked(gateway, "backup-domain", backup_params, self._backup_command_timeout())

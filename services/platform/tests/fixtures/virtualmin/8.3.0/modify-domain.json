@@ -1,0 +1,95 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "modify-domain",
+        "error": "Virtual server contract-absent.praho.test does not exist.",
+        "full_error": "Virtual server contract-absent.praho.test does not exist.\n\nChanges the settings for a Virtualmin server, based on the specified\ncommand-line parameters.\n\nvirtualmin modify-domain --domain domain.name\n                        [--desc new-description]\n                        [--user new-username]\n                        [--pass \"new-password\" | --passfile password-file]\n                        [--email new-email]\n                        [--protected | --unprotected]\n                        [--quota new-quota|UNLIMITED]\n                        [--uquota new-unix-quota|UNLIMITED]\n                        [--apply-quotas | --apply-all-quotas]\n                        [--newdomain new-name]\n                        [--bw bytes|NONE]\n                        [--reseller reseller|NONE]\n                        [--add-reseller reseller]*\n                        [--delete-reseller reseller]*\n                        [--ip address] | [--allocate-ip] |\n                        [--default-ip | --shared-ip address]\n                        [--ip6 address | --allocate-ip6 |\n                         --no-ip6 | --default-ip6 |\n                         --shared-ip6 address]\n                        [--prefix name]\n                        [--template name|id]\n                        [--plan name|id | --apply-plan name|id]\n                        [--plan-features]\n                        [--add-exclude directory]*\n                        [--remove-exclude directory]*\n                        [--add-db-exclude db|db.table]*\n                        [--remove-db-exclude db|db.table]*\n                        [--dns-ip address | --no-dns-ip]\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--link-domain domain | --no-link-domain]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--disable-2fa]\n                        [--skip-warnings]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist.",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "quota": "1024"
+      }
+    },
+    "invalid_quota": {
+      "body": {
+        "command": "modify-domain",
+        "error": "Quota must be a number of blocks",
+        "full_error": "Quota must be a number of blocks\n\nChanges the settings for a Virtualmin server, based on the specified\ncommand-line parameters.\n\nvirtualmin modify-domain --domain domain.name\n                        [--desc new-description]\n                        [--user new-username]\n                        [--pass \"new-password\" | --passfile password-file]\n                        [--email new-email]\n                        [--protected | --unprotected]\n                        [--quota new-quota|UNLIMITED]\n                        [--uquota new-unix-quota|UNLIMITED]\n                        [--apply-quotas | --apply-all-quotas]\n                        [--newdomain new-name]\n                        [--bw bytes|NONE]\n                        [--reseller reseller|NONE]\n                        [--add-reseller reseller]*\n                        [--delete-reseller reseller]*\n                        [--ip address] | [--allocate-ip] |\n                        [--default-ip | --shared-ip address]\n                        [--ip6 address | --allocate-ip6 |\n                         --no-ip6 | --default-ip6 |\n                         --shared-ip6 address]\n                        [--prefix name]\n                        [--template name|id]\n                        [--plan name|id | --apply-plan name|id]\n                        [--plan-features]\n                        [--add-exclude directory]*\n                        [--remove-exclude directory]*\n                        [--add-db-exclude db|db.table]*\n                        [--remove-db-exclude db|db.table]*\n                        [--dns-ip address | --no-dns-ip]\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--link-domain domain | --no-link-domain]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--disable-2fa]\n                        [--skip-warnings]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Quota must be a number of blocks",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a quota that is no number",
+      "params": {
+        "domain": "contract.praho.test",
+        "quota": "abc"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "modify-domain",
+        "output": "Updating virtual server contract.praho.test ..\n\n    Modifying administration user ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\n    Saving server details ..\n    .. done\n\n.. done\n\nUpdating Webmin user ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\nAll done\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "disaster recovery's quota restore: the bandwidth limit is --bw on modify-domain",
+      "params": {
+        "bw": "104857600",
+        "domain": "contract.praho.test",
+        "quota": "2097152"
+      }
+    },
+    "unknown_parameter": {
+      "body": {
+        "command": "modify-domain",
+        "error": "Unknown parameter --bandwidth",
+        "full_error": "Unknown parameter --bandwidth\n\nChanges the settings for a Virtualmin server, based on the specified\ncommand-line parameters.\n\nvirtualmin modify-domain --domain domain.name\n                        [--desc new-description]\n                        [--user new-username]\n                        [--pass \"new-password\" | --passfile password-file]\n                        [--email new-email]\n                        [--protected | --unprotected]\n                        [--quota new-quota|UNLIMITED]\n                        [--uquota new-unix-quota|UNLIMITED]\n                        [--apply-quotas | --apply-all-quotas]\n                        [--newdomain new-name]\n                        [--bw bytes|NONE]\n                        [--reseller reseller|NONE]\n                        [--add-reseller reseller]*\n                        [--delete-reseller reseller]*\n                        [--ip address] | [--allocate-ip] |\n                        [--default-ip | --shared-ip address]\n                        [--ip6 address | --allocate-ip6 |\n                         --no-ip6 | --default-ip6 |\n                         --shared-ip6 address]\n                        [--prefix name]\n                        [--template name|id]\n                        [--plan name|id | --apply-plan name|id]\n                        [--plan-features]\n                        [--add-exclude directory]*\n                        [--remove-exclude directory]*\n                        [--add-db-exclude db|db.table]*\n                        [--remove-db-exclude db|db.table]*\n                        [--dns-ip address | --no-dns-ip]\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--link-domain domain | --no-link-domain]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--disable-2fa]\n                        [--skip-warnings]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter --bandwidth",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "create-domain's --bandwidth sent to modify-domain, which names it --bw (the pre-fix recovery call)",
+      "params": {
+        "bandwidth": "0",
+        "domain": "contract.praho.test",
+        "quota": "1024"
+      }
+    }
+  },
+  "program": "modify-domain",
+  "virtualmin_version": "8.3.0"
+}

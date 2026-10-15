@@ -9,6 +9,7 @@ It is not part of `make test`.
 ```bash
 make virtualmin-lab-up      # build images if missing, start, register in the lab DB, inject credentials
 make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
+make test-virtualmin-contract # every allowlisted Virtualmin program against the real node (also run by test-virtualmin-lab)
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data
 make virtualmin-lab-build   # rebuild both images
@@ -138,6 +139,10 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
   6. the access lock (ADR-0060), with vm-a standing in for any host outside the allowlist:
      - the API user works from Platform; from vm-a, remote.cgi answers 403 and a login-form session gets 403 on every page; with vm-a added to the user's allow list the same calls succeed, so the refusal is the lock;
      - with UFW off, vm-a reaches vm-b:10000; after `virtualmin_harden.yml` (run twice, over SSH from Platform) it cannot, port 80 stays open, and Platform still reaches the API.
+
+### The contract suite
+
+`make test-virtualmin-contract` runs `tests/virtualmin_lab/contract/` against vm-b through PRAHO's own `VirtualminGateway`. There is one test per program on `VIRTUALMIN_ALLOWED_PROGRAMS` (`@covers("<program>")`). Each sends PRAHO's parameters (built by the same functions production uses) and asserts `has_explicit_success`, `explicit_rejection`, the read-only replay classification and the retriability of a refusal on the real answer: a success case and, where the lab can produce one, a refusal. The lab has no mail, BIND or public DNS, so aliases, DNS and certificate issuance are pinned by their refusals. The allowlist holds only programs that exist on Virtualmin 8.3; PRAHO calls nothing else, and the gateway refuses any other program before sending it. The suite uses its own `contract*.praho.test` domains on vm-b and removes them.
 
 ### Node deploy from scratch (`praho-debian-node`)
 

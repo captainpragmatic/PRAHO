@@ -1,0 +1,50 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "delete-alias",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nDeletes a mail alias from a virtual server.\n\nvirtualmin delete-alias --domain domain.name\n                        --from mailbox|\"*\"\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "from": "hello"
+      }
+    },
+    "no_such_alias": {
+      "body": {
+        "command": "delete-alias",
+        "error": "No alias for the email address hello@contract.praho.test exists",
+        "full_error": "No alias for the email address hello@contract.praho.test exists\n\nDeletes a mail alias from a virtual server.\n\nvirtualmin delete-alias --domain domain.name\n                        --from mailbox|\"*\"\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No alias for the email address hello@contract.praho.test exists",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "an alias that was never made",
+      "params": {
+        "domain": "contract.praho.test",
+        "from": "hello"
+      }
+    }
+  },
+  "program": "delete-alias",
+  "virtualmin_version": "8.3.0"
+}

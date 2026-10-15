@@ -1,0 +1,28 @@
+{
+  "cases": {
+    "dns_not_enabled": {
+      "body": {
+        "command": "modify-dns",
+        "error": "The BIND DNS server is not enabled for Virtualmin",
+        "full_error": "The BIND DNS server is not enabled for Virtualmin\n\nChanges DNS settings for one or more domains.\n\nvirtualmin modify-dns --domain name | --all-domains | --all-nonvirt-domains\n                     [--spf | --no-spf]\n                     [--spf-add-a hostname]*\n                     [--spf-add-mx domain]*\n                     [--spf-add-ip4 address]*\n                     [--spf-add-ip6 address]*\n                     [--spf-remove-a hostname]*\n                     [--spf-remove-mx domain]*\n                     [--spf-remove-ip4 address]*\n                     [--spf-remove-ip6 address]*\n                     [--spf-all-disallow | --spf-all-discourage |\n                      --spf-all-neutral | --spf-all-allow |\n                      --spf-all-default]\n                     [--dmarc | --no-dmarc]\n                     [--dmarc-policy none|quarantine|reject]\n                     [--dmarc-percent number]\n                     [--dmarc-rua mailto:user@domain | --no-dmarc-rua]\n                     [--dmarc-ruf mailto:user@domain | --no-dmarc-ruf]\n                     [--add-record \"name type value\"]\n                     [--add-record-with-ttl \"name type TTL value\"]\n                     [--add-proxy-record \"name type value\"]\n                     [--remove-record \"name type value\"]\n                     [--update-record \"oldname oldtype\" \"name type value\"]\n                     [--ttl seconds | --all-ttl seconds]\n                     [--add-slave hostname]* | [--add-all-slaves]\n                     [--remove-slave hostname]* | [--sync-all-slaves]\n                     [--dns-ip address | --no-dns-ip]\n                     [--enable-dnssec | --disable-dnssec]\n                     [--enable-tlsa | --disable-tlsa | --sync-tlsa]\n                     [--tlsa-full | --tlsa-pubkey]\n                     [--enable-subdomain | --disable-subdomain]\n                     [--cloud-dns provider|\"local\"]\n                     [--cloud-dns-import]\n                     [--remote-dns hostname | --local-dns]\n                     [--add-parent-ds | --remove-parent-ds]\n                     [--enable-dkim | --disable-dkim | --default-dkim]\n                     [--alias-dns | --no-alias-dns]\n                     [--dns-ip address | --no-dns-ip]\n                     [--dns-ip6 address | --no-dns-ip6]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "The BIND DNS server is not enabled for Virtualmin",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the lab has no BIND; success cannot be exercised here",
+      "params": {
+        "domain": "contract.praho.test",
+        "spf": ""
+      }
+    }
+  },
+  "program": "modify-dns",
+  "virtualmin_version": "8.3.0"
+}

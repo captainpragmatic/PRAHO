@@ -1,0 +1,72 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "install-cert",
+        "error": "No virtual server named contract-absent.praho.test found",
+        "full_error": "No virtual server named contract-absent.praho.test found\n\nInstalls a certificate, private key, CSR or CA certificate.\n\nvirtualmin install-cert --domain name\n                       [--cert file|data]\n                       [--key file|data]\n                       [--ca file|data]\n                       [--csr file|data]\n                       [--use-newkey]\n                       [--pass key-password]\n                       [--remove-cert]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No virtual server named contract-absent.praho.test found",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "cert": "<redacted>",
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "missing_file": {
+      "body": {
+        "command": "install-cert",
+        "error": "File /nonexistent.pem does not exist",
+        "full_error": "File /nonexistent.pem does not exist\n\nInstalls a certificate, private key, CSR or CA certificate.\n\nvirtualmin install-cert --domain name\n                       [--cert file|data]\n                       [--key file|data]\n                       [--ca file|data]\n                       [--csr file|data]\n                       [--use-newkey]\n                       [--pass key-password]\n                       [--remove-cert]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "File /nonexistent.pem does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a certificate file that is not on the node",
+      "params": {
+        "cert": "<redacted>",
+        "domain": "contract.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "install-cert",
+        "output": "Installing new SSL files ..\n.. done\n\nUpdating Webmin user ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a certificate and key that are files on the node",
+      "params": {
+        "cert": "<redacted>",
+        "domain": "contract.praho.test",
+        "key": "<redacted>"
+      }
+    }
+  },
+  "program": "install-cert",
+  "virtualmin_version": "8.3.0"
+}

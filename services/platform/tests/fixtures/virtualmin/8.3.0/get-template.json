@@ -1,0 +1,107 @@
+{
+  "cases": {
+    "by_id": {
+      "body": {
+        "command": "get-template",
+        "output": "aliascopy: <n>\naliasdomslimit: none\naliaslimit: none\nappend_style: <n>\nautoconfig: none\navail: dns=1 mail=1 web=1 webalizer=0 mysql=1 postgres=1 spam=1 filemin=1 passwd=1 proc=2 cron=1 at=1 systemd=0 telnet=0 xterm=0 updown=0 change-user=1 htaccess-htpasswd=1 mailboxes=1 custom=0 shell=0 webminlog=1 logviewer=1 phpini=1 virtualmin-awstats=\nbccto: none\nbwlimit: none\ncapabilities: none\ncert_ca_tmpl: auto\ncert_cert_tmpl: auto\ncert_combined_tmpl: auto\ncert_everything_tmpl: auto\ncert_key_tmpl: /etc/ssl/virtualmin/${ID}/ssl.key\ncontent_web: <n>\ncontent_web_html: \ndbgroup: none\ndbslimit: none\ndefault: <n>\ndefmquota: <n>\ndisabled_url: none\ndisabled_web: none\ndns: none\ndns_alias: none\ndns_cloud: \ndns_cloud_import: <n>\ndns_cloud_proxy: <n>\ndns_dmarc: none\ndns_dmarcextra: \ndns_dmarcp: none\ndns_dmarcpct: <n>\ndns_dmarcrua: \ndns_dmarcruf: \ndns_indom: \ndns_master: none\ndns_mx: none\ndns_ns: \ndns_prins: <n>\ndns_records: \ndns_replace: \ndns_slaves: \ndns_spf: yes\ndns_spfall: <n>\ndns_spfhosts: \ndns_spfincludes: \ndns_spfonly: \ndns_sub: yes\ndns_ttl: \ndns_view: \ndnssec: none\ndnssec_alg: RSASHA256\ndnssec_single: \ndom_aliases: postmaster=${EMAILTO}\twebmaster=${EMAILTO}\tabuse=${EMAILTO}\thostmaster=${EMAILTO}\ndom_aliases_bounce: <n>\ndomalias: none\ndomalias_type: <n>\ndomauto_disable: \ndomslimit: <n>\nexclude: none\nextra_prefix: none\nfeaturelimits: none\nfile: /etc/webmin/virtual-server/templates/0\nfor_alias: <n>\nfor_parent: <n>\nfor_sub: <n>\nfor_users: <n>\nforceunder: <n>\nftpgroup: none\ngacl: <n>\ngacl_groups: ${GROUP}\ngacl_root: ${HOME}\ngacl_ugroups: ${GROUP}\ngacl_umode: <n>\ngacl_uusers: \nhashpass: <n>\nhashtypes: *\nid: <n>\nipfollow: \nlogrotate: none\nlogrotate_files: none\nlogrotate_shared: yes\nmail: The following virtual server has been set up successfully :\\n\\nDomain name:                ${DOM}\\nHosting server:             ${HOSTNAME}\\n${IF-VIRT}\\nVirtual IP address:         ${IP}\\n${ENDIF-VIRT}\\nAdministration login:       ${USER}\\nAdministration password:    ${PASS}\\n${IF-WEBMIN}\\nAdministration URL:         ${WEBMIN_PROTO}://www.${DOM}:${WEBMIN_PORT}/\\n${ENDIF-WEBMIN}\\n\\n${IF-WEB}\\nWebsite:                    http://www.${DOM}/\\n${IF-WEBALIZER}\\nWebalizer log reporting:    Enabled\\n${ELSE-WEBALIZER}\\nWebalizer log reporting:    Disabled\\n${ENDIF-WEBALIZER}\\n${IF-VIRTUALMIN-AWSTATS}\\nAWStats log reporting:      Enabled\\n${ELSE-VIRTUALMIN-AWSTATS}\\nAWStats log reporting:      Disabled\\n${ENDIF-VIRTUALMIN-AWSTATS}\\n\\n${ENDIF-WEB}\\n${IF-MAIL}\\nEmail domain:               ${DOM}\\nSMTP server:                mail.${DOM}\\nPOP3 server:                mail.${DOM}\\n${IF-MX_SLAVES}\\nBackup SMTP servers:        ${MX_SLAVES}\\n${ENDIF-MX_SLAVES}\\n\\n${ENDIF-MAIL}\\n${IF-DNS}\\nDNS domain:                 ${DOM}\\nNameserver:                 ${DNS_SERVER}\\n${IF-DNS_SLAVE}\\nSlave nameservers:          ${DNS_SLAVE}\\n${ENDIF-DNS_SLAVE}\\n\\n${ENDIF-DNS}\\n${IF-MYSQL}\\n${MYSQL_TYPE} database:     ${DB}\\n${MYSQL_TYPE} login:        ${MYSQL_USER}\\n${IF-MYSQL_PASS}\\n${MYSQL_TYPE} password:     ${MYSQL_PASS}\\n${ELSE-MYSQL_PASS}\\n${MYSQL_TYPE} password:     ${PASS}\\n${ENDIF-MYSQL_PASS}\\n\\n${ENDIF-MYSQL}\\n${IF-POSTGRES}\\nPostgreSQL database:        ${DB}\\nPostgreSQL login:           ${USER}\\nPostgreSQL password:        ${PASS}\\n\\n${ENDIF-POSTGRES}\\n\nmail_bcc: \nmail_cc: \nmail_cloud: \nmail_mta_sts: <n>\nmail_on: none\nmail_subject: Virtual server created\nmailboxlimit: none\nmailgroup: none\nmongrelslimit: <n>\nmysql: ${PREFIX}\nmysql_charset: \nmysql_chgrp: <n>\nmysql_collate: \nmysql_conns: none\nmysql_hosts: none\nmysql_mkdb: <n>\nmysql_nopass: <n>\nmysql_nouser: <n>\nmysql_suffix: none\nmysql_uconns: none\nmysql_wild: \nname: Default Settings\nnamedconf: none\nnamedconf_no_allow_transfer: \nnamedconf_no_also_notify: \nnewuser: Your mailbox has been set up successfully as follows :\\n\\nEmail address:           ${MAILBOX}@${DOM}\\nPOP3 login:              ${USER}\\nPOP3 password:           ${PLAINPASS}\\nSMTP server:             mail.${DOM}\\nPOP3 server:             mail.${DOM}\\n${IF-FTP}\\nFTP login:               Enabled\\nHome directory:          ${HOME}\\n${ELSE-FTP}\\nFTP login:               Disabled\\n${ENDIF-FTP}\\n\\n\nnewuser_bcc: \nnewuser_cc: \nnewuser_on: none\nnewuser_subject: Mailbox created\nnewuser_to_mailbox: <n>\nnewuser_to_owner: <n>\nnewuser_to_reseller: <n>\nnodbname: <n>\nnorename: \nothergroups: none\noutlook_autoconfig: none\nowners: *\nphp5.2cgi: none\nphp5.2fcgi: none\nphp5.3cgi: none\nphp5.3fcgi: none\nphp5.4cgi: none\nphp5.4fcgi: none\nphp5.5cgi: none\nphp5.5fcgi: none\nphp5.6cgi: none\nphp5.6fcgi: none\nphp5cgi: none\nphp5fcgi: none\nphp7.0cgi: none\nphp7.0fcgi: none\nphp7.1cgi: none\nphp7.1fcgi: none\nphp7.2cgi: none\nphp7.2fcgi: none\nphp7.3cgi: none\nphp7.3fcgi: none\nphp7.4cgi: none\nphp7.4fcgi: none\nphp8.0cgi: none\nphp8.0fcgi: none\nphp8.1cgi: none\nphp8.1fcgi: none\nphp8.2cgi: none\nphp8.2fcgi: none\nphp8.3cgi: none\nphp8.3fcgi: none\nphp8.4cgi: none\nphp8.4fcgi: none\nphp8.5cgi: none\nphp8.5fcgi: none\nphp8.6cgi: none\nphp8.6fcgi: none\nphp8.7cgi: none\nphp8.7fcgi: none\nphp8.8cgi: none\nphp8.8fcgi: none\nphp8.9cgi: none\nphp8.9fcgi: none\nphp_fpm: none\nphp_fpmtype: dynamic\nphp_log: <n>\nphp_log_path: \nphp_sock: <n>\nphp_vars: none\npostgres_encoding: none\nquota: <n>\nquotatype: hard\nranges: none\nranges6: none\nrealdomslimit: none\nresellers: *\nresources: none\nsafeunder: \nsgroup: none\nskel: /etc/skel\nskel_nosubs: \nskel_subs: <n>\nspamclear: none\nspamtrap: none\nssl_allow_subset: <n>\nssl_always_ssl: <n>\nssl_auto_letsencrypt: <n>\nssl_cert_type: sha2\nssl_combined_cert: <n>\nssl_connectivity: <n>\nssl_email: <n>\nssl_email_master: <n>\nssl_key_size: <n>\nssl_letsencrypt_wild: <n>\nssl_renew_letsencrypt: \nssl_tlsa_records: <n>\nstandard: <n>\nstatus: none\nstatusonly: <n>\nstatussslcert: <n>\nstatustimeout: \nstatustmpl: \ntrashclear: none\nugroup: none\nujail: <n>\nupdateuser: Your mailbox has been updated successfully as follows :\\n\\nEmail address:           ${MAILBOX}@${DOM}\\nPOP3 login:              ${USER}\\n${IF-PLAINPASS}\\nNew POP3 password:       ${PLAINPASS}\\n${ENDIF-PLAINPASS}\\nSMTP server:             mail.${DOM}\\nPOP3 server:             mail.${DOM}\\n${IF-FTP}\\nFTP login:               Enabled\\nHome directory:          ${HOME}\\n${ELSE-FTP}\\nFTP login:               Disabled\\n${ENDIF-FTP}\\n\\n\nupdateuser_bcc: \nupdateuser_cc: \nupdateuser_on: yes\nupdateuser_subject: Mailbox updated\nupdateuser_to_mailbox: <n>\nupdateuser_to_owner: <n>\nupdateuser_to_reseller: <n>\nuquota: <n>\nuser_aliases: none\nushell: none\nweb: ServerName ${DOM}\tServerAlias www.${DOM}\tServerAlias mail.${DOM}\tDocumentRoot ${HOME}/public_html\tErrorLog /var/log/virtualmin/${DOM}_error_log\tCustomLog /var/log/virtualmin/${DOM}_access_log combined\tScriptAlias /cgi-bin/ ${HOME}/cgi-bin/\tDirectoryIndex index.php index.htm index.html\t<Directory ${HOME}/public_html>\t    Options -Indexes +IncludesNOEXEC +SymLinksIfOwnerMatch \t    Require all granted\t    AllowOverride All Options=ExecCGI,Includes,IncludesNOEXEC,Indexes,MultiViews,SymLinksIfOwnerMatch\t</Directory>\t<Directory ${HOME}/cgi-bin>\t    Require all granted\t    AllowOverride All Options=ExecCGI,Includes,IncludesNOEXEC,Indexes,MultiViews,SymLinksIfOwnerMatch\t</Directory>\nweb_acme: \nweb_admin: <n>\nweb_admindom: \nweb_aliasredir: <n>\nweb_cgimode: fcgiwrap\nweb_dovecot_ssl: <n>\nweb_fcgiwrap: \nweb_html_dir: \nweb_html_perms: <n>\nweb_http2: 0\nweb_mysql_ssl: <n>\nweb_php_ini_5: \nweb_php_ini_5.2: \nweb_php_ini_5.3: \nweb_php_ini_5.4: \nweb_php_ini_5.5: \nweb_php_ini_5.6: \nweb_php_ini_7.0: \nweb_php_ini_7.1: \nweb_php_ini_7.2: \nweb_php_ini_7.3: \nweb_php_ini_7.4: \nweb_php_ini_8.0: \nweb_php_ini_8.1: \nweb_php_ini_8.2: \nweb_php_ini_8.3: \nweb_php_ini_8.4: \nweb_php_ini_8.5: \nweb_php_ini_8.6: \nweb_php_ini_8.7: \nweb_php_ini_8.8: \nweb_php_ini_8.9: \nweb_php_noedit: <n>\nweb_php_suexec: <n>\nweb_phpchildren: \nweb_phpver: \nweb_port: <n>\nweb_postfix_ssl: <n>\nweb_redirects: \nweb_ruby_suexec: <n>\nweb_ssi: <n>\nweb_ssi_suffix: \nweb_ssl: \nweb_sslport: <n>\nweb_sslprotos: \nweb_sslredirect: <n>\nweb_stats_dir: \nweb_stats_hdir: stats\nweb_stats_noedit: <n>\nweb_stats_pass: <n>\nweb_urlport: \nweb_urlsslport: \nweb_user: www-data\nweb_usermin_ssl: <n>\nweb_webmail: <n>\nweb_webmaildom: \nweb_webmin_ssl: <n>\nwebalizer: none\nwebmin_group: \n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a template by id",
+      "params": {
+        "id": "<id>"
+      }
+    },
+    "by_name": {
+      "body": {
+        "command": "get-template",
+        "output": "aliascopy: <n>\naliasdomslimit: none\naliaslimit: none\nappend_style: <n>\nautoconfig: none\navail: dns=1 mail=1 web=1 webalizer=0 mysql=1 postgres=1 spam=1 filemin=1 passwd=1 proc=2 cron=1 at=1 systemd=0 telnet=0 xterm=0 updown=0 change-user=1 htaccess-htpasswd=1 mailboxes=1 custom=0 shell=0 webminlog=1 logviewer=1 phpini=1 virtualmin-awstats=\nbccto: none\nbwlimit: none\ncapabilities: none\ncert_ca_tmpl: auto\ncert_cert_tmpl: auto\ncert_combined_tmpl: auto\ncert_everything_tmpl: auto\ncert_key_tmpl: /etc/ssl/virtualmin/${ID}/ssl.key\ncontent_web: <n>\ncontent_web_html: \ndbgroup: none\ndbslimit: none\ndefault: <n>\ndefmquota: <n>\ndisabled_url: none\ndisabled_web: none\ndns: none\ndns_alias: none\ndns_cloud: \ndns_cloud_import: <n>\ndns_cloud_proxy: <n>\ndns_dmarc: none\ndns_dmarcextra: \ndns_dmarcp: none\ndns_dmarcpct: <n>\ndns_dmarcrua: \ndns_dmarcruf: \ndns_indom: \ndns_master: none\ndns_mx: none\ndns_ns: \ndns_prins: <n>\ndns_records: \ndns_replace: \ndns_slaves: \ndns_spf: yes\ndns_spfall: <n>\ndns_spfhosts: \ndns_spfincludes: \ndns_spfonly: \ndns_sub: yes\ndns_ttl: \ndns_view: \ndnssec: none\ndnssec_alg: RSASHA256\ndnssec_single: \ndom_aliases: postmaster=${EMAILTO}\twebmaster=${EMAILTO}\tabuse=${EMAILTO}\thostmaster=${EMAILTO}\ndom_aliases_bounce: <n>\ndomalias: none\ndomalias_type: <n>\ndomauto_disable: \ndomslimit: <n>\nexclude: none\nextra_prefix: none\nfeaturelimits: none\nfile: /etc/webmin/virtual-server/templates/0\nfor_alias: <n>\nfor_parent: <n>\nfor_sub: <n>\nfor_users: <n>\nforceunder: <n>\nftpgroup: none\ngacl: <n>\ngacl_groups: ${GROUP}\ngacl_root: ${HOME}\ngacl_ugroups: ${GROUP}\ngacl_umode: <n>\ngacl_uusers: \nhashpass: <n>\nhashtypes: *\nid: <n>\nipfollow: \nlogrotate: none\nlogrotate_files: none\nlogrotate_shared: yes\nmail: The following virtual server has been set up successfully :\\n\\nDomain name:                ${DOM}\\nHosting server:             ${HOSTNAME}\\n${IF-VIRT}\\nVirtual IP address:         ${IP}\\n${ENDIF-VIRT}\\nAdministration login:       ${USER}\\nAdministration password:    ${PASS}\\n${IF-WEBMIN}\\nAdministration URL:         ${WEBMIN_PROTO}://www.${DOM}:${WEBMIN_PORT}/\\n${ENDIF-WEBMIN}\\n\\n${IF-WEB}\\nWebsite:                    http://www.${DOM}/\\n${IF-WEBALIZER}\\nWebalizer log reporting:    Enabled\\n${ELSE-WEBALIZER}\\nWebalizer log reporting:    Disabled\\n${ENDIF-WEBALIZER}\\n${IF-VIRTUALMIN-AWSTATS}\\nAWStats log reporting:      Enabled\\n${ELSE-VIRTUALMIN-AWSTATS}\\nAWStats log reporting:      Disabled\\n${ENDIF-VIRTUALMIN-AWSTATS}\\n\\n${ENDIF-WEB}\\n${IF-MAIL}\\nEmail domain:               ${DOM}\\nSMTP server:                mail.${DOM}\\nPOP3 server:                mail.${DOM}\\n${IF-MX_SLAVES}\\nBackup SMTP servers:        ${MX_SLAVES}\\n${ENDIF-MX_SLAVES}\\n\\n${ENDIF-MAIL}\\n${IF-DNS}\\nDNS domain:                 ${DOM}\\nNameserver:                 ${DNS_SERVER}\\n${IF-DNS_SLAVE}\\nSlave nameservers:          ${DNS_SLAVE}\\n${ENDIF-DNS_SLAVE}\\n\\n${ENDIF-DNS}\\n${IF-MYSQL}\\n${MYSQL_TYPE} database:     ${DB}\\n${MYSQL_TYPE} login:        ${MYSQL_USER}\\n${IF-MYSQL_PASS}\\n${MYSQL_TYPE} password:     ${MYSQL_PASS}\\n${ELSE-MYSQL_PASS}\\n${MYSQL_TYPE} password:     ${PASS}\\n${ENDIF-MYSQL_PASS}\\n\\n${ENDIF-MYSQL}\\n${IF-POSTGRES}\\nPostgreSQL database:        ${DB}\\nPostgreSQL login:           ${USER}\\nPostgreSQL password:        ${PASS}\\n\\n${ENDIF-POSTGRES}\\n\nmail_bcc: \nmail_cc: \nmail_cloud: \nmail_mta_sts: <n>\nmail_on: none\nmail_subject: Virtual server created\nmailboxlimit: none\nmailgroup: none\nmongrelslimit: <n>\nmysql: ${PREFIX}\nmysql_charset: \nmysql_chgrp: <n>\nmysql_collate: \nmysql_conns: none\nmysql_hosts: none\nmysql_mkdb: <n>\nmysql_nopass: <n>\nmysql_nouser: <n>\nmysql_suffix: none\nmysql_uconns: none\nmysql_wild: \nname: Default Settings\nnamedconf: none\nnamedconf_no_allow_transfer: \nnamedconf_no_also_notify: \nnewuser: Your mailbox has been set up successfully as follows :\\n\\nEmail address:           ${MAILBOX}@${DOM}\\nPOP3 login:              ${USER}\\nPOP3 password:           ${PLAINPASS}\\nSMTP server:             mail.${DOM}\\nPOP3 server:             mail.${DOM}\\n${IF-FTP}\\nFTP login:               Enabled\\nHome directory:          ${HOME}\\n${ELSE-FTP}\\nFTP login:               Disabled\\n${ENDIF-FTP}\\n\\n\nnewuser_bcc: \nnewuser_cc: \nnewuser_on: none\nnewuser_subject: Mailbox created\nnewuser_to_mailbox: <n>\nnewuser_to_owner: <n>\nnewuser_to_reseller: <n>\nnodbname: <n>\nnorename: \nothergroups: none\noutlook_autoconfig: none\nowners: *\nphp5.2cgi: none\nphp5.2fcgi: none\nphp5.3cgi: none\nphp5.3fcgi: none\nphp5.4cgi: none\nphp5.4fcgi: none\nphp5.5cgi: none\nphp5.5fcgi: none\nphp5.6cgi: none\nphp5.6fcgi: none\nphp5cgi: none\nphp5fcgi: none\nphp7.0cgi: none\nphp7.0fcgi: none\nphp7.1cgi: none\nphp7.1fcgi: none\nphp7.2cgi: none\nphp7.2fcgi: none\nphp7.3cgi: none\nphp7.3fcgi: none\nphp7.4cgi: none\nphp7.4fcgi: none\nphp8.0cgi: none\nphp8.0fcgi: none\nphp8.1cgi: none\nphp8.1fcgi: none\nphp8.2cgi: none\nphp8.2fcgi: none\nphp8.3cgi: none\nphp8.3fcgi: none\nphp8.4cgi: none\nphp8.4fcgi: none\nphp8.5cgi: none\nphp8.5fcgi: none\nphp8.6cgi: none\nphp8.6fcgi: none\nphp8.7cgi: none\nphp8.7fcgi: none\nphp8.8cgi: none\nphp8.8fcgi: none\nphp8.9cgi: none\nphp8.9fcgi: none\nphp_fpm: none\nphp_fpmtype: dynamic\nphp_log: <n>\nphp_log_path: \nphp_sock: <n>\nphp_vars: none\npostgres_encoding: none\nquota: <n>\nquotatype: hard\nranges: none\nranges6: none\nrealdomslimit: none\nresellers: *\nresources: none\nsafeunder: \nsgroup: none\nskel: /etc/skel\nskel_nosubs: \nskel_subs: <n>\nspamclear: none\nspamtrap: none\nssl_allow_subset: <n>\nssl_always_ssl: <n>\nssl_auto_letsencrypt: <n>\nssl_cert_type: sha2\nssl_combined_cert: <n>\nssl_connectivity: <n>\nssl_email: <n>\nssl_email_master: <n>\nssl_key_size: <n>\nssl_letsencrypt_wild: <n>\nssl_renew_letsencrypt: \nssl_tlsa_records: <n>\nstandard: <n>\nstatus: none\nstatusonly: <n>\nstatussslcert: <n>\nstatustimeout: \nstatustmpl: \ntrashclear: none\nugroup: none\nujail: <n>\nupdateuser: Your mailbox has been updated successfully as follows :\\n\\nEmail address:           ${MAILBOX}@${DOM}\\nPOP3 login:              ${USER}\\n${IF-PLAINPASS}\\nNew POP3 password:       ${PLAINPASS}\\n${ENDIF-PLAINPASS}\\nSMTP server:             mail.${DOM}\\nPOP3 server:             mail.${DOM}\\n${IF-FTP}\\nFTP login:               Enabled\\nHome directory:          ${HOME}\\n${ELSE-FTP}\\nFTP login:               Disabled\\n${ENDIF-FTP}\\n\\n\nupdateuser_bcc: \nupdateuser_cc: \nupdateuser_on: yes\nupdateuser_subject: Mailbox updated\nupdateuser_to_mailbox: <n>\nupdateuser_to_owner: <n>\nupdateuser_to_reseller: <n>\nuquota: <n>\nuser_aliases: none\nushell: none\nweb: ServerName ${DOM}\tServerAlias www.${DOM}\tServerAlias mail.${DOM}\tDocumentRoot ${HOME}/public_html\tErrorLog /var/log/virtualmin/${DOM}_error_log\tCustomLog /var/log/virtualmin/${DOM}_access_log combined\tScriptAlias /cgi-bin/ ${HOME}/cgi-bin/\tDirectoryIndex index.php index.htm index.html\t<Directory ${HOME}/public_html>\t    Options -Indexes +IncludesNOEXEC +SymLinksIfOwnerMatch \t    Require all granted\t    AllowOverride All Options=ExecCGI,Includes,IncludesNOEXEC,Indexes,MultiViews,SymLinksIfOwnerMatch\t</Directory>\t<Directory ${HOME}/cgi-bin>\t    Require all granted\t    AllowOverride All Options=ExecCGI,Includes,IncludesNOEXEC,Indexes,MultiViews,SymLinksIfOwnerMatch\t</Directory>\nweb_acme: \nweb_admin: <n>\nweb_admindom: \nweb_aliasredir: <n>\nweb_cgimode: fcgiwrap\nweb_dovecot_ssl: <n>\nweb_fcgiwrap: \nweb_html_dir: \nweb_html_perms: <n>\nweb_http2: 0\nweb_mysql_ssl: <n>\nweb_php_ini_5: \nweb_php_ini_5.2: \nweb_php_ini_5.3: \nweb_php_ini_5.4: \nweb_php_ini_5.5: \nweb_php_ini_5.6: \nweb_php_ini_7.0: \nweb_php_ini_7.1: \nweb_php_ini_7.2: \nweb_php_ini_7.3: \nweb_php_ini_7.4: \nweb_php_ini_8.0: \nweb_php_ini_8.1: \nweb_php_ini_8.2: \nweb_php_ini_8.3: \nweb_php_ini_8.4: \nweb_php_ini_8.5: \nweb_php_ini_8.6: \nweb_php_ini_8.7: \nweb_php_ini_8.8: \nweb_php_ini_8.9: \nweb_php_noedit: <n>\nweb_php_suexec: <n>\nweb_phpchildren: \nweb_phpver: \nweb_port: <n>\nweb_postfix_ssl: <n>\nweb_redirects: \nweb_ruby_suexec: <n>\nweb_ssi: <n>\nweb_ssi_suffix: \nweb_ssl: \nweb_sslport: <n>\nweb_sslprotos: \nweb_sslredirect: <n>\nweb_stats_dir: \nweb_stats_hdir: stats\nweb_stats_noedit: <n>\nweb_stats_pass: <n>\nweb_urlport: \nweb_urlsslport: \nweb_user: www-data\nweb_usermin_ssl: <n>\nweb_webmail: <n>\nweb_webmaildom: \nweb_webmin_ssl: <n>\nwebalizer: none\nwebmin_group: \n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a template by name",
+      "params": {
+        "name": "Default Settings"
+      }
+    },
+    "no_selector": {
+      "body": {
+        "command": "get-template",
+        "error": "Missing --name or --id parameter",
+        "full_error": "Missing --name or --id parameter\n\nOutputs all settings in some virtual server template.\n\nvirtualmin get-template --name template-name | --id template-id\n                       [--setting name]\n                       [--inherited]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Missing --name or --id parameter",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "neither a name nor an id",
+      "params": {}
+    },
+    "unknown_id": {
+      "body": {
+        "command": "get-template",
+        "error": "No template with ID 99 found",
+        "full_error": "No template with ID 99 found\n\nOutputs all settings in some virtual server template.\n\nvirtualmin get-template --name template-name | --id template-id\n                       [--setting name]\n                       [--inherited]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No template with ID 99 found",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "an id with no template",
+      "params": {
+        "id": "<id>"
+      }
+    },
+    "unknown_name": {
+      "body": {
+        "command": "get-template",
+        "error": "No template with name No Such found",
+        "full_error": "No template with name No Such found\n\nOutputs all settings in some virtual server template.\n\nvirtualmin get-template --name template-name | --id template-id\n                       [--setting name]\n                       [--inherited]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No template with name No Such found",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a name with no template",
+      "params": {
+        "name": "No Such"
+      }
+    }
+  },
+  "program": "get-template",
+  "virtualmin_version": "8.3.0"
+}
