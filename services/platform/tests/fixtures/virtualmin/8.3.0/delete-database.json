@@ -1,0 +1,51 @@
+{
+  "cases": {
+    "not_associated": {
+      "body": {
+        "command": "delete-database",
+        "error": "The specified database is not associated with this server",
+        "full_error": "The specified database is not associated with this server\n\nDeletes a database associated with some virtual server.\n\nvirtualmin delete-database --domain domain.name\n                           --name database-name\n                           --type mysql|postgres\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "The specified database is not associated with this server",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the database deleted above",
+      "params": {
+        "domain": "contract.praho.test",
+        "name": "contractdbold",
+        "type": "mysql"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "delete-database",
+        "output": "Database contractdbold deleted successfully\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "an existing database",
+      "params": {
+        "domain": "contract.praho.test",
+        "name": "contractdbold",
+        "type": "mysql"
+      }
+    }
+  },
+  "program": "delete-database",
+  "virtualmin_version": "8.3.0"
+}

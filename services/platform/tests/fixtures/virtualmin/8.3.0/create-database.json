@@ -1,0 +1,74 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "create-database",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nCreates a new database associated with some virtual server.\n\nvirtualmin create-database --domain domain.name\n                           --name database-name\n                           --type mysql|postgres\n                           [--opt \"name value\"]*\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "name": "contractdbnew",
+        "type": "mysql"
+      }
+    },
+    "already_associated": {
+      "body": {
+        "command": "create-database",
+        "error": "A database with the same name and type is already associated with this server",
+        "full_error": "A database with the same name and type is already associated with this server\n\nCreates a new database associated with some virtual server.\n\nvirtualmin create-database --domain domain.name\n                           --name database-name\n                           --type mysql|postgres\n                           [--opt \"name value\"]*\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "A database with the same name and type is already associated with this server",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the same database twice",
+      "params": {
+        "domain": "contract.praho.test",
+        "name": "contractdbnew",
+        "type": "mysql"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "create-database",
+        "output": "Database contractdbnew created successfully\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a MySQL database for the domain",
+      "params": {
+        "domain": "contract.praho.test",
+        "name": "contractdbnew",
+        "type": "mysql"
+      }
+    }
+  },
+  "program": "create-database",
+  "virtualmin_version": "8.3.0"
+}

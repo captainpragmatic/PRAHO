@@ -112,6 +112,19 @@ def _collapse_pem_rows(rows: list[Any]) -> list[Any]:
     return collapsed
 
 
+def _redact_table_descriptions(rows: list[Any]) -> list[Any]:
+    """The plain `list-domains` table prints each domain's description (the recovery seed) in its last column."""
+    first = rows[0].get("name") if rows and isinstance(rows[0], dict) else None
+    if not (isinstance(first, str) and first.startswith("Domain ") and "Description" in first):
+        return rows
+    redacted: list[Any] = [rows[0]]
+    for row in rows[1:]:
+        name = row.get("name") if isinstance(row, dict) else None
+        parts = name.split(None, 2) if isinstance(name, str) and not name.startswith("-") else []
+        redacted.append({**row, "name": f"{parts[0]} {parts[1]} {REDACTED}"} if len(parts) == 3 else row)
+    return redacted
+
+
 def sanitise_value(value: Any, *, key: str | None = None, dates: bool = True, _secret: bool = False) -> Any:
     """A JSON value, recursively. `key` is the name it sits under."""
     secret = _secret or _is_sensitive_key(key)
@@ -120,7 +133,7 @@ def sanitise_value(value: Any, *, key: str | None = None, dates: bool = True, _s
             str(name): sanitise_value(item, key=str(name), dates=dates, _secret=secret) for name, item in value.items()
         }
     if isinstance(value, list):
-        items = _collapse_pem_rows(value)
+        items = _redact_table_descriptions(_collapse_pem_rows(value))
         return [sanitise_value(item, key=key, dates=dates, _secret=secret) for item in items]
     if isinstance(value, str):
         if secret and value:
@@ -135,6 +148,16 @@ def sanitise_params(params: dict[str, Any]) -> dict[str, Any]:
     """The parameters of a call. Dates stay: `start`/`end` are part of what the caller sends."""
     cleaned = sanitise_value(params, dates=False)
     assert isinstance(cleaned, dict)
+    return cleaned
+
+
+def sanitise_recording(recording: dict[str, Any]) -> dict[str, Any]:
+    """A whole recording file: parameters keep their dates, everything else is sanitised as a response."""
+    cleaned = sanitise_value({**recording, "cases": {}})
+    cleaned["cases"] = {
+        name: {**sanitise_value({**case, "params": {}}), "params": sanitise_params(case["params"])}
+        for name, case in recording["cases"].items()
+    }
     return cleaned
 
 

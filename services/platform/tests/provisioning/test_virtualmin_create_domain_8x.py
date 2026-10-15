@@ -27,19 +27,22 @@ from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGat
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
+from tests.helpers.recorded_virtualmin import (
+    RECORDED_ABSENT_DOMAIN,
+    recorded_http_response,
+    recorded_payload,
+)
 from tests.provisioning.test_cov_virtualmin_gateway_listing import http_response
 from tests.provisioning.test_virtualmin_backup_cli_contract import remote_cgi_argv
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
 
 def absent_envelope(domain: str) -> dict[str, object]:
-    """The lab-captured answer of Virtualmin 8.3.0 to list-domains for an absent domain."""
-    return {
-        "error": f"Virtual server {domain} does not exist",
-        "status": "failure",
-        "command": "list-domains",
-        "full_error": f"Virtual server {domain} does not exist\n\nLists the virtual servers on this system.\n",
-    }
+    """Virtualmin 8.3.0's recorded answer to list-domains for an absent domain, for `domain`."""
+    envelope: dict[str, object] = recorded_payload(
+        "list-domains", "absent_domain", replace={RECORDED_ABSENT_DOMAIN: domain}
+    )
+    return envelope
 
 
 class TemplateNameTests(SimpleTestCase):
@@ -114,7 +117,7 @@ class CreateDomainParameterTests(VirtualminTaskTestBase):
         def transport(method: str, url: str, **kwargs: object) -> requests.Response:
             params = cast("dict[str, object]", kwargs["params"])
             sent.append(params)
-            return http_response({"status": "success", "command": params.get("program")})
+            return recorded_http_response(str(params["program"]))
 
         account = VirtualminAccount.objects.create(
             domain="new.example.com",

@@ -100,6 +100,18 @@ class TestSanitiseValue:
         cleaned = sanitise_value({"data": rows})
         assert cleaned["data"] == [{"name": "contract.praho.test", "value": ""}, {"name": "<pem>", "values": {}}]
 
+    def test_the_description_column_of_the_domain_table_is_redacted(self) -> None:
+        rows = [
+            {"name": "Domain                         Username        Description                   ", "values": {}},
+            {"name": "------------------------------ --------------- ------------------------------", "values": {}},
+            {"name": "contract.praho.test            contract        the-recovery-seed             ", "values": {}},
+        ]
+        cleaned = sanitise_value({"data": rows})["data"]
+        assert cleaned[0] == rows[0]
+        assert cleaned[1] == rows[1]
+        assert cleaned[2]["name"] == "contract.praho.test contract <redacted>"
+        assert sanitise_value({"data": cleaned})["data"] == cleaned
+
     def test_the_status_and_error_of_a_refusal_survive(self) -> None:
         body = {
             "status": "failure",

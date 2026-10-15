@@ -1,0 +1,118 @@
+{
+  "cases": {
+    "already_hosted": {
+      "body": {
+        "command": "create-domain",
+        "error": "You are already hosting this domain",
+        "full_error": "You are already hosting this domain\n\nAdds a new Virtualmin virtual server, with the settings and features\nspecified on the command line.\n\nvirtualmin create-domain --domain domain.name\n                         --pass \"password-for-new-domain\" |\n                         --passfile password-file\n                        [--hashpass]\n                        [--parent domain.name | --alias domain.name |\n                         --alias-with-mail domain.name |\n                         --alias-with-dns domain.name |\n                         --superdom domain.name]\n                        [--desc description-for-domain]\n                        [--email contact-email]\n                        [--user new-unix-user]\n                        [--group new-unix-group]\n                        [--unix]\n                        [--dir]\n                        [--web]\n                        [--ssl]\n                        [--logrotate]\n                        [--mysql]\n                        [--webmin]\n                        [--virtualmin-awstats]\n                        [--default-features] | [--features-from-plan]\n                        [--default-ip |\n                         --no-ip |\n                         --shared-ip existing.ip.address |\n                         --allocate-ip |\n                         --ip virtual.ip.address]\n                        [--ip-already]\n                        [--default-ip6 |\n                         --no-ip6 |\n                         --shared-ip6 existing.ip.address |\n                         --allocate-ip6 |\n                         --ip6 virtual.ip.address]\n                        [--ip6-already]\n                        [--dns-ip address | --no-dns-ip]\n                        [--dns-ip6 address | --no-dns-ip6]\n                        [--max-doms domains|*]\n                        [--max-aliasdoms domains]\n                        [--max-realdoms domains]\n                        [--max-mailboxes boxes]\n                        [--max-dbs databases]\n                        [--max-aliases aliases]\n                        [--template \"name\"]\n                        [--plan \"name\"]\n                        [--limits-from-plan]\n                        [--suffix username-prefix]\n                        [--db database-name]\n                        [--fwdto email-address]\n                        [--reseller name]\n                        [--mysql-pass password]\n                        [--skip-warnings]\n                        [--acme]\n                        [--acme-always]\n                        [--acme-never]\n                        [--field-name value]*\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--postgres-server hostname]\n                        [--cloud-dns provider|\"services\"|\"local\"]\n                        [--separate-dns-subdomain |\n                         --any-dns-subdomain]\n                        [--break-ssl-cert | --link-ssl-cert]\n                        [--ssl-redirect]\n                        [--generate-ssl-cert]\n                        [--generate-ssh-key | --use-ssh-key file|data]\n                        [--append-style format]\n                        [--shell command]\n                        [--subprefix directory]\n                        [--proxy url]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--ssl-redirect | --no-ssl-redirect]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "You are already hosting this domain",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the same domain created twice",
+      "params": {
+        "bandwidth": "<id>",
+        "default-features": "",
+        "desc": "<redacted>",
+        "domain": "contract-create.praho.test",
+        "pass": "<redacted>",
+        "quota": "1048576",
+        "template": "Default Settings",
+        "user": "contractcreate"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "create-domain",
+        "output": "Beginning server creation ..\n\nSaving server details ..\n.. done\n\nCreating administration group contractcreate ..\n.. done\n\nCreating administration user contractcreate ..\n.. done\n\nAdding administration user to groups ..\n.. done\n\nCreating home directory ..\n.. done\n\nCreating mailbox for administration user ..\n.. done\n\nAdding new virtual website ..\n.. done\n\nSetting up CGI scripts support with FCGIwrap server execution mode ..\n.. done\n\nAdding webserver user www-data to server's group ..\n.. done\n\nPerforming other Apache configuration ..\n.. done\n\nCreating SSL certificate and private key ..\n.. done\n\nAdding new SSL virtual website ..\n.. done\n\nSetting up log file rotation ..\n.. done\n\nCreating MariaDB login ..\n.. done\n\nCreating MariaDB database contractcreate ..\n.. done\n\nSetting up AWStats reporting ..\n.. done\n\nSetting up password protection for AWStats ..\n.. done\n\nCreating Webmin user ..\n.. done\n\nSaving server details ..\n.. done\n\nUpdating Webmin user ..\n.. done\n\nCreating initial website index page ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nRestarting PHP-FPM 8.2 server ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\nAll done!\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "PRAHO's own parameters: default template, default features, the recovery seed as description",
+      "params": {
+        "bandwidth": "<id>",
+        "default-features": "",
+        "desc": "<redacted>",
+        "domain": "contract-create.praho.test",
+        "pass": "<redacted>",
+        "quota": "1048576",
+        "template": "Default Settings",
+        "user": "contractcreate"
+      }
+    },
+    "unknown_parameter": {
+      "body": {
+        "command": "create-domain",
+        "error": "Unknown parameter --bogus-flag",
+        "full_error": "Unknown parameter --bogus-flag\n\nAdds a new Virtualmin virtual server, with the settings and features\nspecified on the command line.\n\nvirtualmin create-domain --domain domain.name\n                         --pass \"password-for-new-domain\" |\n                         --passfile password-file\n                        [--hashpass]\n                        [--parent domain.name | --alias domain.name |\n                         --alias-with-mail domain.name |\n                         --alias-with-dns domain.name |\n                         --superdom domain.name]\n                        [--desc description-for-domain]\n                        [--email contact-email]\n                        [--user new-unix-user]\n                        [--group new-unix-group]\n                        [--unix]\n                        [--dir]\n                        [--web]\n                        [--ssl]\n                        [--logrotate]\n                        [--mysql]\n                        [--webmin]\n                        [--virtualmin-awstats]\n                        [--default-features] | [--features-from-plan]\n                        [--default-ip |\n                         --no-ip |\n                         --shared-ip existing.ip.address |\n                         --allocate-ip |\n                         --ip virtual.ip.address]\n                        [--ip-already]\n                        [--default-ip6 |\n                         --no-ip6 |\n                         --shared-ip6 existing.ip.address |\n                         --allocate-ip6 |\n                         --ip6 virtual.ip.address]\n                        [--ip6-already]\n                        [--dns-ip address | --no-dns-ip]\n                        [--dns-ip6 address | --no-dns-ip6]\n                        [--max-doms domains|*]\n                        [--max-aliasdoms domains]\n                        [--max-realdoms domains]\n                        [--max-mailboxes boxes]\n                        [--max-dbs databases]\n                        [--max-aliases aliases]\n                        [--template \"name\"]\n                        [--plan \"name\"]\n                        [--limits-from-plan]\n                        [--suffix username-prefix]\n                        [--db database-name]\n                        [--fwdto email-address]\n                        [--reseller name]\n                        [--mysql-pass password]\n                        [--skip-warnings]\n                        [--acme]\n                        [--acme-always]\n                        [--acme-never]\n                        [--field-name value]*\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--postgres-server hostname]\n                        [--cloud-dns provider|\"services\"|\"local\"]\n                        [--separate-dns-subdomain |\n                         --any-dns-subdomain]\n                        [--break-ssl-cert | --link-ssl-cert]\n                        [--ssl-redirect]\n                        [--generate-ssl-cert]\n                        [--generate-ssh-key | --use-ssh-key file|data]\n                        [--append-style format]\n                        [--shell command]\n                        [--subprefix directory]\n                        [--proxy url]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--ssl-redirect | --no-ssl-redirect]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter --bogus-flag",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a parameter the command lacks",
+      "params": {
+        "bandwidth": "<id>",
+        "bogus-flag": "",
+        "default-features": "",
+        "desc": "<redacted>",
+        "domain": "contract-other.praho.test",
+        "pass": "<redacted>",
+        "quota": "1048576",
+        "template": "Default Settings",
+        "user": "contractother"
+      }
+    },
+    "unknown_template": {
+      "body": {
+        "command": "create-domain",
+        "error": "Unknown template name",
+        "full_error": "Unknown template name\n\nAdds a new Virtualmin virtual server, with the settings and features\nspecified on the command line.\n\nvirtualmin create-domain --domain domain.name\n                         --pass \"password-for-new-domain\" |\n                         --passfile password-file\n                        [--hashpass]\n                        [--parent domain.name | --alias domain.name |\n                         --alias-with-mail domain.name |\n                         --alias-with-dns domain.name |\n                         --superdom domain.name]\n                        [--desc description-for-domain]\n                        [--email contact-email]\n                        [--user new-unix-user]\n                        [--group new-unix-group]\n                        [--unix]\n                        [--dir]\n                        [--web]\n                        [--ssl]\n                        [--logrotate]\n                        [--mysql]\n                        [--webmin]\n                        [--virtualmin-awstats]\n                        [--default-features] | [--features-from-plan]\n                        [--default-ip |\n                         --no-ip |\n                         --shared-ip existing.ip.address |\n                         --allocate-ip |\n                         --ip virtual.ip.address]\n                        [--ip-already]\n                        [--default-ip6 |\n                         --no-ip6 |\n                         --shared-ip6 existing.ip.address |\n                         --allocate-ip6 |\n                         --ip6 virtual.ip.address]\n                        [--ip6-already]\n                        [--dns-ip address | --no-dns-ip]\n                        [--dns-ip6 address | --no-dns-ip6]\n                        [--max-doms domains|*]\n                        [--max-aliasdoms domains]\n                        [--max-realdoms domains]\n                        [--max-mailboxes boxes]\n                        [--max-dbs databases]\n                        [--max-aliases aliases]\n                        [--template \"name\"]\n                        [--plan \"name\"]\n                        [--limits-from-plan]\n                        [--suffix username-prefix]\n                        [--db database-name]\n                        [--fwdto email-address]\n                        [--reseller name]\n                        [--mysql-pass password]\n                        [--skip-warnings]\n                        [--acme]\n                        [--acme-always]\n                        [--acme-never]\n                        [--field-name value]*\n                        [--enable-jail | --disable-jail]\n                        [--mysql-server hostname]\n                        [--postgres-server hostname]\n                        [--cloud-dns provider|\"services\"|\"local\"]\n                        [--separate-dns-subdomain |\n                         --any-dns-subdomain]\n                        [--break-ssl-cert | --link-ssl-cert]\n                        [--ssl-redirect]\n                        [--generate-ssl-cert]\n                        [--generate-ssh-key | --use-ssh-key file|data]\n                        [--append-style format]\n                        [--shell command]\n                        [--subprefix directory]\n                        [--proxy url]\n                        [--alias-redirect | --no-alias-redirect]\n                        [--ssl-redirect | --no-ssl-redirect]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown template name",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "there is no template called Default on 8.x",
+      "params": {
+        "bandwidth": "<id>",
+        "default-features": "",
+        "desc": "<redacted>",
+        "domain": "contract-other.praho.test",
+        "pass": "<redacted>",
+        "quota": "1048576",
+        "template": "Default",
+        "user": "contractother"
+      }
+    }
+  },
+  "program": "create-domain",
+  "virtualmin_version": "8.3.0"
+}

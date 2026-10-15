@@ -1,0 +1,25 @@
+{
+  "cases": {
+    "unavailable": {
+      "body": {
+        "error": "Remote program request-letsencrypt-cert does not exist",
+        "status": "error"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Remote program request-letsencrypt-cert does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "8.3 names the command generate-letsencrypt-cert",
+      "params": {
+        "domain": "contract.praho.test"
+      }
+    }
+  },
+  "program": "request-letsencrypt-cert",
+  "virtualmin_version": "8.3.0"
+}

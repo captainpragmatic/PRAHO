@@ -1,0 +1,52 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "create-alias",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nAdds a mail alias to a virtual server.\n\nvirtualmin create-alias --domain domain.name\n                        --from mailbox|\"*\"\n                       <--to address>+\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "from": "hello",
+        "to": "owner@example.com"
+      }
+    },
+    "mail_not_enabled": {
+      "body": {
+        "command": "create-alias",
+        "error": "Virtual server contract.praho.test does not have email enabled",
+        "full_error": "Virtual server contract.praho.test does not have email enabled\n\nAdds a mail alias to a virtual server.\n\nvirtualmin create-alias --domain domain.name\n                        --from mailbox|\"*\"\n                       <--to address>+\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract.praho.test does not have email enabled",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the lab domain has no mail feature",
+      "params": {
+        "domain": "contract.praho.test",
+        "from": "hello",
+        "to": "owner@example.com"
+      }
+    }
+  },
+  "program": "create-alias",
+  "virtualmin_version": "8.3.0"
+}

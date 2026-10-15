@@ -16,19 +16,12 @@ from django.test import TestCase
 from apps.common.types import Err, Ok
 from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRecoveryService
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminResponse
+from tests.helpers.recorded_virtualmin import recorded_response
 
 
 def _accepted() -> VirtualminResponse:
-    """What Virtualmin answers when a command is accepted: an explicit synchronous success."""
-    return VirtualminResponse(
-        success=True,
-        data={"status": "success"},
-        raw_response='{"status": "success"}',
-        http_status=200,
-        execution_time=0.0,
-        program="modify-domain",
-        server_hostname="test.example.com",
-    )
+    """What Virtualmin 8.3 answered to PRAHO's modify-domain in the contract suite: an explicit success."""
+    return recorded_response("modify-domain")
 
 
 class RestoreQuotasGatewayConstructorTests(TestCase):

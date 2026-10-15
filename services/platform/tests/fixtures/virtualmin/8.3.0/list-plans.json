@@ -1,0 +1,58 @@
+{
+  "cases": {
+    "success": {
+      "body": {
+        "command": "list-plans",
+        "data": [
+          {
+            "name": "ID                 Name                                     Quota      Domains ",
+            "values": {}
+          },
+          {
+            "name": "------------------ ---------------------------------------- ---------- --------",
+            "values": {}
+          },
+          {
+            "name": "0                  Default Plan                             <size>      0       ",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the plain plan table",
+      "params": {}
+    },
+    "unknown_parameter": {
+      "body": {
+        "command": "list-plans",
+        "error": "Unknown parameter --bogus",
+        "full_error": "Unknown parameter --bogus\n\nLists the available account plans for virtual servers.\n\nvirtualmin list-plans [--multiline | --json | --xml]\n                      [--id number | --name \"plan name\"]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter --bogus",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a parameter the command lacks",
+      "params": {
+        "bogus": ""
+      }
+    }
+  },
+  "program": "list-plans",
+  "virtualmin_version": "8.3.0"
+}

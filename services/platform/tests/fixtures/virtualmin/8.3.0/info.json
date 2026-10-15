@@ -1,0 +1,44 @@
+{
+  "cases": {
+    "ignored_parameter": {
+      "body": {
+        "command": "info",
+        "output": null,
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "info does not check its parameters",
+      "params": {
+        "bogus": ""
+      }
+    },
+    "success": {
+      "body": {
+        "command": "info",
+        "output": "cpu: \n    * <n>\n    * <n>\n    * <n>\n    * <n>\n    * <n>\ndisk_free: <id>\ndisk_fs: \n    * \n        device: /dev/vda1\n        dir: /etc/resolv.conf\n        free: <id>\n        ifree: <n>\n        itotal: <n>\n        iused: <n>\n        iused_percent: <n>\n        total: <id>\n        type: ext4\n        used: <id>\n        used_percent: <n>\ndisk_total: <id>\ndisk_used: <id>\nfcount: \n    aliases: <n>\n    dbs: <n>\n    dir: <n>\n    dns: <n>\n    doms: <n>\n    logrotate: <n>\n    mail: <n>\n    mysql: <n>\n    postgres: <n>\n    spam: <n>\n    ssl: <n>\n    unix: <n>\n    users: <n>\n    virus: <n>\n    web: <n>\n    webaliases: <n>\n    webalizer: <n>\n    webmin: <n>\nftypes: \n    * doms\n    * dns\n    * web\n    * ssl\n    * webaliases\n    * mail\n    * dbs\n    * users\n    * aliases\nhost: \n    hostname: vm-b.praho.test\n    module root: /usr/share/webmin/virtual-server\n    os: Debian Linux 12\n    root: /usr/share/webmin\n    theme version: <n>\n    virtualmin edition: GPL\n    virtualmin version: 8.3.0\n    webmin version: <n>\nio: \n    * <n>\n    * <n>\nkernel: \n    arch: aarch64\n    os: Linux\n    version: 6.12.76-linuxkit\nload: \n    * <n>\n    * <n>\n    * <n>\nmem: \n    * <n>\n    * <n>\n    * <n>\n    * <n>\n    * <n>\n    * \nposs: \n    * \n        desc: arm64        MariaDB database client library\n        epoch: <n>\n        held: \n        name: libmariadb3\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: libmariadb3\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        MariaDB database client binaries\n        epoch: <n>\n        held: \n        name: mariadb-client\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-client\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        MariaDB database core client binaries\n        epoch: <n>\n        held: \n        name: mariadb-client-core\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-client-core\n        version: 10.11.19-0+deb12u1\n    * \n        desc: MariaDB common configuration files\n        epoch: <n>\n        held: \n        name: mariadb-common\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-common\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        BZip2 compression support in the server and storage engines\n        epoch: <n>\n        held: \n        name: mariadb-plugin-provider-bzip2\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-plugin-provider-bzip2\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        LZ4 compression support in the server and storage engines\n        epoch: <n>\n        held: \n        name: mariadb-plugin-provider-lz4\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-plugin-provider-lz4\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        LZMA compression support in the server and storage engines\n        epoch: <n>\n        held: \n        name: mariadb-plugin-provider-lzma\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-plugin-provider-lzma\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        LZO compression support in the server and storage engines\n        epoch: <n>\n        held: \n        name: mariadb-plugin-provider-lzo\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-plugin-provider-lzo\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        Snappy compression support in the server and storage engines\n        epoch: <n>\n        held: \n        name: mariadb-plugin-provider-snappy\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-plugin-provider-snappy\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        MariaDB database server binaries\n        epoch: <n>\n        held: \n        name: mariadb-server\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-server\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        MariaDB database core server files\n        epoch: <n>\n        held: \n        name: mariadb-server-core\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-server-core\n        version: 10.11.19-0+deb12u1\nprocs: <n>\nprogs: \n    * \n        * Perl version\n        * <n>\n    * \n        * Path to Perl\n        * /usr/bin/perl\n    * \n        * Python version\n        * 3.11.2\n    * \n        * Path to Python\n        * /bin/python3.11\n    * \n        * Apache version\n        * 2.4.68\n    * \n        * PHP versions\n        * 8.2.34\n    * \n        * Logrotate version\n        * 3.21.0\n    * \n        * MariaDB version\n        * 10.11.18\nreboot: <n>\nstatus: \n    * \n        feature: web\n        name: Apache Webserver\n        status: <n>\n    * \n        feature: sshd\n        name: SSH Server\n        status: <n>\n    * \n        feature: mysql\n        name: MariaDB Database Server\n        status: <n>\n    * \n        feature: fpm\n        id: 8.2.34\n        name: PHP-FPM 8.2.34 Server\n        status: <n>\nvposs: \n    * \n        desc: arm64        MariaDB database client binaries\n        epoch: <n>\n        held: \n        name: mariadb-client\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-client\n        version: 10.11.19-0+deb12u1\n    * \n        desc: arm64        MariaDB database server binaries\n        epoch: <n>\n        held: \n        name: mariadb-server\n        oldepoch: <n>\n        oldversion: 10.11.18-0+deb12u1\n        security: <n>\n        source: oldstable-security\n        system: apt\n        update: mariadb-server\n        version: 10.11.19-0+deb12u1\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the health probe and the version read",
+      "params": {}
+    }
+  },
+  "program": "info",
+  "virtualmin_version": "8.3.0"
+}

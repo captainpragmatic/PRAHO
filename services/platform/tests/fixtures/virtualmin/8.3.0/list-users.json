@@ -1,0 +1,108 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "list-users",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nLists the mail, FTP and database users in one or more virtual servers.\n\nvirtualmin list-users --all-domains | --domain name | --domain-user username\n                     [--multiline | --json | --xml]\n                     [--name-only | --email-only]\n                     [--include-owner]\n                     [--user name]\n                     [--simple-aliases]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "no_domain": {
+      "body": {
+        "command": "list-users",
+        "error": "No domains or users specified",
+        "full_error": "No domains or users specified\n\nLists the mail, FTP and database users in one or more virtual servers.\n\nvirtualmin list-users --all-domains | --domain name | --domain-user username\n                     [--multiline | --json | --xml]\n                     [--name-only | --email-only]\n                     [--include-owner]\n                     [--user name]\n                     [--simple-aliases]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No domains or users specified",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "neither a domain nor a user to list",
+      "params": {}
+    },
+    "no_users": {
+      "body": {
+        "command": "list-users",
+        "data": [
+          {
+            "name": "User                 Real name            Mail FTP        DBs  Quota          ",
+            "values": {}
+          },
+          {
+            "name": "-------------------- -------------------- ---- ---------- ---- ---------------",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a domain with no users",
+      "params": {
+        "domain": "contract.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "list-users",
+        "data": [
+          {
+            "name": "User                 Real name            Mail FTP        DBs  Quota          ",
+            "values": {}
+          },
+          {
+            "name": "-------------------- -------------------- ---- ---------- ---- ---------------",
+            "values": {}
+          },
+          {
+            "name": "dave                 Dave                 No   No         No   NA             ",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a domain with one user",
+      "params": {
+        "domain": "contract.praho.test"
+      }
+    }
+  },
+  "program": "list-users",
+  "virtualmin_version": "8.3.0"
+}

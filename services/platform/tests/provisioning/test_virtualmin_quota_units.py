@@ -14,7 +14,7 @@ from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRec
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 from apps.provisioning.virtualmin_units import quota_parameters
-from tests.provisioning.test_cov_virtualmin_gateway_listing import http_response
+from tests.helpers.recorded_virtualmin import recorded_http_response
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
 
@@ -45,7 +45,7 @@ class CreateAndRecoverAgreeTests(VirtualminTaskTestBase):
         def transport(method: str, url: str, **kwargs: object) -> requests.Response:
             params = cast("dict[str, object]", kwargs["params"])
             sent.append(params)
-            return http_response({"status": "success", "command": params.get("program")})
+            return recorded_http_response(str(params["program"]))
 
         job = VirtualminProvisioningJob.objects.create(
             operation="create_domain", server=self.server, account=self.account, correlation_id="c"
@@ -75,9 +75,7 @@ class CreateAndRecoverAgreeTests(VirtualminTaskTestBase):
 
         def refuse(method: str, url: str, **kwargs: object) -> requests.Response:
             params = cast("dict[str, object]", kwargs["params"])
-            return http_response(
-                {"status": "failure", "command": params.get("program"), "error": "Unknown parameter --bandwidth"}
-            )
+            return recorded_http_response(str(params["program"]), "unknown_parameter")
 
         with (
             patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=refuse),

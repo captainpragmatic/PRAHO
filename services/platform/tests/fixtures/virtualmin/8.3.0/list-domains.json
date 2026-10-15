@@ -1,0 +1,710 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "list-domains",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nLists the virtual servers on this system.\n\nvirtualmin list-domains [--multiline | --simple-multiline |\n                         --json | --xml]\n                        [--name-only | --id-only | --user-only |\n                         --home-only | --file-only | --ip-only |\n                         --ip6-only]\n                        [--domain name]*\n                        [--user name]*\n                        [--mail-user name]*\n                        [--id number]*\n                        [--with-feature feature]\n                        [--without-feature feature]\n                        [--with-web] [--with-ssl]\n                        [--alias domain | --no-alias]\n                        [--subserver | --toplevel | --subdomain]\n                        [--parent domain]\n                        [--plan ID|name]\n                        [--template ID|name]\n                        [--disabled | --enabled]\n                        [--php-mode cgi|fcgid|fpm|mod_php]\n                        [--ip address]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the create retry's probe",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "multiline": ""
+      }
+    },
+    "all_domains": {
+      "body": {
+        "command": "list-domains",
+        "data": [
+          {
+            "name": "contract.praho.test",
+            "values": {
+              "access_log": [
+                "/var/log/virtualmin/contract.praho.test_access_log"
+              ],
+              "allowed_features": [
+                "unix dir web ssl logrotate mysql virtualmin-awstats"
+              ],
+              "allowed_mysql_hosts": [
+                "<ip> localhost"
+              ],
+              "allowed_scripts": [
+                "All"
+              ],
+              "can_choose_database_names": [
+                "Yes"
+              ],
+              "can_migrate_backups": [
+                "No"
+              ],
+              "can_rename_servers": [
+                "Yes"
+              ],
+              "cgi_directory": [
+                "/home/contract/cgi-bin"
+              ],
+              "cgi_script_execution_mode": [
+                "fcgiwrap"
+              ],
+              "contact_address": [
+                "contract@vm-b.praho.test"
+              ],
+              "contact_email": [
+                "contract@vm-b.praho.test"
+              ],
+              "created_by": [
+                "root"
+              ],
+              "created_on": [
+                "<timestamp>"
+              ],
+              "created_unix_time": [
+                "<timestamp>"
+              ],
+              "databases_byte_size": [
+                "8192"
+              ],
+              "databases_count": [
+                "1"
+              ],
+              "databases_size": [
+                "<size>"
+              ],
+              "default_website_for_ip": [
+                "Yes"
+              ],
+              "description": [
+                "<redacted>"
+              ],
+              "edit_capabilities": [
+                "users aliases passwd"
+              ],
+              "enabled_http_protocols": [
+                ""
+              ],
+              "error_log": [
+                "/var/log/virtualmin/contract.praho.test_error_log"
+              ],
+              "external_ip_address": [
+                "<ip>"
+              ],
+              "fcgiwrap_port_for_cgis": [
+                "/var/fcgiwrap/<id>.sock/socket"
+              ],
+              "features": [
+                "unix dir web ssl logrotate mysql webmin"
+              ],
+              "file": [
+                "/etc/webmin/virtual-server/domains/<id>"
+              ],
+              "group_id": [
+                "<id>"
+              ],
+              "group_name": [
+                "contract"
+              ],
+              "hashed_password": [
+                "<redacted>"
+              ],
+              "home_directory": [
+                "/home/contract"
+              ],
+              "hostname_for_mysql": [
+                "localhost"
+              ],
+              "html_directory": [
+                "/home/contract/public_html"
+              ],
+              "id": [
+                "<id>"
+              ],
+              "ip_address": [
+                "<ip> (Shared)"
+              ],
+              "last_login": [
+                "Never"
+              ],
+              "login_permissions": [
+                "Email, FTP and SSH"
+              ],
+              "mailbox_username_prefix": [
+                "contract"
+              ],
+              "match_all_web_sub-domains": [
+                "No"
+              ],
+              "maximum_alias_servers": [
+                "Unlimited"
+              ],
+              "maximum_aliases": [
+                "Unlimited"
+              ],
+              "maximum_databases": [
+                "Unlimited"
+              ],
+              "maximum_mailboxes": [
+                "Unlimited"
+              ],
+              "maximum_mongrel_instances": [
+                "Unlimited"
+              ],
+              "maximum_non-alias_servers": [
+                "Unlimited"
+              ],
+              "maximum_sub-servers": [
+                "Cannot create"
+              ],
+              "password_for_mysql": [
+                "<redacted>"
+              ],
+              "password_storage": [
+                "<redacted>"
+              ],
+              "php_error_log": [
+                "/home/contract/logs/php_log"
+              ],
+              "php_execution_mode": [
+                "fpm"
+              ],
+              "php_fcgid_subprocesses": [
+                "None"
+              ],
+              "php_fpm_config_file": [
+                "/etc/php/8.2/fpm/pool.d/<id>.conf"
+              ],
+              "php_fpm_socket": [
+                "File /run/php/<id>.sock"
+              ],
+              "php_max_execution_time": [
+                "30"
+              ],
+              "php_version": [
+                "8.2"
+              ],
+              "plan": [
+                "Default Plan"
+              ],
+              "plan_id": [
+                "<id>"
+              ],
+              "plugins": [
+                "virtualmin-awstats"
+              ],
+              "port_for_mysql": [
+                "3306"
+              ],
+              "possible_cgi_script_execution_modes": [
+                "suexec fcgiwrap"
+              ],
+              "possible_php_execution_modes": [
+                "none fpm cgi"
+              ],
+              "provisioning_for_dns": [
+                "Local"
+              ],
+              "provisioning_for_mysql": [
+                "Local"
+              ],
+              "provisioning_for_spam": [
+                "Local"
+              ],
+              "provisioning_for_virus": [
+                "Local"
+              ],
+              "proxy_hostname": [
+                "No"
+              ],
+              "read-only_mode": [
+                "No"
+              ],
+              "server-side_includes": [
+                "Global default"
+              ],
+              "shell_command": [
+                "/bin/bash"
+              ],
+              "shell_type": [
+                "ssh"
+              ],
+              "ssl_candidate_hostnames": [
+                "contract.praho.test"
+              ],
+              "ssl_cert_and_ca_file": [
+                "/etc/ssl/virtualmin/<id>/ssl.combined"
+              ],
+              "ssl_cert_and_key_file": [
+                "<redacted>"
+              ],
+              "ssl_cert_expiry": [
+                "<timestamp>"
+              ],
+              "ssl_cert_expiry_time": [
+                "<timestamp>"
+              ],
+              "ssl_cert_file": [
+                "/etc/ssl/virtualmin/<id>/ssl.cert"
+              ],
+              "ssl_cert_used_by": [
+                "webmin (contract.praho.test)"
+              ],
+              "ssl_key_file": [
+                "<redacted>"
+              ],
+              "ssl_provider_subset_mode": [
+                "No"
+              ],
+              "sub-servers_cannot_be_under_other_domains": [
+                "No"
+              ],
+              "sub-servers_inherit_ip_address": [
+                "No"
+              ],
+              "sub-servers_must_be_under_main_domain": [
+                "No"
+              ],
+              "supported_http_protocols": [
+                "h2 h2c http/1.1"
+              ],
+              "template": [
+                "Default Settings"
+              ],
+              "template_id": [
+                "<id>"
+              ],
+              "type": [
+                "Top-level server"
+              ],
+              "url": [
+                "http://contract.praho.test/"
+              ],
+              "user_id": [
+                "<id>"
+              ],
+              "username": [
+                "contract"
+              ],
+              "username_for_mysql": [
+                "contract"
+              ],
+              "webmail_redirects": [
+                "Yes"
+              ],
+              "webmin_module_access": [
+                "dns=1 mail=1 web=1 mysql=1 postgres=1 spam=1 filemin=1 passwd=1 proc=2 cron=1 systemd=0 xterm=0 updown=0 change-user=1 htaccess-htpasswd=1 mailboxes=1 custom=0 webminlog=1 logviewer=1 phpini=1 virtualmin-awstats=0"
+              ],
+              "website_hostnames": [
+                "contract.praho.test www.contract.praho.test mail.contract.praho.test webmail.contract.praho.test admin.contract.praho.test"
+              ]
+            }
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "list_domains_with_owners and the lab checks",
+      "params": {
+        "multiline": ""
+      }
+    },
+    "name_only": {
+      "body": {
+        "command": "list-domains",
+        "data": [
+          {
+            "name": "contract.praho.test",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the lab's domain existence check",
+      "params": {
+        "name-only": ""
+      }
+    },
+    "one_domain": {
+      "body": {
+        "command": "list-domains",
+        "data": [
+          {
+            "name": "contract.praho.test",
+            "values": {
+              "access_log": [
+                "/var/log/virtualmin/contract.praho.test_access_log"
+              ],
+              "allowed_features": [
+                "unix dir web ssl logrotate mysql virtualmin-awstats"
+              ],
+              "allowed_mysql_hosts": [
+                "<ip> localhost"
+              ],
+              "allowed_scripts": [
+                "All"
+              ],
+              "can_choose_database_names": [
+                "Yes"
+              ],
+              "can_migrate_backups": [
+                "No"
+              ],
+              "can_rename_servers": [
+                "Yes"
+              ],
+              "cgi_directory": [
+                "/home/contract/cgi-bin"
+              ],
+              "cgi_script_execution_mode": [
+                "fcgiwrap"
+              ],
+              "contact_address": [
+                "contract@vm-b.praho.test"
+              ],
+              "contact_email": [
+                "contract@vm-b.praho.test"
+              ],
+              "created_by": [
+                "root"
+              ],
+              "created_on": [
+                "<timestamp>"
+              ],
+              "created_unix_time": [
+                "<timestamp>"
+              ],
+              "databases_byte_size": [
+                "8192"
+              ],
+              "databases_count": [
+                "1"
+              ],
+              "databases_size": [
+                "<size>"
+              ],
+              "default_website_for_ip": [
+                "Yes"
+              ],
+              "description": [
+                "<redacted>"
+              ],
+              "edit_capabilities": [
+                "users aliases passwd"
+              ],
+              "enabled_http_protocols": [
+                ""
+              ],
+              "error_log": [
+                "/var/log/virtualmin/contract.praho.test_error_log"
+              ],
+              "external_ip_address": [
+                "<ip>"
+              ],
+              "fcgiwrap_port_for_cgis": [
+                "/var/fcgiwrap/<id>.sock/socket"
+              ],
+              "features": [
+                "unix dir web ssl logrotate mysql webmin"
+              ],
+              "file": [
+                "/etc/webmin/virtual-server/domains/<id>"
+              ],
+              "group_id": [
+                "<id>"
+              ],
+              "group_name": [
+                "contract"
+              ],
+              "hashed_password": [
+                "<redacted>"
+              ],
+              "home_directory": [
+                "/home/contract"
+              ],
+              "hostname_for_mysql": [
+                "localhost"
+              ],
+              "html_directory": [
+                "/home/contract/public_html"
+              ],
+              "id": [
+                "<id>"
+              ],
+              "ip_address": [
+                "<ip> (Shared)"
+              ],
+              "last_login": [
+                "Never"
+              ],
+              "login_permissions": [
+                "Email, FTP and SSH"
+              ],
+              "mailbox_username_prefix": [
+                "contract"
+              ],
+              "match_all_web_sub-domains": [
+                "No"
+              ],
+              "maximum_alias_servers": [
+                "Unlimited"
+              ],
+              "maximum_aliases": [
+                "Unlimited"
+              ],
+              "maximum_databases": [
+                "Unlimited"
+              ],
+              "maximum_mailboxes": [
+                "Unlimited"
+              ],
+              "maximum_mongrel_instances": [
+                "Unlimited"
+              ],
+              "maximum_non-alias_servers": [
+                "Unlimited"
+              ],
+              "maximum_sub-servers": [
+                "Cannot create"
+              ],
+              "password_for_mysql": [
+                "<redacted>"
+              ],
+              "password_storage": [
+                "<redacted>"
+              ],
+              "php_error_log": [
+                "/home/contract/logs/php_log"
+              ],
+              "php_execution_mode": [
+                "fpm"
+              ],
+              "php_fcgid_subprocesses": [
+                "None"
+              ],
+              "php_fpm_config_file": [
+                "/etc/php/8.2/fpm/pool.d/<id>.conf"
+              ],
+              "php_fpm_socket": [
+                "File /run/php/<id>.sock"
+              ],
+              "php_max_execution_time": [
+                "30"
+              ],
+              "php_version": [
+                "8.2"
+              ],
+              "plan": [
+                "Default Plan"
+              ],
+              "plan_id": [
+                "<id>"
+              ],
+              "plugins": [
+                "virtualmin-awstats"
+              ],
+              "port_for_mysql": [
+                "3306"
+              ],
+              "possible_cgi_script_execution_modes": [
+                "suexec fcgiwrap"
+              ],
+              "possible_php_execution_modes": [
+                "none fpm cgi"
+              ],
+              "provisioning_for_dns": [
+                "Local"
+              ],
+              "provisioning_for_mysql": [
+                "Local"
+              ],
+              "provisioning_for_spam": [
+                "Local"
+              ],
+              "provisioning_for_virus": [
+                "Local"
+              ],
+              "proxy_hostname": [
+                "No"
+              ],
+              "read-only_mode": [
+                "No"
+              ],
+              "server-side_includes": [
+                "Global default"
+              ],
+              "shell_command": [
+                "/bin/bash"
+              ],
+              "shell_type": [
+                "ssh"
+              ],
+              "ssl_candidate_hostnames": [
+                "contract.praho.test"
+              ],
+              "ssl_cert_and_ca_file": [
+                "/etc/ssl/virtualmin/<id>/ssl.combined"
+              ],
+              "ssl_cert_and_key_file": [
+                "<redacted>"
+              ],
+              "ssl_cert_expiry": [
+                "<timestamp>"
+              ],
+              "ssl_cert_expiry_time": [
+                "<timestamp>"
+              ],
+              "ssl_cert_file": [
+                "/etc/ssl/virtualmin/<id>/ssl.cert"
+              ],
+              "ssl_cert_used_by": [
+                "webmin (contract.praho.test)"
+              ],
+              "ssl_key_file": [
+                "<redacted>"
+              ],
+              "ssl_provider_subset_mode": [
+                "No"
+              ],
+              "sub-servers_cannot_be_under_other_domains": [
+                "No"
+              ],
+              "sub-servers_inherit_ip_address": [
+                "No"
+              ],
+              "sub-servers_must_be_under_main_domain": [
+                "No"
+              ],
+              "supported_http_protocols": [
+                "h2 h2c http/1.1"
+              ],
+              "template": [
+                "Default Settings"
+              ],
+              "template_id": [
+                "<id>"
+              ],
+              "type": [
+                "Top-level server"
+              ],
+              "url": [
+                "http://contract.praho.test/"
+              ],
+              "user_id": [
+                "<id>"
+              ],
+              "username": [
+                "contract"
+              ],
+              "username_for_mysql": [
+                "contract"
+              ],
+              "webmail_redirects": [
+                "Yes"
+              ],
+              "webmin_module_access": [
+                "dns=1 mail=1 web=1 mysql=1 postgres=1 spam=1 filemin=1 passwd=1 proc=2 cron=1 systemd=0 xterm=0 updown=0 change-user=1 htaccess-htpasswd=1 mailboxes=1 custom=0 webminlog=1 logviewer=1 phpini=1 virtualmin-awstats=0"
+              ],
+              "website_hostnames": [
+                "contract.praho.test www.contract.praho.test mail.contract.praho.test webmail.contract.praho.test admin.contract.praho.test"
+              ]
+            }
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "get_domain_state, get_domain_owner and the backup service's feature and id reads",
+      "params": {
+        "domain": "contract.praho.test",
+        "multiline": ""
+      }
+    },
+    "table": {
+      "body": {
+        "command": "list-domains",
+        "data": [
+          {
+            "name": "Domain                         Username        Description                   ",
+            "values": {}
+          },
+          {
+            "name": "------------------------------ --------------- ------------------------------",
+            "values": {}
+          },
+          {
+            "name": "contract.praho.test contract <redacted>",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "list_domains: the plain table, header rows included",
+      "params": {}
+    },
+    "unknown_parameter": {
+      "body": {
+        "command": "list-domains",
+        "error": "Unknown parameter --format",
+        "full_error": "Unknown parameter --format\n\nLists the virtual servers on this system.\n\nvirtualmin list-domains [--multiline | --simple-multiline |\n                         --json | --xml]\n                        [--name-only | --id-only | --user-only |\n                         --home-only | --file-only | --ip-only |\n                         --ip6-only]\n                        [--domain name]*\n                        [--user name]*\n                        [--mail-user name]*\n                        [--id number]*\n                        [--with-feature feature]\n                        [--without-feature feature]\n                        [--with-web] [--with-ssl]\n                        [--alias domain | --no-alias]\n                        [--subserver | --toplevel | --subdomain]\n                        [--parent domain]\n                        [--plan ID|name]\n                        [--template ID|name]\n                        [--disabled | --enabled]\n                        [--php-mode cgi|fcgid|fpm|mod_php]\n                        [--ip address]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter --format",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the old credential probe: a refusal is a 200 failure envelope, never a success",
+      "params": {
+        "format": "json"
+      }
+    }
+  },
+  "program": "list-domains",
+  "virtualmin_version": "8.3.0"
+}

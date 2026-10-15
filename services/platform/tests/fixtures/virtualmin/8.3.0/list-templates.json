@@ -1,0 +1,91 @@
+{
+  "cases": {
+    "success": {
+      "body": {
+        "command": "list-templates",
+        "data": [
+          {
+            "name": "Default Settings",
+            "values": {}
+          },
+          {
+            "name": "Settings For Sub-Servers",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "list_templates",
+      "params": {
+        "name-only": ""
+      }
+    },
+    "table": {
+      "body": {
+        "command": "list-templates",
+        "data": [
+          {
+            "name": "ID                 Description                                                 ",
+            "values": {}
+          },
+          {
+            "name": "------------------ ------------------------------------------------------------",
+            "values": {}
+          },
+          {
+            "name": "0                  Default Settings                                            ",
+            "values": {}
+          },
+          {
+            "name": "1                  Settings For Sub-Servers                                    ",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the plain table, header rows included",
+      "params": {}
+    },
+    "unknown_parameter": {
+      "body": {
+        "command": "list-templates",
+        "error": "Unknown parameter --bogus",
+        "full_error": "Unknown parameter --bogus\n\nLists the available templates for new virtual servers.\n\nvirtualmin list-templates [--multiline | --json | --xml]\n                          [--deleted]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter --bogus",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a parameter the command lacks",
+      "params": {
+        "bogus": ""
+      }
+    }
+  },
+  "program": "list-templates",
+  "virtualmin_version": "8.3.0"
+}

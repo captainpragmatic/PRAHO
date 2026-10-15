@@ -1,0 +1,73 @@
+{
+  "cases": {
+    "missing_archive": {
+      "body": {
+        "command": "restore-domain",
+        "error": "Restore file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz does not exist",
+        "full_error": "Restore file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz does not exist\n\nRestores a Virtualmin backup, for the domains and features specified\non the command line.\n\nvirtualmin restore-domain --source file\n                         [--test]\n                         [--domain name] | [--all-domains]\n                         [--feature name] | [--all-features]\n                         [--except-feature name]\n                         [--reuid | --no-reuid]\n                         [--reuser | --no-reuser]\n                         [--fix]\n                         [--option \"feature name value\"]\n                         [--mysql-replay-binlogs]\n                         [--mysql-stop-time \"YYYY-MM-DD HH:MM:SS\"]\n                         [--all-virtualmin] | [--virtualmin config]\n                         [--only-features]\n                         [--default-ip |\n                          --shared-ip address | --ip address |\n                          --allocate-ip | --original-ip | --no-ip]\n                         [--default-ip6 |\n                          --shared-ip6 address | --ip6 address |\n                          --allocate-ip6 | --original-ip6 | --no-ip6]\n                         [--only-missing | --only-existing]\n                         [--skip-warnings]\n                         [--continue-on-error]\n                         [--delete-existing]\n                         [--replication]\n\nMultiple domains may be specified with multiple --domain parameters.\nFeatures must be specified using their short names, like web and dns.\n\nThe source can be one of :\n - A local file, like /backup/yourdomain.com.tgz\n - An FTP destination, like ftp://login:pass@server/backup/yourdomain.com.tgz\n - An SSH destination, like ssh://login:pass@server/backup/yourdomain.com.tgz\n - An S3 bucket, like s3://accesskey:secretkey@bucket\n - A Rackspace container, like rs://user:apikey@container\n - A Google Cloud Storage bucket, like gcs://bucket\n - A Dropbox folder, like dropbox://folder\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Restore file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "an archive that is not on the node",
+      "params": {
+        "all-features": "",
+        "domain": "contract-restore.praho.test",
+        "source": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "restore-domain",
+        "output": "Checking for missing features ..\n.. all features in backup are supported\n\nChecking for errors in backup ..\n.. no errors found\n\nStarting restore..\nExtracting backup archive file ..\n.. done\n\nRe-creating virtual server contract-restore.praho.test ..\n    Re-allocating user and group IDs ..\n    .. allocated user ID is <id> and group ID is <id>\n\n    Saving server details ..\n    .. done\n\n    Creating administration group contractrestore ..\n    .. done\n\n    Creating administration user contractrestore ..\n    .. done\n\n    Adding administration user to groups ..\n    .. done\n\n    Creating home directory ..\n    .. done\n\n    Creating mailbox for administration user ..\n    .. done\n\n    Adding new virtual website ..\n    .. done\n\n    Adding webserver user www-data to server's group ..\n    .. done\n\n    Performing other Apache configuration ..\n    .. done\n\n    Creating SSL certificate and private key ..\n    .. done\n\n    Adding new SSL virtual website ..\n    .. done\n\n    Setting up log file rotation ..\n    .. done\n\n    Creating MariaDB login ..\n    .. done\n\n    Setting up AWStats reporting ..\n    .. done\n\n    Setting up password protection for AWStats ..\n    .. done\n\n    Creating Webmin user ..\n    .. done\n\n    Saving server details ..\n    .. done\n\n    Applying webserver configuration ..\n    .. done\n\n    Restarting PHP-FPM 8.2 server ..\n    .. done\n\n    Re-loading Webmin ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\n    Re-loading Webmin ..\n    .. done\n\nRestoring backup for virtual server contract-restore.praho.test ..\n    Restoring virtual server password, quota and other details ..\n    .. done\n\n    Updating administration password and quotas ..\n    .. done\n\n    Restoring Cron jobs ..\n    .. done\n\n    Extracting TAR file of home directory ..\n    .. done\n\n    Setting ownership of home directory ..\n    .. done\n\n    Restoring Apache virtual host configuration ..\n    .. done\n\n    Checking restored PHP execution mode ..\n    .. mode FPM works for this system\n\n    Updating PHP-FPM configuration ..\n    .. no fixes needed\n\n    Changing CGI scripts execution mode to suEXEC ..\n    .. done\n\n    Restoring Apache log files ..\n    .. done\n\n    Restoring SSL Apache virtual host configuration and certificate ..\n    .. done\n\n    Restoring Logrotate configuration ..\n    .. not needed when shared\n\n    Restoring allowed MariaDB hosts ..\n    .. done\n\n    Re-loading MariaDB database contractrestore ..\n        Creating MariaDB database contractrestore ..\n        .. done\n\n    .. done\n\n    Restoring Webmin ACL files ..\n    .. done\n\n    Restoring AWStats configuration file ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\nEnabling PHP modules for restored web apps ..\n.. no PHP modules needed to be installed\n\nApplying webserver configuration ..\n.. done\n\nReloading PHP-FPM 8.2 server ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\nRestore completed successfully.\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "restore onto a domain that was deleted: Virtualmin re-creates it",
+      "params": {
+        "all-features": "",
+        "domain": "contract-restore.praho.test",
+        "source": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz"
+      }
+    },
+    "success_over_live_domain": {
+      "body": {
+        "command": "restore-domain",
+        "output": "Checking for missing features ..\n.. all features in backup are supported\n\nChecking for errors in backup ..\n.. no errors found\n\nStarting restore..\nExtracting backup archive file ..\n.. done\n\nRestoring backup for virtual server contract-restore.praho.test ..\n    Restoring virtual server password, quota and other details ..\n    .. done\n\n    Updating administration password and quotas ..\n    .. done\n\n    Restoring Cron jobs ..\n    .. done\n\n    Extracting TAR file of home directory ..\n    .. done\n\n    Setting ownership of home directory ..\n    .. done\n\n    Restoring Apache virtual host configuration ..\n    .. done\n\n    Checking restored PHP execution mode ..\n    .. mode FPM works for this system\n\n    Updating PHP-FPM configuration ..\n    .. no fixes needed\n\n    Restoring Apache log files ..\n    .. done\n\n    Restoring SSL Apache virtual host configuration and certificate ..\n    .. done\n\n    Restoring Logrotate configuration ..\n    .. not needed when shared\n\n    Restoring allowed MariaDB hosts ..\n    .. done\n\n    Deleting old MariaDB databases ..\n    .. done\n\n    Re-loading MariaDB database contractrestore ..\n        Creating MariaDB database contractrestore ..\n        .. done\n\n    .. done\n\n    Restoring Webmin ACL files ..\n    .. done\n\n    Restoring AWStats configuration file ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\nApplying webserver configuration ..\n.. done\n\nReloading PHP-FPM 8.2 server ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\nRestore completed successfully.\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "Virtualmin itself does not refuse a restore over a live domain; PRAHO's gate does",
+      "params": {
+        "all-features": "",
+        "domain": "contract-restore.praho.test",
+        "source": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz"
+      }
+    }
+  },
+  "program": "restore-domain",
+  "virtualmin_version": "8.3.0"
+}

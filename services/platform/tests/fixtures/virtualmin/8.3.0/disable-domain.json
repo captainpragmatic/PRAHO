@@ -1,0 +1,68 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "disable-domain",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\nDisables all features in the specified virtual server.\n\nvirtualmin disable-domain --domain domain.name\n                         [--why \"explanation for disable\"]\n                         [--subservers]\n                         [--feature name]*\n                         [--schedule days|timestamp|none]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "already_disabled": {
+      "body": {
+        "command": "disable-domain",
+        "error": "Virtual server contract-disable.praho.test is already disabled",
+        "full_error": "Virtual server contract-disable.praho.test is already disabled\nDisables all features in the specified virtual server.\n\nvirtualmin disable-domain --domain domain.name\n                         [--why \"explanation for disable\"]\n                         [--subservers]\n                         [--feature name]*\n                         [--schedule days|timestamp|none]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-disable.praho.test is already disabled",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a disabled domain",
+      "params": {
+        "domain": "contract-disable.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "disable-domain",
+        "output": "Disabling virtual server contract-disable.praho.test ..\n\nLocking administration user's password ..\n.. done\n\nReplacing website with error page ..\n.. done\n\nReplacing SSL website with error page ..\n.. done\n\nLocking MariaDB user's password ..\n.. done\n\nSaving server details ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nAll done!\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "an enabled domain",
+      "params": {
+        "domain": "contract-disable.praho.test"
+      }
+    }
+  },
+  "program": "disable-domain",
+  "virtualmin_version": "8.3.0"
+}
