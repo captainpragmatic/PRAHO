@@ -324,7 +324,7 @@ def remove_stranded_archive(job: VirtualminProvisioningJob) -> str:
     return warning
 
 
-def _deployment_destroyed(server: VirtualminServer) -> bool:
+def deployment_destroyed(server: VirtualminServer) -> bool:
     deployment = getattr(server, "node_deployment", None)
     return bool(deployment is not None and deployment.is_destroyed)
 
@@ -336,7 +336,7 @@ def node_lost_refusal(server: VirtualminServer) -> str | None:
     destroyed (decommissioned). Any other state means the node may still be running the step,
     and only "confirm stopped" (which proves it with a cancel marker) can release the job.
     """
-    if server.status == "failed" or _deployment_destroyed(server):
+    if server.status == "failed" or deployment_destroyed(server):
         return None
     return "The node is not marked failed or decommissioned; confirm the step stopped instead"
 
@@ -377,7 +377,7 @@ def resolve_chain_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: 
     logger.warning("⚠️ [Chain] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
     # If the node is still reachable (a failed health check is not proof it is gone) its staging
     # is cleaned in the background; the request never waits on a node declared lost.
-    if (job.parameters or {}).get("archive_name") and not _deployment_destroyed(server):
+    if (job.parameters or {}).get("archive_name") and not deployment_destroyed(server):
         from django_q.tasks import async_task  # noqa: PLC0415
 
         async_task("apps.provisioning.virtualmin_tasks.remove_chain_job_archive", str(job.pk))

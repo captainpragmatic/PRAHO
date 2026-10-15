@@ -59,7 +59,7 @@ from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
-from .virtualmin_pair_restore import is_pair_job, resolve_pair_job
+from .virtualmin_pair_restore import is_pair_job, resolve_pair_job, resolve_pair_job_node_lost
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -605,11 +605,14 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
 @require_http_methods(["POST"])
 @audit_service_call("virtualmin_job_node_lost")
 def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
-    """Operator resolution of a chain job in attention whose node is lost (failed or decommissioned)."""
+    """Operator resolution of a chain job or pair restore in attention whose node is lost (failed or decommissioned)."""
     job = get_object_or_404(VirtualminProvisioningJob.objects.select_related("server", "account"), pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed the node is lost")
     actor = request.user.email if request.user.is_authenticated else "system"
-    resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
+    if is_pair_job(job.operation, job.parameters or {}):
+        resolved = resolve_pair_job_node_lost(job, resolved_by=actor, note=str(note))
+    else:
+        resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
     if resolved.is_err():
         messages.error(request, resolved.unwrap_err())
         return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
@@ -2288,7 +2291,7 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "can_resolve": job.status == "attention",
         "can_resolve_node_lost": (
             job.status == "attention"
-            and is_chain_job(job.operation, job.parameters or {})
+            and (is_chain_job(job.operation, job.parameters or {}) or is_pair_job(job.operation, job.parameters or {}))
             and node_lost_refusal(job.server) is None
         ),
     }

@@ -994,6 +994,27 @@ def remove_chain_job_archive(job_id: str) -> dict[str, Any]:
     return {"success": not warning, "job_id": job_id, "warning": warning}
 
 
+def remove_pair_job_archives(job_id: str) -> dict[str, Any]:
+    """Remove the archives a pair restore declared lost left staged on its node (best effort, never raises)."""
+    from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415
+
+    job = VirtualminProvisioningJob.objects.select_related("server").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    service = VirtualminBackupService(job.server)
+    warnings = []
+    for archive_name in (job.parameters or {}).get("pair_archives", []):
+        removed = service.remove_staged_archive(str(archive_name))
+        if removed.is_err():
+            warnings.append(f"staged archive cleanup failed for {archive_name}: {removed.unwrap_err()}")
+    if warnings:
+        logger.warning("⚠️ [PairRestore] %s (job %s)", "; ".join(warnings), job.pk)
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+            status_message=f"{job.status_message} ({'; '.join(warnings)})".strip(), updated_at=timezone.now()
+        )
+    return {"success": not warnings, "job_id": job_id, "warning": "; ".join(warnings)}
+
+
 def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
     return _run_backup_restore_job(job_id, "backup_domain")
 

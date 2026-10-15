@@ -30,6 +30,7 @@ import base64
 import json
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -45,15 +46,17 @@ from .virtualmin_chain import (
     CHAIN_RUN_ID_PATTERN,
     ROLE_BASE,
     ROLE_DIFFERENTIAL,
+    deployment_destroyed,
+    invalidate_chain,
     is_chain_domain,
+    node_lost_refusal,
 )
-from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from .virtualmin_backup_service import RestoreConfig, VirtualminBackupService
-    from .virtualmin_models import VirtualminServer
 
 logger = logging.getLogger(__name__)
 
@@ -575,4 +578,54 @@ def resolve_pair_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: 
 
     if job.account.service_id:
         reconcile_virtualmin_service_state_async(str(job.account.service_id))
+    return Ok(True)
+
+
+def resolve_pair_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: str, note: str) -> Result[bool, str]:
+    """Operator "node lost" for a pair restore in attention whose node can no longer be reached.
+
+    "Confirm stopped" (``resolve_pair_job``) needs the node to lift its barrier, which a lost node
+    cannot do. This path is allowed only while the job's server (the restore target) is failed or
+    its deployment destroyed. In one transaction under the account lock it fails the job, ROTATES
+    its execution token (a late runner that comes back can no longer finish or publish anything)
+    and discards the chain. The account stays suspended in PRAHO's view and says why; reconcile
+    (ADR-0051), the only writer of the enabled state, decides when it is enabled again.
+    """
+    if job.account_id is None:
+        return Err("The job has no account")
+    if not is_pair_job(job.operation, job.parameters or {}):
+        return Err("Only a pair restore can be resolved as node lost here")
+    with transaction.atomic():
+        locked = VirtualminAccount.objects.select_for_update().get(pk=job.account_id)
+        server = VirtualminServer.objects.select_related("node_deployment").get(pk=job.server_id)
+        refusal = node_lost_refusal(server)
+        if refusal is not None:
+            transaction.set_rollback(True)
+            return Err(refusal)
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField job status; attention -> failed is the only edge
+            status="failed",
+            status_message=f"Node lost; resolved by {resolved_by}: {note}",
+            execution_token=uuid.uuid4(),
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
+        if not rows:
+            transaction.set_rollback(True)
+            return Err("Only a job awaiting attention can be resolved.")
+        invalidate_chain(locked)
+        VirtualminAccount.objects.filter(
+            pk=locked.pk, status="suspended"
+        ).update(  # fsm-bypass: CharField account status
+            status_message="The node was lost during a pair restore; the account is suspended until it is reconciled",
+            updated_at=timezone.now(),
+        )
+    logger.warning("⚠️ [PairRestore] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
+    # If the node is still reachable (a failed health check is not proof it is gone) the archives staged
+    # for the restore are removed in the background; the request never waits on a node declared lost.
+    if (job.parameters or {}).get("pair_archives") and not deployment_destroyed(server):
+        from django_q.tasks import async_task  # noqa: PLC0415
+
+        async_task("apps.provisioning.virtualmin_tasks.remove_pair_job_archives", str(job.pk))
     return Ok(True)
