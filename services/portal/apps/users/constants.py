@@ -6,3 +6,5 @@ REGISTRATION_CONFIRM_SESSION_KEY = "registration_confirm_link"
 REGISTRATION_INTENT_SESSION_KEY = "registration_intent"
 # The visit's first UTM tags and referring site, sent with every order.
 ATTRIBUTION_SESSION_KEY = "first_touch_attribution"
+# The details a staff-minted registration link fills in (Platform's apps.users.registration_prefill).
+REGISTRATION_PREFILL_SESSION_KEY = "registration_prefill"

@@ -46,7 +46,12 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
-from apps.users.constants import PASSWORD_RESET_SESSION_KEY, REGISTRATION_CONFIRM_SESSION_KEY
+from apps.users.constants import (
+    PASSWORD_RESET_SESSION_KEY,
+    REGISTRATION_CONFIRM_SESSION_KEY,
+    REGISTRATION_INTENT_SESSION_KEY,
+    REGISTRATION_PREFILL_SESSION_KEY,
+)
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -496,8 +501,10 @@ def register_view(request: HttpRequest) -> HttpResponse:
 
     if request.method == "GET":
         capture_first_touch(request)
+        if "p" in request.GET:
+            return _take_registration_prefill(request, request.GET["p"])
         capture_intent(request)
-        form = CustomerRegistrationForm()
+        form = CustomerRegistrationForm(initial=request.session.get(REGISTRATION_PREFILL_SESSION_KEY))
     else:  # POST
         form = CustomerRegistrationForm(request.POST)
 
@@ -509,6 +516,7 @@ def register_view(request: HttpRequest) -> HttpResponse:
                 )
 
                 if registration_result:
+                    request.session.pop(REGISTRATION_PREFILL_SESSION_KEY, None)
                     # The same message whatever the address: Platform mails either a confirmation
                     # link or a note that the address already has an account.
                     messages.success(request, _("Thank you. Check your email for a message with the next step."))
@@ -534,6 +542,27 @@ def register_view(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "users/register.html", context)
+
+
+def _take_registration_prefill(request: HttpRequest, token: str) -> HttpResponse:
+    """Keep what a staff-minted link fills in, then show the form without the token in its URL.
+
+    The link proves nothing about who opens it: the details only fill in the form, and stay editable.
+    A token Platform does not accept fills in nothing.
+    """
+    try:
+        prefill = api_client.read_registration_prefill(token, client_ip=get_safe_client_ip(request)).get("prefill")
+    except PlatformAPIError:
+        logger.warning("⚠️ [Portal Registration] Prefill link could not be read")
+        prefill = None
+    if isinstance(prefill, dict):
+        if isinstance(prefill.get("fields"), dict) and prefill["fields"]:
+            request.session[REGISTRATION_PREFILL_SESSION_KEY] = prefill["fields"]
+        if isinstance(prefill.get("intent"), dict) and prefill["intent"]:
+            request.session[REGISTRATION_INTENT_SESSION_KEY] = prefill["intent"]
+    response = redirect("users:register")
+    response["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @never_cache

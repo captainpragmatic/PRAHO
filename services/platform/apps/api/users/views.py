@@ -46,6 +46,7 @@ from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    PublicLookupClientIPThrottle,
     RegistrationConfirmClientIPThrottle,
     ResetClientIPThrottle,
     fixed_window_limited,
@@ -927,6 +928,35 @@ def registration_pending_api(request: HttpRequest) -> Response:
         answer_status, payload = _refusal_answer(details.unwrap_err())
         return Response({"success": False, **payload}, status=answer_status)
     return Response({"success": True, "registration": details.unwrap()})
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        PublicLookupClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def registration_prefill_api(request: HttpRequest) -> Response:
+    """
+    The details a staff-minted registration link fills in (apps.users.registration_prefill).
+
+    POST /api/users/register/prefill/ {"token": "<the link's p>"}
+
+    200 with {"fields": ..., "intent": ...}, or an empty prefill for a token that is not an intact,
+    unexpired prefill token: the answer never says which.
+    """
+    from apps.users.registration_prefill import read_registration_prefill  # noqa: PLC0415
+
+    data = request.data if isinstance(request.data, dict) else {}
+    token = data.get("token")
+    return Response({"success": True, "prefill": read_registration_prefill(token if isinstance(token, str) else "")})
 
 
 @api_view(["POST"])
