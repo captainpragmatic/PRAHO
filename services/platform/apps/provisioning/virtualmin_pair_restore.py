@@ -79,6 +79,64 @@ _HTTP_CODE_RE = re.compile(r"^(none|[0-9]{3})$")
 _STEP_RE = re.compile(r"^[a-z_]{1,40}$")
 
 
+HOLD_HALF_RESTORED = "half_restored"
+_HOLD_MESSAGE = _(
+    "A pair restore was stopped after it had started restoring; the domain may be half-restored and stays "
+    "disabled until staff re-enable it as it is or restore the safety backup"
+)
+
+
+def pair_restore_may_have_restored(parameters: Mapping[str, Any]) -> bool:
+    """False only when the evidence shows no restore step started on the node; otherwise assume one did.
+
+    The job records the checkpoints the node returned. Nothing but ``barrier_up`` means the barrier went
+    up and the first restore never began. A job that never dispatched, or whose node said it refused,
+    restored nothing. Any other state - a result that never arrived, a failure inside a step - is treated
+    as restored, because the cost of wrongly bringing a half-restored site live is higher than one click.
+    """
+    node_step = str(parameters.get("pair_node_step", ""))
+    if not node_step or node_step == "refused":
+        return False
+    checkpoints = parameters.get("pair_checkpoints")
+    if isinstance(checkpoints, list) and checkpoints:
+        return any(str(item.get("step")) not in ("barrier_up",) for item in checkpoints if isinstance(item, dict))
+    return True
+
+
+def hold_half_restored(locked: VirtualminAccount, parameters: Mapping[str, Any], *, message: str = "") -> None:
+    """Hold the (locked) account disabled after a pair restore that may have restored something."""
+    VirtualminAccount.objects.filter(pk=locked.pk).update(
+        restore_hold=HOLD_HALF_RESTORED,
+        restore_hold_safety_backup_id=str(parameters.get("safety_backup_id", "")),
+        status_message=message or str(_HOLD_MESSAGE),
+        updated_at=timezone.now(),
+    )
+    logger.warning("⚠️ [PairRestore] Account held half-restored: account=%s", locked.pk)
+
+
+def release_restore_hold(account_id: Any, *, how: str, actor: str) -> bool:
+    """Clear an account's restore hold and queue a reconcile. False when it held nothing.
+
+    Only explicit staff actions (``how`` names which) and the completion of the safety backup's restore
+    call this; no routine pass does.
+    """
+    with transaction.atomic():
+        rows = (
+            VirtualminAccount.objects.filter(pk=account_id)
+            .exclude(restore_hold="")
+            .update(restore_hold="", restore_hold_safety_backup_id="", status_message="", updated_at=timezone.now())
+        )
+    if not rows:
+        return False
+    logger.warning("⚠️ [PairRestore] Restore hold released: account=%s how=%s by=%s", account_id, how, actor)
+    from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415  # Circular
+
+    service_id = VirtualminAccount.objects.filter(pk=account_id).values_list("service_id", flat=True).first()
+    if service_id:
+        transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(str(service_id)))
+    return True
+
+
 def is_pair_job(operation: str, parameters: Mapping[str, Any]) -> bool:
     """True for a restore job that restores a base and a differential together."""
     return operation == "restore_domain" and str(parameters.get("restore_mode", "")) == RESTORE_MODE_PAIR
@@ -598,6 +656,9 @@ def resolve_pair_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: 
         if not rows:
             transaction.set_rollback(True)
             return Err("Only a job awaiting attention can be resolved.")
+        held = pair_restore_may_have_restored(parameters)
+        if held:
+            hold_half_restored(job.account, parameters)
     backups = VirtualminBackupService(job.server)
     for archive_name in parameters.get("pair_archives", []):
         removed = backups.remove_staged_archive(str(archive_name))
@@ -605,7 +666,8 @@ def resolve_pair_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: 
             logger.warning("⚠️ [PairRestore] Staged archive %s not removed: %s", archive_name, removed.unwrap_err())
     from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415  # Circular
 
-    if job.account.service_id:
+    # A held account stays disabled: nothing routine may bring a half-restored site live.
+    if job.account.service_id and not held:
         reconcile_virtualmin_service_state_async(str(job.account.service_id))
     return Ok(True)
 
@@ -650,6 +712,15 @@ def resolve_pair_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: s
             status_message="The node was lost during a pair restore; the account is suspended until it is reconciled",
             updated_at=timezone.now(),
         )
+        if pair_restore_may_have_restored(job.parameters or {}):
+            hold_half_restored(
+                locked,
+                job.parameters or {},
+                message=(
+                    "The node was lost during a pair restore and the domain may be half-restored; "
+                    "it stays disabled until staff re-enable it as it is or restore the safety backup"
+                ),
+            )
     logger.warning("⚠️ [PairRestore] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
     # If the node is still reachable (a failed health check is not proof it is gone) the archives staged
     # for the restore are removed in the background; the request never waits on a node declared lost.

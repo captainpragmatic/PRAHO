@@ -835,6 +835,21 @@ def _queue_reconcile_after_pair(job: VirtualminProvisioningJob, params: dict[str
         reconcile_virtualmin_service_state_async(str(job.account.service_id))
 
 
+def _release_hold_after_safety_restore(job: VirtualminProvisioningJob, params: dict[str, Any]) -> None:
+    """A completed restore of the safety backup of a half-restored domain is the staff action that ends its hold."""
+    if job.account_id is None or str(params.get("restore_mode", "")) == "pair":
+        return
+    from .virtualmin_pair_restore import release_restore_hold  # noqa: PLC0415  # Circular
+
+    held_backup = (
+        VirtualminAccount.objects.filter(pk=job.account_id)
+        .values_list("restore_hold_safety_backup_id", flat=True)
+        .first()
+    )
+    if held_backup and held_backup == str(params.get("backup_id", "")):
+        release_restore_hold(job.account_id, how="safety_backup_restored", actor=str(params.get("initiated_by", "")))
+
+
 def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Cohesive claim→run→terminal pipeline
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
@@ -979,6 +994,8 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     if rows:
         _audit_job(job.pk)
         _queue_reconcile_after_pair(job, params)
+        if operation == "restore_domain":
+            _release_hold_after_safety_restore(job, params)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 
@@ -1353,7 +1370,11 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
     # are excluded before the cap: they are not divergent, and re-queuing them every
     # run would starve the accounts that are (#566).
     for sid in (
-        exclude_domain_disabled(VirtualminAccount.objects.filter(status="suspended", service__status="active"))
+        # Accounts under a restore hold are excluded too: reconcile would only skip them, and they would
+        # fill the cap.
+        exclude_domain_disabled(
+            VirtualminAccount.objects.filter(status="suspended", service__status="active", restore_hold="")
+        )
         .order_by("pk")
         .values_list("service_id", flat=True)[:50]
     ):

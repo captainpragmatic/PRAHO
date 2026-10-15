@@ -59,7 +59,12 @@ from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
-from .virtualmin_pair_restore import is_pair_job, resolve_pair_job, resolve_pair_job_node_lost
+from .virtualmin_pair_restore import (
+    is_pair_job,
+    pair_restore_may_have_restored,
+    resolve_pair_job,
+    resolve_pair_job_node_lost,
+)
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -476,6 +481,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
+        "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),
         # The pair restore and the base/differential buttons are offered only while differential backups are enabled.
         "incremental_backups_enabled": VirtualminBackupManagementService.incremental_backups_enabled(),
         "take_base_url": reverse("provisioning:virtualmin_account_take_base", args=[account.id]),
@@ -622,6 +629,70 @@ def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
     audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
     messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_reenable")
+def virtualmin_account_hold_reenable(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: accept a half-restored domain as it is and let reconcile enable it."""
+    from .virtualmin_pair_restore import release_restore_hold  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, pk=account_id)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    if release_restore_hold(account.pk, how="re_enabled_as_is", actor=str(actor)):
+        _audit_hold_decision(request, account, "re_enabled_as_is")
+        messages.success(request, _("The hold is released. The domain will be enabled again as it is."))
+    else:
+        messages.error(request, _("This account is not held."))
+    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_restore_safety")
+def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: restore the safety backup taken before the pair restore; the hold ends when it completes."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    safety_id = account.restore_hold_safety_backup_id
+    if not account.restore_hold or not safety_id:
+        messages.error(request, _("This account has no safety backup to restore."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    created = VirtualminBackupManagementService(account.server).create_restore_job(
+        account=account,
+        config=RestoreConfig(backup_id=safety_id, force_restore=True),
+        initiated_by=f"staff:{actor}",
+    )
+    if created.is_err():
+        messages.error(
+            request, _("Could not start the restore of the safety backup: %(error)s") % {"error": created.unwrap_err()}
+        )
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    _audit_hold_decision(request, account, "restore_safety_backup", detail={"safety_backup_id": safety_id})
+    messages.success(request, _("Restoring the safety backup. The hold ends when it completes."))
+    return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
+
+
+def _audit_hold_decision(
+    request: HttpRequest, account: VirtualminAccount, decision: str, *, detail: dict[str, Any] | None = None
+) -> None:
+    """Record who decided what about a half-restored account."""
+    from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
+
+    AuditService.log_event(
+        AuditEventData(
+            event_type="virtualmin_restore_hold_decision",
+            content_object=account,
+            description=f"Staff decision on the half-restored domain {account.domain}: {decision}",
+        ),
+        AuditContext(
+            user=request.user if request.user.is_authenticated else None,
+            metadata={"source_app": "provisioning", "decision": decision, "domain": account.domain, **(detail or {})},
+        ),
+    )
 
 
 @login_required
@@ -2292,6 +2363,13 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "breadcrumb_items": breadcrumb_items,
         "can_retry": _job_can_be_retried(job),
         "can_resolve": job.status == "attention",
+        "half_restore_safety_backup_id": (
+            str((job.parameters or {}).get("safety_backup_id", ""))
+            if job.status == "attention"
+            and is_pair_job(job.operation, job.parameters or {})
+            and pair_restore_may_have_restored(job.parameters or {})
+            else ""
+        ),
         "can_resolve_node_lost": (
             job.status == "attention"
             and (is_chain_job(job.operation, job.parameters or {}) or is_pair_job(job.operation, job.parameters or {}))

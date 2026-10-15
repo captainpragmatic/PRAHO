@@ -64,6 +64,16 @@ urlpatterns = [
         name="virtualmin_account_take_differential",
     ),
     path(
+        "accounts/<uuid:account_id>/hold/reenable/",
+        virtualmin_views.virtualmin_account_hold_reenable,
+        name="virtualmin_account_hold_reenable",
+    ),
+    path(
+        "accounts/<uuid:account_id>/hold/restore-safety/",
+        virtualmin_views.virtualmin_account_hold_restore_safety,
+        name="virtualmin_account_hold_restore_safety",
+    ),
+    path(
         "accounts/<uuid:account_id>/restore/",
         virtualmin_views.virtualmin_account_restore,
         name="virtualmin_account_restore",

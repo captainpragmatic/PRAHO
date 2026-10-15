@@ -116,7 +116,11 @@
                             hx-post="{% url 'provisioning:virtualmin_job_resolve' job.id %}"
                             hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                             hx-include="#job-resolution-note"
+                            {% if half_restore_safety_backup_id %}
+                            hx-confirm="{% blocktrans with backup_id=half_restore_safety_backup_id %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}"
+                            {% else %}
                             hx-confirm="{% trans 'Confirm the remote operation has stopped. This releases the account.' %}"
+                            {% endif %}
                             hx-swap="outerHTML"
                             hx-target="body">
                         {% trans "Confirm stopped" %}

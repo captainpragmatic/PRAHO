@@ -420,7 +420,8 @@ class PairResolutionTests(PairRestoreCase):
         return job
 
     def test_the_node_is_released_before_the_account_and_reconcile_enables_the_domain(self) -> None:
-        job = self.parked()
+        # The barrier went up and nothing was restored: there is nothing to hold the account for.
+        job = self.parked(pair_node_step="failed", pair_checkpoints=[{"step": "barrier_up"}])
         calls: list[dict[str, Any]] = []
 
         def release(server: Any, variables: dict[str, Any], **kwargs: Any) -> Any:

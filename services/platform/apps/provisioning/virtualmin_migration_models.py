@@ -199,13 +199,18 @@ def account_blocks_reconcile(account: VirtualminAccount) -> bool:
 
     Narrower than ``account_has_active_operation`` (which admission uses): the reconciler writes
     the domain's enabled state, so it yields to what writes or deletes the domain - a migration,
-    a restore or delete in any active state, and any job currently running. A backup that is
+    a restore or delete in any active state, any job currently running - and to a restore hold (a
+    half-restored domain that only staff may release). A backup that is
     queued, or a chain job parked in attention, does not write the domain, so a suspend or an
     unsuspend after payment must not wait for an operator to resolve it.
     """
-    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
+    from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
     if account_has_active_migration(account):
+        return True
+    # A half-restored domain stays disabled until staff decide (re-enable it, or restore the safety backup).
+    # Read from the database, not from the possibly stale instance the caller holds.
+    if VirtualminAccount.objects.filter(pk=account.pk).exclude(restore_hold="").exists():
         return True
     return VirtualminProvisioningJob.objects.filter(
         models.Q(operation__in=("restore_domain", "delete_domain"), status__in=_ACTIVE_JOB_STATUSES)

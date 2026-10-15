@@ -1003,6 +1003,8 @@ class VirtualminBackupService:
         )
         if pinned.exists():
             return f"Backup {backup_id} is named by a restore that has not finished"
+        if account is not None and account.restore_hold_safety_backup_id == backup_id:
+            return f"Backup {backup_id} is the safety backup of a half-restored domain; resolve the hold first"
         if (
             account is not None
             and account.chain_base is not None

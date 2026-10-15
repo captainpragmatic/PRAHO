@@ -855,7 +855,7 @@ class Command(BaseCommand):
         from apps.provisioning import virtualmin_tasks  # noqa: PLC0415
         from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
-        from apps.provisioning.virtualmin_pair_restore import resolve_pair_job  # noqa: PLC0415
+        from apps.provisioning.virtualmin_pair_restore import release_restore_hold, resolve_pair_job  # noqa: PLC0415
         from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
@@ -1101,13 +1101,35 @@ class Command(BaseCommand):
                 not maintenance_up() and disabled_on_node(),
             )
             self._ok("the stranded archives are removed", not self._staged(node), self._staged(node))
+            held = VirtualminAccount.objects.get(pk=account.pk)
+            self._ok(
+                "the half-restored account is held with its safety backup named",
+                held.restore_hold == "half_restored" and bool(held.restore_hold_safety_backup_id),
+                (held.restore_hold, held.restore_hold_safety_backup_id),
+            )
             reconciled = virtualmin_tasks.reconcile_virtualmin_service_state(str(account.service_id))
             self._ok(
-                "reconcile re-enables it after the resolution", reconciled.get("action") == "unsuspended", reconciled
+                "reconcile leaves the held domain disabled",
+                reconciled.get("action") == "operation_active" and disabled_on_node(),
+                reconciled,
+            )
+            backstop = virtualmin_tasks.reconcile_divergent_services_task()
+            self._ok(
+                "the divergence backstop leaves it alone too",
+                not backstop.get("queued") and disabled_on_node(),
+                backstop,
             )
             self._ok(
-                "the job is failed and the account released",
+                "the job is failed and the account released from the job",
                 VirtualminProvisioningJob.objects.get(pk=second.pk).status == "failed",
+            )
+            # Only an explicit staff decision brings it live: "Re-enable as is".
+            self._ok("staff re-enable it as it is", release_restore_hold(account.pk, how="lab", actor="lab"))
+            reconciled = virtualmin_tasks.reconcile_virtualmin_service_state(str(account.service_id))
+            self._ok(
+                "reconcile enables it only after that decision",
+                reconciled.get("action") == "unsuspended" and not disabled_on_node(),
+                reconciled,
             )
         finally:
             if probe is not None:

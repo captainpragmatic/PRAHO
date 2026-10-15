@@ -379,6 +379,25 @@ class VirtualminAccount(models.Model):
         default=0, editable=False, help_text=_("Bumped every time the chain is invalidated or restarted")
     )
 
+    # A staff-resolved pair restore that had already restored something leaves a half-restored domain. The
+    # reconciler (ADR-0051) and the divergence backstop leave the account alone while this is set, so the
+    # site is never brought live by a routine pass; only an explicit staff action clears it: "Re-enable as
+    # is", or restoring the safety backup taken before the pair restore.
+    restore_hold = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Why reconcile must leave this account disabled; empty when nothing holds it"),
+    )
+    restore_hold_safety_backup_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("The safety backup taken before the restore that left the domain half-restored"),
+    )
+
     # Timestamps
     provisioned_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
