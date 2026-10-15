@@ -8,6 +8,7 @@ imports a model at module level, so importing this module is safe in any e2e run
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -124,3 +125,43 @@ def hosted_account(bench: Bench, domain: str, *, node: str = "vm-a") -> Iterator
         yield account
     finally:
         bench.forget(domain)
+
+
+JOB_STATUS = "dt:text-is('Status') + dd"
+JOB_IN_FLIGHT = ("Pending", "Running")
+
+
+def job_id_from(page: Page) -> str:
+    """The job on screen: from the URL after a redirect, else from the log pane of a job page swapped in by HTMX.
+
+    An hx-post that redirects swaps the job page into the body but leaves the address bar on the page the
+    click came from, so the job's own log URL (`.../jobs/<id>/logs/`) is the reliable source.
+    """
+    parts = page.url.rstrip("/").split("/")
+    if parts[-1] == "status" and parts[-3] == "jobs":
+        return parts[-2]
+    logs_url = page.locator("button[hx-get$='/logs/']").first.get_attribute("hx-get") or ""
+    match = re.search(r"/jobs/([0-9a-f-]{36})/logs/", logs_url)
+    assert match, f"no job page on screen at {page.url}"
+    return match.group(1)
+
+
+def wait_for_job(page: Page, *, timeout: float = JOB_TIMEOUT_S, final: str = "Completed") -> str:
+    """Reload a job page until its status badge reads `final`; fail at once on any other settled status.
+
+    The status badge is rendered once per page load (only the log pane polls), so the page is reloaded.
+    A Failed job fails the test immediately with the page's own error text instead of after the timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        status = page.locator(JOB_STATUS).first.inner_text().strip()
+        if status == final:
+            return status
+        if status not in JOB_IN_FLIGHT:
+            detail = page.locator("main").first.inner_text()[:800]
+            raise AssertionError(f"the job settled as {status!r}, not {final!r}: {detail!r}")
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the job was still {status!r} after {timeout:.0f}s")
+        time.sleep(RELOAD_INTERVAL_S)
+        page.reload()
+        page.wait_for_load_state("domcontentloaded")
