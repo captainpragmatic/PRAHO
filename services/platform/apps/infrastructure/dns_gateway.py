@@ -22,15 +22,19 @@ See #347 GAP 3. Let's Encrypt / cert issuance is out of scope here (#436).
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Literal
 
 import requests
 
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +59,20 @@ CLOUDFLARE_POLICY = OutboundPolicy(
 DNS_RECORD_TTL_SECONDS = 60
 _MAX_RESPONSE_SIZE_BYTES = 256 * 1024
 _HTTP_NOT_FOUND = 404
+_HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_SERVER_ERROR = 500
+
+# Rate limits (429) and server errors (5xx) are retried in-process a bounded number of times.
+# A Retry-After longer than the cap is not slept through inside a worker: it is handed to the
+# caller on the typed error so a task can reschedule itself.
+DEFAULT_MAX_RETRIES = 2
+_RETRY_BACKOFF_SECONDS = 1.0
+_MAX_IN_PROCESS_RETRY_SECONDS = 30.0
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE"})
+
+# Record listings follow every page (Cloudflare defaults to 100 per page).
+_LIST_PAGE_SIZE = 100
+_MAX_LIST_PAGES = 100
 
 
 # =============================================================================
@@ -113,6 +131,26 @@ class ReconcileOutcome:
 
     applied: list[DnsRecordResult] = field(default_factory=list)
     error: str | None = None
+    # RETRIABLE: the failing request was a rate limit, or a server error on an idempotent call,
+    # so running the whole reconcile again is safe. ``retry_after_seconds`` is the delay the
+    # provider asked for. A caller that cannot wait (the node deploy) may ignore both and treat
+    # ``error`` as a hard failure, exactly as before.
+    retriability: Retriability = Retriability.UNKNOWN
+    retry_after_seconds: float | None = None
+
+
+class DnsTransientError(Exception):
+    """A rate-limit or server-error answer that survived the in-process retries.
+
+    ``retriability`` follows ``Retriability``: RETRIABLE for a 429 (rejected before it was
+    processed) and for a 5xx on an idempotent call; UNKNOWN for a 5xx on a create, which may
+    already have been applied and must not be blindly replayed.
+    """
+
+    def __init__(self, message: str, *, retriability: Retriability, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retriability = retriability
+        self.retry_after_seconds = retry_after_seconds
 
 
 # =============================================================================
@@ -156,8 +194,11 @@ class CloudflareDnsGateway(DnsProviderGateway):
 
     provider = "cloudflare"
 
-    def __init__(self, token: str, *, timeout: float | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self, token: str, *, timeout: float | None = None, max_retries: int = DEFAULT_MAX_RETRIES, **kwargs: Any
+    ) -> None:
         self._token = token
+        self._max_retries = max(0, max_retries)
         self._policy = (
             replace(
                 CLOUDFLARE_POLICY,
@@ -178,14 +219,76 @@ class CloudflareDnsGateway(DnsProviderGateway):
         }
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
-        """Single-shot request via safe_request with the Cloudflare policy."""
-        return safe_request(
-            method,
-            f"{CLOUDFLARE_API_BASE}{path}",
-            policy=self._policy,
-            headers=self._headers(),
-            **kwargs,
-        )
+        """One logical request via safe_request with the Cloudflare policy.
+
+        Each HTTP attempt is single-shot (the policy never replays a POST on its own). A 429, or
+        a 5xx on an idempotent method, is retried here up to ``max_retries`` times after the
+        provider's Retry-After (or a short backoff). A 5xx on a POST is never replayed: it may
+        have been applied. What survives the retries is raised as ``DnsTransientError``.
+        """
+        attempt = 0
+        while True:
+            response = safe_request(
+                method,
+                f"{CLOUDFLARE_API_BASE}{path}",
+                policy=self._policy,
+                headers=self._headers(),
+                **kwargs,
+            )
+            retriability = self._transient_retriability(method, response.status_code)
+            if retriability is None:
+                return response
+            retry_after = self._retry_after_seconds(response)
+            if retriability is Retriability.RETRIABLE and attempt < self._max_retries:
+                delay = retry_after if retry_after is not None else _RETRY_BACKOFF_SECONDS * 2**attempt
+                if delay <= _MAX_IN_PROCESS_RETRY_SECONDS:
+                    logger.warning(
+                        "⚠️ [DnsGateway] HTTP %s on %s %s; retrying in %.1fs", response.status_code, method, path, delay
+                    )
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+            raise DnsTransientError(
+                f"cloudflare HTTP {response.status_code} on {method} {path}",
+                retriability=retriability,
+                retry_after_seconds=retry_after,
+            )
+
+    @staticmethod
+    def _transient_retriability(method: str, status: int) -> Retriability | None:
+        """RETRIABLE/UNKNOWN for a rate-limit or server-error status, None for any other answer."""
+        if status == _HTTP_TOO_MANY_REQUESTS:
+            return Retriability.RETRIABLE  # rejected before processing: provably not applied
+        if status >= _HTTP_SERVER_ERROR:
+            return Retriability.RETRIABLE if method in _IDEMPOTENT_METHODS else Retriability.UNKNOWN
+        return None
+
+    @staticmethod
+    def _retry_after_seconds(response: requests.Response) -> float | None:
+        """The Retry-After header as seconds (delta-seconds or HTTP-date), or None when absent or invalid."""
+        raw = response.headers.get("Retry-After")
+        if not raw:
+            return None
+        raw = raw.strip()
+        if raw.isdigit():
+            return float(raw)
+        try:
+            when = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+    @staticmethod
+    def _failure(outcome: ReconcileOutcome, exc: Exception) -> None:
+        """Record a request failure on ``outcome``, keeping the retriable typing when there is one."""
+        if isinstance(exc, DnsTransientError):
+            outcome.error = f"cloudflare transient error: {exc}"
+            outcome.retriability = exc.retriability
+            outcome.retry_after_seconds = exc.retry_after_seconds
+        else:
+            outcome.error = f"cloudflare transport error: {exc}"
 
     def _safe_json(self, response: requests.Response) -> Any:
         """Parse JSON, rejecting oversized bodies before deserializing."""
@@ -196,8 +299,8 @@ class CloudflareDnsGateway(DnsProviderGateway):
             raise ValueError(f"cloudflare response exceeds size limit ({_MAX_RESPONSE_SIZE_BYTES} bytes)")
         return response.json()
 
-    def _envelope(self, response: requests.Response) -> Result[Any, str]:
-        """Parse the Cloudflare v4 envelope; require ``success is True``."""
+    def _parse(self, response: requests.Response) -> Result[dict[str, Any], str]:
+        """Parse the Cloudflare v4 envelope; require ``success is True``. Returns the whole envelope."""
         try:
             data = self._safe_json(response)
         except ValueError as exc:
@@ -205,7 +308,56 @@ class CloudflareDnsGateway(DnsProviderGateway):
         if not isinstance(data, dict) or data.get("success") is not True:
             errors = data.get("errors") if isinstance(data, dict) else None
             return Err(f"cloudflare API error (HTTP {response.status_code}): {errors}")
-        return Ok(data.get("result"))
+        return Ok(data)
+
+    def _envelope(self, response: requests.Response) -> Result[Any, str]:
+        """Parse the Cloudflare v4 envelope and return its ``result``."""
+        parsed = self._parse(response)
+        if parsed.is_err():
+            return Err(parsed.unwrap_err())
+        return Ok(parsed.unwrap().get("result"))
+
+    def _list_records(self, zone_id: str, params: dict[str, Any]) -> Result[list[dict[str, Any]], str]:
+        """List the DNS records matching ``params``, following every page.
+
+        A listing that claims more than ``_MAX_LIST_PAGES`` pages is an error, never a partial
+        answer: acting on half a listing could miss an unowned conflict or leave owned records behind.
+        """
+        records: list[dict[str, Any]] = []
+        for page in range(1, _MAX_LIST_PAGES + 1):
+            response = self._request(
+                "GET", f"/zones/{zone_id}/dns_records", params={**params, "page": page, "per_page": _LIST_PAGE_SIZE}
+            )
+            parsed = self._parse(response)
+            if parsed.is_err():
+                return Err(parsed.unwrap_err())
+            body = parsed.unwrap()
+            batch = body.get("result") or []
+            if not isinstance(batch, list):
+                return Err("cloudflare: unexpected record listing")
+            records.extend(batch)
+            info = body.get("result_info")
+            total_pages = info.get("total_pages") if isinstance(info, dict) else None
+            if not isinstance(total_pages, int) or page >= total_pages:
+                return Ok(records)
+        return Err(f"cloudflare: record listing exceeds {_MAX_LIST_PAGES} pages")
+
+    @staticmethod
+    def _same_content(current: object, desired: str) -> bool:
+        """Compare record contents as addresses when they are addresses ("2001:DB8:0::1" is "2001:db8::1")."""
+        try:
+            return ipaddress.ip_address(str(current)) == ipaddress.ip_address(desired)
+        except ValueError:
+            return str(current) == desired
+
+    @classmethod
+    def _in_sync(cls, record: dict[str, Any], spec: DnsRecordSpec) -> bool:
+        """Whether an existing record already says what ``spec`` says: content, TTL and proxied flag."""
+        return (
+            cls._same_content(record.get("content"), spec.content)
+            and record.get("ttl") == spec.ttl
+            and bool(record.get("proxied", False)) == spec.proxied
+        )
 
     def _body(self, spec: DnsRecordSpec) -> dict[str, Any]:
         return {
@@ -262,6 +414,8 @@ class CloudflareDnsGateway(DnsProviderGateway):
     def get_zone_name(self, zone_id: str) -> Result[str, str]:
         try:
             resp = self._request("GET", f"/zones/{zone_id}")
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
         except (requests.RequestException, OutboundSecurityError) as exc:
             return Err(f"cloudflare transport error: {exc}")
         env = self._envelope(resp)
@@ -278,18 +432,23 @@ class CloudflareDnsGateway(DnsProviderGateway):
         if not specs:
             return outcome
         name = specs[0].name
+        # One call converges one record name: the listing below, the conflict check and the
+        # stale-record sweep are all scoped to it, so a spec for another name would be written blind.
+        names = {s.name.lower().rstrip(".") for s in specs}
+        if len(names) > 1:
+            outcome.error = f"reconcile takes one record name per call; got {len(names)}: {sorted(names)}"
+            return outcome
         desired_types = {s.record_type for s in specs}
 
         try:
-            listed = self._request("GET", f"/zones/{zone_id}/dns_records", params={"name": name})
-        except (requests.RequestException, OutboundSecurityError) as exc:
-            outcome.error = f"cloudflare transport error: {exc}"
+            listed = self._list_records(zone_id, {"name": name})
+        except (requests.RequestException, OutboundSecurityError, DnsTransientError) as exc:
+            self._failure(outcome, exc)
             return outcome
-        env = self._envelope(listed)
-        if env.is_err():
-            outcome.error = env.unwrap_err()
+        if listed.is_err():
+            outcome.error = listed.unwrap_err()
             return outcome
-        existing: list[dict[str, Any]] = env.unwrap() or []
+        existing = listed.unwrap()
 
         # Fail closed atomically: if ANY desired record type collides with an unowned record,
         # refuse to mutate anything — never leave a half-configured record set (Copilot).
@@ -308,7 +467,7 @@ class CloudflareDnsGateway(DnsProviderGateway):
                     keep = owned[0]
                     res = (
                         self._update(zone_id, str(keep["id"]), spec)
-                        if keep.get("content") != spec.content
+                        if not self._in_sync(keep, spec)
                         else Ok(self._to_result(zone_id, keep, spec))
                     )
                     # Converge replay duplicates down to the single kept record.
@@ -323,8 +482,8 @@ class CloudflareDnsGateway(DnsProviderGateway):
                 str(r["id"]) for r in existing if r.get("comment") == owner_tag and r.get("type") not in desired_types
             ]
             delete_failures += self._delete_ids(zone_id, stale)
-        except (requests.RequestException, OutboundSecurityError) as exc:
-            outcome.error = f"cloudflare transport error: {exc}"
+        except (requests.RequestException, OutboundSecurityError, DnsTransientError) as exc:
+            self._failure(outcome, exc)
 
         # A failed stale/duplicate deletion must not read as success — a lingering wrong
         # record (e.g. a stale AAAA) would keep sending clients to a reassigned address (P1).
@@ -334,24 +493,28 @@ class CloudflareDnsGateway(DnsProviderGateway):
 
     def delete_owned_records(self, zone_id: str, owner_tag: str) -> Result[list[str], str]:
         try:
-            listed = self._request("GET", f"/zones/{zone_id}/dns_records", params={"comment.exact": owner_tag})
+            listed = self._list_records(zone_id, {"comment.exact": owner_tag})
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
         except (requests.RequestException, OutboundSecurityError) as exc:
             return Err(f"cloudflare transport error: {exc}")
-        env = self._envelope(listed)
-        if env.is_err():
-            return Err(env.unwrap_err())
-        records: list[dict[str, Any]] = env.unwrap() or []
+        if listed.is_err():
+            return Err(listed.unwrap_err())
+        records = listed.unwrap()
 
         deleted: list[str] = []
         errors: list[str] = []
+        # Deleting is idempotent, so a teardown whose only failures were transient can simply be run again.
+        only_transient = True
         for rec in records:
             rid = str(rec.get("id", ""))
             if not rid:
                 continue
             try:
                 resp = self._request("DELETE", f"/zones/{zone_id}/dns_records/{rid}")
-            except (requests.RequestException, OutboundSecurityError) as exc:
+            except (requests.RequestException, OutboundSecurityError, DnsTransientError) as exc:
                 errors.append(f"{rid}: {exc}")
+                only_transient &= isinstance(exc, DnsTransientError) and exc.retriability is Retriability.RETRIABLE
                 continue
             if resp.status_code == _HTTP_NOT_FOUND:  # already gone — idempotent
                 deleted.append(rid)
@@ -359,10 +522,14 @@ class CloudflareDnsGateway(DnsProviderGateway):
             del_env = self._envelope(resp)
             if del_env.is_err():
                 errors.append(f"{rid}: {del_env.unwrap_err()}")
+                only_transient = False
             else:
                 deleted.append(rid)
         if errors:
-            return Err(f"failed to delete {len(errors)} record(s): {'; '.join(errors)}")
+            return Err(
+                f"failed to delete {len(errors)} record(s): {'; '.join(errors)}",
+                retriability=Retriability.RETRIABLE if only_transient else Retriability.UNKNOWN,
+            )
         return Ok(deleted)
 
 

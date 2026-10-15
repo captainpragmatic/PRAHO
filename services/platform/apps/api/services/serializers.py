@@ -11,7 +11,7 @@ from rest_framework import serializers
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.services import preview_customer_vat_rate
 from apps.provisioning.relationship_models import ServiceDomain
-from apps.provisioning.service_models import Server, Service, ServicePlan, ServicePlanPrice
+from apps.provisioning.service_models import Service, ServicePlan, ServicePlanPrice
 
 
 def service_monthly_price(service: Service) -> Decimal:
@@ -102,27 +102,6 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
         ]
 
 
-class ServerListSerializer(serializers.ModelSerializer):
-    """Server serializer for service listings"""
-
-    # Server display information
-    server_type_display = serializers.CharField(source="get_server_type_display", read_only=True)
-
-    class Meta:
-        model = Server
-        fields: ClassVar = [
-            "id",
-            "name",
-            "hostname",
-            "server_type",
-            "server_type_display",
-            "primary_ip",
-            "location",
-            "datacenter",
-            "status",
-        ]
-
-
 class ServiceListSerializer(serializers.ModelSerializer):
     """Service list serializer for customer hosting services listing"""
 
@@ -131,8 +110,6 @@ class ServiceListSerializer(serializers.ModelSerializer):
     service_plan_name = serializers.CharField(source="service_plan.name", read_only=True)
     service_plan_type = serializers.CharField(source="service_plan.plan_type", read_only=True)
     service_plan_type_display = serializers.CharField(source="service_plan.get_plan_type_display", read_only=True)
-    server_name = serializers.CharField(source="server.name", read_only=True)
-    server_ip = serializers.CharField(source="server.primary_ip", read_only=True)
 
     # Status display
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -176,8 +153,6 @@ class ServiceListSerializer(serializers.ModelSerializer):
             "service_plan_name",
             "service_plan_type",
             "service_plan_type_display",
-            "server_name",
-            "server_ip",
             "auto_renew",
             "is_overdue",
             "days_until_expiry",
@@ -234,7 +209,6 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     # Related objects with full detail
     service_plan = serializers.SerializerMethodField()
     available_plans = serializers.SerializerMethodField()
-    server = ServerListSerializer(read_only=True)
 
     # Customer information (limited for customer API)
     customer_name = serializers.CharField(source="customer.company_name", read_only=True)
@@ -298,7 +272,6 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             # Related objects
             "service_plan",
             "available_plans",
-            "server",
             # Usage and limits
             "disk_usage_gb",
             "bandwidth_usage_gb",

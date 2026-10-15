@@ -79,21 +79,22 @@ class RestoreQuotasParameterTests(TestCase):
         """Both disk and bandwidth quotas should be included in params."""
         params = self._call_restore_quotas(500, 1000)
         self.assertEqual(params["domain"], "example.com")
-        self.assertEqual(params["quota"], "500")
-        self.assertEqual(params["bw"], "1000")
+        self.assertEqual(params["quota"], "512000")  # KiB, as create-domain sends it
+        self.assertEqual(params["bandwidth"], "1048576000")  # bytes, as create-domain sends it
+        self.assertNotIn("bw", params)  # not a modify-domain option
 
     def test_restore_quotas_disk_only(self) -> None:
         """Only disk quota set; bandwidth should be absent."""
         params = self._call_restore_quotas(500, None)
-        self.assertEqual(params["quota"], "500")
-        self.assertNotIn("bw", params)
+        self.assertEqual(params["quota"], "512000")  # KiB, as create-domain sends it
+        self.assertNotIn("bandwidth", params)
 
     def test_restore_quotas_bandwidth_only(self) -> None:
         """Only bandwidth quota set; disk should be absent."""
         params = self._call_restore_quotas(None, 1000)
         self.assertNotIn("quota", params)
-        self.assertEqual(params["bw"], "1000")
-
+        self.assertEqual(params["bandwidth"], "1048576000")  # bytes, as create-domain sends it
+        self.assertNotIn("bw", params)
     def test_restore_quotas_correct_program(self) -> None:
         """_restore_quotas must call the 'modify-domain' Virtualmin program."""
         with (
@@ -134,7 +135,7 @@ class RestoreQuotasZeroValueTests(TestCase):
         mock_gateway.call.assert_called_once()
         _program, params = mock_gateway.call.call_args[0]
         self.assertEqual(params["quota"], "0")
-        self.assertEqual(params["bw"], "0")
+        self.assertEqual(params["bandwidth"], "0")
 
 
 class RecoveryCapabilityFailClosedTests(TestCase):
@@ -206,4 +207,29 @@ class RecoveryCapabilityFailClosedTests(TestCase):
         mock_gateway.call.assert_called_once()
         _program, params = mock_gateway.call.call_args[0]
         self.assertNotIn("quota", params)
-        self.assertNotIn("bw", params)
+        self.assertNotIn("bandwidth", params)
+
+
+class RestoreQuotasUnitsTests(TestCase):
+    """Recovery restores quotas in the units create-domain uses (KiB for disk, bytes for bandwidth)."""
+
+    def setUp(self) -> None:
+        self.service = VirtualminDisasterRecoveryService()
+        self.mock_server = MagicMock()
+        self.mock_server.hostname = "test.example.com"
+
+    @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminGateway")
+    @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminConfig")
+    def test_unlimited_bandwidth_sentinel_is_sent_as_zero_not_minus_one(
+        self, mock_config_cls: MagicMock, mock_gateway_cls: MagicMock
+    ) -> None:
+        mock_gateway = MagicMock()
+        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway_cls.return_value = mock_gateway
+        mock_config_cls.return_value = MagicMock(spec=VirtualminConfig)
+
+        self.service._restore_quotas(self.mock_server, "example.com", 2048, -1)
+
+        _program, params = mock_gateway.call.call_args[0]
+        self.assertEqual(params["quota"], str(2048 * 1024))
+        self.assertEqual(params["bandwidth"], "0")

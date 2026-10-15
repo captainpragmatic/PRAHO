@@ -20,7 +20,7 @@ def _make_mock_server(  # noqa: PLR0913
     name: str = "test-server",
     status: str = "running",
     ipv4: str = "1.2.3.4",
-    ipv6: str = "2001:db8::1",
+    ipv6: str = "2a01:4f8:c17:1234::/64",  # the SDK reports the /64 block in CIDR notation
     server_type_name: str = "cpx21",
     location_name: str = "fsn1",
     labels: dict[str, str] | None = None,
@@ -88,7 +88,7 @@ class TestCreateServer(TestCase):
         self.assertIsInstance(data, ServerCreateResult)
         self.assertEqual(data.server_id, "42")
         self.assertEqual(data.ipv4_address, "1.2.3.4")
-        self.assertEqual(data.ipv6_address, "2001:db8::1")
+        self.assertEqual(data.ipv6_address, "2a01:4f8:c17:1234::1")
         self.assertEqual(data.root_password, "secret123")
         action.wait_until_finished.assert_called_once()
 

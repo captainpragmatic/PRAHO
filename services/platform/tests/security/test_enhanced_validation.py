@@ -93,7 +93,7 @@ class TestSecureInputValidator(TestCase):
 
     def test_role_validation_prevents_injection(self):
         """Test role validation prevents privilege injection"""
-        valid_roles = ['owner', 'admin', 'manager', 'viewer']
+        valid_roles = ['owner', 'billing', 'tech', 'viewer']  # CustomerMembership.CUSTOMER_ROLE_CHOICES
         invalid_roles = [
             'superuser',
             'staff',

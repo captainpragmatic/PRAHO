@@ -9,7 +9,6 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any, TypedDict, cast
 from urllib.parse import urlencode
 from uuid import UUID
@@ -34,10 +33,9 @@ from apps.common.security_decorators import (
     monitor_performance,
 )
 from apps.common.types import Result
-from apps.customers.models import Customer
 from apps.users.models import User
 
-from .service_models import Service, ServicePlan
+from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
 from .virtualmin_forms import (
@@ -73,6 +71,7 @@ MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
 # Most accounts the bulk page lists at once: one POST field each, under Django's 1,000-field cap.
 BULK_ACCOUNT_LIMIT = 500
+UNASSIGNED_REPORT_LIMIT = 10  # unassigned node accounts named in the sync message
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
 _DEFAULT_MAX_ERROR_DISPLAY = 3
 _HEALTH_CHECK_DEADLINE: ContextVar[float | None] = ContextVar("virtualmin_health_check_deadline", default=None)
@@ -118,6 +117,7 @@ class SyncResults(TypedDict):
     accounts_created: int
     accounts_updated: int
     errors: list[str]
+    unassigned: list[dict[str, str]]
 
 
 def is_staff_or_superuser(user: User | AnonymousUser) -> bool:
@@ -1679,6 +1679,7 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
         "accounts_created": 0,
         "accounts_updated": 0,
         "errors": [],
+        "unassigned": [],
     }
 
     provisioning_service = VirtualminProvisioningService()
@@ -1773,56 +1774,49 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         logger.warning(f"⚠️ [UsageSync] Exception getting usage for {account.domain}: {e}")
                         # Keep existing values if API call fails
 
-                    account.save()
+                    # Only what this sync changed: a full save after the remote usage call would write
+                    # a stale copy of every other field over a concurrent change (status, suspension).
+                    account.save(
+                        update_fields=[
+                            "domain",
+                            "domains",
+                            "server",
+                            "last_sync_at",
+                            "current_disk_usage_mb",
+                            "current_bandwidth_usage_mb",
+                            "disk_quota_mb",
+                            "bandwidth_quota_mb",
+                            "updated_at",
+                        ]
+                    )
                     sync_results["accounts_updated"] += 1
 
                 except VirtualminAccount.DoesNotExist:
-                    # Create new account with associated Service
+                    # Link a node account to a service ONLY when PRAHO already has the service for this
+                    # username. A domain nobody here owns is never imported as a service of some customer
+                    # (it used to go to Customer.objects.first()): it is reported to staff as unassigned
+                    # and nothing is created.
                     try:
-                        # Get default customer and service plan for synced accounts
-                        default_customer = Customer.objects.first()
-                        default_service_plan = ServicePlan.objects.first()
-
-                        if not default_customer or not default_service_plan:
-                            error_msg = f"Missing default customer or service plan for account {username}"
-                            sync_results["errors"].append(error_msg)
-                            continue
-
-                        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
-
-                        # Existing services retain their stored money; only new imports need a retail price.
                         service = Service.objects.filter(username=username).first()
                         if service is None:
-                            currency_code = get_selling_currency_policy().currency_code
-                            retail_price = default_service_plan.get_price_for_currency(currency_code)
-                            if retail_price is None:
-                                error_msg = _("No active monthly price for plan %(plan)s in %(currency)s.") % {
-                                    "plan": default_service_plan.name,
-                                    "currency": currency_code,
-                                }
-                                sync_results["errors"].append(error_msg)
-                                logger.warning("⚠️ [AccountSync] %s", error_msg)
-                                continue
-                            service, created = Service.objects.get_or_create(
-                                username=username,
-                                defaults={
-                                    "currency_id": currency_code,
-                                    "customer": default_customer,
-                                    "service_plan": default_service_plan,
-                                    "service_name": f"Virtualmin Account - {username}",
+                            sync_results["unassigned"].append(
+                                {
+                                    "username": username,
                                     "domain": account_data["primary_domain"],
-                                    "status": "active",
-                                    "billing_cycle": "monthly",
-                                    "price": Decimal(retail_price.monthly_price_cents) / 100,
-                                },
+                                    "server": server.name,
+                                }
                             )
-                        else:
-                            created = False
+                            logger.warning(
+                                "⚠️ [AccountSync] Unassigned account on %s: username=%s domain=%s (not imported)",
+                                server.name,
+                                username,
+                                account_data["primary_domain"],
+                            )
+                            continue
 
-                        # Update service if it exists
-                        if not created:
+                        if service.domain != account_data["primary_domain"]:
                             service.domain = account_data["primary_domain"]
-                            service.save()
+                            service.save(update_fields=["domain", "updated_at"])
 
                         # Fetch actual usage data from Virtualmin API
                         disk_usage_mb = 0
@@ -1895,6 +1889,26 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
         messages.success(request, message)
     else:
         messages.info(request, f"No new accounts found on {sync_results['servers_checked']} servers")
+
+    # Domains on a node that PRAHO has no service for: reported, never imported.
+    if sync_results["unassigned"]:
+        unassigned = sync_results["unassigned"]
+        shown = ", ".join(
+            f"{row['username']} ({row['domain']} on {row['server']})" for row in unassigned[:UNASSIGNED_REPORT_LIMIT]
+        )
+        more = (
+            f" and {len(unassigned) - UNASSIGNED_REPORT_LIMIT} more"
+            if len(unassigned) > UNASSIGNED_REPORT_LIMIT
+            else ""
+        )
+        messages.warning(
+            request,
+            _(
+                "%(count)d unassigned account(s) on the nodes were not imported: %(rows)s%(more)s. "
+                "Attach each one to a customer's service first."
+            )
+            % {"count": len(unassigned), "rows": shown, "more": more},
+        )
 
     # Show errors if any
     if sync_results["errors"]:

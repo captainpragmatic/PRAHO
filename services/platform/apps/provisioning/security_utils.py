@@ -23,6 +23,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
+from apps.common.validators import has_invalid_a_label
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,10 @@ LOG_TRUNCATION_LENGTH = 100
 MAX_SERVICE_ID = 2**63 - 1  # BigAutoField's signed 64-bit primary key range.
 UUID_VERSION_4 = 4
 
-DOMAIN_VALIDATION_PATTERN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
+# The last label is letters, or an IDNA A-label ("xn--p1ai") for an internationalized TLD.
+DOMAIN_VALIDATION_PATTERN = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:[a-zA-Z]{2,}|[xX][nN]--[a-zA-Z0-9-]{1,58}[a-zA-Z0-9])$"
+)
 USERNAME_VALIDATION_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 
@@ -140,13 +144,16 @@ class ProvisioningParametersValidator:
             r'[<>"\'\x00-\x1f\x7f-\x9f]',  # Control characters and HTML/script chars
             r"\.\.+",  # Multiple consecutive dots
             r"^\.|\.$",  # Starting or ending with dot
-            r"--",  # Double hyphens (except xn-- for IDN)
+            r"(?<!^xn)(?<!\.xn)--",  # Double hyphens (except the xn-- prefix of an IDNA A-label)
             r"\s",  # Any whitespace
         ]
 
         for pattern in dangerous_patterns:
             if re.search(pattern, domain):
                 raise ValidationError(_("Domain contains dangerous pattern: %(pattern)s") % {"pattern": pattern})
+
+        if has_invalid_a_label(domain):
+            raise ValidationError(_("Invalid internationalized domain name"))
 
         # Check for localhost, private domains, and other dangerous domains
         dangerous_domains = [

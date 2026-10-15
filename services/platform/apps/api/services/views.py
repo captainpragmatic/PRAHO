@@ -80,9 +80,7 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
         request_data = request.data if hasattr(request, "data") else {}
 
         # Build base queryset for the authenticated customer
-        queryset = Service.objects.filter(customer=customer).select_related(
-            "customer", "service_plan", "server", "currency"
-        )
+        queryset = Service.objects.filter(customer=customer).select_related("customer", "service_plan", "currency")
 
         # Apply filters from request body
         status_filter = request_data.get("status")
@@ -103,9 +101,6 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
                 | Q(service_plan__plan_type__icontains=search_query)
                 | Q(status__icontains=search_query)
                 | Q(price__icontains=search_query)
-                | Q(server__hostname__icontains=search_query)
-                | Q(server__name__icontains=search_query)
-                | Q(server__primary_ip__icontains=search_query)
                 | Q(billing_cycle__icontains=search_query)
             )
 
@@ -187,7 +182,7 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -427,7 +422,7 @@ def update_service_auto_renew_api(request: HttpRequest, customer: Customer, serv
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -509,7 +504,7 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:

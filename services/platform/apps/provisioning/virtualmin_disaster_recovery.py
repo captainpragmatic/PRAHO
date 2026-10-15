@@ -18,6 +18,7 @@ from apps.settings.services import SettingsService
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminProvisioningService
+from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -45,20 +46,32 @@ class VirtualminDisasterRecoveryService:
         self, target_server: VirtualminServer, dry_run: bool = True
     ) -> Result[dict[str, Any], str]:
         """
-        🚨 NUCLEAR OPTION: Rebuild entire Virtualmin server from PRAHO data.
+        Plan the rebuild of a Virtualmin server from PRAHO data. Dry run only.
 
-        This is the ultimate expression of PRAHO-as-Source-of-Truth:
-        - Completely ignore current Virtualmin state
-        - Recreate all accounts based on PRAHO database
-        - Servers are truly replaceable infrastructure
+        The rebuild recreates *empty* domains: the account records come back but the customers'
+        files, databases and mail do not, which reads as a recovery while losing the data. A real
+        run is therefore refused until the recover-to-node service (ADR-0061, phase 2) restores
+        accounts from their backups and replaces this method.
 
         Args:
             target_server: Clean Virtualmin server to rebuild
-            dry_run: If True, only report what would be done
+            dry_run: Must be True (the default); False is refused
 
         Returns:
-            Result with rebuild plan or execution summary
+            Result with the rebuild plan, or an error when a real run is requested
         """
+        if not dry_run:
+            logger.warning(f"⚠️ [DisasterRecovery] Refused a real rebuild of {target_server.hostname}: dry run only")
+            return Err(
+                "Rebuilding a server from PRAHO data recreates empty domains and loses the customers' "
+                "data, so only a dry run is available until backup-based recovery replaces it."
+            )
+        return self._legacy_rebuild(target_server, dry_run=True)
+
+    def _legacy_rebuild(  # Retired entry point: ADR-0061 phase 2 replaces it, so its live path stays unreachable
+        self, target_server: VirtualminServer, dry_run: bool
+    ) -> Result[dict[str, Any], str]:
+        """The pre-ADR-0061 rebuild. Only the dry-run plan is reachable from the public entry point."""
         try:
             # Get all PRAHO accounts that should exist on this server
             praho_accounts = VirtualminAccount.objects.filter(
@@ -96,7 +109,10 @@ class VirtualminDisasterRecoveryService:
                         "server": target_server.hostname,
                         "accounts_to_rebuild": len(rebuild_plan),
                         "rebuild_plan": rebuild_plan,
-                        "message": "🔍 Dry run complete. Use dry_run=False to execute rebuild.",
+                        "message": (
+                            "🔍 Dry run complete. Executing this rebuild is not available: it would recreate "
+                            "empty domains. Recover from backups instead."
+                        ),
                     }
                 )
 
@@ -399,11 +415,8 @@ class VirtualminDisasterRecoveryService:
         bandwidth_quota_mb: int | None,
     ) -> None:
         """Restore disk and bandwidth quotas for a rebuilt domain via Virtualmin API."""
-        params: dict[str, str] = {"domain": domain}
-        if disk_quota_mb is not None:
-            params["quota"] = str(disk_quota_mb)
-        if bandwidth_quota_mb is not None:
-            params["bw"] = str(bandwidth_quota_mb)
+        # The same conversion create-domain applies: disk in KiB, bandwidth in bytes, -1 sent as 0.
+        params: dict[str, str] = {"domain": domain, **quota_parameters(disk_quota_mb, bandwidth_quota_mb)}
 
         try:
             config = VirtualminConfig(server=server)

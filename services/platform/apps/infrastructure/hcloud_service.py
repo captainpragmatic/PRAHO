@@ -9,6 +9,7 @@ See ADR-0027 for migration rationale.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -35,6 +36,7 @@ from apps.infrastructure.cloud_gateway import (
     normalize_server_status,
     register_cloud_gateway,
 )
+from apps.infrastructure.panel_cert_probes import public_address
 
 logger = logging.getLogger(__name__)
 
@@ -126,13 +128,7 @@ class HcloudService(CloudProviderGateway):
             # Wait for server to be running
             action.wait_until_finished(max_retries=HCLOUD_ACTION_MAX_RETRIES)
 
-            ipv4 = ""
-            ipv6 = ""
-            if server.public_net:
-                if server.public_net.ipv4:
-                    ipv4 = server.public_net.ipv4.ip
-                if server.public_net.ipv6:
-                    ipv6 = server.public_net.ipv6.ip
+            ipv4, ipv6 = self._extract_ips(server)
 
             logger.info(f"✅ [Hcloud] Server created: {req.name} (id={server.id}, ip={ipv4})")
 
@@ -487,15 +483,31 @@ class HcloudService(CloudProviderGateway):
         )
 
     @staticmethod
-    def _extract_ips(server: Server | Any) -> tuple[str, str]:
-        """Extract IPv4 and IPv6 addresses from server."""
+    def _ipv6_host_address(block: str) -> str:
+        """The address a server answers on, from the IPv6 network Hetzner reports.
+
+        ``public_net.ipv6.ip`` is the server's /64 in CIDR notation ("2a01:4f8:c17:1234::/64"), not an
+        address; Hetzner serves the machine on ``::1`` of that block. Anything that is not a public
+        IPv6 network yields "" so no AAAA record is published for it.
+        """
+        try:
+            network = ipaddress.IPv6Network(block, strict=False)
+            host = network.network_address + 1 if "/" in block else network.network_address
+            return public_address(str(host), 6)
+        except ValueError:
+            logger.warning(f"⚠️ [Hcloud] Ignoring a non-public IPv6 network from the API: {block!r}")
+            return ""
+
+    @classmethod
+    def _extract_ips(cls, server: Server | Any) -> tuple[str, str]:
+        """Extract the IPv4 address and the IPv6 host address from server."""
         ipv4 = ""
         ipv6 = ""
         if server.public_net:
             if server.public_net.ipv4:
                 ipv4 = server.public_net.ipv4.ip
             if server.public_net.ipv6:
-                ipv6 = server.public_net.ipv6.ip
+                ipv6 = cls._ipv6_host_address(server.public_net.ipv6.ip)
         return ipv4, ipv6
 
 

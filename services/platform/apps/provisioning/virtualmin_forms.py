@@ -510,7 +510,8 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
         # Set default quota values
         self.fields["disk_quota_mb"].initial = 1000
         self.fields["bandwidth_quota_mb"].initial = 10000
-        self.fields["status"].initial = "active"
+        # Unverified until staff or the sync confirm it on the node: the model default, not "active"
+        self.fields["status"].initial = "provisioning"
 
     def clean_domain(self) -> str:
         """Validate domain format and uniqueness."""

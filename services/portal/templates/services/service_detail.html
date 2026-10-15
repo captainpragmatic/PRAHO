@@ -198,19 +198,6 @@
                         {% endif %}
                       </span>
                     </div>
-                    <div class="flex justify-between">
-                      <span class="text-slate-400">{% trans "Server" %}</span>
-                      {% if service.server and service.server.status %}
-                        {% if service.server.status == 'online' %}
-                          {% trans "Online" as status_label %}
-                          {% badge status_label variant="success" icon="check" rounded="full" %}
-                        {% else %}
-                          {% badge service.server.status|title variant="warning" icon="warning" %}
-                        {% endif %}
-                      {% else %}
-                        <span class="text-slate-500">{% trans "Checking..." %}</span>
-                      {% endif %}
-                    </div>
                   </div>
                 </div>
 
@@ -243,16 +230,6 @@
                           {{ service.domain }}
                         {% else %}
                           <span class="text-slate-500">{% trans "Not configured" %}</span>
-                        {% endif %}
-                      </span>
-                    </div>
-                    <div class="flex justify-between">
-                      <span class="text-slate-400">{% trans "Server IP" %}</span>
-                      <span class="text-white font-mono">
-                        {% if service.server and service.server.primary_ip %}
-                          {{ service.server.primary_ip }}
-                        {% else %}
-                          <span class="text-slate-500">{% trans "Assigning..." %}</span>
                         {% endif %}
                       </span>
                     </div>
@@ -409,23 +386,6 @@
                             <span class="text-slate-500">{% trans "Not configured" %}</span>
                           {% endif %}
                         </div>
-                      </div>
-                    </div>
-
-                    <!-- Server Assignment -->
-                    <div>
-                      <h4 class="text-sm font-medium text-slate-300 mb-2">{% trans "Server" %}</h4>
-                      <div class="bg-slate-600/30 rounded-lg p-3">
-                        {% if service.server %}
-                          <div class="text-xs text-slate-400 mb-1">{% trans "Assigned Server" %}</div>
-                          <div class="text-sm text-white">{{ service.server.name }}</div>
-                          {% if service.server.hostname %}
-                          <div class="text-xs text-slate-400 mt-1 font-mono">{{ service.server.hostname }}</div>
-                          {% endif %}
-                        {% else %}
-                          <div class="text-xs text-slate-400 mb-1">{% trans "Server Assignment" %}</div>
-                          <div class="text-sm text-slate-500">{% trans "Pending assignment" %}</div>
-                        {% endif %}
                       </div>
                     </div>
                   </div>

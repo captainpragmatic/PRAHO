@@ -210,7 +210,7 @@ class PanelCertPreflightService:
             report.add("dns.zone_containment", "not_run", "Zone containment requires an accessible Cloudflare zone")
             return zone
         try:
-            gateway = get_dns_gateway("cloudflare", token, timeout=PROBE_TIMEOUT)
+            gateway = get_dns_gateway("cloudflare", token, timeout=PROBE_TIMEOUT, max_retries=0)
             result = gateway.get_zone_name(zone_id)
             if result.is_err():
                 report.add(
