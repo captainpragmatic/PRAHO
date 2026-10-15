@@ -64,12 +64,11 @@
 
           <div id="vat-field">
             {% form_field form.vat_number icon_left="document" %}
-            {% form_field form.cui icon_left="document" %}
-            {% form_field form.trade_registry_number icon_left="document" %}
-          </div>
-
-          <div id="cnp-field" style="display: none;">
-            {% form_field form.cnp icon_left="user" %}
+            {# Romanian company identifiers: register-toggle.js shows them while the country is Romania #}
+            <div id="romanian-company-fields" data-default-romania="{% if form.default_country_is_romania %}true{% else %}false{% endif %}"{% if not form.asks_romanian_company_ids %} hidden{% endif %}>
+              {% form_field form.cui icon_left="document" %}
+              {% form_field form.trade_registry_number icon_left="document" %}
+            </div>
           </div>
         </div>
 

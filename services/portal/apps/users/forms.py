@@ -27,16 +27,6 @@ from apps.common.localisation_services import get_localisation_defaults
 
 logger = logging.getLogger(__name__)
 
-# Romanian validation constants
-CNP_LENGTH = 13  # Romanian Personal Numeric Code length
-_CNP_CHECK_WEIGHTS = "279146358279"
-
-
-def _cnp_check_digit_matches(cnp: str) -> bool:
-    """The 13th digit is the weighted sum of the first 12, mod 11 (10 counts as 1), as Platform checks it."""
-    remainder = sum(int(digit) * int(weight) for digit, weight in zip(cnp[:12], _CNP_CHECK_WEIGHTS, strict=True)) % 11
-    return int(cnp[12]) == (1 if remainder == 10 else remainder)  # noqa: PLR2004  # CNP check-digit rule
-
 
 # Password validation constants
 REGISTRATION_PASSWORD_MIN_LENGTH = 12
@@ -204,20 +194,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         ),
     )
 
-    cnp = forms.CharField(
-        label=_("CNP (Cod Numeric Personal)"),
-        max_length=13,
-        required=False,
-        help_text=_("Romanian Personal Identification Number - required for individuals in Romania."),
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": "1234567890123",
-                "id": "id_cnp",
-            }
-        ),
-    )
-
     cui = forms.CharField(
         label=_("CUI"),
         max_length=20,
@@ -301,6 +277,18 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     def clean_country(self) -> str:
         return self.cleaned_data.get("country") or country_name(get_localisation_defaults().default_country)
 
+    def default_country_is_romania(self) -> bool:
+        return get_localisation_defaults().default_country == "RO"
+
+    def asks_romanian_company_ids(self) -> bool:
+        """Whether the page opens with the CUI and trade registry number: Romanian identifiers.
+
+        The billing country decides, or the default country when none was given, as clean() does.
+        register-toggle.js follows the country field from then on.
+        """
+        country = self.data.get("country") if self.is_bound else self.initial.get("country")
+        return normalize_country_code(country) == "RO" if country else self.default_country_is_romania()
+
     # ===============================================================================
     # GDPR COMPLIANCE
     # ===============================================================================
@@ -317,22 +305,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         email = str(self.cleaned_data.get("email", "")).lower().strip()
         return email
 
-    def clean_cnp(self) -> str:
-        """Validate Romanian CNP (Cod Numeric Personal) format"""
-        cnp = str(self.cleaned_data.get("cnp", "")).strip()
-        if cnp:
-            # CNP must be exactly 13 digits
-            # isascii(): isdigit() also accepts digits such as "²", which int() cannot read.
-            if not (cnp.isascii() and cnp.isdigit()) or len(cnp) != CNP_LENGTH:
-                raise ValidationError(_("CNP must be exactly 13 digits."))
-
-            # Century marker and check digit. Platform validates the CNP in full, and refuses
-            # one with a wrong check digit; checking it here puts the error on the field.
-            if cnp[0] not in "123456789" or not _cnp_check_digit_matches(cnp):
-                raise ValidationError(_("Invalid CNP format."))
-
-        return cnp
-
     def clean_cui(self) -> str:
         """The CUI's digits; Platform verifies the check digit and shows its answer on this field."""
         cui = "".join(str(self.cleaned_data.get("cui", "")).split()).upper().removeprefix("RO")
@@ -347,7 +319,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         return number
 
     def clean(self) -> dict[str, Any]:
-        """Ask each customer for the fiscal identity it has: a CNP in Romania, else VAT number or CUI.
+        """Ask a company for its VAT number or CUI in Romania; an individual gives no fiscal identifier.
 
         "Romania" is the billing country, or the default country when none was given, as Platform
         decides it. Platform checks the identifiers in full.
@@ -361,15 +333,8 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         if cleaned_data.get("customer_type") == "individual":
             cleaned_data.update(vat_number="", cui="", trade_registry_number="")
             self._drop_errors("vat_number", "cui", "trade_registry_number")
-            if not in_romania:
-                cleaned_data["cnp"] = ""
-                self._drop_errors("cnp")
-            elif not cleaned_data.get("cnp") and "cnp" not in self.errors:
-                self.add_error("cnp", _("CNP is required for individuals."))
             return cleaned_data
 
-        cleaned_data["cnp"] = ""
-        self._drop_errors("cnp")
         if (
             in_romania
             and not cleaned_data.get("vat_number")
@@ -386,7 +351,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     # Platform's field names for the registration, mapped onto this form's fields.
     _PLATFORM_FIELDS = dict(  # noqa: C408  # identifier kwargs, as below
-        cnp="cnp",
         cui="cui",
         registration_number="trade_registry_number",
         vat_number="vat_number",
@@ -433,7 +397,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "customer_type": self._CUSTOMER_TYPE_TO_PLATFORM.get(form_customer_type, form_customer_type),
                     "company_name": self.cleaned_data["company_name"],
                     "vat_number": self.cleaned_data.get("vat_number", ""),
-                    "cnp": self.cleaned_data.get("cnp", ""),
                     "cui": self.cleaned_data.get("cui", ""),
                     "registration_number": self.cleaned_data.get("trade_registry_number", ""),
                     "address_line1": self.cleaned_data["address_line1"],

@@ -75,7 +75,7 @@ class RegistrationCounterRollbackTests(TestCase):
 
     def test_a_storage_failure_keeps_the_counter_and_its_record(self) -> None:
         with (
-            # The row is stored with one INSERT once its CNP is encrypted under the row's id.
+            # The row is stored with one INSERT.
             patch("apps.users.services.PendingRegistration.save", side_effect=RuntimeError("Store unavailable")),
             self.assertRaises(ValidationError),
         ):

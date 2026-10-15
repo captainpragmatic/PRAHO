@@ -1,8 +1,8 @@
 """The registration form asks for the fiscal identity each customer type has, and shows Platform's refusals.
 
-A company gives a VAT number or a CUI (with its trade registry number), an individual in Romania a
-CNP. Platform checks them in full (checksums, VAT/CUI agreement); a refusal used to reach the
-customer as "Registration failed" with no field named, so it is now shown on the field.
+A company gives a VAT number or a CUI (with its trade registry number); an individual gives none,
+and no CNP is asked for. Platform checks them in full (checksums, VAT/CUI agreement); a refusal used
+to reach the customer as "Registration failed" with no field named, so it is now shown on the field.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from django.test import SimpleTestCase
 from apps.api_client.services import PlatformAPIError
 from apps.users.forms import CustomerRegistrationForm
 
-CNP = "1960101223143"
+CNP = "1960101223143"  # Posted by an older page; never sent on
 CUI = "14399840"
 
 
@@ -65,32 +65,22 @@ class RegistrationFiscalFieldsTests(SimpleTestCase):
         form = CustomerRegistrationForm(data=form_data(country="Germany", postal_code="10115"))
         self.assertTrue(form.is_valid(), form.errors)
 
-    def test_an_individual_in_romania_needs_a_cnp_and_sends_no_company_identifiers(self) -> None:
-        data = form_data(customer_type="individual", cui=CUI, trade_registry_number="J40/1234/2020")
+    def test_an_individual_in_romania_gives_no_cnp_and_sends_no_identifiers(self) -> None:
+        data = form_data(customer_type="individual", cui=CUI, trade_registry_number="J40/1234/2020", cnp=CNP)
         form = CustomerRegistrationForm(data=data)
-        self.assertFalse(form.is_valid())
-        self.assertIn("cnp", form.errors)
-        form = CustomerRegistrationForm(data={**data, "cnp": CNP})
         self.assertTrue(form.is_valid(), form.errors)
+        self.assertNotIn("cnp", form.fields)
         sent = sent_customer_data(form)
-        self.assertEqual(sent["cnp"], CNP)
-        self.assertEqual(sent["cui"], "")
-        self.assertEqual(sent["registration_number"], "")
-
-    def test_an_individual_abroad_needs_no_cnp(self) -> None:
-        form = CustomerRegistrationForm(
-            data=form_data(customer_type="individual", country="Germany", postal_code="10115")
-        )
-        self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(sent_customer_data(form)["cnp"], "")
+        self.assertNotIn("cnp", sent)
+        self.assertNotIn(CNP, str(sent))
+        self.assertEqual((sent["cui"], sent["registration_number"]), ("", ""))
 
     def test_identifiers_that_do_not_apply_raise_no_errors(self) -> None:
-        # An individual abroad typing a foreign ID, or leaving junk in the hidden CUI field.
-        data = form_data(customer_type="individual", country="Germany", postal_code="10115", cnp="AB12345", cui="x")
+        # An individual abroad leaving junk in the hidden CUI field.
+        data = form_data(customer_type="individual", country="Germany", postal_code="10115", cui="x")
         form = CustomerRegistrationForm(data=data)
         self.assertTrue(form.is_valid(), form.errors)
-        sent = sent_customer_data(form)
-        self.assertEqual((sent["cnp"], sent["cui"]), ("", ""))
+        self.assertEqual(sent_customer_data(form)["cui"], "")
 
     def test_a_spaced_cui_is_accepted(self) -> None:
         form = CustomerRegistrationForm(data=form_data(cui="RO 14 399 840"))

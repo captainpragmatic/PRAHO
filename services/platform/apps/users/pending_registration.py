@@ -6,12 +6,8 @@ it does. Whoever confirms the link chooses the password, so nobody can set a pas
 account for an address they do not control, and the request itself never looks the address up.
 
 The link's token is derived from the row and SECRET_KEY, not stored. A re-sent mail carries the
-same link, and a row that no longer exists has no valid token.
-
-A CNP waits here encrypted, in its own column, bound to its row (the row's id is the AES-GCM
-associated data, as ADR-0040 binds payment details). It never enters the JSON fields, and it is
-cleared when the link is used. Re-encryption tooling finds only EncryptedJSONField columns, so a
-retired key must stay in the keyring for at least a link's lifetime plus the cleanup margin.
+same link, and a row that no longer exists has no valid token. Registration collects no CNP, so
+none waits here.
 """
 
 from __future__ import annotations
@@ -24,8 +20,6 @@ from django.db import models
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from django.utils.translation import gettext_lazy as _
-
-from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 
 TOKEN_SALT = "praho.users.pending-registration"  # noqa: S105  # HMAC key salt name, not a secret
 # How long a confirmation link works, from when its mail was sent.
@@ -42,10 +36,7 @@ class PendingRegistration(models.Model):
     # first_name, last_name, phone. Never a password.
     user_data = models.JSONField(default=dict)
     # customer_type, company_name, vat_number, cui, registration_number and the billing address.
-    # Never the CNP: see cnp_encrypted.
     customer_data = models.JSONField(default=dict)
-    # The CNP, AES-256-GCM encrypted and bound to this row. Set it with set_cnp(), read it with cnp().
-    cnp_encrypted = models.TextField(blank=True, default="")
     language = models.CharField(max_length=10, default="en")
     sent_at = models.DateTimeField(null=True, blank=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
@@ -60,17 +51,6 @@ class PendingRegistration(models.Model):
 
     def __str__(self) -> str:
         return f"Pending registration {self.pk}"
-
-    def _cnp_aad(self) -> bytes:
-        return f"{self._meta.db_table}:cnp_encrypted:{self.pk}".encode()
-
-    def set_cnp(self, cnp: str) -> None:
-        """Encrypt a CNP into this row. The id exists before the first save, so one INSERT stores it."""
-        self.cnp_encrypted = encrypt_sensitive_data(cnp, aad=self._cnp_aad()) if cnp else ""
-
-    def cnp(self) -> str:
-        """This row's CNP. Raises DecryptionError for ciphertext that is not this row's, or not bound."""
-        return decrypt_sensitive_data(self.cnp_encrypted, aad=self._cnp_aad())
 
     def token(self) -> str:
         """The link token: an HMAC of this row's random, never-reused id under SECRET_KEY."""

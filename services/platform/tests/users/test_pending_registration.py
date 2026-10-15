@@ -401,7 +401,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 "last_name": "Marlowe",
                 "company_name": "Quill Lantern SRL",
                 "vat_number": "",
-                # The company identifiers the confirmer checks; never the CNP.
+                # The company identifiers the confirmer checks.
                 "cui": "",
                 "registration_number": "",
                 # The terms release the confirmer accepts, and the privacy notice (none published here).

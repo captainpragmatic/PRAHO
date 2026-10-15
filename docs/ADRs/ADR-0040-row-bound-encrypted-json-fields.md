@@ -131,6 +131,10 @@ application encryption key.
 
 ## Addendum (2026-10-11): the CNP of a pending registration
 
+**Superseded 2026-10-15.** Registration no longer collects a CNP: nothing needs it there, so
+`PendingRegistration.cnp_encrypted` and its accessors are removed (users migration 0007), and with
+them the 25-hour key-retirement constraint below. Kept as the record of what was.
+
 `PendingRegistration.cnp_encrypted` holds the CNP a registration was submitted with until its
 link is confirmed. It is a plain `TextField` with hand-written accessors (`set_cnp()`, `cnp()`),
 not an `EncryptedJSONField`, and binds each value to its row the same way:

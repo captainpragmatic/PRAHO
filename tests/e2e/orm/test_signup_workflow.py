@@ -49,8 +49,6 @@ class RegistrationCase(TestCase):
                 "customer_type": "individual" if individual else "company",
                 "company_name": "Ana Pop" if individual else "E2E Registration SRL",
                 "vat_number": "" if individual else "RO14399840",
-                # The portal requires a CNP from individuals in Romania, and Platform does too.
-                **({"cnp": "1900101123457"} if individual else {}),
                 "address_line1": "Str. Victoriei nr. 10",
                 "city": "București",
                 "county": "București",
@@ -99,7 +97,8 @@ class TestSignupWorkflow(RegistrationCase):
     def test_complete_individual_signup_flow(self):
         _, customer = self.register(individual=True)
         self.assertEqual(customer.customer_type, "individual")
-        self.assertEqual(customer.tax_profile.cnp, "1900101123457")
+        # Registration collects no CNP: an individual has no fiscal identifier on file.
+        self.assertFalse(getattr(getattr(customer, "tax_profile", None), "cnp", None))
         self.assertEqual(customer.billing_profile.preferred_currency, "RON")
         self.assertTrue(customer.addresses.get().is_billing)
 

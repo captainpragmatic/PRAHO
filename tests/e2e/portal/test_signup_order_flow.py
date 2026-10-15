@@ -131,7 +131,6 @@ def test_signup_page_loads_correctly(page: Page) -> None:
             ('input[name="vat_number"]', "VAT number field"),
             ('input[name="cui"]', "CUI field"),
             ('input[name="trade_registry_number"]', "Trade registry number field"),
-            ('input[name="cnp"]', "CNP field"),
             ('input[name="terms_accepted"]', "Terms of Service checkbox"),
         ]
 
@@ -142,6 +141,8 @@ def test_signup_page_loads_correctly(page: Page) -> None:
 
         # Registration asks for no password: it is chosen on the emailed confirmation page.
         expect(page.locator('input[type="password"]')).to_have_count(0)
+        # Nor a CNP: nothing needs one at registration.
+        expect(page.locator('input[name="cnp"]')).to_have_count(0)
 
         # Verify submit button is present and enabled
         submit_button = page.locator('button:has-text("Create Account")')

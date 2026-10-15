@@ -12,13 +12,11 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
-from django.views.decorators.debug import sensitive_variables
 from rest_framework import serializers
 
 from apps.api.users.serializers import ProfileUpdateSerializer
 from apps.billing.currency_service import default_selling_currency
 from apps.billing.fiscal_identity import billing_country_code
-from apps.common.cnp_validator import CNPValidator
 from apps.common.cui_validator import normalize_cui_digits
 from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name, normalize_country_code, resolve_display
@@ -114,9 +112,9 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     county = serializers.CharField(max_length=100, required=False, allow_blank=True)
     postal_code = serializers.CharField(max_length=10)
     country = serializers.CharField(max_length=100, required=False)
-    # Fiscal identity: a CNP for an individual in Romania, a CUI and trade registry number for anyone
-    # else. Checked in validate(), which also drops what does not apply to the customer type.
-    cnp = serializers.CharField(max_length=20, required=False, allow_blank=True, write_only=True)
+    # A company's fiscal identity: its CUI and trade registry number. Checked in validate(), which
+    # drops them for an individual. No CNP is collected: an individual's invoice states the statutory
+    # identifier, and a registrar that needs a CNP asks for it with the domain order.
     cui = serializers.CharField(max_length=20, required=False, allow_blank=True)
     registration_number = serializers.CharField(max_length=50, required=False, allow_blank=True)
     # Sent by the portal; only the acceptance of whoever confirms the link is recorded.
@@ -124,8 +122,6 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     marketing_consent = serializers.BooleanField(default=False)
 
     # Fixed messages: none of them repeats what was submitted.
-    CNP_REQUIRED = _("A CNP is required for individuals in Romania.")
-    CNP_INVALID = _("Enter a valid CNP.")
     CUI_INVALID = _("Enter a valid CUI.")
     VAT_CUI_MISMATCH = _("The VAT number does not match the CUI.")
     VAT_OR_CUI_REQUIRED = _("Enter the company's VAT number or CUI.")
@@ -145,9 +141,8 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         except DjangoValidationError:
             raise serializers.ValidationError(_("Enter a valid trade registry number.")) from None
 
-    @sensitive_variables("attrs", "cnp")
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        """Keep only the identifiers that apply: a CNP for an individual in Romania, else CUI and registry.
+        """Keep only the identifiers that apply: a company's CUI and registry number, none for an individual.
 
         No identifier is looked up: whether it is already registered is never part of the answer.
         """
@@ -160,18 +155,8 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
         if attrs.get("customer_type") == "individual":
             attrs.pop("cui", None)
             attrs.pop("registration_number", None)
-            if not self._in_romania(attrs.get("country")):
-                attrs.pop("cnp", None)
-                return attrs
-            cnp = "".join(str(attrs.get("cnp", "")).split())
-            if not cnp:
-                raise serializers.ValidationError({"cnp": [self.CNP_REQUIRED]})
-            if not CNPValidator.validate(cnp).is_valid:
-                raise serializers.ValidationError({"cnp": [self.CNP_INVALID]})
-            attrs["cnp"] = cnp
             return attrs
 
-        attrs.pop("cnp", None)
         vat_number, cui = attrs.get("vat_number", ""), attrs.get("cui", "")
         if vat_number and cui and vat_number.removeprefix("RO") != cui:
             raise serializers.ValidationError({"cui": [self.VAT_CUI_MISMATCH]})
@@ -214,15 +199,12 @@ class CustomerRegistrationSerializer(serializers.Serializer):
     customer_data = CustomerRegistrationDataSerializer()
     language = serializers.ChoiceField(choices=[("en", "English"), ("ro", "Română")], default="en")
 
-    @sensitive_variables("validated_data", "customer_data", "cnp")
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """Store the registration and queue its mail; raise on refusals."""
         customer_data = dict(validated_data["customer_data"])
         # Consent to the rest is collected from whoever confirms the link.
         customer_data.pop("marketing_consent", None)
         customer_data.pop("terms_accepted", None)
-        # Stored encrypted, apart from the rest (apps.users.pending_registration).
-        cnp = customer_data.pop("cnp", "")
         customer_data.update(
             billing_address=customer_data.pop("address_line1"),
             billing_city=customer_data.pop("city"),
@@ -235,7 +217,6 @@ class CustomerRegistrationSerializer(serializers.Serializer):
                 customer_data=customer_data,
                 request_ip=forwarded_client_ip(request) if request is not None else None,
                 language=validated_data["language"],
-                cnp=cnp,
             )
         except Exception as e:
             logger.error(f"🔥 [API Registration] Unexpected error: {e}")

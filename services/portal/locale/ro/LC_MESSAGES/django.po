@@ -1711,10 +1711,6 @@ msgstr "Număr TVA"
 msgid "Romanian VAT number (RO12345678) - required for VAT registered companies."
 msgstr "Număr TVA românesc (RO12345678) - obligatoriu pentru companiile plătitoare de TVA."
 
-#: services/portal/apps/users/forms.py:218
-msgid "CNP (Cod Numeric Personal)"
-msgstr "CNP (Cod Numeric Personal)"
-
 #: services/portal/apps/users/forms.py:221
 msgid "Romanian Personal Identification Number - required for individuals."
 msgstr "Numărul de Identificare Personală Românesc - obligatoriu pentru persoane fizice."
@@ -1800,18 +1796,6 @@ msgstr "Format de număr de telefon invalid. Utilizați formatul românesc: +40.
 #: services/portal/apps/users/forms.py:350
 msgid "VAT number must start with RO followed by digits (e.g., RO12345678)"
 msgstr "Numărul TVA trebuie să înceapă cu RO urmat de cifre (de exemplu, RO12345678)"
-
-#: services/portal/apps/users/forms.py:359
-msgid "CNP must be exactly 13 digits."
-msgstr "CNP trebuie să conțină exact 13 cifre."
-
-#: services/portal/apps/users/forms.py:364
-msgid "Invalid CNP format."
-msgstr "Format CNP invalid."
-
-#: services/portal/apps/users/forms.py:378
-msgid "CNP is required for individuals."
-msgstr "CNP este obligatoriu pentru persoane fizice."
 
 #: services/portal/apps/users/forms.py:479
 msgid "Preferred Language"
@@ -3988,10 +3972,6 @@ msgstr "Informații despre cont"
 #: services/portal/templates/dashboard/dashboard.html:211
 msgid "Customer name"
 msgstr "Numele clientului"
-
-#: services/portal/templates/dashboard/dashboard.html:217
-msgid "VAT Number (CNP if Individual)"
-msgstr "Număr TVA (CNP pentru persoane fizice)"
 
 #: services/portal/templates/dashboard/dashboard.html:223
 msgid "Customer Since"
@@ -7613,10 +7593,6 @@ msgstr "Introduceți codul de TVA sau CUI-ul firmei."
 #: apps/users/forms.py
 msgid "Digits only; an RO prefix is accepted and removed."
 msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
-
-#: apps/users/forms.py
-msgid "Romanian Personal Identification Number - required for individuals in Romania."
-msgstr "Codul Numeric Personal - obligatoriu pentru persoanele fizice din România."
 
 msgid "I have read and accept the Terms of Service."
 msgstr "Am citit și accept Termenii de Serviciu."

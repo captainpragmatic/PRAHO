@@ -381,7 +381,7 @@
 
           {% if user.primary_customer.tax_profile.vat_number %}
           <div class="flex items-center justify-between">
-            <span class="text-slate-300">{% trans 'VAT Number (CNP if Individual)' %}</span>
+            <span class="text-slate-300">{% trans 'VAT Number' %}</span>
             <span class="text-white">{{ user.primary_customer.tax_profile.vat_number }}</span>
           </div>
           {% endif %}

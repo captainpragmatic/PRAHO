@@ -22,7 +22,6 @@ from django.utils.translation import gettext, gettext_noop
 from django.views.decorators.debug import sensitive_variables
 
 from apps.common import counters
-from apps.common.encryption import DecryptionError
 from apps.common.legal import LegalDocument, current_legal_document
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import SecureInputValidator, log_security_event
@@ -169,7 +168,6 @@ def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmR
             "vat_number": str(row.customer_data.get("vat_number", "")),
             "cui": str(row.customer_data.get("cui", "")),
             "registration_number": str(row.customer_data.get("registration_number", "")),
-            # Never the CNP, not even masked: the portal keeps these details in its session.
             # The terms release to accept, in the registration's language; confirming another is refused.
             "terms_document": terms.unwrap().reference(),
             # The privacy notice the page links, if one is published.
@@ -202,7 +200,7 @@ def _refusal_before_creating(row: PendingRegistration, user_data: dict[str, Any]
     return None
 
 
-@sensitive_variables("password", "user_data", "cnp", "customer_data")
+@sensitive_variables("password", "user_data", "customer_data")
 def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder supplies
     registration_id: str,
     token: str,
@@ -217,8 +215,7 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
     """Create the account a pending registration describes, with the password its confirmer chose.
 
     The row is locked, so two confirmations of one link create one account. A refusal before the
-    account is created leaves the row usable, except that a used or expired link stays refused,
-    and a row whose CNP cannot be read is spent: that refusal commits on purpose.
+    account is created leaves the row usable, except that a used or expired link stays refused.
 
     Accepting the terms records the release the confirmer saw (from preview()) and when. A release
     that is no longer the one in force is refused as `terms_changed`, before anything is written, so
@@ -232,16 +229,6 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
         terms = _accepted_terms(row, terms_accepted, terms_document_id)
         if isinstance(terms, Err):
             return terms
-
-        try:
-            cnp = row.cnp()
-        except DecryptionError:
-            # Ciphertext that is not this row's, or a key no longer in the keyring. The account
-            # would lack the CNP it was registered with, so none is created, and the link is spent
-            # rather than left to fail until it expires. Committing this Err is intended.
-            _spend(row)
-            log_security_event("pending_registration_cnp_unreadable", {"registration_id": str(row.pk)}, request_ip)
-            return Err(ConfirmRefusal("details_unavailable"))
 
         user_data = {
             **row.user_data,
@@ -258,11 +245,8 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
         if refusal is not None:
             return Err(refusal)
 
-        customer_data = dict(row.customer_data)
-        if cnp:
-            customer_data["cnp"] = cnp
         result = SecureUserRegistrationService.create_customer_owner_unchecked(
-            user_data, customer_data, request_ip, user_agent
+            user_data, dict(row.customer_data), request_ip, user_agent
         )
         if isinstance(result, Err):
             # The core rolled its own savepoint back, so no user or customer exists. Only its
@@ -322,10 +306,9 @@ def _audit_terms_acceptance(
 
 
 def _spend(row: PendingRegistration) -> None:
-    """Mark the link used, and drop the CNP it carried: the customer now holds it, or never will."""
+    """Mark the link used."""
     row.consumed_at = timezone.now()
-    row.cnp_encrypted = ""
-    row.save(update_fields=["consumed_at", "cnp_encrypted", "updated_at"])
+    row.save(update_fields=["consumed_at", "updated_at"])
 
 
 def cleanup(now: datetime | None = None) -> int:

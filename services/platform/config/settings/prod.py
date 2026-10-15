@@ -301,7 +301,7 @@ if SENTRY_DSN and HAS_SENTRY:
         traces_sample_rate=0.1,
         send_default_pii=False,
         # Frame variables are captured whatever send_default_pii says: never send a CNP.
-        event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "cnp", "cnp_encrypted"]),
+        event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "cnp"]),
         environment="production",
         release=os.environ.get("APP_VERSION", "unknown"),
     )

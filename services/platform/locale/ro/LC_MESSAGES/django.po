@@ -15636,10 +15636,6 @@ msgstr "Numărul de TVA trebuie să înceapă cu RO urmat de cifre (de ex., RO12
 msgid "Invalid customer type selected."
 msgstr "Tip de client selectat invalid."
 
-#: apps/users/forms.py:689
-msgid "CNP is required for individuals."
-msgstr "CNP este obligatoriu pentru persoane fizice."
-
 #: apps/users/forms.py:696
 msgid "CustomerOnboardingRegistrationForm must be saved with commit=True"
 msgstr "CustomerOnboardingRegistrationForm trebuie salvată cu commit=True"
@@ -19883,10 +19879,6 @@ msgstr "Informații despre cont"
 #: templates/dashboard.html:378
 msgid "Customer name"
 msgstr "Numele clientului"
-
-#: templates/dashboard.html:384
-msgid "VAT Number (CNP if Individual)"
-msgstr "Numărul de TVA (CNP dacă persoană fizică)"
 
 #: templates/dashboard.html:390
 msgid "Customer Since"
@@ -26512,14 +26504,6 @@ msgstr "Doar cifre; prefixul RO este acceptat și eliminat."
 
 #~ msgid "more"
 #~ msgstr "mai mult"
-
-#: apps/api/customers/serializers.py
-msgid "A CNP is required for individuals in Romania."
-msgstr "Pentru persoanele fizice din România, CNP-ul este obligatoriu."
-
-#: apps/api/customers/serializers.py
-msgid "Enter a valid CNP."
-msgstr "Introduceți un CNP valid."
 
 #: apps/api/customers/serializers.py
 msgid "The VAT number does not match the CUI."

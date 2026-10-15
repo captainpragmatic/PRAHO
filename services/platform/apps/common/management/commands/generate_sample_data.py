@@ -128,6 +128,20 @@ def _cycle(items: list[Any], index: int) -> Any:
     return items[index % len(items)]
 
 
+def _cnp(body: str) -> str:
+    """A sample CNP: its 12-digit body and the check digit CNPValidator expects."""
+    return f"{body}{CNPValidator._calculate_check_digit(body)}"
+
+
+def _random_cnp(fake: Faker, index: int) -> str:
+    """A valid sample CNP: sex/century digit, birth date in 1960-1999, a county code, a serial number."""
+    century = 1 if index % 2 == 0 else 2
+    birth = (
+        f"{fake.random_int(min=60, max=99):02d}{fake.random_int(min=1, max=12):02d}{fake.random_int(min=1, max=28):02d}"
+    )
+    return _cnp(f"{century}{birth}{fake.random_int(min=1, max=46):02d}{fake.random_int(min=1, max=999):03d}")
+
+
 def _purge_promotion_ledger(redemptions: Any, gift_card_transactions: Any) -> None:
     """Delete promotion ledger rows (they PROTECT their orders) and recount parents.
 
@@ -1287,19 +1301,7 @@ class Command(BaseCommand):
             )
         elif customer_type == "individual":
             # All individuals get a CNP for invoice/tax purposes
-            # Romanian CNP: S(1) + YY(2) + MM(2) + DD(2) + CC(2) + NNN(3) + C(1) = 13 digits
-            century = 1 if index % 2 == 0 else 2
-            yy = fake.random_int(min=60, max=99)
-            mm = fake.random_int(min=1, max=12)
-            dd = fake.random_int(min=1, max=28)
-            cc = fake.random_int(min=1, max=52)
-            nnn = fake.random_int(min=1, max=999)
-            check = index % 10
-            CustomerTaxProfile.objects.create(
-                customer=customer,
-                cnp=f"{century}{yy:02d}{mm:02d}{dd:02d}{cc:02d}{nnn:03d}{check}",
-                is_vat_payer=False,
-            )
+            CustomerTaxProfile.objects.create(customer=customer, cnp=_random_cnp(fake, index), is_vat_payer=False)
 
         # --- Billing profile with variety ---
         currencies = ["RON", "EUR"]
@@ -1712,7 +1714,7 @@ class Command(BaseCommand):
             cnp_body = f"{century_digit}{birth_year % 100:02d}0101{40 + idx:02d}{idx:03d}"
             CustomerTaxProfile.objects.create(
                 customer=customer,
-                cnp=f"{cnp_body}{CNPValidator._calculate_check_digit(cnp_body)}",
+                cnp=_cnp(cnp_body),
                 is_vat_payer=False,
             )
 

@@ -35,9 +35,6 @@ class TestRegistrationCustomerTypeMapping(SimpleTestCase):
             "data_processing_consent": True,
             "terms_accepted": True,
         }
-        # Individuals must supply a CNP (Romanian personal ID) per the form's own rule.
-        if customer_type == "individual":
-            data["cnp"] = "1960101223143"
         form = CustomerRegistrationForm(data=data)
         assert form.is_valid(), form.errors
         return form
