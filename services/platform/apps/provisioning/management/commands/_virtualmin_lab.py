@@ -23,9 +23,13 @@ is the production code path.
 
 from __future__ import annotations
 
+import importlib
 import json
+import logging
+import secrets
 import socket
 import subprocess
+import traceback
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
@@ -36,6 +40,7 @@ from unittest import mock
 from django.conf import settings
 from django.core.management.base import CommandError
 from django.test import override_settings
+from django_q.models import OrmQ
 
 from apps.common.types import Err, Ok, Result
 
@@ -43,8 +48,13 @@ if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment
     from apps.provisioning.virtualmin_models import VirtualminServer
 
+logger = logging.getLogger(__name__)
+
 LAB_SETTINGS_MODULES = frozenset({"config.settings.lab"})
 LAB_LOOPBACK = "127.0.0.1"
+# The staff login of the lab database: a developer's `make dev` and the browser smoke tests sign in as this user.
+LAB_STAFF_EMAIL = "lab-staff@praho.test"
+LAB_STAFF_FILE = "staff.env"
 
 
 @dataclass(frozen=True)
@@ -241,6 +251,94 @@ def container_address(container: str, field: str = "IPAddress") -> str:
     if result.returncode != 0 or len(addresses) != 1:
         raise CommandError(f"Cannot read the {field} of {container}: {result.stderr.strip() or addresses}")
     return addresses[0]
+
+
+# The opt-in hosting features a lab server switches on (migration, drain, differential backups).
+LAB_FEATURE_SETTINGS = (
+    "provisioning.migration_enabled",
+    "infrastructure.drain_enabled",
+    "provisioning.incremental_backups_enabled",
+)
+
+
+def enable_lab_features() -> None:
+    """Switch the opt-in hosting features on, through the settings service (so this process's cache sees it)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-domain: lab-only wiring
+
+    for key in LAB_FEATURE_SETTINGS:
+        result = SettingsService.update_setting(key, True)
+        if result.is_err():
+            raise CommandError(f"Could not enable {key}: {result.unwrap_err()}")
+
+
+# Only these task modules do hosting work in the lab; the rest of the queue (e-mail, notifications) is discarded.
+LAB_WORKER_MODULES = ("apps.provisioning.virtualmin_tasks", "apps.provisioning.tasks")
+
+
+@dataclass
+class QueuedRun:
+    """One queued task a lab worker ran (or tried to)."""
+
+    func: str
+    args: tuple[Any, ...]
+    result: Any = None
+    error: str = ""
+
+    @property
+    def name(self) -> str:
+        return self.func.rsplit(".", 1)[-1]
+
+
+def run_queued_once(modules: tuple[str, ...] = LAB_WORKER_MODULES) -> list[QueuedRun]:
+    """Run, once and in queue order, what is waiting on the ORM broker, the way a Django-Q worker does.
+
+    The lab has no Django-Q cluster: its worker processes are spawned, so they would not inherit the lab
+    transport (`lab_transport` patches the running process). The lab server, the workflow bench and the fault
+    suite call this in a process that already runs inside the transport instead. A task that raises is recorded,
+    not propagated (a worker records the failure and moves on); a row another caller already took is skipped.
+    """
+    ran: list[QueuedRun] = []
+    for row in list(OrmQ.objects.order_by("id")):
+        task = row.task
+        if OrmQ.objects.filter(pk=row.pk).delete()[0] == 0:
+            continue  # taken by another caller between the listing and now
+        func = str(task.get("func", ""))
+        module, _, name = func.rpartition(".")
+        if module not in modules:
+            continue
+        run = QueuedRun(func=func, args=tuple(task.get("args", ())))
+        try:
+            run.result = getattr(importlib.import_module(module), name)(*run.args, **dict(task.get("kwargs", {})))
+        except Exception:  # A worker records a failed task and carries on
+            run.error = traceback.format_exc()
+            logger.warning("⚠️ [VirtualminLab] task %s raised:\n%s", name, run.error)
+        ran.append(run)
+    return ran
+
+
+def ensure_lab_staff(state_dir: Path) -> None:
+    """Create (or reset) the lab's staff superuser with a fresh random password, kept in `staff.env`.
+
+    The password lives only in the git-ignored lab state directory, like the node credentials, and is
+    rotated by every bootstrap.
+    """
+    from apps.users.models import User  # noqa: PLC0415  # Cross-domain: the lab database holds the staff login
+
+    password = secrets.token_urlsafe(18)
+    user, _ = User.objects.update_or_create(
+        email=LAB_STAFF_EMAIL,
+        defaults={
+            "first_name": "Lab",
+            "last_name": "Staff",
+            "is_active": True,
+            "is_staff": True,
+            "is_superuser": True,
+            "staff_role": "admin",
+        },
+    )
+    user.set_password(password)
+    user.save(update_fields=["password"])
+    write_private(state_dir / LAB_STAFF_FILE, f"LAB_STAFF_EMAIL={LAB_STAFF_EMAIL}\nLAB_STAFF_PASSWORD={password}\n")
 
 
 def read_env_file(path: Path) -> dict[str, str]:

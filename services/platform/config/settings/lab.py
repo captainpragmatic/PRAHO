@@ -4,6 +4,10 @@ dedicated SQLite database, so lab runs never touch the developer's dev data.
 
 Keys come from deploy/virtualmin-lab/.state/django.env, which `lab.sh up`
 generates once per checkout. Local only; never used by any deployment.
+
+`VIRTUALMIN_LAB_DATABASE` points the settings at another SQLite file. The browser smoke tests
+(`make test-virtualmin-e2e`) run against a copy of the lab database, so the server they start and the
+test process share one file while the lab database itself, and the suites that use it, stay untouched.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ VIRTUALMIN_LAB_STATE_DIR = _LAB_STATE_DIR
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": str(BASE_DIR / "db-virtualmin-lab.sqlite3"),
+        "NAME": os.environ.get("VIRTUALMIN_LAB_DATABASE") or str(BASE_DIR / "db-virtualmin-lab.sqlite3"),
         "OPTIONS": {"timeout": 30},
     }
 }
