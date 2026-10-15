@@ -27,5 +27,17 @@ class ComposeTaskWorkerTests(unittest.TestCase):
                 self.assertEqual(worker["depends_on"], {"platform": {"condition": "service_healthy"}})
                 self.assertEqual(worker["restart"], "unless-stopped")
                 self.assertNotIn("ports", worker)
-                self.assertNotIn("healthcheck", worker)
                 self.assertEqual(worker.get("networks"), platform.get("networks"))
+
+    def test_workers_disable_the_inherited_http_healthcheck(self) -> None:
+        # Omitting healthcheck inherits the image's web probe, but qcluster serves no HTTP.
+        dockerfile = (ROOT / "deploy/platform/Dockerfile").read_text()
+        self.assertRegex(dockerfile, r"(?s)HEALTHCHECK.*?CMD curl -f http://localhost:8700/")
+        for stack in STACKS:
+            with self.subTest(stack=stack):
+                services = yaml.safe_load((ROOT / f"deploy/docker-compose.{stack}.yml").read_text())["services"]
+                self.assertEqual(services["qcluster"].get("healthcheck"), {"disable": True})
+                self.assertEqual(
+                    services["platform"]["healthcheck"]["test"],
+                    ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"],
+                )

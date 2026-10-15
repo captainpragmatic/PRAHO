@@ -129,6 +129,9 @@ services:
     image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
     container_name: praho_qcluster
     command: ["python", "manage.py", "qcluster"]
+    # qcluster serves no HTTP; disable the platform image's inherited web probe.
+    healthcheck:
+      disable: true
     env_file: *platform-env-file
     environment: *platform-environment
     volumes: *platform-volumes

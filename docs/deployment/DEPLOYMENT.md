@@ -23,6 +23,14 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 
 ## Managed-node SSH Trust
 
+Platform and its task worker include `ansible-core` from the locked Platform dependency group and
+OpenSSH client tools. Docker builds and native deployment install the pinned collections in
+`services/platform/infrastructure/ansible/requirements.yml` into `/opt/praho-ansible/collections`.
+The service processes read that directory. Docker uses a private controller home under `/tmp`; native
+units use separate mode-0700 runtime directories under `/run`. Native `ProtectHome` and `ProtectSystem`
+remain enabled. Portal does not need these
+tools. Installing Ansible only on the deployment laptop does not supply the application runtime.
+
 PRAHO rejects unknown SSH host keys for node validation, Virtualmin fallback access, pooled SSH connections, and Ansible maintenance. Before enabling infrastructure automation, provision a `known_hosts` file for the operating-system account that runs Platform and its Django-Q workers.
 
 Obtain each host key or fingerprint through a trusted out-of-band channel, such as the cloud-provider console. Do not trust an unverified `ssh-keyscan` result by itself. Add entries for every address PRAHO uses to connect (normally both the node hostname and its public IP), then set:

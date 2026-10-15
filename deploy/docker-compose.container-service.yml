@@ -90,6 +90,9 @@ services:
   qcluster:
     image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
     command: ["python", "manage.py", "qcluster"]
+    # qcluster serves no HTTP; disable the platform image's inherited web probe.
+    healthcheck:
+      disable: true
     env_file: *platform-env-file
     environment: *platform-environment
     # The platform container runs the migrations; the worker starts once that one is healthy.
