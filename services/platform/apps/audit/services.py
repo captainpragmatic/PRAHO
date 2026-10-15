@@ -5930,10 +5930,10 @@ class DomainsAuditService:
             "order_item_id": str(domain_order_item.id),
             "order_id": str(domain_order_item.order.id) if domain_order_item.order else None,
             "domain_name": domain_order_item.domain_name,
-            "operation_type": domain_order_item.operation_type,
+            "action": domain_order_item.action,
             "registrar": domain_order_item.registrar.name if domain_order_item.registrar else None,
             "tld_extension": domain_order_item.tld.extension if domain_order_item.tld else None,
-            "price_cents": domain_order_item.price_cents,
+            "total_price_cents": domain_order_item.total_price_cents,
             "customer_id": str(domain_order_item.order.customer.id)
             if domain_order_item.order and domain_order_item.order.customer
             else None,
@@ -5955,7 +5955,7 @@ class DomainsAuditService:
 
         # Generate description if not provided
         if not description:
-            description = f"Domain order {event_type.replace('_', ' ')}: {domain_order_item.domain_name} ({domain_order_item.operation_type})"
+            description = f"Domain order {event_type.replace('_', ' ')}: {domain_order_item.domain_name} ({domain_order_item.action})"
 
         # Create audit event
         audit_event_data = AuditEventData(

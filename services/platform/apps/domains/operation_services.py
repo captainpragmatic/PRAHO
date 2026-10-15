@@ -18,7 +18,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .gateways import RegistrarAPIError, RegistrarGatewayFactory
 from .gateways.contracts import parse_date
-from .models import Domain, DomainOperation
+from .models import Domain, DomainOperation, DomainOrderItem
 
 if TYPE_CHECKING:
     from .gateways import BaseRegistrarGateway
@@ -128,6 +128,7 @@ class DomainOperationService:
                 auto_renew=config.auto_renew,
                 **terms,
             )
+            cls._link_order_item(config.order_item, domain)
             operation = DomainOperation.objects.create(
                 domain=domain,
                 registrar=config.registrar,
@@ -175,6 +176,13 @@ class DomainOperationService:
         cls.resume_registration_nameservers(domain)
         domain.refresh_from_db()
         return Ok(domain)
+
+    @staticmethod
+    def _link_order_item(order_item: DomainOrderItem | None, domain: Domain) -> None:
+        """Link the bought item with the row, so whichever path activates the domain finds its line."""
+        if order_item is not None:
+            order_item.domain = domain
+            order_item.save(update_fields=["domain", "updated_at"])
 
     @staticmethod
     def _prepare_contact(

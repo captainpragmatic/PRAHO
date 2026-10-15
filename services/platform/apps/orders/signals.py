@@ -375,6 +375,10 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
 
             # Also cancel items without services (pending provisioning)
             for item in order.items.filter(service__isnull=True, provisioning_status__in=["pending", "in_progress"]):
+                if item.is_domain_line and item.provisioning_status == "in_progress":
+                    # Sent to the registrar, which may still register it: its domain completes it.
+                    logger.warning("⚠️ [Order] Domain line %s is with the registrar; not cancelled", item.id)
+                    continue
                 try:
                     item.cancel_provisioning()
                     item.save(update_fields=["provisioning_status"])
@@ -624,9 +628,10 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
                     )
                 )
 
-        if new_status == "completed" and item.service:
-            # Item successfully provisioned - send notification
-            _send_service_ready_email(item)
+        if new_status == "completed":
+            # A hosting item is ready to use; a domain line completes when its registrar confirms it.
+            if item.service:
+                _send_service_ready_email(item)
 
             # Check if all items in order are provisioned
             order = item.order

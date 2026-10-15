@@ -884,6 +884,19 @@ class DomainOrderItem(models.Model):
         related_name="order_items",
         help_text=_("Created/renewed domain after order processing"),
     )
+    # The order line the customer paid for: its provisioning status follows the registrar's answer.
+    # One to one, so a paid line can start at most one registration or transfer.
+    order_item = models.OneToOneField(
+        "orders.OrderItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="domain_order_item",
+    )
+    # The registrar the line was quoted for.
+    registrar = models.ForeignKey(
+        Registrar, on_delete=models.PROTECT, null=True, blank=True, related_name="order_items"
+    )
 
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)

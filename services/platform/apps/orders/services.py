@@ -22,12 +22,14 @@ from apps.products.models import Product
 from apps.provisioning.service_models import Service, ServicePlan
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apps.billing.models import Invoice
     from apps.customers.models import Customer
     from apps.orders.checkout_consents import CheckoutConsents
     from apps.users.models import User
 
-    from .models import Order
+    from .models import Order, OrderItem
 
 """
 Order Management Services for PRAHO Platform
@@ -64,6 +66,33 @@ def _order_item_billing_period(item: Any) -> str:
     if period not in _ORDER_PERIOD_TO_SERVICE_CYCLE:
         raise ValueError(f"Unsupported order item billing period: {period}")
     return period
+
+
+def _attach_domain_order_item(order: Order, line: OrderItem) -> None:
+    """Record the registration or transfer a domain line sells, or refuse the whole order.
+
+    Raises inside the order's transaction, so a line that cannot be recorded leaves no order.
+    """
+    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007: cross-app at call time
+
+    if not line.is_domain_line:
+        return
+    quoted = DomainOrderService.quote_order_item(line, order.currency_id)
+    if quoted.is_err():
+        raise ValueError(quoted.unwrap_err())
+    quote = quoted.unwrap()
+    if line.unit_price_cents * line.quantity != quote.total_cents:
+        raise ValueError(f"{quote.domain_name} costs {quote.total_cents}, not {line.unit_price_cents * line.quantity}")
+    created, result = DomainOrderService.create_domain_order_item(
+        order, quote.domain_name, quote.action, years=quote.years, order_item=line, registrar=quote.registrar
+    )
+    if not created:
+        raise ValueError(str(result))
+
+
+def _service_lines(items: Iterable[OrderItem]) -> list[OrderItem]:
+    """The lines a hosting service fulfils: domain lines are fulfilled by their registrar."""
+    return [item for item in items if not item.is_domain_line]
 
 
 def _enqueue_domain_item_processing(order: Order) -> None:
@@ -686,7 +715,7 @@ class OrderService:
                 product = products.get(uuid.UUID(str(product_id)))
                 if product is None:
                     raise ValueError(f"Order item references an unknown product: {product_id}")
-                OrderItem.objects.create(
+                line = OrderItem.objects.create(
                     order=order,
                     product=product,
                     service_id=str(service_id) if service_id else None,
@@ -701,6 +730,7 @@ class OrderService:
                     domain_name=item_data.get("domain_name", ""),
                     config=item_config,
                 )
+                _attach_domain_order_item(order, line)
 
             # After creating items, ensure order totals are consistent with item data (includes setup fees)
             try:
@@ -948,7 +978,7 @@ class OrderServiceCreationService:
             logger.info(f"🔧 [ServiceCreation] Creating pending services for order {order.order_number}")
 
             items = order.items.select_for_update(of=("self",)).select_related("product")
-            for item in items:
+            for item in _service_lines(items):
                 # Skip if service already exists for this item
                 if item.service_id:
                     logger.info(f"🔧 [ServiceCreation] Service already exists for item {item.id}, skipping")
@@ -1118,7 +1148,7 @@ class OrderServiceCreationService:
                 updated_services = []
 
                 items_query = order.items.select_for_update(of=("self",)).select_related("product")
-                items = list(items_query)
+                items = _service_lines(items_query)
                 if any(item.service_id is None for item in items):
                     creation_result = OrderServiceCreationService.create_pending_services(order)
                     if creation_result.is_err():
@@ -1127,7 +1157,7 @@ class OrderServiceCreationService:
                         )
                     # QuerySet evaluation above cached the pre-creation rows. Clone it so
                     # the newly linked services are read back under the same row locks.
-                    items = list(items_query.all())
+                    items = _service_lines(items_query.all())
 
                 # #294: lock every service in ONE statement ordered by pk. Locking per item
                 # in iteration order can deadlock against paths that lock the same rows in

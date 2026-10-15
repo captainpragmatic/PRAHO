@@ -24,6 +24,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 CORE_COMMANDS: list[tuple[str, str]] = [
     ("setup_default_settings", "Settings catalog sync"),
     ("ensure_home_currency", "Home currency"),
+    ("ensure_domain_product", "Domain product"),
     ("setup_scheduled_tasks", "Scheduled background tasks"),
     ("setup_email_templates", "Email templates"),
     ("ensure_superuser", "Superuser account"),

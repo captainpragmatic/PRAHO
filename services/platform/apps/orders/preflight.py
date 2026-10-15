@@ -94,10 +94,20 @@ class OrderPreflightValidationService:
                 if not product.is_active:
                     warnings.append(str(_("Item '{}': product is inactive").format(item.product_name)))
 
-                # Price availability in catalog for the order currency
-                price = product.get_price_for_currency(order.currency.code)
                 if product.requires_domain and product.domain_required_at_signup and not item.domain_name.strip():
                     items_missing_domain.append(str(item.product_name))
+
+                if item.is_domain_line:
+                    # Priced from the TLD price list (apps.domains), not the catalog: it must still be offered.
+                    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007
+
+                    quoted = DomainOrderService.quote_order_item(item, order.currency.code)
+                    if quoted.is_err():
+                        errors.append(str(_("Item '{}': {}").format(item.product_name, quoted.unwrap_err())))
+                    continue
+
+                # Price availability in catalog for the order currency
+                price = product.get_price_for_currency(order.currency.code)
                 if price is None:
                     errors.append(
                         str(_("Item '{}': no current price for {}").format(item.product_name, order.currency.code))

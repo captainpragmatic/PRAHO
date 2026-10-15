@@ -840,6 +840,11 @@ class OrderItem(models.Model):
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
 
+    @property
+    def is_domain_line(self) -> bool:
+        """A domain registration or transfer: fulfilled by the registrar, never by a hosting service."""
+        return self.product_type == "domain"
+
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
         totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)

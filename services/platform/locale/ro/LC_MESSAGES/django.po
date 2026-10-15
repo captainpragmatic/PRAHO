@@ -26970,3 +26970,15 @@ msgstr "Verificat la"
 
 msgid "Check at ANAF"
 msgstr "Verifică la ANAF"
+
+msgid "Choose to register or transfer the domain."
+msgstr "Alegeți dacă înregistrați sau transferați domeniul."
+
+msgid "This domain extension is not offered."
+msgstr "Această extensie de domeniu nu este oferită."
+
+msgid "This domain extension cannot be ordered right now."
+msgstr "Această extensie de domeniu nu poate fi comandată acum."
+
+msgid "We could not complete this domain automatically. Our team will finish it and contact you."
+msgstr "Nu am putut finaliza automat acest domeniu. Echipa noastră îl va finaliza și vă va contacta."

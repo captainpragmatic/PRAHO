@@ -35,7 +35,7 @@ from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
-    from apps.orders.models import Order
+    from apps.orders.models import Order, OrderItem
 
     from .currency_terms import DomainRenewalQuote
     from .gateways import BaseRegistrarGateway, DomainInfoResult, RegistrarAPIError
@@ -1299,12 +1299,62 @@ class DomainNotificationService:
 # ===============================================================================
 
 
+@dataclass(frozen=True)
+class DomainLineQuote:
+    """The price of an order's domain line, quoted from the TLD price list before totals and VAT."""
+
+    domain_name: str
+    action: str  # register | transfer
+    registrar: Registrar
+    years: int
+    unit_price_cents: int  # per year
+
+    @property
+    def total_cents(self) -> int:
+        return self.unit_price_cents * self.years
+
+
+ORDERABLE_DOMAIN_ACTIONS = ("register", "transfer")
+
+
 class DomainOrderService:
     """
     🛒 Domain order processing service
 
     Handles domain orders from the e-commerce system.
     """
+
+    @staticmethod
+    def quote_order_line(domain_name: str, action: str, currency_code: str) -> Result[DomainLineQuote, str]:
+        """What a domain line costs, from the TLD price list: the one quote cart, checkout and order use.
+
+        A registration is for the TLD's shortest period, a transfer for one year. A TLD with no
+        active registrar is not orderable.
+        """
+        if action not in ORDERABLE_DOMAIN_ACTIONS:
+            return Err(cast(str, _("Choose to register or transfer the domain.")))
+        is_valid, error = DomainValidationService.validate_domain_name(domain_name)
+        if not is_valid:
+            return Err(error)
+        name = canonicalize_domain_name(domain_name)
+        tld = TLDService.get_tld_pricing(DomainValidationService.extract_tld_from_domain(name))
+        if tld is None:
+            return Err(cast(str, _("This domain extension is not offered.")))
+        registrar = RegistrarService.select_best_registrar_for_tld(tld)
+        if registrar is None:
+            return Err(cast(str, _("This domain extension cannot be ordered right now.")))
+        years = max(1, tld.min_registration_period) if action == "register" else 1
+        try:
+            cost = TLDService.calculate_domain_cost(tld, 1, False, action=action, currency_code=currency_code)
+        except ValueError as exc:
+            return Err(str(exc))
+        return Ok(DomainLineQuote(name, action, registrar, years, cost["total_cost_cents"]))
+
+    @staticmethod
+    def quote_order_item(line: OrderItem, currency_code: str) -> Result[DomainLineQuote, str]:
+        """Quote an order's domain line again, as it was ordered."""
+        mode = str((line.config or {}).get("domain_mode") or "register")
+        return DomainOrderService.quote_order_line(line.domain_name, mode, currency_code)
 
     @staticmethod
     def _price_domain_item(
@@ -1334,8 +1384,14 @@ class DomainOrderService:
         whois_privacy: bool = False,
         auto_renew: bool = True,
         epp_code: str = "",
+        *,
+        order_item: OrderItem | None = None,
+        registrar: Registrar | None = None,
     ) -> tuple[bool, DomainOrderItem | str]:
-        """🛒 Create domain order item"""
+        """🛒 Create domain order item
+
+        From an order line, order_item is that line and registrar the one it was quoted for.
+        """
         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
 
         from .currency_terms import commit_domain_quote, purchase_renewal_terms, renewal_item_terms  # noqa: PLC0415
@@ -1409,7 +1465,7 @@ class DomainOrderService:
             return False, str(exc)
 
         try:
-            order_item = DomainOrderItem.objects.create(
+            domain_item = DomainOrderItem.objects.create(
                 order=order,
                 domain_name=domain_name,
                 tld=tld,
@@ -1422,22 +1478,55 @@ class DomainOrderService:
                 epp_code="",
                 domain=existing_domain,
                 renewal_terms=renewal_terms,
+                order_item=order_item,
+                registrar=registrar,
             )
             if existing_domain is not None and quote is not None:
-                commit_domain_quote(existing_domain, order_item, quote)
+                commit_domain_quote(existing_domain, domain_item, quote)
 
             # Encrypt EPP code via model setter (single encryption boundary)
             if action == "transfer" and epp_code:
-                order_item.set_encrypted_epp_code(epp_code)
-                order_item.save(update_fields=["epp_code"])
+                domain_item.set_encrypted_epp_code(epp_code)
+                domain_item.save(update_fields=["epp_code"])
 
             logger.info(f"🛒 [Domain] Created order item: {action} {domain_name} for {years} years")
-            return True, order_item
+            return True, domain_item
 
         except Exception as e:
             logger.error(f"🔥 [Domain] Failed to create order item: {e}")
             transaction.set_rollback(True)
             return False, cast(str, _("Failed to create domain order item"))
+
+    @staticmethod
+    def _process_registration(order: Order, item: DomainOrderItem) -> Domain | None:
+        """Register one item; a paid line is claimed first, so the registrar sees it at most once."""
+        from .order_fulfilment import claim_order_line, fail_order_line  # noqa: PLC0415  # Deferred: imports orders
+
+        if item.order_item_id is not None and not claim_order_line(item):
+            return None
+        result: Result[Domain, str]
+        try:
+            result = DomainLifecycleService.create_domain_registration(
+                customer=order.customer,
+                domain_name=item.domain_name,
+                years=item.years,
+                whois_privacy=item.whois_privacy,
+                auto_renew=item.auto_renew,
+                order_item=item,
+            )
+        except Exception as exc:  # A claimed line must not wait in progress unnoticed.
+            logger.exception("🔥 [Domain] Registration of %s crashed", item.domain_name)
+            result = Err(f"Registration crashed: {exc}")
+        if result.is_ok():
+            logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
+            return result.unwrap()
+        logger.error("🔥 [Domain] Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
+        # register() links the domain it creates and deletes it only when nothing is pending at the
+        # registrar, so a paid line left without a domain was refused; a linked one awaits the answer.
+        item.refresh_from_db(fields=["domain"])
+        if item.order_item_id is not None and item.domain_id is None:
+            fail_order_line(item, result.unwrap_err())
+        return None
 
     @staticmethod
     def process_domain_order_items(order: Order) -> list[Domain]:  # noqa: PLR0912  # per-action dispatch with per-outcome handling
@@ -1458,38 +1547,9 @@ class DomainOrderService:
             # type from aborting the order's remaining valid items.
             try:
                 if item.action == "register":
-                    result = DomainLifecycleService.create_domain_registration(
-                        customer=order.customer,
-                        domain_name=item.domain_name,
-                        years=item.years,
-                        whois_privacy=item.whois_privacy,
-                        auto_renew=item.auto_renew,
-                        order_item=item,
-                    )
-
-                    if result.is_ok():
-                        domain = result.unwrap()
-                        item.domain = domain
-                        item.save(update_fields=["domain"])
-                        processed_domains.append(domain)
-                        logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
-                    else:
-                        logger.error(
-                            "🔥 [Domain] Failed to process registration %s: %s",
-                            item.domain_name,
-                            result.unwrap_err(),
-                        )
-                        # A pending-accepted/pending-unknown outcome leaves a pending
-                        # Domain row (definite rejections delete it) — link it so the
-                        # purchased item keeps its provenance once the reconciliation
-                        # worker activates the domain.
-                        pending_domain = Domain.objects.filter(
-                            name=canonicalize_domain_name(item.domain_name),
-                            customer=order.customer,
-                        ).first()
-                        if pending_domain is not None and item.domain_id is None:
-                            item.domain = pending_domain
-                            item.save(update_fields=["domain"])
+                    registered = DomainOrderService._process_registration(order, item)
+                    if registered is not None:
+                        processed_domains.append(registered)
 
                 elif item.action == "renew":
                     # #430: create_domain_order_item links the Domain only when the ordering customer
@@ -1541,13 +1601,10 @@ class DomainOrderService:
                         )
 
                 elif item.action == "transfer":
-                    # #430: inbound transfer creates a new Domain via initiate_transfer, which needs a
-                    # resolved registrar — there is no registrar on the order item yet, so this path is
-                    # intentionally NOT auto-processed here. Log explicitly instead of dropping it
-                    # silently; wiring registrar selection for transfers is tracked separately.
+                    # #430: an inbound transfer needs the domain's transfer code, which the order does
+                    # not collect yet, so its paid line stays pending. Log it rather than dropping it.
                     logger.warning(
-                        "⚠️ [Domain] Transfer item %s is not auto-processed (registrar selection for "
-                        "order-driven transfers is not wired yet) — handle via initiate_transfer",
+                        "⚠️ [Domain] Transfer item %s is not auto-processed: it waits for its transfer code",
                         item.domain_name,
                     )
 

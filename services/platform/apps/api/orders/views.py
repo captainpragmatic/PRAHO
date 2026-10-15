@@ -41,7 +41,7 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
 )
-from apps.common.types import CurrencyCode, Err, Ok
+from apps.common.types import CurrencyCode, Err, Ok, Result
 from apps.customers.models import Customer
 from apps.orders.checkout_consents import ORDERING_UNAVAILABLE, accepted_checkout_consents, checkout_requirements
 from apps.orders.models import Order
@@ -208,13 +208,45 @@ def product_detail(request: Request, slug: str) -> Response:
     return Response({**serializer.data, **policy.as_dict()})
 
 
+def _domain_line(product: Product, item: dict[str, Any], currency_code: str) -> Result[dict[str, Any], str]:
+    """A domain line priced from the TLD price list: the one quote cart, preflight and order use.
+
+    The generic domain product has no ProductPrice. The line is a one-off purchase of the
+    registration period (renewals follow the domain's own auto-renew, not a subscription).
+    """
+    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007: cross-app at call time
+
+    config = item.get("config")
+    mode = str(config.get("domain_mode") or "register") if isinstance(config, dict) else "register"
+    quoted = DomainOrderService.quote_order_line(str(item.get("domain_name") or ""), mode, currency_code)
+    if quoted.is_err():
+        return Err(quoted.unwrap_err())
+    quote = quoted.unwrap()
+    return Ok(
+        {
+            "product_id": product.id,
+            "product_slug": product.slug,
+            "product_type": product.product_type,
+            "product_name": product.name,
+            "description": f"{product.name}: {quote.domain_name}",
+            "billing_period": "once",
+            "quantity": 1,
+            "unit_price_cents": quote.total_cents,
+            "setup_cents": 0,
+            "meta": {"domain_mode": quote.action},
+            "domain_name": quote.domain_name,
+            "service_id": None,
+        }
+    )
+
+
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 @transaction.atomic
-def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business logic
+def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -295,6 +327,16 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
             if not product:
                 identifier = product_id or product_slug or "unknown"
                 warnings.append({"type": "product_not_found", "message": f"Product not found: {identifier}"})
+                continue
+
+            if product.product_type == "domain":
+                line = _domain_line(product, item_data, currency_code)
+                if line.is_err():
+                    warnings.append(
+                        {"type": "domain_unavailable", "product_name": product.name, "message": line.unwrap_err()}
+                    )
+                else:
+                    order_items.append(line.unwrap())
                 continue
 
             # Get current pricing (server-authoritative)
@@ -456,7 +498,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 @transaction.atomic
-def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -533,6 +575,17 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 logger.info(f"🔎 [API] Found product: {product.name} (id={product.id})")
+
+                if product.product_type == "domain":
+                    line = _domain_line(product, cart_item, currency.code)
+                    if line.is_err():
+                        return Response(
+                            {"success": False, "errors": [line.unwrap_err()], "warnings": []},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    preview_items.append(line.unwrap())
+                    subtotal_cents += line.unwrap()["unit_price_cents"]
+                    continue
 
                 price = product.get_price_for_period(currency.code, cart_item["billing_period"])
                 logger.info(f"🔎 [API] Price lookup: {price} for {currency.code}/{cart_item['billing_period']}")
@@ -836,6 +889,15 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     {"error": f"Product not found: {identifier}", "code": "INVALID_ORDER"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            if product.product_type == "domain":
+                line = _domain_line(product, item_data, currency_code)
+                if line.is_err():
+                    return Response(
+                        {"error": line.unwrap_err(), "code": "INVALID_ORDER"}, status=status.HTTP_400_BAD_REQUEST
+                    )
+                order_items.append(line.unwrap())
+                continue
 
             billing_period = item_data["billing_period"]
             price = product.get_price_for_period(currency_code, billing_period)
