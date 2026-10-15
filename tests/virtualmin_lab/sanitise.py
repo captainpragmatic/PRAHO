@@ -81,8 +81,9 @@ def sanitise_text(text: str, *, dates: bool = True) -> str:
         cleaned = _DATE.sub("<date>", cleaned)
     cleaned = _IPV6.sub("<ip>", cleaned)
     cleaned = _IPV4.sub("<ip>", cleaned)
-    cleaned = _LONG_HEX.sub("<hex>", cleaned)
+    # Digits first: a domain id is 14 or 18 digits depending on the run, and 16 digits are also valid hex.
     cleaned = _LONG_NUMBER.sub("<id>", cleaned)
+    cleaned = _LONG_HEX.sub("<hex>", cleaned)
     cleaned = _OWNER_ID.sub(r"\1<id>", cleaned)
     cleaned = _SIZE.sub("<size>", cleaned)
     cleaned = _DURATION.sub("<n>", cleaned)
