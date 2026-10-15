@@ -237,8 +237,12 @@ class Lab:
 
     def exec(self, *argv: str) -> str:
         """Run a command on the lab node and return stdout; a failure is a failed test."""
+        return self.exec_on(self.node.container, *argv)
+
+    def exec_on(self, container: str, *argv: str) -> str:
+        """Run a command in any lab container (the other node, for a transfer) and return stdout."""
         completed = subprocess.run(  # noqa: S603  # Fixed argv against a local lab container
-            ["docker", "exec", self.node.container, *argv],  # noqa: S607  # docker from PATH, dev-only
+            ["docker", "exec", container, *argv],  # noqa: S607  # docker from PATH, dev-only
             capture_output=True,
             text=True,
             timeout=300,
