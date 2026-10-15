@@ -800,8 +800,14 @@ else
 	@$(MAKE) audit-a11y
 	@echo "📋 Phase 13: Dark-mode audit (blockers)"
 	@$(MAKE) audit-dark-mode
+	@echo "📋 Phase 14: Runtime media tracking check"
+	@$(MAKE) lint-runtime-media
 	@echo "🎉 All services linting complete!"
 endif
+
+.PHONY: lint-runtime-media
+lint-runtime-media:
+	@$(PYTHON_SHARED) scripts/lint_runtime_media.py
 
 lint-fix:
 ifdef FILE

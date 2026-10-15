@@ -105,6 +105,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: runtime-media-check
+        name: "Security: No Tracked Runtime Media"
+        entry: scripts/run_project_python
+        args: [scripts/lint_runtime_media.py]
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # Check portal doesn't import platform code
       - id: portal-isolation-check
         name: "Security: Portal Isolation Check"

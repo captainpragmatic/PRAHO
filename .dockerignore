@@ -30,6 +30,11 @@ htmlcov
 # Database
 db.sqlite3
 
+# Runtime files never belong in an image, even when present in the local checkout.
+media/
+services/platform/media/
+services/portal/media/
+
 # Build artifacts
 logs
 backups
