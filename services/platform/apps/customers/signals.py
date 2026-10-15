@@ -759,20 +759,20 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
 
 
 def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
-    """Handle GDPR consent changes.
+    """Record a change to whether the customer was given the privacy notice.
 
-    GDPR Art. 7(3) requires consent withdrawal to always succeed. Audit call
-    is wrapped in a savepoint so a DatabaseError during log_compliance_event
-    cannot leave the connection in InFailedSqlTransaction state and force
-    rollback of the outer transaction (the consent change itself).
+    data_processing_consent records the notice, not a consent: the processing performs the
+    customer's contract (ADR-0058). The audit call is wrapped in a savepoint so a DatabaseError
+    during log_compliance_event cannot leave the connection in InFailedSqlTransaction state and
+    force rollback of the outer transaction (the change itself).
     """
     try:
-        consent_action = "granted" if new_consent else "withdrawn"
+        consent_action = "recorded" if new_consent else "cleared"
 
         compliance_request = ComplianceEventRequest(
             compliance_type="gdpr_consent",
             reference_id=f"customer_{customer.id}",
-            description=f"GDPR data processing consent {consent_action}",
+            description=f"Privacy notice {consent_action}",
             status="success",
             evidence={
                 "customer_id": str(customer.id),
@@ -784,13 +784,12 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
         with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
             AuditService.log_compliance_event(compliance_request)
 
-        # Update consent timestamp (must run regardless of audit outcome —
-        # GDPR Art. 7(1) requires the controller to record when consent was given).
+        # Date the notice (must run regardless of audit outcome: it is the record of when it was given).
         if new_consent and not customer.gdpr_consent_date:
             Customer.objects.filter(pk=customer.pk).update(gdpr_consent_date=timezone.now())
 
         with best_effort_atomic(logger=logger, scope="Customers", message="GDPR consent display logging failed"):
-            logger.info(f"🛡️ [Customer] GDPR consent {consent_action}: {customer.get_display_name()}")
+            logger.info(f"🛡️ [Customer] Privacy notice {consent_action}: {customer.get_display_name()}")
 
     except Exception:
         raise

@@ -683,8 +683,8 @@ class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
     # GDPR Compliance (matching registration)
     data_processing_consent = forms.BooleanField(
         required=True,
-        label=_("Data Processing Consent"),
-        help_text=_("Customer has given consent for personal data processing according to GDPR"),
+        label=_("Privacy notice given"),
+        help_text=_("The customer has received the privacy policy, which describes how their data is processed"),
         widget=forms.CheckboxInput(
             attrs={"class": "rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500"}
         ),
@@ -1141,8 +1141,8 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     # GDPR Compliance
     data_processing_consent = forms.BooleanField(
         required=False,  # Don't enforce here, as it's already set
-        label=_("Data Processing Consent"),
-        help_text=_("Customer has given consent for personal data processing according to GDPR"),
+        label=_("Privacy notice given"),
+        help_text=_("The customer has received the privacy policy, which describes how their data is processed"),
         widget=forms.CheckboxInput(
             attrs={"class": "rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500"}
         ),

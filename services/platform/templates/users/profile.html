@@ -192,7 +192,7 @@
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
 
           <div class="space-y-3">
-            <!-- Data Processing Consent -->
+            <!-- Data Processing: needed for the service, described by the privacy policy rather than consented to -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
                 <span class="text-green-400 mr-2">{% icon "lock" %}</span>
@@ -201,11 +201,7 @@
                   <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
                 </div>
               </div>
-              {% if user.gdpr_consent_date %}
-                {% trans "Given" as bt7 %}{% badge bt7 variant="success" icon="check" %}
-              {% else %}
-                {% trans "Not Given" as bt8 %}{% badge bt8 variant="danger" icon="x" %}
-              {% endif %}
+              <a href="{% url 'privacy_policy' %}" class="text-sm text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
             </div>
 
             <!-- Marketing Consent -->
@@ -224,12 +220,6 @@
               {% endif %}
             </div>
           </div>
-
-          {% if user.gdpr_consent_date %}
-          <div class="text-xs text-slate-400">
-            {% trans 'Last updated:' %} {% localised_date user.gdpr_consent_date "date" %}
-          </div>
-          {% endif %}
         </div>
 
         <!-- GDPR Actions -->

@@ -111,12 +111,8 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
         :5
     ]
 
-    # Calculate current consent status
-    consent_status = {
-        "data_processing": bool(user.gdpr_consent_date),
-        "marketing": user.accepts_marketing,
-        "last_updated": user.gdpr_consent_date.isoformat() if user.gdpr_consent_date else None,
-    }
+    # Marketing is the one consent: data processing performs the account's contract (ADR-0058).
+    consent_status = {"marketing": user.accepts_marketing}
 
     context = {
         "consent_history": consent_history,
@@ -428,16 +424,6 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
         match result:
             case Ok(success_msg):
                 messages.success(request, _("Your consent has been withdrawn for: {}").format(success_msg))
-
-                # If data processing consent withdrawn, warn about anonymization
-                if "data_processing" in consent_types:
-                    messages.warning(
-                        request,
-                        _(
-                            "Data processing consent withdrawal will trigger account anonymization. "
-                            "This cannot be undone."
-                        ),
-                    )
             case Err(error_msg):
                 messages.error(request, _("Failed to withdraw consent: {}").format(error_msg))
 
@@ -459,16 +445,13 @@ def update_consent(request: HttpRequest) -> HttpResponse:
     # Add debugging info - sanitized to prevent sensitive data leakage (OWASP A09:2021)
     logger.info(f"🔍 [GDPR Consent] Update request from {user.email}")
     # Only log safe consent-related keys, not full POST data
-    safe_consent_keys = ["accepts_marketing", "gdpr_consent"]
+    safe_consent_keys = ["accepts_marketing"]
     safe_post_data = {k: request.POST.get(k) for k in safe_consent_keys if k in request.POST}
     logger.info(f"🔍 [GDPR Consent] POST data (sanitized): {safe_post_data}")
 
     try:
         # Get current values for comparison
-        old_values = {
-            "accepts_marketing": user.accepts_marketing,
-            "gdpr_consent_date": user.gdpr_consent_date.isoformat() if user.gdpr_consent_date else None,
-        }
+        old_values = {"accepts_marketing": user.accepts_marketing}
 
         logger.info(f"🔍 [GDPR Consent] Current values: {old_values}")
 
@@ -489,27 +472,13 @@ def update_consent(request: HttpRequest) -> HttpResponse:
             changes_made.append(f"marketing_consent_{'granted' if marketing_consent else 'withdrawn'}")
             logger.info(f"✅ [GDPR Consent] Marketing consent changed: {user.accepts_marketing} -> {marketing_consent}")
 
-        # Handle data processing consent (only if granting, withdrawal is handled differently)
-        data_processing_consent = request.POST.get("gdpr_consent") == "on"
-        logger.info(
-            f"🔍 [GDPR Consent] Data processing consent checkbox: {request.POST.get('gdpr_consent')} -> {data_processing_consent}"
-        )
-
-        if data_processing_consent and not user.gdpr_consent_date:
-            user.gdpr_consent_date = timezone.now()
-            changes_made.append("gdpr_consent_granted")
-            logger.info("✅ [GDPR Consent] Data processing consent granted")
-
         logger.info(f"🔍 [GDPR Consent] Changes to make: {changes_made}")
 
         if changes_made:
-            user.save(update_fields=["accepts_marketing", "gdpr_consent_date"])
+            user.save(update_fields=["accepts_marketing"])
             logger.info(f"✅ [GDPR Consent] User saved with changes: {changes_made}")
 
-            new_values = {
-                "accepts_marketing": user.accepts_marketing,
-                "gdpr_consent_date": user.gdpr_consent_date.isoformat() if user.gdpr_consent_date else None,
-            }
+            new_values = {"accepts_marketing": user.accepts_marketing}
 
             # Log consent update
             compliance_request = ComplianceEventRequest(

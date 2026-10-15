@@ -13,23 +13,16 @@
   {% section_card title=sc_ccs_title icon="chart" css_class="mb-6" %}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- Data Processing Consent -->
+        <!-- Data Processing: needed for the service, described by the privacy policy rather than consented to -->
         <div class="p-4 bg-slate-700 rounded-lg">
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center">
               <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
               <h4 class="text-sm font-medium text-white">{% trans 'Data Processing' %}</h4>
             </div>
-            {% if profile.gdpr_consent_date %}
-              {% badge "Active" variant="success" icon="check" size="xs" rounded="full" %}
-            {% else %}
-              {% badge "Inactive" variant="danger" icon="x" size="xs" rounded="full" %}
-            {% endif %}
+            <a href="{% url 'privacy_policy' %}" class="text-sm text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
           </div>
           <p class="text-xs text-slate-400 mb-2">{% trans 'Required for account operation and service delivery' %}</p>
-          {% if profile.gdpr_consent_date %}
-            <p class="text-xs text-slate-500">{% trans 'Granted on:' %} {% localised_date profile.gdpr_consent_date "date" %}</p>
-          {% endif %}
         </div>
 
         <!-- Marketing Consent -->

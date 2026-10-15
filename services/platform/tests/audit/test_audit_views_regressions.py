@@ -107,21 +107,20 @@ class GDPRDashboardTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
 
     @patch("apps.audit.views.gdpr_consent_service")
-    def test_gdpr_dashboard_with_consent_date(self, mock_consent):
+    def test_gdpr_dashboard_offers_no_data_processing_consent(self, mock_consent):
+        """Data processing performs the account's contract, so the dashboard offers marketing
+        as the only consent to grant or withdraw, and no shortcut to anonymize (ADR-0058)."""
         mock_consent.get_consent_history.return_value = []
         self.regular_user.gdpr_consent_date = timezone.now()
         self.regular_user.save(update_fields=["gdpr_consent_date"])
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.get(reverse("audit:gdpr_dashboard"))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp.context["consent_status"],
-            {
-                "data_processing": True,
-                "marketing": False,
-                "last_updated": self.regular_user.gdpr_consent_date.isoformat(),
-            },
-        )
+        self.assertEqual(resp.context["consent_status"], {"marketing": False})
+        html = resp.content.decode()
+        self.assertNotIn('value="data_processing"', html)
+        self.assertNotIn('name="gdpr_consent"', html)
+        self.assertNotIn("Not Given", html)
 
 
 # =============================================================================
@@ -548,16 +547,16 @@ class WithdrawConsentTests(AuditViewsBaseTestCase):
         )
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
-    @patch("apps.audit.views.gdpr_consent_service")
-    def test_withdraw_data_processing_warning(self, mock_service):
-        mock_service.withdraw_consent.return_value = Ok("data_processing")
-
+    def test_withdrawing_data_processing_is_refused_and_keeps_the_account(self):
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.post(
             reverse("audit:withdraw_consent"),
             {"consent_types": ["data_processing"]},
         )
-        self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
+        self.assertRedirects(resp, reverse("audit:gdpr_dashboard"), fetch_redirect_response=False)
+        self.regular_user.refresh_from_db()
+        self.assertTrue(self.regular_user.is_active)
+        self.assertEqual(self.regular_user.email, "user@example.com")
 
     @patch("apps.audit.views.gdpr_consent_service")
     def test_withdraw_error(self, mock_service):
@@ -604,7 +603,8 @@ class UpdateConsentTests(AuditViewsBaseTestCase):
         self.assertTrue(self.regular_user.accepts_marketing)
 
     @patch("apps.audit.views.AuditService")
-    def test_update_gdpr_consent(self, mock_audit):
+    def test_posting_gdpr_consent_records_nothing(self, mock_audit):
+        """There is no data processing consent to grant; the registration notice records its date."""
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.post(
             reverse("audit:update_consent"),
@@ -612,7 +612,7 @@ class UpdateConsentTests(AuditViewsBaseTestCase):
         )
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
         self.regular_user.refresh_from_db()
-        self.assertIsNotNone(self.regular_user.gdpr_consent_date)
+        self.assertIsNone(self.regular_user.gdpr_consent_date)
 
     def test_no_changes(self):
         self.client.login(email="user@example.com", password="testpass123")
@@ -667,17 +667,19 @@ class UpdateConsentTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
 
     @patch("apps.audit.views.AuditService")
-    def test_update_consent_gdpr_already_granted(self, mock_audit):
-        """When gdpr_consent_date already set, sending gdpr_consent=on should not re-grant."""
-        self.regular_user.gdpr_consent_date = timezone.now()
+    def test_update_consent_keeps_the_notice_date(self, mock_audit):
+        """Posting gdpr_consent neither re-dates nor clears the registration notice's date."""
+        acknowledged = timezone.now() - timedelta(days=30)
+        self.regular_user.gdpr_consent_date = acknowledged
         self.regular_user.save(update_fields=["gdpr_consent_date"])
         self.client.login(email="user@example.com", password="testpass123")
         resp = self.client.post(
             reverse("audit:update_consent"),
             {"gdpr_consent": "on"},
         )
-        # No changes since gdpr already granted, marketing didn't change
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
+        self.regular_user.refresh_from_db()
+        self.assertEqual(self.regular_user.gdpr_consent_date, acknowledged)
 
 
 # =============================================================================

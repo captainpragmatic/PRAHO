@@ -450,10 +450,6 @@ msgstr "Selectați cel puțin un tip de consimțământ de retras."
 msgid "Your consent has been withdrawn for: {}"
 msgstr "Consimțământul dvs. a fost retras pentru: {}"
 
-#: apps/audit/views.py:423
-msgid "Data processing consent withdrawal will trigger account anonymization. This cannot be undone."
-msgstr "Retragerea consimțământului de prelucrare a datelor va declanșa anonimizarea contului. Aceasta nu poate fi anulată."
-
 #: apps/audit/views.py:428
 #, python-brace-format
 msgid "Failed to withdraw consent: {}"
@@ -5475,14 +5471,6 @@ msgstr "Credit maxim permis"
 #: templates/customers/detail.html:719
 msgid "Preferred Currency"
 msgstr "Monedă Preferată"
-
-#: apps/customers/forms.py:697 apps/customers/forms.py:1156
-msgid "Data Processing Consent"
-msgstr "Consimțământ Procesare Date"
-
-#: apps/customers/forms.py:698 apps/customers/forms.py:1157
-msgid "Customer has given consent for personal data processing according to GDPR"
-msgstr "Clientul a dat consimțământul pentru prelucrarea datelor cu caracter personal conform GDPR"
 
 #: apps/customers/forms.py:705 apps/customers/forms.py:1164
 msgid "Marketing Communications Consent"
@@ -16117,10 +16105,6 @@ msgstr "Necesar pentru serviciu"
 msgid "Given"
 msgstr "Acordat"
 
-#: templates/audit/gdpr_dashboard.html:45 templates/users/profile.html:207
-msgid "Not Given"
-msgstr "Neacordat"
-
 #: templates/audit/gdpr_dashboard.html:53
 #: templates/audit/gdpr_dashboard.html:306
 #: templates/audit/gdpr_dashboard.html:394 templates/users/profile.html:216
@@ -16360,10 +16344,6 @@ msgstr "Anulează"
 msgid "Withdraw Consent"
 msgstr "Retrage Consimțământul"
 
-#: templates/audit/gdpr_dashboard.html:311
-msgid "will anonymize account"
-msgstr "va anonimiza contul"
-
 #: templates/audit/gdpr_dashboard.html:327
 msgid "Request Account Deletion"
 msgstr "Solicitați Ștergerea Contului"
@@ -16403,14 +16383,6 @@ msgstr "Actualizați setările de confidențialitate"
 #: templates/audit/gdpr_dashboard.html:369
 msgid "Manage your consent preferences below:"
 msgstr "Gestionați preferințele de consimțământ mai jos:"
-
-#: templates/audit/gdpr_dashboard.html:380
-msgid "Already given. Use \"Withdraw Consent\" for changes."
-msgstr "Deja acordat. Utilizați \"Retrage Consimțământul\" pentru modificări."
-
-#: templates/audit/gdpr_dashboard.html:382
-msgid "Required for account operation and service delivery."
-msgstr "Necesar pentru funcționarea contului și prestarea serviciilor."
 
 #: templates/audit/gdpr_dashboard.html:396
 msgid "Receive newsletters, product updates, and promotional content."
@@ -26951,3 +26923,9 @@ msgstr "Prețurile includ TVA"
 
 msgid "VAT follows the customer's country and VAT status. Prices are stored in cents for precision."
 msgstr "TVA depinde de țara clientului și de statutul său de plătitor de TVA. Prețurile sunt stocate în cenți pentru precizie."
+
+msgid "Privacy notice given"
+msgstr "Politica de confidențialitate a fost comunicată"
+
+msgid "The customer has received the privacy policy, which describes how their data is processed"
+msgstr "Clientul a primit politica de confidențialitate, care descrie cum îi sunt prelucrate datele"

@@ -1829,7 +1829,9 @@ class GDPRConsentService:
         """Withdraw specific types of consent"""
 
         try:
-            valid_types = ["data_processing", "marketing", "analytics", "cookies"]
+            # Not "data_processing": it performs the account's contract and is no consent (ADR-0058).
+            # Erasing the account is a deletion request (GDPRDeletionService).
+            valid_types = ["marketing", "analytics", "cookies"]
             invalid_types = [ct for ct in consent_types if ct not in valid_types]
             if invalid_types:
                 return Err(f"Invalid consent types: {invalid_types}")
@@ -1844,32 +1846,6 @@ class GDPRConsentService:
                 # (#226). Propagate to every customer the user belongs to.
                 cls._propagate_marketing_consent(user, consent=False)
                 changes_made.append("marketing_communications")
-
-            # Data processing consent withdrawal triggers anonymization
-            if "data_processing" in consent_types:
-                # This is a full GDPR deletion request
-                deletion_result = GDPRDeletionService.create_deletion_request(
-                    user, "anonymize", request_ip, "Data processing consent withdrawn"
-                )
-                if deletion_result.is_err():
-                    error_msg = deletion_result.error if hasattr(deletion_result, "error") else str(deletion_result)
-                    # Err without raising would COMMIT the marketing propagation above
-                    # while the user flag never persists — roll the whole withdrawal back.
-                    transaction.set_rollback(True)
-                    return Err(f"Failed to process consent withdrawal: {error_msg}")
-
-                # Immediately process the deletion request
-                # Type-safe extraction after confirming it's Ok
-                deletion_request = deletion_result.unwrap()
-                process_result = GDPRDeletionService.process_deletion_request(deletion_request)
-                if process_result.is_err():
-                    error_msg = process_result.error if hasattr(process_result, "error") else str(process_result)
-                    # Err without raising would COMMIT the marketing propagation above
-                    # while the user flag never persists — roll the whole withdrawal back.
-                    transaction.set_rollback(True)
-                    return Err(f"Failed to anonymize user data: {error_msg}")
-
-                changes_made.append("data_processing")
 
             if changes_made:
                 user.save()

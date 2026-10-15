@@ -5875,10 +5875,6 @@ msgstr "Prelucrarea datelor"
 msgid "Required for account operation and service delivery"
 msgstr "Necesar pentru operarea contului și furnizarea serviciilor"
 
-#: services/portal/templates/users/consent_history.html:31
-msgid "Granted on:"
-msgstr "Acordat la:"
-
 #: services/portal/templates/users/consent_history.html:40
 #: services/portal/templates/users/privacy_dashboard.html:42
 msgid "Marketing Communications"
