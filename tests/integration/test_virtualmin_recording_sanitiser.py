@@ -56,6 +56,11 @@ class TestSanitiseText:
     def test_secrets_and_volatile_values_are_stripped(self, raw: str, secret: str) -> None:
         assert secret not in sanitise_text(raw)
 
+    def test_the_feature_counts_of_info_do_not_depend_on_what_ran_before(self) -> None:
+        few = "cpu: x\nfcount: \n    dir: 1\n    web: 1\nhost: \n    hostname: vm\n"
+        many = "cpu: x\nfcount: \n    aliases: 0\n    dbs: 1\n    dir: 1\n    users: 2\n    web: 1\nhost: \n    hostname: vm\n"
+        assert sanitise_text(few) == sanitise_text(many) == "cpu: x\nfcount: <counts>\nhost: \n    hostname: vm\n"
+
     def test_the_text_the_gateway_classifies_on_is_untouched(self) -> None:
         for text in (
             "Virtual server nope.praho.test does not exist",

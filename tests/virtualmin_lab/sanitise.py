@@ -51,6 +51,9 @@ _OWNER_ID = re.compile(r"(?i)\b((?:user|group|uid|gid)(?: ID)?(?: is)?[: ]+)\d+"
 _SIZE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s?(?:bytes?|[KMGT]i?B)\b")
 _DURATION = re.compile(r"(?i)\b\d+(?:\.\d+)?(?= ?(?:seconds?|secs?|milliseconds?|ms)\b)")
 # Numbers on their own line (`info`, `get-template`): counters and gauges that move between runs.
+# `info` lists a feature only once the node has counted something for it (aliases, dbs, users appear after the
+# first mailbox user or database), so the block's keys depend on what ran before.
+_FEATURE_COUNTS = re.compile(r"(?m)^fcount:[ \t]*\n(?:[ \t]+\S.*\n?)+")
 _BARE_NUMBER_LINE = re.compile(r"(?m)^(\s*(?:\* )?)-?\d+(?:\.\d+)?$")
 _LABELLED_NUMBER_LINE = re.compile(r"(?m)^(\s*[A-Za-z_][A-Za-z_ ]*:)[ \t]*-?\d+(?:\.\d+)?$")
 
@@ -84,6 +87,7 @@ def sanitise_text(text: str, *, dates: bool = True) -> str:
     cleaned = _SIZE.sub("<size>", cleaned)
     cleaned = _DURATION.sub("<n>", cleaned)
     if "\n" in cleaned:
+        cleaned = _FEATURE_COUNTS.sub("fcount: <counts>\n", cleaned)
         cleaned = _BARE_NUMBER_LINE.sub(r"\1<n>", cleaned)
         cleaned = _LABELLED_NUMBER_LINE.sub(r"\1 <n>", cleaned)
     return cleaned
