@@ -610,39 +610,56 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                 )
 
 
+def release_pair_on_node(job: VirtualminProvisioningJob) -> Result[None, str]:
+    """Ask the node to release a pair restore: under the per-domain lock, write its cancel marker and take the 503 barrier down.
+
+    Idempotent. The domain is left disabled. A job that never reached the node needs no release.
+    """
+    if job.account_id is None or job.account is None:
+        return Err("The job has no account")
+    parameters = job.parameters or {}
+    domain_id = str(parameters.get("virtualmin_domain_id", ""))
+    token = str(parameters.get("pair_token", ""))
+    if not (domain_id and token and parameters.get("pair_node_step")):
+        return Ok(None)
+    released = run_pair_step(
+        job.server,
+        {
+            "pair_action": "release",
+            "chain_domain": job.account.domain,
+            "chain_domain_id": domain_id,
+            "chain_token": token,
+            "pair_lock_wait_seconds": 30,
+        },
+        token=token,
+        domain_id=domain_id,
+        timeout_seconds=PAIR_NODE_MARGIN_SECONDS,
+    )
+    if released.is_err() or released.unwrap().outcome != "released":
+        detail = released.unwrap_err() if released.is_err() else released.unwrap().reason
+        return Err(f"Could not release the pair restore on the node ({detail})")
+    return Ok(None)
+
+
 def resolve_pair_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: str) -> Result[bool, str]:
     """Operator resolution of a pair restore parked in attention.
 
     The node is asked to release the pair: under the per-domain lock it writes the job's cancel
     marker (a late invocation can never start), takes the 503 section down and leaves the
-    domain disabled. Only when that is confirmed is the job failed and the account released; the
-    account stays suspended in PRAHO's view, so reconcile enables the domain again (ADR-0051)
-    when its service is active. A job that never reached the node needs no release.
+    domain disabled. Only when that is confirmed is the job failed and the account released. When a
+    restore step had already run, the account is also HELD (see ``pair_restore_may_have_restored``):
+    reconcile enables the domain only after an explicit staff decision. Otherwise the account stays
+    suspended in PRAHO's view, so reconcile enables the domain again (ADR-0051) when its service is
+    active. A job that never reached the node needs no release.
     """
     from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415  # Circular
 
     if job.account_id is None or job.account is None:
         return Err("The job has no account")
     parameters = job.parameters or {}
-    domain_id = str(parameters.get("virtualmin_domain_id", ""))
-    token = str(parameters.get("pair_token", ""))
-    if domain_id and token and parameters.get("pair_node_step"):
-        released = run_pair_step(
-            job.server,
-            {
-                "pair_action": "release",
-                "chain_domain": job.account.domain,
-                "chain_domain_id": domain_id,
-                "chain_token": token,
-                "pair_lock_wait_seconds": 30,
-            },
-            token=token,
-            domain_id=domain_id,
-            timeout_seconds=PAIR_NODE_MARGIN_SECONDS,
-        )
-        if released.is_err() or released.unwrap().outcome != "released":
-            detail = released.unwrap_err() if released.is_err() else released.unwrap().reason
-            return Err(f"Could not release the pair restore on the node ({detail}); the account stays held")
+    released = release_pair_on_node(job)
+    if released.is_err():
+        return Err(f"{released.unwrap_err()}; the account stays held")
     with transaction.atomic():
         VirtualminAccount.objects.select_for_update().get(pk=job.account_id)
         rows = VirtualminProvisioningJob.objects.filter(
@@ -724,8 +741,16 @@ def resolve_pair_job_node_lost(job: VirtualminProvisioningJob, *, resolved_by: s
     logger.warning("⚠️ [PairRestore] Node declared lost: job=%s server=%s by=%s", job.pk, job.server_id, resolved_by)
     # If the node is still reachable (a failed health check is not proof it is gone) the archives staged
     # for the restore are removed in the background; the request never waits on a node declared lost.
-    if (job.parameters or {}).get("pair_archives") and not deployment_destroyed(server):
+    # The cancel marker and the barrier on a node that is still reachable are released first, retried until
+    # the node answers (a leftover zz-praho-maint file would keep answering 503 for the domain for good),
+    # and only then are its staged archives removed.
+    if not deployment_destroyed(server) and (job.parameters or {}).get("pair_node_step"):
         from django_q.tasks import async_task  # noqa: PLC0415
 
-        async_task("apps.provisioning.virtualmin_tasks.remove_pair_job_archives", str(job.pk))
+        async_task("apps.provisioning.virtualmin_tasks.release_lost_pair_node", str(job.pk))
+    # Reconcile now rather than at the next 15-minute sweep; an account held half-restored stays disabled.
+    if locked.service_id:
+        from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415  # Circular
+
+        reconcile_virtualmin_service_state_async(str(locked.service_id))
     return Ok(True)

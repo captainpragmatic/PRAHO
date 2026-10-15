@@ -1011,13 +1011,14 @@ def remove_chain_job_archive(job_id: str) -> dict[str, Any]:
     return {"success": not warning, "job_id": job_id, "warning": warning}
 
 
-def remove_pair_job_archives(job_id: str) -> dict[str, Any]:
-    """Remove the archives a pair restore declared lost left staged on its node (best effort, never raises)."""
+PAIR_RELEASE_RETRY_SECONDS = 900
+PAIR_RELEASE_MAX_ATTEMPTS = 96  # a day at the retry interval
+
+
+def _remove_pair_archives(job: VirtualminProvisioningJob) -> dict[str, Any]:
+    """Remove the archives a pair restore left staged on its node. The caller has released the node first."""
     from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415
 
-    job = VirtualminProvisioningJob.objects.select_related("server").filter(pk=job_id).first()
-    if job is None:
-        return {"success": False, "job_id": job_id, "error": "missing"}
     service = VirtualminBackupService(job.server)
     warnings = []
     for archive_name in (job.parameters or {}).get("pair_archives", []):
@@ -1029,7 +1030,84 @@ def remove_pair_job_archives(job_id: str) -> dict[str, Any]:
         VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
             status_message=f"{job.status_message} ({'; '.join(warnings)})".strip(), updated_at=timezone.now()
         )
-    return {"success": not warnings, "job_id": job_id, "warning": "; ".join(warnings)}
+    return {"success": not warnings, "job_id": str(job.pk), "warning": "; ".join(warnings)}
+
+
+def remove_pair_job_archives(job_id: str) -> dict[str, Any]:
+    """Remove the archives a pair restore left staged on its node, after taking the node lock (best effort, never raises).
+
+    Releasing the pair takes the per-domain lock and writes the job's cancel marker, so a restore that is
+    still running or waiting for the lock can neither lose its archives mid-run nor start afterwards.
+    When the node cannot be released the archives are left alone.
+    """
+    from .virtualmin_pair_restore import release_pair_on_node  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.select_related("server", "account").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    released = release_pair_on_node(job)
+    if released.is_err():
+        return {"success": False, "job_id": job_id, "error": released.unwrap_err()}
+    return _remove_pair_archives(job)
+
+
+def release_lost_pair_node(job_id: str, attempt: int = 1) -> dict[str, Any]:
+    """Release a pair restore declared lost once its node answers: lock, cancel marker, barrier down, then clean up.
+
+    "Node lost" only fails the job and holds the account in PRAHO; a node that was merely marked failed
+    may still carry the maintenance section (answering 503 for the domain) and no cancel marker. This
+    retries until the node answers, then removes the staged archives and queues a reconcile. If it never
+    answers within a day an audit alert tells staff the node needs a manual look.
+    """
+    from django_q.models import Schedule  # noqa: PLC0415
+    from django_q.tasks import schedule  # noqa: PLC0415
+
+    from .virtualmin_pair_restore import release_pair_on_node  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.select_related("server", "account").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    released = release_pair_on_node(job)
+    if released.is_err():
+        error = released.unwrap_err()
+        if attempt >= PAIR_RELEASE_MAX_ATTEMPTS:
+            logger.error(
+                "🔥 [PairRestore] Lost node never released after %s attempts: job=%s %s", attempt, job.pk, error
+            )
+            if job.account is not None:
+                from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
+
+                AuditService.log_event(
+                    AuditEventData(
+                        event_type="virtualmin_pair_release_abandoned",
+                        content_object=job.account,
+                        description=f"The maintenance section of {job.account.domain} could not be released on its node: {error}",
+                    ),
+                    AuditContext(
+                        actor_type="system",
+                        metadata={
+                            "source_app": "provisioning",
+                            "severity": "high",
+                            "requires_review": True,
+                            "job_id": str(job.pk),
+                        },
+                    ),
+                )
+            return {"success": False, "job_id": job_id, "error": error, "abandoned": True}
+        schedule(
+            "apps.provisioning.virtualmin_tasks.release_lost_pair_node",
+            job_id,
+            attempt + 1,
+            name=f"release-lost-pair-{job_id}-{attempt + 1}",
+            schedule_type=Schedule.ONCE,
+            next_run=timezone.now() + timedelta(seconds=PAIR_RELEASE_RETRY_SECONDS),
+        )
+        logger.warning("⚠️ [PairRestore] Lost node not released yet (attempt %s): job=%s %s", attempt, job.pk, error)
+        return {"success": False, "job_id": job_id, "error": error, "retry": attempt + 1}
+    outcome = _remove_pair_archives(job)
+    if job.account is not None and job.account.service_id:
+        reconcile_virtualmin_service_state_async(str(job.account.service_id))
+    return {**outcome, "released": True}
 
 
 def run_virtualmin_backup(job_id: str) -> dict[str, Any]:

@@ -15,6 +15,7 @@ from unittest.mock import patch
 from django.urls import reverse
 
 from apps.audit.models import AuditEvent
+from apps.provisioning import virtualmin_pair_restore as pair
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
 from apps.provisioning.virtualmin_migration_models import account_has_active_operation
@@ -23,6 +24,7 @@ from apps.users.models import User
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
 from tests.provisioning.test_virtualmin_chain_interruption import DOMAIN_ID
 from tests.provisioning.test_virtualmin_chain_state import ChainFixtures
+from tests.provisioning.test_virtualmin_pair_restore import node_result
 
 ARCHIVES = ["virtualmin_backup_" + "a" * 32 + ".tar.gz", "virtualmin_backup_" + "b" * 32 + ".tar.gz"]
 
@@ -120,13 +122,13 @@ class PairNodeLostTests(ChainFixtures, ExclusionCase):
         self.assertIn("datacentre fire", event.new_values["status_message"])
         self.assertIn("Node lost", event.new_values["status_message"])
 
-    def test_staged_archives_are_cleaned_in_the_background_unless_the_deployment_is_destroyed(self) -> None:
+    def test_the_node_is_released_in_the_background_unless_the_deployment_is_destroyed(self) -> None:
         VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
         with patch("django_q.tasks.async_task") as queued:
             self.client.post(self.url)
         self.assertEqual(
             [call.args for call in queued.call_args_list],
-            [("apps.provisioning.virtualmin_tasks.remove_pair_job_archives", str(self.job.pk))],
+            [("apps.provisioning.virtualmin_tasks.release_lost_pair_node", str(self.job.pk))],
         )
         VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="attention")
         self.deployment("destroyed")
@@ -139,15 +141,21 @@ class PairNodeLostTests(ChainFixtures, ExclusionCase):
 
         VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="failed")
         removed: list[str] = []
-        with patch.object(
-            VirtualminBackupService,
-            "remove_staged_archive",
-            autospec=True,
-            side_effect=lambda service, name: removed.append(name) or Ok(None),
+        with (
+            patch.object(pair, "run_pair_step", return_value=node_result("released", "barrier_removed", ran=False, checkpoints=())),
+            patch.object(
+                VirtualminBackupService,
+                "remove_staged_archive",
+                autospec=True,
+                side_effect=lambda service, name: removed.append(name) or Ok(None),
+            ),
         ):
             self.assertTrue(virtualmin_tasks.remove_pair_job_archives(str(self.job.pk))["success"])
         self.assertEqual(removed, ARCHIVES)
-        with patch.object(VirtualminBackupService, "remove_staged_archive", return_value=Err("unreachable")):
+        with (
+            patch.object(pair, "run_pair_step", return_value=node_result("released", "barrier_removed", ran=False, checkpoints=())),
+            patch.object(VirtualminBackupService, "remove_staged_archive", return_value=Err("unreachable")),
+        ):
             outcome = virtualmin_tasks.remove_pair_job_archives(str(self.job.pk))
         self.assertFalse(outcome["success"])
         self.job.refresh_from_db()
@@ -166,3 +174,129 @@ class PairNodeLostTests(ChainFixtures, ExclusionCase):
         VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
         after = self.client.get(self.page).content.decode()
         self.assertIn(self.url, after)
+
+
+class LostNodeReleaseTests(ChainFixtures, ExclusionCase):
+    """A node declared lost that is still reachable is released before anything else touches its staging."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.account = self._account()
+        self.staff = User.objects.create_user(
+            email="pair-lost-release@example.com", password="pair-lost-test-password", staff_role="admin"
+        )
+        self.client.force_login(self.staff)
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(status="suspended", chain_epoch=3)
+        self.job = VirtualminProvisioningJob.objects.create(
+            operation="restore_domain",
+            account=self.account,
+            server=self.server,
+            status="attention",
+            execution_token=uuid.uuid4(),
+            parameters={
+                "restore_mode": "pair",
+                "pair_token": str(uuid.uuid4()),
+                "virtualmin_domain_id": DOMAIN_ID,
+                "pair_node_step": "dispatching",
+                "pair_archives": ARCHIVES,
+            },
+        )
+        self.url = reverse("provisioning:virtualmin_job_node_lost", args=[self.job.pk])
+        VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="failed")
+        self.events: list[str] = []
+        self.reconciles: list[str] = []
+        self.scheduled: list[tuple[Any, ...]] = []
+        for target, effect in (
+            ("django_q.tasks.schedule", lambda *args, **kwargs: self.scheduled.append((args, kwargs))),
+            (
+                "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async",
+                self.reconciles.append,
+            ),
+        ):
+            patcher = patch(target, side_effect=effect)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def release_outcome(self, outcome: Any) -> Any:
+        def run(server: Any, variables: dict[str, Any], **kwargs: Any) -> Any:
+            self.events.append(f"node {variables['pair_action']}")
+            return outcome
+
+        return patch.object(pair, "run_pair_step", side_effect=run)
+
+    def removal(self) -> Any:
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        return patch.object(
+            VirtualminBackupService,
+            "remove_staged_archive",
+            side_effect=lambda name: self.events.append(f"remove {name[18:20]}") or Ok(None),
+        )
+
+    def test_the_release_runs_before_the_archives_are_removed_and_queues_a_reconcile(self) -> None:
+        released = node_result("released", "barrier_removed", ran=False, checkpoints=())
+        with self.release_outcome(released), self.removal():
+            outcome = virtualmin_tasks.release_lost_pair_node(str(self.job.pk))
+        self.assertTrue(outcome["success"] and outcome["released"], outcome)
+        self.assertEqual(self.events, ["node release", "remove aa", "remove bb"], "lock, cancel marker, barrier, then cleanup")
+        self.assertEqual(self.reconciles, [str(self.account.service_id)])
+        self.assertEqual(self.scheduled, [])
+
+    def test_an_unreachable_node_keeps_its_archives_and_retries_later(self) -> None:
+        from apps.common.types import Err, Retriability  # noqa: PLC0415
+
+        with self.release_outcome(Err("unreachable", retriability=Retriability.UNKNOWN)), self.removal():
+            outcome = virtualmin_tasks.release_lost_pair_node(str(self.job.pk))
+        self.assertFalse(outcome["success"])
+        self.assertEqual(self.events, ["node release"], "nothing is removed from a node that was not released")
+        ((args, kwargs),) = self.scheduled
+        self.assertEqual(args, ("apps.provisioning.virtualmin_tasks.release_lost_pair_node", str(self.job.pk), 2))
+        self.assertEqual(kwargs["schedule_type"], "O")
+        self.assertEqual(self.reconciles, [])
+
+    def test_the_retries_stop_after_a_day_and_raise_an_alert(self) -> None:
+        from apps.common.types import Err, Retriability  # noqa: PLC0415
+
+        with self.release_outcome(Err("unreachable", retriability=Retriability.UNKNOWN)):
+            outcome = virtualmin_tasks.release_lost_pair_node(str(self.job.pk), virtualmin_tasks.PAIR_RELEASE_MAX_ATTEMPTS)
+        self.assertTrue(outcome["abandoned"])
+        self.assertEqual(self.scheduled, [])
+        self.assertTrue(AuditEvent.objects.filter(action="virtualmin_pair_release_abandoned").exists())
+
+    def test_the_cleanup_task_alone_takes_the_node_lock_first(self) -> None:
+        from apps.common.types import Err, Retriability  # noqa: PLC0415
+
+        with self.release_outcome(Err("unreachable", retriability=Retriability.UNKNOWN)), self.removal():
+            outcome = virtualmin_tasks.remove_pair_job_archives(str(self.job.pk))
+        self.assertFalse(outcome["success"])
+        self.assertEqual(self.events, ["node release"])
+
+    def test_declaring_the_node_lost_queues_a_reconcile_at_once(self) -> None:
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(
+            status="attention",
+            parameters={**self.job.parameters, "pair_node_step": "failed", "pair_checkpoints": [{"step": "barrier_up"}]},
+        )
+        with patch("django_q.tasks.async_task"):
+            self.client.post(self.url, {"note": "gone"})
+        self.assertEqual(self.reconciles, [str(self.account.service_id)])
+
+    def test_an_account_still_held_stays_disabled_after_node_lost(self) -> None:
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(
+            status="attention",
+            parameters={
+                **self.job.parameters,
+                "pair_node_step": "failed",
+                "pair_checkpoints": [{"step": "barrier_up"}, {"step": "after_base"}],
+                "safety_backup_id": "safety-1",
+            },
+        )
+        with patch("django_q.tasks.async_task"):
+            self.client.post(self.url, {"note": "gone"})
+        self.account.refresh_from_db()
+        self.assertEqual((self.account.restore_hold, self.account.restore_hold_safety_backup_id), ("half_restored", "safety-1"))
+        # The reconcile that was queued finds the hold and leaves the account suspended.
+        with patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account") as unsuspend:
+            result = virtualmin_tasks.reconcile_virtualmin_service_state(str(self.account.service_id))
+        unsuspend.assert_not_called()
+        self.assertEqual(result["action"], "operation_active")
