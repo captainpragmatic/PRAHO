@@ -10,6 +10,7 @@ It is not part of `make test`.
 make virtualmin-lab-up      # build images if missing, start, register in the lab DB, inject credentials
 make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
 make test-virtualmin-contract # every allowlisted Virtualmin program against the real node (also run by test-virtualmin-lab)
+make test-virtualmin-faults # nightly: Webmin stopped, network cut and calls timed out while PRAHO backs up and restores
 make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.yml on the bare node, then the contract smoke checks
 make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
@@ -164,6 +165,24 @@ Workflow domains are `wf*.example.com`: the provisioning pipeline refuses a doma
 Two things the workflows pinned down about today's behaviour:
 - A plan change edits the Service and nothing else. No path pushes new quotas to the node ("Unsupported automated plan changes remain unavailable", docs/domain/CUSTOMER_RECOVERY_AND_SERVICE_REQUESTS.md), and the lab nodes report no quotas at all.
 - `delete_account` only accepts an account that is `terminated` or in `error`. A healthy account is refused whatever its protection flag says.
+
+### Fault injection
+
+`make test-virtualmin-faults` (nightly) breaks the lab while PRAHO works and asserts how PRAHO reads it. Each test provisions its own `wffault*.example.com` account and puts the node back afterwards.
+
+| Fault | When | What it asserts |
+|---|---|---|
+| `systemctl stop webmin` | in the middle of a backup | the job fails once with an unknown outcome; one `backup-domain` request was sent; nothing is published to the object store; the account is released; the domain is unchanged |
+| `docker network disconnect` | in the middle of a backup | the same, through a read timeout |
+| `systemctl stop webmin` | in the middle of a restore | the job is parked in `attention`; one `restore-domain` request was sent; no job reads as completed; backup, restore and migration admission are refused; the reconciler yields; the pushed archive is kept; an operator's resolve frees the account |
+| `docker network disconnect` | in the middle of a restore | the same, through a read timeout |
+| `docker pause` | a read-only program, then a mutating one | the read-only program is sent three times (`virtualmin.max_retries`), the mutation once, both with an unknown outcome |
+| `docker pause` | a suspend | the account is not marked suspended; the job is not completed; the retry pool does not send `disable-domain` again |
+| `docker pause` | a delete | the job is parked in `attention`; the account is not marked terminated; `delete-domain` is not sent again; the exclusion holds |
+
+The fault is applied by a thread that watches the node (an archive appearing in the staging directory) and fires while the call is in flight; a fault that could not be applied is a failed test. The requests are counted at the gateway's transport seam, so the count is what reached the wire.
+
+The lab is restored whatever happens: after every test, and again by the runner's trap, which unpauses and reconnects both nodes, starts Webmin, waits for them to be healthy and checks that each node still presents the certificate its `VirtualminServer` pins (`manage.py virtualmin_lab_pins`). A node restart regenerates its TLS identity and invalidates the pin, so a mismatch re-runs `virtualmin_lab_bootstrap` and `lab.sh apply-credentials`. Nothing in the suite restarts a node on purpose.
 
 ### Node deploy from scratch (`praho-debian-node`)
 

@@ -63,30 +63,29 @@ class Command(BaseCommand):
     help = "Prepare and run a from-scratch Virtualmin node deploy on the bare Debian lab node (lab only)"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        parser.add_argument("phase", choices=("prepare", "deploy"))
+        parser.add_argument("phase", choices=("prepare", "deploy", "cleanup"))
 
     def handle(self, *args: Any, **options: Any) -> None:
         refuse_unless_lab_settings()
         state = load_state()
         if options["phase"] == "prepare":
             self._prepare(state)
-        else:
+        elif options["phase"] == "deploy":
             self._deploy(state)
+        else:
+            self._forget_server()
 
     # -------------------------------------------------------------- prepare
 
     def _prepare(self, state: LabState) -> None:
-        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
-        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
         state_dir = Path(state.state_dir)
+        self._forget_server()
         # Ansible caches facts by inventory hostname for an hour; a rebuilt node must not inherit the last one's.
         shutil.rmtree(FACT_CACHE, ignore_errors=True)
         # Nothing of an earlier run may survive: the server row (and its vault credential) belongs to a node
         # whose certificate and API password no longer exist.
-        NodeDeployment.objects.filter(hostname=DEPLOY_NODE.deployment_hostname).update(virtualmin_server=None)
-        VirtualminServer.objects.filter(hostname=DEPLOY_NODE.server_hostname).delete()
         ensure_lab_deployment(DEPLOY_NODE, state_dir, dns_zone=DEPLOY_NODE_ZONE)
 
         # Host keys are generated at every boot: pin this run's, next to the two lab nodes' keys.
@@ -98,6 +97,18 @@ class Command(BaseCommand):
         if result.is_err():
             raise CommandError(f"Could not set the node admin allowlist: {result.unwrap_err()}")
         self.stdout.write(f"Prepared {DEPLOY_NODE.server_hostname}; node admin allowlist {allowed}")
+
+    def _forget_server(self) -> None:
+        """Nothing of the node may outlive its container: the lab's health and placement sweeps would see it."""
+        from apps.common.credential_vault import EncryptedCredential  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
+
+        NodeDeployment.objects.filter(hostname=DEPLOY_NODE.deployment_hostname).update(virtualmin_server=None)
+        VirtualminServer.objects.filter(hostname=DEPLOY_NODE.server_hostname).delete()
+        EncryptedCredential.objects.filter(
+            service_type="virtualmin", service_identifier=DEPLOY_NODE.server_hostname
+        ).delete()
 
     # --------------------------------------------------------------- deploy
 

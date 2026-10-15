@@ -48,6 +48,8 @@ manage() {
 
 cleanup() {
   "${LAB}" node-down >/dev/null 2>&1 || echo "⚠️ [Virtualmin node deploy] could not remove ${NODE}" >&2
+  # The server row would outlive its container, and the lab's health and placement sweeps would see it.
+  manage virtualmin_lab_node_deploy cleanup >/dev/null 2>&1 || echo "⚠️ [Virtualmin node deploy] could not forget the node's server row" >&2
 }
 
 [ -x "${PYTHON}" ] || die "no Python at ${PYTHON}; run: make install"

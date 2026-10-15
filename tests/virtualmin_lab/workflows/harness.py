@@ -383,6 +383,19 @@ class DomainData:
             "sh", "-c", 'cat "$1" 2>/dev/null || printf ABSENT', "sh", f"{self.home}/public_html/{relative}"
         )
 
+    def add_blob(self, megabytes: int) -> None:
+        """Incompressible bulk, so that a backup of the domain takes seconds, not milliseconds."""
+        path = f"{self.home}/public_html/blob.bin"
+        self.lab.exec(
+            "sh",
+            "-c",
+            'dd if=/dev/urandom of="$1" bs=1M count="$2" 2>/dev/null && chown "$3": "$1"',
+            "sh",
+            path,
+            str(megabytes),
+            self.user,
+        )
+
     def remove(self, relative: str) -> None:
         self.lab.exec("rm", "-f", f"{self.home}/public_html/{relative}")
 
