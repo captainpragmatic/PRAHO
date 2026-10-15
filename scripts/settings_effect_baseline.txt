@@ -149,6 +149,7 @@ promotions.max_code_generation_attempts
 promotions.max_discount_percent
 promotions.new_offers_enabled
 provisioning.cache_timeout
+provisioning.chain_alert_after_failures
 provisioning.chain_base_interval_days
 provisioning.chain_differential_interval_hours
 provisioning.incremental_backups_enabled

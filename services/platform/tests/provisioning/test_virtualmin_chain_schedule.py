@@ -26,6 +26,7 @@ from apps.provisioning.virtualmin_backup_service import ChainStepResult, Virtual
 from apps.provisioning.virtualmin_chain_schedule import (
     ALERT_AFTER_FAILURES,
     SCHEDULER_ACTOR,
+    alert_after_failures,
     backoff_for,
     base_interval,
     differential_interval,
@@ -575,6 +576,26 @@ class OperationalFailureBackoffTests(ScheduleCase):
         self.assertEqual(alert.severity, "high")
         self.fail_next()
         self.assertEqual(len(self.alerts()), 1, "the next failure belongs to the same streak")
+
+    def test_the_threshold_is_a_setting_and_moves_when_the_alert_is_raised(self) -> None:
+        self.assertEqual(alert_after_failures(), 3)
+        self.assertTrue(SettingsService.update_setting("provisioning.chain_alert_after_failures", 2).is_ok())
+        self.assertEqual(alert_after_failures(), 2)
+        self.fail_next()
+        self.assertEqual(self.alerts(), [])
+        self.fail_next()
+        (alert,) = self.alerts()
+        self.assertIn("2 times in a row", alert.description)
+        self.fail_next()
+        self.assertEqual(len(self.alerts()), 1, "the third failure is past the threshold of this streak")
+
+    def test_the_threshold_refuses_zero_and_negative_values_and_falls_back_from_legacy_ones(self) -> None:
+        for value in (0, -1):
+            with self.subTest(value=value):
+                self.assertTrue(SettingsService.update_setting("provisioning.chain_alert_after_failures", value).is_err())
+        store_legacy_integer("provisioning.chain_alert_after_failures", 0)
+        cache.clear()
+        self.assertEqual(alert_after_failures(), ALERT_AFTER_FAILURES)
 
     def test_a_success_resets_the_streak(self) -> None:
         for _ in range(ALERT_AFTER_FAILURES - 1):

@@ -9,7 +9,7 @@ from error text:
   evidence arrives, fenced by epoch), so the next run finds no live base and takes a base;
 * a failure that leaves the chain alone (the node was busy, a metadata read failed) is retried as
   the same role after a growing delay, and raises one alert when it has happened
-  ``ALERT_AFTER_FAILURES`` times in a row. It never turns a differential into a base.
+  ``provisioning.chain_alert_after_failures`` times in a row (default 3). It never turns a differential into a base.
 
 Jobs go through the admission staff use (account lock, exclusion, pins, budget), so a migration, a
 restore, a delete, another backup or a job parked for an operator keeps the account out of the
@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 SCHEDULER_ACTOR = "system:chain-scheduler"
 SCHEDULE_NAME = "virtualmin-chain-backups"
 
-# Consecutive operational failures of an account's chain backups before staff are alerted.
+# Consecutive operational failures of an account's chain backups before staff are alerted: the default of
+# provisioning.chain_alert_after_failures.
 ALERT_AFTER_FAILURES = 3
 # At most this many jobs are admitted per sweep, so enabling the flag on a large fleet spreads
 # its first bases over several hours instead of queueing every account at once.
@@ -81,6 +82,12 @@ def differential_interval() -> timedelta:
         "provisioning.chain_differential_interval_hours", _DEFAULT_DIFFERENTIAL_INTERVAL_HOURS
     )
     return timedelta(hours=hours if hours > 0 else _DEFAULT_DIFFERENTIAL_INTERVAL_HOURS)
+
+
+def alert_after_failures() -> int:
+    """Failures in a row before staff are alerted. A stored zero or negative value (written before validation) means the default."""
+    threshold = SettingsService.get_integer_setting("provisioning.chain_alert_after_failures", ALERT_AFTER_FAILURES)
+    return threshold if threshold > 0 else ALERT_AFTER_FAILURES
 
 
 def backoff_for(streak: int) -> timedelta:
@@ -194,7 +201,7 @@ def note_chain_failure(job_id: Any) -> None:
     if job is None or job.account is None or (job.result or {}).get("chain_state") != "intact":
         return
     streak, _ = failure_streak(job.account)
-    if streak != ALERT_AFTER_FAILURES:
+    if streak != alert_after_failures():
         return
     message = (job.status_message or "")[:300]
     logger.error("🔥 [ChainSchedule] %s: %s chain backups failed in a row: %s", job.account.domain, streak, message)

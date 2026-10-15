@@ -2339,6 +2339,22 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="provisioning.chain_alert_after_failures",
+        data_type="integer",
+        default=3,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Chain backup alert threshold"),
+        help_text=_(
+            "How many scheduled base or differential backups of one account must fail in a row, leaving its "
+            "chain intact, before staff are alerted."
+        ),
+        unit="failures",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="provisioning.chain_base_interval_days",
         data_type="integer",
         default=7,
