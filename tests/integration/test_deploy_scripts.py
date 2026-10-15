@@ -10,12 +10,14 @@ Docker daemon and never touch a real env file; one test runs the real `docker co
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,14 @@ SCRIPTS = PROJECT_ROOT / "deploy/scripts"
 PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n"
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
-RECORDED_ENV = ("PRAHO_ENV_FILE", "DB_HOST", "DB_SSLMODE", "VERSION", "DJANGO_SETTINGS_MODULE", "PORTAL_DJANGO_SECRET_KEY")
+RECORDED_ENV = (
+    "PRAHO_ENV_FILE",
+    "DB_HOST",
+    "DB_SSLMODE",
+    "VERSION",
+    "DJANGO_SETTINGS_MODULE",
+    "PORTAL_DJANGO_SECRET_KEY",
+)
 # Built at runtime, so the source holds no password-like assignment for secret scanners to flag.
 DB_PW = "DB_" + "PASSWORD"
 LEAK = "leak-marker"
@@ -84,11 +93,24 @@ elif argv[:1] == ["cp"] and os.environ.get("DOCKER_CP_FAILS"):
     sys.exit(1)
 elif argv[:2] == ["cp", "-a"] and os.environ.get("DOCKER_MEDIA_RESTORE_FAILS"):
     sys.exit(1)
+elif argv[:2] == ["cp", "-a"]:
+    sys.stdin.buffer.read()
 """
 # Archive fixtures: a plain pg_dump envelope and an empty tar, with intact compression.
 SQL_DUMP = b"-- PostgreSQL database dump\nSET statement_timeout = 0;\n-- PostgreSQL database dump complete\n"
 DUMP_GZIP = gzip.compress(SQL_DUMP)
-MEDIA_GZIP = gzip.compress(bytes(10240))
+
+
+def _empty_media_archive() -> bytes:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as archive:
+        directory = tarfile.TarInfo("media/")
+        directory.type = tarfile.DIRTYPE
+        archive.addfile(directory)
+    return output.getvalue()
+
+
+MEDIA_GZIP = _empty_media_archive()
 EMPTY_GZIP = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
 
@@ -103,7 +125,7 @@ class Project:
         stub = bin_dir / "docker"
         stub.write_text(DOCKER_STUB.format(python=sys.executable, recorded=RECORDED_ENV))
         curl = bin_dir / "curl"
-        curl.write_text("#!/bin/sh\necho curl >> \"$DOCKER_LOG\"\nexit 7\n")
+        curl.write_text('#!/bin/sh\necho curl >> "$DOCKER_LOG"\nexit 7\n')
         for tool in (stub, curl):
             tool.chmod(0o755)
         self.log = root / "docker.log"
@@ -207,7 +229,9 @@ class TestDeployScript:
     def test_a_settings_module_in_the_shell_does_not_override_the_file(self, project: Project) -> None:
         # Compose lets a shell variable beat --env-file, so a developer's exported module would win.
         project.write_env(".env.staging", STAGING_ENV)
-        result = project.run("deploy.sh", "single-server", "--env", "staging", DJANGO_SETTINGS_MODULE="config.settings.dev")
+        result = project.run(
+            "deploy.sh", "single-server", "--env", "staging", DJANGO_SETTINGS_MODULE="config.settings.dev"
+        )
         assert result.returncode == 0, result.stderr
         assert {c["env"]["DJANGO_SETTINGS_MODULE"] for c in project.compose_calls()} == {None}
 
@@ -226,7 +250,8 @@ class TestDeployScript:
     )
     def test_production_refuses_to_deploy_without_its_keys(self, project: Project, encryption_line: str) -> None:
         project.write_env(
-            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n" + encryption_line
+            ".env.prod",
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n" + encryption_line,
         )
         result = project.run("deploy.sh", "single-server")
         assert result.returncode != 0
@@ -236,7 +261,10 @@ class TestDeployScript:
     @pytest.mark.integration
     @pytest.mark.parametrize("value", ["abc#def", "'abc # def'", '"abc"  # comment', "abc # comment"])
     def test_production_accepts_any_spelling_of_a_set_key(self, project: Project, value: str) -> None:
-        project.write_env(".env.prod", f"DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\nDJANGO_ENCRYPTION_KEY={value}\n")
+        project.write_env(
+            ".env.prod",
+            f"DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\nDJANGO_ENCRYPTION_KEY={value}\n",
+        )
         result = project.run("deploy.sh", "single-server")
         assert result.returncode == 0, result.stderr
 
@@ -244,7 +272,8 @@ class TestDeployScript:
     def test_a_production_portal_host_deploys_without_the_platform_keys(self, project: Project) -> None:
         # A portal-only host must not hold the platform's encryption keys at all.
         project.write_env(
-            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://p.example.com/api\n"
+            ".env.prod",
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://p.example.com/api\n",
         )
         result = project.run("deploy.sh", "portal-only")
         assert result.returncode == 0, result.stderr
@@ -292,7 +321,8 @@ class TestDeployScript:
     @pytest.mark.integration
     def test_portal_only_reads_the_platform_url_from_the_env_file(self, project: Project) -> None:
         project.write_env(
-            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+            ".env.prod",
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n",
         )
         result = project.run("deploy.sh", "portal-only")
         assert result.returncode == 0, result.stderr
@@ -359,7 +389,9 @@ class TestRollbackAndRestore:
         assert result.returncode != 0, result.stdout
 
     @pytest.mark.integration
-    @pytest.mark.parametrize(("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore.sh", ("--latest",))])
+    @pytest.mark.parametrize(
+        ("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore.sh", ("--latest",))]
+    )
     def test_recovery_refuses_a_production_file_without_its_keys_before_touching_anything(
         self, project: Project, script: str, args: tuple[str, ...]
     ) -> None:
@@ -464,14 +496,27 @@ class TestEveryComposeCallUsesTheHelper:
 
 def _compose_config(env_file: Path, compose_file: str, *args: str) -> dict[str, Any]:
     result = subprocess.run(  # noqa: S603  # Fixed docker invocation.
-        [shutil.which("docker") or "docker", "compose", "--env-file", str(env_file), "-f", compose_file, *args,
-         "config", "--format", "json"],
+        [
+            shutil.which("docker") or "docker",
+            "compose",
+            "--env-file",
+            str(env_file),
+            "-f",
+            compose_file,
+            *args,
+            "config",
+            "--format",
+            "json",
+        ],
         # Only what the docker CLI needs: a shell variable would beat the env file.
         env={
             **{k: v for k, v in os.environ.items() if k in ("PATH", "HOME") or k.startswith("DOCKER_")},
             "PRAHO_ENV_FILE": str(env_file),
         },
-        capture_output=True, text=True, timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     services: dict[str, Any] = json.loads(result.stdout)["services"]
@@ -497,8 +542,7 @@ class TestComposeReadsTheChosenFile:
         # The header and docs name PLATFORM_DOMAIN and PORTAL_DOMAIN; the legacy DOMAIN is not set.
         env_file = project.write_env(
             ".env.prod",
-            PROD_ENV
-            + "DB_HOST=db.example.com\nDB_NAME=praho\nDB_USER=praho\nDB_PASSWORD=p\nDJANGO_SECRET_KEY=s\n"
+            PROD_ENV + "DB_HOST=db.example.com\nDB_NAME=praho\nDB_USER=praho\nDB_PASSWORD=p\nDJANGO_SECRET_KEY=s\n"
             "PLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
             "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
             "PLATFORM_API_BASE_URL=https://platform.example.com/api\n",
@@ -563,10 +607,21 @@ def _declarations(text: str) -> dict[str, str]:
 def _portal_only_variables() -> set[str]:
     """What Compose itself says docker-compose.portal-only.yml interpolates."""
     result = subprocess.run(  # noqa: S603  # Fixed docker invocation.
-        [shutil.which("docker") or "docker", "compose", "-f", str(PROJECT_ROOT / "deploy/docker-compose.portal-only.yml"),
-         "config", "--variables", "--format", "json"],
+        [
+            shutil.which("docker") or "docker",
+            "compose",
+            "-f",
+            str(PROJECT_ROOT / "deploy/docker-compose.portal-only.yml"),
+            "config",
+            "--variables",
+            "--format",
+            "json",
+        ],
         env={k: v for k, v in os.environ.items() if k in ("PATH", "HOME") or k.startswith("DOCKER_")},
-        capture_output=True, text=True, timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     return set(json.loads(result.stdout))
@@ -578,7 +633,9 @@ class TestPortalHostEnv:
     platform is the root of the MFA, audit-chain and unsubscribe keys."""
 
     @pytest.mark.integration
-    @pytest.mark.parametrize(("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")])
+    @pytest.mark.parametrize(
+        ("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")]
+    )
     def test_the_guard_refuses_a_full_operator_file(self, project: Project, example: str, env_name: str) -> None:
         source = _filled_example(example, PORTAL_KEY)
         project.write_env(f".env.{env_name}", source)
@@ -660,9 +717,7 @@ class TestPortalHostEnv:
     def test_the_helper_refuses_values_compose_would_interpolate(self, project: Project, line: str, key: str) -> None:
         # The variable a reference points at is not copied, so on the portal host it would resolve to
         # empty, and a portal key spelled ${DJANGO_SECRET_KEY} would get past the equality check.
-        project.write_env(
-            ".env.prod", PORTAL_ONLY_ENV + "HMAC_SECRET=h-value\nDJANGO_SECRET_KEY=platform-key\n" + line
-        )
+        project.write_env(".env.prod", PORTAL_ONLY_ENV + "HMAC_SECRET=h-value\nDJANGO_SECRET_KEY=platform-key\n" + line)
         result = project.run("portal-env.sh")
         assert result.returncode != 0
         assert key in result.stderr
@@ -671,7 +726,10 @@ class TestPortalHostEnv:
 
     @pytest.mark.integration
     def test_the_helper_writes_only_what_the_portal_stack_uses(self, project: Project) -> None:
-        extra = PORTAL_KEY + "PLATFORM_API_SECRET='a$b#c'\nHSTS_POLICY=\"max-age=1; includeSubDomains\"\nPORTAL_HMAC_SECRET=x # note\n"
+        extra = (
+            PORTAL_KEY
+            + "PLATFORM_API_SECRET='a$b#c'\nHSTS_POLICY=\"max-age=1; includeSubDomains\"\nPORTAL_HMAC_SECRET=x # note\n"
+        )
         source = _filled_example(".env.example.prod", extra)
         project.write_env(".env.prod", source)
         result = project.run("portal-env.sh")
@@ -698,7 +756,9 @@ class TestPortalHostEnv:
         "portal_line", ["", "PORTAL_DJANGO_SECRET_KEY=\n", 'PORTAL_DJANGO_SECRET_KEY="dup-value-123"\n']
     )
     def test_the_helper_refuses_a_missing_empty_or_shared_portal_key(self, project: Project, portal_line: str) -> None:
-        project.write_env(".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nDJANGO_SECRET_KEY=dup-value-123\n" + portal_line)
+        project.write_env(
+            ".env.prod", "DJANGO_SETTINGS_MODULE=config.settings.prod\nDJANGO_SECRET_KEY=dup-value-123\n" + portal_line
+        )
         result = project.run("portal-env.sh")
         assert result.returncode != 0
         assert "PORTAL_DJANGO_SECRET_KEY" in result.stderr
@@ -751,7 +811,9 @@ class TestPortalHostEnv:
         assert source.read_bytes() == before
 
     @pytest.mark.integration
-    @pytest.mark.parametrize(("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")])
+    @pytest.mark.parametrize(
+        ("example", "env_name"), [(".env.example.prod", "prod"), (".env.example.staging", "staging")]
+    )
     def test_the_helpers_file_deploys_on_the_portal_host(
         self, project: Project, tmp_path: Path, example: str, env_name: str
     ) -> None:
@@ -766,7 +828,9 @@ class TestPortalHostEnv:
 
     @pytest.mark.integration
     def test_the_helpers_file_satisfies_the_portal_stack(self, project: Project) -> None:
-        project.write_env(".env.prod", _filled_example(".env.example.prod", PORTAL_KEY + "PLATFORM_API_SECRET='a$b#c'\n"))
+        project.write_env(
+            ".env.prod", _filled_example(".env.example.prod", PORTAL_KEY + "PLATFORM_API_SECRET='a$b#c'\n")
+        )
         assert project.run("portal-env.sh").returncode == 0
         services = _compose_config(project.root / ".env.prod.portal", project.compose_file("portal-only"))
         portal = services["portal"]["environment"]
@@ -777,9 +841,17 @@ class TestPortalHostEnv:
     @pytest.mark.integration
     def test_the_allowlist_is_what_compose_interpolates(self) -> None:
         result = subprocess.run(  # noqa: S603  # The helper library, sourced in a fresh shell.
-            ["/bin/bash", "-c", 'DEPLOY_DIR="$1"; source "$1/scripts/lib/compose.sh"; praho_portal_allowlist', "_",
-             str(PROJECT_ROOT / "deploy")],
-            capture_output=True, text=True, timeout=30, check=False,
+            [
+                "/bin/bash",
+                "-c",
+                'DEPLOY_DIR="$1"; source "$1/scripts/lib/compose.sh"; praho_portal_allowlist',
+                "_",
+                str(PROJECT_ROOT / "deploy"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
         allowlist = set(result.stdout.split())
@@ -794,7 +866,9 @@ class TestPortalHostEnv:
     @pytest.mark.parametrize("name", ["single-server", "container-service"])
     @pytest.mark.parametrize("separate", [True, False])
     def test_a_shared_host_may_give_the_portal_its_own_key(self, project: Project, name: str, separate: bool) -> None:
-        env_file = project.write_env(".env.prod", SHARED_HOST_ENV + ("PORTAL_DJANGO_SECRET_KEY=portal-key\n" if separate else ""))
+        env_file = project.write_env(
+            ".env.prod", SHARED_HOST_ENV + ("PORTAL_DJANGO_SECRET_KEY=portal-key\n" if separate else "")
+        )
         services = _compose_config(env_file, project.compose_file(name))
         assert services["platform"]["environment"]["DJANGO_SECRET_KEY"] == "platform-key"
         assert services["portal"]["environment"]["DJANGO_SECRET_KEY"] == ("portal-key" if separate else "platform-key")

@@ -135,8 +135,14 @@ stage_and_check_archives() {
 # Before anything is dropped: the companion must be an intact tar archive, and its volume present.
 check_media_restorable() {
     local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
+    local media_root
+    media_root="$(basename "$MEDIA_PATH")"
     [ -f "$MEDIA_FILE" ] || return 0
-    if ! gzip -t "$MEDIA_FILE" 2>/dev/null || ! tar -tzf "$MEDIA_FILE" >/dev/null 2>&1; then
+    # GNU tar accepts some short non-tar payloads as empty archives. docker cp always writes
+    # the source directory entry, even for empty media, so require that structural evidence too.
+    if ! gzip -t "$MEDIA_FILE" 2>/dev/null ||
+        ! tar -tzf "$MEDIA_FILE" > "$RESTORE_TMP_DIR/media-members" 2>/dev/null ||
+        ! grep -Fxq -e "$media_root" -e "$media_root/" "$RESTORE_TMP_DIR/media-members"; then
         log_error "The media archive ${MEDIA_FILE} is damaged or not a tar archive; nothing was restored"
         exit 1
     fi
