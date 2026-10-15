@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Native restores validate staged dump/media inputs and require a safety backup before downtime; SQL or readiness failures keep applications offline for recovery.
+- Fresh deployment recipes use PostgreSQL 16 and reject existing legacy data before attempting an implicit major-version replacement; upgrades require an explicit migration.
 
 - **Platform and its workers include node-provisioning tools.** Their runtime now installs a locked Ansible controller, pinned node-playbook collections and OpenSSH clients. Native services use a shared read-only collection directory and private temporary files without weakening their systemd filesystem restrictions. Portal does not receive the controller dependency.
 - **Docker restores check their input before replacing data.** Corrupt, empty or incomplete dump archives and invalid companion media archives stop before services are stopped or the database changes. The pre-restore backup must succeed, and SQL errors stop the restore with applications held offline for recovery. Only existing local application containers are stopped and restarted, so a platform-only host needs no local portal. Private staging preserves the selected backup through retention cleanup; these file checks do not prove SQL compatibility with the target database.

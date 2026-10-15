@@ -70,6 +70,8 @@ if argv[:1] == ["ps"]:
     if not os.environ.get("DOCKER_ABSENT_PORTAL"):
         names.append("praho_portal")
     print("\\n".join(names))
+elif argv[:1] == ["compose"] and "config" in argv and "json" in argv:
+    print(json.dumps({{"services": {{"db": {{"image": "postgres:16-alpine", "volumes": [{{"type": "volume", "source": "postgres_data", "target": "/var/lib/postgresql/data"}}]}}}}, "volumes": {{"postgres_data": {{"name": "deploy_postgres_data"}}}}}}))
 elif argv[:1] == ["inspect"] and "{{{{.Image}}}}" in argv:
     print(os.environ.get("DOCKER_SOURCE_IMAGE", "sha256:" + ("b" if argv[-1] == "praho_portal" else "a") * 64))
 elif argv[:1] == ["inspect"] and "{{{{.Config.Image}}}}" in argv:

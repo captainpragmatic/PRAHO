@@ -1209,6 +1209,7 @@ docker-build:
 docker-dev:
 	@echo "🚀 [Docker] Starting development services (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@docker compose -f deploy/docker-compose.dev.yml config --format json | python3 deploy/scripts/check_postgres_version.py
 	@docker compose -f deploy/docker-compose.dev.yml up --build
 
 docker-stop:
