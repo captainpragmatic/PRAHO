@@ -1038,6 +1038,16 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 ### Portal-Specific Variables
 
+Native Portal uses `/opt/praho/.portal.env`, generated from the same filtered values used for
+its migrations and static collection. It contains Portal API credentials and its own
+`PORTAL_DJANGO_SECRET_KEY` (mapped to Django's `DJANGO_SECRET_KEY`), but excludes the Platform
+DB password, encryption key and vault key. Set a nonempty Portal key distinct from the Platform
+key before upgrading; replacing the previously shared key invalidates existing Portal sessions.
+Keep `STATIC_ROOT=/opt/praho/static` for Platform: Portal always uses `/opt/praho/portal-static`,
+which is also Caddy's Portal static root. Both staging and production use this contract.
+The existing shared OS identity still allows access to Platform-owned files; the separate Portal
+identity migration must be completed before treating this as filesystem isolation.
+
 These are set in the `.env` file and used by the Portal service:
 
 | Variable | Description | Required When |

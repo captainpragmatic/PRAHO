@@ -130,6 +130,7 @@ NATIVE_BASE_ENV = {
     "PORTAL_DOMAIN": "p",
     "PLATFORM_DOMAIN": "q",
     "DJANGO_SECRET_KEY": "s",
+    "PORTAL_DJANGO_SECRET_KEY": "portal-s",
     "DB_PASSWORD": "d",
     "HMAC_SECRET": "h",
 }
@@ -183,6 +184,14 @@ class TestNativeProductionKeys:
     @pytest.mark.integration
     def test_preflight_does_not_require_them_for_staging(self) -> None:
         assert self._passes("staging", NATIVE_BASE_ENV)
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("profile", ["prod", "staging"])
+    @pytest.mark.parametrize("portal_key", ["", "s"])
+    def test_native_portal_requires_a_distinct_nonempty_key(self, profile: str, portal_key: str) -> None:
+        values = {**NATIVE_BASE_ENV, **PRODUCTION_KEY_VALUES, "PORTAL_DJANGO_SECRET_KEY": portal_key}
+        assert not self._passes(profile, values)
+
 
 
 class TestPortalTrustsItsProxy:
@@ -303,6 +312,7 @@ class TestNativeMigrateEnvironment:
             "PORTAL_DOMAIN": "portal.example.invalid",
             "PLATFORM_DOMAIN": "platform.example.invalid",
             "DJANGO_SECRET_KEY": secrets.token_urlsafe(60),
+            "PORTAL_DJANGO_SECRET_KEY": secrets.token_urlsafe(60),
             "DB_PASSWORD": secrets.token_urlsafe(24),
             "HMAC_SECRET": secrets.token_urlsafe(40),
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),

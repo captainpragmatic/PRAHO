@@ -13,10 +13,8 @@ UMask=0027
 User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/portal
-EnvironmentFile={{ project_root }}/.env
-Environment="SESSION_DB_PATH={{ portal_django_env.SESSION_DB_PATH }}"
-Environment="PORTAL_TRUSTED_PROXY_CIDRS={{ portal_django_env.PORTAL_TRUSTED_PROXY_CIDRS }}"
-# Read by services/portal/gunicorn.conf.py; the .env above (EnvironmentFile) overrides these.
+EnvironmentFile={{ project_root }}/.portal.env
+# Read by services/portal/gunicorn.conf.py; the filtered EnvironmentFile overrides these.
 Environment="PORTAL_GUNICORN_WORKER_CLASS={{ gunicorn_worker_class_portal }}"
 Environment="PORTAL_GUNICORN_WORKERS={{ gunicorn_workers_portal }}"
 Environment="PORTAL_GUNICORN_THREADS={{ gunicorn_threads_portal }}"
