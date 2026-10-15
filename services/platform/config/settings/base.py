@@ -16,6 +16,9 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Up 3 levels to services/platform/
 REPO_ROOT = BASE_DIR.parent.parent  # Up to project root (PRAHO/)
 
+# Django test commands isolate media even when selecting development settings.
+TEST_RUNNER = "tests.runner.MediaIsolatedRunner"
+
 # Application definition
 DJANGO_APPS: list[str] = [
     "django.contrib.admin",

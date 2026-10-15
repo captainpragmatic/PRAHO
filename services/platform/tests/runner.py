@@ -10,7 +10,7 @@ Two-layer defense:
 1. ci.py sets CONN_MAX_AGE=None (prevents close_if_unusable_or_obsolete from closing)
 2. This runner adds ensure_connection() recovery as a safety net
 
-Only activated via TEST_RUNNER in ci.py (PG runs); SQLite tests are unaffected.
+All Django runs isolate media; the PostgreSQL runner additionally protects CI connections.
 """
 
 from __future__ import annotations
@@ -21,11 +21,14 @@ from typing import Any, cast, override
 from unittest import TestCase as UnitTestCase
 from unittest import TestResult, TestSuite, TextTestResult
 
+from django.conf import settings
 from django.core.cache import caches
 from django.core.cache.backends import locmem
 from django.core.cache.backends.locmem import LocMemCache
 from django.db import connection, connections
-from django.test.runner import DiscoverRunner
+from django.test.runner import DiscoverRunner, ParallelTestSuite
+
+from tests.media import isolated_media, setup_worker_media
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,29 @@ class CacheClearingTestResult(TextTestResult):
         super().startTest(test)
 
 
-class PostgreSQLSafeRunner(DiscoverRunner):
+class MediaIsolatedParallelSuite(ParallelTestSuite):
+    """Give spawned workers the same disposable directory inherited by forked workers."""
+
+    # Django passes this bound method's __func__ to the worker initializer.
+    process_setup = setup_worker_media
+
+    @property
+    def process_setup_args(self) -> tuple[str]:
+        return (str(settings.MEDIA_ROOT),)
+
+
+class MediaIsolatedRunner(DiscoverRunner):
+    """Isolate discovery, database setup and test writes, even when a run raises."""
+
+    parallel_test_suite = MediaIsolatedParallelSuite
+
+    @override
+    def run_tests(self, test_labels: list[str], **kwargs: object) -> int:
+        with isolated_media():
+            return super().run_tests(test_labels, **kwargs)
+
+
+class PostgreSQLSafeRunner(MediaIsolatedRunner):
     """DiscoverRunner with connection recovery and cache isolation for serial CI."""
 
     def get_resultclass(self) -> type[TextTestResult]:
