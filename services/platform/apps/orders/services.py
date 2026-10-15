@@ -656,7 +656,7 @@ class OrderService:
 
                     fallback_vat_result = TaxService.calculate_vat(
                         amount_cents=subtotal_cents,
-                        country_code="RO",  # Conservative Romanian default
+                        country_code=operator_country(),  # The operator's own rate, the conservative default
                     )
                     tax_rate_decimal = (fallback_vat_result["vat_rate_percent"] / Decimal("100")).quantize(
                         Decimal("0.0001")
