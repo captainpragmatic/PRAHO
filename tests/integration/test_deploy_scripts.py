@@ -77,7 +77,8 @@ elif argv[:1] == ["inspect"] and "{{{{.Config.Image}}}}" in argv:
 elif argv[:1] == ["exec"] and "SHOW server_version_num" in argv:
     print("160010")
 elif argv[:1] == ["inspect"]:
-    print(os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy")))
+    health = os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy"))
+    print(("running " if ".State.Status" in " ".join(argv) else "") + health)
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):

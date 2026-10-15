@@ -1042,6 +1042,17 @@ These are set in the `.env` file and used by the Portal service:
 
 ### Check Service Health
 
+`make docker-dev` starts the development task worker only after Platform migrations, setup and its
+HTTP health check finish. It shares Platform's dev image, database, source and media; it has no HTTP
+health probe. A running worker is not evidence that a queued task executed.
+
+For Docker hosts, run `deploy/scripts/health-check.sh single-server`, `platform-only`, `portal-only`
+or `container-service` for the local topology. Split hosts omit remote services. Use `--with-db`
+when a platform-only host includes the bundled database and `--with-caddy` when its optional Caddy
+must be present; `--without-caddy` selects an external edge. An optional Caddy that exists is still
+checked. Missing/unknown/starting/unhealthy state or Docker inspection errors fail the check.
+Set `PLATFORM_URL` and/or `PORTAL_URL` to additionally test public routes with bounded HTTP probes.
+
 ```bash
 # Using script
 ./deploy/scripts/health-check.sh

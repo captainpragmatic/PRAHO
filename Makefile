@@ -1407,7 +1407,7 @@ rollback-db:
 health-check:
 	@echo "🏥 [Health] Checking service health..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/health-check.sh
+	@./deploy/scripts/health-check.sh "$(DEPLOY_TYPE)" $(HEALTH_FLAGS)
 
 # ===============================================================================
 # INFRASTRUCTURE PROVISIONING (Terraform → Hetzner) ☁️
