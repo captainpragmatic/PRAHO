@@ -16,6 +16,14 @@ Every task: a test that fails first (quote the failure line), the fix, green, `m
 - **Alias domains appear in `list-domains`** and would corrupt the account sync (`virtualmin_views.py:~1705`), `update_server_statistics` (`virtualmin_service.py:1569`) and `list_migration_domains` (`virtualmin_migration_service.py:108`). They are filtered in P1.7.
 - **There is no ACME client.** Virtualmin GPL's DNS-01 needs BIND, and nodes run without it. The wildcard is issued on Platform with the Python `acme` and `josepy` libraries, so the Cloudflare token stays off the nodes.
 
+## Status (2026-10-15)
+
+- **Phase 0 is built** (PR #695).
+- **Phase 1 is paused** after its gate task disproved the alias design.
+  - **P1.0 DISPROVEN on Virtualmin 8.3** (`docs/domain/virtualmin-account-alias-contract.md`, commit 6106e628 on `feat/adr61-phase1-account-hostnames`). An alias domain cannot carry SSL and becomes a `ServerAlias` in the customer's vhost. It has no certificate of its own, is not in the parent's backup, and serving the wildcard from the parent would put its key in the customer's backup.
+  - **Before Phase 1 resumes, choose how a node serves the account name.** Candidates: a PRAHO-managed reverse-proxy vhost outside Virtualmin's files, or a Virtualmin sub-server. Either needs its own lab proof.
+- **Tasks that depend on the alias design** and must be rewritten after that choice: P1.4 (`ensure_node_alias` / `remove_node_alias`), P1.5, the alias steps of P1.7, and P1.10's certificate-on-every-alias step.
+
 ## Review record
 
 - **Reviewed:** plan v1, phases 0 to 2, by an adversarial plan review (REWORK: 6 HIGH, 4 MEDIUM, 1 LOW, 0 CRITICAL) and a code review of the files it touches (14 findings on existing code: 6 HIGH, 7 MEDIUM, 1 LOW).
