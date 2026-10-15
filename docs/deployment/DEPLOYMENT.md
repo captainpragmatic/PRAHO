@@ -1196,3 +1196,13 @@ deploy/
             ├── tasks/main.yml         # 11-step deployment (validates + copies .env)
             └── templates/             # systemd units, Caddyfile, backup/restore scripts
 ```
+
+Native recovery stages the selected custom dump and optional companion media privately before the
+safety backup can apply retention. It reads the TOC and renders every dump data block to a discarded
+SQL stream without connecting; corrupt/truncated/empty inputs stop before downtime. This is an
+integrity check, not proof of application-schema compatibility. Use trusted backup pairs selected
+for the intended application release. Recovery supports the bundled local PostgreSQL on port 5432.
+The pre-restore backup and stopping all writers are mandatory. SQL errors leave services stopped;
+failed starts or bounded readiness checks stop them again. Inspect the failure and safety backup
+before explicitly restarting. A running worker service still requires a separate queue execution
+check. The script does not roll back a partially restored database automatically.
