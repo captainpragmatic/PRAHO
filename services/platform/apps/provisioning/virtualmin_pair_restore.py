@@ -86,17 +86,23 @@ def is_pair_job(operation: str, parameters: Mapping[str, Any]) -> bool:
 
 @dataclass(frozen=True)
 class PairCheckpoint:
-    """What the node saw at one point: is the domain disabled, and what do the two ports answer."""
+    """What the node saw at one point.
+
+    Is the domain disabled, what do the two ports answer to its own name, and what do they answer to
+    every other spelling of its names (upper case, a trailing dot, the mail name, each alias): the
+    last is 503 only when all of them were refused.
+    """
 
     step: str
     at: str
     disabled: bool
     http80: str
     http443: str
+    odd_hosts: str
 
     @property
     def barrier_holds(self) -> bool:
-        return self.disabled and self.http80 == "503" and self.http443 in ("none", "503")
+        return self.disabled and self.http80 == "503" and self.http443 in ("none", "503") and self.odd_hosts == "503"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +111,7 @@ class PairCheckpoint:
             "disabled": self.disabled,
             "http80": self.http80,
             "http443": self.http443,
+            "odd_hosts": self.odd_hosts,
         }
 
 
@@ -162,6 +169,7 @@ def parse_pair_step_result(stdout: str, *, token: str, domain_id: str, action: s
                 disabled=item["disabled"] is True,
                 http80=str(item["http80"]),
                 http443=str(item["http443"]),
+                odd_hosts=str(item["odd_hosts"]),
             )
             for item in raw_checkpoints
         )
@@ -180,6 +188,7 @@ def parse_pair_step_result(stdout: str, *, token: str, domain_id: str, action: s
             _STEP_RE.match(checkpoint.step)
             and _HTTP_CODE_RE.match(checkpoint.http80)
             and _HTTP_CODE_RE.match(checkpoint.http443)
+            and _HTTP_CODE_RE.match(checkpoint.odd_hosts)
         ):
             return uncertain("malformed checkpoint")
     return Ok(step)

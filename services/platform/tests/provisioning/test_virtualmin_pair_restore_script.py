@@ -40,12 +40,19 @@ case $cmd in
     case $mode in
       id) echo "$FAKE_DOMAIN_ID" ;;
       disabled) if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi ;;
-      multi) echo "    IP address: 10.9.8.7 (Shared)" ;;
+      multi)
+        echo "    IP address: 10.9.8.7 (Shared)"
+        [[ ${FAKE_NO_DOCROOT:-0} == 1 ]] || echo "    HTML directory: ${FAKE_DOCROOT:-/home/node/public_html}"
+        echo "    Website hostnames: ${FAKE_HOSTNAMES-$FAKE_DOMAIN www.$FAKE_DOMAIN mail.$FAKE_DOMAIN}"
+        ;;
       name) if [[ ${FAKE_DOMAIN_GONE:-0} != 1 ]]; then echo "$FAKE_DOMAIN"; fi ;;
     esac
     ;;
   disable-domain) echo disable >>"$state/calls"; : >"$state/disabled" ;;
-  enable-domain) echo enable >>"$state/calls"; rm -f "$state/disabled" ;;
+  enable-domain)
+    echo enable >>"$state/calls"
+    if [[ ${FAKE_ENABLE_FAILS:-0} != 1 ]]; then rm -f "$state/disabled"; fi
+    ;;
   restore-domain)
     source=""
     while (($#)); do case $1 in --source) source=$2; shift ;; esac; shift; done
@@ -55,6 +62,7 @@ case $cmd in
       [[ -e $state/disabled ]] && printf 'disabled=yes ' || printf 'disabled=no '
       [[ -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]] && printf 'maint=yes\n' || printf 'maint=no\n'
     } >>"$state/calls"
+    cp "$PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf" "$state/maint.$n.conf" 2>/dev/null || true
     if [[ ${FAKE_RESTORE_ENABLES:-0} == 1 ]]; then rm -f "$state/disabled"; fi
     if [[ ${FAKE_RESTORE_FAIL_ON:-0} == "$n" ]]; then echo "restore blew up" >&2; exit 1; fi
     if [[ ${FAKE_CANCEL_AFTER:-0} == "$n" ]]; then : >"$PRAHO_RUN_DIR/chain-$FAKE_DOMAIN_ID.cancelled.$FAKE_TOKEN"; fi
@@ -62,10 +70,15 @@ case $cmd in
 esac
 """,
     # 503 while the maintenance include exists, 200 otherwise; FAKE_NO_503 simulates a barrier that never takes.
-    "curl": (
-        "#!/bin/bash\n"
-        'if [[ ${FAKE_NO_503:-0} != 1 && -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]]; then printf 503; else printf 200; fi\n'
-    ),
+    # Every probed host is recorded; FAKE_OPEN_HOST names one spelling the barrier does not cover.
+    "curl": r"""#!/bin/bash
+host=""
+while (($#)); do case $1 in --resolve) host=${2%%:*}; shift ;; esac; shift; done
+echo "$host" >>"$FAKE_STATE/probed"
+if [[ -n ${FAKE_OPEN_HOST:-} && $host == "$FAKE_OPEN_HOST" ]]; then printf 200; exit 0; fi
+if [[ -n ${FAKE_OPEN_AFTER_RESTORE:-} && -e $FAKE_STATE/restore_count && $host == "$FAKE_OPEN_AFTER_RESTORE" ]]; then printf 200; exit 0; fi
+if [[ ${FAKE_NO_503:-0} != 1 && -e $PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf ]]; then printf 503; else printf 200; fi
+""",
     "apache2ctl": (
         "#!/bin/bash\n"
         'if [[ $1 == -M ]]; then [[ ${FAKE_SSL:-1} == 1 ]] && echo " ssl_module (shared)"; exit 0; fi\n'
@@ -186,6 +199,61 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(self.restores(), [])
         self.assertFalse(self.maint.exists())
         self.assertFalse(self.disabled(), "a refusal leaves the node as it was, including the enabled state")
+
+    def maintenance_conf(self) -> str:
+        """The 503 section as it stood while the first restore ran."""
+        return (self.state / "maint.1.conf").read_text()
+
+    def probed(self) -> list[str]:
+        return (self.state / "probed").read_text().split()
+
+    def test_the_barrier_is_keyed_on_the_virtual_host_and_on_every_spelling_of_its_names(self) -> None:
+        self.step(
+            FAKE_DOCROOT="/home/node/public_html",
+            FAKE_HOSTNAMES=f"{DOMAIN} www.{DOMAIN} shop.{DOMAIN} *.wild.{DOMAIN}",
+        )
+        conf = self.maintenance_conf()
+        self.assertIn("RewriteOptions InheritDownBefore", conf, "it runs before the virtual host's own rewrite rules")
+        self.assertIn("RewriteCond %{DOCUMENT_ROOT} ^/home/node/public_html(/|$) [OR]", conf, "keyed on the vhost")
+        host_condition = next(line for line in conf.splitlines() if line.startswith("RewriteCond %{HTTP_HOST}"))
+        self.assertTrue(host_condition.endswith("[NC]"), "the host comparison ignores case")
+        self.assertIn(r")\.?(:[0-9]+)?$", host_condition, "an optional trailing dot and port are allowed")
+        for alias in (r"node\.example\.com", r"www\.node", r"mail\.node", r"shop\.node"):
+            self.assertIn(alias, host_condition)
+        self.assertIn(r"[A-Za-z0-9.-]+\.wild\.node\.example\.com", host_condition, "a wildcard alias is covered")
+        self.assertIn("RewriteRule ^ - [R=503,L]", conf)
+
+    def test_every_odd_spelling_of_the_domains_names_is_probed_at_every_checkpoint(self) -> None:
+        result = self.step(FAKE_HOSTNAMES=f"{DOMAIN} www.{DOMAIN} shop.{DOMAIN}")
+        probed = set(self.probed())
+        for host in (DOMAIN.upper(), f"{DOMAIN}.", f"mail.{DOMAIN}", f"www.{DOMAIN}", f"shop.{DOMAIN}"):
+            self.assertIn(host, probed)
+        for checkpoint in result.checkpoints[:-1]:
+            self.assertEqual(checkpoint.odd_hosts, "503", checkpoint.step)
+
+    def test_a_spelling_the_barrier_does_not_cover_refuses_before_anything_destructive(self) -> None:
+        for host in (DOMAIN.upper(), f"{DOMAIN}.", f"mail.{DOMAIN}"):
+            with self.subTest(host=host):
+                self.state_reset()
+                result = self.step(FAKE_OPEN_HOST=host)
+                self.assertEqual((result.outcome, result.reason, result.ran), ("refused", "barrier_not_verified", False))
+                self.assertEqual(result.checkpoints[0].odd_hosts, "200")
+                self.assertEqual(self.restores(), [])
+                self.assertFalse(self.maint.exists())
+
+    def test_a_spelling_that_slips_through_after_a_restore_keeps_the_barrier_and_fails(self) -> None:
+        # The first checkpoint is clean; the host opens only once the base restore has run.
+        result = self.step(FAKE_OPEN_AFTER_RESTORE=DOMAIN.upper())
+        self.assertEqual((result.outcome, result.reason, result.ran), ("failed", "barrier_lost_after_after_base", True))
+        self.assertEqual(len(self.restores()), 1, "the differential was never restored")
+        self.assertEqual(result.checkpoints[-1].odd_hosts, "200")
+        self.assertTrue(self.maint.exists() and self.disabled(), "both layers stay up for an operator")
+
+    def test_a_domain_whose_document_root_is_unknown_is_refused_untouched(self) -> None:
+        result = self.step(FAKE_NO_DOCROOT="1")
+        self.assertEqual((result.outcome, result.reason, result.ran), ("refused", "docroot_unknown", False))
+        self.assertFalse((self.state / "apache").exists(), "Apache was never touched")
+        self.assertFalse(self.disabled())
 
     def test_an_archive_that_does_not_match_its_checksum_is_refused_before_the_barrier(self) -> None:
         (self.staging / DIFF).write_bytes(b"tampered")

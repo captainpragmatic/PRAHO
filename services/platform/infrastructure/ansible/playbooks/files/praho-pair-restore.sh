@@ -5,10 +5,14 @@
 # Run by virtualmin_pair_restore.yml as root on the node. Under the per-domain chain lock
 # (the same lock the backup chain steps take, so no chain backup interleaves):
 #
-#   1. barrier layer (a): a server-level Apache section answering 503 for the domain's names (and
-#      only those), in a configuration file of its own that restore-domain never rewrites,
-#      loaded and verified. It is deliberately NOT a virtual host: Virtualmin recognises a virtual
-#      host that serves the domain and rewrites it during a restore, which let requests through;
+#   1. barrier layer (a): server-level Apache rules answering 503 for whatever reaches the domain's
+#      virtual host, in a configuration file of its own that restore-domain never rewrites, loaded
+#      and verified. They are keyed on the virtual host itself (its document root) and, as a second
+#      key, on every name the domain answers to, case-insensitively and with an optional trailing
+#      dot, and they run before the virtual host's own rewrite rules (Apache 2.4.8 or later,
+#      RewriteOptions InheritDownBefore). It is deliberately NOT a virtual host: Virtualmin
+#      recognises a virtual host that serves the domain and rewrites it during a restore, which let
+#      requests through;
 #   2. barrier layer (b): disable-domain, verified;
 #   3. restore the base, then re-apply and verify both layers;
 #   4. restore the differential, then re-apply and verify both layers;
@@ -75,6 +79,11 @@ cancel_marker="$RUN_DIR/chain-$domain_id.cancelled.$token"
 maint_conf="$APACHE_DIR/zz-praho-maint-$domain_id.conf"
 progress="$RUN_DIR/pair-$domain_id.progress"
 checkpoints=""
+docroot=""
+docroot_regex=""
+probe_hosts=()
+name_regex=""
+CP_ODD=none
 
 now() {
   local t
@@ -95,41 +104,72 @@ is_disabled() {
   virtualmin list-domains --disabled --name-only 2>/dev/null | grep -qxF -- "$domain"
 }
 
-http_code() { # SCHEME PORT
-  local scheme=$1 port=$2 insecure=""
+http_code() { # SCHEME PORT [HOST]
+  local scheme=$1 port=$2 host=${3:-$domain} insecure=""
   [[ $scheme == https ]] && insecure="-k"
   # $insecure is deliberately unquoted: empty means no argument at all.
   # shellcheck disable=SC2086
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 $insecure \
-    --resolve "$domain:$port:127.0.0.1" "$scheme://$domain:$port/" 2>/dev/null || printf '000'
+    --resolve "$host:$port:127.0.0.1" "$scheme://$host:$port/" 2>/dev/null || printf '000'
 }
 
 ssl_loaded() { apache2ctl -M 2>/dev/null | grep -q 'ssl_module'; }
 
-# checkpoint STEP : record whether the domain is disabled and what the two ports answer.
+# probe_odd_hosts : every spelling the domain's virtual host can be reached by must be answered 503
+# on every port that is open: the names in upper case, with a trailing dot, the mail name and every
+# alias. Sets CP_ODD to 503, or to the first other answer (and writes which host gave it).
+probe_odd_hosts() {
+  local host code
+  CP_ODD=503
+  for host in "${probe_hosts[@]}"; do
+    code=$(http_code http "$HTTP_PORT" "$host")
+    if [[ $code != 503 ]]; then
+      CP_ODD=$code
+      printf 'host %s answered %s on port %s\n' "$host" "$code" "$HTTP_PORT" >>"$RUN_DIR/pair-$domain_id.diag"
+      return
+    fi
+    if ssl_loaded; then
+      code=$(http_code https "$HTTPS_PORT" "$host")
+      if [[ $code != 503 ]]; then
+        CP_ODD=$code
+        printf 'host %s answered %s on port %s\n' "$host" "$code" "$HTTPS_PORT" >>"$RUN_DIR/pair-$domain_id.diag"
+        return
+      fi
+    fi
+  done
+}
+
+# checkpoint STEP : record whether the domain is disabled and what the two ports answer, to the
+# domain's own name and to every odd spelling of its names.
 checkpoint() {
   local disabled=false h80 h443=none
   is_disabled && disabled=true
   h80=$(http_code http "$HTTP_PORT")
   if ssl_loaded; then h443=$(http_code https "$HTTPS_PORT"); fi
+  probe_odd_hosts
   [[ -n $checkpoints ]] && checkpoints+=","
-  checkpoints+=$(printf '{"step":"%s","at":"%s","disabled":%s,"http80":"%s","http443":"%s"}' "$1" "$(now)" "$disabled" "$h80" "$h443")
+  checkpoints+=$(printf '{"step":"%s","at":"%s","disabled":%s,"http80":"%s","http443":"%s","odd_hosts":"%s"}' "$1" "$(now)" "$disabled" "$h80" "$h443" "$CP_ODD")
   printf '%s\n' "$checkpoints" >"$progress"
   CP_DISABLED=$disabled CP_80=$h80 CP_443=$h443
 }
 
 barrier_holds() {
-  [[ $CP_DISABLED == true && $CP_80 == 503 && ( $CP_443 == none || $CP_443 == 503 ) ]]
+  [[ $CP_DISABLED == true && $CP_80 == 503 && ( $CP_443 == none || $CP_443 == 503 ) && $CP_ODD == 503 ]]
 }
 
 reload_apache() { apache2ctl graceful >/dev/null 2>&1; }
 
 barrier_up() {
-  local escaped=${domain//./\\.}
-  # Server-level, so every virtual host inherits it, whatever Virtualmin does to them.
+  # Server level, so every virtual host inherits it whatever Virtualmin does to its own file. The rules
+  # run in the translation phase and are inherited BEFORE a virtual host's own rewrite rules: Virtualmin's
+  # virtual host redirects its webmail and admin names itself, and a rule that ran after those would never
+  # be reached for them. They match the virtual host (its document root, so also a Host header that names
+  # nothing at all) or any spelling of the domain's names; nothing else on the node is touched.
   {
-    printf '<If "%%{HTTP_HOST} =~ /^(www\\.)?%s(:[0-9]+)?$/">\n' "$escaped"
-    printf '  RewriteEngine On\n  RewriteRule ^ - [R=503,L]\n  ErrorDocument 503 "Restore in progress"\n</If>\n'
+    printf 'RewriteOptions InheritDownBefore\nRewriteEngine On\n'
+    printf 'RewriteCond %%{DOCUMENT_ROOT} ^%s(/|$) [OR]\n' "$docroot_regex"
+    printf 'RewriteCond %%{HTTP_HOST} ^(%s)\\.?(:[0-9]+)?$ [NC]\n' "$name_regex"
+    printf 'RewriteRule ^ - [R=503,L]\nErrorDocument 503 "Restore in progress"\n'
   } >"$maint_conf"
   reload_apache
 }
@@ -181,9 +221,50 @@ if ! listed_id=$(virtualmin list-domains --domain "$domain" --id-only 2>/dev/nul
   exit 0
 fi
 
+# ---- what reaches the domain's virtual host: its document root and every name it answers to ----
+domain_info=$(virtualmin list-domains --domain "$domain" --multiline 2>/dev/null || true)
+docroot=$(sed -n 's/^ *HTML directory: *//p' <<<"$domain_info")
+docroot=${docroot%%$'\n'*}
+docroot=${docroot%/}
+hostnames=$(sed -n 's/^ *Website hostnames: *//p' <<<"$domain_info")
+hostnames=${hostnames%%$'\n'*}
+if [[ ! $docroot =~ $safe_dir || $docroot == *..* ]]; then
+  emit refused docroot_unknown false
+  exit 0
+fi
+host_ok='^(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+name_alternatives=()
+seen_hosts=" "
+add_probe_host() { # HOST : once per exact spelling (the upper-case spelling is a probe of its own)
+  [[ $seen_hosts != *" $1 "* ]] || return 0
+  seen_hosts+="$1 "
+  probe_hosts+=("$1")
+}
+# read, not an unquoted expansion: a wildcard alias must not be globbed against the working directory.
+read -r -a listed_names <<<"$hostnames"
+for name in "$domain" "www.$domain" "mail.$domain" ${listed_names[@]+"${listed_names[@]}"}; do
+  [[ $name =~ $host_ok ]] || continue
+  escaped_name=${name//./\\.}
+  if [[ $name == \*.* ]]; then
+    # A wildcard alias: any prefix, probed with a made-up one.
+    name_alternatives+=("[A-Za-z0-9.-]+\\.${escaped_name#\*\\.}")
+    add_probe_host "wildcard-probe.${name#\*.}"
+  else
+    name_alternatives+=("$escaped_name")
+    add_probe_host "$name"
+  fi
+done
+add_probe_host "$(printf '%s' "$domain" | tr '[:lower:]' '[:upper:]')"
+add_probe_host "$domain."
+printf -v name_regex '%s|' "${name_alternatives[@]}"
+name_regex=${name_regex%|}
+docroot_regex=${docroot//./\\.}
+readonly docroot name_regex docroot_regex
+
 # ---- layer (a): the server-level 503 section; layer (b): disable-domain -----------------------
 pre_disabled=false
 is_disabled && pre_disabled=true
+rm -f -- "$RUN_DIR/pair-$domain_id.diag"
 barrier_up
 virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
 checkpoint barrier_up

@@ -70,15 +70,19 @@ def manifests(account: VirtualminAccount) -> tuple[dict[str, Any], dict[str, Any
     return base, diff
 
 
-def checkpoint(step: str, *, disabled: bool = True, http80: str = "503", http443: str = "503") -> pair.PairCheckpoint:
-    return pair.PairCheckpoint(step=step, at="1.0", disabled=disabled, http80=http80, http443=http443)
+def checkpoint(
+    step: str, *, disabled: bool = True, http80: str = "503", http443: str = "503", odd_hosts: str = "503"
+) -> pair.PairCheckpoint:
+    return pair.PairCheckpoint(
+        step=step, at="1.0", disabled=disabled, http80=http80, http443=http443, odd_hosts=odd_hosts
+    )
 
 
 GOOD_CHECKPOINTS = (
     checkpoint("barrier_up"),
     checkpoint("after_base"),
     checkpoint("after_differential"),
-    checkpoint("barrier_down", http80="200", http443="200"),
+    checkpoint("barrier_down", http80="200", http443="200", odd_hosts="200"),
 )
 
 

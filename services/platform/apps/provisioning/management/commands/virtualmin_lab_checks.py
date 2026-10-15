@@ -923,24 +923,41 @@ class Command(BaseCommand):
                 f"{scheme}://{CHECK_DOMAIN}/",
             ).strip()
 
+        # Every name the virtual host answers to, in the spellings a client may use, a Host header that
+        # names nothing (the domain's virtual host is the node's default for its address) and the bare IP.
+        odd_hosts = (
+            CHECK_DOMAIN.upper(),
+            f"{CHECK_DOMAIN}.",
+            f"www.{CHECK_DOMAIN}",
+            f"mail.{CHECK_DOMAIN}",
+            f"webmail.{CHECK_DOMAIN}",
+            f"admin.{CHECK_DOMAIN}",
+            "unknown.invalid",
+        )
+
         def start_probe() -> subprocess.Popen[bytes]:
+            names = " ".join((CHECK_DOMAIN, *odd_hosts))
             loop = (
                 f"rm -f {probe_stop} {probe_log}; "
                 f'ip=$(virtualmin list-domains --domain {CHECK_DOMAIN} --multiline | sed -n "s/^ *IP address: *\\([0-9.]*\\).*/\\1/p" | head -n 1); '
                 f"while [ ! -e {probe_stop} ]; do t=$(date +%s.%N); "
-                f'a=$(curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve {CHECK_DOMAIN}:80:$ip http://{CHECK_DOMAIN}/); '
-                f'b=$(curl -sk -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve {CHECK_DOMAIN}:443:$ip https://{CHECK_DOMAIN}/); '
-                f'echo "$t $a $b" >> {probe_log}; sleep 0.05; done'
+                f"for h in {names}; do "
+                f'a=$(curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve $h:80:$ip http://$h/); '
+                f'b=$(curl -sk -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve $h:443:$ip https://$h/); '
+                f'echo "$t $h $a $b" >> {probe_log}; done; '
+                f'a=$(curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 http://$ip/); '
+                f'b=$(curl -sk -o /dev/null -w "%{{http_code}}" --max-time 3 https://$ip/); '
+                f'echo "$t IP-LITERAL $a $b" >> {probe_log}; sleep 0.05; done'
             )
             return subprocess.Popen(["docker", "exec", node.container, "sh", "-c", loop])  # noqa: S607  # Fixed argv, lab container
 
-        def stop_probe(process: subprocess.Popen[bytes]) -> list[tuple[float, str, str]]:
+        def stop_probe(process: subprocess.Popen[bytes]) -> list[tuple[float, str, str, str]]:
             node_exec(node.container, "touch", probe_stop)
             process.wait(timeout=30)
             rows = []
             for line in node_exec(node.container, "cat", probe_log).splitlines():
-                at, port80, port443 = line.split()
-                rows.append((float(at), port80, port443))
+                at, host, port80, port443 = line.split()
+                rows.append((float(at), host, port80, port443))
             return rows
 
         SettingsService.update_setting(flag, True)
@@ -959,6 +976,9 @@ class Command(BaseCommand):
             write("change.txt", "damaged")
             remove("added.txt")
             self._ok("the domain is serving before the restore", http_code(80) not in ("503", "000"), http_code(80))
+            self.stdout.write(
+                "  odd Host spellings probed during the restore: " + ", ".join((*odd_hosts, "IP-LITERAL"))
+            )
 
             probe = start_probe()
             time.sleep(1)
@@ -994,12 +1014,18 @@ class Command(BaseCommand):
             inside = [row for row in rows if start <= row[0] <= end]
             self._ok(
                 "requests got 503 on ports 80 and 443 throughout both restores",
-                len(inside) >= MIN_PROBES and all(row[1] == "503" and row[2] == "503" for row in inside),
-                (len(inside), [row for row in inside if row[1:] != ("503", "503")][:5]),
+                len(inside) >= MIN_PROBES and all(row[2] == "503" and row[3] == "503" for row in inside),
+                (len(inside), [row for row in inside if row[2:] != ("503", "503")][:5]),
+            )
+            probed_hosts = {row[1] for row in inside}
+            self._ok(
+                "every odd Host spelling, every alias, an unnamed Host and the bare IP were probed",
+                {CHECK_DOMAIN, *odd_hosts, "IP-LITERAL"} <= probed_hosts,
+                sorted(probed_hosts),
             )
             self._ok(
                 "the domain was serving before the barrier",
-                any(row[1] not in ("503", "000") for row in rows if row[0] < start),
+                any(row[2] not in ("503", "000") for row in rows if row[0] < start and row[1] == CHECK_DOMAIN),
                 rows[:3],
             )
             self._ok("the data is base plus differential: changed file", read("change.txt") == "v1", read("change.txt"))
