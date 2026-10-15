@@ -57,7 +57,8 @@ cleanup_backups() {
     remove_abandoned_partials
 
     local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
-    # A media archive goes with its dump.
+    # Metadata and media go with their dump.
+    find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.metadata.json" -mtime "+${DAYS}" -delete
     find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime "+${DAYS}" -delete
 
     if [ "$COUNT" -gt 0 ]; then
@@ -116,6 +117,12 @@ create_backup() {
         log_info "Size: ${SIZE}"
 
         backup_media
+        # Metadata is published only for a complete pair; it contains no credentials.
+        if ! python3 "${SCRIPT_DIR}/backup_manifest.py" create "$BACKUP_FILE"; then
+            log_error "Backup pair retained, but recovery metadata could not be written"
+            cleanup_backups
+            exit 1
+        fi
 
         # Auto cleanup
         cleanup_backups

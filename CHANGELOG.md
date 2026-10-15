@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Platform and its workers include node-provisioning tools.** Their runtime now installs a locked Ansible controller, pinned node-playbook collections and OpenSSH clients. Native services use a shared read-only collection directory and private temporary files without weakening their systemd filesystem restrictions. Portal does not receive the controller dependency.
 - **Docker restores check their input before replacing data.** Corrupt, empty or incomplete dump archives and invalid companion media archives stop before services are stopped or the database changes. The pre-restore backup must succeed, and SQL errors stop the restore with applications held offline for recovery. Only existing local application containers are stopped and restarted, so a platform-only host needs no local portal. Private staging preserves the selected backup through retention cleanup; these file checks do not prove SQL compatibility with the target database.
+- Docker backup pairs now record private checksums, source application image IDs and PostgreSQL major-version metadata for explicit recovery compatibility checks.
 
 - **Docker deployments wait for the task worker correctly.** The worker inherited Platform's HTTP health check even though it serves no HTTP, so Compose could report an unhealthy deployment while the worker was running. All three worker definitions now disable that inherited probe; the web services retain their HTTP checks.
 

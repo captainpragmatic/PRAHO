@@ -914,6 +914,15 @@ make rollback VERSION=v1.2.3
 
 **Native installs rolling back past the log rotation change** (releases before Platform and the portal stopped rotating their own log files): remove `/etc/logrotate.d/praho-platform` and `/etc/logrotate.d/praho-portal` first. The older release rotates those files in process again, and logrotate moving them as well would race it. The next deploy of a current release installs them again.
 
+### Backup recovery metadata
+
+Docker `backup.sh` also writes a mode-0600 `.metadata.json` beside each completed database/media
+pair. It records SHA-256 checksums, PostgreSQL major version and immutable source application image
+IDs/references, without environment secrets. Keep all three files together. The operator host needs
+Python 3.9+ for this stdlib-only metadata helper. A metadata failure is reported as a failed backup
+run while retaining the completed dump/media for manual recovery. Existing legacy pairs remain
+restorable; metadata does not change their format or prove cross-release schema compatibility.
+
 ### Database Rollback
 
 Restore the latest database backup:
