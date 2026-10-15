@@ -610,8 +610,13 @@ class CredentialVault:
                 )
 
                 gateway = VirtualminGateway(config)
-                result = gateway.call("list-domains", {"format": "json"})
-                return Ok(True) if result.is_ok() else Err("Authentication failed")
+                # name-only keeps the probe cheap. The call already asks for JSON (json=1): Virtualmin
+                # refuses a "format" parameter, and a refusal arrives as a 200 failure envelope, so only an
+                # explicit success proves the credential can run the command.
+                result = gateway.call("list-domains", {"name-only": ""})
+                if result.is_err():
+                    return Err("Authentication failed")
+                return Ok(True) if result.unwrap().success else Err("Credential was refused by Virtualmin")
 
             except Exception as e:
                 return Err(f"Connection test failed: {e!s}")
