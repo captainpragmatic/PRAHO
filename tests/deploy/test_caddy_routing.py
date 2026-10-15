@@ -3,7 +3,7 @@
 Run structural checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m 'not docker'
 Run container checks with: pytest -o addopts='' tests/deploy/test_caddy_routing.py -m docker -s
 Docker checks require a working daemon and the official caddy:2-alpine image, pulled from
-AWS's mirror of Docker Official Images (the same image; see IMAGE).
+AWS's mirror with Docker Hub fallback for the same official image (see IMAGE).
 """
 
 from __future__ import annotations
@@ -371,12 +371,20 @@ def _pull_once(image: str) -> None:
     if _docker("image", "inspect", image).returncode == 0:
         return
     result = _docker("pull", image)
+    candidate = image
+    prefix = "public.ecr.aws/docker/library/"
+    if result.returncode != 0 and image.startswith(prefix):
+        candidate = "docker.io/library/" + image.removeprefix(prefix)
+        result = _docker("pull", candidate)
     for attempt in range(1, PULL_ATTEMPTS):
         if result.returncode == 0 or "toomanyrequests" not in (result.stdout + result.stderr).lower():
             break
         time.sleep(2**attempt)
-        result = _docker("pull", image)
+        result = _docker("pull", candidate)
     assert result.returncode == 0, result.stdout + result.stderr
+    if candidate != image:
+        tagged = _docker("tag", candidate, image)
+        assert tagged.returncode == 0, tagged.stdout + tagged.stderr
 
 
 @pytest.mark.docker
@@ -642,3 +650,32 @@ def test_live_platform_public_body_cap(name: str, tmp_path: Path, docker_daemon:
         for path in ("/integrations/webhooks/stripe/", "/api/users/login/"):
             assert _post_size(peer, edge, path, limit) == 200, path
             assert _post_size(peer, edge, path, limit + 1) == 413, path
+
+
+def test_official_image_pull_falls_back_and_keeps_the_test_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    canonical = "docker.io/library/caddy:2-alpine"
+
+    def record(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        failed = args[:2] == ("image", "inspect") or args == ("pull", IMAGE)
+        return subprocess.CompletedProcess(
+            args, int(failed), stdout="", stderr="registry unavailable" if failed else ""
+        )
+
+    monkeypatch.setitem(globals(), "_docker", record)
+    _pull_once(IMAGE)
+    assert calls == [("image", "inspect", IMAGE), ("pull", IMAGE), ("pull", canonical), ("tag", canonical, IMAGE)]
+
+
+def test_both_official_image_sources_failing_remains_a_test_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def record(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="registry unavailable")
+
+    monkeypatch.setitem(globals(), "_docker", record)
+    with pytest.raises(AssertionError, match="registry unavailable"):
+        _pull_once(IMAGE)
+    assert not any(call[0] == "tag" for call in calls)

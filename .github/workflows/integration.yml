@@ -107,26 +107,15 @@ jobs:
       DB_PASSWORD: postgres
       DB_HOST: localhost
 
-    services:
-      postgres:
-        # Docker Official Images mirror: the same image, without Docker Hub's anonymous pull limit.
-        image: public.ecr.aws/docker/library/postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+
+    - name: Start PostgreSQL (registry fallback)
+      run: make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16
+      env:
+        POSTGRES_PASSWORD: ${{ env.DB_PASSWORD }}
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -220,3 +209,7 @@ jobs:
           htmlcov/
           test-layout-audit.json
         if-no-files-found: warn
+
+    - name: Stop CI PostgreSQL
+      if: always()
+      run: make ci-postgres-stop
