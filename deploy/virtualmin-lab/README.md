@@ -135,6 +135,10 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
   2. a base made by a plain full backup stays byte-identical through the ordinary full backup, the config-only backup and the migration backup parameters;
   3. the staging directory `/var/lib/praho-transfer` is root 0700, an unprivileged user cannot read a `.dom` sidecar, a verified fetch leaves nothing behind, and a world-readable staging directory makes the fetch refuse;
   4. `virtualmin_backup.yml`, applied twice, leaves one enabled, non-differential schedule that Webmin cron runs, and running it archives the domain and keeps the base;
+     - chain-step checks cover base/differential fingerprints, refused stale lineage, cancellation and timeout cleanup;
+     - job-state checks cover chain epochs, confirm-stopped cleanup of staged archives/sidecars, and chain invalidation on restore admission;
+     - the hourly PRAHO scheduler admits nothing with its flag off, then selects a base, a due differential, and a replacement base when the node snapshot is lost. The lab executes admitted jobs inline because it has no qcluster; this checks scheduler decisions, not a running worker;
+     - pair restore applies base before differential behind an HTTP/HTTPS write barrier. The probe sees maintenance responses through both legs; a stop between them leaves the domain disabled and the job awaiting resolution. Deleted-since-base files reappear, as the pair contract documents;
   5. `virtualmin.yml` on the installed node succeeds, and its API user authenticates, can disable and enable a domain, lists the templates, and runs PRAHO's backup (with `mkdir`, master-only) and restore parameters.
   6. the access lock (ADR-0060), with vm-a standing in for any host outside the allowlist:
      - the API user works from Platform; from vm-a, remote.cgi answers 403 and a login-form session gets 403 on every page; with vm-a added to the user's allow list the same calls succeed, so the refusal is the lock;

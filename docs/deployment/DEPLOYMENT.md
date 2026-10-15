@@ -522,7 +522,6 @@ Override defaults with `-e` flags:
 | `gunicorn_workers_portal` | 2 | Portal Gunicorn workers |
 | `gunicorn_worker_class_portal` | gthread | Portal worker class: `gthread`, or `sync` to roll back (ADR-0056) |
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
-| `qcluster_workers` | 2 | Django-Q2 background workers |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
 | `deploy_method` | rsync | `rsync` (dev/staging) or `git` (prod) |
@@ -955,6 +954,13 @@ make deploy-prod VERSION=v1.2.3
 
 ---
 
+## Terraform validation and state recovery
+
+`make infra-validate` checks formatting and validates with the committed provider lock, a temporary
+plugin cache and backend initialization disabled. It makes no plan/apply or backend migration.
+Keep environment workspaces and private state backups according to the
+[state recovery runbook](TERRAFORM_STATE_RECOVERY.md) before operating infrastructure.
+
 ## Makefile Commands
 
 | Command | Description |
@@ -977,6 +983,10 @@ make deploy-prod VERSION=v1.2.3
 ## Environment Variables
 
 ### Native Deployment (Ansible)
+
+The native inventory deploys the complete single-server stack. The common role controls firewall
+ports, and Django controls worker configuration; inventory flags and role defaults do not disable
+individual services or tune qcluster. Worker startup is separate from proving queued work executes.
 
 All variables live in your `.env.{env}` file. See `.env.example.prod` for the full list with descriptions. Key required variables:
 
