@@ -5,6 +5,8 @@ The archives are written to PRAHO's staging directory on the node under fixed na
 
 from __future__ import annotations
 
+import pytest
+
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_backup_service import (
     CHAIN_ROLE_STANDALONE,
@@ -41,6 +43,7 @@ def _archive_size(lab: Lab, number: int) -> int:
     return int(lab.exec("stat", "-c", "%s", f"{REMOTE_ARCHIVE_DIR}/{_archive(number)}").strip())
 
 
+@pytest.mark.smoke
 @covers("backup-domain")
 def test_backup_domain(lab: Lab) -> None:
     assert_mutating("backup-domain")
@@ -137,6 +140,7 @@ def test_backup_domain(lab: Lab) -> None:
         _remove_archives(lab, full, config, migration, *refused_archives)
 
 
+@pytest.mark.smoke
 @covers("restore-domain")
 def test_restore_domain(lab: Lab) -> None:
     assert_mutating("restore-domain")

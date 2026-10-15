@@ -10,6 +10,7 @@ It is not part of `make test`.
 make virtualmin-lab-up      # build images if missing, start, register in the lab DB, inject credentials
 make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
 make test-virtualmin-contract # every allowlisted Virtualmin program against the real node (also run by test-virtualmin-lab)
+make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.yml on the bare node, then the contract smoke checks
 make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data
@@ -41,7 +42,7 @@ The nodes run with `privileged`, `cgroup: host`, the host's `/sys/fs/cgroup` mou
 | Image | Dockerfile | Contents |
 |---|---|---|
 | `praho-virtualmin-lab:8.3.0` | `virtualmin/Dockerfile` | `debian:12-slim` (pinned by digest), systemd, OpenSSH, Virtualmin GPL |
-| `praho-debian-node:12` | `debian-node/Dockerfile` | `debian:12-slim` (same digest), systemd, OpenSSH, nothing else |
+| `praho-debian-node:12` | `debian-node/Dockerfile` | `debian:12-slim` (same digest), systemd, OpenSSH, and the Ansible prerequisites (`python3`, `iproute2`, `ca-certificates`) |
 
 Both use `deploy/virtualmin-lab/` as the build context. Both are multi-arch clean: no architecture-specific URLs.
 
@@ -166,12 +167,18 @@ Two things the workflows pinned down about today's behaviour:
 
 ### Node deploy from scratch (`praho-debian-node`)
 
-`virtualmin.yml` was run end to end against a fresh `praho-debian-node` container (SSH on 127.0.0.1:2722): the Virtualmin 8 installer installed Virtualmin 8.3.0 / Webmin 2.670, the play finished with `failed=0`, and the API user it created could create and delete a domain over remote.cgi. That run is not part of `make test-virtualmin-lab`. Three things a cloud image has and the bare image lacks had to be added first:
-- `python3`, for Ansible;
-- `iproute2`, or the installer cannot find the primary interface;
-- the removal of `/etc/apt/apt.conf.d/docker-clean`, which deletes downloaded packages before dpkg installs them.
+`make test-virtualmin-node-deploy` is the nightly run. It is not part of `make test-virtualmin-lab`, because the Virtualmin 8 installer alone takes several minutes and is not pinned to 8.3.0. On a freshly created container of the bare image (SSH on 127.0.0.1:2722, the panel published on 10103 once installed) it:
+- registers a deployment and a new managed SSH key, pins the node's host keys, and sets the node admin allowlist (ADR-0060) to the lab's address, the compose network gateway;
+- runs `virtualmin.yml` and `virtualmin_harden.yml` through `AnsibleService`, with an API password generated the way a deployment generates it;
+- registers the node as a `VirtualminServer` pinned to the certificate the installer produced, and activates it through `NodeRegistrationService.verify_and_activate`;
+- reads the API user's ACL and IP lock and the UFW rules on the node, and checks that vm-a, outside the allowlist, cannot reach port 10000;
+- runs the contract suite's `smoke` subset against it, without comparing or writing recordings.
 
-The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. Clear it between rebuilds.
+The container is recreated every run and removed at the end, whatever the outcome. vm-a, vm-b and MinIO are not touched.
+
+The image holds only what Ansible itself needs on top of systemd and OpenSSH: `python3`, `iproute2` (the installer cannot find the primary interface without it) and `ca-certificates`, and `docker-clean` is removed from apt's configuration because it deletes downloaded packages before dpkg installs them. Nothing of Virtualmin is in the image.
+
+The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. The node deploy clears it before every run.
 
 ### Transport adaptations (lab only)
 

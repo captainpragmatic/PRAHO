@@ -76,6 +76,8 @@ services:
     stop_signal: SIGRTMIN+3
     ports:
       - "127.0.0.1:${LAB_C_SSH_PORT:-2722}:22"
+      # Published for the panel once virtualmin.yml has installed it (make test-virtualmin-node-deploy).
+      - "127.0.0.1:${LAB_C_WEBMIN_PORT:-10103}:10000"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - ./.state/node-c/inject:/etc/lab-node/inject:ro

@@ -7,6 +7,8 @@
 #   lab.sh apply-credentials  re-apply .state/<node>/inject on running nodes
 #   lab.sh status             show container health
 #   lab.sh node-up            start the bare Debian node and wait for sshd
+#   lab.sh node-down          remove the bare Debian node and its data (a rebuild starts from the image)
+#   lab.sh build-node         build praho-debian-node:12 only
 #
 # Works with macOS bash 3.2. Image pulls that hang on a credential helper can
 # use an anonymous config: LAB_DOCKER_CONFIG=/path/with/empty/config.json.
@@ -134,12 +136,28 @@ cmd_node_up() {
   wait_healthy vmlab-debian-node
 }
 
+cmd_build_node() {
+  local revision
+  revision="$(git -C "${LAB_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  docker build --build-arg "VCS_REF=${revision}" -f "${LAB_DIR}/debian-node/Dockerfile" \
+    -t praho-debian-node:12 "${LAB_DIR}"
+  info "built praho-debian-node:12"
+}
+
+cmd_node_down() {
+  ensure_state
+  compose --profile debian-node rm -sfv debian-node
+  info "node-c removed"
+}
+
 case "${1:-}" in
+  build-node) cmd_build_node ;;
+  node-down) cmd_node_down ;;
   build) cmd_build ;;
   up) cmd_up ;;
   down) cmd_down ;;
   apply-credentials) cmd_apply_credentials ;;
   status) cmd_status ;;
   node-up) cmd_node_up ;;
-  *) sed -n '2,11p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
+  *) sed -n '2,13p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac

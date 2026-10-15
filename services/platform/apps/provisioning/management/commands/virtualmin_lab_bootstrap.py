@@ -36,9 +36,11 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     LabNode,
     LabState,
     container_address,
+    ensure_lab_deployment,
     lab_state_dir,
     read_env_file,
     refuse_unless_lab_settings,
+    write_private,
 )
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
@@ -73,14 +75,6 @@ def _scan_host_keys(port: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_private(path: Path, content: str) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(content)
-    tmp.chmod(0o600)
-    tmp.replace(path)
-
-
 class Command(BaseCommand):
     help = "Register the Docker Virtualmin lab nodes, keys and MinIO backup settings (lab settings only)"
 
@@ -97,7 +91,7 @@ class Command(BaseCommand):
 
         known_hosts = "".join(_scan_host_keys(node.ssh_port) for node in NODES)
         known_hosts_path = state_dir / "known_hosts"
-        _write_private(known_hosts_path, known_hosts)
+        write_private(known_hosts_path, known_hosts)
 
         spool = state_dir / "spool"
         spool.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -124,14 +118,6 @@ class Command(BaseCommand):
         self.stdout.write("Next: deploy/virtualmin-lab/lab.sh apply-credentials")
 
     def _register_node(self, node: LabNode, state_dir: Path) -> None:
-        from apps.infrastructure.models import (  # noqa: PLC0415
-            CloudProvider,
-            NodeDeployment,
-            NodeRegion,
-            NodeSize,
-            PanelType,
-        )
-        from apps.infrastructure.ssh_key_manager import get_ssh_key_manager  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
         password = secrets.token_urlsafe(24)
@@ -153,72 +139,9 @@ class Command(BaseCommand):
         server.set_api_password(password)
         server.save()
 
-        # No provider type fits a local container; these rows exist only so the
-        # transport has the NodeDeployment it requires, and stay inactive.
-        provider, _ = CloudProvider.objects.get_or_create(
-            code="lab",
-            defaults={
-                "name": "Virtualmin lab (Docker)",
-                "provider_type": "hetzner",
-                "is_active": False,
-                "credential_identifier": "virtualmin-lab",
-            },
-        )
-        region, _ = NodeRegion.objects.get_or_create(
-            provider=provider,
-            provider_region_id="lab1",
-            defaults={
-                "name": "Virtualmin lab",
-                "normalized_code": "lab1",
-                "country_code": "ro",
-                "city": "Docker",
-                "is_active": False,
-            },
-        )
-        size, _ = NodeSize.objects.get_or_create(
-            provider=provider,
-            provider_type_id="lab",
-            defaults={
-                "name": "Virtualmin lab node",
-                "display_name": "Lab",
-                "vcpus": 1,
-                "memory_gb": 2,
-                "disk_gb": 10,
-                "hourly_cost_eur": Decimal("0"),
-                "monthly_cost_eur": Decimal("0"),
-                "is_active": False,
-            },
-        )
-        panel, _ = PanelType.objects.get_or_create(
-            panel_type="virtualmin",
-            defaults={"name": "Virtualmin", "ansible_playbook": "virtualmin.yml"},
-        )
-        deployment, _ = NodeDeployment.objects.update_or_create(
-            hostname=node.deployment_hostname,
-            defaults={
-                "environment": "dev",
-                "node_type": "sha",
-                "provider": provider,
-                "region": region,
-                "node_size": size,
-                "panel_type": panel,
-                "node_number": int(node.deployment_hostname.rsplit("-", 1)[1]),
-                "display_name": f"Virtualmin lab {node.key}",
-                "ipv4_address": LAB_LOOPBACK,
-                "virtualmin_server": server,
-                "status": "completed",
-                "backup_enabled": True,
-                "backup_storage": "local",
-            },
-        )
-
-        key = get_ssh_key_manager().generate_deployment_key(deployment)
-        if key.is_err():
-            raise CommandError(f"SSH key generation failed for {node.key}: {key.unwrap_err()}")
-
+        ensure_lab_deployment(node, state_dir, server=server)
         inject = state_dir / node.key / "inject"
-        _write_private(inject / "root_password", password + "\n")
-        _write_private(inject / "authorized_keys", key.unwrap().public_key.strip() + "\n")
+        write_private(inject / "root_password", password + "\n")
         self.stdout.write(f"{node.key}: server {server.hostname}:{node.api_port}, ssh {node.ssh_port}")
 
     def _configure_backup_settings(self, lab_env: dict[str, str], s3_port: int, spool: Path) -> None:

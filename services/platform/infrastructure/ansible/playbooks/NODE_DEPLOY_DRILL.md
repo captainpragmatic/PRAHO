@@ -25,17 +25,18 @@ Given a Hetzner key, `deploy_node` produces an **active, credentialed** `Virtual
    (`playbooks/files/praho-webmin-api-user.pl`): a Webmin user whose only module is virtual-server, with
    Virtualmin master rights, because remote.cgi runs most programs only for the master administrator.
    (`virtualmin create-admin` makes per-domain extra administrators and cannot serve PRAHO.) SSH to the node:
-   - `grep '^praho-api:' /etc/webmin/webmin.acl` → `praho-api: virtual-server`.
-   - `grep '^praho-api:' /etc/webmin/miniserv.users | cut -d: -f5` → `allow <your allowlist>` (the per-user
-     IP lock, ADR-0060).
-   - `ufw status` → 22/tcp and 10000/tcp `ALLOW IN` only from the allowlist entries; 80, 443, mail, FTP, DNS
-     and 20000 from Anywhere.
-   - From a host outside the allowlist, port 10000 must not answer.
+   - The lab runs these node-side checks on every nightly run: `make test-virtualmin-node-deploy` deploys
+     `virtualmin.yml` and `virtualmin_harden.yml` onto the bare `praho-debian-node` image, and reads the API
+     user's ACL (`praho-api: virtual-server`), its per-user IP lock (`allow <your allowlist>`, ADR-0060), the
+     UFW rules (22/tcp and 10000/tcp `ALLOW IN` only from the allowlist) and that a host outside the allowlist
+     cannot reach port 10000. On a real node, read the same four things by hand:
+     `grep '^praho-api:' /etc/webmin/webmin.acl`, `grep '^praho-api:' /etc/webmin/miniserv.users | cut -d: -f5`,
+     `ufw status`, and port 10000 from outside.
    - Let PRAHO's own diagnostic prove auth — do NOT hand-auth with `curl -k`. Step 4 below
      (`status=active`) is the real auth proof: `verify_and_activate` authenticates over the pinned-cert TLS
      with the vault credential, the exact production path.
-   - The lab already proves the helper on Virtualmin 8.3.0: `make test-virtualmin-lab` (check 5) and a
-     from-scratch run on `praho-debian-node` (deploy/virtualmin-lab/README.md).
+   - The lab already proves the helper: `make test-virtualmin-lab` (check 5) on Virtualmin 8.3.0, and
+     `make test-virtualmin-node-deploy` from scratch on `praho-debian-node` (deploy/virtualmin-lab/README.md).
 4. **Confirm PRAHO activated the node.** The `VirtualminServer` row should be `status=active`
    (i.e. `verify_and_activate` succeeded). If still `disabled`, the deployment log carries the
    "Node registered but left disabled: …" reason — that reason IS the handshake failure from step 3.
