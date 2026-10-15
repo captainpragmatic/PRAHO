@@ -375,7 +375,7 @@ class VirtualminAuthenticationManager:
 
             # Add parameters
             for key, value in parameters.items():
-                if value is True:
+                if value is True or value == "":  # "" is the bare flag, as it is for remote.cgi
                     cmd_parts.append(f"--{key}")
                 elif value is not None and value is not False:
                     cmd_parts.extend([f"--{key}", str(value)])
@@ -525,11 +525,14 @@ class VirtualminAuthenticationManager:
             start_time = timezone.now()
 
             try:
-                result = self._execute_with_method(method, "list-domains", {"multiline": True})
+                # An empty value is the bare flag on both paths: remote.cgi would turn True into "--multiline True",
+                # which Virtualmin refuses.
+                result = self._execute_with_method(method, "list-domains", {"multiline": ""})
 
                 execution_time = (timezone.now() - start_time).total_seconds() * 1000
 
-                if result.is_ok():
+                # A refusal is a 200 failure envelope, not a transport error: only an accepted answer is healthy.
+                if result.is_ok() and getattr(result.unwrap(), "success", True) is not False:
                     results[method.value] = AuthResult(
                         success=True, method=method, response_time_ms=int(execution_time)
                     )
