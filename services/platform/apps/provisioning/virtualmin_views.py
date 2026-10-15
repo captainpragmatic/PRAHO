@@ -2198,7 +2198,7 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
     if request.method == "POST":
         # Toggle the protection status
         account.protected_from_deletion = not account.protected_from_deletion
-        account.save()
+        account.save(update_fields=["protected_from_deletion", "updated_at"])
 
         action = "enabled" if account.protected_from_deletion else "disabled"
         icon = "🔒" if account.protected_from_deletion else "🔓"
