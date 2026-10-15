@@ -15,7 +15,20 @@ from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRecoveryService
-from apps.provisioning.virtualmin_gateway import VirtualminConfig
+from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminResponse
+
+
+def _accepted() -> VirtualminResponse:
+    """What Virtualmin answers when a command is accepted: an explicit synchronous success."""
+    return VirtualminResponse(
+        success=True,
+        data={"status": "success"},
+        raw_response='{"status": "success"}',
+        http_status=200,
+        execution_time=0.0,
+        program="modify-domain",
+        server_hostname="test.example.com",
+    )
 
 
 class RestoreQuotasGatewayConstructorTests(TestCase):
@@ -35,7 +48,7 @@ class RestoreQuotasGatewayConstructorTests(TestCase):
         mock_config_instance = MagicMock(spec=VirtualminConfig)
         mock_config_cls.return_value = mock_config_instance
         mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway.call.return_value = Ok(_accepted())
         mock_gateway_cls.return_value = mock_gateway
 
         self.service._restore_quotas(self.mock_server, "example.com", 500, 1000)
@@ -65,7 +78,7 @@ class RestoreQuotasParameterTests(TestCase):
     ) -> dict[str, str]:
         """Helper: call _restore_quotas and return the params dict passed to gateway.call."""
         mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway.call.return_value = Ok(_accepted())
         mock_gateway_cls.return_value = mock_gateway
         mock_config_cls.return_value = MagicMock(spec=VirtualminConfig)
 
@@ -80,8 +93,8 @@ class RestoreQuotasParameterTests(TestCase):
         params = self._call_restore_quotas(500, 1000)
         self.assertEqual(params["domain"], "example.com")
         self.assertEqual(params["quota"], "512000")  # KiB, as create-domain sends it
-        self.assertEqual(params["bandwidth"], "1048576000")  # bytes, as create-domain sends it
-        self.assertNotIn("bw", params)  # not a modify-domain option
+        self.assertEqual(params["bw"], "1048576000")  # bytes; modify-domain's name for create-domain's --bandwidth
+        self.assertNotIn("bandwidth", params)  # modify-domain refuses it: "Unknown parameter --bandwidth"
 
     def test_restore_quotas_disk_only(self) -> None:
         """Only disk quota set; bandwidth should be absent."""
@@ -93,8 +106,8 @@ class RestoreQuotasParameterTests(TestCase):
         """Only bandwidth quota set; disk should be absent."""
         params = self._call_restore_quotas(None, 1000)
         self.assertNotIn("quota", params)
-        self.assertEqual(params["bandwidth"], "1048576000")  # bytes, as create-domain sends it
-        self.assertNotIn("bw", params)
+        self.assertEqual(params["bw"], "1048576000")  # bytes, under modify-domain's own name
+        self.assertNotIn("bandwidth", params)
     def test_restore_quotas_correct_program(self) -> None:
         """_restore_quotas must call the 'modify-domain' Virtualmin program."""
         with (
@@ -102,7 +115,7 @@ class RestoreQuotasParameterTests(TestCase):
             patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminGateway") as mock_gw_cls,
         ):
             mock_gw = MagicMock()
-            mock_gw.call.return_value = Ok({"status": "success"})
+            mock_gw.call.return_value = Ok(_accepted())
             mock_gw_cls.return_value = mock_gw
 
             self.service._restore_quotas(self.mock_server, "example.com", 100, 200)
@@ -126,7 +139,7 @@ class RestoreQuotasZeroValueTests(TestCase):
     ) -> None:
         """Zero disk/bandwidth values must be sent (not skipped), as 0 means unlimited."""
         mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway.call.return_value = Ok(_accepted())
         mock_gateway_cls.return_value = mock_gateway
         mock_config_cls.return_value = MagicMock(spec=VirtualminConfig)
 
@@ -135,7 +148,7 @@ class RestoreQuotasZeroValueTests(TestCase):
         mock_gateway.call.assert_called_once()
         _program, params = mock_gateway.call.call_args[0]
         self.assertEqual(params["quota"], "0")
-        self.assertEqual(params["bandwidth"], "0")
+        self.assertEqual(params["bw"], "0")
 
 
 class RecoveryCapabilityFailClosedTests(TestCase):
@@ -198,7 +211,7 @@ class RecoveryCapabilityFailClosedTests(TestCase):
     ) -> None:
         """None quota values must be omitted from params (no quota to restore)."""
         mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway.call.return_value = Ok(_accepted())
         mock_gateway_cls.return_value = mock_gateway
         mock_config_cls.return_value = MagicMock(spec=VirtualminConfig)
 
@@ -224,7 +237,7 @@ class RestoreQuotasUnitsTests(TestCase):
         self, mock_config_cls: MagicMock, mock_gateway_cls: MagicMock
     ) -> None:
         mock_gateway = MagicMock()
-        mock_gateway.call.return_value = Ok({"status": "success"})
+        mock_gateway.call.return_value = Ok(_accepted())
         mock_gateway_cls.return_value = mock_gateway
         mock_config_cls.return_value = MagicMock(spec=VirtualminConfig)
 
@@ -232,4 +245,4 @@ class RestoreQuotasUnitsTests(TestCase):
 
         _program, params = mock_gateway.call.call_args[0]
         self.assertEqual(params["quota"], str(2048 * 1024))
-        self.assertEqual(params["bandwidth"], "0")
+        self.assertEqual(params["bw"], "0")

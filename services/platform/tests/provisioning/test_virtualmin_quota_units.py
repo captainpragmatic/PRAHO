@@ -61,6 +61,31 @@ class CreateAndRecoverAgreeTests(VirtualminTaskTestBase):
 
         create = next(p for p in sent if p.get("program") == "create-domain")
         modify = next(p for p in sent if p.get("program") == "modify-domain")
-        for key in ("quota", "bandwidth"):
-            self.assertEqual(modify.get(key), create.get(key), key)
-        self.assertEqual(modify["bandwidth"], "0")
+        # The same numbers under each command's own name for the bandwidth limit: create-domain takes
+        # --bandwidth, modify-domain takes --bw and refuses --bandwidth ("Unknown parameter", Virtualmin 8.3,
+        # observed on the lab node), which would also discard the disk quota sent with it.
+        self.assertEqual(modify.get("quota"), create.get("quota"))
+        self.assertEqual(modify.get("bw"), create.get("bandwidth"))
+        self.assertEqual(modify["bw"], "0")
+        self.assertNotIn("bandwidth", modify)
+
+    def test_a_refused_quota_restore_is_not_reported_as_restored(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+        def refuse(method: str, url: str, **kwargs: object) -> requests.Response:
+            params = cast("dict[str, object]", kwargs["params"])
+            return http_response(
+                {"status": "failure", "command": params.get("program"), "error": "Unknown parameter --bandwidth"}
+            )
+
+        with (
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=refuse),
+            self.assertLogs("apps.provisioning.virtualmin_disaster_recovery", level="INFO") as logs,
+        ):
+            VirtualminDisasterRecoveryService()._restore_quotas(self.server, self.account.domain, 2000, 1000)
+
+        text = "\n".join(logs.output)
+        self.assertIn("Failed to restore quotas", text)
+        self.assertIn("Unknown parameter --bandwidth", text)
+        self.assertNotIn("Restored quotas", text)
