@@ -6,8 +6,9 @@
   reconciler it queues repairs the node. The backstop looks at PRAHO's rows only: a domain someone changes on
   the node behind PRAHO's back is not a signature it detects, and this file does not pretend otherwise.
 
-The lab nodes have no filesystem quotas (README, Limits), so quotas are not part of what the usage sync can
-be shown to read.
+The lab nodes have no filesystem quotas and print no usage fields (README, Limits), so the usage sync can only be
+shown to run cleanly against a node and stamp the account; the usage values it reads are always 0 here and are
+not asserted.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def account(bench: Bench) -> Iterator[VirtualminAccount]:
         yield hosted
 
 
-def test_usage_sync_reads_the_node_into_the_account(bench: Bench, account: VirtualminAccount) -> None:
+def test_usage_sync_runs_against_the_node_and_stamps_the_account(bench: Bench, account: VirtualminAccount) -> None:
     DomainData(bench.lab_of(account), account).write("big.bin", "x" * 4096)
     VirtualminAccount.objects.filter(pk=account.pk).update(last_sync_at=None)
     out = io.StringIO()
@@ -70,7 +71,7 @@ def test_health_and_statistics_tasks_stamp_the_servers_from_the_nodes(bench: Ben
 
     assert health["success"] and health["results"]["healthy_servers"] == 2, health
     assert stats["success"] and stats["results"]["updated_servers"] == 2, stats
-    server.refresh_from_db()
+    server = bench.server("vm-a")  # read again: the tasks wrote it
     assert server.is_healthy and server.last_health_check is not None
     assert server.current_domains == len(bench.lab("vm-a").domain_names()), "the count is the node's own listing"
 

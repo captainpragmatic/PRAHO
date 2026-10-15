@@ -157,7 +157,7 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
 | `test_backup_restore.py` | full and config-only backup and restore as queued jobs; a restore of a backup that does not exist |
 | `test_differential_chain.py` | base, differential and pair restore with the flag on (ADR-0059), and the end of the chain |
 | `test_migration_drain.py` | migration and drain from vm-a to vm-b, data verified on vm-b; the drain moves the round-trip account too, and the test puts it back |
-| `test_sync.py` | usage sync, health and statistics tasks, and the divergence backstop |
+| `test_sync.py` | the usage sync command (it runs cleanly and stamps the account; the lab reports no usage values), the health and statistics tasks, and the divergence backstop |
 | `test_disaster_recovery.py` | the integrity report, the dry-run plan and the refusal of a real rebuild, and recovery from a backup onto another node |
 
 Workflow domains are `wf*.example.com`: the provisioning pipeline refuses a domain with a `test` label, so `*.praho.test` cannot go through it. The bench moves placement to vm-a by server weight, and puts weights, settings and domain counts back at the end.
@@ -176,7 +176,8 @@ Two things the workflows pinned down about today's behaviour:
 | `docker network disconnect` | in the middle of a backup | the same, through a read timeout |
 | `systemctl stop webmin` | in the middle of a restore | the job is parked in `attention`; one `restore-domain` request was sent; no job reads as completed; backup, restore and migration admission are refused; the reconciler yields; the pushed archive is kept; an operator's resolve frees the account |
 | `docker network disconnect` | in the middle of a restore | the same, through a read timeout |
-| `docker pause` | a read-only program, then a mutating one | the read-only program is sent three times (`virtualmin.max_retries`), the mutation once, both with an unknown outcome |
+| `docker pause` | a read-only program, then a mutating one | the read-only program is sent three times (`virtualmin.max_retries`), the mutation once, both with an unknown outcome (the handshake stalls, so this shows the classification, not an in-flight request) |
+| a 2 s read timeout | a `backup-domain` the node runs to the end | one request was sent; the node still finished the archive; nothing sent it again |
 | `docker pause` | a suspend | the account is not marked suspended; the job is not completed; the retry pool does not send `disable-domain` again |
 | `docker pause` | a delete | the job is parked in `attention`; the account is not marked terminated; `delete-domain` is not sent again; the exclusion holds |
 

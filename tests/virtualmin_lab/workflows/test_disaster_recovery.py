@@ -3,8 +3,10 @@
 PRAHO as the source of truth (docs/domain, ADR-0061 phase 0): the integrity report says whether every account
 could be rebuilt from PRAHO's rows, and the legacy rebuild produces a plan but refuses to run, because it would
 recreate empty domains and lose the customers' data. The recovery that exists today is a restore from a backup:
-onto the same node when the domain is lost, or onto another node. Recovery to a replacement node that also
-repoints the account is the ADR-0061 phase 2 service and does not exist yet.
+onto the same node when the domain is lost, or onto another node (`create_restore_job(target_server=...)`,
+reachable from `virtualmin_backup restore --target-server`). Nothing repoints the account afterwards: it keeps
+naming the lost node while the data lives on the replacement. Recovery that also repoints is the ADR-0061 phase 2
+service and does not exist yet.
 """
 
 from __future__ import annotations
