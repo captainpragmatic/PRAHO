@@ -201,7 +201,7 @@ def test_accessible(page: Page) -> None:
 
 
 def test_cookie_policy_page(page: Page) -> None:
-    """/cookie-policy/ loads and describes all 4 categories."""
+    """The published policy appears above PRAHO's browser-storage inventory and preferences."""
     # Dismiss banner first since this test focuses on the policy page content
     from tests.e2e.helpers import _dismiss_cookie_consent  # noqa: PLC0415
 
@@ -210,17 +210,28 @@ def test_cookie_policy_page(page: Page) -> None:
     page.goto(f"{BASE_URL}/cookie-policy/")
     page.wait_for_load_state("networkidle")
 
-    # Page loads
-    expect(page.locator("h1")).to_contain_text("Cookie Policy")
+    expect(page.get_by_role("heading", name="Cookie Policy", exact=True)).to_be_visible()
+    article = page.locator("article")
+    expect(article.get_by_role("heading", name="Sample Cookie Policy", exact=True)).to_be_visible()
+    expect(article).to_contain_text("Sample text for development and testing. It is not legal text.")
 
-    # All 4 categories described (use heading locators to avoid ambiguous matches)
-    expect(page.get_by_role("heading", name="Essential Cookies")).to_be_visible()
-    expect(page.get_by_role("heading", name="Functional Cookies")).to_be_visible()
-    expect(page.get_by_role("heading", name="Analytics Cookies")).to_be_visible()
-    expect(page.get_by_role("heading", name="Marketing Cookies")).to_be_visible()
+    expect(page.get_by_role("heading", name="What this site stores in your browser", exact=True)).to_be_visible()
+    inventory = page.locator("#main-content table")
+    for name, purpose in (
+        ("portal_session", "Keeps you signed in"),
+        ("csrftoken", "Protects forms against cross-site request forgery"),
+        ("cookie_consent", "Your cookie choices"),
+        ("cookie_consent_id", "Links your cookie choices to the record of them"),
+        ("django_language", "The language you chose"),
+        ("pendingCookieConsent", "Your cookie choices, kept in local storage until they are recorded"),
+        ("htmx-history-cache", "Pages opened in this tab, for the Back button, kept in session storage"),
+        ("Stripe", "On payment pages only, Stripe sets its own cookies to process the payment and prevent fraud"),
+    ):
+        row = inventory.get_by_role("row").filter(has=page.get_by_role("cell", name=name, exact=True))
+        expect(row).to_contain_text(purpose)
 
-    # Legal basis documented
-    expect(page.locator("text=Legal Basis").first).to_be_visible()
+    page.get_by_role("button", name="Change your cookie choices", exact=True).click()
+    expect(page.locator("#cookie-consent-banner")).to_be_visible()
 
 
 def test_server_recording(page: Page) -> None:

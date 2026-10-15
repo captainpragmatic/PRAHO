@@ -65,6 +65,16 @@ class E2EFixtureTests(TestCase):
             memberships = CustomerMembership.objects.filter(user__email=customer["email"])
             self.assertEqual(list(memberships.values_list("customer_id", flat=True)), [customer["id"]])
 
+    def test_baseline_creates_the_local_portal_origin_without_an_existing_override(self) -> None:
+        from apps.users.services import portal_public_origin  # noqa: PLC0415
+
+        self.assertFalse(SystemSetting.objects.filter(key="portal.public_base_url").exists())
+
+        seed_baseline()
+
+        self.assertEqual(portal_public_origin(), "http://localhost:8701")
+        self.assertEqual(SystemSetting.objects.get(key="portal.public_base_url").value, "http://localhost:8701")
+
     def test_validation_reports_missing_prerequisite_without_repair(self):
         baseline = seed_baseline()
         CustomerMembership.objects.filter(user__email=baseline["customers"][1]["email"]).delete()

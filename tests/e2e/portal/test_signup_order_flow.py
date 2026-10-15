@@ -101,7 +101,7 @@ def test_signup_page_loads_correctly(page: Page) -> None:
 
         # Verify main heading
         heading = page.locator("h1")
-        expect(heading).to_contain_text("Create Your PragmaticHost Account")
+        expect(heading).to_have_text("Create your PRAHO account")
         print("  Signup page heading is correct")
 
         # Verify all form sections are present

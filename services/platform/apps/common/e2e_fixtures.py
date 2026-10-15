@@ -193,7 +193,8 @@ def seed_baseline() -> dict[str, Any]:
     for command in ("setup_default_settings", "setup_tax_rules", "setup_email_templates"):
         call_command(command, stdout=StringIO())
     SystemSetting.objects.filter(key="node_deployment.dns_default_zone").update(value="nodes.e2e.example")
-    SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://localhost:8701")
+    # Deployment fallbacks have no row on a fresh database; create the local override explicitly.
+    SettingsService.update_setting("portal.public_base_url", "http://localhost:8701").unwrap()
     # Browser signups share localhost; keep enforcement active with a finite suite-sized allowance.
     registration_limit = SettingsService.update_setting("security.registration_rate_limit_per_ip", 10000)
     if registration_limit.is_err():
