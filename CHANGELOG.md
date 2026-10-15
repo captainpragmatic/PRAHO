@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Platform and its workers include node-provisioning tools.** Their runtime now installs a locked Ansible controller, pinned node-playbook collections and OpenSSH clients. Native services use a shared read-only collection directory and private temporary files without weakening their systemd filesystem restrictions. Portal does not receive the controller dependency.
+
 - **Docker deployments wait for the task worker correctly.** The worker inherited Platform's HTTP health check even though it serves no HTTP, so Compose could report an unhealthy deployment while the worker was running. All three worker definitions now disable that inherited probe; the web services retain their HTTP checks.
 
 - **Hosting accounts can be created on Virtualmin 8.** (#498) PRAHO asked for the template "Default" and enabled no features, which Virtualmin 8.3 refuses. It now uses "Default Settings" with the default features, and a retried create of a domain that was never made reads it as absent, not as an error.

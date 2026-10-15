@@ -12,6 +12,11 @@ User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/platform
 Environment=PYTHONPATH={{ project_root }}/src/services/platform
+Environment=ANSIBLE_COLLECTIONS_PATH=/opt/praho-ansible/collections
+RuntimeDirectory=praho-qcluster
+RuntimeDirectoryMode=0700
+Environment=ANSIBLE_HOME=/run/praho-qcluster/ansible
+Environment=ANSIBLE_LOCAL_TEMP=/run/praho-qcluster/ansible/tmp
 EnvironmentFile={{ project_root }}/.env
 ExecStart={{ project_root }}/.venv-linux/bin/python manage.py qcluster
 Restart=on-failure

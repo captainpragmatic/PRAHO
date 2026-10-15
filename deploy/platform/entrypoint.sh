@@ -7,6 +7,9 @@
 # `command:`), they run instead of the default gunicorn.
 set -e
 
+# This image has no writable home; controller caches and plugins stay in a private runtime dir.
+install -d -m 0700 "${ANSIBLE_HOME:-/tmp/praho-ansible}"
+
 echo "🚀 Running database migrations..."
 python manage.py migrate --noinput
 

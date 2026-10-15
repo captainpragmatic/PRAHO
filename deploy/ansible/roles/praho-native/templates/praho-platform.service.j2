@@ -12,6 +12,11 @@ User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/platform
 Environment=PYTHONPATH={{ project_root }}/src/services/platform
+Environment=ANSIBLE_COLLECTIONS_PATH=/opt/praho-ansible/collections
+RuntimeDirectory=praho-platform
+RuntimeDirectoryMode=0700
+Environment=ANSIBLE_HOME=/run/praho-platform/ansible
+Environment=ANSIBLE_LOCAL_TEMP=/run/praho-platform/ansible/tmp
 EnvironmentFile={{ project_root }}/.env
 ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ platform_port }} \

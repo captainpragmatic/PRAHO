@@ -204,6 +204,7 @@ platform = [
     "croniter>=6.0.0",
 
     # Server provisioning & SSH
+    "ansible-core==2.20.6",  # Controller used by Platform jobs and native deployment checks
     "paramiko>=4.0.0",
     "hcloud>=2.0.0",
     "dnspython>=2.8.0",
