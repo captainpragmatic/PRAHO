@@ -604,6 +604,15 @@ test-e2e-orm:
 	@E2E_STRICT=1 DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/orm/ -v
 	@echo "✅ ORM E2E tests completed!"
 
+.PHONY: ci-postgres-start ci-postgres-stop
+CI_POSTGRES_IMAGE_TAG ?= 16
+ci-postgres-start:
+	@./scripts/start_ci_postgres.sh "$(CI_POSTGRES_IMAGE_TAG)"
+
+ci-postgres-stop:
+	@./scripts/start_ci_postgres.sh --stop
+
+
 test:
 	@echo "🔄 [All Tests] Running comprehensive test suite (post Redis removal)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

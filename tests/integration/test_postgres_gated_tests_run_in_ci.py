@@ -44,8 +44,43 @@ def _workflow_jobs() -> list[tuple[str, str, dict[str, Any]]]:
     return jobs
 
 
-def _has_postgres(job: dict[str, Any]) -> bool:
-    return any("postgres" in str(service.get("image", "")) for service in (job.get("services") or {}).values())
+def _postgres_service(job: dict[str, object]) -> bool:
+    services = job.get("services")
+    return isinstance(services, dict) and any(
+        isinstance(service, dict) and "postgres" in str(service.get("image", "")) for service in services.values()
+    )
+
+
+def _bootstrap_index(job: dict[str, object]) -> int | None:
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return None
+    nightly = [
+        "git show '${{ github.workflow_sha }}:scripts/start_ci_postgres.sh' > \"$RUNNER_TEMP/praho-ci-postgres.sh\"",
+        'bash "$RUNNER_TEMP/praho-ci-postgres.sh" 16-alpine',
+    ]
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict) or step.get("continue-on-error"):
+            continue
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        lines = [line.strip() for line in run.splitlines() if line.strip()]
+        if lines in (["make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16"], nightly):
+            return index
+    return None
+
+
+def _postgres_ci_runs(job: dict[str, object]) -> list[str]:
+    """Count only settings.ci steps after a required, real PostgreSQL bootstrap has succeeded."""
+    if _postgres_service(job):
+        return _ci_runs(job)
+    index = _bootstrap_index(job)
+    if index is None:
+        return []
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    return _ci_runs({**job, "steps": steps[index + 1 :]})
 
 
 def _ci_runs(job: dict[str, Any]) -> list[str]:
@@ -62,19 +97,14 @@ def _explicit_labels() -> set[str]:
     """Dotted labels named on a `manage.py test` line in a PostgreSQL job's CI step."""
     labels: set[str] = set()
     for _file, _name, job in _workflow_jobs():
-        if not _has_postgres(job):
-            continue
-        for run in _ci_runs(job):
+        for run in _postgres_ci_runs(job):
             for invocation in re.findall(r"manage\.py test(.*?)--settings", run, flags=re.DOTALL):
                 labels.update(re.findall(r"\btests(?:\.\w+)+", invocation))
     return labels
 
 
 def _derived_step_runs_in_postgres_job() -> bool:
-    for _file, _name, job in _workflow_jobs():
-        if _has_postgres(job) and any(SCRIPT in run for run in _ci_runs(job)):
-            return True
-    return False
+    return any(any(SCRIPT in run for run in _postgres_ci_runs(job)) for _file, _name, job in _workflow_jobs())
 
 
 def _covered(module: str, labels: set[str]) -> bool:
@@ -135,3 +165,11 @@ class TestPostgresGatedTestsRunInCi:
                 assert invocation, "the step must run the platform tests"
                 assert not re.findall(r"\btests(?:\.\w+)+", invocation.group(1)), "no hand-named labels"
         assert seen == 1
+
+
+def test_bootstrap_must_precede_gated_steps_and_must_be_required() -> None:
+    bootstrap = {"run": "make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16"}
+    test = {"run": f"python {SCRIPT}", "env": {"DJANGO_SETTINGS_MODULE": "config.settings.ci"}}
+    assert _postgres_ci_runs({"steps": [bootstrap, test]}) == [test["run"]]
+    assert _postgres_ci_runs({"steps": [test, bootstrap]}) == []
+    assert _postgres_ci_runs({"steps": [{**bootstrap, "continue-on-error": True}, test]}) == []

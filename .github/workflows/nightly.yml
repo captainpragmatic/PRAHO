@@ -108,30 +108,20 @@ jobs:
       matrix:
         branch: ${{ fromJSON(needs.check-activity.outputs.branches) }}
 
-    services:
-      postgres:
-        # Docker Official Images mirror: the same image, without Docker Hub's anonymous pull limit.
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
-          POSTGRES_USER: test
-          POSTGRES_INITDB_ARGS: "--nosync"
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-          --shm-size=256mb
-          --tmpfs /var/lib/postgresql/data
-        ports:
-          - 5432:5432
-
     steps:
     - uses: actions/checkout@v4
       with:
         ref: ${{ matrix.branch }}
         fetch-depth: 0
+
+    - name: Start PostgreSQL (registry fallback)
+      # The matrix can check out an older staging branch; bootstrap from the workflow revision.
+      run: |
+        git show '${{ github.workflow_sha }}:scripts/start_ci_postgres.sh' > "$RUNNER_TEMP/praho-ci-postgres.sh"
+        bash "$RUNNER_TEMP/praho-ci-postgres.sh" 16-alpine
+      env:
+        CI_POSTGRES_USER: test
+        POSTGRES_PASSWORD: test
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -269,6 +259,14 @@ jobs:
   #
   # No postgres service: the e2e settings use their own SQLite files.
   # ---------------------------------------------------------------------------
+
+    - name: Stop CI PostgreSQL
+      if: always()
+      run: |
+        if [ -f "$RUNNER_TEMP/praho-ci-postgres.sh" ]; then
+          bash "$RUNNER_TEMP/praho-ci-postgres.sh" --stop
+        fi
+
   nightly-e2e:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'
