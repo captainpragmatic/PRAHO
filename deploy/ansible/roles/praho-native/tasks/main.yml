@@ -423,10 +423,24 @@
     # Production portal settings refuse to import without it (see the platform task above).
     praho_passthrough:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+      - PORTAL_GUNICORN_WORKER_CLASS
+      - PORTAL_GUNICORN_WORKERS
+      - PORTAL_GUNICORN_THREADS
+      - PORTAL_ID
+      - PORTAL_HMAC_SECRET
+      - PLATFORM_API_TIMEOUT
+      - PLATFORM_API_TOTAL_BUDGET_SECONDS
+      - PLATFORM_API_AUTH_MIN_DURATION_SECONDS
+      - CSP_PROFILE
+      - CSP_REPORT_ONLY
+      - DJANGO_LOG_LEVEL
+      - COMPANY_BANK_BENEFICIARY
+      - COMPANY_BANK_IBAN
+      - COMPANY_BANK_NAME
     praho_portal_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/portal"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.PORTAL_DJANGO_SECRET_KEY }}"
       ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
       PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
       PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
@@ -434,8 +448,20 @@
       DJANGO_SECURE_SSL_REDIRECT: "false"
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/portal-static"
+      PORTAL_LOG_DIR: /var/log/praho/portal
       SESSION_DB_PATH: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
       PORTAL_TRUSTED_PROXY_CIDRS: "{{ deployed_env.PORTAL_TRUSTED_PROXY_CIDRS | default('127.0.0.1/32,::1/128') }}"
+
+- name: Install filtered Portal runtime environment
+  copy:
+    content: "{{ portal_django_env | native_systemd_env }}"
+    dest: "{{ project_root }}/.portal.env"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: restart praho-portal
 
 - name: Create Portal database directory
   file:
@@ -645,7 +671,7 @@
     hour: "2"
     job: >-
       cd {{ project_root }}/src/services/portal &&
-      set -a && . {{ project_root }}/.env && set +a &&
+      set -a && . {{ project_root }}/.portal.env && set +a &&
       SESSION_DB_PATH={{ portal_django_env.SESSION_DB_PATH }}
       PYTHONPATH={{ project_root }}/src/services/portal
       DJANGO_SETTINGS_MODULE={{ django_settings_module }}

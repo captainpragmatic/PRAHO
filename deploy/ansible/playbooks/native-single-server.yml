@@ -57,11 +57,14 @@
       no_log: true
 
     - name: Validate required env vars
+      no_log: true
       assert:
         that:
           - preflight_env.PORTAL_DOMAIN is defined and preflight_env.PORTAL_DOMAIN | length > 0
           - preflight_env.PLATFORM_DOMAIN is defined and preflight_env.PLATFORM_DOMAIN | length > 0
           - preflight_env.DJANGO_SECRET_KEY is defined and preflight_env.DJANGO_SECRET_KEY | length > 0
+          - preflight_env.PORTAL_DJANGO_SECRET_KEY | default('') | length > 0
+          - preflight_env.PORTAL_DJANGO_SECRET_KEY | default('') != preflight_env.DJANGO_SECRET_KEY
           - preflight_env.DB_PASSWORD is defined and preflight_env.DB_PASSWORD | length > 0
           - preflight_env.HMAC_SECRET is defined and preflight_env.HMAC_SECRET | length > 0
           # Production settings refuse to start without these three; staging doesn't need them.
