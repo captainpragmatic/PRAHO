@@ -8,14 +8,14 @@ from uuid import UUID
 from django.contrib import messages
 from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_POST
 
 from apps.common.decorators import staff_required_strict
-from apps.domains.staff_fulfilment import record_paid_domain, refuse_paid_domain
+from apps.domains.staff_fulfilment import record_paid_domain, refuse_paid_domain, reveal_paid_transfer_code
 
 from .models import Order, OrderItem
 from .views import _REVIEW_APPROVE_ROLES
@@ -82,3 +82,20 @@ def domain_refuse(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse
         return HttpResponseBadRequest(str(error))
     messages.success(request, _("Registrar refusal recorded."))
     return _domain_redirect(request, pk)
+
+
+@staff_required_strict
+@require_POST
+def domain_transfer_code(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse:
+    if not _can_record(request.user):
+        return HttpResponseForbidden(_("Only admin or billing staff can record registrar answers."))
+    try:
+        code = reveal_paid_transfer_code(pk, item_pk, actor=request.user)
+    except (Order.DoesNotExist, OrderItem.DoesNotExist):
+        raise Http404 from None
+    except ValueError as error:
+        return HttpResponseBadRequest(str(error))
+    response = render(request, "orders/partials/domain_transfer_code.html", {"transfer_code": code})
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response

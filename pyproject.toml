@@ -639,7 +639,7 @@ disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call
 
 # API serializers and core: DRF typing issues
 [[tool.mypy.overrides]]
-module = ["apps.api.billing.gift_views"]
+module = ["apps.api.billing.gift_views", "apps.api.orders.domain_views"]
 # Same untyped DRF framework boundary as views/serializers above; keep attribute checks.
 disable_error_code = ["misc", "untyped-decorator"]
 

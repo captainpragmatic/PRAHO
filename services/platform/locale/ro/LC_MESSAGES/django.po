@@ -27057,3 +27057,48 @@ msgstr "Confirmați că registratorul a refuzat această operațiune de domeniu?
 
 msgid "Refused by the registrar"
 msgstr "Refuzat de registrator"
+
+msgid "Enter a transfer code of 1-64 printable ASCII characters without spaces."
+msgstr "Introduceți un cod de transfer de 1-64 de caractere ASCII imprimabile, fără spații."
+
+msgid "This line is not a domain transfer."
+msgstr "Această linie nu este un transfer de domeniu."
+
+msgid "This order cannot accept a transfer code in its current state."
+msgstr "Această comandă nu poate accepta un cod de transfer în starea curentă."
+
+msgid "This transfer has already been dispatched or cannot be retried."
+msgstr "Acest transfer a fost deja trimis sau nu poate fi reîncercat."
+
+msgid "A transfer code was received."
+msgstr "A fost primit un cod de transfer."
+
+msgid "This domain extension is not supported."
+msgstr "Această extensie de domeniu nu este acceptată."
+
+msgid "This transfer is already being processed."
+msgstr "Acest transfer este deja în curs de procesare."
+
+msgid "Domain operation crashed: {error}"
+msgstr "Operațiunea de domeniu s-a întrerupt: {error}"
+
+msgid "No transfer code is available for this line."
+msgstr "Nu există un cod de transfer disponibil pentru această linie."
+
+msgid "The transfer code cannot be read. Ask the customer to submit it again."
+msgstr "Codul de transfer nu poate fi citit. Cereți clientului să îl trimită din nou."
+
+msgid "A transfer code was revealed to staff."
+msgstr "Un cod de transfer a fost afișat personalului."
+
+msgid "Transfer code"
+msgstr "Cod de transfer"
+
+msgid "Copy this code before leaving this page."
+msgstr "Copiați acest cod înainte de a părăsi pagina."
+
+msgid "Reveal this transfer code and record access in the audit log?"
+msgstr "Afișați acest cod de transfer și consemnați accesul în jurnalul de audit?"
+
+msgid "Show transfer code"
+msgstr "Afișează codul de transfer"

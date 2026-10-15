@@ -981,7 +981,7 @@ class BaseRegistrarGateway(ABC):
                 attempt + 1,
                 max_retries,
                 backoff,
-                error,
+                error.code.value,
             )
             time.sleep(backoff)
 

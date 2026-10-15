@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.audit.services import DomainsAuditService
+from apps.common.encryption import DecryptionError
 
 from .currency_terms import domain_fields_from_order_item
 from .domain_names import canonicalize_domain_name
@@ -23,6 +24,29 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 MAX_REGISTRY_ID_LENGTH = 100
+
+
+def reveal_paid_transfer_code(order_id: UUID, line_id: UUID, *, actor: User) -> str:
+    """Return the code for one audited response; keep it until dispatch or staff resolution."""
+    with transaction.atomic():
+        line, item, _domain = _locked_line(order_id, line_id)
+        if (
+            item.action != "transfer"
+            or not item.epp_code
+            or line.provisioning_status not in ("pending", "failed", "in_progress")
+        ):
+            raise ValueError(_("No transfer code is available for this line."))
+        try:
+            code = item.get_decrypted_epp_code()
+        except DecryptionError:
+            raise ValueError(_("The transfer code cannot be read. Ask the customer to submit it again.")) from None
+        DomainsAuditService.log_domain_order_event(
+            "domain_transfer_code_revealed",
+            item,
+            user=actor,
+            description=_("A transfer code was revealed to staff."),
+        )
+    return code
 
 
 def _locked_line(order_id: UUID, line_id: UUID) -> tuple[OrderItem, DomainOrderItem, Domain | None]:

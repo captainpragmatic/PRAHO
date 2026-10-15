@@ -18,6 +18,7 @@ from typing import Any, cast
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Model
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -42,8 +43,26 @@ from .models import (
     TLDRetailPrice,
 )
 from .order_fulfilment import fulfil_order_item_for_domain
+from .transfer_codes import clear_terminal_transfer_code
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_transition)
+def clear_transfer_code_on_terminal_line(
+    sender: type[Model],
+    instance: Model,
+    target: str,
+    **kwargs: object,
+) -> None:
+    """FSM transitions fire before save; clear only the terminal line state that commits."""
+    if target not in ("completed", "cancelled"):
+        return
+    from apps.orders.models import OrderItem  # noqa: PLC0415  # Cross-app models are deferred (ADR-0007).
+
+    if isinstance(instance, OrderItem):
+        line_id = instance.pk
+        transaction.on_commit(lambda: clear_terminal_transfer_code(line_id), robust=True)
 
 
 @receiver(post_save, sender=DomainCurrencyTransition)

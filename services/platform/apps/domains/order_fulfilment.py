@@ -17,6 +17,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -55,6 +56,11 @@ def claim_order_line(domain_item: DomainOrderItem) -> bool:
         line = _lock_line(domain_item)
         if line is None or line.provisioning_status != "pending" or line.order.status != "provisioning":
             return False
+        current = DomainOrderItem.objects.select_for_update().get(pk=domain_item.pk)
+        if current.domain_id is not None or (current.action == "transfer" and not current.epp_code):
+            return False
+        # A customer may replace a pending code while this worker waits for the order lock.
+        domain_item.epp_code = current.epp_code
         line.start_provisioning()
         line.save(update_fields=["provisioning_status", "updated_at"])
     return True
@@ -131,11 +137,10 @@ def sweep_domain_order_lines() -> int:
         acted += fail_order_line(domain_item, _("It stalled after it was claimed, before the registrar was asked"))
     # Paid, but the processing task was never queued or never ran.
     never_picked_up = paid.filter(
-        action="register",
         order_item__provisioning_status="pending",
         order__status="provisioning",
         order__updated_at__lt=stalled_before,
-    )
+    ).filter(Q(action="register") | (Q(action="transfer") & ~Q(epp_code="")))
     for order_id in set(never_picked_up.values_list("order_id", flat=True)):
         async_task("apps.domains.tasks.process_order_domain_items", str(order_id))
         acted += 1

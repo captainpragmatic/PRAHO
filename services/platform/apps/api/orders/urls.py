@@ -5,7 +5,7 @@ RESTful endpoints for product catalog and order management.
 
 from django.urls import path
 
-from . import views
+from . import domain_views, views
 
 app_name = "orders"
 
@@ -21,4 +21,5 @@ urlpatterns = [
     path("", views.order_list, name="order_list"),
     path("<uuid:order_id>/", views.order_detail, name="order_detail"),
     path("<uuid:order_id>/confirm/", views.confirm_order, name="confirm_order"),
+    path("<uuid:order_id>/items/<uuid:item_id>/transfer-code/", domain_views.transfer_code, name="transfer_code"),
 ]

@@ -5,6 +5,14 @@
       <section class="mt-6 p-6 bg-slate-800 rounded-lg border border-slate-700" aria-labelledby="domain-resolution-{{ item.id }}">
         <h3 id="domain-resolution-{{ item.id }}" class="text-lg text-white font-semibold">{{ item.domain_name }}</h3>
         <p class="mt-2 text-sm text-slate-400">{% trans "Record the answer confirmed by the registrar." %}</p>
+        {% if item.domain_order_item.action == "transfer" and item.domain_order_item.epp_code %}
+          <form method="post" action="{% url 'orders:domain_transfer_code' pk=order.id item_pk=item.id %}" hx-post="{% url 'orders:domain_transfer_code' pk=order.id item_pk=item.id %}" hx-target="#transfer-code-{{ item.id }}" hx-confirm="{% trans 'Reveal this transfer code and record access in the audit log?' %}" class="mt-3">
+            {% csrf_token %}
+            {% trans "Show transfer code" as reveal_label %}
+            {% button reveal_label type="submit" variant="secondary" %}
+          </form>
+          <div id="transfer-code-{{ item.id }}"></div>
+        {% endif %}
         <form method="post" action="{% url 'orders:domain_record' pk=order.id item_pk=item.id %}" hx-post="{% url 'orders:domain_record' pk=order.id item_pk=item.id %}" hx-confirm="{% trans 'Confirm that the registrar registered or transferred this domain?' %}" class="mt-4 space-y-3">
           {% csrf_token %}
           {% trans "Expiry date" as expiry_label %}

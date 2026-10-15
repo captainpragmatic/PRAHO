@@ -605,18 +605,52 @@ class DomainLifecycleService:
     # -- Phase 2: Transfer, nameservers, lock --------------------------------
 
     @staticmethod
-    def initiate_transfer(  # noqa: PLR0911  # multi-outcome lifecycle: gateway/registrant/TLD/retriability exits
-        domain_name: str, epp_code: str, customer: Customer, registrar: Registrar
-    ) -> Result[DomainOperation, str]:
-        """Initiate inbound domain transfer (two-phase: DB record + registrar submit)."""
+    def _transfer_gateway(
+        tld: TLD,
+        registrar: Registrar,
+        order_item: DomainOrderItem | None,
+    ) -> Result[tuple[Registrar, BaseRegistrarGateway], str]:
+        """Use the purchased registrar and refuse unsendable work while the code is still stored."""
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
-        from .operation_services import DomainOperationService  # noqa: PLC0415
 
+        if order_item is not None:
+            if order_item.registrar is None or not RegistrarService.serves_tld(order_item.registrar, tld):
+                return Err(str(_("The registrar this domain was sold with no longer offers it.")))
+            registrar = order_item.registrar
         try:
             gateway = RegistrarGatewayFactory.create_gateway(registrar)
         except ValueError:
             return Err(f"No gateway for registrar {registrar.name}")
 
+        # Refusals before dispatch retain the code for staff to complete an unverified transfer.
+        if order_item is not None:
+            if guard := gateway._verified_adapter_guard():
+                return Err(str(guard.unwrap_err()))
+            if breaker := gateway._check_circuit_breaker():
+                return Err(breaker.unwrap_err().code.value)
+        return Ok((registrar, gateway))
+
+    @staticmethod
+    def initiate_transfer(  # noqa: PLR0911  # explicit preflight and registrar outcome exits
+        domain_name: str,
+        epp_code: str,
+        customer: Customer,
+        registrar: Registrar,
+        *,
+        order_item: DomainOrderItem | None = None,
+    ) -> Result[DomainOperation, str]:
+        """Initiate inbound domain transfer (two-phase: DB record + registrar submit)."""
+        from .currency_terms import domain_fields_from_order_item  # noqa: PLC0415
+        from .operation_services import DomainOperationService  # noqa: PLC0415
+
+        tld_ext = DomainValidationService.extract_tld_from_domain(domain_name)
+        tld = TLDService.get_tld_pricing(tld_ext)
+        if not tld:
+            return Err(str(_("This domain extension is not supported.")))
+        gateway_result = DomainLifecycleService._transfer_gateway(tld, registrar, order_item)
+        if isinstance(gateway_result, Err):
+            return gateway_result
+        registrar, gateway = gateway_result.value
         # Gandi requires an owner contact on transfer-in; validate registrant data
         # BEFORE creating any row so incomplete customer data fails with an
         # actionable message instead of a registrar rejection.
@@ -628,10 +662,18 @@ class DomainLifecycleService:
         # Phase 1: create Domain + DomainOperation records
         try:
             with transaction.atomic():
-                tld_ext = DomainValidationService.extract_tld_from_domain(domain_name)
-                tld = TLDService.get_tld_pricing(tld_ext)
-                if not tld:
-                    return Err(cast(str, _(f"TLD '.{tld_ext}' is not supported")))
+                if not DomainOperationService._can_create_domain(order_item):
+                    return Err(str(_("This transfer is already being processed.")))
+                terms = (
+                    domain_fields_from_order_item(
+                        order_item,
+                        customer_id=customer.pk,
+                        domain_name=canonicalize_domain_name(domain_name),
+                        tld_id=tld.pk,
+                    )
+                    if order_item is not None
+                    else {}
+                )
 
                 domain = Domain.objects.create(
                     name=canonicalize_domain_name(domain_name),
@@ -639,7 +681,11 @@ class DomainLifecycleService:
                     registrar=registrar,
                     customer=customer,
                     status="pending",
+                    whois_privacy=order_item.whois_privacy if order_item is not None else False,
+                    auto_renew=order_item.auto_renew if order_item is not None else True,
+                    **terms,
                 )
+                DomainOperationService._link_order_item(order_item, domain)
                 domain.start_transfer_in()
                 domain.save()
 
@@ -649,14 +695,14 @@ class DomainLifecycleService:
                     operation_type="transfer_in",
                     parameters={"epp_code": "***"},  # never store plaintext EPP
                 )
-        except Exception as e:
-            logger.error("Failed to create transfer records for %s: %s", domain_name, e)
+        except Exception as exc:
+            logger.error("🔥 [Domain] Failed to create transfer records for %s: %s", domain_name, type(exc).__name__)
             return Err(cast(str, _("Failed to initiate transfer")))
 
         # Phase 2: submit to registrar (outside the transaction above). Use the stored
         # (lowercased) domain.name so the gateway idempotency key matches on any retry —
         # passing the raw domain_name would key "Example.com" separately from "example.com".
-        if not DomainOperationService.dispatch(op):
+        if not DomainOperationService.dispatch(op, order_item=order_item):
             return Err("Operation already submitted; awaiting confirmation.")
         result = gateway.initiate_transfer(
             domain.name,
@@ -1515,28 +1561,47 @@ class DomainOrderService:
             return False, cast(str, _("Failed to create domain order item"))
 
     @staticmethod
-    def _process_registration(order: Order, item: DomainOrderItem) -> Domain | None:
-        """Register one item; a paid line is claimed first, so the registrar sees it at most once."""
+    def _process_paid_line(order: Order, item: DomainOrderItem) -> Domain | None:
+        """Claim one registration or transfer before dispatch, with one refusal/crash boundary."""
+        if item.action == "transfer" and not item.epp_code:
+            logger.warning(
+                "⚠️ [Domain] Transfer item %s is not auto-processed: it waits for its transfer code",
+                item.domain_name,
+            )
+            return None
         if item.order_item_id is not None and not claim_order_line(item):
             return None
         result: Result[Domain, str]
         try:
-            result = DomainLifecycleService.create_domain_registration(
-                customer=order.customer,
-                domain_name=item.domain_name,
-                years=item.years,
-                whois_privacy=item.whois_privacy,
-                auto_renew=item.auto_renew,
-                order_item=item,
-            )
+            if item.action == "transfer":
+                if item.registrar is None:
+                    result = Err(str(_("The registrar this domain was sold with no longer offers it.")))
+                else:
+                    transfer = DomainLifecycleService.initiate_transfer(
+                        item.domain_name,
+                        item.get_decrypted_epp_code(),
+                        order.customer,
+                        item.registrar,
+                        order_item=item,
+                    )
+                    result = Ok(transfer.value.domain) if isinstance(transfer, Ok) else transfer
+            else:
+                result = DomainLifecycleService.create_domain_registration(
+                    customer=order.customer,
+                    domain_name=item.domain_name,
+                    years=item.years,
+                    whois_privacy=item.whois_privacy,
+                    auto_renew=item.auto_renew,
+                    order_item=item,
+                )
         except Exception as exc:  # A claimed line must not wait in progress unnoticed.
             # Its kind only: the text of an error raised here may quote registrant data.
-            logger.error("🔥 [Domain] Registration of %s crashed: %s", item.domain_name, type(exc).__name__)
-            result = Err(_("Registration crashed: {error}").format(error=type(exc).__name__))
+            logger.error("🔥 [Domain] %s of %s crashed: %s", item.action, item.domain_name, type(exc).__name__)
+            result = Err(_("Domain operation crashed: {error}").format(error=type(exc).__name__))
         if result.is_ok():
-            logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
+            logger.info("✅ [Domain] Processed %s: %s", item.action, item.domain_name)
             return result.unwrap()
-        logger.error("🔥 [Domain] Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
+        logger.error("🔥 [Domain] Failed to process %s %s: %s", item.action, item.domain_name, result.unwrap_err())
         # register() links the domain it creates and deletes it only when nothing is pending at the
         # registrar, so a paid line left without a domain was refused; a linked one awaits the answer.
         item.refresh_from_db(fields=["domain"])
@@ -1545,7 +1610,7 @@ class DomainOrderService:
         return None
 
     @staticmethod
-    def process_domain_order_items(order: Order) -> list[Domain]:  # noqa: PLR0912  # per-action dispatch with per-outcome handling
+    def process_domain_order_items(order: Order) -> list[Domain]:
         """⚡ Process all domain order items for paid order"""
         from .operation_services import DomainOperationService  # noqa: PLC0415
 
@@ -1562,9 +1627,9 @@ class DomainOrderService:
             # infrastructure can still raise. One boundary per item prevents any action
             # type from aborting the order's remaining valid items.
             try:
-                if item.action == "register":
-                    registered = DomainOrderService._process_registration(order, item)
-                    if registered is not None:
+                if item.action in ORDERABLE_DOMAIN_ACTIONS:
+                    registered = DomainOrderService._process_paid_line(order, item)
+                    if registered is not None and item.action == "register":
                         processed_domains.append(registered)
 
                 elif item.action == "renew":
@@ -1616,14 +1681,6 @@ class DomainOrderService:
                             renewal_result.unwrap_err(),
                         )
 
-                elif item.action == "transfer":
-                    # #430: an inbound transfer needs the domain's transfer code, which the order does
-                    # not collect yet, so its paid line stays pending. Log it rather than dropping it.
-                    logger.warning(
-                        "⚠️ [Domain] Transfer item %s is not auto-processed: it waits for its transfer code",
-                        item.domain_name,
-                    )
-
                 else:
                     # #430: any unhandled action must be VISIBLE, not silently dropped. This logs and
                     # continues rather than raising: one malformed item must not abort processing of
@@ -1635,12 +1692,12 @@ class DomainOrderService:
                         item.domain_name,
                     )
 
-            except Exception:
+            except Exception as exc:
                 logger.error(
-                    "🔥 [Domain] Processing %s item %s crashed unexpectedly — continuing with remaining items",
+                    "🔥 [Domain] Processing %s item %s crashed unexpectedly (%s) — continuing with remaining items",
                     item.action,
                     item.domain_name,
-                    exc_info=True,
+                    type(exc).__name__,
                 )
                 continue
 

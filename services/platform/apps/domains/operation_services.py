@@ -68,13 +68,41 @@ class DomainOperationService:
         operation.save(update_fields=["review_required_at", "error_message", "result", "updated_at"])
 
     @staticmethod
-    def dispatch(operation: DomainOperation) -> bool:
+    def _lock_paid_item(order_item: DomainOrderItem) -> DomainOrderItem | None:
+        """Caller holds atomic; lock Order → OrderItem → DomainOrderItem before its domain."""
+        from .order_fulfilment import _lock_line  # noqa: PLC0415  # Shared paid-line lock order.
+
+        line = _lock_line(order_item)
+        if line is None or line.provisioning_status != "in_progress":
+            return None
+        return DomainOrderItem.objects.select_for_update().get(
+            pk=order_item.pk, order_item=line, order_id=line.order_id
+        )
+
+    @classmethod
+    def _can_create_domain(cls, order_item: DomainOrderItem | None) -> bool:
+        """Legacy callers have no line; paid callers must still own an unlinked claim."""
+        if order_item is None or order_item.order_item_id is None:
+            return True
+        paid_item = cls._lock_paid_item(order_item)
+        return paid_item is not None and paid_item.domain_id is None
+
+    @classmethod
+    def dispatch(cls, operation: DomainOperation, *, order_item: DomainOrderItem | None = None) -> bool:
         """Claim dispatch once, including when multiple workers resume preflight."""
         with transaction.atomic():
+            paid_item = None
+            if order_item is not None and order_item.order_item_id is not None:
+                paid_item = cls._lock_paid_item(order_item)
+                if paid_item is None or paid_item.domain_id != operation.domain_id:
+                    return False
             Domain.objects.select_for_update().get(pk=operation.domain_id)
             current = DomainOperation.objects.select_for_update().get(pk=operation.pk)
             if current.state != "pending":
                 return False
+            if paid_item is not None and operation.operation_type == "transfer_in":
+                paid_item.epp_code = ""
+                paid_item.save(update_fields=["epp_code", "updated_at"])
             operation.mark_submitted()
             operation.next_retry_at = timezone.now() + timedelta(minutes=15)
             operation.save()
@@ -121,6 +149,8 @@ class DomainOperationService:
             return Err(str(exc))
 
         with transaction.atomic():
+            if not cls._can_create_domain(config.order_item):
+                return Err(str(REGISTRATION_PENDING_MESSAGE))
             domain = Domain.objects.create(
                 name=config.domain_name,
                 tld=config.tld,
@@ -155,7 +185,7 @@ class DomainOperationService:
         data = {**config.registrant_data}
         if contact_result.unwrap():
             data["registrar_contact_id"] = contact_result.unwrap()
-        if not cls.dispatch(operation):
+        if not cls.dispatch(operation, order_item=config.order_item):
             return Err(str(REGISTRATION_PENDING_MESSAGE))
         try:
             success, payload = DomainRegistrarGateway.register_domain(config.registrar, domain.name, config.years, data)
