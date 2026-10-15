@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Browser runs work from a fresh database.** The E2E fixtures create their local portal URL override explicitly, so registration and recovery emails have a valid destination even when deployment defaults have no stored row. Browser checks now verify the deployment's published Cookie Policy, PRAHO's browser-storage inventory and preferences, and the default registration branding.
 
+- **Brand mounts remain inspectable with Compose v2.** Explicit bind mappings preserve the read-only brand directory and its default while letting `compose config --variables` read the deployment files; the former volume shorthand failed with "too many colons" during portal environment validation.
+
 - **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
 
 ### Changed

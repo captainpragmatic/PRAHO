@@ -12,6 +12,7 @@ import yaml
 from django.test import SimpleTestCase
 
 ROOT = Path(__file__).resolve().parents[2]
+type ComposeMount = str | dict[str, str | bool]
 
 
 def _runtime_instructions(service: str) -> list[tuple[str, str]]:
@@ -133,11 +134,14 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
                 raw_mounts = config.get("volumes", [])
                 self.assertIsInstance(raw_mounts, list)
                 persistent_destinations: list[PurePosixPath] = []
-                for mount in cast(list[str], raw_mounts):
-                    parts = mount.split(":")
-                    if len(parts) < 2:
-                        continue  # Anonymous volumes are not stable across container replacement.
-                    source, destination = parts[:2]
+                for mount in cast(list[ComposeMount], raw_mounts):
+                    if isinstance(mount, str):
+                        parts = mount.split(":")
+                        if len(parts) < 2:
+                            continue  # Anonymous volumes are not stable across container replacement.
+                        source, destination = parts[:2]
+                    else:
+                        source, destination = str(mount["source"]), str(mount["target"])
                     if source in compose.get("volumes", {}) or source.startswith((".", "/")):
                         persistent_destinations.append(PurePosixPath(destination))
                 self.assertTrue(
@@ -150,8 +154,13 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
         self.assertEqual(checked, expected_portal_files)
 
     def test_compose_workdirs_and_mounts_match_the_images(self) -> None:
-        brand = "${BRAND_DIR:-./brand}:/app/brand:ro"  # Read-only deployment brand folder (ADR-0058)
-        expected_volumes: dict[str, dict[str, list[str]]] = {
+        brand: ComposeMount = {
+            "type": "bind",
+            "source": "${BRAND_DIR:-./brand}",
+            "target": "/app/brand",
+            "read_only": True,
+        }
+        expected_volumes: dict[str, dict[str, list[ComposeMount]]] = {
             "docker-compose.container-service.yml": {
                 "platform": [],
                 "portal": ["portal_sessions:/app/data"],

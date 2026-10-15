@@ -109,7 +109,11 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
-      - ${BRAND_DIR:-./brand}:/app/brand:ro  # brand folder (ADR-0058); the empty deploy/brand keeps PRAHO's mark
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]

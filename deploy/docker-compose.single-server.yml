@@ -93,7 +93,11 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
-      - ${BRAND_DIR:-./brand}:/app/brand:ro  # brand folder (ADR-0058); the empty deploy/brand keeps PRAHO's mark
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     depends_on:
       db:
         condition: service_healthy
@@ -180,7 +184,11 @@ services:
       - portal_static:/app/staticfiles
       - portal_logs:/app/logs
       - portal_sessions:/app/data
-      - ${BRAND_DIR:-./brand}:/app/brand:ro  # brand folder (ADR-0058); the empty deploy/brand keeps PRAHO's mark
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     depends_on:
       platform:
         condition: service_healthy
