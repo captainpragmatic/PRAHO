@@ -237,6 +237,9 @@ portal = [
 
     # HTML sanitization (used in shared UI template tags)
     "bleach>=6.0.0",
+
+    # Proof-of-work bot protection on public forms (typed; no stub override needed)
+    "altcha==2.3.0",
 ]
 
 # ===============================================================================
@@ -602,7 +605,6 @@ ignore_errors = true
 module = [
     "rest_framework.*",
     "django_q.*",
-    "captcha.*",
     "faker.*",
     "prometheus_client.*",
     "anymail.*",

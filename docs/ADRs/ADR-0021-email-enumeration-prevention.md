@@ -187,7 +187,7 @@ def signup(request):
 ### Phase 2: Extension (Future)
 - [ ] Apply same pattern to password reset flows
 - [ ] Extend to account recovery endpoints
-- [ ] Add CAPTCHA integration for high-volume abuse
+- [x] Proof-of-work on the public registration and password-reset forms (ALTCHA, 2026-10; see below)
 - [ ] Implement advanced monitoring dashboards
 
 ### Phase 3: Monitoring (Future)
@@ -263,10 +263,27 @@ The pattern should be extended to all similar endpoints (password reset, account
 1. Monitor production metrics for 30 days
 2. Extend pattern to password reset endpoint
 3. Implement advanced abuse detection
-4. Consider CAPTCHA integration for extreme cases
+4. Proof-of-work (ALTCHA) already slows automated registration and password-reset requests; see the addendum below
 
 **References:**
 - OWASP Testing Guide: Information Gathering
 - NIST Cybersecurity Framework
 - RFC 7231: HTTP/1.1 Semantics and Content
 - GDPR Article 25: Data Protection by Design
+
+## Addendum (2026-10-15): proof-of-work on the public forms
+
+The portal's registration and password-reset forms carry an ALTCHA widget (`apps.common.altcha`).
+The browser solves a PBKDF2 challenge the portal signed with a key derived from `SECRET_KEY`, in a
+worker served from the portal's own origin, and submits the solution with the form.
+
+- **Accepted once.** A verified solution claims its challenge's signature until the challenge
+  expires, so a replayed or re-encoded copy is refused. A challenge without an expiry, signed
+  elsewhere, or over 4 KB is refused before or instead of verification.
+- **An ordinary form error.** A missing or refused solution is a field error like any other. It is
+  checked with the other fields, before anything is sent to Platform, so it adds no account
+  signal: the uniform answers above are unchanged.
+- **It complements, never replaces, the limits.** The per-IP and per-address budgets still apply,
+  and `/altcha/challenge/` has its own per-IP budget.
+- **Switch.** `ALTCHA_ENABLED` is on in production and staging, off in development and the unit
+  tests, and on in the E2E settings so the CSP gates run with the widget.

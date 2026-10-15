@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **A cookie choice records the Cookie Policy release** in force in the visitor's language, instead of the constant "1.0".
   - **Fixed:** the order confirmation and completion emails showed no order number, total or customer name: the values their templates name were never passed. The checkout's withdrawal notice no longer says provisioning waives the right of withdrawal, and a refused checkout now says why instead of "Error creating order".
 
+- **Proof-of-work on the public forms.** The portal's registration and password-reset forms carry an ALTCHA widget: the browser solves a small PBKDF2 challenge in a worker when the form is submitted, and each solution is accepted once (ADR-0021 addendum). It slows automated submissions without a third-party service or tracking. `ALTCHA_ENABLED` is on in production and staging and off in development; the widget is vendored with its licence and checksums in NOTICE.md.
+
 - **Media can live in a private S3-compatible bucket.** For container platforms, where the platform and task-worker containers share no volume and lose their disks on every deploy, `MEDIA_STORAGE=s3` stores invoice PDFs, e-Factura archives, ticket attachments and GDPR exports in a bucket (ADR-0057). The bucket stays private: Django reads every file, and a half-configured bucket stops the start instead of falling back to the container's disk. Every other deployment keeps the filesystem. The staff ticket-attachment download no longer needs a local file path.
 
 ### Changed

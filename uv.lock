@@ -23,6 +23,15 @@ wheels = [
 ]
 
 [[package]]
+name = "altcha"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/01/843864be3ceb5f8e93f065a657d17b3f3d7a023f31ad903e30bc682f10e5/altcha-2.3.0.tar.gz", hash = "sha256:26fd7a08fa56eb36c286d4da7da9af0b9a81cd17280d596d8ee613c22b48ddd0", size = 36394, upload-time = "2026-10-04T01:23:26.024Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/94/8f1b57a34d434dd9e5dda8989659c81f024ec79abd251ffb310cf01c59dd/altcha-2.3.0-py3-none-any.whl", hash = "sha256:92d118164866e1e80e3f1f1b1561c49ff4a0e8ae932e8b6cf560a2729c661cd1", size = 23972, upload-time = "2026-10-04T01:23:24.415Z" },
+]
+
+[[package]]
 name = "argon2-cffi"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1907,6 +1916,7 @@ platform = [
     { name = "xmltodict" },
 ]
 portal = [
+    { name = "altcha" },
     { name = "bleach" },
     { name = "django-ipware" },
     { name = "gunicorn" },
@@ -2020,6 +2030,7 @@ platform = [
     { name = "xmltodict", specifier = ">=0.13.0" },
 ]
 portal = [
+    { name = "altcha", specifier = "==2.3.0" },
     { name = "bleach", specifier = ">=6.0.0" },
     { name = "django-ipware", specifier = ">=7.0.0" },
     { name = "gunicorn", specifier = ">=26.2.0" },

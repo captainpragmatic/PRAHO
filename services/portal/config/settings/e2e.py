@@ -27,6 +27,9 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 E2E_TEST_ROUTES_ENABLED = True
 ROOT_URLCONF = "config.e2e_urls"
 
+# The browser solves the public forms' proof-of-work, so the CSP gates run with the widget.
+ALTCHA_ENABLED = True
+
 # Let the unauthenticated browser reach the CSP positive-control page without a
 # login redirect. Scoped to E2E only — never set in dev/staging/prod.
 # NOTE: keep external DB-driver names out of prose in config/settings* — the

@@ -58,6 +58,9 @@ CSRF_TRUSTED_ORIGINS = list(CSRF_TRUSTED_ORIGINS)
 
 # Debug mode
 DEBUG = True
+
+# No proof-of-work in development or the unit tests (they run on these settings); E2E turns it on.
+ALTCHA_ENABLED = False
 # base.py derives these from DEBUG before the line above runs; development serves plain HTTP
 # whatever DEBUG was spelled as (the platform's dev settings say the same).
 SECURE_SSL_REDIRECT = False

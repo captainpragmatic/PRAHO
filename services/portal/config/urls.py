@@ -9,6 +9,7 @@ from django.shortcuts import redirect
 from django.urls import include, path
 
 from apps.common.views import (
+    altcha_challenge_view,
     cookie_consent_view,
     cookie_policy_view,
     legal_document_view,
@@ -70,6 +71,7 @@ urlpatterns = [
     path("privacy-policy/", privacy_policy_view, name="privacy_policy"),
     path("legal/<uuid:document_id>/", legal_document_view, name="legal_document"),
     path("api/cookie-consent/", cookie_consent_view, name="cookie_consent"),
+    path("altcha/challenge/", altcha_challenge_view, name="altcha_challenge"),
     # SEO / Crawlers
     path("robots.txt", robots_txt, name="robots_txt"),
     # API client health check

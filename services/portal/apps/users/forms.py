@@ -13,6 +13,7 @@ from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.altcha import AltchaFormMixin
 from apps.common.identity_fields import clean_with_country, normalize_phone, normalize_vat_number
 from apps.common.localisation import (
     DATE_FORMAT_CHOICES,
@@ -90,7 +91,7 @@ class CustomerLoginForm(forms.Form):
     )
 
 
-class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
+class CustomerRegistrationForm(AltchaFormMixin, CountryDefaultsMixin, forms.Form):
     """
     Customer registration form with Romanian business context.
     Sends registration data to Platform API for processing.
@@ -559,7 +560,7 @@ class TwoFactorVerifyForm(forms.Form):
         return token
 
 
-class PasswordResetRequestForm(forms.Form):
+class PasswordResetRequestForm(AltchaFormMixin, forms.Form):
     """Password reset request form with dark theme"""
 
     email = forms.EmailField(

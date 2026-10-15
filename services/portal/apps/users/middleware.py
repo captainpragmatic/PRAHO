@@ -70,7 +70,16 @@ class PortalAuthenticationMiddleware:
     # The slash-less forms are listed too. This middleware answers before routing, and
     # CommonMiddleware adds the slash only for a 404, so they would otherwise get the login redirect.
     PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset(
-        {"/terms/", "/terms", "/privacy-policy/", "/privacy-policy", "/cookie-policy"}
+        {
+            "/terms/",
+            "/terms",
+            "/privacy-policy/",
+            "/privacy-policy",
+            "/cookie-policy",
+            # The public forms' proof-of-work challenge (apps.common.altcha)
+            "/altcha/challenge/",
+            "/altcha/challenge",
+        }
     )
 
     # Validation timing configuration

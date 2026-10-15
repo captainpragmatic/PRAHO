@@ -332,6 +332,14 @@ DEFAULT_CSP_PROFILE = "phase3-target"
 CSP_PROFILE = os.environ.get("CSP_PROFILE", DEFAULT_CSP_PROFILE)
 CSP_REPORT_ONLY = os.environ.get("CSP_REPORT_ONLY", "false").lower() in ("1", "true", "yes")
 
+# Proof-of-work bot protection on the public registration and password-reset forms
+# (apps.common.altcha). Development and the unit tests turn it off; the E2E settings turn it back
+# on, so the CSP gates run with the widget and its worker.
+ALTCHA_ENABLED = True
+# PBKDF2 iterations per attempt; a challenge needs about 256 attempts, well under a second in a browser.
+ALTCHA_COST = 5000
+ALTCHA_EXPIRY_SECONDS = 10 * 60
+
 # Test-only URL surface (CSP violation positive-control). The E2E settings
 # module is the sole enabler; base/dev/staging/prod keep this False so the
 # route 404s even if config.e2e_urls is somehow loaded.

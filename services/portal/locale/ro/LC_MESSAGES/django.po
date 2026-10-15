@@ -7804,3 +7804,6 @@ msgstr "Detalii TVA"
 
 msgid "County or region"
 msgstr "Județ sau regiune"
+
+msgid "Please confirm that you are not a robot, then submit the form again."
+msgstr "Confirmați că nu sunteți un robot, apoi trimiteți din nou formularul."

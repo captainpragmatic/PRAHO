@@ -1,0 +1,11 @@
+{% load i18n static %}
+{# The public forms' proof-of-work (apps.common.altcha), solved in a worker when the form is submitted. #}
+{# A refusal shows in the form's error summary. Modules run in order: the widget, Romanian, then the worker. #}
+{% if form.altcha %}
+  {% get_current_language as language %}
+  <link rel="stylesheet" href="{% static 'js/vendor/altcha/altcha.css' %}">
+  <script type="module" src="{% static 'js/vendor/altcha/altcha.min.js' %}"></script>
+  <script type="module" src="{% static 'js/vendor/altcha/ro.js' %}"></script>
+  <script type="module" src="{% static 'js/altcha-init.js' %}"></script>
+  <altcha-widget challenge="{% url 'altcha_challenge' %}" name="altcha" auto="onsubmit" language="{{ language }}" data-worker="{% static 'js/vendor/altcha/pbkdf2.js' %}"></altcha-widget>
+{% endif %}

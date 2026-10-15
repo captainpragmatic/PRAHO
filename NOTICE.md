@@ -16,6 +16,13 @@ Attributions and third-party components:
 - django-debug-toolbar — BSD
 - cryptography — Apache-2.0 / BSD-3-Clause
 - Stripe Python SDK — MIT
+- ALTCHA (Python library 2.3.0) — MIT
+- ALTCHA widget 3.3.0 — MIT. Vendored unmodified from the npm package `altcha@3.3.0` into
+  `services/portal/static/js/vendor/altcha/`, with its LICENSE.txt. SHA-256 of each file:
+  - `altcha.min.js` (dist/external) — 54c1991dbea707360c93c151f981ccb405dc2c7d4a3b87d71bb718f9ac48caac
+  - `altcha.css` (dist/external) — 03622256effb4e962d0c1da9a59684cf237f541f290703934c07a97dabcbad47
+  - `pbkdf2.js` (dist/workers) — f2dcf92ba8cd81a7a6170c2c6181248359ddf5a6e35340c7472a313208273336
+  - `ro.js` (dist/i18n) — a1759c27213279d52667f5ced2ace5e010f0e25e58e38dcc3ed2d23c5bd4b77f
 
 If you distribute this software (or make it available for use over a
 network), you must comply with the terms of the GPL-3.0-or-later for

@@ -14,10 +14,12 @@ from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils.translation import get_language, ngettext
 from django.utils.translation import gettext as _
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common import altcha, counters
 from apps.common.legal_documents import (
     TITLES,
     LegalDocument,
@@ -33,6 +35,30 @@ api_client = PlatformAPIClient()
 
 # Kept as long as the consent cookie the banner sets: the two are read together.
 COOKIE_CONSENT_ID_MAX_AGE = 365 * 24 * 60 * 60
+
+
+# Per client IP: each verification fetches one, so a page refused a few times stays far below it.
+ALTCHA_CHALLENGES_PER_MINUTE = 30
+
+
+@never_cache
+@require_GET
+def altcha_challenge_view(request: HttpRequest) -> HttpResponse:
+    """A signed proof-of-work challenge for the public forms' widget; 404 while the feature is off."""
+    if not altcha.enabled():
+        raise Http404
+    from apps.common.rate_limiting import _client_ip_is_distinguishable  # noqa: PLC0415  # Shared IP policy
+
+    if getattr(settings, "RATE_LIMITING_ENABLED", True) and _client_ip_is_distinguishable():
+        key = f"altcha_challenge_ip_{get_safe_client_ip(request)}"
+        try:
+            spent = counters.increment(key, 60) > ALTCHA_CHALLENGES_PER_MINUTE
+        except Exception:
+            logger.exception("🔥 [Altcha] Challenge limiter unavailable")
+            return JsonResponse({"error": "unavailable"}, status=503)
+        if spent:
+            return JsonResponse({"error": "rate_limited"}, status=429, headers={"Retry-After": "60"})
+    return JsonResponse(altcha.new_challenge())
 
 
 @require_POST
