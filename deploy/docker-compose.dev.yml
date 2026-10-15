@@ -30,19 +30,19 @@ services:
   # PLATFORM SERVICE - DEVELOPMENT HOT RELOAD 🔥
   # ===============================================================================
   platform:
-    build:
+    build: &platform_build
       context: ..
       dockerfile: deploy/platform/Dockerfile
       target: dev
     ports:
       - "8700:8700"
-    volumes:
+    volumes: &platform_volumes
       # Hot reload - the repository layout the settings expect: REPO_ROOT is /app (ADR-0035)
       - ../services/platform:/app/services/platform:delegated
       - ../shared:/app/shared:ro
       - dev_static_volume:/app/services/platform/staticfiles
       - dev_media_volume:/app/services/platform/media
-    environment:
+    environment: &platform_environment
       # `true`, not 1: the settings read DEBUG as .lower() == "true"
       - DEBUG=true
       # config.settings.dev uses SQLite unless told otherwise
@@ -62,10 +62,31 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]
+      interval: 5s
+      timeout: 3s
+      # Fresh databases can need several minutes for the complete migration stack.
+      start_period: 600s
+      retries: 10
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py setup_initial_data &&
              python manage.py runserver 0.0.0.0:8700"
+
+  # Uses the same code, database and media as Platform. Platform becomes healthy only after
+  # migrations and initial setup finish; a parallel worker must never migrate the same database.
+  qcluster:
+    build: *platform_build
+    volumes: *platform_volumes
+    environment: *platform_environment
+    command: python manage.py qcluster
+    healthcheck:
+      disable: true
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ===============================================================================
   # PORTAL SERVICE - DEVELOPMENT HOT RELOAD 🌐
