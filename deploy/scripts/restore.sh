@@ -25,6 +25,8 @@ WAIT_TIMEOUT=900
 MEDIA_CONTAINER="${MEDIA_CONTAINER:-praho_platform}"
 MEDIA_PATH="${MEDIA_PATH:-/app/media}"
 RESTORE_TMP_DIR=""
+LEAVE_STOPPED=false
+CHECK_ONLY=false
 trap 'if [ -n "$RESTORE_TMP_DIR" ]; then rm -rf "$RESTORE_TMP_DIR"; fi' EXIT
 
 # Colors
@@ -188,6 +190,11 @@ restore_backup() {
         fi
     fi
 
+    if $CHECK_ONLY; then
+        stage_and_check_archives "$BACKUP_FILE"
+        find_local_services
+        return 0
+    fi
     log_info "Restore file: ${BACKUP_FILE}"
     echo ""
     echo -e "${RED}WARNING: This will OVERWRITE the current database!${NC}"
@@ -236,6 +243,15 @@ restore_backup() {
     local MEDIA_FAILED=0
     restore_media "${BACKUP_FILE}" || MEDIA_FAILED=1
 
+    if $LEAVE_STOPPED; then
+        if [ "$MEDIA_FAILED" -ne 0 ]; then
+            log_error "Media restore failed; applications remain stopped for recovery."
+            exit 1
+        fi
+        log_success "Database and media restored; applications remain stopped."
+        return 0
+    fi
+
     # Restart services
     log_info "Starting services and waiting for health..."
     if ! docker start "${LOCAL_SERVICES[@]}"; then
@@ -256,7 +272,15 @@ restore_backup() {
 }
 
 praho_parse_env_args "$@"
-set -- ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}
+RESTORE_ARGS=()
+for argument in ${PRAHO_ARGS[@]+"${PRAHO_ARGS[@]}"}; do
+    case "$argument" in
+        --leave-stopped) LEAVE_STOPPED=true ;;
+        --check) CHECK_ONLY=true ;;
+        *) RESTORE_ARGS+=("$argument") ;;
+    esac
+done
+set -- ${RESTORE_ARGS[@]+"${RESTORE_ARGS[@]}"}
 # Resolve and check the env file before anything is dropped: a production file without its
 # keys could not start the platform again.
 praho_load_env

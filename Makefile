@@ -118,6 +118,7 @@ help:
 	@echo "⏪ ROLLBACK:"
 	@echo "  make rollback VERSION=X - Roll back to version X"
 	@echo "  make rollback-db        - Restore latest database backup"
+	@echo "  make rollback-full VERSION=X BACKUP=PATH - Restore a verified pair with its application images"
 	@echo "  make health-check       - Check service health"
 	@echo ""
 	@echo "☁️  INFRASTRUCTURE (Terraform → Hetzner):"
@@ -1308,7 +1309,7 @@ clean-nuke:
 # PRODUCTION DEPLOYMENT 🚀
 # ===============================================================================
 
-.PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db health-check
+.PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db rollback-full health-check
 
 # The standalone Compose deployments read .env.prod or .env.staging (never the development .env).
 DEPLOY_ENV ?= prod
@@ -1382,6 +1383,17 @@ endif
 	@echo "⏪ [Rollback] Rolling back to version $(VERSION)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@./deploy/scripts/rollback.sh version $(VERSION) --env $(DEPLOY_ENV)
+
+rollback-full:
+ifndef VERSION
+	@echo "VERSION and BACKUP are required: make rollback-full VERSION=v1.2.3 BACKUP=/path/backup.sql.gz"
+	@exit 1
+endif
+ifndef BACKUP
+	@echo "BACKUP is required; full rollback never guesses compatibility from the latest file"
+	@exit 1
+endif
+	@./deploy/scripts/rollback.sh full "$(VERSION)" --backup "$(BACKUP)" --topology "$(DEPLOY_TYPE)" --env "$(DEPLOY_ENV)"
 
 rollback-db:
 	@echo "⏪ [Rollback] Restoring database from latest backup..."
