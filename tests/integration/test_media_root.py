@@ -178,8 +178,11 @@ def _render(template: str, root: Path) -> str:
     environment.filters["quote"] = shlex.quote
     return environment.from_string((TEMPLATES / template).read_text()).render(
         project_root=str(root),
+        project_user="praho",
         backup_directory=str(root / "backups"),
         backup_retention_days=7,
+        platform_port=8700,
+        portal_port=8701,
         deployed_env={"DB_PASSWORD": "x", "DB_USER": "praho", "DB_NAME": "praho"},
     )
 
@@ -193,8 +196,11 @@ def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (stubs / "pg_dump").write_text(
         '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
     )
-    for tool in ("pg_restore", "systemctl", "sudo", "sleep"):
+    for tool in ("systemctl", "sudo", "sleep"):
         (stubs / tool).write_text("#!/bin/sh\nexit 0\n")
+    (stubs / "sudo").write_text('#!/bin/sh\nshift 2\n[ "$1" = tar ] && exec "$@"\nexit 0\n')
+    (stubs / "pg_restore").write_text('#!/bin/sh\n[ "$1" = --list ] && echo "1; 0 1 TABLE DATA public django_migrations praho"\nexit 0\n')
+    (stubs / "curl").write_text('#!/bin/sh\nprintf 200\n')
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     (root / "scripts").mkdir()
