@@ -22,6 +22,7 @@ urlpatterns = [
     path("<int:customer_id>/delete/", views.customer_delete, name="delete"),
     # Customer Profile Management
     path("<int:customer_id>/tax-profile/", views.customer_tax_profile, name="tax_profile"),
+    path("<int:customer_id>/tax-profile/anaf/", views.customer_anaf_verify, name="anaf_verify"),
     path("<int:customer_id>/billing-profile/", views.customer_billing_profile, name="billing_profile"),
     path("<int:customer_id>/address/add/", views.customer_address_add, name="address_add"),
     path("<int:customer_id>/note/add/", views.customer_note_add, name="note_add"),

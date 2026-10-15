@@ -725,6 +725,20 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="billing.anaf_lookup_enabled",
+        jurisdiction="RO",
+        data_type="boolean",
+        default=True,
+        group="billing",
+        section=_("VAT"),
+        label=_("Look up Romanian companies at ANAF"),
+        help_text=_(
+            "When a customer's CUI is saved, check it in ANAF's public register and record the "
+            "company's registered name, VAT registration and status. The public registration "
+            "page also offers to fill in a company's details from it."
+        ),
+    ),
+    SettingDef(
         key="billing.reverse_charge_requires_consultation_reference",
         data_type="boolean",
         default=True,

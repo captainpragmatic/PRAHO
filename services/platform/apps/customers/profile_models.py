@@ -115,6 +115,21 @@ class CustomerTaxProfile(SoftDeleteModel):
         verbose_name=_("VIES status"),
     )
 
+    class AnafStatus(models.TextChoices):
+        NOT_CHECKED = "", _("Not checked")
+        PENDING = "pending", _("Pending")
+        ACTIVE = "active", _("Registered, active")
+        INACTIVE = "inactive", _("Registered, inactive or deregistered")
+        NOT_FOUND = "not_found", _("Not found at ANAF")
+
+    # ANAF register evidence for a Romanian CUI (apps.customers.anaf_verification)
+    anaf_status = models.CharField(
+        max_length=20, choices=AnafStatus.choices, blank=True, default="", verbose_name=_("ANAF status")
+    )
+    anaf_verified_name = models.CharField(max_length=255, blank=True, verbose_name=_("ANAF company name"))
+    anaf_verified_at = models.DateTimeField(null=True, blank=True, verbose_name=_("ANAF checked at"))
+    anaf_vat_registered = models.BooleanField(null=True, blank=True, verbose_name=_("VAT-registered at ANAF"))
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -136,6 +151,15 @@ class CustomerTaxProfile(SoftDeleteModel):
 
         return reverse_charge_requires_name_match() and not vies_name_matches(
             self.vies_verified_name, self.customer.get_billing_name()
+        )
+
+    @property
+    def anaf_name_mismatch(self) -> bool:
+        """ANAF's registered name lacks a word the invoices carry (the VIES name rule)."""
+        from apps.billing.vies_evidence import vies_name_matches  # noqa: PLC0415
+
+        return bool(self.anaf_verified_name) and not vies_name_matches(
+            self.anaf_verified_name, self.customer.get_billing_name()
         )
 
     @property

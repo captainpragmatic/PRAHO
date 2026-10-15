@@ -26913,3 +26913,60 @@ msgstr "Politica de confidențialitate a fost comunicată"
 
 msgid "The customer has received the privacy policy, which describes how their data is processed"
 msgstr "Clientul a primit politica de confidențialitate, care descrie cum îi sunt prelucrate datele"
+
+msgid "Not checked"
+msgstr "Neverificat"
+
+msgid "Registered, active"
+msgstr "Înregistrată, activă"
+
+msgid "Registered, inactive or deregistered"
+msgstr "Înregistrată, inactivă sau radiată"
+
+msgid "Not found at ANAF"
+msgstr "Negăsită la ANAF"
+
+msgid "ANAF status"
+msgstr "Stare ANAF"
+
+msgid "ANAF company name"
+msgstr "Denumire la ANAF"
+
+msgid "ANAF checked at"
+msgstr "Verificat la ANAF la"
+
+msgid "VAT-registered at ANAF"
+msgstr "Înregistrată în scopuri de TVA la ANAF"
+
+msgid "Look up Romanian companies at ANAF"
+msgstr "Caută companiile românești la ANAF"
+
+msgid "When a customer's CUI is saved, check it in ANAF's public register and record the company's registered name, VAT registration and status. The public registration page also offers to fill in a company's details from it."
+msgstr "Când se salvează CUI-ul unui client, este verificat în registrul public ANAF și se înregistrează denumirea companiei, înregistrarea în scopuri de TVA și starea. Pagina publică de înregistrare oferă și completarea datelor companiei din el."
+
+msgid "ANAF lookups are turned off."
+msgstr "Căutările la ANAF sunt dezactivate."
+
+msgid "This customer has no Romanian CUI to look up."
+msgstr "Acest client nu are un CUI românesc de căutat."
+
+msgid "ANAF did not answer. The lookup will be tried again in the background."
+msgstr "ANAF nu a răspuns. Căutarea va fi reluată în fundal."
+
+msgid "ANAF's answer is recorded."
+msgstr "Răspunsul ANAF a fost înregistrat."
+
+msgid "ANAF register"
+msgstr "Registrul ANAF"
+
+msgid "Registered name"
+msgstr "Denumire înregistrată"
+
+msgid "VAT-registered"
+msgstr "Înregistrată în scopuri de TVA"
+
+msgid "Checked at"
+msgstr "Verificat la"
+
+msgid "Check at ANAF"
+msgstr "Verifică la ANAF"

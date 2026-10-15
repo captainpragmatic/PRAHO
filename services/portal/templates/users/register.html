@@ -67,6 +67,15 @@
             {# Romanian company identifiers: register-toggle.js shows them while the country is Romania #}
             <div id="romanian-company-fields" data-default-romania="{% if form.default_country_is_romania %}true{% else %}false{% endif %}"{% if not form.asks_romanian_company_ids %} hidden{% endif %}>
               {% form_field form.cui icon_left="document" %}
+              {% if company_lookup_available %}
+                {# company-lookup.js: fills the company fields from ANAF's register #}
+                <div id="company-lookup" class="space-y-1" data-url="{% url 'users:company_lookup' %}" data-filled="{% trans 'The details from ANAF are filled in. Check them before you continue.' %}" data-failed="{% trans 'The company lookup is not available right now. Fill in the details yourself.' %}">
+                  {% trans "Fill in from ANAF" as company_lookup_label %}
+                  {% button company_lookup_label type="button" variant="secondary" size="sm" icon="search" button_id="company-lookup-button" %}
+                  <p id="company-lookup-message" class="text-sm text-slate-400" aria-live="polite"></p>
+                </div>
+                <script type="module" src="{% static 'js/company-lookup.js' %}"></script>
+              {% endif %}
               {% form_field form.trade_registry_number icon_left="document" %}
             </div>
           </div>

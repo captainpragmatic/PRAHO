@@ -883,6 +883,12 @@ class PlatformAPIClient:
             "POST", "/customers/register/", data={**registration_data, **_client_ip_payload(client_ip)}
         )
 
+    def company_lookup(self, cui: str, client_ip: str = "") -> dict[str, Any]:
+        """A Romanian company as ANAF's register states it, through Platform; propagate errors."""
+        return self._make_request(
+            "POST", "/customers/company-lookup/", data={"cui": cui, **_client_ip_payload(client_ip)}
+        )
+
     def get_pending_registration(self, registration_id: str, token: str, client_ip: str = "") -> dict[str, Any]:
         """What confirming a registration link would create; propagate Platform errors."""
         return self._make_request(

@@ -79,6 +79,9 @@ class PortalAuthenticationMiddleware:
             # The public forms' proof-of-work challenge (apps.common.altcha)
             "/altcha/challenge/",
             "/altcha/challenge",
+            # The registration page's company register lookup
+            "/company-lookup/",
+            "/company-lookup",
         }
     )
 

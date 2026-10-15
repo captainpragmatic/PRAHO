@@ -264,6 +264,10 @@ def handle_tax_profile_changes(
         if instance.cui and (created or old_values.get("cui") != instance.cui):
             _validate_romanian_cui(instance)
 
+        # A new or changed CUI cannot keep the previous one's ANAF evidence: look it up again.
+        if created or old_values.get("cui") != instance.cui:
+            _refresh_anaf_evidence(instance, created=created)
+
         # A changed number cannot inherit the previous number's evidence.
         if created or old_values.get("vat_number") != instance.vat_number:
             from apps.billing.vies_evidence import profile_vat_identity
@@ -887,6 +891,24 @@ def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
                     evidence={"cui": tax_profile.cui, "customer_id": str(tax_profile.customer.id)},
                 )
                 AuditService.log_compliance_event(compliance_request)
+
+
+def _refresh_anaf_evidence(tax_profile: CustomerTaxProfile, *, created: bool) -> None:
+    """Clear the ANAF evidence of the previous CUI and queue a lookup of a Romanian one."""
+    from apps.customers.anaf_verification import lookups_enabled, schedule_lookup
+
+    will_look_up = is_romanian_cui(tax_profile.cui) and lookups_enabled()
+    status = CustomerTaxProfile.AnafStatus.PENDING if will_look_up else CustomerTaxProfile.AnafStatus.NOT_CHECKED
+    if not created or will_look_up:
+        CustomerTaxProfile.objects.filter(pk=tax_profile.pk).update(  # fsm-bypass: plain fields, not FSMField
+            anaf_status=status, anaf_verified_name="", anaf_verified_at=None, anaf_vat_registered=None
+        )
+        tax_profile.anaf_status = status
+        tax_profile.anaf_verified_name = ""
+        tax_profile.anaf_verified_at = None
+        tax_profile.anaf_vat_registered = None
+    if will_look_up:
+        transaction.on_commit(lambda tax_profile_id=str(tax_profile.pk): schedule_lookup(tax_profile_id))
 
 
 def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:

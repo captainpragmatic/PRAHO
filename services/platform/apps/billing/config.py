@@ -123,6 +123,11 @@ def reverse_charge_requires_vies() -> bool:
         return True
 
 
+def anaf_lookup_enabled() -> bool:
+    """Whether Romanian CUIs are looked up in ANAF's register (billing.anaf_lookup_enabled)."""
+    return SettingsService.get_boolean_setting("billing.anaf_lookup_enabled", True)
+
+
 def get_vies_evidence_max_age_days() -> int:
     """Return the entitlement lifetime; the recheck schedule is independent."""
     return max(1, SettingsService.get_integer_setting("billing.vies_evidence_max_age_days", 30))

@@ -39,7 +39,9 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACCreateUserThrottle,
     PortalHMACRateThrottle,
+    PublicLookupClientIPThrottle,
     RegistrationClientIPThrottle,
+    fixed_window_limited,
 )
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import SecureInputValidator
@@ -547,6 +549,78 @@ class CustomerProfileAPIView(APIView):
                 {"success": False, "error": "Validation failed", "errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+
+# All public lookups together, whatever their source: ANAF answers one request per second.
+COMPANY_LOOKUP_GLOBAL_RATE = "20/m"
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        PublicLookupClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def company_lookup_api(request: HttpRequest) -> Response:
+    """
+    🏛️ A Romanian company as ANAF's public register states it, for the registration page.
+
+    POST /api/customers/company-lookup/  {"cui": "14399840", "client_ip": "<end user's IP, signed>"}
+
+    The answer comes from ANAF only: nothing here reads PRAHO's customers, so it says nothing about
+    who is registered with this operator (ADR-0021). `available` is false while the lookup is off
+    (another operator country, the setting, or no connection to ANAF) or ANAF did not answer.
+    """
+    from apps.billing.gateways.anaf_gateway import AnafGateway  # noqa: PLC0415  # Deferred: loaded on use
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+    from apps.customers.anaf_verification import lookups_enabled  # noqa: PLC0415
+
+    if not lookups_enabled():
+        return Response({"success": True, "available": False})
+    data = request.data if isinstance(request.data, dict) else {}
+    checked = CUIValidator.validate_strict(str(data.get("cui", "")))
+    if not checked.is_valid:
+        return Response({"success": False, "error": "invalid_cui"}, status=status.HTTP_400_BAD_REQUEST)
+    limited, retry_after = fixed_window_limited("anaf:public", COMPANY_LOOKUP_GLOBAL_RATE)
+    if limited:
+        return Response(
+            {"success": False, "error": "rate_limited"},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    answer = AnafGateway.lookup([checked.digits])
+    if not answer.api_available:
+        return Response({"success": True, "available": False})
+    company = answer.companies.get(checked.digits)
+    if company is None:
+        return Response({"success": True, "available": True, "found": False})
+    return Response(
+        {
+            "success": True,
+            "available": True,
+            "found": True,
+            "company": {
+                "cui": company.cui,
+                "name": company.name,
+                "registration_number": company.registration_number,
+                # A VAT-registered Romanian company's VAT number is its CUI with the RO prefix.
+                "vat_number": f"RO{company.cui}" if company.vat_registered else "",
+                "street": company.street,
+                "city": company.city,
+                "county": company.county,
+                "postal_code": company.postal_code,
+                "active": company.active,
+            },
+        }
+    )
 
 
 # ===============================================================================

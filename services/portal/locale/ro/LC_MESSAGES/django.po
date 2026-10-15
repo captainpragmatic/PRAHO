@@ -7807,3 +7807,15 @@ msgstr "Județ sau regiune"
 
 msgid "Please confirm that you are not a robot, then submit the form again."
 msgstr "Confirmați că nu sunteți un robot, apoi trimiteți din nou formularul."
+
+msgid "The details from ANAF are filled in. Check them before you continue."
+msgstr "Datele de la ANAF au fost completate. Verificați-le înainte de a continua."
+
+msgid "The company lookup is not available right now. Fill in the details yourself."
+msgstr "Căutarea companiei nu este disponibilă acum. Completați datele manual."
+
+msgid "Fill in from ANAF"
+msgstr "Completează de la ANAF"
+
+msgid "ANAF has no company with this CUI."
+msgstr "ANAF nu are nicio companie cu acest CUI."

@@ -9,6 +9,7 @@ from .views import (
     CustomerProfileAPIView,
     CustomerSearchViewSet,
     CustomerServicesViewSet,
+    company_lookup_api,
     customer_addresses_add,
     customer_addresses_delete,
     customer_addresses_list,
@@ -39,6 +40,7 @@ app_name = "customers"
 urlpatterns = [
     # Customer registration endpoint (public)
     path("register/", customer_register_api, name="customer-register"),
+    path("company-lookup/", company_lookup_api, name="company-lookup"),
     # Customer creation endpoint (HMAC authenticated, for Portal)
     path("create/", customer_create_api, name="customer-create"),
     # Customer profile management (authenticated)

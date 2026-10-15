@@ -324,6 +324,8 @@ class AuditEvent(models.Model):
         ("payment_method_removed", "Payment Method Removed"),
         ("billing_address_updated", "Billing Address Updated"),
         ("tax_information_updated", "Tax Information Updated"),
+        ("anaf_lookup_completed", "ANAF Lookup Completed"),
+        ("anaf_lookup_deferred", "ANAF Lookup Deferred"),
         ("order_placed", "Order Placed"),
         ("order_terms_accepted", "Order Terms Accepted"),
         ("early_performance_requested", "Early Performance Requested"),

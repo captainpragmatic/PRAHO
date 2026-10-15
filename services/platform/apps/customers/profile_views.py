@@ -12,6 +12,7 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
+from django.views.decorators.http import require_POST
 
 from apps.common.decorators import staff_required
 from apps.users.models import User
@@ -55,6 +56,32 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     }
 
     return render(request, "customers/tax_profile_form.html", context)
+
+
+@staff_required
+@require_POST
+def customer_anaf_verify(request: HttpRequest, customer_id: int) -> HttpResponse:
+    """Ask ANAF now about the customer's Romanian CUI and record its answer."""
+    from apps.customers.anaf_verification import (  # noqa: PLC0415  # Deferred: the gateway loads on use
+        lookups_enabled,
+        verify_tax_profile_with_anaf,
+    )
+
+    user = cast(User, request.user)  # Safe due to @staff_required
+    customer = get_object_or_404(CustomerService.get_accessible_customers(user), id=customer_id)
+    tax_profile = get_object_or_404(CustomerTaxProfile, customer=customer)
+    if not lookups_enabled():
+        messages.error(request, _("ANAF lookups are turned off."))
+        return redirect("customers:detail", customer_id=customer.id)
+
+    outcome = verify_tax_profile_with_anaf(str(tax_profile.pk))
+    if outcome == "skipped":
+        messages.error(request, _("This customer has no Romanian CUI to look up."))
+    elif outcome == "rescheduled":
+        messages.info(request, _("ANAF did not answer. The lookup will be tried again in the background."))
+    else:
+        messages.success(request, _("ANAF's answer is recorded."))
+    return redirect("customers:detail", customer_id=customer.id)
 
 
 @staff_required

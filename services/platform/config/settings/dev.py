@@ -67,6 +67,9 @@ INSTALLED_APPS = list(INSTALLED_APPS)
 DEBUG = True
 TEMPLATE_DEBUG = True
 
+# No calls to ANAF from development unless asked for.
+ANAF_TRANSPORT_ENABLED = os.environ.get("ANAF_TRANSPORT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+
 # Disable account lockout for development and E2E testing
 DISABLE_ACCOUNT_LOCKOUT = True
 

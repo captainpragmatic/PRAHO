@@ -447,6 +447,7 @@ defaults below are `DEFAULT_THROTTLE_RATES`; three can be overridden from the en
 | `ResetClientIPThrottle` | `auth_reset_ip` | `5/minute` | End-user IP in the Portal's signed body | Both password-reset endpoints |
 | `RegistrationClientIPThrottle` | `auth_register_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/customers/register/` |
 | `RegistrationConfirmClientIPThrottle` | `auth_register_confirm_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/users/register/pending/`, `/api/users/register/confirm/` |
+| `PublicLookupClientIPThrottle` | `public_lookup_ip` | `10/minute` | End-user IP in the Portal's signed body | `/api/customers/company-lookup/` (ANAF register; also a global `20/m` cap on calls to ANAF) |
 | `OrderCreateThrottle` | `order_create` | `20/min` | Portal for HMAC traffic, else user, else client IP | Order creation |
 | `OrderCalculateThrottle` | `order_calculate` | `60/min` | Portal for HMAC traffic, else user, else client IP | Cart totals and preflight |
 | `OrderListThrottle` | `order_list` | `200/min` | Portal for HMAC traffic, else user, else client IP | Order list, detail and confirmation |

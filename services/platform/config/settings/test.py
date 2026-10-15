@@ -12,6 +12,9 @@ from .base import *
 DEBUG = False
 TEMPLATE_DEBUG = False
 
+# Tests never reach ANAF; gateway tests turn this on and stub the request.
+ANAF_TRANSPORT_ENABLED = False
+
 # A configured seller, as production requires; tests of the unconfigured case override these.
 COMPANY_NAME = "Test Hosting SRL"
 COMPANY_CUI = "RO12345674"

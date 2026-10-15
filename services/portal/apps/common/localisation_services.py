@@ -28,12 +28,27 @@ class PublicDefaults(TypedDict):
     success: bool
     localisation: dict[str, str]
     company: dict[str, str]
+    features: dict[str, bool]
 
 
 _COMPANY_FIELDS = frozenset({"legal_name", "email_support", "email_privacy", "email_finance", "phone"})
 # Shown on the legal pages. Optional, so the portal also reads a Platform that does not send them yet.
 _COMPANY_OPTIONAL_FIELDS = frozenset({"email_dpo", "email_contact", "address", "registration_number", "brand_name"})
 _LOCALISATION_FIELDS = frozenset(LocalisationDefaults().customer_payload())
+# Platform features the portal shows only when offered; absent (an older Platform) means off.
+_FEATURES = frozenset({"company_lookup"})
+
+
+def _features(value: object) -> dict[str, bool]:
+    if value is None:
+        value = {}
+    if (
+        not isinstance(value, dict)
+        or not set(value) <= _FEATURES
+        or not all(isinstance(v, bool) for v in value.values())
+    ):
+        raise ValueError("Invalid public defaults features")
+    return {feature: bool(value.get(feature, False)) for feature in _FEATURES}
 
 
 def _string_mapping(value: object, fields: frozenset[str]) -> dict[str, str]:
@@ -75,7 +90,12 @@ def _validated_payload(response: object) -> PublicDefaults:
             validate_email(address)
     if any("\r" in value or "\n" in value for value in company.values()):
         raise ValueError("Invalid company identity control characters")
-    return {"success": True, "localisation": localisation, "company": company}
+    return {
+        "success": True,
+        "localisation": localisation,
+        "company": company,
+        "features": _features(response.get("features")),
+    }
 
 
 def platform_cache_key(name: str) -> str:
@@ -119,6 +139,11 @@ def get_public_defaults() -> PublicDefaults:
 
 def get_localisation_defaults() -> LocalisationDefaults:
     return LocalisationDefaults.from_mapping(get_public_defaults()["localisation"])
+
+
+def company_lookup_available() -> bool:
+    """Whether Platform offers the company register lookup on the registration page."""
+    return get_public_defaults()["features"]["company_lookup"]
 
 
 def get_company_identity() -> dict[str, str]:

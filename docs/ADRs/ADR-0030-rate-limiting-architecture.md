@@ -90,7 +90,7 @@ validates at startup:
 
 - `portal_hmac`, `portal_hmac_burst`, `portal_hmac_create_user`, `customer`, `burst`
 - `auth`, `token_request`, `sustained`, `api_burst`
-- `auth_login_ip`, `auth_reset_ip`, `auth_register_ip`, `auth_register_confirm_ip`
+- `auth_login_ip`, `auth_reset_ip`, `auth_register_ip`, `auth_register_confirm_ip`, `public_lookup_ip`
 - `order_create`, `order_calculate`, `order_list`, `product_catalog`
 - `session_validation`
 - `anon` (validation only)

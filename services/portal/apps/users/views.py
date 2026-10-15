@@ -12,7 +12,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -20,9 +20,10 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common import altcha
 from apps.common.constants import BACKUP_CODE_LENGTH
 from apps.common.decorators import (
     log_access_attempt,
@@ -31,7 +32,7 @@ from apps.common.decorators import (
     require_billing_access,
 )
 from apps.common.localisation_middleware import sync_language_selection
-from apps.common.localisation_services import store_localisation_preferences
+from apps.common.localisation_services import company_lookup_available, store_localisation_preferences
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -517,9 +518,42 @@ def register_view(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "page_title": _("Customer Registration"),
+        "company_lookup_available": company_lookup_available(),
     }
 
     return render(request, "users/register.html", context)
+
+
+@never_cache
+@csrf_protect
+@require_POST
+def company_lookup_view(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # one answer per refusal
+    """A Romanian company's details from ANAF's register, to fill in the registration form.
+
+    Platform answers from ANAF only, so this says nothing about who is registered here. Like the
+    registration itself, it needs a solved proof-of-work while ALTCHA is on.
+    """
+    if not company_lookup_available():
+        raise Http404
+    if altcha.enabled() and not altcha.accept_solution(request.POST.get(altcha.FIELD_NAME, "")):
+        return JsonResponse({"error": str(altcha.VERIFICATION_FAILED)}, status=400)
+    cui = "".join(request.POST.get("cui", "").split()).upper().removeprefix("RO")
+    if not (cui.isascii() and cui.isdigit() and 2 <= len(cui) <= 10):  # noqa: PLR2004  # CUI length
+        return JsonResponse({"error": _("Enter a valid CUI.")}, status=400)
+    unavailable = _("The company lookup is not available right now. Fill in the details yourself.")
+    try:
+        result = api_client.company_lookup(cui, client_ip=get_safe_client_ip(request))
+    except PlatformAPIError as exc:
+        if exc.is_rate_limited:
+            return JsonResponse({"error": get_rate_limit_message(exc.retry_after)}, status=429)
+        if exc.status_code == 400:  # noqa: PLR2004  # Platform refused the CUI
+            return JsonResponse({"error": _("Enter a valid CUI.")}, status=400)
+        return JsonResponse({"error": unavailable}, status=503)
+    if not result.get("available"):
+        return JsonResponse({"error": unavailable}, status=503)
+    if not result.get("found"):
+        return JsonResponse({"error": _("ANAF has no company with this CUI.")}, status=404)
+    return JsonResponse({"company": result.get("company", {})})
 
 
 def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfileForm:

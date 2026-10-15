@@ -582,6 +582,10 @@ COMPANY_REGISTRATION_NUMBER = os.environ.get("COMPANY_REGISTRATION_NUMBER", "") 
 COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
 COMPANY_BANK_ACCOUNT = os.environ.get("COMPANY_BANK_ACCOUNT", "")  # IBAN
 
+# Whether the ANAF company lookup (apps.billing.gateways.anaf_gateway) may connect to ANAF. On
+# unless the environment turns it off; development and the tests never connect.
+ANAF_TRANSPORT_ENABLED = os.environ.get("ANAF_TRANSPORT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
 # VAT settings for Romanian compliance
 # NOTE: VAT_RATE removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 VAT_ENABLED = True
@@ -739,6 +743,7 @@ DEFAULT_THROTTLE_RATES = {
     "auth_reset_ip": "5/minute",
     "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
+    "public_lookup_ip": "10/minute",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # No throttle class uses this scope: it is validated at startup (apps.common.apps) so DRF's

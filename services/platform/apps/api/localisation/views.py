@@ -40,10 +40,14 @@ def localisation_defaults(request: HttpRequest, request_data: dict[str, object])
         "address": _text(SettingsService.get_setting("company.address")),
         "registration_number": _text(SettingsService.get_setting("company.registration_number")),
     }
+    from apps.customers.anaf_verification import lookups_enabled  # noqa: PLC0415  # Deferred: loaded on use
+
     return Response(
         {
             "success": True,
             "localisation": get_localisation_defaults().customer_payload(),
             "company": company,
+            # Features the portal shows only when Platform offers them; it never learns why.
+            "features": {"company_lookup": lookups_enabled()},
         }
     )
