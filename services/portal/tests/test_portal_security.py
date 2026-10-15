@@ -18,6 +18,7 @@ from typing import cast
 
 from django.http import HttpRequest
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.urls import resolve, reverse
 
 from apps.common.request_ip import get_safe_client_ip
 
@@ -27,7 +28,7 @@ from apps.common.request_ip import get_safe_client_ip
 
 
 _TEST_WEBHOOK_SECRET = "test-webhook-secret-do-not-use-in-prod"
-_WEBHOOK_URL = "/orders/payment/webhook/"
+_WEBHOOK_URL_NAME = "orders:payment_webhook"
 
 
 def _build_valid_sig(body: bytes, ts: str, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -42,7 +43,14 @@ class WebhookAuthenticationTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
         self.body = json.dumps({"order_id": "1", "status": "paid"}).encode()
-        self.url = _WEBHOOK_URL
+        self.url = reverse(_WEBHOOK_URL_NAME)
+
+    def test_webhook_url_is_served_by_the_payment_webhook_view(self) -> None:
+        """The path these tests post to must be the real, mounted route."""
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        self.assertEqual(self.url, "/order/payment/webhook/")
+        self.assertIs(resolve(self.url).func, payment_success_webhook)
 
     @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
     def test_webhook_rejected_without_signature(self) -> None:
@@ -129,7 +137,7 @@ class WebhookHardeningTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
         self.body = json.dumps({"order_id": "1", "status": "paid"}).encode()
-        self.url = _WEBHOOK_URL
+        self.url = reverse(_WEBHOOK_URL_NAME)
 
     def _make_webhook_request(
         self, body: bytes, ts: str, sig: str,

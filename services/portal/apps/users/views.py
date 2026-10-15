@@ -25,7 +25,6 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.common import altcha
-from apps.common.constants import BACKUP_CODE_LENGTH
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
@@ -63,6 +62,7 @@ from apps.users.forms import (
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
     RegistrationConfirmForm,
+    TOTPSetupForm,
 )
 from apps.users.intent_capture import (
     capture_first_touch,
@@ -161,8 +161,15 @@ def _can_edit_company_profile(request: HttpRequest, customer_id: str) -> bool:
     return role in ["owner", "billing"]
 
 
-def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_email: str) -> HttpResponse:
-    """Handle GET request for TOTP setup"""
+def _browser(request: HttpRequest) -> dict[str, str]:
+    """The customer's browser, forwarded so Platform's audit trail names it rather than this server."""
+    return {"client_ip": get_safe_client_ip(request), "user_agent": request.META.get("HTTP_USER_AGENT", "")}
+
+
+def _handle_totp_setup_get(
+    request: HttpRequest, customer_id: str, customer_email: str, form: TOTPSetupForm | None = None
+) -> HttpResponse:
+    """The setup page. Platform keeps one pending secret, so showing it again shows the same code."""
     try:
         user_id = request.session.get("user_id")
         totp_data = api_client.setup_totp_mfa(customer_id, user_id=user_id)
@@ -172,6 +179,7 @@ def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_emai
             )
 
         context = {
+            "form": form or TOTPSetupForm(),
             "qr_code": totp_data.get("qr_code"),
             "secret": totp_data.get("secret"),
             "customer_email": customer_email,
@@ -196,36 +204,62 @@ def _store_returned_session_auth_hash(request: HttpRequest, result: Mapping[str,
         request.session["session_auth_hash"] = returned
 
 
-def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) -> HttpResponse:
-    """Handle POST request for TOTP setup verification"""
-    if not token:
-        return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Please enter the verification code."))
-    if len(token) == BACKUP_CODE_LENGTH:
+def _setup_refusal(request: HttpRequest, exc: PlatformAPIError, form: TOTPSetupForm) -> HttpResponse | None:
+    """Explain a refused confirmation on the form; only a wrong password or code is a failed attempt.
+
+    Returns a response only when the page should not be shown again.
+    """
+    code = (exc.response_data or {}).get("code")
+    if exc.is_rate_limited:
+        form.add_error(None, _("Too many attempts. Please wait and try again."))
+    elif exc.is_degraded:
+        # Nothing was verified, so this is not a wrong credential and spends no attempt.
+        form.add_error(None, get_degraded_message(exc))
+    elif code == "mfa_already_enabled":
+        messages.info(request, _("Two-factor authentication is already on."))
+        return redirect("users:mfa_management")
+    elif code == "mfa_setup_expired":
+        form.add_error(None, _("This setup expired. Scan the new code and try again."))
+    else:
         mark_auth_failure(request, bucket="reauth")
-        return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Finish setup with the 6-digit code."))
+        form.add_error(None, _("The password or the code is incorrect."))
+    return None
+
+
+def _handle_totp_setup_post(request: HttpRequest, customer_id: str, customer_email: str) -> HttpResponse:
+    """Confirm the setup; on any refusal show the same page, with the same secret, and say why."""
+    form = TOTPSetupForm(request.POST)
+    if not form.is_valid():
+        return _handle_totp_setup_get(request, customer_id, customer_email, form)
 
     try:
-        user_id = request.session.get("user_id")
-        result = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
-        if result and result.get("success"):
-            _store_returned_session_auth_hash(request, result)
-            request.session.cycle_key()
-            request.session["new_mfa_backup_codes"] = result.get("backup_codes", [])
-            logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
-            return _handle_mfa_success_redirect(
-                request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
-            )
-        else:
-            mark_auth_failure(request, bucket="reauth")
-            return _handle_mfa_error_redirect(
-                request, "users:mfa_setup_totp", _("Invalid verification code. Please try again.")
-            )
-
+        result = api_client.verify_totp_mfa(
+            customer_id,
+            form.cleaned_data["token"],
+            form.cleaned_data["password"],
+            user_id=request.session.get("user_id"),
+            **_browser(request),
+        )
     except SessionSaveContended:
         raise  # The session middleware answers 503 with Retry-After (ADR-0055).
-    except Exception as e:
-        logger.error(f"🔥 [Portal 2FA] Error verifying TOTP: {e}")
-        return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("An error occurred. Please try again."))
+    except PlatformAPIError as exc:
+        leave = _setup_refusal(request, exc, form)
+        return leave or _handle_totp_setup_get(request, customer_id, customer_email, form)
+
+    _store_returned_session_auth_hash(request, result)
+    request.session.cycle_key()
+    logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
+    messages.success(request, _("Two-factor authentication has been enabled successfully!"))
+    return _render_new_backup_codes(request, list(result.get("backup_codes", [])))
+
+
+def _render_new_backup_codes(request: HttpRequest, codes: list[str]) -> HttpResponse:
+    """New recovery codes, shown once in the response that made them and kept in no session (#689)."""
+    return render(
+        request,
+        "users/mfa_backup_codes.html",
+        {"backup_codes": codes, "remaining": len(codes), "form": MFAReauthenticationForm()},
+    )
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/") -> str:
@@ -1329,9 +1363,7 @@ def mfa_setup_totp_view(request: HttpRequest) -> HttpResponse:
 
     if request.method == "GET":
         return _handle_totp_setup_get(request, customer_id, str(customer_email))
-    else:  # POST - verify TOTP token
-        token = request.POST.get("token", "").strip()
-        return _handle_totp_setup_post(request, customer_id, token)
+    return _handle_totp_setup_post(request, customer_id, str(customer_email))
 
 
 @never_cache
@@ -1362,13 +1394,14 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         try:
             result = api_client.regenerate_backup_codes(
-                user_id, form.cleaned_data["password"], form.cleaned_data["token"]
+                user_id, form.cleaned_data["password"], form.cleaned_data["token"], **_browser(request)
             )
             request.session.cycle_key()
-            request.session["new_mfa_backup_codes"] = result["backup_codes"]
-            return redirect("users:mfa_backup_codes")
+            return _render_new_backup_codes(request, list(result["backup_codes"]))
         except PlatformAPIError as exc:
-            if exc.is_unavailable:
+            if exc.is_rate_limited:
+                form.add_error(None, _("Too many attempts. Please wait and try again."))
+            elif exc.is_unavailable:
                 # Nothing was verified, so this is not a wrong credential and spends no attempt.
                 form.add_error(None, get_degraded_message(exc))
             else:
@@ -1378,11 +1411,7 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "users/mfa_backup_codes.html",
-        {
-            "backup_codes": request.session.pop("new_mfa_backup_codes", []),
-            "remaining": profile.get("backup_codes_count", 0),
-            "form": form,
-        },
+        {"backup_codes": [], "remaining": profile.get("backup_codes_count", 0), "form": form},
     )
 
 
@@ -1396,18 +1425,22 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         try:
             result = api_client.disable_mfa(
-                int(request.session["user_id"]), form.cleaned_data["password"], form.cleaned_data["token"]
+                int(request.session["user_id"]),
+                form.cleaned_data["password"],
+                form.cleaned_data["token"],
+                **_browser(request),
             )
             if result and result.get("success"):
                 _store_returned_session_auth_hash(request, result)
                 request.session.cycle_key()
-                request.session.pop("new_mfa_backup_codes", None)
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
             mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
         except PlatformAPIError as exc:
-            if exc.is_unavailable:
+            if exc.is_rate_limited:
+                form.add_error(None, _("Too many attempts. Please wait and try again."))
+            elif exc.is_unavailable:
                 # Nothing was verified, so this is not a wrong credential and spends no attempt.
                 form.add_error(None, get_degraded_message(exc))
             elif (exc.response_data or {}).get("code") == "staff_mfa_required":

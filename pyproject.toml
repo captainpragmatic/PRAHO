@@ -611,6 +611,7 @@ module = [
     "weasyprint",
     "ipware.*",
     "boto3.*",
+    "botocore.*",
     "stdnum.*",
 ]
 ignore_missing_imports = true
@@ -781,18 +782,6 @@ directory = "htmlcov"
 # ===============================================================================
 # DEVELOPMENT TOOLS
 # ===============================================================================
-
-[tool.djlint]
-# Template linting for HTMX + Tailwind templates
-profile = "django"
-extension = "html"
-indent = 2
-max_line_length = 100
-format_attribute_template_tags = true
-
-[tool.djlint.rules]
-# template standards
-ignore = "H006,H030,H031"  # Allow img without alt, allow raw text, allow Meta tag
 
 # ===============================================================================
 # DEPLOYMENT CONFIGURATION

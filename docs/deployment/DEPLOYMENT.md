@@ -952,7 +952,7 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `COMPANY_NAME`, `COMPANY_CUI` | The seller on every invoice; production refuses to start without them | `Example Hosting SRL`, `RO12345674` |
 | `COMPANY_COUNTRY_CODE` | ISO code of the EU country the seller is established in. It decides which Romanian features apply (ADR-0047) and the home currency (ADR-0041); production refuses to start without it | `RO`, `DE` |
 | `TIME_ZONE` | The operator's clock for billing periods, document dates and reports. Empty means `Europe/Bucharest`, the only zone allowed in Romania; any other operator must set it | `Europe/Berlin` |
-| `BRAND_DIR` | Optional folder with `logo.svg`, `favicon.svg`, `brand.css` replacing PRAHO's marks (ADR-0058) | `/opt/praho/brand` |
+| `BRAND_DIR` | Optional folder with `logo.svg`, `favicon.svg`, `brand.css` replacing PRAHO's marks (ADR-0061) | `/opt/praho/brand` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@example.com` |
 
 ### Docker Deployment (Compose)
@@ -976,7 +976,7 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 ### Brand folder
 
-`BRAND_DIR` names a folder holding any of `logo.svg` (drawn for PRAHO's dark screens), `favicon.svg`, `favicon.ico`, `apple-touch-icon.png` and `brand.css`; each file present replaces PRAHO's own (ADR-0058). In `brand.css`, `--color-primary-50` to `--color-primary-950` recolour the portal's accent and `--color-slate-*` its neutrals. Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
+`BRAND_DIR` names a folder holding any of `logo.svg` (drawn for PRAHO's dark screens), `favicon.svg`, `favicon.ico`, `apple-touch-icon.png` and `brand.css`; each file present replaces PRAHO's own (ADR-0061). In `brand.css`, `--color-primary-50` to `--color-primary-950` recolour the portal's accent and `--color-slate-*` its neutrals. Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
 
 ### Legal documents
 

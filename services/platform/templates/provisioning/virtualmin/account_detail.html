@@ -56,8 +56,63 @@
                 </button>
             {% endif %}
             {% trans "Backup Now" as bt4 %}{% button bt4 href=backup_url variant="primary" %}
+            {% if incremental_backups_enabled %}
+                {% trans "Restore pair" as bt4b %}{% button bt4b href=restore_pair_url variant="secondary" %}
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                        hx-post="{{ take_base_url }}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                        hx-confirm="{% trans 'Take a base backup? It is a complete backup of this account and starts a new chain: differential backups taken after it hold only what changed since it.' %}"
+                        hx-swap="outerHTML"
+                        hx-target="body">
+                    {% trans "Take base backup" %}
+                </button>
+                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                        hx-post="{{ take_differential_url }}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                        hx-confirm="{% trans 'Take a differential backup? It holds only what changed since the base backup, so restoring it needs that base backup as well.' %}"
+                        hx-swap="outerHTML"
+                        hx-target="body">
+                    {% trans "Take differential backup" %}
+                </button>
+            {% endif %}
         </div>
     </div>
+
+    {% if account.restore_hold %}
+    <!-- =============================================================================== -->
+    <!-- HALF-RESTORED DOMAIN (restore hold) -->
+    <!-- =============================================================================== -->
+    <div class="bg-amber-900/20 border border-amber-700 rounded-lg p-6 space-y-4">
+        <h3 class="text-sm font-medium text-amber-300">{% trans "This domain may be half-restored and stays disabled" %}</h3>
+        <p class="text-sm text-slate-300">
+            {% blocktrans with backup_id=account.restore_hold_safety_backup_id %}A pair restore was stopped after it had started restoring. Nothing re-enables the domain on its own. Re-enable it as it is, or restore the safety backup {{ backup_id }} that was taken just before the restore.{% endblocktrans %}
+        </p>
+        <div class="flex items-center space-x-3">
+            {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+            <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
+                    hx-post="{{ hold_reenable_url }}"
+                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                    hx-confirm="{% trans 'Re-enable the domain as it is? Its files and databases may be a mix of the base backup and the differential, or of what the stopped restore left.' %}"
+                    hx-swap="outerHTML"
+                    hx-target="body">
+                {% trans "Re-enable as is" %}
+            </button>
+            {% if account.restore_hold_safety_backup_id %}
+            {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+            <button class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors"
+                    hx-post="{{ hold_restore_safety_url }}"
+                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                    hx-confirm="{% blocktrans with backup_id=account.restore_hold_safety_backup_id %}Restore the safety backup {{ backup_id }}? It overwrites the domain with what it held just before the pair restore. The domain stays disabled until that restore completes.{% endblocktrans %}"
+                    hx-swap="outerHTML"
+                    hx-target="body">
+                {% blocktrans with backup_id=account.restore_hold_safety_backup_id %}Restore the safety backup {{ backup_id }}{% endblocktrans %}
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- =============================================================================== -->
     <!-- ACCOUNT OVERVIEW CARDS -->
@@ -204,15 +259,7 @@
                     <div id="quick-actions-section">
                         <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
                         <div class="space-y-3">
-                            {% trans "Access Control Panel" as bt5 %}{% button bt5 href="#" variant="primary" icon="external-link" %}
-                            {% trans "Reset Password" as bt6 %}{% button bt6 href="#" variant="secondary" icon="key" %}
-                            {% trans "Change Plan" as bt7 %}{% button bt7 href="#" variant="secondary" icon="upgrade" %}
-                            {% trans "Transfer Account" as bt8 %}{% button bt8 href="#" variant="secondary" icon="transfer" %}
-                            {% if account.is_active %}
-                                {% trans "Disable Account" as bt9 %}{% button bt9 href="#" variant="danger" icon="pause" %}
-                            {% else %}
-                                {% trans "Enable Account" as bt10 %}{% button bt10 href="#" variant="success" icon="play" %}
-                            {% endif %}
+                            {% include "provisioning/virtualmin/partials/account_state_actions.html" %}
 
                             <!-- Protection Toggle -->
                             {# tmpl-allow TMPL002: seven data-* attributes carry per-account values (URL, CSRF token, domain, translated confirm texts); the button tag's attrs takes one literal string the template can't build #}

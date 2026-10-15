@@ -16,6 +16,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.audit.services import AuditService
 from apps.common.decorators import staff_required
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import SecureInputValidator
@@ -52,10 +53,10 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
             messages.error(request, _("Email address is required."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        try:
-            user = User.objects.get(email=user_email)
-        except User.DoesNotExist:
-            messages.error(request, _("User with email '{}' not found.").format(user_email))
+        # Named by exact email, never picked from a list of every account (#689).
+        user = User.objects.filter(email__iexact=user_email, is_active=True).first()
+        if user is None:
+            messages.error(request, _("No active account uses the email address '{}'.").format(user_email))
             return redirect("customers:detail", customer_id=customer.id)
 
         # Check if user is already assigned
@@ -70,13 +71,8 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
         return redirect("customers:detail", customer_id=customer.id)
 
     # GET request - show form
-    available_users = (
-        User.objects.filter(is_active=True).exclude(customer_memberships__customer=customer).order_by("email")
-    )
-
     context = {
         "customer": customer,
-        "available_users": available_users,
         "role_choices": CustomerMembership.CUSTOMER_ROLE_CHOICES,
         "breadcrumb_items": [
             {"text": _("Dashboard"), "url": reverse("dashboard")},
@@ -280,8 +276,23 @@ def toggle_user_status(request: HttpRequest, customer_id: int, user_id: int) -> 
         return redirect("customers:detail", customer_id=customer.id)
 
     is_active = request.POST.get("is_active") == "true"
-    user.is_active = is_active
-    user.save()
+    # Only is_active, on the locked row: a full save of the instance loaded above would write back
+    # anything changed meanwhile, such as an administrator's 2FA reset (#689).
+    with transaction.atomic():
+        locked = User.objects.select_for_update().get(pk=user.pk)
+        was_active = locked.is_active
+        locked.is_active = is_active
+        locked.save(update_fields=["is_active"])
+        AuditService.log_simple_event(
+            "profile_updated",
+            user=request.user,
+            content_object=locked,
+            description=f"Account {'activated' if is_active else 'suspended'} from customer {customer.id}",
+            old_values={"is_active": was_active},
+            new_values={"is_active": is_active},
+            metadata={"customer_id": customer.id, "changed_by_staff": True},
+            ip_address=get_safe_client_ip(request),
+        )
 
     action = _("activated") if is_active else _("suspended")
     messages.success(request, _("User '{}' has been {}.").format(user.email, action))

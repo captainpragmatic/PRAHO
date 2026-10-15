@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apps.orders.vat_rules import CustomerVATInfo
     from apps.products.models import ProductPrice
 
 from django.contrib import messages
@@ -324,50 +325,98 @@ def _audit_price_overrides(
 # ===============================================================================
 
 
+def _fallback_vat_country(order: Order) -> str:
+    """The country for the fallback rate: the snapshot's when it is readable, else the supplier's own."""
+    from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+    try:
+        return billing_country_code((order.billing_address or {}).get("country"))
+    except ValueError:
+        return TaxService.get_supplier_country()
+
+
+def _order_vat_info(order: Order, *, record_vies_refusal: bool) -> CustomerVATInfo:
+    """The order's VAT facts: its billing snapshot plus the customer's tax-profile overrides.
+
+    record_vies_refusal decides whether refused VIES evidence is written to the audit trail, as
+    pricing an item does, or only read, as a preview on every page view must (#689).
+    """
+    from apps.billing.vies_evidence import vies_refusal_reason, vies_verified_for  # noqa: PLC0415
+
+    customer = order.customer
+    billing_address = order.billing_address or {}
+    vat_number = str(billing_address.get("vat_number") or billing_address.get("vat_id") or "")
+    info: CustomerVATInfo = {
+        "country": billing_country_code(billing_address.get("country")),
+        "is_business": bool(billing_address.get("company_name")) or bool(vat_number),
+        "vat_number": vat_number,
+        "customer_id": str(customer.id),
+        "order_id": None,
+    }
+    # Include per-customer overrides from tax profile if available.
+    #
+    # `ObjectDoesNotExist` only, matching `apps/api/orders/views.py:71` which builds the same
+    # CustomerVATInfo correctly. The previous `except Exception: pass` meant a DatabaseError
+    # reading the profile silently produced a dict WITHOUT the customer's overrides, so the
+    # order took the country's default VAT with nothing logged — a wrong rate on a Romanian
+    # fiscal document. That case now reaches the caller, which logs and falls back deliberately.
+    try:
+        tax_profile = customer.tax_profile
+    except ObjectDoesNotExist:
+        return info  # No tax profile — the immutable order snapshot governs
+    billing_name = str(billing_address.get("company_name") or customer.get_billing_name())
+    info["is_vat_payer"] = tax_profile.is_vat_payer
+    info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+    info["vies_verified"] = (
+        vies_verified_for(tax_profile, vat_number, billing_name=billing_name)
+        if record_vies_refusal
+        else not vies_refusal_reason(tax_profile, vat_number, billing_name=billing_name)
+    )
+    info["vat_rate_reason"] = tax_profile.vat_rate_reason
+    if tax_profile.vat_rate is not None:
+        info["custom_vat_rate"] = tax_profile.vat_rate
+    return info
+
+
+def _vat_preview(order: Order, item: OrderItem | None) -> dict[str, str]:
+    """The rate the item form previews: the stored rate for an existing item, else the customer's.
+
+    An edit keeps the item's rate unless its product or period changes, so the preview shows the
+    stored one. A new item gets the rate pricing would give it, read without recording anything.
+    """
+    from apps.common.tax_service import TaxService, VATScenario  # noqa: PLC0415
+
+    if item is not None and item.tax_rate is not None:
+        rate = Decimal(item.tax_rate).quantize(Decimal("0.0001"))
+        scenario: VATScenario | None = None
+    else:
+        try:
+            scenario, rate = TaxService.preview_vat_rate(_order_vat_info(order, record_vies_refusal=False))
+        except Exception as e:
+            from apps.billing.config import get_vat_rate  # noqa: PLC0415
+
+            logger.warning("⚠️ [Orders] VAT preview failed for order %s: %s — using country VAT", order.id, e)
+            scenario = None
+            rate = get_vat_rate(_fallback_vat_country(order))
+    reasons = {
+        VATScenario.EU_B2B_REVERSE_CHARGE: _("Reverse charge: the customer accounts for VAT"),
+        VATScenario.NON_EU_ZERO_VAT: _("No VAT: customer outside the EU"),
+        VATScenario.CUSTOM_RATE_OVERRIDE: _("The customer's own VAT rate"),
+    }
+    return {
+        "rate": str(rate),
+        # The percentage without trailing zeros: 0.2100 -> "21", 0.2550 -> "25.5".
+        "percent": format((rate * 100).normalize(), "f"),
+        "reason": str(reasons.get(scenario, "")) if scenario is not None else "",
+    }
+
+
 def _get_vat_rate_for_order(order: Order) -> Decimal:
     """Resolve VAT from the order snapshot plus any explicit customer override."""
-    from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
+    from apps.orders.vat_rules import OrderVATCalculator  # noqa: PLC0415
 
-    country = operator_country()
     try:
-        customer = order.customer
-        billing_address = order.billing_address or {}
-        country = billing_country_code(billing_address.get("country"))
-        vat_number = str(billing_address.get("vat_number") or billing_address.get("vat_id") or "")
-        is_business = bool(billing_address.get("company_name")) or bool(vat_number)
-
-        info: CustomerVATInfo = {
-            "country": country,
-            "is_business": is_business,
-            "vat_number": vat_number,
-            "customer_id": str(customer.id),
-            "order_id": None,
-        }
-        # Include per-customer overrides from tax profile if available.
-        #
-        # `ObjectDoesNotExist` only, matching `apps/api/orders/views.py:71` which builds the same
-        # CustomerVATInfo correctly. The previous `except Exception: pass` meant a DatabaseError
-        # reading the profile silently produced a dict WITHOUT the customer's overrides, so the
-        # order took the country's default VAT with nothing logged — a wrong rate on a Romanian
-        # fiscal document. That case now reaches the outer handler, which logs and falls back
-        # deliberately.
-        try:
-            tax_profile = customer.tax_profile
-        except ObjectDoesNotExist:
-            tax_profile = None  # No tax profile — the immutable order snapshot governs
-        if tax_profile is not None:
-            info["is_vat_payer"] = tax_profile.is_vat_payer
-            info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
-            from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
-
-            info["vies_verified"] = vies_verified_for(
-                tax_profile,
-                info.get("vat_number"),
-                billing_name=str(billing_address.get("company_name") or customer.get_billing_name()),
-            )
-            info["vat_rate_reason"] = tax_profile.vat_rate_reason
-            if tax_profile.vat_rate is not None:
-                info["custom_vat_rate"] = tax_profile.vat_rate
+        info = _order_vat_info(order, record_vies_refusal=True)
         # Use 10000 (100.00) as dummy subtotal — we only need the rate
         result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
         return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
@@ -375,7 +424,7 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
         from apps.billing.config import get_vat_rate  # noqa: PLC0415
 
         logger.warning("⚠️ [Orders] VAT rate lookup failed for order %s: %s — using country VAT", order.id, e)
-        return get_vat_rate(country)
+        return get_vat_rate(_fallback_vat_country(order))
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -836,7 +885,6 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
 
         # VAT calc per rules
         from .vat_rules import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
-            CustomerVATInfo,
             OrderVATCalculator,
         )
 
@@ -1592,8 +1640,7 @@ def _render_order_item_form(
         "billing_period_options": billing_period_options,
         "selected_billing_period": item.billing_period if item else "monthly",
         "action": action,
-        # The rate a new item is saved with, for the tax preview.
-        "vat_rate": _get_vat_rate_for_order(order),
+        "vat_preview": _vat_preview(order, item),
     }
 
     # Check if this is a request from expandable row (check for inline parameter or HX-Request header)
@@ -1845,77 +1892,6 @@ def order_export(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 # CART OPERATIONS - CUSTOMER SHOPPING CART 🛒
 # ===============================================================================
-
-
-@login_required
-def cart_view(request: HttpRequest) -> HttpResponse:
-    """
-    🛒 Display customer shopping cart with items and totals
-    Multi-tenant: Users only see their own cart items
-    """
-    # Type guard for authenticated user
-    if not isinstance(request.user, User):
-        return redirect("users:login")
-
-    # Get or create current customer context
-    try:
-        customer = request.user.primary_customer
-        if not customer:
-            messages.error(request, _("❌ No customer profile found. Please contact support."))
-            return redirect("dashboard")
-    except Exception as e:
-        logger.error(f"🔥 [Cart] Error getting customer for user {request.user.id}: {e}")
-        messages.error(request, _("❌ Error accessing cart. Please try again."))
-        return redirect("dashboard")
-
-    # Get current cart order (draft)
-    cart_order = Order.objects.filter(customer=customer, status="draft").first()
-
-    context = {
-        "cart_order": cart_order,
-        "cart_items": cart_order.items.select_related("product") if cart_order else [],
-        "customer": customer,
-    }
-
-    return render(request, "orders/cart/cart_view.html", context)
-
-
-@login_required
-def cart_calculate(request: HttpRequest) -> HttpResponse:
-    """
-    🧮 Calculate cart totals via HTMX
-    Returns order summary HTML partial
-    """
-    # Type guard for authenticated user
-    if not isinstance(request.user, User):
-        return HttpResponse("Authentication required", status=401)
-
-    try:
-        customer = request.user.primary_customer
-        if not customer:
-            return HttpResponse("No customer profile", status=400)
-
-        # Get current cart order
-        cart_order = Order.objects.filter(customer=customer, status="draft").first()
-
-        if not cart_order:
-            return HttpResponse("Empty cart", status=400)
-
-        # Recalculate totals
-        cart_order.calculate_totals()
-        cart_order.save()
-
-        # Return order summary partial
-        context = {
-            "cart_order": cart_order,
-            "customer": customer,
-        }
-
-        return render(request, "orders/cart/cart_summary_partial.html", context)
-
-    except Exception as e:
-        logger.error(f"🔥 [Cart] Error calculating cart totals: {e}")
-        return HttpResponse("Calculation error", status=500)
 
 
 @login_required

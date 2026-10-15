@@ -6,11 +6,11 @@
 
 > **Diagrams:**
 > - [`entity-relationships.mmd`](../architecture/diagrams/entity-relationships.mmd) — ER diagram using db_table names, shows FK relationships
-> - [`database-tables.mmd`](../architecture/diagrams/database-tables.mmd) — flat app-grouped taxonomy of all 119 tables
+> - [`database-tables.mmd`](../architecture/diagrams/database-tables.mmd) — flat app-grouped taxonomy of all 152 tables
 
 ## Context
 
-PRAHO Platform uses Django ORM with PostgreSQL. All 119 concrete models across 15 Django apps
+PRAHO Platform uses Django ORM with PostgreSQL. All 152 concrete models across 15 Django apps
 need explicit, consistent `db_table` values so that:
 
 - DBAs and SQL consumers can identify which app owns a table at a glance
@@ -66,33 +66,43 @@ All Django models **must** declare an explicit `Meta.db_table`. The value follow
 
 ## Complete Table Catalog
 
-All 119 tables across 15 apps.
+All 152 tables across 15 apps.
 
-### audit — 11 tables
+### audit — 14 tables
 
 | db_table | Model |
 |----------|-------|
 | audit_events | AuditEvent |
-| audit_data_exports | AuditDataExport |
+| audit_chain_head | AuditChainHead |
+| audit_chain_links | AuditChainLink |
+| audit_chain_anchors | AuditChainAnchor |
+| audit_data_exports | DataExport |
 | audit_integrity_checks | AuditIntegrityCheck |
 | audit_retention_policies | AuditRetentionPolicy |
+| audit_file_integrity_baselines | FileIntegrityBaseline |
 | audit_search_queries | AuditSearchQuery |
 | audit_alerts | AuditAlert |
-| audit_compliance_logs | AuditComplianceLog |
-| audit_siem_hash_chain_states | AuditSiemHashChainState |
-| audit_compliance_reports | AuditComplianceReport |
-| audit_siem_export_logs | AuditSiemExportLog |
-| audit_cookie_consents | AuditCookieConsent |
+| audit_event_reviews | AuditEventReview |
+| audit_compliance_logs | ComplianceLog |
+| audit_compliance_reports | ComplianceReportRecord |
+| audit_cookie_consents | CookieConsent |
 
-### billing — 32 tables
+### billing — 38 tables
 
 | db_table | Model |
 |----------|-------|
 | billing_currencies | Currency |
-| billing_fx_rates | FxRate |
+| billing_fx_rates | FXRate |
+| billing_efactura_documents | EFacturaDocument |
 | billing_invoice_sequences | InvoiceSequence |
 | billing_invoices | Invoice |
 | billing_invoice_lines | InvoiceLine |
+| billing_tax_rules | TaxRule |
+| billing_vat_validations | VATValidation |
+| billing_efactura_oauth_tokens | OAuthToken |
+| billing_fiscal_corrections | FiscalCorrection |
+| billing_smartbill_rate_gates | SmartBillRateGate |
+| billing_provider_issuances | ProviderIssuance |
 | billing_usage_meters | UsageMeter |
 | billing_usage_events | UsageEvent |
 | billing_usage_aggregations | UsageAggregation |
@@ -102,6 +112,7 @@ All 119 tables across 15 apps.
 | billing_usage_thresholds | UsageThreshold |
 | billing_usage_alerts | UsageAlert |
 | billing_payments | Payment |
+| billing_recurring_payment_submissions | RecurringPaymentSubmission |
 | billing_credit_ledgers | CreditLedger |
 | billing_payment_retry_policies | PaymentRetryPolicy |
 | billing_payment_retry_attempts | PaymentRetryAttempt |
@@ -109,23 +120,22 @@ All 119 tables across 15 apps.
 | billing_proforma_sequences | ProformaSequence |
 | billing_proforma_invoices | ProformaInvoice |
 | billing_proforma_lines | ProformaLine |
+| billing_recurring_payment_authorizations | RecurringPaymentAuthorization |
 | billing_refunds | Refund |
 | billing_refund_notes | RefundNote |
 | billing_refund_status_history | RefundStatusHistory |
+| billing_subscription_currency_transitions | SubscriptionCurrencyTransition |
 | billing_subscriptions | Subscription |
 | billing_subscription_changes | SubscriptionChange |
 | billing_price_locks | PriceGrandfathering |
 | billing_subscription_items | SubscriptionItem |
-| billing_tax_rules | TaxRule |
-| billing_vat_validations | VatValidation |
-| billing_efactura_documents | EFacturaDocument |
-| billing_efactura_oauth_tokens | EFacturaOAuthToken |
 
-### common — 2 tables
+### common — 3 tables
 
 | db_table | Model |
 |----------|-------|
-| common_credentials | CredentialVault |
+| common_counters | Counter |
+| common_credentials | EncryptedCredential |
 | common_credential_access_logs | CredentialAccessLog |
 
 ### customers — 6 tables
@@ -139,14 +149,17 @@ All 119 tables across 15 apps.
 | customer_tax_profiles | CustomerTaxProfile |
 | customer_billing_profiles | CustomerBillingProfile |
 
-### domains — 5 tables
+### domains — 8 tables
 
 | db_table | Model |
 |----------|-------|
-| domains | Domain — root entity |
+| domain_currency_transitions | DomainCurrencyTransition |
 | domain_tlds | TLD |
+| domains_tldretailprice | TLDRetailPrice |
 | domain_registrars | Registrar |
 | domain_tld_registrar_assignments | TLDRegistrarAssignment |
+| domains | Domain — root entity |
+| domain_operations | DomainOperation |
 | domain_order_items | DomainOrderItem |
 
 ### infrastructure — 11 tables
@@ -159,10 +172,10 @@ All 119 tables across 15 apps.
 | infrastructure_panel_types | PanelType |
 | infrastructure_node_deployments | NodeDeployment |
 | infrastructure_node_deployment_logs | NodeDeploymentLog |
-| infrastructure_node_deployment_costs | NodeDeploymentCost |
+| infrastructure_node_deployment_costs | NodeDeploymentCostRecord |
 | infrastructure_drift_checks | DriftCheck |
 | infrastructure_drift_reports | DriftReport |
-| infrastructure_drift_remediations | DriftRemediation |
+| infrastructure_drift_remediations | DriftRemediationRequest |
 | infrastructure_drift_snapshots | DriftSnapshot |
 
 ### integrations — 2 tables
@@ -201,76 +214,99 @@ All 119 tables across 15 apps.
 | product_bundles | ProductBundle |
 | product_bundle_items | ProductBundleItem |
 
-### promotions — 12 tables
+### promotions — 22 tables
 
 | db_table | Model |
 |----------|-------|
 | promotion_campaigns | PromotionCampaign |
 | promotion_coupons | Coupon |
 | promotion_coupon_redemptions | CouponRedemption |
-| promotion_customer_loyalties | CustomerLoyalty |
+| promotion_rules | PromotionRule |
+| promotion_referral_codes | ReferralCode |
+| promotion_referrals | Referral |
 | promotion_gift_cards | GiftCard |
 | promotion_gift_card_transactions | GiftCardTransaction |
 | promotion_loyalty_programs | LoyaltyProgram |
 | promotion_loyalty_tiers | LoyaltyTier |
+| promotion_customer_loyalties | CustomerLoyalty |
 | promotion_loyalty_transactions | LoyaltyTransaction |
-| promotion_referral_codes | ReferralCode |
-| promotion_referrals | Referral |
-| promotion_rules | PromotionRule |
+| promotions_promotionapplication | PromotionApplication |
+| promotions_renewalbenefit | RenewalBenefit |
+| promotions_renewalbenefituse | RenewalBenefitUse |
+| promotions_giftcardpurchase | GiftCardPurchase |
+| promotions_giftcardfundingattempt | GiftCardFundingAttempt |
+| promotions_giftcardfundingrefund | GiftCardFundingRefund |
+| promotions_giftcarddelivery | GiftCardDelivery |
+| promotions_giftcardreservation | GiftCardReservation |
+| promotions_tenderrefundcommand | TenderRefundCommand |
+| promotions_tenderrefundleg | TenderRefundLeg |
 
-### provisioning — 12 tables
+### provisioning — 18 tables
 
 | db_table | Model |
 |----------|-------|
+| provisioning_service_relationships | ServiceRelationship |
+| provisioning_service_domains | ServiceDomainok |
+| provisioning_service_groups | ServiceGroup |
+| provisioning_service_group_members | ServiceGroupMember |
 | provisioning_service_plans | ServicePlan |
+| provisioning_serviceplanprice | ServicePlanPrice |
 | provisioning_servers | Server |
 | provisioning_services | Service |
 | provisioning_tasks | ProvisioningTask |
+| provisioning_servicerequest | ServiceRequest |
+| provisioning_virtualmin_migrations | VirtualminMigration |
+| provisioning_nodedrain | NodeDrain |
+| provisioning_spoolroot | SpoolRoot |
+| provisioning_spoolreservation | SpoolReservation |
 | provisioning_virtualmin_servers | VirtualminServer |
 | provisioning_virtualmin_accounts | VirtualminAccount |
 | provisioning_virtualmin_jobs | VirtualminProvisioningJob |
 | provisioning_virtualmin_drift_records | VirtualminDriftRecord |
-| provisioning_service_relationships | ServiceRelationship |
-| provisioning_service_domains | ServiceDomain |
-| provisioning_service_groups | ServiceGroup |
-| provisioning_service_group_members | ServiceGroupMember |
 
 ### settings — 2 tables
 
 | db_table | Model |
 |----------|-------|
-| setting_categories | SettingCategory |
-| setting_entries | SettingEntry |
+| setting_entries | SystemSetting |
+| setting_activations | SettingActivation |
 
 ### tickets — 5 tables
 
 | db_table | Model |
 |----------|-------|
-| tickets | Ticket — root entity |
 | ticket_categories | SupportCategory |
+| tickets | Ticket — root entity |
 | ticket_comments | TicketComment |
 | ticket_attachments | TicketAttachment |
 | ticket_worklogs | TicketWorklog |
 
-### users — 5 tables
+### users — 9 tables
 
 | db_table | Model |
 |----------|-------|
 | users | User — root entity |
+| users_usercredentialversion | UserCredentialVersion |
 | user_customer_memberships | CustomerMembership |
 | user_profiles | UserProfile |
 | user_login_logs | UserLoginLog |
+| users_api_tokens | APIToken |
+| users_usersession | UserSession |
 | user_webauthn_credentials | WebAuthnCredential |
+| users_pending_registrations | PendingRegistration |
 
 ---
 
 ## Schema Design Decisions
 
-### Django ORM — no raw SQL DDL for app tables
+### Django ORM — no separately maintained DDL for app tables
 
-All schema is defined through Django models and migrations. Raw SQL DDL is not maintained
-separately. Benefits: type-safe queries, automatic migration tracking, guaranteed model/schema
-parity. Raw SQL is only used for health checks (SELECT 1).
+All schema is defined through Django models and migrations; no DDL file is maintained beside
+them. Benefits: type-safe queries, automatic migration tracking, guaranteed model/schema
+parity. Raw SQL exists in two places only: the counter store (`apps.common.counters`, atomic
+upserts with `RETURNING`, ADR-0050) and the PostgreSQL-only objects that no model can express
+(covering and GIN/BRIN indexes, the encryption-context trigger), which migrations carry
+verbatim (ADR-0052). Health checks use `SELECT 1`.
 
 ### UUID primary keys on business-facing models
 
@@ -283,7 +319,10 @@ auto-increment integer PKs for insert performance.
 
 ### Monetary values as integer cents
 
-All money columns use INTEGER (cents), never DECIMAL. See ADR-0025 for full rationale.
+All money columns store integer cents as `BigIntegerField` or `PositiveBigIntegerField`
+(BIGINT), never DECIMAL. The one exception is `RenewalBenefit.monthly_cents`, a
+high-precision `DecimalField` holding a fractional per-month rate. See ADR-0025 for full
+rationale.
 
 ### created_at / updated_at on all models
 
@@ -293,8 +332,10 @@ updated_at = DateTimeField(auto_now=True). No exceptions.
 ### State machine columns
 
 Models with lifecycle states use django-fsm-2 FSMField (stored as plain VARCHAR in
-PostgreSQL). See ADR-0034. State transitions are enforced at the Python layer; the DB column
-has no CHECK constraint.
+PostgreSQL). See ADR-0034. State transitions are enforced at the Python layer. Many of these
+models also declare a `CheckConstraint` listing the allowed status values (for example
+`payment_status_valid_values` on `billing_payments`), so the database rejects a value the
+model does not define; it does not enforce which transition led there.
 
 ### Romanian compliance columns
 

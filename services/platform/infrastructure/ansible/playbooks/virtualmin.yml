@@ -7,12 +7,34 @@
   gather_facts: true
 
   vars:
-    # Pinned versions for stability - UPDATE THESE FOR NEW RELEASES
-    virtualmin_version: "7.10.0"
-    webmin_version: "2.105"
-    virtualmin_install_script_url: "https://software.virtualmin.com/gpl/scripts/virtualmin-install.sh"
+    # Recorded in /etc/praho-virtualmin-install only: the installer takes the
+    # current packages of its major line. These are the versions the lab
+    # (deploy/virtualmin-lab) proves PRAHO against.
+    virtualmin_version: "8.3.0"
+    webmin_version: "2.670"
+    # The Virtualmin 8 installer. The old software.virtualmin.com/gpl/scripts URL
+    # serves installer 7.5.2, which sets up the Virtualmin 7 repository.
+    virtualmin_install_script_url: "https://download.virtualmin.com/virtualmin-install.sh"
+    # Features every PRAHO-provisioned server gets; all exist on a --minimal node.
+    virtualmin_required_features:
+      - unix
+      - dir
+      - web
+      - ssl
+      - logrotate
+      - mysql
+      - webmin
 
   tasks:
+    # The installer and Let's Encrypt need the node's fully qualified name, which the
+    # short inventory_hostname is not. PRAHO passes it as node_fqdn (-e from a vars file).
+    - name: Refuse a missing node FQDN
+      ansible.builtin.assert:
+        that:
+          - node_fqdn is defined
+          - node_fqdn | length > 0
+        fail_msg: "node_fqdn is required: pass the node's fully qualified domain name"
+
     - name: Check if Virtualmin is already installed
       ansible.builtin.stat:
         path: /usr/share/webmin/virtual-server
@@ -28,7 +50,7 @@
     - name: Run Virtualmin installation
       ansible.builtin.command: >
         /root/virtualmin-install.sh
-        --hostname {{ inventory_hostname }}
+        --hostname {{ node_fqdn }}
         --minimal
         --force
       args:
@@ -84,42 +106,49 @@
         path: /root/virtualmin-install.sh
         state: absent
 
-    - name: Configure Virtualmin settings
+    # Only keys Virtualmin 8.3 reads from its module config are written here.
+    # This play used to also write php_fpm=1, php_vers, web_port=10000, ssl=1 and
+    # autoquota=1, and a key=value "domain-template". Checked in the lab:
+    #   - web_port is the Apache port of NEW virtual servers; 10000 is Webmin's,
+    #     so every create-domain failed ("port 10000 are being used by Webmin");
+    #   - php_fpm holds FPM pool directives, not a switch, and ssl=3 is the
+    #     shipped mode;
+    #   - php_vers and autoquota are not read at all;
+    #   - domain-template is the body of the new-server email, not domain defaults.
+    - name: Configure the Virtualmin default addresses
       ansible.builtin.lineinfile:
         path: /etc/webmin/virtual-server/config
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
-        create: yes
+        create: false
       loop:
         - { regexp: '^defip=', line: 'defip={{ ansible_default_ipv4.address }}' }
         - { regexp: '^defip6=', line: 'defip6={{ ansible_default_ipv6.address | default("") }}' }
-        - { regexp: '^php_fpm=', line: 'php_fpm=1' }
-        - { regexp: '^php_vers=', line: 'php_vers={{ php_default_version }}' }
-        - { regexp: '^web_port=', line: 'web_port=10000' }
-        - { regexp: '^ssl=', line: 'ssl=1' }
-        - { regexp: '^autoquota=', line: 'autoquota=1' }
       notify: Restart webmin
 
-    - name: Configure default domain template
-      ansible.builtin.template:
-        src: templates/domain_template.j2
-        dest: /etc/webmin/virtual-server/domain-template
-        mode: '0644'
-      notify: Restart webmin
+    - name: Find the PHP-FPM configuration
+      ansible.builtin.stat:
+        path: "/etc/php/{{ php_default_version }}/fpm/php.ini"
+      register: php_fpm_ini
+
+    - name: Report a missing PHP-FPM configuration
+      ansible.builtin.debug:
+        msg: "PHP_DEFAULTS_SKIPPED /etc/php/{{ php_default_version }}/fpm/php.ini not found"
+      when: not php_fpm_ini.stat.exists
 
     - name: Set PHP defaults
       ansible.builtin.lineinfile:
-        path: "{{ item.path }}"
+        path: "/etc/php/{{ php_default_version }}/fpm/php.ini"
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       loop:
-        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^memory_limit', line: 'memory_limit = {{ php_memory_limit }}' }
-        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^upload_max_filesize', line: 'upload_max_filesize = {{ php_upload_max_filesize }}' }
-        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^post_max_size', line: 'post_max_size = {{ php_post_max_size }}' }
-        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^max_execution_time', line: 'max_execution_time = {{ php_max_execution_time }}' }
-        - { path: '/etc/php/{{ php_default_version }}/fpm/php.ini', regexp: '^max_input_time', line: 'max_input_time = {{ php_max_input_time }}' }
+        - { regexp: '^memory_limit', line: 'memory_limit = {{ php_memory_limit }}' }
+        - { regexp: '^upload_max_filesize', line: 'upload_max_filesize = {{ php_upload_max_filesize }}' }
+        - { regexp: '^post_max_size', line: 'post_max_size = {{ php_post_max_size }}' }
+        - { regexp: '^max_execution_time', line: 'max_execution_time = {{ php_max_execution_time }}' }
+        - { regexp: '^max_input_time', line: 'max_input_time = {{ php_max_input_time }}' }
+      when: php_fpm_ini.stat.exists
       notify: Restart php-fpm
-      ignore_errors: yes  # PHP path may vary
 
     - name: Enable required Apache modules
       community.general.apache2_module:
@@ -127,7 +156,6 @@
         state: present
       loop: "{{ webserver_modules }}"
       notify: Restart apache
-      ignore_errors: yes
 
 # Let's Encrypt issuance/install (#436). Failures stay non-fatal until the
     # staging drill proves the real CLI contract — but they are VISIBLE
@@ -142,11 +170,11 @@
     - name: Generate Let's Encrypt certificate for Virtualmin
       ansible.builtin.command: >
         virtualmin generate-letsencrypt-cert
-        --host {{ inventory_hostname }}
+        --host {{ node_fqdn }}
         --web
         --renew
       args:
-        creates: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+        creates: /etc/webmin/letsencrypt-cert-{{ node_fqdn }}
       register: letsencrypt_result
       # Fatal ONLY when letsencrypt_fatal is explicitly passed true (default false ==
       # today's non-fatal behavior, byte-for-byte). The #436 staging drill flips this on
@@ -173,7 +201,7 @@
     - name: Configure Webmin to use Let's Encrypt certificate
       ansible.builtin.command: >
         /usr/share/webmin/webmin/letsencrypt.cgi
-        --host {{ inventory_hostname }}
+        --host {{ node_fqdn }}
       when:
         - letsencrypt_result.changed | default(false)
         - letsencrypt_cgi.stat.exists
@@ -190,7 +218,7 @@
 
     - name: Record successful certificate issuance and installation
       ansible.builtin.file:
-        path: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+        path: /etc/webmin/letsencrypt-cert-{{ node_fqdn }}
         state: touch
         mode: '0644'
       when:
@@ -199,53 +227,97 @@
         - letsencrypt_install.rc is defined
         - letsencrypt_install.rc == 0
 
-    - name: Enable Virtualmin features
-      ansible.builtin.command: >
-        virtualmin modify-config
-        --enabled-feature {{ item }}
-      loop:
-        - dns
-        - web
-        - ssl
-        - mail
-        - ftp
-        - mysql
-        - dir
-        - unix
-        - webmin
-        - logrotate
-        - status
-        - backup
-      failed_when: false
+    # `virtualmin modify-config` does not exist (the old task hid that behind
+    # failed_when: false); set-global-feature is the 8.x command. Only features a
+    # --minimal node can run are required: dns needs BIND and mail needs Postfix,
+    # neither of which --minimal installs, and set-global-feature refuses both
+    # there. The same set is what create-domain --default-features gives a new
+    # server. Only features that are off are switched on, because enabling an
+    # automatic feature (unix, dir, ssl, logrotate) turns it into an optional
+    # one. A failure here fails the deploy.
+    - name: Read the Virtualmin features
+      ansible.builtin.command:
+        argv: [virtualmin, list-features, --json]
+      register: virtualmin_features_before
       changed_when: false
 
-    - name: Create the PRAHO API administrator (dedicated ACL user, never master admin)
-      # #347: PRAHO stores this same password in its vault at registration, so the
-      # first API call and verify_and_activate authenticate. The password arrives
-      # via a 0600 extra-vars file (never the CONTROLLER's ansible command line) and
-      # is no_log here so it never lands in ansible output.
-      # RESIDUAL RISK (#348 #4): `--pass` still places the plaintext password on THIS
-      # node's process list (/proc, ps) for the brief duration of the command — no_log
-      # only hides the controller's output, not the target's argv. Accepted as low risk
-      # (freshly-provisioned, PRAHO-controlled node; short-lived command). A stdin/
-      # password-file facility is a hardening follow-up to investigate on a real node.
-      # VALIDATE ON A REAL NODE: the exact `create-admin` capability flags govern
-      # what PRAHO can do via the API and must be confirmed against a live
-      # Virtualmin before this is trusted (part of the #347 acceptance drill).
-      ansible.builtin.command: >
-        virtualmin create-admin
-        --name {{ praho_api_user }}
-        --pass {{ praho_api_password }}
-        --desc "PRAHO platform API administrator"
-        --can-create
-        --can-edit
+    - name: Work out which required features are off
+      ansible.builtin.set_fact:
+        virtualmin_features_off: >-
+          {{ virtualmin_required_features | difference(
+               (virtualmin_features_before.stdout | from_json).data
+               | selectattr('values.enabled.0', 'equalto', 'Yes')
+               | map(attribute='name') | list) }}
+
+    - name: Enable the Virtualmin features PRAHO provisions with
+      ansible.builtin.command:
+        argv:
+          - virtualmin
+          - set-global-feature
+          - --enable-feature
+          - "{{ item }}"
+          - --default-on
+          - "{{ item }}"
+      loop: "{{ virtualmin_features_off }}"
+
+    - name: Read the Virtualmin features again
+      ansible.builtin.command:
+        argv: [virtualmin, list-features, --json]
+      register: virtualmin_features_after
+      changed_when: false
+
+    - name: Require every PRAHO feature to be enabled
+      ansible.builtin.assert:
+        that:
+          - virtualmin_required_features | difference(
+              (virtualmin_features_after.stdout | from_json).data
+              | selectattr('values.enabled.0', 'equalto', 'Yes')
+              | map(attribute='name') | list) | length == 0
+        fail_msg: "Virtualmin features still off: {{ virtualmin_features_off }}"
+
+    # #347: PRAHO stores this same password in its vault at registration, so the
+    # first API call and verify_and_activate authenticate. The password arrives
+    # via a 0600 extra-vars file on the controller and on the node's stdin, never
+    # on either command line, and the task is no_log.
+    #
+    # `virtualmin create-admin` makes a per-domain extra administrator: it needs
+    # --domain and has no --can-create/--can-edit flags, so the old task failed
+    # every deploy. Virtualmin's remote API runs most programs only for its
+    # master administrator (a virtual-server ACL without `noconfig`). The helper
+    # therefore creates a Webmin user whose ONLY Webmin module is virtual-server,
+    # with Virtualmin master rights in it. On a re-deploy it resets the password
+    # to the vault's, so node and vault converge.
+    - name: Install the PRAHO API user helper
+      ansible.builtin.copy:
+        src: files/praho-webmin-api-user.pl
+        dest: /usr/local/sbin/praho-webmin-api-user
+        owner: root
+        group: root
+        mode: '0700'
+      when: praho_api_user is defined and praho_api_password is defined
+
+    # The API user is a Virtualmin master administrator (ADR-0060), so it may
+    # log in only from the node admin allowlist: Platform's egress addresses
+    # plus the operators' admin networks. An empty list would leave the
+    # credential usable from anywhere, so the deploy stops instead.
+    - name: Refuse an empty node admin allowlist
+      ansible.builtin.assert:
+        that:
+          - node_admin_allowed_cidrs is defined
+          - node_admin_allowed_cidrs | length > 0
+        fail_msg: >-
+          infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
+          addresses and the admin networks before deploying a node.
+      when: praho_api_user is defined and praho_api_password is defined
+
+    - name: Create or update the PRAHO API user
+      ansible.builtin.command:
+        argv: "{{ ['/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
+        stdin: "{{ praho_api_password }}"
       when: praho_api_user is defined and praho_api_password is defined
       no_log: true
       register: praho_admin_result
-      changed_when: praho_admin_result.rc == 0
-      failed_when:
-        - praho_admin_result.rc != 0
-        - "'already exists' not in (praho_admin_result.stderr | default(''))"
+      changed_when: true
 
     - name: Create PRAHO tracking file
       ansible.builtin.copy:
@@ -264,14 +336,14 @@
         name: webmin
         state: restarted
 
+    # Notified only when php.ini of this PHP version exists (Set PHP defaults),
+    # so the service exists; a failed restart is a broken node, not noise.
     - name: Restart php-fpm
       ansible.builtin.service:
         name: "php{{ php_default_version }}-fpm"
         state: restarted
-      ignore_errors: yes
 
     - name: Restart apache
       ansible.builtin.service:
         name: apache2
         state: restarted
-      ignore_errors: yes

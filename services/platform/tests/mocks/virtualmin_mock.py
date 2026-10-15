@@ -105,7 +105,7 @@ class MockVirtualminGateway:
         self._domains: dict[str, MockDomain] = {}
         self._archives: dict[str, MockDomain] = {}
         self._calls: list[CallRecord] = []
-        self.available_templates: list[str] = ["Default"]
+        self.available_templates: list[str] = ["Default Settings"]
 
     # ---------------------------------------------------------------
     # State management helpers (for test setup)

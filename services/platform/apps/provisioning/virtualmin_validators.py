@@ -10,7 +10,7 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.validators import SecureInputValidator
+from apps.common.validators import SecureInputValidator, has_invalid_a_label
 
 # Validation constants
 MIN_PASSWORD_LENGTH = 8
@@ -19,7 +19,13 @@ MIN_PASSWORD_STRENGTH_TYPES = 3
 MAX_EMAIL_LENGTH = 254  # RFC 5321 limit
 MAX_EMAIL_LOCAL_LENGTH = 64  # RFC 5321 limit
 MAX_TEMPLATE_NAME_LENGTH = 50
+# Virtualmin 8.x names its built-in server template "Default Settings" (ID 0);
+# there is no template called "Default" (create-domain: "Unknown template name").
+DEFAULT_VIRTUALMIN_TEMPLATE = "Default Settings"
 MAX_PARAMETER_VALUE_LENGTH = 1000
+# Parameters that carry a domain name. Virtualmin turns each parameter into a command-line option,
+# so a domain value starting with "-" would be read as another option.
+DOMAIN_PARAMETER_KEYS = frozenset({"domain", "parent"})
 MIN_DOMAIN_LENGTH = 3
 MAX_DOMAIN_LENGTH = 253  # RFC 1035 limit
 MIN_USERNAME_LENGTH = 3
@@ -117,7 +123,8 @@ class VirtualminValidator:
     EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
     # Template name validation
-    TEMPLATE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,50}$")
+    # Words of letters, digits, "_" and "-", separated by single spaces.
+    TEMPLATE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+(?: [a-zA-Z0-9_-]+)*$")
 
     @staticmethod
     def validate_domain_name(domain: str) -> str:
@@ -164,6 +171,10 @@ class VirtualminValidator:
         # Check for suspicious patterns
         if ".." in domain or domain.startswith(".") or domain.endswith("."):
             raise ValidationError(_("Invalid domain name format"))
+
+        # An "xn--" label must be a valid IDNA A-label
+        if has_invalid_a_label(domain):
+            raise ValidationError(_("Invalid internationalized domain name"))
 
         return domain
 
@@ -383,7 +394,7 @@ class VirtualminValidator:
             ValidationError: If template name is invalid
         """
         if not template:
-            return "Default"  # Virtualmin default template
+            return DEFAULT_VIRTUALMIN_TEMPLATE
 
         # Input validation and security check
         if not isinstance(template, str):
@@ -398,7 +409,9 @@ class VirtualminValidator:
 
         # Pattern validation
         if not VirtualminValidator.TEMPLATE_PATTERN.match(template):
-            raise ValidationError(_("Template name can only contain letters, numbers, hyphens, and underscores"))
+            raise ValidationError(
+                _("Template name can only contain letters, numbers, hyphens, underscores and single spaces")
+            )
 
         return template
 
@@ -554,6 +567,14 @@ class VirtualminValidator:
         return format_type
 
     @staticmethod
+    def _check_domain_parameter(key: str, value: str) -> None:
+        """Refuse an option-shaped value or an invalid A-label in a parameter that carries a domain."""
+        if key not in DOMAIN_PARAMETER_KEYS:
+            return
+        if value.startswith("-") or has_invalid_a_label(value):
+            raise ValidationError(_("Parameter '%(key)s' is not a valid domain name") % {"key": key})
+
+    @staticmethod
     def validate_virtualmin_params(params: dict[str, Any]) -> dict[str, Any]:
         """
         Validate and sanitize Virtualmin API parameters.
@@ -580,10 +601,24 @@ class VirtualminValidator:
             # XSS/injection check for key
             SecureInputValidator._check_malicious_patterns(key)
 
+            # A list is sent as a repeated parameter ("--feature a --feature b");
+            # every element gets the same checks as a single string value.
+            if isinstance(value, (list, tuple)):
+                if not all(isinstance(item, str) for item in value):
+                    raise ValidationError(_("Parameter '%(key)s' list values must be strings") % {"key": key})
+                for item in value:
+                    SecureInputValidator._check_malicious_patterns(item)
+                    VirtualminValidator._check_domain_parameter(key, item)
+                    if len(item) > MAX_PARAMETER_VALUE_LENGTH:
+                        raise ValidationError(_("Parameter '%(key)s' value too long") % {"key": key})
+                validated_params[key] = list(value)
+                continue
+
             # Validate parameter values based on type
             if isinstance(value, str):
                 # XSS/injection check for string values
                 SecureInputValidator._check_malicious_patterns(value)
+                VirtualminValidator._check_domain_parameter(key, value)
 
             # Length limits for all string parameters
             if isinstance(value, str) and len(value) > MAX_PARAMETER_VALUE_LENGTH:

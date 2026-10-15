@@ -3,6 +3,9 @@
   hosts: all
   gather_facts: false
   become: false
+  vars:
+    # Must match REMOTE_ARCHIVE_DIR in apps/provisioning/virtualmin_backup_service.py.
+    remote_archive_dir: /var/lib/praho-transfer
   tasks:
     - name: Validate single-host backup inputs
       ansible.builtin.assert:
@@ -12,9 +15,28 @@
           - spool_dir is match('^/')
           - spool_free_bytes | int > 0
 
+    # Virtualmin writes the archive and its .dom/.info sidecars 0644; only the
+    # parent directory keeps them private. Refuse to move an archive that sat
+    # in a directory anyone else could read or replace.
+    - name: Inspect the remote staging directory
+      ansible.builtin.stat:
+        path: "{{ remote_archive_dir }}"
+        follow: false
+      register: staging_dir
+
+    - name: Require a private staging directory
+      ansible.builtin.assert:
+        that:
+          - staging_dir.stat.exists
+          - staging_dir.stat.isdir | default(false)
+          - not (staging_dir.stat.islnk | default(false))
+          - staging_dir.stat.uid == 0
+          - staging_dir.stat.mode == '0700'
+        fail_msg: "{{ remote_archive_dir }} is not a root-owned 0700 directory; backup archive not fetched"
+
     - name: Inspect remote archive
       ansible.builtin.stat:
-        path: "/tmp/{{ archive_name }}"
+        path: "{{ remote_archive_dir }}/{{ archive_name }}"
         checksum_algorithm: sha256
         follow: false
       register: backup_archive
@@ -35,7 +57,7 @@
     - name: Fetch archive directly to the private controller spool
       become: false
       ansible.builtin.fetch:
-        src: "/tmp/{{ archive_name }}"
+        src: "{{ remote_archive_dir }}/{{ archive_name }}"
         dest: "{{ spool_dir }}/{{ archive_name }}"
         flat: yes
         fail_on_missing: true
@@ -43,11 +65,13 @@
 
     # Unlike migration (which retains the source copy by design), backups must
     # not strand multi-GB temp archives on the node: delete only AFTER the
-    # checksum-validated fetch above succeeded.
-    - name: Remove the remote temporary archive
+    # checksum-validated fetch above succeeded. The sidecars hold the domain's
+    # database passwords and are never needed for a restore.
+    - name: Remove the remote temporary archive and its sidecars
       ansible.builtin.file:
-        path: "/tmp/{{ archive_name }}"
+        path: "{{ remote_archive_dir }}/{{ archive_name }}{{ item }}"
         state: absent
+      loop: ["", ".dom", ".info"]
 
     - name: Register backup checksum evidence
       ansible.builtin.set_fact:

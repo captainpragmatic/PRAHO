@@ -1,11 +1,12 @@
 """Regression tests for Portal authentication attempt accounting."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.messages import get_messages
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.http import HttpResponse
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from requests import Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -64,7 +65,19 @@ class AuthenticationRateLimitTests(TestCase):
             self.assertEqual(counters.peek(self.ip_key), 5)
             self.assertEqual(counters.peek(self.account_key), 5)
 
-    def test_successful_login_clears_counters(self) -> None:
+    def _sign_in_as(self, platform: MagicMock, email: str, client: Client | None = None) -> HttpResponse:
+        platform.authenticate_customer.return_value = {
+            "valid": True,
+            "user_id": 1,
+            "customer_id": 1,
+            "customer_data": {},
+        }
+        platform.post.return_value = {"success": True, "results": []}
+        platform.get_user_customers.return_value = []
+        platform.get_customer_profile.return_value = {}
+        return (client or self.client).post(reverse("users:login"), {"email": email, "password": "test-password"})
+
+    def test_successful_login_clears_only_the_account_counter(self) -> None:
         counters.increment(self.ip_key, 900, delta=3)
         counters.increment(self.account_key, 1800, delta=3)
         with patch("apps.users.views.api_client") as platform:
@@ -74,21 +87,40 @@ class AuthenticationRateLimitTests(TestCase):
             self.assertEqual(counters.peek(self.ip_key), 4)
             self.assertEqual(counters.peek(self.account_key), 4)
 
-            platform.authenticate_customer.return_value = {
-                "valid": True,
-                "user_id": 1,
-                "customer_id": 1,
-                "customer_data": {},
-            }
-            platform.post.return_value = {"success": True, "results": []}
-            platform.get_user_customers.return_value = []
-            platform.get_customer_profile.return_value = {}
-            response = self.client.post(reverse("users:login"), self.credentials)
+            response = self._sign_in_as(platform, self.email)
 
         self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
         self.assertEqual(self.client.session["user_id"], 1)
-        self.assertEqual(counters.peek(self.ip_key), 0)
         self.assertEqual(counters.peek(self.account_key), 0)
+        # The address budget bounds guesses from one client across every account, so a
+        # success on one account must not hand the budget back.
+        self.assertEqual(counters.peek(self.ip_key), 4)
+
+    def test_signing_in_to_an_own_account_does_not_refill_the_address_budget(self) -> None:
+        """A sprayer who signs into their own account between guesses stays limited."""
+        victims = [f"victim{index}@example.com" for index in range(4)]
+        with patch("apps.users.views.api_client") as platform:
+            platform.authenticate_customer.return_value = None
+            for victim in victims:
+                self.client.post(reverse("users:login"), {"email": victim, "password": "guess"})
+            self.assertEqual(counters.peek(self.ip_key), 4)
+
+            # The sprayer's own session is separate from the guessing client's.
+            response = self._sign_in_as(platform, "attacker@example.com", Client())
+            self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
+            self.assertEqual(counters.peek(self.ip_key), 4)
+
+            platform.authenticate_customer.return_value = None
+            self.client.post(reverse("users:login"), {"email": "victim4@example.com", "password": "guess"})
+            self.assertEqual(counters.peek(self.ip_key), 5)
+            blocked = self.client.post(
+                reverse("users:login"),
+                {"email": "victim5@example.com", "password": "guess"},
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(platform.authenticate_customer.call_count, 6)
 
     def test_failed_login_does_not_clear_existing_counter(self) -> None:
         counters.increment(self.ip_key, 900, delta=2)
@@ -209,17 +241,19 @@ class AuthenticationRateLimitTests(TestCase):
         session.update({"user_id": 42, "customer_id": 7, "email": self.email})
         session.save()
         key = "auth_reauth_user_42"
+        refused = PlatformAPIError("refused", status_code=400, response_data={"code": "mfa_incorrect"})
+        attempt = {"token": "123456", "password": "Original-secure123!"}
         with patch("apps.users.views.api_client") as platform:
-            platform.verify_totp_mfa.return_value = None
+            platform.verify_totp_mfa.side_effect = refused
+            platform.setup_totp_mfa.return_value = {"qr_code": "", "secret": "PENDINGSECRETABC"}
             for _ in range(5):
-                response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
-                self.assertRedirects(response, reverse("users:mfa_setup_totp"), fetch_redirect_response=False)
+                # The same page comes back, with the same secret and the error (#689).
+                response = self.client.post(reverse("users:mfa_setup_totp"), attempt)
+                self.assertContains(response, "The password or the code is incorrect.")
             self.assertEqual(counters.peek(key), 5)
             self.assertEqual(counters.peek(self.ip_key), 0)
             self.assertEqual(counters.peek(self.account_key), 0)
-            response = self.client.post(
-                reverse("users:mfa_setup_totp"), {"token": "123456"}, HTTP_HX_REQUEST="true"
-            )
+            response = self.client.post(reverse("users:mfa_setup_totp"), attempt, HTTP_HX_REQUEST="true")
             self.assertEqual(response.status_code, 429)
             self.assertEqual(counters.peek(key), 5)
             self.assertEqual(counters.peek(self.ip_key), 0)

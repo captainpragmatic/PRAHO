@@ -15,6 +15,7 @@ from django.http import HttpRequest, HttpResponseBase, JsonResponse
 from rest_framework.response import Response
 
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.portal_hmac import parse_signed_user_id
 from apps.customers.models import Customer
 from apps.users.mfa import staff_must_enrol
 from apps.users.models import CustomerMembership, User
@@ -120,15 +121,27 @@ def _validate_customer_exists(customer_id: str | int) -> tuple[Customer | None, 
         return None, _uniform_error_response()
 
 
+def _signed_user_id(request: HttpRequest, raw: object) -> int | None:
+    """The user a verified body names: in the one accepted spelling, and the person the HMAC
+    middleware counted the request against (#689). A body naming two users counts as nobody
+    there, so it authenticates as nobody here."""
+    user_id = parse_signed_user_id(raw)
+    if user_id is None:
+        return None
+    counted_as = getattr(request, "_portal_principal", None)
+    if counted_as is not None and counted_as != f"user:{user_id}":
+        return None
+    return user_id
+
+
 def _validate_user_membership(
-    body_user_id: str | int, customer: Customer, action: str, customer_id: int
+    request: HttpRequest, body_user_id: object, customer: Customer, action: str, customer_id: int
 ) -> tuple[CustomerMembership | None, Response | None]:
     """Validate user membership to customer"""
     # Resolve user identity from signed body only (no header reliance)
-    try:
-        resolved_user_id = int(body_user_id)
-    except (TypeError, ValueError):
-        logger.warning(f"🚨 [API Security] Invalid user_id format in HMAC context: {body_user_id}")
+    resolved_user_id = _signed_user_id(request, body_user_id)
+    if resolved_user_id is None:
+        logger.warning(f"🚨 [API Security] Invalid user_id format in HMAC context: {body_user_id!r}")
         return None, _uniform_error_response("Authentication required", 401)
 
     try:
@@ -204,7 +217,7 @@ def get_authenticated_customer(  # noqa: PLR0911
         if body_user_id is None:
             logger.warning("🔥 [API Security] Missing user_id in request body")
             return None, _uniform_error_response()
-        membership, membership_error = _validate_user_membership(body_user_id, customer, action, customer_id)
+        membership, membership_error = _validate_user_membership(request, body_user_id, customer, action, customer_id)
         if membership is None:
             return None, membership_error
         if roles is not None and membership.role not in roles:
@@ -246,7 +259,9 @@ def get_authenticated_user(request: HttpRequest) -> tuple[User | None, Response 
             logger.warning("🚨 [API Security] Missing user_id in request")
             return None, JsonResponse({"error": "Missing user_id"}, status=400)
 
-        user_id = int(user_id_field)
+        user_id = _signed_user_id(request, user_id_field)
+        if user_id is None:
+            raise ValueError("user_id is not in its one accepted spelling")
         user = User.objects.get(id=user_id, is_active=True)
         if staff_must_enrol(user):
             logger.warning("🚨 [API Security] Staff account %s without 2FA refused while the policy is on", user.pk)

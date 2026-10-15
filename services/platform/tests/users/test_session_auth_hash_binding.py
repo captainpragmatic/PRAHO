@@ -9,7 +9,7 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.db import connection
 from django.http import HttpResponse
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils.crypto import salted_hmac
@@ -160,7 +160,8 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(setup.status_code, 200, setup.content)
         secret = setup.json()["setup_data"]["manual_entry_key"]
         response = self.portal_post(
-            "/api/users/mfa/verify/", {"user_id": self.user.pk, "token": pyotp.TOTP(secret).now()}
+            "/api/users/mfa/verify/",
+            {"user_id": self.user.pk, "token": pyotp.TOTP(secret).now(), "password": self.password},
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.user.refresh_from_db()
@@ -257,9 +258,11 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         code = self.user.generate_backup_codes()[0]
         before = list(self.user.backup_tokens)
         old_hash = self.user.get_session_auth_hash()
-        response = self.portal_post("/api/users/mfa/verify/", {"user_id": self.user.pk, "token": code})
+        response = self.portal_post(
+            "/api/users/mfa/verify/", {"user_id": self.user.pk, "token": code, "password": self.password}
+        )
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertIn("Finish setup with the 6-digit code.", response.json()["token"])
+        self.assertIn("Enter the 6-digit code from your authenticator app.", response.json()["token"])
         self.user.refresh_from_db()
         self.assertFalse(self.user.two_factor_enabled)
         self.assertEqual(self.user.backup_tokens, before)
@@ -285,12 +288,14 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         browser.force_login(self.user)
         setup = browser.get(reverse("users:mfa_setup_totp"))
         self.assertEqual(setup.status_code, 200, setup.content)
-        secret = browser.session["2fa_secret"]
+        secret = setup.context["secret"]
         old_key = browser.session.session_key
         response = browser.post(
             reverse("users:mfa_setup_totp"), {"token": pyotp.TOTP(secret).now(), "password": self.password}
         )
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        # The recovery codes come back in this response (#689).
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
         self.user.refresh_from_db()
         self.assertEqual(self.user.two_factor_secret, secret)
         self.assertTrue(self.user.two_factor_enabled)
@@ -316,7 +321,11 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         old_key = browser.session.session_key
         response = browser.post(
             reverse("users:mfa_disable"),
-            {"password": self.password, "token": pyotp.TOTP(self.user.two_factor_secret).now()},
+            {
+                "password": self.password,
+                "token": pyotp.TOTP(self.user.two_factor_secret).now(),
+                "confirm_disable": "on",
+            },
         )
         self.assertRedirects(response, reverse("users:user_profile"), fetch_redirect_response=False)
         self.user.refresh_from_db()
@@ -362,27 +371,21 @@ class SessionAuthHashBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(self.validate_session(self.user.get_session_auth_hash()).status_code, 200)
         self.assertTrue(self.user.two_factor_enabled is False)
 
-    def test_disable_all_and_recovery_each_revoke_sessions(self) -> None:
-        for action in ("disable_all", "recover"):
+    def test_disable_and_recovery_each_revoke_sessions(self) -> None:
+        for action in ("disable", "recover"):
             with self.subTest(action=action):
                 self.user.two_factor_enabled = True
                 self.user.two_factor_secret = pyotp.random_base32()
                 self.user.save()
                 old_hash = self.user.get_session_auth_hash()
-                if action == "disable_all":
-                    credential = WebAuthnCredential.objects.create(
-                        user=self.user, credential_id="revocation-test", public_key="public-key", name="Key"
-                    )
-                    request = RequestFactory().post("/")
-                    request.user = self.user
-                    self.assertTrue(MFAService.disable_all_mfa_methods(request, self.user)["success"])
-                    self.assertFalse(WebAuthnCredential.objects.filter(pk=credential.pk).exists())
+                if action == "disable":
+                    MFAService.apply_state_change(self.user, action="disable")
                 else:
                     SessionSecurityService.secure_account_after_password_reset(self.user)
                 fresh = User.objects.get(pk=self.user.pk)
-                # A password reset keeps enrolled 2FA (#595); disabling everything does not.
+                # A password reset keeps enrolled 2FA (#595); disabling it does not.
                 self.assertEqual(fresh.two_factor_enabled, action == "recover")
-                if action == "disable_all":
+                if action == "disable":
                     self.assertEqual(fresh.two_factor_secret, "")
                     self.assertEqual(fresh.backup_tokens, [])
                 self.assertNotEqual(fresh.get_session_auth_hash(), old_hash)

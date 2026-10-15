@@ -1,0 +1,76 @@
+---
+# One step of a differential backup chain, or the cancellation of one.
+#
+# Virtualmin keeps ONE differential snapshot per domain, and a plain full backup replaces it.
+# So the archive and the snapshot fingerprint that vouches for it must come from the same
+# locked execution on the node. files/praho-chain-backup.sh does all of it under
+# `flock /run/praho/chain-<domain id>.lock`: it reads the cancel marker and the fingerprint,
+# checks a differential's expected fingerprint, runs backup-domain, reads the fingerprint again
+# and prints one result line. Snapshot writers outside PRAHO are unsupported (ADR-0059).
+#
+#   chain_action=run     chain_mode=base          no differential flag: resets the snapshot
+#                        chain_mode=differential  --differential: requires chain_expected_fp, a real
+#                                                 snapshot fingerprint (never ABSENT)
+#   chain_action=cancel  writes the cancel marker for chain_token under the lock, so a
+#                        delayed or waiting run of that token can never start afterwards
+- name: Run or cancel one differential-chain backup step
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    # Must match REMOTE_ARCHIVE_DIR in apps/provisioning/virtualmin_backup_service.py.
+    remote_archive_dir: /var/lib/praho-transfer
+    chain_lock_wait_seconds: 60
+    chain_mode: ""
+    chain_archive: ""
+    chain_expected_fp: ""
+  tasks:
+    - name: Validate chain step inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - chain_action in ['run', 'cancel']
+          - chain_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
+          - chain_domain_id is match('^[0-9]{1,30}$')
+          - chain_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - chain_lock_wait_seconds | string is match('^[0-9]{1,4}$')
+          - chain_action == 'cancel' or chain_mode in ['base', 'differential']
+          - chain_action == 'cancel' or chain_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - chain_mode != 'differential' or chain_expected_fp is match('^[0-9a-f]{64}:[0-9]+$')
+
+    - name: Ensure the private staging directory
+      ansible.builtin.file:
+        path: "{{ remote_archive_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: chain_action == 'run'
+
+    - name: Run the step under the per-domain lock
+      ansible.builtin.script:
+        cmd: files/praho-chain-backup.sh
+      environment:
+        PRAHO_CHAIN_ACTION: "{{ chain_action }}"
+        PRAHO_CHAIN_MODE: "{{ chain_mode }}"
+        PRAHO_DOMAIN: "{{ chain_domain }}"
+        PRAHO_DOMAIN_ID: "{{ chain_domain_id }}"
+        PRAHO_CHAIN_TOKEN: "{{ chain_token }}"
+        PRAHO_ARCHIVE: "{{ chain_archive }}"
+        PRAHO_EXPECTED_FP: "{{ chain_expected_fp }}"
+        PRAHO_LOCK_WAIT: "{{ chain_lock_wait_seconds }}"
+        PRAHO_STAGING_DIR: "{{ remote_archive_dir }}"
+      register: chain_step
+      changed_when: true
+
+    - name: Require exactly one result line
+      vars:
+        chain_result_lines: "{{ chain_step.stdout_lines | select('match', '^CHAIN_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - chain_result_lines | length == 1
+        fail_msg: "The chain step did not print exactly one result line"
+
+    - name: Emit the structured chain result
+      ansible.builtin.debug:
+        msg: "{{ chain_step.stdout_lines | select('match', '^CHAIN_RESULT=[A-Za-z0-9+/=]+$') | first }}"

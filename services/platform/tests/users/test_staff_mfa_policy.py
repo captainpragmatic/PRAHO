@@ -31,7 +31,7 @@ from apps.audit.models import AuditEvent
 from apps.common.middleware import StaffMFAEnrollmentMiddleware
 from apps.settings.catalog import CATALOG_BY_KEY, GROUPS_BY_SLUG, ZONE_BUSINESS
 from apps.settings.services import SettingsService
-from apps.users.mfa import TOTPService, staff_mfa_required
+from apps.users.mfa import BackupCodeService, TOTPService, staff_mfa_required
 from apps.users.models import APIToken, CustomerMembership, User
 from apps.users.services import APITokenService
 from config.settings import base as base_settings
@@ -370,7 +370,7 @@ class StaffMFADisableTests(PolicyTestBase):
         self.enrolled.refresh_from_db()
         self.assertTrue(self.enrolled.two_factor_enabled)
         # The refusal comes before the code is checked, so the backup code is not spent.
-        self.assertTrue(self.enrolled.verify_backup_code(self.backup_codes[0]))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(self.enrolled, self.backup_codes[0]))
 
     def test_the_profile_offers_no_disable_link_while_the_policy_is_on(self) -> None:
         disable_url = reverse("users:mfa_disable")

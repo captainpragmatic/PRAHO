@@ -30,7 +30,6 @@ from apps.common.encryption import (  # Core encryption needed for user model
     encrypt_sensitive_data,
     generate_backup_codes,
     hash_backup_code,
-    verify_backup_code,
 )
 from apps.customers.models import Customer  # Cross-app relationship
 
@@ -405,17 +404,6 @@ class User(AbstractUser):
 
         # Return plain text codes for user to save (only time they see them)
         return codes
-
-    def verify_backup_code(self, code: str) -> bool:
-        """Verify and consume a backup code"""
-        for i, hashed_code in enumerate(self.backup_tokens):
-            if verify_backup_code(code, hashed_code):
-                # Remove used backup code
-                self.backup_tokens.pop(i)
-                self.save(update_fields=["backup_tokens"])
-                return True
-
-        return False
 
     def has_backup_codes(self) -> bool:
         """Check if user has unused backup codes"""

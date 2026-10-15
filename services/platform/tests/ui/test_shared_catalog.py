@@ -44,7 +44,7 @@ class SharedCatalogTests(SimpleTestCase):
     def test_catalog_covers_every_shared_template_msgid(self) -> None:
         messages = _shared_msgids()
         self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 26)
-        # badge "Close" shares the modal msgid. PRAHO ships no legal prose (ADR-0058).
+        # badge "Close" shares the modal msgid. PRAHO ships no legal prose (ADR-0061).
         self.assertEqual(len(messages), 34)
         self.assertTrue(SHARED_PO.is_file(), "Shared Romanian catalog is missing")
         self.assertIn((None, _BLOCK_MESSAGE), messages)

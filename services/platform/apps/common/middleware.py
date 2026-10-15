@@ -35,6 +35,7 @@ from apps.common.constants import (
 )
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.store_unavailable import STORE_UNAVAILABLE_RETRY_AFTER_SECONDS, store_unavailable_response
 
 # Security constants
 HMAC_NONCE_MIN_LENGTH = 32
@@ -212,7 +213,7 @@ class AuditMiddleware:
         }
 
         # Don't log sensitive data
-        if request.path.startswith("/admin/") or "password" in request.path.lower():
+        if "password" in request.path.lower():
             audit_data["sensitive"] = True
         else:
             audit_data["query_params"] = dict(request.GET)
@@ -396,21 +397,6 @@ class HMACStoreUnavailable(Exception):  # noqa: N818  # names the condition, lik
     Answered 503, never 401 or 429: the portal reads a 401 as "the secret or the clock is wrong"
     and a 429 as "this customer is throttled", and neither is what happened.
     """
-
-
-# Within the portal's immediate-retry cap (PLATFORM_API_MAX_RETRY_WAIT_SECONDS, 2.5 s), so a brief
-# store outage is absorbed by one retry instead of failing the page.
-HMAC_STORE_RETRY_AFTER_SECONDS = 2
-
-
-def _store_unavailable_response() -> HttpResponse:
-    response = HttpResponse(
-        json.dumps({"success": False, "error": "Platform temporarily unavailable", "status": 503}),
-        status=503,
-        content_type="application/json",
-    )
-    response["Retry-After"] = str(HMAC_STORE_RETRY_AFTER_SECONDS)
-    return response
 
 
 class PortalServiceHMACMiddleware:
@@ -678,7 +664,7 @@ class PortalServiceHMACMiddleware:
         try:
             is_limited, retry_after = self._rate_limited(portal_id, client_ip, path=request.path, principal=principal)
         except HMACStoreUnavailable:
-            return _store_unavailable_response()
+            return store_unavailable_response()
         if not is_limited:
             return None
         logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id} ip={client_ip}")
@@ -720,7 +706,7 @@ class PortalServiceHMACMiddleware:
                 is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
             except HMACStoreUnavailable:
                 logger.error("🔥 [HMAC Auth] Nonce store unavailable — answering 503 to %s", client_ip, exc_info=True)
-                return _store_unavailable_response()
+                return store_unavailable_response()
 
             if not is_valid:
                 # Allow session-authenticated staff users to access specific API paths
@@ -928,7 +914,6 @@ class StaffOnlyPlatformMiddleware:
         public_paths = {
             "/auth/login/",
             "/auth/logout/",
-            "/admin/",  # Django admin has its own authentication
             "/api/",  # API has its own authentication via portal service
             "/i18n/",  # Language switching
         }
@@ -952,6 +937,45 @@ class StaffOnlyPlatformMiddleware:
                 request, _("❌ Customers cannot access the platform. Please use the customer portal instead.")
             )
             return redirect("users:login")
+
+
+class StoreUnavailableMiddleware:
+    """A 503, never a wrong-code answer, when the counter store behind second factors is unreachable.
+
+    Used codes and the attempt budget live in the counter store (#689). When it fails nothing was
+    decided, so the person is charged nothing and told to try again. One middleware answers for
+    every view that checks a second factor, Platform pages and the Portal's API alike.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        return self.get_response(request)
+
+    def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
+        from apps.users.mfa import MFAStoreUnavailable  # noqa: PLC0415  # Circular: users imports common
+
+        if not isinstance(exception, MFAStoreUnavailable):
+            return None
+        logger.error("🔥 [MFA] Counter store unavailable during a second-factor check on %s", request.path)
+        if request.path.startswith("/api/"):
+            return store_unavailable_response()
+        # Inline, like MaintenanceModeMiddleware: rendering base.html while the database is
+        # degraded could turn this 503 into a 500.
+        response = HttpResponse(
+            '<!doctype html><html><head><title>503</title></head><body style="font-family:system-ui;'
+            "background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
+            'height:100vh;margin:0"><div style="text-align:center"><h1>'
+            + str(_("Temporarily unavailable"))
+            + "</h1><p>"
+            + str(_("Your code could not be checked just now. Nothing was counted against you. Please try again."))
+            + "</p></div></body></html>",
+            status=503,
+            content_type="text/html",
+        )
+        response["Retry-After"] = str(STORE_UNAVAILABLE_RETRY_AFTER_SECONDS)
+        return response
 
 
 class MaintenanceModeMiddleware:

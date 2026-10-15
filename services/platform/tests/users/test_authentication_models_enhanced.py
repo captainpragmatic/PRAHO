@@ -19,7 +19,7 @@ from django.utils import timezone
 from apps.common.request_ip import get_safe_client_ip
 
 from apps.customers.models import Customer
-from apps.users.mfa import WebAuthnCredential
+from apps.users.mfa import BackupCodeService, WebAuthnCredential
 from apps.users.models import CustomerMembership, UserLoginLog, UserProfile
 
 UserModel = get_user_model()
@@ -370,7 +370,7 @@ class EnhancedUserModelTest(TestCase):
         """Test backup codes edge cases"""
         # Test with no codes
         self.assertFalse(self.user.has_backup_codes())
-        self.assertFalse(self.user.verify_backup_code('invalid'))
+        self.assertFalse(BackupCodeService.verify_and_consume_code(self.user, 'invalid'))
 
         # Generate codes
         codes = self.user.generate_backup_codes()
@@ -378,21 +378,21 @@ class EnhancedUserModelTest(TestCase):
         self.assertTrue(self.user.has_backup_codes())
 
         # Test verifying invalid code
-        self.assertFalse(self.user.verify_backup_code('invalid_code'))
+        self.assertFalse(BackupCodeService.verify_and_consume_code(self.user, 'invalid_code'))
 
         # Test verifying valid code
         first_code = codes[0]
-        self.assertTrue(self.user.verify_backup_code(first_code))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(self.user, first_code))
 
         # Same code should not work again
-        self.assertFalse(self.user.verify_backup_code(first_code))
+        self.assertFalse(BackupCodeService.verify_and_consume_code(self.user, first_code))
 
         # Should have one less code now
         self.assertEqual(len(self.user.backup_tokens), 7)
 
         # Verify all remaining codes work
         for code in codes[1:]:
-            self.assertTrue(self.user.verify_backup_code(code))
+            self.assertTrue(BackupCodeService.verify_and_consume_code(self.user, code))
 
         # Should have no codes left
         self.assertFalse(self.user.has_backup_codes())

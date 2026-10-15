@@ -9,6 +9,11 @@
 > from August 2025. The project has since migrated to a **two-service architecture**
 > (Platform `:8700` + Portal `:8701`) running **Django 5.2** on **Python 3.13**.
 > See `CLAUDE.md` for the current architecture. Retained as historical context.
+>
+> The directory tree below is illustrative of the original intent and is no longer exact. Several
+> layouts have since changed. Billing gateways live in a `billing/gateways/` package, Stripe webhook
+> handling is in `integrations/webhooks/stripe.py`, and the Virtualmin client is
+> `provisioning/virtualmin_gateway.py`. Read the repository itself for the current layout.
 
 ## Context
 

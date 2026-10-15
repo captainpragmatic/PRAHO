@@ -1,5 +1,4 @@
 {% load i18n %}
-{% load l10n %}
 {% load ui_components %}
 
 <form method="POST"
@@ -29,7 +28,8 @@
         <div class="ml-3">
           <h4 class="text-sm font-medium text-blue-200">{% trans 'VAT' %}</h4>
           <div class="mt-1 text-sm text-blue-300">
-            <p>{% trans "VAT follows the customer's country and VAT status. Prices are stored in cents for precision." %}</p>
+            <p>{% blocktrans with percent=vat_preview.percent %}This order's items are charged VAT at {{ percent }}%, from the customer's tax details. Prices are stored in cents for precision.{% endblocktrans %}</p>
+            {% if vat_preview.reason %}<p>{{ vat_preview.reason }}</p>{% endif %}
           </div>
         </div>
       </div>
@@ -110,13 +110,13 @@
         <div class="ml-3">
           <h4 class="text-sm font-medium text-green-200">{% trans 'Tax Calculation Preview' %}</h4>
           <div class="mt-2 text-sm text-green-300">
-            <div class="space-y-1" id="tax-preview" data-vat-rate="{{ vat_rate|unlocalize }}">
+            <div class="space-y-1" id="tax-preview">
               <div class="flex justify-between">
                 <span>{% trans "Subtotal:" %}</span>
                 <span id="preview-subtotal">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span>{% trans "VAT:" %}</span>
+                <span>{% blocktrans with percent=vat_preview.percent %}VAT ({{ percent }}%):{% endblocktrans %}</span>
                 <span id="preview-vat">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between font-semibold border-t border-green-700 pt-1">
@@ -149,8 +149,10 @@
   </div>
 </form>
 
+{{ vat_preview.rate|json_script:"order-item-vat-rate" }}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
+    const vatRate = parseFloat(JSON.parse(document.getElementById('order-item-vat-rate').textContent)) || 0;
     // Update price displays when values change
     function updatePriceDisplays() {
         const unitPriceCents = parseInt(document.getElementById('id_unit_price_cents').value || '0');
@@ -172,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // As OrderItem computes it: the setup fee is charged once, not per unit.
         const lineTotal = unitPriceCents * quantity + setupCents;
         const subtotal = lineTotal / 100;
-        const vatAmount = subtotal * (parseFloat(document.getElementById('tax-preview').dataset.vatRate) || 0);
+        const vatAmount = subtotal * vatRate; // the order's own rate, a fraction
         const total = subtotal + vatAmount;
 
         document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;

@@ -23,8 +23,7 @@ from apps.api.secure_auth import (
 )
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.recurring_locking import lock_recurring_collection_customer
-from apps.common.operator import operator_country
-from apps.common.tax_service import TaxService
+from apps.billing.services import preview_customer_vat_rate
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan
 
@@ -81,9 +80,7 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
         request_data = request.data if hasattr(request, "data") else {}
 
         # Build base queryset for the authenticated customer
-        queryset = Service.objects.filter(customer=customer).select_related(
-            "customer", "service_plan", "server", "currency"
-        )
+        queryset = Service.objects.filter(customer=customer).select_related("customer", "service_plan", "currency")
 
         # Apply filters from request body
         status_filter = request_data.get("status")
@@ -104,9 +101,6 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
                 | Q(service_plan__plan_type__icontains=search_query)
                 | Q(status__icontains=search_query)
                 | Q(price__icontains=search_query)
-                | Q(server__hostname__icontains=search_query)
-                | Q(server__name__icontains=search_query)
-                | Q(server__primary_ip__icontains=search_query)
                 | Q(billing_cycle__icontains=search_query)
             )
 
@@ -188,7 +182,7 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -288,8 +282,8 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         costs: dict[str, Decimal] = {}
         for service in active_services:
             costs[service.currency_id] = costs.get(service.currency_id, Decimal("0")) + service_monthly_price(service)
-        # Calculate cost with the operator's current domestic VAT rate
-        vat_multiplier = Decimal("1") + TaxService.get_vat_rate(operator_country(), as_decimal=True)
+        # With the customer's own VAT: reverse charge, non-EU and custom rates included (#689)
+        vat_multiplier = Decimal("1") + preview_customer_vat_rate(customer)
         monthly_costs = [
             {
                 "currency_code": code,
@@ -428,7 +422,7 @@ def update_service_auto_renew_api(request: HttpRequest, customer: Customer, serv
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -510,7 +504,7 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "server", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:

@@ -1,4 +1,4 @@
-"""The portal shows the legal documents the operator published on Platform (ADR-0058).
+"""The portal shows the legal documents the operator published on Platform (ADR-0061).
 
 PRAHO ships no legal text: /terms/, /privacy-policy/ and /cookie-policy/ show the release in force in
 the visitor's language, and /legal/<id>/ shows the release an acceptance names. The HTML is

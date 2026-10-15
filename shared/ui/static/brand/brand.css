@@ -1,6 +1,6 @@
 /*
  * Deployment brand stylesheet. PRAHO ships this file empty; a deployment's brand folder
- * (BRAND_DIR, see docs/ADRs/ADR-0058) may replace it, for example to recolour the UI by
+ * (BRAND_DIR, see docs/ADRs/ADR-0061) may replace it, for example to recolour the UI by
  * overriding the Tailwind v4 theme variables: --color-primary-50 ... --color-primary-950 for the
  * portal's accent and --color-slate-50 ... --color-slate-950 for its neutrals.
  * Loaded after the main stylesheet on every page of both services.

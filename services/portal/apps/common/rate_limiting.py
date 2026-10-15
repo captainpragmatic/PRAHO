@@ -387,22 +387,17 @@ class AuthenticationRateLimitMiddleware:
             raise
 
     def _clear_rate_limits(self, request: HttpRequest) -> None:
-        """🔒 Clear rate limits on successful authentication"""
+        """🔒 Give the account its attempts back after it authenticates.
+
+        Only the per-account budget is cleared. The per-address budget bounds the guesses one client
+        makes across every account, so a success (possibly on the client's own account) must not
+        hand it back: otherwise a password sprayer resets it between guesses.
+        """
         try:
-            client_ip = self._get_client_ip(request)
             email = self._extract_email_from_request(request)
-
-            # Clear the IP budget only when clients can be distinguished.
-            if _client_ip_is_distinguishable():
-                counters.reset(f"auth_ip_attempts_{client_ip}")
-
-            # Clear account-based rate limit
             if email:
                 counters.reset(f"auth_account_attempts_{email}")
-                logger.info(f"✅ [RateLimit] Rate limits cleared for IP {client_ip}, Account {email}")
-            else:
-                logger.info(f"✅ [RateLimit] Rate limits cleared for IP {client_ip}")
-
+                logger.info("✅ [RateLimit] Account rate limit cleared for %s", email)
         except Exception as e:
             logger.error(f"🔥 [RateLimit] Failed to clear rate limits: {e}")
 

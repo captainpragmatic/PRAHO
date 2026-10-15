@@ -1,6 +1,6 @@
 # Legal documents
 
-PRAHO ships no legal text. Each deployment publishes its own Terms of Service, Privacy Policy and Cookie Policy, and the customer portal shows them (ADR-0058). Until Terms of Service are in force, nobody can register.
+PRAHO ships no legal text. Each deployment publishes its own Terms of Service, Privacy Policy and Cookie Policy, and the customer portal shows them (ADR-0061). Until Terms of Service are in force, nobody can register.
 
 ## Publishing
 

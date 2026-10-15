@@ -27,7 +27,6 @@
 - [Enhanced Table Component Guide](development/CLICKABLE_DATA_TABLE_GUIDE.md) -- Reusable clickable data table pattern
 - [Component Migration Summary](development/COMPONENT_MIGRATION_SUMMARY.md) -- Component refactoring history
 - [Django User Fields Guide](development/django-user-fields-guide.md) -- Custom user model field reference
-- [N+1 Query Optimization Summary](development/N1_QUERY_OPTIMIZATION_SUMMARY.md) -- select_related/prefetch_related patterns
 - [IDE Auto-Formatting Prevention](development/IDE_AUTO_FORMATTING_PREVENTION.md) -- Preventing IDE conflicts with Ruff
 - [Trace-Based Dynamic Analysis](development/TRACE_BASED_ANALYSIS.md) -- Runtime tracing for debugging
 - [Template and CSP Security](development/TEMPLATE-AND-CSP-SECURITY.md) -- XSS prevention, CSP compliance, HTMX security patterns

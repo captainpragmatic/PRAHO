@@ -9,6 +9,9 @@ auto-deploy is customer-ready.
 ## Prerequisites
 - A Hetzner Cloud API token (project-scoped) configured in PRAHO (provider token / vault).
 - PRAHO platform running with node-deployment settings configured.
+- `infrastructure.node_admin_allowed_cidrs` set to Platform's egress addresses plus your admin network
+  (ADR-0060). `virtualmin.yml` and `virtualmin_harden.yml` refuse to run while it is empty, and the harden
+  play refuses when its own SSH connection comes from outside it.
 - Configure the Cloudflare API token, zone ID and deployment DNS zone. The deployment pipeline now creates and owns its public A/AAAA records. Run `panel_cert_preflight --provider-id <id>` before the paid drill.
 - Follow the canonical [panel-certificate drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436-drill-gated) for #436. This credential-seam checklist does not prove certificate issuance or authorize enabling fatal issuance. The current installer can make a production ACME request; prepare and verify the isolated staging path first.
 
@@ -18,20 +21,21 @@ Given a Hetzner key, `deploy_node` produces an **active, credentialed** `Virtual
 ## Steps
 1. Trigger a deployment (`queue_deploy_node` / staff UI / management command). Record the deployment id.
 2. Watch the FSM (per-stage `NodeDeploymentLog`): pending → provisioning_node → configuring_dns → installing_panel → configuring_backups → validating → registering → completed.
-3. **CRITICAL — validate the `create-admin` flags (the biggest unknown).** SSH to the node:
-   - `virtualmin list-admins` → confirm the `praho-api` admin exists.
-   - **Let PRAHO's own diagnostic prove auth — do NOT hand-auth with `curl -k`.** `-k` disables the
-     certificate validation the platform enforces (pinned-cert TLS), so a `curl -k` success would
-     "prove" a path PRAHO never uses. Step 4 below (`status=active`) IS the real auth proof:
-     `verify_and_activate` authenticates over the pinned-cert TLS with the vault credential — the exact
-     production path. If you must probe the API by hand, do it securely: read the password from the
-     vault into a shell variable (never type it on the command line / into shell history), validate the
-     node cert (`--cacert` / pinned fingerprint, not `-k`), and pass credentials via a `--netrc`/config
-     file rather than `-u user:pass` on argv.
-   - If auth fails, the capability flags in `virtualmin.yml`'s create-admin task are likely wrong. Do
-     NOT flip `no_log: false` — that logs the plaintext password. Diagnose safely: run
-     `virtualmin create-admin --help` on the node for the exact flag names, and/or re-create a THROWAWAY
-     admin manually with a DUMMY password to read the real CLI error — never with the real credential.
+3. **Validate the API user.** `virtualmin.yml` creates it with `/usr/local/sbin/praho-webmin-api-user`
+   (`playbooks/files/praho-webmin-api-user.pl`): a Webmin user whose only module is virtual-server, with
+   Virtualmin master rights, because remote.cgi runs most programs only for the master administrator.
+   (`virtualmin create-admin` makes per-domain extra administrators and cannot serve PRAHO.) SSH to the node:
+   - `grep '^praho-api:' /etc/webmin/webmin.acl` → `praho-api: virtual-server`.
+   - `grep '^praho-api:' /etc/webmin/miniserv.users | cut -d: -f5` → `allow <your allowlist>` (the per-user
+     IP lock, ADR-0060).
+   - `ufw status` → 22/tcp and 10000/tcp `ALLOW IN` only from the allowlist entries; 80, 443, mail, FTP, DNS
+     and 20000 from Anywhere.
+   - From a host outside the allowlist, port 10000 must not answer.
+   - Let PRAHO's own diagnostic prove auth — do NOT hand-auth with `curl -k`. Step 4 below
+     (`status=active`) is the real auth proof: `verify_and_activate` authenticates over the pinned-cert TLS
+     with the vault credential, the exact production path.
+   - The lab already proves the helper on Virtualmin 8.3.0: `make test-virtualmin-lab` (check 5) and a
+     from-scratch run on `praho-debian-node` (deploy/virtualmin-lab/README.md).
 4. **Confirm PRAHO activated the node.** The `VirtualminServer` row should be `status=active`
    (i.e. `verify_and_activate` succeeded). If still `disabled`, the deployment log carries the
    "Node registered but left disabled: …" reason — that reason IS the handshake failure from step 3.
@@ -45,14 +49,11 @@ Given a Hetzner key, `deploy_node` produces an **active, credentialed** `Virtual
 6. Record RTO (deploy start → active) and note any manual step you had to take — the goal is **zero**.
 
 ## Debugging aids
-- Hidden create-admin error → do NOT flip `no_log: false` (it logs the plaintext password). Read the
-  flag names with `virtualmin create-admin --help`, or reproduce with a throwaway admin + dummy password.
+- Hidden API-user error → do NOT flip `no_log: false` (it logs the plaintext password). Re-run the helper
+  on the node with a dummy login and password on stdin to read its error.
 - Credential transport: the API password reaches the ansible CONTROLLER via a `0600` temp vars file
-  (`-e @file`, never the `ansible-playbook` argv), cleaned up after the run. **Residual risk:** on the
-  TARGET node the password is briefly visible in the process list during the `create-admin` command
-  itself (`--pass` on argv) — inherent to the Virtualmin CLI; `no_log` only hides the CONTROLLER's
-  output. Mitigated by the node being freshly-provisioned + PRAHO-controlled and the command being
-  short-lived; a stdin/password-file facility on the node is a hardening follow-up to investigate.
+  (`-e @file`, never the `ansible-playbook` argv), cleaned up after the run. On the TARGET node the helper
+  reads it from stdin, so it never appears in the node's process list either.
 - `verify_and_activate` calls `gateway.test_connection()`; check its `{"healthy": …}` response.
 
 ## Definition of done for #347

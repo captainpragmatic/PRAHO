@@ -24,7 +24,7 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django_fsm import FSMField, transition
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 if TYPE_CHECKING:
     pass
@@ -68,7 +68,7 @@ def get_subscription_grace_period_days() -> int:
 # ===============================================================================
 
 
-class Subscription(models.Model):
+class Subscription(ConcurrentTransitionMixin, models.Model):
     """
     Core subscription model for recurring billing.
 

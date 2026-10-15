@@ -19,9 +19,9 @@ from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 from requests import Response
 
-from apps.billing.models import Currency, FXRate
+from apps.billing.models import Currency
 from apps.customers.models import Customer
-from apps.provisioning.models import Service, ServicePlan, ServicePlanPrice
+from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from apps.provisioning.virtualmin_migration_models import NodeDrain
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -186,43 +186,19 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
         self.assertContains(response, "Remote failure &lt;script&gt;alert(1)&lt;/script&gt;")
         self.assertNotContains(response, "<script>alert(1)</script>")
 
-    def test_sync_creates_linked_service_using_current_selling_currency(self) -> None:
-        SystemSetting.objects.filter(key="billing.default_currency").delete()
-        for code in ("RON", "EUR"):
-            with self.subTest(currency=code):
-                cache.clear()
-                Currency.objects.get_or_create(code=code, defaults={"symbol": code, "decimals": 2})
-                ServicePlanPrice.objects.get_or_create(
-                    service_plan=self.plan, currency_id=code, defaults={"monthly_price_cents": 1000}
-                )
-                if code == "EUR":
-                    FXRate.objects.create(
-                        base_code_id="EUR",
-                        quote_code_id="RON",
-                        rate=Decimal("4.97"),
-                        as_of=timezone.localdate(),
-                        source=FXRate.Source.BNR,
-                        source_reference="virtualmin-qa",
-                        fetched_at=timezone.now(),
-                    )
-                    self.setting("billing.default_currency", code)
-                domain = f"imported-{code.lower()}.example.com"
-                username = f"imported{code.lower()}"
-                self.payloads["list-domains"] = list_domains.single_domain(domain=domain, username=username)
-                self.payloads["list-bandwidth"] = list_bandwidth.success(domain=domain)
-                with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
-                    response = self.client.post(
-                        reverse("provisioning:virtualmin_accounts_sync"), HTTP_HX_REQUEST="true"
-                    )
-                self.assertTrue(VirtualminAccount.objects.filter(domain=domain).exists())
-                account = VirtualminAccount.objects.select_related("service").get(domain=domain)
-                self.assertEqual(account.server_id, self.server.pk)
-                self.assertEqual(account.service.customer_id, self.customer.pk)
-                self.assertEqual(account.service.service_plan_id, self.plan.pk)
-                self.assertEqual(account.service.currency_id, code)
-                self.assertEqual(account.service.username, username)
-                self.assertEqual(account.service.domain, domain)
-                self.assertContains(response, domain)
+    def test_sync_does_not_import_an_unknown_domain_as_a_service(self) -> None:
+        # ADR-0061 P0.5: an unknown domain used to become an active service of Customer.objects.first().
+        domain = "imported-ron.example.com"
+        username = "importedron"
+        self.payloads["list-domains"] = list_domains.single_domain(domain=domain, username=username)
+        self.payloads["list-bandwidth"] = list_bandwidth.success(domain=domain)
+        services_before = Service.objects.count()
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
+            response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"), HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Service.objects.count(), services_before)
+        self.assertFalse(VirtualminAccount.objects.filter(domain=domain).exists())
+        self.assertFalse(Service.objects.filter(username=username).exists())
 
     def test_bulk_health_check_rejects_negative_current_disk_usage(self) -> None:
         # The DB rejects negative usage. Hydrate a legacy in-memory value without relaxing its constraint.
@@ -258,7 +234,7 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
                 job = VirtualminProvisioningJob.objects.create(
                     server=self.server,
                     account=self.account,
-                    operation="backup_domain",
+                    operation="suspend_domain",
                     status="failed",
                     max_retries=limit,
                     retry_count=attempts,
@@ -336,3 +312,34 @@ class VirtualminQAViewsTests(VirtualminQATestBase):
                     )
                     # End the first fixture so the per-server active-drain constraint admits the next one.
                     NodeDrain.objects.filter(pk=drain.pk).update(status="cancelled")
+
+    def test_backup_jobs_are_not_offered_a_retry_the_sweep_never_runs(self) -> None:
+        """#689: the failed-job sweep does not retry backups, so the page must not offer it."""
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server, account=self.account, operation="backup_domain", status="failed", max_retries=3
+        )
+        response = self.client.get(reverse("provisioning:virtualmin_job_status", args=[job.pk]))
+        self.assertFalse(response.context["can_retry"])
+        self.assertNotContains(response, "Retry Job")
+        refused = self.client.post(reverse("provisioning:virtualmin_job_retry", args=[job.pk]))
+        self.assertEqual(refused.status_code, 302)
+        job.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)
+
+    def test_retrying_marks_the_job_due_and_runs_the_sweep_once_committed(self) -> None:
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server,
+            account=self.account,
+            operation="suspend_domain",
+            status="failed",
+            max_retries=3,
+            next_retry_at=timezone.now() + timedelta(hours=1),
+        )
+        with patch("apps.provisioning.virtualmin_views.async_task") as queue, self.captureOnCommitCallbacks(
+            execute=True
+        ):
+            response = self.client.post(reverse("provisioning:virtualmin_job_retry", args=[job.pk]))
+        self.assertEqual(response.status_code, 302)
+        job.refresh_from_db()
+        self.assertLessEqual(job.next_retry_at, timezone.now())
+        queue.assert_called_once_with("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs")

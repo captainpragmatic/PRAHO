@@ -16,6 +16,9 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Up 3 levels to services/platform/
 REPO_ROOT = BASE_DIR.parent.parent  # Up to project root (PRAHO/)
 
+# Django test commands isolate media even when selecting development settings.
+TEST_RUNNER = "tests.runner.MediaIsolatedRunner"
+
 # Application definition
 DJANGO_APPS: list[str] = [
     "django.contrib.admin",
@@ -76,6 +79,7 @@ MIDDLEWARE: list[str] = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
     "apps.common.middleware.StaffMFAEnrollmentMiddleware",  # Staff without 2FA can only enrol while the policy is on (before the HMAC staff bypass)
     "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
+    "apps.common.middleware.StoreUnavailableMiddleware",  # 503 when the second-factor counter store fails
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -217,7 +221,7 @@ STATICFILES_DIRS: list[Path | tuple[str, Path]] = [
     REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components and the default brand pack
 ]
 # A deployment's brand folder (logo.svg, favicon.svg, brand.css) is served as static/brand/ ahead of
-# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0058).
+# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0061).
 if BRAND_DIR := os.environ.get("BRAND_DIR", "").strip():
     STATICFILES_DIRS.insert(0, ("brand", Path(BRAND_DIR)))
 
@@ -744,6 +748,8 @@ DEFAULT_THROTTLE_RATES = {
     "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
     "public_lookup_ip": "10/minute",
+    # Per person: password and second-factor checks through the Portal (MFACredentialThrottle).
+    "mfa_credential": "15/hour",
     "sustained": "2000/hour",
     "api_burst": "120/min",
     # No throttle class uses this scope: it is validated at startup (apps.common.apps) so DRF's

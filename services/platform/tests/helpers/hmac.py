@@ -50,6 +50,7 @@ HMAC_TEST_MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.common.middleware.PortalServiceHMACMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.StoreUnavailableMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

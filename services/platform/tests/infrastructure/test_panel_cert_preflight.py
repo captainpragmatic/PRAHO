@@ -115,7 +115,7 @@ class PreflightTests(SimpleTestCase):
         self.assertEqual([call[0] for call in self.cloud.method_calls], ["get_locations"])
         self.assertEqual([call[0] for call in self.dns.method_calls], ["get_zone_name"])
         self.cloud_factory.assert_called_once_with("hetzner", CLOUD_SECRET, timeout=10, max_retries=0)
-        self.dns_factory.assert_called_once_with("cloudflare", DNS_SECRET, timeout=10)
+        self.dns_factory.assert_called_once_with("cloudflare", DNS_SECRET, timeout=10, max_retries=0)
         self.assertIn("NOT proven", report.to_dict()["scope"])
 
     def test_vault_precedes_environment_and_failed_lookup_does_not_fall_back(self):

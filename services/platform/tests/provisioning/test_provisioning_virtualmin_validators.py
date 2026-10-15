@@ -240,6 +240,7 @@ class VirtualminValidatorTest(TestCase):
         """Test template name validation"""
         # Valid templates
         valid_templates = [
+            "Default Settings",
             "Default",
             "PHP-Template",
             "Custom_Template",
@@ -251,14 +252,15 @@ class VirtualminValidatorTest(TestCase):
                 result = VirtualminValidator.validate_template_name(template)
                 self.assertEqual(result, template)
 
-        # Test empty template returns Default
+        # Empty: Virtualmin 8.x's built-in template, "Default Settings"
         result = VirtualminValidator.validate_template_name("")
-        self.assertEqual(result, "Default")
+        self.assertEqual(result, "Default Settings")
 
         # Invalid templates
         invalid_templates = [
             "a" * 51,  # Too long
-            "Invalid Template",  # Space not allowed
+            "Invalid  Template",  # Only single spaces between words
+            " Template",  # No leading space
             "Invalid.Template",  # Dot not allowed
             "Invalid@Template"  # Special chars not allowed
         ]

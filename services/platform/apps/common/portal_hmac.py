@@ -141,6 +141,20 @@ def _refuse_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return dict(pairs)
 
 
+def parse_signed_user_id(value: object) -> int | None:
+    """A user id in its one accepted spelling: a positive int, or a string of ASCII digits.
+
+    Authentication and the per-person throttles both read the id through this, so a spelling
+    one accepted and the other did not (``"+7"``, ``" 7"``, ``7.0``, ``true``) can never pick a
+    user while being counted as nobody.
+    """
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= MAX_USER_ID_DIGITS:
+        value = int(value)
+    if isinstance(value, int) and not isinstance(value, bool) and 0 < value < 10**MAX_USER_ID_DIGITS:
+        return value
+    return None
+
+
 def portal_principal(body: bytes) -> str:
     """Who a verified portal request is for: ``user:<id>``, else ``ip:<addr>``, else ``anonymous``.
 
@@ -154,10 +168,8 @@ def portal_principal(body: bytes) -> str:
         return ANONYMOUS_PRINCIPAL
     if not isinstance(data, dict):
         return ANONYMOUS_PRINCIPAL
-    user_id = data.get("user_id")
-    if isinstance(user_id, str) and user_id.isascii() and user_id.isdigit() and len(user_id) <= MAX_USER_ID_DIGITS:
-        user_id = int(user_id)
-    if isinstance(user_id, int) and not isinstance(user_id, bool) and 0 < user_id < 10**MAX_USER_ID_DIGITS:
+    user_id = parse_signed_user_id(data.get("user_id"))
+    if user_id is not None:
         return f"user:{user_id}"
     client_ip = data.get("client_ip")
     return _ip_principal(client_ip) if isinstance(client_ip, str) else ANONYMOUS_PRINCIPAL

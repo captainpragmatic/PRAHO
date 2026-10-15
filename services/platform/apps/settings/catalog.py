@@ -361,6 +361,19 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("S3 bucket name"),
     ),
     SettingDef(
+        key="backup.s3_endpoint_url",
+        data_type="string",
+        default="",
+        group="backup",
+        section=_("S3 storage"),
+        label=_("S3 endpoint URL"),
+        help_text=_(
+            "Leave empty for Amazon S3. For S3-compatible storage such as MinIO, enter its URL, "
+            "e.g. https://s3.example.com:9000. Buckets are then addressed path-style."
+        ),
+        advanced=True,
+    ),
+    SettingDef(
         key="billing.default_currency",
         data_type="string",
         default=default_selling_currency(),  # Fixed per deployment: COMPANY_COUNTRY_CODE does not change at runtime
@@ -1584,6 +1597,23 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="infrastructure.node_admin_allowed_cidrs",
+        data_type="list",
+        default=[],
+        group="advanced",
+        section=_("Infrastructure"),
+        label=_("Node admin allowlist"),
+        help_text=_(
+            "Addresses or networks (CIDR) that may reach a node's SSH and Webmin: Platform's egress "
+            "addresses plus the operators' admin networks. The node playbooks lock the Virtualmin API "
+            "user and the firewall for ports 22 and 10000 to this list, and refuse to run while it is "
+            "empty (ADR-0060)."
+        ),
+        input_kind="chips",
+        advanced=True,
+        validation={"min_items": 0, "item_type": "string", "item_format": "ip_network", "unique_items": True},
+    ),
+    SettingDef(
         key="infrastructure.drain_enabled",
         data_type="boolean",
         default=False,
@@ -2343,6 +2373,67 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="provisioning.incremental_backups_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Enable differential backups"),
+        help_text=_(
+            "Allow base and differential Virtualmin backups. Turning it off stops new base and "
+            "differential backups; restores, standalone backups and existing backups are unaffected."
+        ),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
+        key="provisioning.chain_alert_after_failures",
+        data_type="integer",
+        default=3,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Chain backup alert threshold"),
+        help_text=_(
+            "How many scheduled base or differential backups of one account must fail in a row, leaving its "
+            "chain intact, before staff are alerted."
+        ),
+        unit="failures",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.chain_base_interval_days",
+        data_type="integer",
+        default=7,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Base backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a new base backup of each account, when differential backups are enabled."
+        ),
+        unit="days",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.chain_differential_interval_hours",
+        data_type="integer",
+        default=24,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Differential backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a differential backup of each account with a live base, "
+            "when differential backups are enabled."
+        ),
+        unit="hours",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="provisioning.migration_backup_timeout_seconds",
         data_type="integer",
         default=1800,
@@ -2751,6 +2842,21 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="minutes",
         input_kind="number",
         validation={"min": 0},
+    ),
+    SettingDef(
+        key="users.totp_enrolment_ttl_minutes",
+        data_type="integer",
+        default=15,
+        group="security",
+        section=_("Two-factor authentication"),
+        label=_("Authenticator setup lifetime"),
+        help_text=_(
+            "How long a setup code stays valid after it was last shown. Showing it again extends it, so "
+            "someone who scanned it is not handed a different one while they are still typing."
+        ),
+        unit="minutes",
+        input_kind="number",
+        validation={"min": 1},
     ),
     SettingDef(
         key="users.security_lockout_failure_threshold",

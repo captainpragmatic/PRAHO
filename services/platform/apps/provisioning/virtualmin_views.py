@@ -9,7 +9,6 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any, TypedDict, cast
 from urllib.parse import urlencode
 from uuid import UUID
@@ -26,6 +25,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
+from django_q.tasks import async_task
 
 from apps.common.decorators import admin_required
 from apps.common.security_decorators import (
@@ -33,12 +33,18 @@ from apps.common.security_decorators import (
     monitor_performance,
 )
 from apps.common.types import Result
-from apps.customers.models import Customer
 from apps.users.models import User
 
-from .service_models import Service, ServicePlan
+from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
+from .virtualmin_chain import (
+    is_chain_domain,
+    is_chain_job,
+    node_lost_refusal,
+    resolve_chain_job,
+    resolve_chain_job_node_lost,
+)
 from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
@@ -46,12 +52,19 @@ from .virtualmin_forms import (
     VirtualminBulkFilterForm,
     VirtualminMigrationForm,
     VirtualminRestoreForm,
+    VirtualminRestorePairForm,
     VirtualminServerForm,
 )
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from .virtualmin_pair_restore import (
+    is_pair_job,
+    pair_restore_may_have_restored,
+    resolve_pair_job,
+    resolve_pair_job_node_lost,
+)
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -72,6 +85,7 @@ MIN_DOMAIN_LENGTH = 3
 _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS = 10
 # Most accounts the bulk page lists at once: one POST field each, under Django's 1,000-field cap.
 BULK_ACCOUNT_LIMIT = 500
+UNASSIGNED_REPORT_LIMIT = 10  # unassigned node accounts named in the sync message
 _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT = 300
 _DEFAULT_MAX_ERROR_DISPLAY = 3
 _HEALTH_CHECK_DEADLINE: ContextVar[float | None] = ContextVar("virtualmin_health_check_deadline", default=None)
@@ -117,6 +131,7 @@ class SyncResults(TypedDict):
     accounts_created: int
     accounts_updated: int
     errors: list[str]
+    unassigned: list[dict[str, str]]
 
 
 def is_staff_or_superuser(user: User | AnonymousUser) -> bool:
@@ -180,7 +195,7 @@ def virtualmin_servers_list(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers"},  # Current page - no URL
     ]
 
@@ -275,7 +290,7 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": server.name},  # Current page - no URL
     ]
@@ -380,7 +395,7 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts"},  # Current page - no URL
     ]
 
@@ -441,7 +456,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain},  # Current page - no URL
     ]
@@ -465,6 +480,13 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
+        "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
+        "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),
+        # The pair restore and the base/differential buttons are offered only while differential backups are enabled.
+        "incremental_backups_enabled": VirtualminBackupManagementService.incremental_backups_enabled(),
+        "take_base_url": reverse("provisioning:virtualmin_account_take_base", args=[account.id]),
+        "take_differential_url": reverse("provisioning:virtualmin_account_take_differential", args=[account.id]),
         "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
@@ -546,13 +568,32 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
     actor = request.user.email if request.user.is_authenticated else "system"
-    # fsm-bypass: CharField job status; attention -> failed is the only edge.
-    rows = VirtualminProvisioningJob.objects.filter(pk=job.pk, status="attention").update(
-        status="failed",
-        status_message=f"Manually resolved by {actor}: {note}",
-        next_retry_at=None,
-        updated_at=timezone.now(),
-    )
+    if job.status == "attention" and is_chain_job(job.operation, job.parameters):
+        # A base or differential step may still be running on the node: confirm it is stopped
+        # (cancel marker under the lock), clear the chain, then release.
+        resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    elif job.status == "attention" and is_pair_job(job.operation, job.parameters or {}):
+        # A pair restore leaves the domain behind a maintenance page and disabled: the node is
+        # asked to release it (cancel marker, barrier down) before the account is released.
+        resolved = resolve_pair_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    else:
+        # CharField job status; attention -> failed is the only edge.
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField status
+            status="failed",
+            status_message=f"Manually resolved by {actor}: {note}",
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
     if rows:
         from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
 
@@ -564,6 +605,94 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_job_node_lost")
+def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Operator resolution of a chain job or pair restore in attention whose node is lost (failed or decommissioned)."""
+    job = get_object_or_404(VirtualminProvisioningJob.objects.select_related("server", "account"), pk=job_id)
+    note = request.POST.get("note", "").strip() or _("operator confirmed the node is lost")
+    actor = request.user.email if request.user.is_authenticated else "system"
+    if is_pair_job(job.operation, job.parameters or {}):
+        resolved = resolve_pair_job_node_lost(job, resolved_by=actor, note=str(note))
+    else:
+        resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
+    if resolved.is_err():
+        messages.error(request, resolved.unwrap_err())
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+    job.refresh_from_db()
+    audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
+    messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_reenable")
+def virtualmin_account_hold_reenable(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: accept a half-restored domain as it is and let reconcile enable it."""
+    from .virtualmin_pair_restore import release_restore_hold  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, pk=account_id)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    if release_restore_hold(account.pk, how="re_enabled_as_is", actor=str(actor)):
+        _audit_hold_decision(request, account, "re_enabled_as_is")
+        messages.success(request, _("The hold is released. The domain will be enabled again as it is."))
+    else:
+        messages.error(request, _("This account is not held."))
+    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_restore_safety")
+def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: restore the safety backup taken before the pair restore; the hold ends when it completes."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    safety_id = account.restore_hold_safety_backup_id
+    if not account.restore_hold or not safety_id:
+        messages.error(request, _("This account has no safety backup to restore."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    created = VirtualminBackupManagementService(account.server).create_restore_job(
+        account=account,
+        config=RestoreConfig(backup_id=safety_id, force_restore=True),
+        initiated_by=f"staff:{actor}",
+    )
+    if created.is_err():
+        messages.error(
+            request, _("Could not start the restore of the safety backup: %(error)s") % {"error": created.unwrap_err()}
+        )
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    _audit_hold_decision(request, account, "restore_safety_backup", detail={"safety_backup_id": safety_id})
+    messages.success(request, _("Restoring the safety backup. The hold ends when it completes."))
+    return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
+
+
+def _audit_hold_decision(
+    request: HttpRequest, account: VirtualminAccount, decision: str, *, detail: dict[str, Any] | None = None
+) -> None:
+    """Record who decided what about a half-restored account."""
+    from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
+
+    AuditService.log_event(
+        AuditEventData(
+            event_type="virtualmin_restore_hold_decision",
+            content_object=account,
+            description=f"Staff decision on the half-restored domain {account.domain}: {decision}",
+        ),
+        AuditContext(
+            user=request.user if request.user.is_authenticated else None,
+            metadata={"source_app": "provisioning", "decision": decision, "domain": account.domain, **(detail or {})},
+        ),
+    )
 
 
 @login_required
@@ -605,7 +734,7 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
         {"text": "Backup"},  # Current page - no URL
@@ -621,6 +750,30 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     }
 
     return render(request, "provisioning/virtualmin/backup_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_chain_backup")
+def virtualmin_account_chain_backup(request: HttpRequest, account_id: str, role: str) -> HttpResponse:
+    """💾 Take a base or a differential backup of one account (never in bulk)."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    if role not in ("base", "differential"):
+        return HttpResponseBadRequest("Unknown backup role")
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+    management = VirtualminBackupManagementService(account.server)
+    take = management.take_base_backup if role == "base" else management.take_differential_backup
+    created = take(account, initiated_by=f"staff:{cast(User, request.user).email}")
+    if created.is_err():
+        messages.error(request, _("The backup could not be started: {error}").format(error=created.unwrap_err()))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    job = created.unwrap()
+    messages.success(request, _("Base backup queued.") if role == "base" else _("Differential backup queued."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -671,7 +824,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
         {"text": "Restore"},  # Current page - no URL
@@ -688,6 +841,57 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     }
 
     return render(request, "provisioning/virtualmin/restore_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@audit_service_call("virtualmin_restore_pair_form")
+def virtualmin_account_restore_pair(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🔄 Restore a base backup and the differential taken against it, as one workflow."""
+    from .virtualmin_pair_restore import PAIR_RESTORE_LABEL  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+    backups_result = VirtualminBackupService(account.server).list_backups(account=account)
+    listed = backups_result.unwrap() if backups_result.is_ok() else []
+    differentials = [item for item in listed if item.get("chain_role") == "differential" and item.get("base_backup_id")]
+    if not differentials:
+        messages.error(request, _("No differential backups are available for this account."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+
+    if request.method == "POST":
+        form = VirtualminRestorePairForm(request.POST, differentials=differentials)
+        if form.is_valid():
+            chosen = next(item for item in differentials if item["backup_id"] == form.cleaned_data["differential_id"])
+            created = VirtualminBackupManagementService(account.server).create_pair_restore_job(
+                account,
+                str(chosen["base_backup_id"]),
+                str(chosen["backup_id"]),
+                force_restore=True,  # the confirmation checkbox is the explicit consent
+                initiated_by=f"staff:{cast(User, request.user).email}",
+            )
+            if created.is_ok():
+                messages.success(request, _("Pair restore queued."))
+                return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().id)
+            messages.error(request, f"Failed to create pair restore: {created.unwrap_err()}")
+    else:
+        form = VirtualminRestorePairForm(differentials=differentials)
+
+    context = {
+        "page_title": f"Restore pair: {account.domain}",
+        "account": account,
+        "breadcrumb_items": [
+            {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+            {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
+            {"text": "Restore pair"},
+        ],
+        "form": form,
+        "pair_label": PAIR_RESTORE_LABEL,
+        "cancel_url": reverse("provisioning:virtualmin_account_detail", args=[account.id]),
+    }
+    return render(request, "provisioning/virtualmin/restore_pair_form.html", context)
 
 
 # ===============================================================================
@@ -762,7 +966,7 @@ def virtualmin_server_create(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Add Server"},  # Current page - no URL
     ]
@@ -800,7 +1004,7 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Servers", "url": reverse("provisioning:virtualmin_servers")},
         {"text": server.name, "url": reverse("provisioning:virtualmin_server_detail", args=[server.id])},
         {"text": "Edit"},  # Current page - no URL
@@ -1676,6 +1880,7 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
         "accounts_created": 0,
         "accounts_updated": 0,
         "errors": [],
+        "unassigned": [],
     }
 
     provisioning_service = VirtualminProvisioningService()
@@ -1709,6 +1914,12 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                 username = domain_data.get("username", "").strip()
 
                 if not domain_name or not username:
+                    continue
+                if not is_chain_domain(domain_name):
+                    # The domain later reaches the node's chain scripts as a strict-alphabet input.
+                    error_msg = f"Skipped {username}: {domain_name!r} is not a valid domain name"
+                    sync_results["errors"].append(error_msg)
+                    logger.warning("⚠️ [AccountSync] %s", error_msg)
                     continue
 
                 if username not in accounts_by_username:
@@ -1770,56 +1981,49 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         logger.warning(f"⚠️ [UsageSync] Exception getting usage for {account.domain}: {e}")
                         # Keep existing values if API call fails
 
-                    account.save()
+                    # Only what this sync changed: a full save after the remote usage call would write
+                    # a stale copy of every other field over a concurrent change (status, suspension).
+                    account.save(
+                        update_fields=[
+                            "domain",
+                            "domains",
+                            "server",
+                            "last_sync_at",
+                            "current_disk_usage_mb",
+                            "current_bandwidth_usage_mb",
+                            "disk_quota_mb",
+                            "bandwidth_quota_mb",
+                            "updated_at",
+                        ]
+                    )
                     sync_results["accounts_updated"] += 1
 
                 except VirtualminAccount.DoesNotExist:
-                    # Create new account with associated Service
+                    # Link a node account to a service ONLY when PRAHO already has the service for this
+                    # username. A domain nobody here owns is never imported as a service of some customer
+                    # (it used to go to Customer.objects.first()): it is reported to staff as unassigned
+                    # and nothing is created.
                     try:
-                        # Get default customer and service plan for synced accounts
-                        default_customer = Customer.objects.first()
-                        default_service_plan = ServicePlan.objects.first()
-
-                        if not default_customer or not default_service_plan:
-                            error_msg = f"Missing default customer or service plan for account {username}"
-                            sync_results["errors"].append(error_msg)
-                            continue
-
-                        from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
-
-                        # Existing services retain their stored money; only new imports need a retail price.
                         service = Service.objects.filter(username=username).first()
                         if service is None:
-                            currency_code = get_selling_currency_policy().currency_code
-                            retail_price = default_service_plan.get_price_for_currency(currency_code)
-                            if retail_price is None:
-                                error_msg = _("No active monthly price for plan %(plan)s in %(currency)s.") % {
-                                    "plan": default_service_plan.name,
-                                    "currency": currency_code,
-                                }
-                                sync_results["errors"].append(error_msg)
-                                logger.warning("⚠️ [AccountSync] %s", error_msg)
-                                continue
-                            service, created = Service.objects.get_or_create(
-                                username=username,
-                                defaults={
-                                    "currency_id": currency_code,
-                                    "customer": default_customer,
-                                    "service_plan": default_service_plan,
-                                    "service_name": f"Virtualmin Account - {username}",
+                            sync_results["unassigned"].append(
+                                {
+                                    "username": username,
                                     "domain": account_data["primary_domain"],
-                                    "status": "active",
-                                    "billing_cycle": "monthly",
-                                    "price": Decimal(retail_price.monthly_price_cents) / 100,
-                                },
+                                    "server": server.name,
+                                }
                             )
-                        else:
-                            created = False
+                            logger.warning(
+                                "⚠️ [AccountSync] Unassigned account on %s: username=%s domain=%s (not imported)",
+                                server.name,
+                                username,
+                                account_data["primary_domain"],
+                            )
+                            continue
 
-                        # Update service if it exists
-                        if not created:
+                        if service.domain != account_data["primary_domain"]:
                             service.domain = account_data["primary_domain"]
-                            service.save()
+                            service.save(update_fields=["domain", "updated_at"])
 
                         # Fetch actual usage data from Virtualmin API
                         disk_usage_mb = 0
@@ -1893,6 +2097,26 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
     else:
         messages.info(request, f"No new accounts found on {sync_results['servers_checked']} servers")
 
+    # Domains on a node that PRAHO has no service for: reported, never imported.
+    if sync_results["unassigned"]:
+        unassigned = sync_results["unassigned"]
+        shown = ", ".join(
+            f"{row['username']} ({row['domain']} on {row['server']})" for row in unassigned[:UNASSIGNED_REPORT_LIMIT]
+        )
+        more = (
+            f" and {len(unassigned) - UNASSIGNED_REPORT_LIMIT} more"
+            if len(unassigned) > UNASSIGNED_REPORT_LIMIT
+            else ""
+        )
+        messages.warning(
+            request,
+            _(
+                "%(count)d unassigned account(s) on the nodes were not imported: %(rows)s%(more)s. "
+                "Attach each one to a customer's service first."
+            )
+            % {"count": len(unassigned), "rows": shown, "more": more},
+        )
+
     # Show errors if any
     if sync_results["errors"]:
         error_count = len(sync_results["errors"])
@@ -1933,7 +2157,7 @@ def virtualmin_account_new(request: HttpRequest) -> HttpResponse:
     breadcrumb_items = [
         {"text": "🏠 Management", "url": "/dashboard/"},
         {"text": "⚙️ Provisioning", "url": reverse("provisioning:services")},
-        {"text": "🖥️ Virtualmin", "url": "#"},
+        {"text": "🖥️ Virtualmin", "url": reverse("provisioning:virtualmin_servers")},
         {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
         {"text": "New Account"},  # Current page - no URL
     ]
@@ -2048,7 +2272,7 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
     if request.method == "POST":
         # Toggle the protection status
         account.protected_from_deletion = not account.protected_from_deletion
-        account.save()
+        account.save(update_fields=["protected_from_deletion", "updated_at"])
 
         action = "enabled" if account.protected_from_deletion else "disabled"
         icon = "🔒" if account.protected_from_deletion else "🔓"
@@ -2137,10 +2361,62 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "job": job,
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
-        "can_retry": job.status == "failed" and job.retry_count < job.max_retries,
+        "can_retry": _job_can_be_retried(job),
+        "can_resolve": job.status == "attention",
+        "half_restore_safety_backup_id": (
+            str((job.parameters or {}).get("safety_backup_id", ""))
+            if job.status == "attention"
+            and is_pair_job(job.operation, job.parameters or {})
+            and pair_restore_may_have_restored(job.parameters or {})
+            else ""
+        ),
+        "can_resolve_node_lost": (
+            job.status == "attention"
+            and (is_chain_job(job.operation, job.parameters or {}) or is_pair_job(job.operation, job.parameters or {}))
+            and node_lost_refusal(job.server) is None
+        ),
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)
+
+
+def _job_can_be_retried(job: VirtualminProvisioningJob) -> bool:
+    """Whether the failed-job sweep would retry this job: the operations it recovers, under the limit.
+
+    Backup and restore jobs are not retried by the sweep, so offering them a retry promised
+    something that never happened (#689).
+    """
+    from .virtualmin_tasks import _RETRYABLE_OPERATIONS  # noqa: PLC0415  # Circular: tasks import views' services
+
+    return (
+        job.status == "failed"
+        and job.retry_count < job.max_retries
+        and job.operation in _RETRYABLE_OPERATIONS
+        and job.account_id is not None
+    )
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_job_retry")
+def virtualmin_job_retry(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Retry a failed job now: mark it due and run the failed-job sweep at once.
+
+    The sweep claims the job with its lease and fencing, exactly as the 15-minute schedule does,
+    so there is one retry path, not two.
+    """
+    job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
+    if not _job_can_be_retried(job):
+        messages.error(request, _("This job cannot be retried."))
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    now = timezone.now()
+    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(next_retry_at=now, updated_at=now)
+    transaction.on_commit(
+        lambda: async_task("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"), robust=True
+    )
+    messages.success(request, _("The job is queued for another attempt."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required

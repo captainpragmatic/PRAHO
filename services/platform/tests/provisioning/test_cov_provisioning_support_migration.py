@@ -46,9 +46,11 @@ class ProvisioningSupportMigrationTests(ProvisioningSupportMigrationFixture):
         self.payload["data"] = [{"name": "tenant.example.com", "values": values}]
         result = list_migration_domains(self.gateway)
         self.assertTrue(result.is_ok(), result)
+        # Only the allowlisted attributes are retained: "Disk quota" is not read, so it is dropped.
+        kept = {"Username": [" tenant "], "Status": ["Unknown"]}
         self.assertEqual(
             result.unwrap(),
-            [{"domain": "tenant.example.com", "username": "tenant", "enabled": None, "attributes": values}],
+            [{"domain": "tenant.example.com", "username": "tenant", "enabled": None, "attributes": kept}],
         )
 
     def test_listing_strict_refuses_malformed_rows_while_sync_retains_valid_rows(self) -> None:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -20,6 +21,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 from apps.common.types import Retriability
+from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,27 @@ HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
 # auto-failed; only auto-failed servers are auto-recovered.
 HEALTH_AUTO_FAIL_THRESHOLD = 6
 _EXECUTION_RECOVERY_MARGIN_SECONDS = 60
+
+# Operations whose interruption or unknown outcome parks the job in attention (keeping the
+# account's operation exclusion) instead of failing it into the retry pool: the command may
+# already have destroyed the domain, so a blind replay or a released exclusion is unsafe.
+UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS = ("delete_domain",)
+
+# Keys a persisted job result never keeps. Job results hold Virtualmin
+# response envelopes, and 8.x listing rows carry `hashed_password` and
+# `password_for_mysql`; the create-domain parameters carry `pass`.
+_SECRET_KEY_RE = re.compile(
+    r"((^|[-_])pass$|passw|passphrase|secret|token|hashed|private_key|api_key|access_key)", re.I
+)
+
+
+def without_secrets(value: Any) -> Any:
+    """A copy of a JSON-like value with every secret-looking key removed, at any depth."""
+    if isinstance(value, dict):
+        return {key: without_secrets(item) for key, item in value.items() if not _SECRET_KEY_RE.search(str(key))}
+    if isinstance(value, list):
+        return [without_secrets(item) for item in value]
+    return value
 
 
 class VirtualminServer(models.Model):
@@ -293,7 +316,9 @@ class VirtualminAccount(models.Model):
         help_text=_("Unique Virtualmin virtual server username"),
     )
     encrypted_password = models.BinaryField(verbose_name=_("Encrypted Password"))
-    template_name = models.CharField(max_length=50, default="Default", verbose_name=_("Virtualmin Template"))
+    template_name = models.CharField(
+        max_length=50, default=DEFAULT_VIRTUALMIN_TEMPLATE, verbose_name=_("Virtualmin Template")
+    )
 
     # All domains managed by this account
     domains = models.JSONField(default=list, help_text=_("All domains managed by this Virtualmin account"))
@@ -327,6 +352,51 @@ class VirtualminAccount(models.Model):
     # Current usage statistics
     current_disk_usage_mb = models.PositiveIntegerField(default=0)
     current_bandwidth_usage_mb = models.PositiveIntegerField(default=0)
+
+    # Differential-backup chain (docs/domain/virtualmin-incremental-contract.md). Virtualmin keeps one
+    # snapshot per domain; the chain is "live" only while this points at the base backup job whose
+    # snapshot is still on the node. Anything that can reset or lose the snapshot (a restore, a new
+    # base, a migration, a delete) clears it in its admission transaction and bumps the epoch, so a
+    # job pinned to an older epoch can never extend a chain that has since been broken.
+    chain_base = models.ForeignKey(
+        "provisioning.VirtualminProvisioningJob",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Differential chain base"),
+        help_text=_("The base backup job a differential would extend; empty when no chain is live"),
+    )
+    chain_base_fingerprint = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Snapshot fingerprint (sha256:size) the base left on the node"),
+    )
+    chain_epoch = models.PositiveIntegerField(
+        default=0, editable=False, help_text=_("Bumped every time the chain is invalidated or restarted")
+    )
+
+    # A staff-resolved pair restore that had already restored something leaves a half-restored domain. The
+    # reconciler (ADR-0051) and the divergence backstop leave the account alone while this is set, so the
+    # site is never brought live by a routine pass; only an explicit staff action clears it: "Re-enable as
+    # is", or restoring the safety backup taken before the pair restore.
+    restore_hold = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Why reconcile must leave this account disabled; empty when nothing holds it"),
+    )
+    restore_hold_safety_backup_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("The safety backup taken before the restore that left the domain half-restored"),
+    )
 
     # Timestamps
     provisioned_at = models.DateTimeField(null=True, blank=True)
@@ -376,27 +446,30 @@ class VirtualminAccount(models.Model):
 
     def get_recovery_seed(self) -> str:
         """
-        Generate recovery seed for Virtualmin comment field.
+        Generate the recovery seed stored as the Virtualmin server description.
 
-        Limited to ~200 chars due to Virtualmin comment field limitations.
-        Format: "PRAHO:service_id|CID:customer_id|STATUS:status"
+        Format: "PRAHO=service_id|CID=customer_id|STATUS=status", at most 200
+        characters. create-domain takes it as --desc, which refuses ":"
+        (Virtualmin 8.x has no --comment option at all).
         """
         parts = []
 
         if self.praho_service_id:
-            parts.append(f"PRAHO:{self.praho_service_id}")
+            parts.append(f"PRAHO={self.praho_service_id}")
 
         if self.praho_customer_id:
-            parts.append(f"CID:{self.praho_customer_id}")
+            parts.append(f"CID={self.praho_customer_id}")
 
-        parts.append(f"STATUS:{self.status}")
+        parts.append(f"STATUS={self.status}")
 
         return "|".join(parts)[:200]  # Truncate to fit Virtualmin comment limit
 
     @classmethod
     def parse_recovery_seed(cls, seed: str) -> dict[str, Any]:
         """
-        Parse recovery seed from Virtualmin comment field.
+        Parse a recovery seed from the Virtualmin server description.
+
+        Accepts the current "KEY=value" form and the older "KEY:value" one.
 
         Args:
             seed: Recovery seed string from Virtualmin
@@ -406,14 +479,15 @@ class VirtualminAccount(models.Model):
         """
         data: dict[str, uuid.UUID | int | str] = {}
 
-        if not seed or "PRAHO:" not in seed:
+        if not seed or not ("PRAHO=" in seed or "PRAHO:" in seed):
             return data
 
         try:
             parts = seed.split("|")
             for part in parts:
-                if ":" in part:
-                    key, value = part.split(":", 1)
+                separator = "=" if "=" in part else ":"
+                if separator in part:
+                    key, value = part.split(separator, 1)
 
                     if key == "PRAHO":
                         with contextlib.suppress(ValueError):
@@ -624,7 +698,7 @@ class VirtualminProvisioningJob(models.Model):
             cls.objects.filter(status__in=("pending", "running"))
             # Backup/restore have their own execution_deadline and janitor.
             .exclude(operation__in=("backup_domain", "restore_domain"))
-            .only("status", "parameters", "claimed_at", "started_at", "updated_at")
+            .only("operation", "status", "parameters", "claimed_at", "started_at", "updated_at")
         )
         recovered = 0
         for job in jobs.iterator():
@@ -639,13 +713,27 @@ class VirtualminProvisioningJob(models.Model):
             if expired:
                 # Fence against a worker completing, starting or refreshing the row
                 # after this sweep read it.
-                recovered += cls.objects.filter(
+                fenced = cls.objects.filter(
                     pk=job.pk,
                     status=job.status,
                     claimed_at=job.claimed_at,
                     started_at=job.started_at,
                     updated_at=job.updated_at,
-                ).update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time)
+                )
+                if job.status == "running" and job.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
+                    # A dead delete worker may have deleted the domain: replaying it blind, and
+                    # releasing the account's exclusion, is not safe. An operator resolves it.
+                    recovered += fenced.update(
+                        status="attention",
+                        status_message="Worker interrupted; execution deadline exceeded",
+                        next_retry_at=None,
+                        claimed_at=None,
+                        updated_at=recovery_time,
+                    )
+                else:
+                    recovered += fenced.update(
+                        status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time
+                    )
         return recovered
 
     @classmethod
@@ -695,7 +783,7 @@ class VirtualminProvisioningJob(models.Model):
         result: dict[str, Any] | None = None,
     ) -> int:
         """Token-fenced terminal write; a rotated token makes this a no-op."""
-        payload = dict(result or {})
+        payload = without_secrets(dict(result or {}))
         return cls.objects.filter(pk=job_id, execution_token=token).update(
             status=status,
             status_message=message,
@@ -733,7 +821,7 @@ class VirtualminProvisioningJob(models.Model):
         now = timezone.now()
         self.status = "completed"
         self.completed_at = now
-        self.result = result
+        self.result = without_secrets(dict(result))
 
         # Store rollback operations for potential future use
         if rollback_operations and "rollback_operations" not in self.result:
@@ -744,6 +832,41 @@ class VirtualminProvisioningJob(models.Model):
             self.execution_time_seconds = Decimal(str(duration.total_seconds()))
 
         self.save(update_fields=["status", "completed_at", "result", "execution_time_seconds", "updated_at"])
+
+    def mark_attention(self, error_message: str, result: dict[str, Any] | None = None) -> None:
+        """Park an uncertain mutation for an operator instead of failing it.
+
+        The command may already have run, so the job neither retries nor releases the account's
+        operation exclusion (``attention`` is an active status); it stays until resolved.
+        """
+        now = timezone.now()
+        self.status = "attention"
+        self.status_message = error_message
+        self.completed_at = now
+        self.result = {**without_secrets(dict(result or self.result or {})), "retriability": Retriability.UNKNOWN.value}
+        self.next_retry_at = None
+        if self.started_at:
+            self.execution_time_seconds = Decimal(str((now - self.started_at).total_seconds()))
+        self.save(
+            update_fields=[
+                "status",
+                "status_message",
+                "completed_at",
+                "result",
+                "execution_time_seconds",
+                "next_retry_at",
+                "updated_at",
+            ]
+        )
+
+    def settle_failure(
+        self, error_message: str, result: dict[str, Any] | None = None, *, retriability: Retriability
+    ) -> None:
+        """Fail the job, or park it when an UNKNOWN outcome leaves a destructive command uncertain."""
+        if retriability is Retriability.UNKNOWN and self.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
+            self.mark_attention(error_message, result)
+        else:
+            self.mark_failed(error_message, result, retriability=retriability)
 
     def mark_failed(  # noqa: PLR0913  # Cohesive persisted failure transition
         self,
@@ -771,7 +894,7 @@ class VirtualminProvisioningJob(models.Model):
         self.completed_at = now
 
         if result:
-            self.result = dict(result)
+            self.result = without_secrets(dict(result))
         else:
             self.result = dict(self.result or {})
         self.result["retriability"] = retriability.value

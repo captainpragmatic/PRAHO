@@ -24,6 +24,14 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# Network budget for every Stripe call. The SDK default is 80s per attempt with two
+# retries, which outlasts the web worker timeout (gunicorn --timeout 120 in
+# deploy/platform/entrypoint.sh). Worst case here is 2 * (5 + 25) + 5 = 65s.
+# One retry is safe because every money write carries a stable idempotency key.
+STRIPE_CONNECT_TIMEOUT_SECONDS = 5.0
+STRIPE_READ_TIMEOUT_SECONDS = 25.0
+STRIPE_MAX_NETWORK_RETRIES = 1
+
 
 # ===============================================================================
 # STRIPE GATEWAY IMPLEMENTATION
@@ -58,6 +66,10 @@ class StripeGateway(BasePaymentGateway):
                 raise ValueError("Stripe secret key not configured in settings system")
 
             stripe.api_key = str(api_key)
+            stripe.max_network_retries = STRIPE_MAX_NETWORK_RETRIES
+            stripe.default_http_client = stripe.RequestsClient(
+                timeout=(STRIPE_CONNECT_TIMEOUT_SECONDS, STRIPE_READ_TIMEOUT_SECONDS)
+            )
             self._stripe = stripe
 
             # Set API version for consistency

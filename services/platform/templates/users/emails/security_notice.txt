@@ -1,0 +1,5 @@
+{% load i18n %}{% blocktrans with name=user.first_name|default:user.email %}Hello {{ name }},{% endblocktrans %}
+
+{% if event == "2fa_enabled" %}{% trans "Two-factor authentication was turned on for your account." %}{% elif event == "2fa_disabled" %}{% trans "Two-factor authentication was turned off for your account. Signing in now needs only your password." %}{% elif event == "2fa_reset" %}{% if by_operator %}{% trans "Our support team reset two-factor authentication for your account." %}{% else %}{% blocktrans %}An administrator, {{ actor_email }}, reset two-factor authentication for your account.{% endblocktrans %}{% endif %} {% trans "Set it up again from your account's security page." %}{% elif event == "backup_codes" %}{% trans "New backup codes were created for your account. Your previous backup codes no longer work." %}{% elif event == "password_changed" %}{% trans "The password for your account was changed." %}{% endif %}
+
+{% trans "If this was not you, reset your password and contact support straight away." %}

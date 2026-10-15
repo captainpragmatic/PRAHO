@@ -241,8 +241,12 @@ def _build_customer_vat_info(
     order_id: str | None = None,
     *,
     country: object | None = None,
+    record_vies_refusal: bool = True,
 ) -> CustomerVATInfo:
-    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    """Build customer VAT context for TaxService.calculate_vat_for_document().
+
+    record_vies_refusal=False only reads the VIES decision, for previews shown on every view.
+    """
     country_source = country
     if country_source is None:
         billing_address = customer.get_billing_address()
@@ -262,7 +266,7 @@ def _build_customer_vat_info(
     info["vat_number"] = getattr(tax_profile, "vat_number", None)
     info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
     info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
-    from apps.billing.vies_evidence import vies_verified_for  # noqa: PLC0415
+    from apps.billing.vies_evidence import vies_refusal_reason, vies_verified_for  # noqa: PLC0415
 
     billing_name = customer.get_billing_name()
     if order_id:
@@ -276,13 +280,29 @@ def _build_customer_vat_info(
             info["vat_number"] = (
                 str(snapshot.get("vat_number") or snapshot.get("vat_id") or info.get("vat_number") or "") or None
             )
-    info["vies_verified"] = vies_verified_for(tax_profile, info.get("vat_number"), billing_name=billing_name)
+    info["vies_verified"] = (
+        vies_verified_for(tax_profile, info.get("vat_number"), billing_name=billing_name)
+        if record_vies_refusal
+        else not vies_refusal_reason(tax_profile, info.get("vat_number"), billing_name=billing_name)
+    )
     info["vat_rate_reason"] = tax_profile.vat_rate_reason
     vat_rate_override = getattr(tax_profile, "vat_rate", None)
 
     if vat_rate_override is not None:
         info["custom_vat_rate"] = vat_rate_override
     return info
+
+
+def preview_customer_vat_rate(customer: Any) -> Decimal:
+    """The VAT a document for this customer would carry now, as a fraction (0.21), audit-free (#689).
+
+    For amounts shown "with VAT" outside a priced document: a reverse-charge or non-EU customer,
+    or one with a custom rate, sees what their invoices will say, not Romania's standard rate.
+    """
+    from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+    _scenario, rate = TaxService.preview_vat_rate(_build_customer_vat_info(customer, record_vies_refusal=False))
+    return rate
 
 
 class EFacturaService:

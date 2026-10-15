@@ -93,7 +93,7 @@ class TestSecureInputValidator(TestCase):
 
     def test_role_validation_prevents_injection(self):
         """Test role validation prevents privilege injection"""
-        valid_roles = ['owner', 'admin', 'manager', 'viewer']
+        valid_roles = ['owner', 'billing', 'tech', 'viewer']  # CustomerMembership.CUSTOMER_ROLE_CHOICES
         invalid_roles = [
             'superuser',
             'staff',
@@ -227,30 +227,16 @@ class TestSecurityDecorators(TestCase):
 
     def test_rate_limiting_functionality(self):
         """Test rate limiting decorator"""
-        with patch('apps.common.security_decorators.cache') as mock_cache:
-            # Setup mock cache behavior - track calls
-            cache_data: dict[str, int] = {}
-
-            def mock_get(key, default=0):
-                return cache_data.get(key, default)
-
-            def mock_set(key, value, timeout=None):
-                cache_data[key] = value
-                return True
-
-            mock_cache.get.side_effect = mock_get
-            mock_cache.set.side_effect = mock_set
-
-            # Test normal operation (first 5 requests should pass)
-            for i in range(5):
-                try:
-                    _check_rate_limit('test_key', 5, '192.168.1.1', None)
-                except ValidationError:
-                    self.fail(f"Request {i+1} should not be rate limited")
-
-            # 6th request should fail
-            with self.assertRaises(ValidationError):
+        # Test normal operation (first 5 requests should pass)
+        for i in range(5):
+            try:
                 _check_rate_limit('test_key', 5, '192.168.1.1', None)
+            except ValidationError:
+                self.fail(f"Request {i+1} should not be rate limited")
+
+        # 6th request should fail
+        with self.assertRaises(ValidationError):
+            _check_rate_limit('test_key', 5, '192.168.1.1', None)
 
     def test_timing_attack_prevention(self):
         """Test timing normalization"""

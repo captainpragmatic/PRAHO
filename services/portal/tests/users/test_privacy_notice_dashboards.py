@@ -1,4 +1,4 @@
-"""The privacy pages describe the account's data processing as a notice, not a consent (ADR-0058).
+"""The privacy pages describe the account's data processing as a notice, not a consent (ADR-0061).
 
 Registration asks for no consent to process the account's data: that processing performs the
 contract, and the privacy policy describes it. The privacy dashboard and consent history still

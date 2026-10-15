@@ -19,6 +19,7 @@ import io
 import logging
 import secrets
 import string
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast
 
@@ -27,12 +28,12 @@ import qrcode
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
-from django.core.cache import cache
-from django.db import models, transaction
+from django.db import DatabaseError, InterfaceError, models, transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
+from apps.common import counters
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.common.request_ip import get_safe_client_ip
 
@@ -206,6 +207,64 @@ class WebAuthnCredential(models.Model):
 # ===============================================================================
 
 
+class MFAStoreUnavailable(Exception):  # noqa: N818  # names the condition, like DatabaseError
+    """The counter store holding used codes and the attempt budget could not be reached.
+
+    Nothing was decided: the code was neither accepted nor refused, so nobody is charged a
+    failed attempt. Answered 503 by StoreUnavailableMiddleware, never as a wrong code.
+    """
+
+
+# A used code stays refused for three 30-second steps: the current one and the drift either side.
+_USED_CODE_SECONDS = 90
+_ATTEMPT_WINDOW_SECONDS = 300
+
+
+def _counters_call[T](operation: Callable[[], T]) -> T:
+    """Run one counter-store operation in its own savepoint; a store failure becomes MFAStoreUnavailable.
+
+    The savepoint keeps a failed statement from aborting the caller's transaction on PostgreSQL,
+    which held the user row lock and was about to record the outcome.
+    """
+    try:
+        with transaction.atomic():
+            return operation()
+    except (DatabaseError, InterfaceError) as error:
+        raise MFAStoreUnavailable from error
+
+
+def _claim_used_code(user_id: int, token: str) -> bool:
+    """Mark a code used for this person; False when another request already did (a replay)."""
+
+    # The claim's token is a constant, never the code: claim() stores its token in plain text.
+    return _counters_call(lambda: counters.claim(f"totp_used:{user_id}:{token}", _USED_CODE_SECONDS, "used"))
+
+
+@dataclass(frozen=True)
+class BrowserOrigin:
+    """Where a person's browser connected from, when the request in hand is the Portal's signed call."""
+
+    ip: str | None = None
+    user_agent: str | None = None
+
+
+def _origin_ip(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
+    """The browser's address: the one the Portal signed, else this request's own client address.
+
+    With an origin, only the origin counts, field by field included: a Portal call that sent no
+    user agent must not be recorded with the Portal server's agent next to the browser's address.
+    """
+    if origin is not None:
+        return origin.ip
+    return get_safe_client_ip(request) if request else None
+
+
+def _origin_user_agent(request: HttpRequest | None, origin: BrowserOrigin | None) -> str | None:
+    if origin is not None:
+        return origin.user_agent
+    return request.META.get("HTTP_USER_AGENT") if request else None
+
+
 class TOTPService:
     """
     🔐 Time-based One-Time Password (TOTP) Service
@@ -243,26 +302,33 @@ class TOTPService:
             if not secret or not token:
                 return False
 
-            # Check if code was recently used (prevent replay)
-            if user is not None:
-                cache_key = f"totp_used:{user.id}:{token}"
-                if cache.get(cache_key):
-                    logger.warning("⚠️ [TOTP] Replay attempt detected")
-                    return False
+            # Verify with time window tolerance for clock drift, then claim the code atomically:
+            # a wrong code reserves nothing, and of two requests with one code exactly one wins.
+            if not pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
+                return False
+            if user is not None and not _claim_used_code(user.id, token):
+                logger.warning("⚠️ [TOTP] Replay attempt detected")
+                return False
+            return True
 
-            # Verify with time window tolerance for clock drift
-            totp = pyotp.TOTP(secret)
-            if totp.verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
-                # Mark token as used for 90 seconds (3 * 30-second periods)
-                if user is not None:
-                    cache.set(cache_key, True, 90)
-                return True
-
-            return False
-
+        except MFAStoreUnavailable:
+            raise
         except Exception as e:
             logger.error(f"🔥 [TOTP] Verification error: {e}")
             return False
+
+    @staticmethod
+    def verify_enrolment_code(user: "User", secret: str, token: str) -> bool:
+        """Check a code against a secret that is not enabled yet (a pending enrolment).
+
+        The code is claimed as used, as at sign-in, so the code that confirmed enrolment cannot
+        then be replayed to sign in.
+        """
+        if not secret or len(token) != TOTPService.TOTP_DIGITS or not token.isdigit():
+            return False
+        if not pyotp.TOTP(secret).verify(token, valid_window=TOTPService.TIME_WINDOW_TOLERANCE):
+            return False
+        return _claim_used_code(user.id, token)
 
     @staticmethod
     def generate_qr_code(user: "User", secret: str) -> str:
@@ -629,6 +695,11 @@ class MFAService:
             credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
                 user_id=user.pk
             )
+            if action in {"recover", "disable"}:
+                # A secret shown before a password reset or a disable must not be confirmable after it.
+                from .pending_totp import discard  # noqa: PLC0415  # Circular: pending_totp imports mfa
+
+                discard(user.pk)
             if action == "recover":
                 if not locked_user.two_factor_enabled:
                     user.two_factor_secret = ""
@@ -651,15 +722,37 @@ class MFAService:
             credential_version.refresh_from_db(fields=["version"])
             if audit_event is not None:
                 AuditService.log_2fa_event(audit_event)
+            MFAService._notify_state_change(user.pk, action, audit_event)
         # Replace a previously cached version (including a cached missing row).
         user.credential_version = credential_version
 
     @staticmethod
+    def _notify_state_change(user_pk: int, action: str, audit_event: TwoFactorAuditRequest | None) -> None:
+        """Email the account holder about 2FA turned on, off or reset (#689), once this commits."""
+        from .security_notices import notify_credential_change  # noqa: PLC0415  # Circular: imports tasks
+
+        if action == "enable":
+            notify_credential_change(user_pk, "2fa_enabled")
+        elif action == "disable" and audit_event is not None and audit_event.event_type == "2fa_admin_reset":
+            by_operator = audit_event.context.actor_type == "system"
+            actor_email = "" if by_operator or audit_event.actor is None else audit_event.actor.email
+            notify_credential_change(user_pk, "2fa_reset", actor_email=actor_email, by_operator=by_operator)
+        elif action == "disable":
+            notify_credential_change(user_pk, "2fa_disabled")
+
+    @staticmethod
     def enable_totp(
-        user: "User", request: HttpRequest | None = None, *, secret: str | None = None
+        user: "User",
+        request: HttpRequest | None = None,
+        *,
+        secret: str | None = None,
+        origin: BrowserOrigin | None = None,
     ) -> tuple[str, list[str]]:
         """
         🔐 Enable TOTP/2FA for user with audit logging
+
+        origin names the browser when the request is the Portal's signed call, whose own
+        address and agent are the Portal server's.
 
         Returns:
             Tuple of (totp_secret, backup_codes)
@@ -684,8 +777,8 @@ class MFAService:
             if request:
                 metadata.update(
                     {
-                        "session_id": request.session.session_key,
-                        "user_agent": request.META.get("HTTP_USER_AGENT", ""),
+                        "session_id": getattr(getattr(request, "session", None), "session_key", None),
+                        "user_agent": _origin_user_agent(request, origin) or "",
                     }
                 )
 
@@ -696,8 +789,8 @@ class MFAService:
                     event_type="2fa_enabled",
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata=metadata,
                     ),
                     description=f"TOTP/2FA enabled for user {user.email}",
@@ -712,13 +805,14 @@ class MFAService:
             raise
 
     @staticmethod
-    def disable_totp(
+    def disable_totp(  # noqa: PLR0913  # Who acted (admin, operator) and where from (request, origin) are separate seams
         user: "User",
         admin_user: Union["User", None] = None,
         reason: str | None = None,
         request: HttpRequest | None = None,
         *,
         operator: str | None = None,
+        origin: BrowserOrigin | None = None,
     ) -> bool:
         """
         🔓 Disable TOTP/2FA with audit trail
@@ -730,6 +824,7 @@ class MFAService:
             request: HTTP request for context
             operator: The server account that ran `manage.py reset_two_factor`; such a reset is
                 recorded with no actor, as the operator has no account in the application
+            origin: The browser behind a Portal call, whose request is the Portal server's
         """
         try:
             if not user.two_factor_enabled:
@@ -772,8 +867,8 @@ class MFAService:
                     event_type=event_type,
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata=metadata,
                         actor_type=actor_type,
                     ),
@@ -792,9 +887,11 @@ class MFAService:
             raise
 
     @staticmethod
-    def generate_backup_codes(user: "User", request: HttpRequest | None = None) -> list[str]:
+    def generate_backup_codes(
+        user: "User", request: HttpRequest | None = None, *, origin: BrowserOrigin | None = None
+    ) -> list[str]:
         """
-        🎫 Generate new backup codes with audit
+        🎫 Generate new backup codes with audit; origin names the browser behind a Portal call
         """
         try:
             if not user.two_factor_enabled:
@@ -804,14 +901,18 @@ class MFAService:
             # Only the codes: a full save of this instance would write back every other column.
             user.save(update_fields=["backup_tokens"])
 
+            from .security_notices import notify_credential_change  # noqa: PLC0415  # Circular: imports tasks
+
+            notify_credential_change(user.pk, "backup_codes")
+
             # 📊 Audit log generation
             MFAService._log_2fa_event_isolated(
                 TwoFactorAuditRequest(
                     event_type="2fa_backup_codes_generated",
                     user=user,
                     context=AuditContext(
-                        ip_address=get_safe_client_ip(request) if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        ip_address=_origin_ip(request, origin),
+                        user_agent=_origin_user_agent(request, origin),
                         metadata={
                             "count": len(codes),
                             "timestamp": timezone.now().isoformat(),
@@ -945,6 +1046,8 @@ class MFAService:
 
             return result
 
+        except MFAStoreUnavailable:
+            raise  # Nothing was decided; StoreUnavailableMiddleware answers 503.
         except Exception as e:
             logger.error(f"🔥 [MFA] Verification error for {user.email}: {e}")
             result["success"] = False
@@ -996,67 +1099,6 @@ class MFAService:
     def get_enabled_methods(user: "User") -> list[str]:
         return MFAService._get_available_methods(user)
 
-    @staticmethod
-    def verify_second_factor(request: HttpRequest, user: "User", method: str, token: str) -> dict[str, Any]:
-        """Verify the provided second-factor token for the given method."""
-        result: dict[str, Any] = {"success": False}
-
-        # Rate limiting
-        if not MFAService._check_rate_limit(user):
-            result["error"] = "Rate limit exceeded"
-            # Generic audit for compatibility with enhanced tests
-            AuditService.log_simple_event(
-                event_type="mfa_verification_failed", user=user, metadata={"reason": "rate_limited"}
-            )
-            return result
-
-        try:
-            if method == "totp":
-                ok = TOTPService.verify_token(user, token, request)
-                result.update({"success": ok, "method": "totp"})
-            elif method == "backup_code":
-                ok = (
-                    user.verify_backup_code(token)
-                    if hasattr(user, "verify_backup_code")
-                    else BackupCodeService.verify_and_consume_code(user, token)
-                )
-                result.update({"success": ok, "method": "backup_code"})
-            else:
-                result["error"] = f"Unsupported MFA method: {method}"
-                AuditService.log_simple_event(
-                    event_type="mfa_verification_failed", user=user, metadata={"method": method}
-                )
-                return result
-
-            # Audit via generic interface for tests
-            AuditService.log_simple_event(
-                event_type="mfa_verification_success" if result["success"] else "mfa_verification_failed",
-                user=user,
-                metadata={"method": method, "ip": request.META.get("REMOTE_ADDR")},
-            )
-            if not result["success"]:
-                result["error"] = "Invalid MFA token"
-            return result
-        except Exception as e:  # pragma: no cover
-            logger.error(f"🔥 [MFA] verify_second_factor error: {e}")
-            result["error"] = "Internal error"
-            return result
-
-    @staticmethod
-    def disable_all_mfa_methods(request: HttpRequest, user: "User") -> dict[str, Any]:
-        """Disable TOTP, clear backup codes, and remove WebAuthn credentials."""
-        try:
-            with transaction.atomic():
-                MFAService.apply_state_change(user, action="disable")
-                WebAuthnCredential.objects.filter(user=user).delete()
-            AuditService.log_simple_event(
-                event_type="mfa_disabled", user=user, metadata={"by": getattr(request.user, "email", None)}
-            )
-            return {"success": True}
-        except Exception as e:  # pragma: no cover
-            logger.error(f"🔥 [MFA] disable_all_mfa_methods error: {e}")
-            return {"success": False, "error": "Internal error"}
-
     # ===============================================================================
     # PRIVATE HELPER METHODS
     # ===============================================================================
@@ -1066,20 +1108,18 @@ class MFAService:
         """
         🚦 Rate limit MFA verification attempts
         """
-        cache_key = f"mfa_attempts:{user.id}"
-        attempts = cache.get(cache_key, 0)
 
-        if attempts >= MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes
+        # In the counter store, not the cache: a cull or a cache clear must not hand the budget back.
+        attempts = _counters_call(lambda: counters.increment(f"mfa_attempts:{user.id}", _ATTEMPT_WINDOW_SECONDS))
+        if attempts > MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes, this one included
             logger.error(f"🔥 [MFA] Rate limit exceeded for user {user.email}")
             return False
-
-        cache.set(cache_key, attempts + 1, 300)  # 5 minute window
         return True
 
     @staticmethod
     def _reset_rate_limit(user: "User") -> None:
         """Give back the attempt budget after a verified login, so honest logins never drain it."""
-        cache.delete(f"mfa_attempts:{user.id}")
+        _counters_call(lambda: counters.reset(f"mfa_attempts:{user.id}"))
 
     @staticmethod
     def _get_available_methods(user: "User") -> list[str]:

@@ -19,18 +19,26 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import connection, models, transaction
+from django.db import models, transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
 from .domain_veto import domain_disables_hosting
 from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
-from .virtualmin_backup_service import BackupConfig, RestoreConfig
+from .virtualmin_backup_service import (
+    CHAIN_ROLE_BASE,
+    CHAIN_ROLE_DIFFERENTIAL,
+    CHAIN_ROLE_STANDALONE,
+    BackupConfig,
+    RestoreConfig,
+    VirtualminBackupService,
+)
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
@@ -43,14 +51,16 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
-from .virtualmin_validators import VirtualminValidator
+from .virtualmin_units import quota_parameters
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .virtualmin_migration_service import MigrationResumeOutcome
 
-from .virtualmin_migration_models import account_has_active_migration
+from .virtualmin_chain import ROLE_STANDALONE, admit_chain_role, invalidate_chain
+from .virtualmin_migration_models import account_has_active_migration, account_has_active_operation
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +126,7 @@ class VirtualminAccountCreationData:
     domain: str
     username: str | None = None
     password: str | None = None
-    template: str = "Default"
+    template: str = DEFAULT_VIRTUALMIN_TEMPLATE
     server: Any | None = None  # VirtualminServer
 
 
@@ -277,7 +287,7 @@ class VirtualminProvisioningService:
                 logger.error(f"❌ [VirtualminService] Failed to create account {domain}: {error_msg}")
 
                 # Update account status
-                account.status = "error"
+                account.status = "error"  # fsm-bypass: CharField status
                 account.status_message = error_msg
                 account.save(update_fields=["status", "status_message", "updated_at"])
 
@@ -305,18 +315,25 @@ class VirtualminProvisioningService:
         (`_execute_domain_creation`) against the existing account: it rotates to a fresh
         password (the old one is unrecoverable after a server loss), optionally retargets
         the server, resets the account to `provisioning`, and drives a new provisioning job.
+
+        The target server is only staged on the instance while the domain is created; it is stored
+        (with the account turning active, in one transaction) once the create is verified. A failed
+        create leaves the stored server, and the caller's instance, on the node that held the domain.
         """
+        previous_server = account.server
+        committed = False
         try:
             # account.server is a non-nullable FK, so this is always a real server.
-            server = target_server or account.server
+            server = target_server or previous_server
 
             with transaction.atomic():
                 # Rotate password — the pre-loss secret cannot be recovered.
                 account.set_password(self._generate_secure_password())  # nosemgrep: unvalidated-password
-                account.server = server
+                account.server = server  # staged: not in update_fields below
+                # fsm-bypass: CharField status
                 account.status = "provisioning"
                 account.status_message = "Reprovisioning from PRAHO (disaster recovery)"
-                account.save(update_fields=["encrypted_password", "server", "status", "status_message", "updated_at"])
+                account.save(update_fields=["encrypted_password", "status", "status_message", "updated_at"])
 
                 job = VirtualminProvisioningJob(
                     operation="create_domain",
@@ -326,7 +343,7 @@ class VirtualminProvisioningService:
                         {
                             "domain": account.domain,
                             "username": account.virtualmin_username,
-                            "template": account.template_name or "Default",
+                            "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                             "recovery_seed": account.get_recovery_seed(),
                         }
                     ),
@@ -336,12 +353,14 @@ class VirtualminProvisioningService:
 
             provisioning_result = self._execute_domain_creation(account, job)
             if provisioning_result.is_ok():
+                # The create already stored the server with the active state, in its own transaction.
+                committed = True
                 logger.info(f"✅ [VirtualminService] Reprovisioned account {account.domain}")
                 return Ok(account)
 
             error_msg = provisioning_result.unwrap_err()
             logger.error(f"❌ [VirtualminService] Failed to reprovision {account.domain}: {error_msg}")
-            account.status = "error"
+            account.status = "error"  # fsm-bypass: CharField status
             account.status_message = error_msg
             account.save(update_fields=["status", "status_message", "updated_at"])
             return Err(error_msg, retriability=retriability_of(provisioning_result))
@@ -351,6 +370,9 @@ class VirtualminProvisioningService:
         except Exception as e:
             logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
+        finally:
+            if not committed:
+                account.server = previous_server
 
     def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
@@ -392,16 +414,17 @@ class VirtualminProvisioningService:
                 "user": account.virtualmin_username,
                 "pass": account.get_password(),
                 "template": account.template_name,
-                "comment": account.get_recovery_seed(),  # Store recovery seed
+                # The recovery seed, as the server description (8.x has no --comment).
+                "desc": account.get_recovery_seed(),
+                # Virtualmin 8.x enables no feature unless asked ("No virtual
+                # server features enabled"). PRAHO plans carry no feature list,
+                # so a server gets the node's default-on set, which the node
+                # playbook pins to unix dir web ssl logrotate mysql webmin.
+                "default-features": "",
             }
 
-            # Virtualmin expects disk quotas in KiB and bandwidth in bytes.
-            # Zero and the account's -1 bandwidth sentinel mean unlimited.
-            if account.disk_quota_mb is not None:
-                params["quota"] = str(account.disk_quota_mb * 1024)
-
-            if account.bandwidth_quota_mb is not None:
-                params["bandwidth"] = str(max(0, account.bandwidth_quota_mb) * 1024 * 1024)
+            # Disk in KiB and bandwidth in bytes; zero and the -1 sentinel mean unlimited (shared with recovery).
+            params.update(quota_parameters(account.disk_quota_mb, account.bandwidth_quota_mb))
 
             # Make API call
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
@@ -420,28 +443,36 @@ class VirtualminProvisioningService:
                     )
 
                     try:
-                        # Update account status
-                        account.status = "active"
-                        account.provisioned_at = timezone.now()
-                        account.save(update_fields=["status", "provisioned_at", "updated_at"])
+                        # One transaction: recovery reads an active account as "already counted",
+                        # so the account must never be active without the server's count raised.
+                        with transaction.atomic():
+                            # fsm-bypass: CharField status
+                            account.status = "active"
+                            account.provisioned_at = timezone.now()
+                            # "server" is stored here, with the active state: a reprovision stages its
+                            # target on the instance and only a verified create may persist it.
+                            account.save(update_fields=["status", "provisioned_at", "server", "updated_at"])
 
-                        # Update server stats (track for rollback)
-                        old_domain_count = account.server.current_domains
-                        VirtualminServer.objects.filter(pk=account.server_id).update(
-                            current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                        )
-                        account.server.refresh_from_db(fields=["current_domains"])
+                            # Update server stats (track for rollback)
+                            old_domain_count = account.server.current_domains
+                            VirtualminServer.objects.filter(pk=account.server_id).update(
+                                current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                            )
+                            account.server.refresh_from_db(fields=["current_domains"])
 
-                        rollback_operations.append(
-                            {
-                                "operation": "revert_server_stats",
-                                "params": {"domain_count": old_domain_count},
-                                "description": f"Revert server domain count to {old_domain_count}",
-                            }
-                        )
+                            # Recorded for a later rollback of the completed job only. If this block
+                            # fails, the transaction has already undone the increment, so the error
+                            # path below must not revert it a second time.
+                            completed_rollback = [
+                                *rollback_operations,
+                                {
+                                    "operation": "revert_server_stats",
+                                    "params": {"domain_count": old_domain_count},
+                                    "description": f"Revert server domain count to {old_domain_count}",
+                                },
+                            ]
 
-                        # Mark job as completed
-                        job.mark_completed(response.data, rollback_operations)
+                            job.mark_completed(response.data, completed_rollback)
 
                         logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
                         return Ok(response.data)
@@ -749,6 +780,7 @@ class VirtualminProvisioningService:
                 logger.error(f"🚨 [VirtualminService] Rollback failed for {account.domain}")
 
             restored = rollback_status == "success" and previous_status is not None
+            # fsm-bypass: CharField status
             account.status = previous_status if restored and previous_status is not None else "error"
             account.status_message = (
                 previous_status_message if restored else str(_("Provisioning failed - rollback executed"))
@@ -848,7 +880,7 @@ class VirtualminProvisioningService:
 
                     try:
                         with transaction.atomic():
-                            account.status = "suspended"
+                            account.status = "suspended"  # fsm-bypass: CharField status
                             account.status_message = reason
                             account.save(update_fields=["status", "status_message", "updated_at"])
                             job.mark_completed(response.data)
@@ -985,6 +1017,7 @@ class VirtualminProvisioningService:
 
                     try:
                         with transaction.atomic():
+                            # fsm-bypass: CharField status
                             account.status = "active"
                             account.status_message = ""
                             account.save(update_fields=["status", "status_message", "updated_at"])
@@ -1036,7 +1069,33 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(  # Complexity: multi-step business logic  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
+    @staticmethod
+    def _delete_refusal(account: VirtualminAccount) -> Result[bool, str] | None:
+        """The deletion preconditions that depend only on the account row, or None to proceed.
+
+        Evaluated twice: cheaply before the idempotency key is taken, and again on the
+        row-locked account, so a status change in between cannot slip past.
+        """
+        # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
+        if account.protected_from_deletion:
+            error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+
+        # Idempotency check - already terminated
+        if account.status == "terminated":
+            logger.info(f"⏭️ [VirtualminService] Account {account.domain} already terminated (idempotent)")
+            return Ok(True)
+
+        # Additional safety check - only allow deletion of terminated/error accounts
+        # Note: We check for 'error' status separately since terminated is handled above
+        if account.status not in ["error"]:
+            error_msg = f"Account {account.domain} must be terminated or in error state before deletion (current: {account.status})"
+            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
+            return Err(error_msg)
+        return None
+
+    def delete_account(  # Complexity: multi-step business logic  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -1060,23 +1119,9 @@ class VirtualminProvisioningService:
             logger.info("✅ [VirtualminService] Migration lock blocks deletion: %s", account.pk)
             return Err("Account has an active migration")
 
-        # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
-        if account.protected_from_deletion:
-            error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
-            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
-            return Err(error_msg)
-
-        # Idempotency check - already terminated
-        if account.status == "terminated":
-            logger.info(f"⏭️ [VirtualminService] Account {account.domain} already terminated (idempotent)")
-            return Ok(True)
-
-        # Additional safety check - only allow deletion of terminated/error accounts
-        # Note: We check for 'error' status separately since terminated is handled above
-        if account.status not in ["error"]:
-            error_msg = f"Account {account.domain} must be terminated or in error state before deletion (current: {account.status})"
-            logger.warning(f"🛡️ [VirtualminService] {error_msg}")
-            return Err(error_msg)
+        refusal = self._delete_refusal(account)
+        if refusal is not None:
+            return refusal
 
         idempotency_key: str | None = None
         try:
@@ -1095,19 +1140,34 @@ class VirtualminProvisioningService:
                     logger.warning(f"⚠️ [VirtualminService] Delete operation already in progress for {account.domain}")
                     return Err("Operation already in progress")
 
-            gateway = self._get_gateway(account.server)
+            # Admission joins the account exclusion: the row lock serialises it against
+            # backup/restore/migration admission, and the job row is created inside the
+            # same transaction so no competing operation can slip in before it exists.
+            job: VirtualminProvisioningJob | None = None
+            with transaction.atomic():
+                VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+                account.refresh_from_db()  # decisions below use the locked, current row
+                admission_refusal: Result[bool, str] | None
+                if account_has_active_operation(account):
+                    admission_refusal = Err("Account has an active migration or backup/restore/delete operation")
+                else:
+                    admission_refusal = self._delete_refusal(account)
+                if admission_refusal is None:
+                    invalidate_chain(account)  # the domain and its snapshot are about to go
+                    job = VirtualminProvisioningJob(
+                        operation="delete_domain",
+                        server=account.server,
+                        account=account,
+                        parameters=self._job_parameters({"domain": account.domain}),
+                        correlation_id=f"delete_domain_{account.id}",
+                    )
+                    job.save()
+            if admission_refusal is not None or job is None:
+                _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
+                return admission_refusal if admission_refusal is not None else Err("Delete admission failed")
 
-            # Create provisioning job
-            job = VirtualminProvisioningJob(
-                operation="delete_domain",
-                server=account.server,
-                account=account,
-                parameters=self._job_parameters({"domain": account.domain}),
-                correlation_id=f"delete_domain_{account.id}",
-            )
-            job.save()
+            gateway = self._get_gateway(account.server)
             job.mark_started()
-            stats_decremented = 0
 
             # Make API call
             result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
@@ -1117,19 +1177,20 @@ class VirtualminProvisioningService:
 
                 if response.success:
                     try:
-                        # Update server stats (relative, lost-update safe; the
-                        # rowcount records whether a decrement actually applied
-                        # so rollback never invents usage)
-                        stats_decremented = VirtualminServer.objects.filter(
-                            pk=account.server_id, current_domains__gt=0
-                        ).update(current_domains=models.F("current_domains") - 1, updated_at=timezone.now())
-                        account.server.refresh_from_db(fields=["current_domains"])
+                        # One transaction: the count, the terminated status and the job move
+                        # together, so a crash between them can never leave the domain uncounted
+                        # while the account still looks live for a retry to decrement again.
+                        with transaction.atomic():
+                            VirtualminServer.objects.filter(pk=account.server_id, current_domains__gt=0).update(
+                                current_domains=models.F("current_domains") - 1, updated_at=timezone.now()
+                            )
+                            account.server.refresh_from_db(fields=["current_domains"])
 
-                        # Mark account as terminated (don't delete for audit trail)
-                        account.status = "terminated"
-                        account.save(update_fields=["status", "updated_at"])
+                            # Mark account as terminated (don't delete for audit trail)
+                            account.status = "terminated"  # fsm-bypass: CharField status
+                            account.save(update_fields=["status", "updated_at"])
 
-                        job.mark_completed(response.data)
+                            job.mark_completed(response.data)
 
                         # Mark idempotency as complete
                         IdempotencyManager.complete(idempotency_key, {"success": True})
@@ -1167,19 +1228,6 @@ class VirtualminProvisioningService:
                         )
                         _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
 
-                        # Try to at least revert server stats — but only if this
-                        # operation's decrement actually applied, or the +1
-                        # would invent capacity usage out of nothing
-                        try:
-                            if stats_decremented:
-                                VirtualminServer.objects.filter(pk=account.server_id).update(
-                                    current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                                )
-                                account.server.refresh_from_db(fields=["current_domains"])
-                            logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
-                        except Exception as revert_error:
-                            logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
-
                         return Err(
                             f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}"
                         )
@@ -1187,14 +1235,14 @@ class VirtualminProvisioningService:
                 else:
                     error_msg = response.data.get("error", "Deletion failed")
                     retriability = classify_virtualmin_application_error(response)
-                    job.mark_failed(error_msg, response.data, retriability=retriability)
+                    job.settle_failure(error_msg, response.data, retriability=retriability)
                     _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                     return Err(error_msg, retriability=retriability)
 
             else:
                 error = result.unwrap_err()
                 error_msg = str(error)
-                job.mark_failed(error_msg, retriability=retriability_of(result))
+                job.settle_failure(error_msg, retriability=retriability_of(result))
                 _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                 return Err(error_msg, retriability=retriability_of(result))
 
@@ -1259,6 +1307,7 @@ class VirtualminProvisioningService:
             # original create succeeded past the response. Finalize in place.
             previously_active = account.status == "active"
             with transaction.atomic():
+                # fsm-bypass: CharField status
                 account.status = "active"
                 account.status_message = ""
                 if account.provisioned_at is None:
@@ -1280,6 +1329,26 @@ class VirtualminProvisioningService:
             return Err(creation_result.unwrap_err())
         return Ok(True)
 
+    @staticmethod
+    def _lifecycle_exclusion_refusal(account: VirtualminAccount, job: VirtualminProvisioningJob) -> Err[str] | None:
+        """A retry is an admission like any other.
+
+        The account row lock serialises it against backup/restore/delete admission, and
+        only ANOTHER active operation refuses it (the retried job is itself the account's
+        operation). Refused, the job returns to the retry pool instead of staying running.
+        """
+        with transaction.atomic():
+            VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            busy = account_has_active_operation(account, ignore_job_id=job.pk)
+            if not busy and job.operation == "delete_domain":
+                invalidate_chain(account)
+        if not busy:
+            return None
+        logger.info("✅ [VirtualminService] Active operation blocks lifecycle retry: %s", account.pk)
+        message = "Account has an active migration or backup/restore/delete operation"
+        job.mark_failed(message, retriability=Retriability.RETRIABLE)
+        return Err(message, retriability=Retriability.RETRIABLE)
+
     def _execute_lifecycle_operation(  # Distinct guard exits: migration lock + per-operation outcomes  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
@@ -1287,6 +1356,9 @@ class VirtualminProvisioningService:
         if account_has_active_migration(account):
             logger.info("✅ [VirtualminService] Migration lock blocks lifecycle retry: %s", account.pk)
             return Err("Account has an active migration")
+        exclusion = self._lifecycle_exclusion_refusal(account, job)
+        if exclusion is not None:
+            return exclusion
         operations = {
             "suspend_domain": ("disable-domain", "suspended"),
             "unsuspend_domain": ("enable-domain", "active"),
@@ -1334,18 +1406,19 @@ class VirtualminProvisioningService:
             error_msg = str(result.unwrap_err())
             # Thread the gateway's retriability so a RETRIABLE failure during a
             # retry keeps next_retry_at armed instead of stranding the job.
-            job.mark_failed(error_msg, retriability=retriability_of(result))
+            job.settle_failure(error_msg, retriability=retriability_of(result))
             return Err(error_msg, retriability=retriability_of(result))
 
         response = result.unwrap()
         if not response.success:
             error_msg = response.data.get("error", f"{program} failed")
             retriability = classify_virtualmin_application_error(response)
-            job.mark_failed(error_msg, response.data, retriability=retriability)
+            job.settle_failure(error_msg, response.data, retriability=retriability)
             return Err(error_msg, retriability=retriability)
 
         previous_status = account.status
         with transaction.atomic():
+            # fsm-bypass: CharField status
             account.status = target_status
             reason = (job.parameters or {}).get("reason", "")
             account.status_message = reason
@@ -1538,7 +1611,9 @@ class VirtualminServerManagementService:
                 server.save(update_fields=update_fields)
                 recovered = VirtualminServer.objects.filter(
                     pk=server.pk, status="failed", failed_by_health_check=True
-                ).update(status="active", failed_by_health_check=False, updated_at=timezone.now())
+                ).update(  # fsm-bypass: CharField status
+                    status="active", failed_by_health_check=False, updated_at=timezone.now()
+                )
                 if recovered:
                     server.refresh_from_db()
                     logger.info(f"✅ [ServerManagement] Auto-recovered {server.hostname} to active")
@@ -1666,6 +1741,11 @@ class VirtualminBackupManagementService:
             # Use default config if none provided
             if config is None:
                 config = BackupConfig()
+            role_error = config.chain_role_error()
+            if role_error is not None:
+                return Err(role_error)
+            if config.chain_role != CHAIN_ROLE_STANDALONE and not self.incremental_backups_enabled():
+                return Err("Differential backups are disabled (provisioning.incremental_backups_enabled)")
 
             parameters = {
                 "backup_type": config.backup_type,
@@ -1673,6 +1753,7 @@ class VirtualminBackupManagementService:
                 "include_databases": config.include_databases,
                 "include_files": config.include_files,
                 "include_ssl": config.include_ssl,
+                "chain_role": config.chain_role,
                 "initiated_by": initiated_by,
             }
             return self._admit_job(
@@ -1681,12 +1762,39 @@ class VirtualminBackupManagementService:
                 parameters=parameters,
                 task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_backup",
                 execute_inline=execute_inline,
+                source_bound=True,
             )
         except Exception as e:
             logger.error(f"Backup job creation failed: {e}")
             return Err(f"Backup job failed: {e!s}")
 
-    def _admit_job(  # Distinct admission refusals
+    @staticmethod
+    def incremental_backups_enabled() -> bool:
+        """Whether base and differential backups may be created (provisioning.incremental_backups_enabled)."""
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
+
+        return SettingsService.get_boolean_setting("provisioning.incremental_backups_enabled", False)
+
+    def take_base_backup(
+        self, account: VirtualminAccount, *, initiated_by: str = "system", execute_inline: bool = False
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Start a new differential chain: a full backup that resets the node's snapshot."""
+        return self._take_chain_backup(account, CHAIN_ROLE_BASE, initiated_by, execute_inline)
+
+    def take_differential_backup(
+        self, account: VirtualminAccount, *, initiated_by: str = "system", execute_inline: bool = False
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Back up only what changed since the account's live base."""
+        return self._take_chain_backup(account, CHAIN_ROLE_DIFFERENTIAL, initiated_by, execute_inline)
+
+    def _take_chain_backup(
+        self, account: VirtualminAccount, role: str, initiated_by: str, execute_inline: bool
+    ) -> Result[VirtualminProvisioningJob, str]:
+        return self.create_backup_job(
+            account, BackupConfig(chain_role=role), initiated_by=initiated_by, execute_inline=execute_inline
+        )
+
+    def _admit_job(  # noqa: PLR0911, PLR0913  # Distinct admission refusals + execution-context seams
         self,
         account: VirtualminAccount,
         *,
@@ -1694,8 +1802,15 @@ class VirtualminBackupManagementService:
         parameters: dict[str, Any],
         task_path: str,
         execute_inline: bool,
+        source_bound: bool,
+        task_budget: int | None = None,
     ) -> Result[VirtualminProvisioningJob, str]:
         """Durable admission: account lock + exclusion + pending row + queued task.
+
+        ``source_bound`` jobs (backups) run where the account lives: the node comes
+        from the LOCKED account row, and admission refuses when the account moved
+        since this service was built. A restore names its target node explicitly
+        (``self.server``), so it is not source-bound.
 
         The job row and its queue message commit in one transaction (the ORM
         broker shares the business DB); sync=False keeps django-q's sync mode
@@ -1707,28 +1822,41 @@ class VirtualminBackupManagementService:
 
         from .spool import estimated_transfer_bytes  # noqa: PLC0415  # Circular
         from .virtualmin_backup_service import backup_task_timeout  # noqa: PLC0415  # Circular
-        from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
         estimated = estimated_transfer_bytes(account.current_disk_usage_mb or 0)
-        budget = backup_task_timeout(estimated)
+        budget = task_budget or backup_task_timeout(
+            estimated, chain=parameters.get("chain_role", CHAIN_ROLE_STANDALONE) != CHAIN_ROLE_STANDALONE
+        )
         retry_window = int(str(settings.Q_CLUSTER.get("retry", 0)))
         if budget + 60 >= retry_window:
             return Err(
                 f"Task budget {budget}s does not fit under the broker visibility timeout {retry_window}s; "
                 "raise Q_CLUSTER retry or provisioning.backup_min_transfer_mib_s"
             )
-        if execute_inline and (connection.in_atomic_block or not transaction.get_autocommit()):
+        if execute_inline and not is_outside_transaction():
             return Err("Inline execution requires autocommit; run outside any transaction")
 
         parameters = {**parameters, "estimated_bytes": estimated, "task_budget_seconds": budget}
         with transaction.atomic():
+            # Lock only the account row: a select_related join would also lock the server row
+            # (PostgreSQL locks joined rows), out of order with migration admission.
             locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            if source_bound and locked.server_id != self.server.pk:
+                return Err("Account moved to another server since this request began; retry")
             if account_has_active_operation(locked):
                 return Err("Account already has an active migration or backup/restore operation")
+            role = str(parameters.get("chain_role", ROLE_STANDALONE))
+            if operation == "restore_domain":
+                invalidate_chain(locked)  # a restore deletes the node's snapshot (contract Q8)
+            elif role != ROLE_STANDALONE:
+                pins = admit_chain_role(locked, role)
+                if pins.is_err():
+                    return Err(pins.unwrap_err())
+                parameters = {**parameters, **pins.unwrap()}
             job = VirtualminProvisioningJob.objects.create(
                 operation=operation,
                 account=locked,
-                server=self.server,
+                server=locked.server if source_bound else self.server,
                 parameters=parameters,
                 status="pending",
             )
@@ -1744,6 +1872,90 @@ class VirtualminBackupManagementService:
                 return Err(f"{operation} failed: {job.status_message or job.status}")
         logger.info("✅ [BackupJobs] Admitted %s job %s (budget %ss)", operation, job.pk, budget)
         return Ok(job)
+
+    def create_pair_restore_job(  # noqa: PLR0913  # Pair identity, target, actor and execution seams
+        self,
+        account: VirtualminAccount,
+        base_backup_id: str,
+        differential_backup_id: str,
+        target_server: VirtualminServer | None = None,
+        initiated_by: str = "system",
+        *,
+        force_restore: bool = False,
+        execute_inline: bool = False,
+        step_hold_seconds: int = 0,
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Admit a pair restore: a base and its differential, restored as one workflow.
+
+        Refuses early what the workflow would refuse later (exact lineage, from the manifests), so
+        no job is created for a pair that cannot be restored. It follows
+        ``provisioning.incremental_backups_enabled`` like creating a base or a differential. The budget covers both archives and
+        every stage of the workflow, and is checked against the broker visibility window by
+        ``_admit_job`` like any other job. A pair restore always overwrites the live domain, so
+        the caller must say so (``force_restore``).
+        """
+        from .spool import estimated_transfer_bytes  # noqa: PLC0415  # Circular
+        from .virtualmin_pair_restore import (  # noqa: PLC0415  # Circular
+            RESTORE_MODE_PAIR,
+            pair_lineage_refusal,
+            pair_restore_task_timeout,
+        )
+
+        if not self.incremental_backups_enabled():
+            # Differential backups are one feature: a pair restore follows the flag, like creation, in
+            # the staff page and the CLI alike (ADR-0059).
+            return Err("Differential backups are disabled (provisioning.incremental_backups_enabled)")
+        if not force_restore:
+            return Err("A pair restore overwrites the live domain; it must be confirmed explicitly")
+        try:
+            target_server = target_server or self.server
+            backups = VirtualminBackupService(target_server)
+            manifests: dict[str, dict[str, Any]] = {}
+            for label, backup_id in (("base", base_backup_id), ("differential", differential_backup_id)):
+                read = backups.read_manifest(backup_id)
+                if read.is_err():
+                    return Err(f"The {label} backup could not be read: {read.unwrap_err()}")
+                manifests[label] = read.unwrap()
+            refusal = pair_lineage_refusal(
+                manifests["base"], manifests["differential"], service_id=account.service_id, domain=account.domain
+            )
+            if refusal is not None:
+                return Err(refusal)
+            sizes = [int(manifests[label].get("file_size_bytes") or 0) for label in ("base", "differential")]
+            budget = pair_restore_task_timeout(
+                estimated_transfer_bytes(account.current_disk_usage_mb or 0), sizes[0], sizes[1]
+            )
+            parameters = {
+                "restore_mode": RESTORE_MODE_PAIR,
+                "base_backup_id": base_backup_id,
+                "differential_backup_id": differential_backup_id,
+                "pair_token": str(uuid.uuid4()),
+                "pair_step_hold_seconds": step_hold_seconds,
+                "restore_email": True,
+                "restore_databases": True,
+                "restore_files": True,
+                "restore_ssl": True,
+                "force_restore": True,
+                "target_server_id": str(target_server.id),
+                "initiated_by": initiated_by,
+            }
+            original_server = self.server
+            self.server = target_server
+            try:
+                return self._admit_job(
+                    account,
+                    operation="restore_domain",
+                    parameters=parameters,
+                    task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
+                    execute_inline=execute_inline,
+                    source_bound=False,
+                    task_budget=budget,
+                )
+            finally:
+                self.server = original_server
+        except Exception as e:
+            logger.error(f"Pair restore job creation failed: {e}")
+            return Err(f"Pair restore job failed: {e!s}")
 
     def create_restore_job(
         self,
@@ -1787,6 +1999,7 @@ class VirtualminBackupManagementService:
                     parameters=parameters,
                     task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
                     execute_inline=execute_inline,
+                    source_bound=False,
                 )
             finally:
                 self.server = original_server

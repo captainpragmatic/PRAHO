@@ -49,6 +49,8 @@ EFACTURA_POLICY = OutboundPolicy(
     allowed_domains=frozenset({"anaf.ro", "mfinante.gov.ro"}),
     timeout_seconds=30.0,
     max_retries=0,  # Retries handled by _request_with_retry
+    # A connection reset can arrive after the upload body was sent; replaying it submits twice.
+    retry_connection_errors=False,
 )
 
 # Maximum Retry-After sleep to prevent unbounded waits

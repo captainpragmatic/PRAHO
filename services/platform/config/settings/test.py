@@ -46,6 +46,8 @@ test_middleware = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.common.localisation_middleware.LocalisationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # Kept in tests: second-factor views rely on it to answer a counter-store failure with 503.
+    "apps.common.middleware.StoreUnavailableMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -179,7 +181,7 @@ TESTING = True
 configure_rate_limiting(globals(), enabled=False)
 
 # Disable DRF throttling in tests to prevent 429s from rapid API calls
-REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
 
 # ===============================================================================
 # ENCRYPTION (Test AES-256-GCM key — URL-safe base64 of 32 random bytes)

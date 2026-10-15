@@ -413,6 +413,11 @@ TIMESTAMP
   to `/api/users/register/confirm/` and `/api/users/register/pending/` (which shows a link's
   holder what confirming would create). Both require HMAC authentication and are charged to
   the middleware's authentication buckets, like login and password reset.
+- `MFACredentialThrottle` (`mfa_credential`, `15/hour`) charges each person for every password
+  or second-factor check through the Portal, before the view runs, through
+  `fixed_window_limited`. Authentication accepts a user id only in the spelling the HMAC
+  middleware counts and only for the person it counted, so a body naming two users, or an id
+  spelled `"+7"`, is refused rather than going uncounted.
 - Forwarded-IP limits accept only a valid IP string in an HMAC-authenticated body.
   Missing or malformed IPs skip that limit without falling back to the transport IP.
 
@@ -448,6 +453,7 @@ defaults below are `DEFAULT_THROTTLE_RATES`; three can be overridden from the en
 | `RegistrationClientIPThrottle` | `auth_register_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/customers/register/` |
 | `RegistrationConfirmClientIPThrottle` | `auth_register_confirm_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/users/register/pending/`, `/api/users/register/confirm/` |
 | `PublicLookupClientIPThrottle` | `public_lookup_ip` | `10/minute` | End-user IP in the Portal's signed body | `/api/customers/company-lookup/` (ANAF register; also a global `20/m` cap on calls to ANAF), `/api/users/register/prefill/` |
+| `MFACredentialThrottle` | `mfa_credential` | `15/hour` | The person the HMAC middleware read from the signed body, in the database counter store; not applied to other traffic | 2FA enrolment verify, disable and backup-code regeneration, and password change |
 | `OrderCreateThrottle` | `order_create` | `20/min` | Portal for HMAC traffic, else user, else client IP | Order creation |
 | `OrderCalculateThrottle` | `order_calculate` | `60/min` | Portal for HMAC traffic, else user, else client IP | Cart totals and preflight |
 | `OrderListThrottle` | `order_list` | `200/min` | Portal for HMAC traffic, else user, else client IP | Order list, detail and confirmation |

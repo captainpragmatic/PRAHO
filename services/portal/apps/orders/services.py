@@ -525,6 +525,11 @@ class GDPRCompliantCartSession:
 
     def set_warnings(self, warnings: list[dict[str, Any]]) -> None:
         """Set cart warnings (price changes, etc.)"""
+        # Every totals and preflight request calls this. Saving unchanged warnings would write the
+        # whole cart this request loaded over a concurrent removal or quantity change (ADR-0055
+        # merges per key, and the cart is one value), so only a real change saves.
+        if warnings == self.cart.get("warnings", []):
+            return
         self.cart["warnings"] = warnings
         self._save_cart()
 

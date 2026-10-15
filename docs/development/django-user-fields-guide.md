@@ -1,186 +1,125 @@
-# Django User Fields: Complete Guide
+# User Fields and Authorization
 
-## **🔍 Django Built-in User Fields Explained**
+PRAHO's Platform uses an email-based `User` model derived from Django's `AbstractUser`.
+Staff privileges and customer-company membership are separate. A person can have both.
 
-Django's `AbstractUser` comes with several built-in permission fields that serve specific framework purposes:
+The source of truth is [User and UserManager](../../services/platform/apps/users/models.py)
+and the [authorization helpers](../../services/platform/apps/common/decorators.py).
+[ADR-0024](../ADRs/ADR-0024-user-role-clarification.md) preserves an unimplemented proposal:
+neither `system_role` nor `admin_role` is a current field.
 
-| Field | Purpose | Scope | When True | Typical Usage |
-|-------|---------|-------|-----------|---------------|
-| **`is_active`** | Account enabled | User login | User can log in | Account suspension |
-| **`is_staff`** | Django admin access | Django admin panel | Can access `/admin/` | Technical admin interface |
-| **`is_superuser`** | Django god mode | All Django permissions | Bypasses ALL permission checks | Emergency access |
+## Django Flags and the Staff Role
 
-## **🎯 Detailed Field Explanations**
+| Field | Meaning in PRAHO |
+|---|---|
+| `is_active` | Whether Django's authentication backend accepts the account. The configured backend also rejects an inactive user when loading a session. |
+| `is_staff` | A Django flag that also makes PRAHO's broad `is_staff_user` check true. It does not grant a specific business role. |
+| `is_superuser` | Used by Django permission checks and explicitly accepted by PRAHO's administrative and financial helpers. It is separate from `is_staff`. |
+| `staff_role` | Internal business role: `admin`, `support`, `billing`, `manager`, or `""` for no staff role. |
 
-### **`is_active` - Account Status**
-```python
-# Purpose: Can the user log in?
-user.is_active = True   # ✅ User can log in
-user.is_active = False  # ❌ User cannot log in (suspended/deactivated)
+Django admin is disabled in [Platform URL configuration](../../services/platform/config/urls.py).
+There is no `/admin/` interface to unlock by setting `is_staff`; staff use PRAHO's own views.
 
-# Common usage:
-if not user.is_active:
-    return "Account is deactivated"
-```
+`UserManager.create_user()` defaults a missing or `None` staff role to `""` and rejects
+unsupported values such as `"customer"`. The `user_staff_role_valid` database constraint
+also rejects unsupported stored values, including writes that bypass the manager.
+The field is blankable, not nullable.
 
-### **`is_staff` - Django Admin Panel Access**
-```python
-# Purpose: Can access Django's /admin/ interface?
-user.is_staff = True   # ✅ Can access /admin/ URL
-user.is_staff = False  # ❌ Cannot access /admin/ URL
+`create_superuser()` defaults `is_staff=True`, `is_superuser=True` and `staff_role="admin"`.
+It requires both Django flags to be true and respects an explicitly supplied valid role.
+Assigning `is_superuser` directly does not automatically change the other fields.
 
-# Django automatically checks this:
-# /admin/ -> checks if user.is_staff == True
+## Staff Classification and Authorization
 
-# Common usage:
-@staff_member_required  # Django decorator that checks is_staff
-def admin_dashboard(request):
-    # Only is_staff=True users can access
-```
-
-### **`is_superuser` - Django God Mode**
-```python
-# Purpose: Has ALL Django permissions automatically?
-user.is_superuser = True   # ✅ Has EVERY permission in Django
-user.is_superuser = False  # ❌ Must have explicit permissions
-
-# Django behavior:
-if user.is_superuser:
-    # User has ALL permissions without checking Permission table
-    # Can do ANYTHING in Django admin
-    # Bypasses all permission checks
-```
-
-## **🏢 Our Business Logic Layer**
-
-Our custom `admin_role` field handles **business functionality** (not Django framework):
+The broad staff property is exactly:
 
 ```python
-class User(AbstractUser):
-    # Django framework fields (built-in)
-    # is_active = models.BooleanField(default=True)      # Account status
-    # is_staff = models.BooleanField(default=False)      # Django admin access
-    # is_superuser = models.BooleanField(default=False)  # Django god mode
-
-    # PRAHO business field (our custom)
-    admin_role = models.CharField(
-        max_length=20,
-        choices=[
-            ('admin', 'Administrator'),      # Business admin (not Django admin)
-            ('support', 'Support Agent'),    # Customer support
-            ('billing', 'Billing Staff'),    # Financial operations
-            ('manager', 'Manager'),          # Account management
-        ],
-        null=True,
-        blank=True
-    )
+bool(user.staff_role) or user.is_staff or user.is_superuser
 ```
 
-## **🎭 User Type Examples**
+It classifies a user; it does not test authentication, active status, or permission for
+every staff operation. For example, a support agent is staff but cannot issue a refund.
 
-### **1. Django Superuser (Emergency Access)**
-```python
-user.is_superuser = True   # ✅ Django god mode
-user.is_staff = True       # ✅ Auto-implied with superuser
-user.admin_role = 'admin'  # ✅ Also business admin
-# Can do ANYTHING in Django admin + business functions
+The following gates live in `apps.common.decorators`. They require authentication and
+then apply these rules; `is_superuser` is accepted by every role-specific gate listed.
+
+| Gate or helper | Role rule |
+|---|---|
+| `staff_required`, `staff_required_strict` | `user.is_staff_user` |
+| `admin_required` | `staff_role == "admin"` |
+| `billing_staff_required` | `admin`, `billing`, `manager` |
+| `billing_staff_api_required` | `can_manage_financial_data(user)`, delegating to `User.can_manage_financial_data`: `admin`, `billing`, `manager` |
+| `billing_configuration_required` | `admin`, `billing` |
+| `support_staff_required` | `admin`, `support`, `manager` |
+
+`admin_required` delegates to the shared `is_administrator()` predicate: superuser or
+`staff_role == "admin"`. The [user list and detail views](../../services/platform/apps/users/views.py)
+use the same rule, so support, billing and manager roles cannot browse all user accounts.
+
+`staff_required` redirects an authenticated non-staff user to the dashboard with a message;
+`staff_required_strict` returns 403 instead. Both redirect anonymous users to login.
+`billing_staff_api_required` returns JSON 401 for an anonymous caller and JSON 403 for a
+caller without financial privileges, so API clients do not receive a login page.
+
+With both Django staff flags false, the current role outcomes are:
+
+| `staff_role` | `is_staff_user` | `can_manage_financial_data` | `admin_required` |
+|---|---|---|---|
+| `admin` | True | True | Allowed |
+| `support` | True | False | Refused |
+| `billing` | True | True | Refused |
+| `manager` | True | True | Refused |
+| `""` | False | False | Refused |
+
+A bare `is_staff=True` account with an empty role passes the broad staff check but fails
+the financial and admin gates. A regression guard checks that production creation sites
+supply a staff role or superuser status; do not use the Django flag alone to provision a
+new staff account.
+
+These are the shared gates, not a universal permission matrix. For example,
+`can_access_admin_functions()` allows admin and manager roles, while `admin_required`
+allows only admin or superuser. [Infrastructure permissions](../../services/platform/apps/infrastructure/permissions.py)
+also use explicit Django permission codes for deployment and destructive operations.
+A role name does not automatically assign those Django permissions.
+
+## Customer Membership
+
+Customer roles live on `CustomerMembership.role`: `owner`, `billing`, `tech`, and `viewer`.
+They apply to one customer organization; they do not grant an internal `staff_role`.
+
+`user.is_customer_user` reports whether customer membership rows exist. It does not select
+a customer or prove that a membership is active or permits a particular operation.
+`customer_or_staff_required` is similarly a broad entry gate; the view must enforce the
+appropriate customer scope and role. Signed Portal APIs must validate the authenticated
+user's active membership in the customer named by the request.
+
+A staff account can also hold customer memberships. Do not assume that staff and customer
+users are mutually exclusive, or use an account-wide membership boolean as tenant authorization.
+
+## Using the Checks
+
+Use the existing decorator or domain permission helper at the server boundary. Templates can
+use the corresponding property to offer the same actions:
+
+```django
+{% load i18n %}
+{% if user.can_manage_financial_data %}
+  <span>{% trans "Financial operations available" %}</span>
+{% endif %}
 ```
 
-### **2. Business Administrator**
-```python
-user.is_superuser = False  # ❌ Not Django god
-user.is_staff = True       # ✅ Can access Django admin
-user.admin_role = 'admin'  # ✅ Business admin role
-# Can access Django admin + manage customers/billing
-```
+A hidden control is presentation only; the endpoint still needs its authorization gate.
+Account lockout, object ownership and tenant checks remain separate controls.
+When `users.mfa_required_for_staff` is enabled, the [staff MFA policy](../../services/platform/apps/users/mfa.py)
+and [enrolment middleware](../../services/platform/apps/common/middleware.py) require an
+unenrolled staff session to set up a second factor. Superuser status does not bypass that policy.
 
-### **3. Support Agent**
-```python
-user.is_superuser = False    # ❌ Not Django god
-user.is_staff = True         # ✅ Can access Django admin
-user.admin_role = 'support'  # ✅ Support role only
-# Can access Django admin + handle support tickets
-```
+## Existing Regression Coverage
 
-### **4. Customer User**
-```python
-user.is_superuser = False  # ❌ Not Django god
-user.is_staff = False      # ❌ Cannot access Django admin
-user.admin_role = None     # ❌ No business admin role
-# Customer memberships exist -> customer dashboard only
-```
-
-### **5. Deactivated User**
-```python
-user.is_active = False     # ❌ Cannot log in
-# All other fields irrelevant - user cannot access anything
-```
-
-## **🚦 Permission Flow Examples**
-
-### **Accessing Django Admin Panel (`/admin/`)**
-```python
-# Django's built-in check:
-if user.is_authenticated and user.is_active and user.is_staff:
-    # Allow access to /admin/
-else:
-    # Redirect to login or show 403
-```
-
-### **Accessing Business Admin Features**
-```python
-# Our custom business logic:
-if user.admin_role in ['admin', 'support', 'billing', 'manager']:
-    # Allow access to business admin features
-elif user.is_customer_user:
-    # Allow access to customer dashboard
-else:
-    # No access (orphaned user - should not exist)
-```
-
-### **Checking Specific Permissions**
-```python
-# Django permissions (for Django admin)
-if user.has_perm('customers.change_customer'):
-    # Can modify customers in Django admin
-
-# Business permissions (our logic)
-if user.admin_role == 'billing':
-    # Can manage invoices and payments
-elif user.admin_role == 'support':
-    # Can handle support tickets
-```
-
-## **⚠️ Important Notes**
-
-### **Security Best Practices:**
-1. **`is_superuser=True`**: Use sparingly! Only for emergency access
-2. **`is_staff=True`**: Only for users who need Django admin access
-3. **`admin_role`**: Use for business function control
-4. **Regular Review**: Audit user permissions regularly
-
-### **Common Mistakes:**
-```python
-# ❌ WRONG: Using is_staff for business logic
-if user.is_staff:
-    # Show business admin menu
-
-# ✅ CORRECT: Using admin_role for business logic
-if user.admin_role:
-    # Show business admin menu
-
-# ❌ WRONG: Making everyone is_superuser
-user.is_superuser = True  # Dangerous!
-
-# ✅ CORRECT: Specific roles for specific purposes
-user.admin_role = 'support'  # Safe and specific
-```
-
-## **🎯 Summary**
-
-- **`is_active`**: Can user log in? (account status)
-- **`is_staff`**: Can user access Django admin? (technical admin)
-- **`is_superuser`**: Does user have ALL Django permissions? (emergency access)
-- **`admin_role`**: What business functions can user perform? (business admin)
-
-**Each field serves a specific purpose - don't mix Django framework permissions with business logic!**
+- [Staff classification and manager validation](../../services/platform/tests/users/test_staff_role_classification.py)
+  cover valid roles, Django-flag fallbacks, superuser defaults and the database constraint.
+- [Staff account creation guardrail](../../services/platform/tests/users/test_staff_account_creation_guardrail.py)
+  checks production creation sites for bare Django-staff accounts.
+- [Order security tests](../../services/platform/tests/orders/test_orders_security.py) exercise the
+  financial-role matrix; [refund authorization guardrails](../../services/platform/tests/billing/test_refund_authorization_guardrail.py)
+  require a financial gate on refund entry points.

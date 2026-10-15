@@ -424,6 +424,10 @@ def _log_dns_fallback(hostname: str, old_ip: str, new_ip: str) -> None:
         logger.error("🔥 [OutboundHTTP] Audit logging failed for DNS fallback: %s → %s", old_ip, new_ip, exc_info=True)
 
 
+# Methods the adapter may resend to a fresh address after a ConnectionError.
+_REPLAY_SAFE_METHODS: frozenset[str] = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 # ---------------------------------------------------------------------------
 # PinnedIPAdapter — forces connections to pre-validated IP addresses
 # ---------------------------------------------------------------------------
@@ -476,7 +480,10 @@ class PinnedIPAdapter(HTTPAdapter):
         cert: bytes | str | tuple[bytes | str, bytes | str] | None = None,
         proxies: Mapping[str, str] | None = None,
     ) -> requests.Response:
-        """Rewrite URL to pinned IP with DNS fallback on ConnectionError."""
+        """Rewrite URL to pinned IP with DNS fallback on ConnectionError.
+
+        The fallback resends the request, so it only runs for read-only methods.
+        """
         # Save original URL for potential retry
         original_url = request.url
         self._rewrite_url_to_ip(request, self._pinned_ip)
@@ -485,6 +492,10 @@ class PinnedIPAdapter(HTTPAdapter):
         except requests.ConnectionError:
             if not self._retry_connection_errors:
                 raise  # The request may have reached the server; do not replay mutations.
+            if (request.method or "").upper() not in _REPLAY_SAFE_METHODS:
+                # A reset can arrive after the body was sent, so a replay may repeat a write.
+                # This holds for every policy, whatever its retry flag says.
+                raise
             # Re-resolve DNS — _resolve_dns already validates IPs are public
             try:
                 fresh_ips = _resolve_dns(self._hostname, self._port)

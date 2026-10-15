@@ -53,6 +53,54 @@
       notify: Restart sshd
 
     # UFW firewall (backup to cloud firewall)
+    #
+    # SSH and Webmin (firewall_admin_tcp_ports) open only to the node admin
+    # allowlist (ADR-0060). The play fails closed: no allowlist, no firewall
+    # change at all, rather than opening them to everyone. It also refuses when
+    # the address this very connection comes from is not on the list, so a
+    # deploy can never lock Platform out, and it adds the allow rules before it
+    # removes the old any-source ones or sets the deny default.
+    - name: Refuse an empty node admin allowlist
+      ansible.builtin.assert:
+        that:
+          - node_admin_allowed_cidrs is defined
+          - node_admin_allowed_cidrs | length > 0
+        fail_msg: >-
+          infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
+          addresses and the admin networks before hardening a node.
+
+    - name: Require this connection's source in the allowlist
+      ansible.builtin.command:
+        argv: >-
+          {{ ['python3', '-c', allowlist_membership_check,
+              (ansible_env.SSH_CLIENT | default('')).split(' ') | first] + node_admin_allowed_cidrs }}
+      vars:
+        allowlist_membership_check: |
+          import ipaddress, sys
+          source, networks = sys.argv[1], sys.argv[2:]
+          address = ipaddress.ip_address(source)
+          if not any(address in ipaddress.ip_network(net) for net in networks):
+              sys.exit(f"this connection comes from {source}, outside {networks}; refusing to firewall it out")
+      changed_when: false
+
+    - name: Allow SSH and Webmin from the node admin allowlist
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.0 }}"
+        proto: tcp
+        from_ip: "{{ item.1 }}"
+      loop: "{{ firewall_admin_tcp_ports | product(node_admin_allowed_cidrs) | list }}"
+      notify: Enable ufw
+
+    # Earlier deploys opened these ports to everyone.
+    - name: Remove any-source SSH and Webmin rules
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+        delete: true
+      loop: "{{ firewall_admin_tcp_ports }}"
+
     - name: Configure UFW defaults
       community.general.ufw:
         default: deny
@@ -87,6 +135,13 @@
         port: "40000:40100"
         proto: tcp
       notify: Enable ufw
+
+    # A task, not only the handler: a handler fires only when a rule changed,
+    # so a firewall someone switched off with every rule already in place
+    # would otherwise stay off.
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
 
     # Automatic security updates
     - name: Configure unattended-upgrades

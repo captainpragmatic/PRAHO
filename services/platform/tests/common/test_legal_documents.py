@@ -1,4 +1,4 @@
-"""Legal documents the operator publishes: immutable releases, current by effective date (ADR-0058)."""
+"""Legal documents the operator publishes: immutable releases, current by effective date (ADR-0061)."""
 
 from __future__ import annotations
 

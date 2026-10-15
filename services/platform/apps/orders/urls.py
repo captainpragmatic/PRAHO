@@ -47,8 +47,6 @@ urlpatterns = [
     path("<uuid:pk>/duplicate/", views.order_duplicate, name="order_duplicate"),
     path("<uuid:pk>/convert-to-invoice/", views.order_to_invoice, name="order_to_invoice"),
     # Cart operations (HTMX powered)
-    path("cart/", views.cart_view, name="cart_view"),
-    path("cart/calculate/", views.cart_calculate, name="cart_calculate"),
     path("cart/update/", views.cart_update, name="cart_update"),
     path("cart/remove/", views.cart_remove, name="cart_remove"),
     # Reports and analytics

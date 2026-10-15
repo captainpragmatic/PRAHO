@@ -269,7 +269,7 @@ STATICFILES_DIRS: list[Path | tuple[str, Path]] = [
     REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components and the default brand pack
 ]
 # A deployment's brand folder (logo.svg, favicon.svg, brand.css) is served as static/brand/ ahead of
-# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0058).
+# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0061).
 if BRAND_DIR := os.environ.get("BRAND_DIR", "").strip():
     STATICFILES_DIRS.insert(0, ("brand", Path(BRAND_DIR)))
 STATIC_ROOT = BASE_DIR / "staticfiles"

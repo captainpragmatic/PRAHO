@@ -1,0 +1,19 @@
+{% load i18n ui_components %}
+{# Account actions that have a page or an endpoint; shared by the account page and its quick-actions partial (#689). #}
+{% url 'provisioning:virtualmin_account_migrate' account.id as migrate_url %}
+{% trans "Transfer to Another Server" as transfer_label %}{% button transfer_label href=migrate_url variant="secondary" icon="transfer" %}
+{% if account.is_active %}
+  <form method="post" action="{% url 'provisioning:virtualmin_account_suspend' account.id %}">
+    {% csrf_token %}
+    {% trans "Suspend Account" as suspend_label %}
+    {% trans "Suspend this hosting account? Its service is suspended, and its sites stop serving until it is activated again." as suspend_confirm %}
+    {% button suspend_label type="submit" variant="danger" icon="pause" class="w-full" data_action="confirm-submit" data_confirm=suspend_confirm %}
+  </form>
+{% else %}
+  <form method="post" action="{% url 'provisioning:virtualmin_account_activate' account.id %}">
+    {% csrf_token %}
+    {% trans "Activate Account" as activate_label %}
+    {% trans "Activate this hosting account? Its service becomes active again." as activate_confirm %}
+    {% button activate_label type="submit" variant="success" icon="play" class="w-full" data_action="confirm-submit" data_confirm=activate_confirm %}
+  </form>
+{% endif %}

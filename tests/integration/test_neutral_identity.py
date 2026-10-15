@@ -1,4 +1,4 @@
-"""PRAHO ships no deployment's identity (ADR-0058).
+"""PRAHO ships no deployment's identity (ADR-0061).
 
 A deployment brings its name, contacts and marks through its environment, settings and brand
 folder, so no tracked source, template, setting, script or document names one. Tests and

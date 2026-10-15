@@ -20,6 +20,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.products.models import Product
 from apps.settings.models import SystemSetting
+from apps.users.mfa import BackupCodeService
 from apps.users.models import CustomerMembership
 
 RESET_TASK = "apps.users.tasks.send_password_reset_email"
@@ -122,7 +123,7 @@ class E2EFixtureTests(TestCase):
         self.assertTrue(admin.two_factor_enabled and admin.is_superuser)
         self.assertTrue(pyotp.TOTP(fixture["admin_totp_secret"]).verify(pyotp.TOTP(admin.two_factor_secret).now()))
         self.assertEqual(len(fixture["admin_backup_codes"]), 8)
-        self.assertTrue(admin.verify_backup_code(fixture["admin_backup_codes"][-1]))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(admin, fixture["admin_backup_codes"][-1]))
         staff = User.objects.get(pk=fixture["staff_id"])
         self.assertEqual((staff.staff_role, staff.two_factor_enabled, staff.is_superuser), ("support", False, False))
         self.assertTrue(staff.check_password(fixture["password"]))

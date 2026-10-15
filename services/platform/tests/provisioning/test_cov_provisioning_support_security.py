@@ -87,7 +87,7 @@ class ProvisioningSecurityParameterTests(SimpleTestCase):
                 ProvisioningParametersValidator.validate_username(username)
 
     def test_template_default_normalization_and_rejections(self) -> None:
-        self.assertEqual(ProvisioningParametersValidator.validate_template(""), "Default")
+        self.assertEqual(ProvisioningParametersValidator.validate_template(""), "Default Settings")
         self.assertEqual(ProvisioningParametersValidator.validate_template("  Shared Hosting_2  "), "Shared Hosting_2")
         for template, error in (("x" * 51, "too long"), ("../Default", "invalid characters")):
             with self.subTest(template=template), self.assertRaisesMessage(ValidationError, error):

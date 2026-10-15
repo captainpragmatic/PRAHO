@@ -4,7 +4,7 @@ The mark: a geometric P (stem, top bar, bowl, bottom bar) with a signal dot insi
 in a 100 x 100 box. Every shape is a filled outline (no strokes, no live text), so the files
 render identically everywhere.
 
-Outputs, in PRAHO's default brand folder (shared/ui/static/brand/, ADR-0058):
+Outputs, in PRAHO's default brand folder (shared/ui/static/brand/, ADR-0061):
   logo.svg         light blue, for PRAHO's dark staff and customer screens
   logo-light.svg   blue, for light surfaces such as the README on a light theme
   favicon.svg      follows the browser's prefers-color-scheme

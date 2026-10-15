@@ -974,6 +974,25 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
         return cleaned_data
 
 
+class TOTPSetupForm(forms.Form):
+    """Confirming an authenticator: a 6-digit code from the app and the current password (#689).
+
+    The password stops a hijacked session enrolling its own app. Platform checks both; this
+    form only refuses a request that could not be right, so nothing is sent for it.
+    """
+
+    token = forms.RegexField(
+        regex=r"^\d{6}$",
+        label=_("Verification code"),
+        error_messages={"invalid": _("Enter the 6-digit code from your authenticator app.")},
+    )
+    password = forms.CharField(
+        label=_("Current password"),
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+    )
+
+
 class MFAReauthenticationForm(TwoFactorVerifyForm):
     """Step-up credentials for MFA removal and recovery-code regeneration."""
 

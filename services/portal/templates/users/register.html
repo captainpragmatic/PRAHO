@@ -27,15 +27,7 @@
       <form method="post" class="space-y-6">
         {% csrf_token %}
 
-        {# ── Messages ── #}
-        {% if messages %}
-        <div class="space-y-2">
-          {% for message in messages %}
-          {% alert message variant="danger" %}
-          {% endfor %}
-        </div>
-        {% endif %}
-
+        {# Messages arrive as the page's toasts; listing them here as well showed each twice (#689). #}
         {% form_error_summary form %}
 
         {# ── Step 1: Personal Information ── #}

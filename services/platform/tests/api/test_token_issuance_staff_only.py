@@ -28,7 +28,7 @@ from django.urls import NoReverseMatch, Resolver404, resolve, reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.users.mfa import TOTPService
+from apps.users.mfa import BackupCodeService, TOTPService
 from apps.users.models import APIToken, User
 
 PASSWORD = "correct-horse-battery-staple"  # test fixture, not a credential
@@ -92,7 +92,7 @@ class TokenIssuanceStaffOnlyTests(TestCase):
         self.assertEqual(self.post(customer.email, mfa_token=backup_code), REFUSED)
         customer.refresh_from_db()
         self.assertEqual(len(customer.backup_tokens), 8)
-        self.assertTrue(customer.verify_backup_code(backup_code))
+        self.assertTrue(BackupCodeService.verify_and_consume_code(customer, backup_code))
 
     def test_customer_refusal_is_audited_like_a_wrong_password(self) -> None:
         """Both refusals write one failed-login audit row, so neither does less work than the other."""

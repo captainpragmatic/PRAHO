@@ -1,4 +1,4 @@
-"""The operator's published legal documents, read from Platform and shown as published (ADR-0058).
+"""The operator's published legal documents, read from Platform and shown as published (ADR-0061).
 
 The release in force for a kind and language is cached for a minute; while Platform cannot answer,
 the last answer read stands in for up to an hour. A release read by its id never changes, so it is

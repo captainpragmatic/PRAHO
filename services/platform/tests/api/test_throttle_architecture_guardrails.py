@@ -15,7 +15,13 @@ from django.test import RequestFactory, SimpleTestCase, TestCase, override_setti
 from django.utils.module_loading import import_string
 from rest_framework.decorators import api_view, authentication_classes, throttle_classes
 from rest_framework.test import APIRequestFactory
-from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle, UserRateThrottle
+from rest_framework.throttling import (
+    AnonRateThrottle,
+    BaseThrottle,
+    ScopedRateThrottle,
+    SimpleRateThrottle,
+    UserRateThrottle,
+)
 from rest_framework.views import APIView
 
 from apps.api.core import throttling as core_throttling
@@ -73,6 +79,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             rate_limiting.ResetClientIPThrottle,
             rate_limiting.RegistrationClientIPThrottle,
             rate_limiting.RegistrationConfirmClientIPThrottle,
+            rate_limiting.MFACredentialThrottle,
         ]
 
         for throttle_cls in classes:
@@ -98,6 +105,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "auth_register_ip",
             "auth_register_confirm_ip",
             "public_lookup_ip",
+            "mfa_credential",
             "sustained",
 
             "api_burst",
@@ -601,21 +609,22 @@ REMOVED_THROTTLE_NAMES = (
     "ServiceRateThrottle",
     "EndpointThrottle",
 )
-EXPECTED_SCOPED_THROTTLE_COUNT = 19
+EXPECTED_SCOPED_THROTTLE_COUNT = 20
 
 
-def _scoped_throttle_classes() -> dict[str, type[SimpleRateThrottle]]:
+def _scoped_throttle_classes() -> dict[str, type[BaseThrottle]]:
     """Every concrete scoped throttle PRAHO defines, found the same way in any test run.
 
     `__subclasses__()` sees only classes whose modules are already imported, so the result would
     depend on which tests ran first. Importing the URLconf loads every view module, and with it
     every throttle a view can attach. The walk is recursive because most throttles sit two or
-    three levels below `SimpleRateThrottle`.
+    three levels below `SimpleRateThrottle`, and starts at `BaseThrottle` because a throttle
+    backed by the database counters (MFACredentialThrottle) is not a `SimpleRateThrottle`.
     """
     import_module(settings.ROOT_URLCONF)
     import_module("apps.common.performance.rate_limiting")
-    found: dict[str, type[SimpleRateThrottle]] = {}
-    pending: list[type[SimpleRateThrottle]] = [SimpleRateThrottle]
+    found: dict[str, type[BaseThrottle]] = {}
+    pending: list[type[BaseThrottle]] = [BaseThrottle]
     while pending:
         for subclass in pending.pop().__subclasses__():
             pending.append(subclass)

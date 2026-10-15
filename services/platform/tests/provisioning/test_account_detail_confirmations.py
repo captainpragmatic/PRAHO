@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from inspect import unwrap
 from pathlib import Path
@@ -93,6 +94,9 @@ process.stdout.write(JSON.stringify({initial, afterSwap, requests}));
 """
 
 
+ACCOUNT_ID = uuid.UUID("5b8f6c7e-0c1d-4e2f-9a3b-1c2d3e4f5a6b")  # the page builds account URLs from it
+
+
 class AccountDetailConfirmationTests(SimpleTestCase):
     def render_account(self, *, protected: bool, domain: str = "hosting.example.com") -> str:
         engine = Engine(
@@ -116,6 +120,7 @@ class AccountDetailConfirmationTests(SimpleTestCase):
                 Context(
                     {
                         "account": {
+                            "id": ACCOUNT_ID,
                             "domain": domain,
                             "protected_from_deletion": protected,
                             "can_be_deleted": not protected,

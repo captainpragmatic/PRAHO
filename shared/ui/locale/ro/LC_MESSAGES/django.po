@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PRAHO shared UI\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 19:27+0300\n"
+"POT-Creation-Date: 2026-10-15 21:10+0300\n"
 "PO-Revision-Date: 2026-10-06 00:00+0300\n"
 "Last-Translator: PRAHO contributors\n"
 "Language-Team: Romanian\n"
@@ -50,8 +50,7 @@ msgstr "Introduceți aici textul de confirmare..."
 
 #: templates/components/dangerous_action_modal.html:95
 #: templates/components/form_actions.html:24
-#: templates/components/form_actions.html:25
-#: templates/components/modal.html:70
+#: templates/components/form_actions.html:25 templates/components/modal.html:70
 msgid "Cancel"
 msgstr "Anulează"
 
@@ -95,7 +94,7 @@ msgid "Go to previous page"
 msgstr "Mergeți la pagina anterioară"
 
 #: templates/components/pagination.html:78
-#: templates/components/pagination.html:85 templates/components/table.html:150
+#: templates/components/pagination.html:85 templates/components/table.html:148
 msgid "Previous"
 msgstr "Anterior"
 
@@ -113,8 +112,7 @@ msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
 #: templates/components/pagination.html:201
-#: templates/components/pagination.html:208
-#: templates/components/table.html:158
+#: templates/components/pagination.html:208 templates/components/table.html:156
 msgid "Next"
 msgstr "Următorul"
 
@@ -141,37 +139,1141 @@ msgstr "(etapa curentă)"
 msgid "Back"
 msgstr "Înapoi"
 
-#: templates/components/table.html:47
+#: templates/components/table.html:45
 msgid "Actions"
 msgstr "Acțiuni"
 
-#: templates/components/table.html:117
+#: templates/components/table.html:115
 msgid "No data available"
 msgstr "Nu există date disponibile"
 
-#: templates/components/table.html:118
+#: templates/components/table.html:116
 msgid "No records have been added yet."
 msgstr "Nu au fost adăugate înregistrări încă."
 
-#: templates/components/table.html:167
+#: templates/components/table.html:165
 msgid "Showing"
 msgstr "Se afișează"
 
-#: templates/components/table.html:169
+#: templates/components/table.html:167
 msgid "to"
 msgstr "până la"
 
-#: templates/components/table.html:171
+#: templates/components/table.html:169
 msgid "of"
 msgstr "din"
 
-#: templates/components/table.html:173
+#: templates/components/table.html:171
 msgid "results"
 msgstr "rezultate"
 
 #: templates/components/toast.html:51
 msgid "Close notification"
 msgstr "Închide notificarea"
+
+#~ msgid "Privacy Policy"
+#~ msgstr "Politică de confidențialitate"
+
+#~ msgid "Last updated"
+#~ msgstr "Ultima actualizare"
+
+#~ msgid "Effective date"
+#~ msgstr "Data de intrare în vigoare"
+
+#~ msgid "Quick Navigation"
+#~ msgstr "Navigare rapidă"
+
+#~ msgid "Introduction"
+#~ msgstr "Introducere"
+
+#~ msgid "Data Controller"
+#~ msgstr "Operator de date"
+
+#~ msgid "Data We Collect"
+#~ msgstr "Datele pe care le colectăm"
+
+#~ msgid "Legal Basis for Processing"
+#~ msgstr "Temeiul legal al prelucrării"
+
+#~ msgid "How We Use Your Data"
+#~ msgstr "Cum folosim datele dvs."
+
+#~ msgid "Data Sharing"
+#~ msgstr "Partajarea datelor"
+
+#~ msgid "Your Rights (GDPR)"
+#~ msgstr "Drepturile dvs. (GDPR)"
+
+#~ msgid "Data Retention"
+#~ msgstr "Păstrarea datelor"
+
+#~ msgid "Security Measures"
+#~ msgstr "Măsuri de securitate"
+
+#~ msgid "Cookies"
+#~ msgstr "Cookies"
+
+#~ msgid "International Transfers"
+#~ msgstr "Transferuri internaționale"
+
+#~ msgid "Contact Us"
+#~ msgstr "Contactați-ne"
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                %(legal_name)s (\"we\", \"us\", \"our\") is committed to protecting your privacy and personal data.\n"
+#~ "                This Privacy Policy explains how we collect, use, store, and protect your personal information\n"
+#~ "                when you use our PRAHO Platform hosting services.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                %(legal_name)s (\"noi\", \"ne\", \"noastre\") este angajată să vă protejeze intimitatea și datele personale.\n"
+#~ "                Această Politică de Confidențialitate explică cum colectăm, folosim, stocăm și protejăm informațiile dvs. personale\n"
+#~ "                atunci când utilizați serviciile noastre de găzduire PRAHO Platform.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                We comply with the General Data Protection Regulation (GDPR - EU 2016/679), Romanian Law 190/2018\n"
+#~ "                implementing GDPR, and other applicable data protection legislation.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Respectăm Regulamentul General privind Protecția Datelor (GDPR - UE 2016/679), Legea română 190/2018\n"
+#~ "                care implementează GDPR și alte legislații aplicabile privind protecția datelor.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                By using our services, you acknowledge that you have read and understood this Privacy Policy.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Prin utilizarea serviciilor noastre, recunoscuți că ați citit și ați înțeles această Politică de Confidențialitate.\n"
+#~ "                "
+
+#~ msgid "Data Controller Information"
+#~ msgstr "Informații despre operatorul de date"
+
+#~ msgid "Company Name"
+#~ msgstr "Denumirea companiei"
+
+#~ msgid "Registration Number (CUI)"
+#~ msgstr "Număr de înregistrare (CUI)"
+
+#~ msgid "Registered Address"
+#~ msgstr "Sediu social"
+
+#~ msgid "Email"
+#~ msgstr "Email"
+
+#~ msgid "Phone"
+#~ msgstr "Telefon"
+
+#~ msgid "Privacy inquiries"
+#~ msgstr "Solicitări privind confidențialitatea"
+
+#~ msgid "Data Protection Officer (DPO)"
+#~ msgstr "Responsabil cu protecția datelor (DPO)"
+
+#~ msgid ""
+#~ "\n"
+#~ "                    For any privacy-related inquiries or to exercise your data protection rights,\n"
+#~ "                    please contact our Data Protection Officer.\n"
+#~ "                    "
+#~ msgstr ""
+#~ "\n"
+#~ "                    Pentru orice întrebări legate de confidențialitate sau pentru a vă exercita drepturile privind protecția datelor,\n"
+#~ "                    vă rugăm să contactați Responsabilul nostru cu protecția datelor.\n"
+#~ "                    "
+
+#~ msgid "Personal Data We Collect"
+#~ msgstr "Date personale pe care le colectăm"
+
+#~ msgid "3.1 Information You Provide"
+#~ msgstr "3.1 Informații pe care le furnizați"
+
+#~ msgid "Account Information"
+#~ msgstr "Informații despre cont"
+
+#~ msgid "Name, email address, phone number, password"
+#~ msgstr "Nume, adresă de email, număr de telefon, parolă"
+
+#~ msgid "Billing Information"
+#~ msgstr "Informații de Facturare"
+
+#~ msgid "Company name, VAT number (CUI/CIF), billing address, payment details"
+#~ msgstr "Denumirea companiei, cod de TVA (CUI/CIF), adresa de facturare, detalii de plată"
+
+#~ msgid "Service Configuration"
+#~ msgstr "Configurarea serviciilor"
+
+#~ msgid "Domain names, hosting preferences, technical settings"
+#~ msgstr "Nume de domenii, preferințe de găzduire, setări tehnice"
+
+#~ msgid "Support Communications"
+#~ msgstr "Comunicări de suport"
+
+#~ msgid "Ticket content, emails, chat messages"
+#~ msgstr "Conținut tichete de suport, emailuri, mesaje din chat"
+
+#~ msgid "3.2 Information Collected Automatically"
+#~ msgstr "3.2 Informații colectate automat"
+
+#~ msgid "Technical Data"
+#~ msgstr "Date tehnice"
+
+#~ msgid "IP address, browser type, device information, operating system"
+#~ msgstr "Adresă IP, tip de browser, informații despre dispozitiv, sistem de operare"
+
+#~ msgid "Usage Data"
+#~ msgstr "Date de utilizare"
+
+#~ msgid "Pages visited, features used, session duration, click patterns"
+#~ msgstr "Pagini vizitate, caracteristici utilizate, durata sesiunii, modele de clic"
+
+#~ msgid "Security Data"
+#~ msgstr "Date de securitate"
+
+#~ msgid "Login attempts, authentication events, security alerts"
+#~ msgstr "Încercări de autentificare, evenimente de autentificare, alerte de securitate"
+
+#~ msgid "Cookie Data"
+#~ msgstr "Date din cookies"
+
+#~ msgid "Session identifiers, preferences (see our"
+#~ msgstr "Identificatori de sesiune, preferințe (consultați"
+
+#~ msgid "Cookie Policy"
+#~ msgstr "Politica de cookie-uri"
+
+#~ msgid "3.3 Special Categories of Data"
+#~ msgstr "3.3 Categorii speciale de date"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We do not intentionally collect special categories of personal data (such as health data,\n"
+#~ "                religious beliefs, or political opinions). If you provide such data in support tickets or\n"
+#~ "                other communications, we will treat it with additional care.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Nu colectăm în mod intenționat categorii speciale de date personale (cum ar fi date de sănătate,\n"
+#~ "                convingeri religioase sau opinii politice). Dacă furnizați asemenea date în tichete de suport sau\n"
+#~ "                alte comunicări, le vom trata cu grijă suplimentară.\n"
+#~ "                "
+
+#~ msgid "Under GDPR Article 6, we process your data based on the following legal grounds:"
+#~ msgstr "Conform articolului 6 al GDPR, procesăm datele dvs. pe baza următoarelor motive legale:"
+
+#~ msgid "Processing Activity"
+#~ msgstr "Activitate de prelucrare"
+
+#~ msgid "Legal Basis"
+#~ msgstr "Bază legală"
+
+#~ msgid "GDPR Article"
+#~ msgstr "Articolul GDPR"
+
+#~ msgid "Service provision"
+#~ msgstr "Furnizarea serviciului"
+
+#~ msgid "Contract performance"
+#~ msgstr "Executarea contractului"
+
+#~ msgid "Invoicing and VAT compliance"
+#~ msgstr "Facturare și conformitate TVA"
+
+#~ msgid "Legal obligation"
+#~ msgstr "Obligație legală"
+
+#~ msgid "Security monitoring"
+#~ msgstr "Monitorizarea securității"
+
+#~ msgid "Legitimate interest"
+#~ msgstr "Interes legitim"
+
+#~ msgid "Marketing communications"
+#~ msgstr "Comunicări de Marketing"
+
+#~ msgid "Consent"
+#~ msgstr "Consimțământ"
+
+#~ msgid "Analytics and improvement"
+#~ msgstr "Analitică și îmbunătățire"
+
+#~ msgid "Legitimate interest / Consent"
+#~ msgstr "Interes legitim / Consimțământ"
+
+#~ msgid "Financial record retention (5 years after the financial year)"
+#~ msgstr "Păstrarea înregistrărilor financiare (5 ani după exercițiul financiar)"
+
+#~ msgid "Legal obligation (Romanian Law)"
+#~ msgstr "Obligație legală (Legea română)"
+
+#~ msgid "How We Use Your Personal Data"
+#~ msgstr "Cum folosim datele dvs. personale"
+
+#~ msgid "5.1 Service Delivery"
+#~ msgstr "5.1 Furnizarea serviciilor"
+
+#~ msgid "Creating and managing your hosting account"
+#~ msgstr "Crearea și gestionarea contului dvs. de găzduire"
+
+#~ msgid "Provisioning and configuring hosting services"
+#~ msgstr "Provizionarea și configurarea serviciilor de găzduire"
+
+#~ msgid "Processing payments and generating invoices"
+#~ msgstr "Prelucrarea plăților și generarea facturilor"
+
+#~ msgid "Providing technical support"
+#~ msgstr "Furnizarea suportului tehnic"
+
+#~ msgid "5.2 Communication"
+#~ msgstr "5.2 Comunicare"
+
+#~ msgid "Sending service-related notifications (required)"
+#~ msgstr "Trimiterea notificărilor legate de serviciu (obligatoriu)"
+
+#~ msgid "Responding to support requests"
+#~ msgstr "Răspunsul la solicitările de suport"
+
+#~ msgid "Sending marketing emails (with your consent)"
+#~ msgstr "Trimiterea de e-mailuri de marketing (cu consimțământul dvs.)"
+
+#~ msgid "5.3 Security and Compliance"
+#~ msgstr "5.3 Securitate și conformitate"
+
+#~ msgid "Detecting and preventing fraud"
+#~ msgstr "Detectarea și prevenirea fraudei"
+
+#~ msgid "Protecting against security threats"
+#~ msgstr "Protecția împotriva amenințărilor de securitate"
+
+#~ msgid "Complying with legal obligations"
+#~ msgstr "Conformitatea cu obligațiile legale"
+
+#~ msgid "Maintaining audit logs for compliance"
+#~ msgstr "Menținerea jurnalelor de audit pentru conformitate"
+
+#~ msgid "Data Sharing and Third Parties"
+#~ msgstr "Partajarea datelor și terți"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We do not sell your personal data. We may share your data with:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Nu vândem datele dvs. personale. Este posibil să partajăm datele dvs. cu:\n"
+#~ "                "
+
+#~ msgid "Service Providers"
+#~ msgstr "Furnizori de servicii"
+
+#~ msgid "Payment processors, email providers, infrastructure providers"
+#~ msgstr "Procesatori de plăți, furnizori de e-mail, furnizori de infrastructură"
+
+#~ msgid "Domain Registrars"
+#~ msgstr "Registratori de domenii"
+
+#~ msgid "When you register domain names"
+#~ msgstr "Când înregistrați domenii"
+
+#~ msgid "Legal Authorities"
+#~ msgstr "Autorități legale"
+
+#~ msgid "When required by law or court order"
+#~ msgstr "Când este necesar de lege sau prin ordin de instanță"
+
+#~ msgid "Business Partners"
+#~ msgstr "Parteneri de afaceri"
+
+#~ msgid "With your explicit consent only"
+#~ msgstr "Numai cu consimțământul dvs. explicit"
+
+#~ msgid ""
+#~ "\n"
+#~ "                All third-party processors are bound by Data Processing Agreements (DPAs) ensuring GDPR compliance.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Toți procesatorii terți sunt obligați prin Acorduri de prelucrare a datelor (DPA) care asigură conformitatea GDPR.\n"
+#~ "                "
+
+#~ msgid "View our Third-Party Data Processors"
+#~ msgstr "Vizualizați procesatorii noștri terți de date"
+
+#~ msgid "Your Rights Under GDPR"
+#~ msgstr "Drepturile dvs. conform GDPR"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Under the General Data Protection Regulation, you have the following rights:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Conform Regulamentului General privind Protecția Datelor, dvs. aveți următoarele drepturi:\n"
+#~ "                "
+
+#~ msgid "Right of Access"
+#~ msgstr "Dreptul de acces"
+
+#~ msgid "Request a copy of your personal data we hold."
+#~ msgstr "Solicitați o copie a datelor dvs. personale pe care le deținem."
+
+#~ msgid "Right to Rectification"
+#~ msgstr "Dreptul la rectificare"
+
+#~ msgid "Request correction of inaccurate personal data."
+#~ msgstr "Solicitați corectarea datelor personale inexacte."
+
+#~ msgid "Right to Erasure"
+#~ msgstr "Dreptul la ștergere"
+
+#~ msgid "Request deletion of your personal data (\"Right to be Forgotten\")."
+#~ msgstr "Solicitați ștergerea datelor dvs. personale („Dreptul de a fi uitat”)."
+
+#~ msgid "Right to Restriction"
+#~ msgstr "Dreptul la restricționarea prelucrării"
+
+#~ msgid "Request restriction of processing in certain circumstances."
+#~ msgstr "Solicitați restricția prelucrării datelor în anumite circumstanțe."
+
+#~ msgid "Right to Data Portability"
+#~ msgstr "Dreptul la portabilitatea datelor"
+
+#~ msgid "Receive your data in a machine-readable format."
+#~ msgstr "Primiți datele dvs. într-un format ușor de citit de mașini."
+
+#~ msgid "Right to Object"
+#~ msgstr "Dreptul la opoziție"
+
+#~ msgid "Object to processing based on legitimate interests or for marketing."
+#~ msgstr "Opuneți-vă procesării bazate pe interese legitime sau în scopuri de marketing."
+
+#~ msgid "Right to Withdraw Consent"
+#~ msgstr "Dreptul de a retrage consimțământul"
+
+#~ msgid "Withdraw consent at any time for consent-based processing."
+#~ msgstr "Retrageți consimțământul în orice moment pentru prelucrarea bazată pe consimțământ."
+
+#~ msgid "Exercise Your Rights"
+#~ msgstr "Exercitați-vă drepturile"
+
+#~ msgid ""
+#~ "\n"
+#~ "                    You can exercise your rights through our GDPR Privacy Dashboard or by contacting our DPO.\n"
+#~ "                    "
+#~ msgstr ""
+#~ "\n"
+#~ "                    Vă puteți exercita drepturile prin intermediul panoului nostru de control al confidențialității RGPD sau contactând Responsabilul cu Protecția Datelor.\n"
+#~ "                    "
+
+#~ msgid "You can exercise your rights through our GDPR Privacy Dashboard."
+#~ msgstr "Vă puteți exercita drepturile prin intermediul panoului nostru de control al confidențialității RGPD."
+
+#~ msgid ""
+#~ "\n"
+#~ "                We retain your personal data only as long as necessary for the purposes outlined in this policy:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Păstrăm datele dvs. personale doar pentru perioada necesară în scopurile descrise în această politică:\n"
+#~ "                "
+
+#~ msgid "Data Type"
+#~ msgstr "Tip de date"
+
+#~ msgid "Retention Period"
+#~ msgstr "Perioada de retenție"
+
+#~ msgid "Account data"
+#~ msgstr "Datele contului"
+
+#~ msgid "Duration of account + 2 years"
+#~ msgstr "Durata contului + 2 ani"
+
+#~ msgid "Financial records (invoices)"
+#~ msgstr "Înregistrări financiare (facturi)"
+
+#~ msgid "5 years from 1 July of the year after the financial year"
+#~ msgstr "5 ani de la 1 iulie a anului următor exercițiului financiar"
+
+#~ msgid "Romanian fiscal law"
+#~ msgstr "Legislația fiscală românească"
+
+#~ msgid "Security logs"
+#~ msgstr "Jurnale de securitate"
+
+#~ msgid "2 years"
+#~ msgstr "2 ani"
+
+#~ msgid "Support tickets"
+#~ msgstr "Bilete de suport"
+
+#~ msgid "5 years"
+#~ msgstr "5 ani"
+
+#~ msgid "Marketing consent records"
+#~ msgstr "Evidențe ale consimțământului pentru marketing"
+
+#~ msgid "Duration of consent + 3 years"
+#~ msgstr "Durata consimțământului + 3 ani"
+
+#~ msgid "Legal compliance"
+#~ msgstr "Conformitate legală"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We implement appropriate technical and organizational measures to protect your personal data:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Implementăm măsuri tehnice și organizatorice adecvate pentru a vă proteja datele personale:\n"
+#~ "                "
+
+#~ msgid "Encryption"
+#~ msgstr "Criptare"
+
+#~ msgid "TLS/HTTPS for data in transit"
+#~ msgstr "TLS/HTTPS pentru datele în tranzit"
+
+#~ msgid "AES-256 encryption for sensitive data at rest"
+#~ msgstr "Criptare AES-256 pentru datele sensibile stocate"
+
+#~ msgid "Encrypted backups"
+#~ msgstr "Copii de siguranță criptate"
+
+#~ msgid "Access Control"
+#~ msgstr "Control al accesului"
+
+#~ msgid "Role-based access control (RBAC)"
+#~ msgstr "Control al accesului bazat pe roluri (RBAC)"
+
+#~ msgid "Two-factor authentication (2FA)"
+#~ msgstr "Autentificare cu Doi Factori"
+
+#~ msgid "Account lockout protection"
+#~ msgstr "Protecție prin blocarea contului"
+
+#~ msgid "Monitoring"
+#~ msgstr "Monitorizare"
+
+#~ msgid "Comprehensive audit logging"
+#~ msgstr "Jurnalizare completă a auditului"
+
+#~ msgid "Real-time security alerts"
+#~ msgstr "Alerte de securitate în timp real"
+
+#~ msgid "Regular security assessments"
+#~ msgstr "Evaluări de securitate regulate"
+
+#~ msgid "Compliance"
+#~ msgstr "Conformitate"
+
+#~ msgid "Regular data protection training"
+#~ msgstr "Instruire regulată privind protecția datelor"
+
+#~ msgid "Incident response procedures"
+#~ msgstr "Proceduri de răspuns la incidente"
+
+#~ msgid "Vendor security assessments"
+#~ msgstr "Evaluări de securitate ale furnizorilor"
+
+#~ msgid "Cookies and Tracking"
+#~ msgstr "Cookie-uri și Urmărire"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We use cookies and similar technologies to operate our service and improve your experience.\n"
+#~ "                For detailed information, please see our Cookie Policy.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Utilizăm cookie-uri și tehnologii similare pentru a opera serviciul nostru și a vă îmbunătăți experiența.\n"
+#~ "                Pentru informații detaliate, vă rugăm să consultați Politica noastră privind Cookie-urile.\n"
+#~ "                "
+
+#~ msgid "View Cookie Policy"
+#~ msgstr "Vizualizați Politica privind Cookie-urile"
+
+#~ msgid "International Data Transfers"
+#~ msgstr "Transferuri Internaționale de Date"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Your data is primarily processed within the European Economic Area (EEA). If we transfer data\n"
+#~ "                outside the EEA, we ensure adequate safeguards through:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Datele dvs. sunt procesate în principal în Spațiul Economic European (SEE). Dacă transferăm date\n"
+#~ "                în afara SEE, asigurăm garanții adecvate prin:\n"
+#~ "                "
+
+#~ msgid "EU-approved Standard Contractual Clauses (SCCs)"
+#~ msgstr "Clauze Contractuale Standard aprobate de UE (SCC)"
+
+#~ msgid "EU-US Data Privacy Framework (where applicable)"
+#~ msgstr "Cadrul de Confidențialitate a Datelor UE-SUA (unde este aplicabil)"
+
+#~ msgid "Binding Corporate Rules for processors"
+#~ msgstr "Reguli Corporative Vinculante pentru Procesatori"
+
+#~ msgid ""
+#~ "\n"
+#~ "                For questions about this Privacy Policy or to exercise your data protection rights:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Pentru întrebări cu privire la această Politică de Confidențialitate sau pentru a vă exercita drepturile de protecție a datelor:\n"
+#~ "                "
+
+#~ msgid "Data Protection Officer"
+#~ msgstr "Responsabil cu protecția datelor"
+
+#~ msgid "General Inquiries"
+#~ msgstr "Solicitări generale"
+
+#~ msgid "Supervisory Authority"
+#~ msgstr "Autoritate de Supraveghere"
+
+#~ msgid ""
+#~ "\n"
+#~ "                    You have the right to lodge a complaint with the Romanian Data Protection Authority (ANSPDCP):\n"
+#~ "                    "
+#~ msgstr ""
+#~ "\n"
+#~ "                    Dvs. aveți dreptul să depuneți o plângere la Autoritatea Națională de Supraveghere a Prelucrării Datelor cu Caracter Personal (ANSPDCP):\n"
+#~ "                    "
+
+#~ msgid "Changes to This Policy"
+#~ msgstr "Modificări ale acestei Politici"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We may update this Privacy Policy from time to time. We will notify you of significant changes\n"
+#~ "                by email or through our platform. The \"Last updated\" date at the top of this policy indicates\n"
+#~ "                when it was last revised.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Este posibil să actualizăm această Politică de Confidențialitate din timp în timp. Vă vom notifica cu privire la modificări semnificative\n"
+#~ "                prin email sau prin intermediul platformei noastre. Data \"Ultima actualizare\" de la începutul acestei politici indică\n"
+#~ "                când a fost revizuită pentru ultima dată.\n"
+#~ "                "
+
+#~ msgid "Terms of Service"
+#~ msgstr "Termeni și condiții"
+
+#~ msgid "Version"
+#~ msgstr "Versiune"
+
+#~ msgid "Acceptance of Terms"
+#~ msgstr "Acceptarea Termenilor"
+
+#~ msgid "Description of Services"
+#~ msgstr "Descrierea serviciilor"
+
+#~ msgid "Account Registration"
+#~ msgstr "Înregistrarea contului"
+
+#~ msgid "Payment Terms"
+#~ msgstr "Termeni de Plată"
+
+#~ msgid "Acceptable Use Policy"
+#~ msgstr "Politica de Utilizare Acceptabilă"
+
+#~ msgid "Intellectual Property"
+#~ msgstr "Proprietate Intelectuală"
+
+#~ msgid "Data Protection"
+#~ msgstr "Protecția datelor"
+
+#~ msgid "Warranties & Disclaimers"
+#~ msgstr "Garanții și Declinări de Răspundere"
+
+#~ msgid "Limitation of Liability"
+#~ msgstr "Limitarea Răspunderii"
+
+#~ msgid "Termination"
+#~ msgstr "Încetare"
+
+#~ msgid "Governing Law"
+#~ msgstr "Legea Aplicabilă"
+
+#~ msgid "Contact Information"
+#~ msgstr "Informații de contact"
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                By accessing or using the PRAHO Platform services provided by %(legal_name)s (\"Company\", \"we\", \"us\", \"our\"),\n"
+#~ "                you (\"Customer\", \"you\", \"your\") agree to be bound by these Terms of Service (\"Terms\").\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Prin accesarea sau utilizarea serviciilor PRAHO Platform furnizate de %(legal_name)s (\"Companie\", \"noi\", \"ne\", \"noastră\"),\n"
+#~ "                dvs. (\"Client\", \"dvs.\", \"al dvs.\") acceptați să fiți obligați de acești Termeni de Serviciu (\"Termeni\").\n"
+#~ "                "
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                If you do not agree to these Terms, you may not access or use our services. These Terms constitute\n"
+#~ "                a legally binding agreement between you and %(legal_name)s.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Dacă nu sunteți de acord cu acești Termeni, nu puteți accesa sau utiliza serviciile noastre. Acești Termeni constituie\n"
+#~ "                un acord legal obligatoriu între dvs. și %(legal_name)s.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                    IMPORTANT: By creating an account or using our services, you confirm that you are at least 18 years old\n"
+#~ "                    and have the legal capacity to enter into binding contracts.\n"
+#~ "                    "
+#~ msgstr ""
+#~ "\n"
+#~ "                    IMPORTANT: Prin crearea unui cont sau utilizarea serviciilor noastre, confirmați că aveți cel puțin 18 ani\n"
+#~ "                    și aveți capacitatea juridică de a încheie contracte obligatorii.\n"
+#~ "                    "
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                %(legal_name)s provides web hosting and related services through the PRAHO Platform, including but not limited to:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                %(legal_name)s oferă servicii de găzduire web și servicii conexe prin PRAHO Platform, inclusiv, dar fără a se limita la:\n"
+#~ "                "
+
+#~ msgid "Shared and VPS web hosting"
+#~ msgstr "Găzduire web partajată și VPS"
+
+#~ msgid "Domain name registration and management"
+#~ msgstr "Înregistrarea și gestionarea numelor de domenii"
+
+#~ msgid "Email hosting services"
+#~ msgstr "Servicii de găzduire e-mail"
+
+#~ msgid "SSL certificate provisioning"
+#~ msgstr "Furnizare de certificate SSL"
+
+#~ msgid "Technical support services"
+#~ msgstr "Servicii de suport tehnic"
+
+#~ msgid "Automated backup solutions"
+#~ msgstr "Soluții de backup automatizat"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Service specifications, features, and limitations are described in the specific service plans\n"
+#~ "                available on our platform.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Specificațiile serviciului, caracteristicile și limitările sunt descrise în planurile de servicii specifice\n"
+#~ "                disponibile pe platforma noastră.\n"
+#~ "                "
+
+#~ msgid "Account Registration and Security"
+#~ msgstr "Înregistrarea și Securitatea Contului"
+
+#~ msgid "3.1 Registration Requirements"
+#~ msgstr "3.1 Cerințe de înregistrare"
+
+#~ msgid ""
+#~ "\n"
+#~ "                To use our services, you must create an account by providing accurate, current, and complete information.\n"
+#~ "                You agree to update your information promptly if it changes.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Pentru a utiliza serviciile noastre, trebuie să creați un cont furnizând informații precise, actuale și complete.\n"
+#~ "                Acceptați să vă actualizați informațiile fără întârziere dacă se schimbă.\n"
+#~ "                "
+
+#~ msgid "3.2 Account Security"
+#~ msgstr "3.2 Securitatea Contului"
+
+#~ msgid "You are responsible for maintaining the confidentiality of your account credentials."
+#~ msgstr "Sunteți responsabil de menținerea confidențialității acreditărilor dvs. de cont."
+
+#~ msgid "You must immediately notify us of any unauthorized access to your account."
+#~ msgstr "Trebuie să ne anunțați imediat orice acces neautorizat la contul dvs."
+
+#~ msgid "We strongly recommend enabling two-factor authentication (2FA)."
+#~ msgstr "Vă recomandăm cu insistență activarea autentificării cu doi factori (2FA)."
+
+#~ msgid "You are responsible for all activities that occur under your account."
+#~ msgstr "Sunteți responsabil de toate activitățile care au loc sub contul dvs."
+
+#~ msgid "3.3 Business Customers"
+#~ msgstr "3.3 Clienți business"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Business customers must provide accurate company information, including VAT registration number (CUI/CIF)\n"
+#~ "                for Romanian companies. This information is required for invoicing and tax compliance.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Clienții cu activitate de afaceri trebuie să furnizeze informații exacte despre companie, inclusiv numărul de înregistrare TVA (CUI/CIF)\n"
+#~ "                pentru companiile din România. Aceste informații sunt necesare pentru facturare și conformitate fiscală.\n"
+#~ "                "
+
+#~ msgid "4.1 Pricing and Fees"
+#~ msgstr "4.1 Prețuri și taxe"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Prices show their currency and applicable VAT. Existing invoices, gift cards and credit balances\n"
+#~ "                retain their original currency when the currency for new sales changes.\n"
+#~ "                Prices may change with 30 days' prior notice.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Prețurile afișează moneda și TVA-ul aplicabil. Facturile existente, cardurile cadou și soldurile de credit păstrează moneda lor originală atunci când se modifică moneda pentru vânzările noi.\n"
+#~ "                Prețurile se pot schimba cu notificare prealabilă de 30 de zile.\n"
+#~ "                "
+
+#~ msgid "4.2 Payment Methods"
+#~ msgstr "4.2 Metode de plată"
+
+#~ msgid "Bank transfer (Romanian and international)"
+#~ msgstr "Transfer bancar (românesc și internațional)"
+
+#~ msgid "Credit/debit cards (Visa, Mastercard)"
+#~ msgstr "Carduri de credit/debit (Visa, Mastercard)"
+
+#~ msgid "PayPal (where available)"
+#~ msgstr "PayPal (unde este disponibil)"
+
+#~ msgid "4.3 Billing Cycle"
+#~ msgstr "4.3 Ciclu de facturare"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Services are billed in advance according to the billing cycle selected (monthly, annually, etc.).\n"
+#~ "                Proforma invoices are issued before service activation; fiscal invoices are issued upon payment.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Serviciile sunt facturate în avans conform ciclului de facturare selectat (lunar, anual, etc.).\n"
+#~ "                Facturile proformă sunt emise înainte de activarea serviciului; facturile fiscale sunt emise la plată.\n"
+#~ "                "
+
+#~ msgid "4.4 Late Payment"
+#~ msgstr "4.4 Plată cu întârziere"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Invoices are due within 14 days of issue. Late payments may result in service suspension.\n"
+#~ "                We reserve the right to charge interest on overdue amounts at the legal rate.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Facturile sunt scadente în termen de 14 zile de la emitere. Plățile cu întârziere pot duce la suspendarea serviciului.\n"
+#~ "                Ne rezervăm dreptul de a percepe dobândă asupra sumelor întârziate conform ratei legale.\n"
+#~ "                "
+
+#~ msgid "4.5 Refund Policy"
+#~ msgstr "4.5 Politica de rambursare"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We offer a 30-day money-back guarantee for new hosting services. Domain registration fees,\n"
+#~ "                SSL certificates, and add-on services are non-refundable. Refund requests must be submitted\n"
+#~ "                through the support ticket system.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Oferim o garanție de rambursare în 30 de zile pentru serviciile noi de găzduire. Taxele de înregistrare a domeniului,\n"
+#~ "                certificatele SSL și serviciile suplimentare sunt nerambursabile. Cererile de rambursare trebuie depuse\n"
+#~ "                prin sistemul de tichete de suport.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                You agree to use our services only for lawful purposes and in compliance with these Terms.\n"
+#~ "                You must NOT use our services to:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Sunteți de acord să utilizați serviciile noastre doar pentru scopuri legale și în conformitate cu acești Termeni.\n"
+#~ "                NU trebuie să utilizați serviciile noastre pentru:\n"
+#~ "                "
+
+#~ msgid "Prohibited Activities"
+#~ msgstr "Activități interzise"
+
+#~ msgid "Host or distribute malware, viruses, or malicious code"
+#~ msgstr "Găzduirea sau distribuirea de malware, viruși sau cod malițios"
+
+#~ msgid "Send spam or unsolicited bulk emails"
+#~ msgstr "Trimiterea de spam sau de e-mailuri comerciale nesolicitate"
+
+#~ msgid "Infringe intellectual property rights"
+#~ msgstr "Încălcarea drepturilor de proprietate intelectuală"
+
+#~ msgid "Host illegal content under Romanian or EU law"
+#~ msgstr "Găzduirea de conținut ilegal conform legislației din România sau a UE"
+
+#~ msgid "Engage in phishing or fraudulent activities"
+#~ msgstr "Implicarea în activități de phishing sau frauduloase"
+
+#~ msgid "Attack or attempt to breach other systems"
+#~ msgstr "Atacarea sau încercarea de a compromite alte sisteme"
+
+#~ msgid "Consume excessive resources affecting other customers"
+#~ msgstr "Consumați resurse excesive care afectează alți clienți"
+
+#~ msgid "Host content promoting violence or hatred"
+#~ msgstr "Găzduiți conținut care promovează violența sau ura"
+
+#~ msgid "Operate cryptocurrency mining without authorization"
+#~ msgstr "Operați mining de criptomonede fără autorizație"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Violation of this policy may result in immediate service termination without refund.\n"
+#~ "                We reserve the right to remove content that violates these terms.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Încălcarea acestei politici poate duce la rezilierea imediată a serviciului fără rambursare.\n"
+#~ "                Ne rezervăm dreptul de a elimina conținutul care încalcă acești termeni.\n"
+#~ "                "
+
+#~ msgid "6.1 Our Property"
+#~ msgstr "6.1 Proprietatea noastră"
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                The PRAHO Platform, including its software, design, logos, and documentation, is owned by\n"
+#~ "                %(legal_name)s and protected by intellectual property laws.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Platforma PRAHO, inclusiv software-ul, designul, logo-urile și documentația acesteia, este deținută de\n"
+#~ "                %(legal_name)s și protejată de legile de proprietate intelectuală.\n"
+#~ "                "
+
+#~ msgid "6.2 Your Content"
+#~ msgstr "6.2 Conținutul dvs."
+
+#~ msgid ""
+#~ "\n"
+#~ "                You retain all rights to the content you upload to our services. By using our services,\n"
+#~ "                you grant us a limited license to store and transmit your content as necessary to provide the services.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Păstrați toate drepturile asupra conținutului pe care îl încărcați în serviciile noastre. Prin utilizarea serviciilor noastre,\n"
+#~ "                ne acordați o licență limitată pentru a stoca și transmite conținutul dvs. după cum este necesar pentru furnizarea serviciilor.\n"
+#~ "                "
+
+#~ msgid "Data Protection and Privacy"
+#~ msgstr "Protecția datelor și confidențialitate"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We process personal data in accordance with the General Data Protection Regulation (GDPR)\n"
+#~ "                and Romanian Law 190/2018. Please review our Privacy Policy for detailed information about\n"
+#~ "                how we collect, use, and protect your data.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Prelucrăm datele cu caracter personal în conformitate cu Regulamentul general privind protecția datelor (GDPR)\n"
+#~ "                și Legea română 190/2018. Vă rugăm să consultați Politica noastră de confidențialitate pentru informații detaliate despre\n"
+#~ "                modul în care colectăm, folosim și protejăm datele dvs.\n"
+#~ "                "
+
+#~ msgid "View Privacy Policy"
+#~ msgstr "Vizualizați Politica de confidențialitate"
+
+#~ msgid "7.1 Customer Data Responsibility"
+#~ msgstr "7.1 Responsabilitatea datelor clienților"
+
+#~ msgid ""
+#~ "\n"
+#~ "                If you collect personal data through services hosted on our platform, you are the data controller\n"
+#~ "                for that data and are responsible for compliance with applicable data protection laws.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Dacă colectați date cu caracter personal prin serviciile găzduite pe platforma noastră, sunteți operatorul de date personale\n"
+#~ "                pentru acele date și sunteți responsabil de conformitatea cu legile aplicabile de protecție a datelor.\n"
+#~ "                "
+
+#~ msgid "Warranties and Disclaimers"
+#~ msgstr "Garanții și declinări de răspundere"
+
+#~ msgid "8.1 Service Level"
+#~ msgstr "8.1 Nivelul serviciului"
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "                We strive to maintain 99.9%% uptime for our hosting services. Service credits may be issued\n"
+#~ "                for downtime exceeding this threshold, as specified in our Service Level Agreement.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Ne străduim să asigurăm o disponibilitate de 99,9%% pentru serviciile noastre de găzduire. Credite de serviciu pot fi emise\n"
+#~ "                pentru perioade de indisponibilitate care depășesc această limită, așa cum se specifică în Acordul privind nivelul serviciului.\n"
+#~ "                "
+
+#~ msgid "8.2 Disclaimer"
+#~ msgstr "8.2 Declinare de răspundere"
+
+#~ msgid ""
+#~ "\n"
+#~ "                    SERVICES ARE PROVIDED \"AS IS\" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,\n"
+#~ "                    INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,\n"
+#~ "                    AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT SERVICES WILL BE UNINTERRUPTED OR ERROR-FREE.\n"
+#~ "                    "
+#~ msgstr ""
+#~ "\n"
+#~ "                    SERVICIILE SUNT FURNIZATE \"CUM SUNT\" FĂRĂ GARANȚII DE NICIO NATURĂ, EXPRESE SAU IMPLICITE,\n"
+#~ "                    INCLUSIV, FĂRĂ A SE LIMITA LA, GARANȚII PRIVIND COMERCIALIZABILITATEA, ADECVAREA PENTRU UN SCOP PARTICULAR,\n"
+#~ "                    ȘI NEÎNCĂLCAREA DREPTURILOR TERȚILOR. NU GARANTĂM CĂ SERVICIILE VOR FI NEÎNTRERUPTE SAU FĂRĂ ERORI.\n"
+#~ "                    "
+
+#~ msgid ""
+#~ "\n"
+#~ "                To the maximum extent permitted by Romanian law:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                În limita maximă permisă de legea română:\n"
+#~ "                "
+
+#~ msgid "We shall not be liable for indirect, incidental, special, or consequential damages."
+#~ msgstr "Nu vom fi răspunzători pentru daune indirecte, accidentale, speciale sau consecutive."
+
+#~ msgid "Our total liability shall not exceed the fees paid by you in the 12 months preceding the claim."
+#~ msgstr "Răspunderea noastră totală nu va depăși taxele plătite de dvs. în cele 12 luni anterioare reclamației."
+
+#~ msgid "We are not liable for data loss; you are responsible for maintaining backups."
+#~ msgstr "Nu suntem răspunzători pentru pierderea de date; sunteți responsabil de menținerea copiilor de siguranță."
+
+#~ msgid "10.1 By Customer"
+#~ msgstr "10.1 Din partea clientului"
+
+#~ msgid ""
+#~ "\n"
+#~ "                You may cancel your services at any time through the customer portal or by contacting support.\n"
+#~ "                Prepaid fees are non-refundable except as specified in our refund policy.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Puteți anula serviciile dvs. în orice moment prin portalul de client sau contactând echipa de suport.\n"
+#~ "                Taxele plătite în avans nu sunt rambursabile, cu excepția cazurilor specificate în politica noastră de rambursare.\n"
+#~ "                "
+
+#~ msgid "10.2 By Company"
+#~ msgstr "10.2 Din partea companiei"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We may suspend or terminate services immediately if you:\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Putem suspenda sau rezilia serviciile imediat dacă dvs.:\n"
+#~ "                "
+
+#~ msgid "Violate these Terms or Acceptable Use Policy"
+#~ msgstr "Încălcați acești Termeni sau Politica de utilizare acceptabilă"
+
+#~ msgid "Fail to pay invoices within 30 days"
+#~ msgstr "Nu plătiți facturile în termen de 30 de zile"
+
+#~ msgid "Engage in illegal activities"
+#~ msgstr "Desfășurați activități ilegale"
+
+#~ msgid "10.3 Data After Termination"
+#~ msgstr "10.3 Datele după reziliere"
+
+#~ msgid ""
+#~ "\n"
+#~ "                Upon termination, we will retain your data for 30 days to allow for retrieval.\n"
+#~ "                After this period, data may be permanently deleted unless legally required to be retained.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                După reziliere, vom păstra datele dvs. pentru 30 de zile pentru a permite recuperarea.\n"
+#~ "                După această perioadă, datele pot fi șterse permanent, cu excepția cazului în care legea cere retenția.\n"
+#~ "                "
+
+#~ msgid "Governing Law and Disputes"
+#~ msgstr "Legea aplicabilă și litigii"
+
+#~ msgid ""
+#~ "\n"
+#~ "                These Terms shall be governed by and construed in accordance with the laws of Romania.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Acești Termeni vor fi reglementați de și interpretați în conformitate cu legile României.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                Any disputes arising from these Terms shall be submitted to the exclusive jurisdiction of\n"
+#~ "                the courts of Bucharest, Romania.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Orice dispute care decurg din acești Termeni vor fi supuse jurisdicției exclusive a\n"
+#~ "                tribunalelor din București, România.\n"
+#~ "                "
+
+#~ msgid ""
+#~ "\n"
+#~ "                For consumers in the EU, this does not affect your statutory rights or your right to bring\n"
+#~ "                claims before the courts of your country of residence.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Pentru consumatorii din UE, aceasta nu afectează drepturile dvs. legale sau dreptul dvs. de a depune\n"
+#~ "                reclamații în fața instanțelor din țara dvs. de reședință.\n"
+#~ "                "
+
+#~ msgid "Company"
+#~ msgstr "Companie"
+
+#~ msgid "Registration Number"
+#~ msgstr "Număr de înregistrare"
+
+#~ msgid "Address"
+#~ msgstr "Adresă"
+
+#~ msgid "Support"
+#~ msgstr "Suport"
+
+#~ msgid "Changes to These Terms"
+#~ msgstr "Modificări ale acestor Termeni"
+
+#~ msgid ""
+#~ "\n"
+#~ "                We reserve the right to modify these Terms at any time. We will notify you of material changes\n"
+#~ "                at least 30 days before they take effect. Your continued use of our services after changes\n"
+#~ "                become effective constitutes acceptance of the modified Terms.\n"
+#~ "                "
+#~ msgstr ""
+#~ "\n"
+#~ "                Ne rezervăm dreptul de a modifica acești Termeni în orice moment. Vă vom notifica cu privire la modificări importante\n"
+#~ "                cel puțin 30 de zile înainte ca acestea să intre în vigoare. Utilizarea continuă a serviciilor noastre după ce modificările\n"
+#~ "                intră în vigoare constituie acceptarea Termenilor modificați.\n"
+#~ "                "
 
 #~ msgid "Label"
 #~ msgstr "Etichetă"

@@ -57,7 +57,6 @@ services/platform/apps/products/views.py|apps.billing.models|Currency
 services/platform/apps/promotions/signals.py|apps.audit.models|AuditEvent
 services/platform/apps/provisioning/service_views.py|apps.customers.models|Customer
 services/platform/apps/provisioning/service_views.py|apps.users.models|User
-services/platform/apps/provisioning/virtualmin_views.py|apps.customers.models|Customer
 services/platform/apps/provisioning/virtualmin_views.py|apps.users.models|User
 services/platform/apps/tickets/services.py|apps.users.models|User
 services/platform/apps/tickets/views.py|apps.users.models|User

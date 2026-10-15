@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load localisation_tags ui_components %}
+{% load i18n %}
+
+{% block title %}{{ page_title }} - {% trans "Restore pair" %}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      {% breadcrumb breadcrumb_items css_class="mb-4" %}
+      <h1 class="text-2xl font-bold text-slate-100 mt-2">{{ page_title }}</h1>
+      <p class="mt-2 text-sm text-slate-400">{% trans "Restore a base backup and the differential taken against it" %}</p>
+    </div>
+    <div class="mt-4 sm:mt-0">
+      {% trans "Cancel" as bt1 %}{% button bt1 href=cancel_url variant="secondary" %}
+    </div>
+  </div>
+
+  <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+    <h3 class="text-sm font-medium text-yellow-400">{% trans "Pair restore" %}</h3>
+    <p class="mt-2 text-sm text-yellow-300">{{ pair_label }}</p>
+  </div>
+
+  <div class="bg-slate-800 rounded-lg border border-slate-700">
+    <div class="px-6 py-6">
+      {% if form.errors %}
+      <div class="mb-6 text-sm text-red-300">
+        {% for field, errors in form.errors.items %}{% for error in errors %}<p>{{ error }}</p>{% endfor %}{% endfor %}
+      </div>
+      {% endif %}
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <div>
+          <label for="{{ form.differential_id.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">{% trans "Differential backup" %}</label>
+          {{ form.differential_id }}
+          <p class="mt-1 text-sm text-slate-400">{{ form.differential_id.help_text }}</p>
+        </div>
+        <div class="flex items-center">
+          {{ form.confirm_restore }}
+          <label for="{{ form.confirm_restore.id_for_label }}" class="ml-2 text-sm text-slate-300">{{ form.confirm_restore.help_text }}</label>
+        </div>
+        {% trans "Restore pair" as bt2 %}{% button bt2 type="submit" variant="warning" %}
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

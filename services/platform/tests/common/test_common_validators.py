@@ -145,7 +145,7 @@ class TestRoleValidation(TestCase):
 
     def test_valid_roles(self):
         """Test valid customer roles"""
-        valid_roles = ['owner', 'admin', 'manager', 'viewer']
+        valid_roles = ['owner', 'billing', 'tech', 'viewer']  # CustomerMembership.CUSTOMER_ROLE_CHOICES
 
         for role in valid_roles:
             result = SecureInputValidator.validate_customer_role(role)
@@ -161,6 +161,8 @@ class TestRoleValidation(TestCase):
             '',
             None,
             'INVALID_ROLE',
+            'admin',  # staff role, not a membership role
+            'manager',
         ]
 
         for role in invalid_roles:
@@ -171,8 +173,8 @@ class TestRoleValidation(TestCase):
         """Test role case normalization"""
         test_cases = [
             ('OWNER', 'owner'),
-            ('Admin', 'admin'),
-            ('MANAGER', 'manager'),
+            ('Billing', 'billing'),
+            ('TECH', 'tech'),
             ('viewer', 'viewer'),
         ]
 

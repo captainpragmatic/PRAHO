@@ -109,8 +109,8 @@
                         <div>
                             <div class="flex items-center gap-2">
                                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white">.{{ tld.extension }}</h3>
-                                {% if tld.is_active %}{% trans "" as bt3 %}{% badge bt3 %}{% else %}{% trans "" as bt4 %}{% badge bt4 %}{% endif %}
-                                {% if tld.is_featured %}{% trans "" as bt5 %}{% badge bt5 variant="secondary" %}{% endif %}
+                                {% if tld.is_active %}{% trans "Active" as bt3 %}{% badge bt3 variant="success" size="sm" %}{% else %}{% trans "Inactive" as bt4 %}{% badge bt4 variant="danger" size="sm" %}{% endif %}
+                                {% if tld.is_featured %}{% trans "Featured" as bt5 %}{% badge bt5 variant="secondary" icon="star" size="sm" %}{% endif %}
                                 {% if tld.whois_privacy_available %}{% trans "WHOIS" as bt6 %}{% badge bt6 icon="lock" size="sm" %}{% endif %}
                             </div>
                             <p class="text-sm text-slate-600 dark:text-slate-400">{{ tld.description }}</p>
@@ -240,7 +240,8 @@
             <p class="text-slate-500 dark:text-slate-400 mb-6">
                 {% trans "Get started by adding your first TLD and pricing." %}
             </p>
-            {% trans "Add First TLD" as bt9 %}{% button bt9 variant="primary" href="#" %}
+            {% url 'domains:tld_create' as tld_create_url %}
+            {% trans "Add First TLD" as bt9 %}{% button bt9 variant="primary" href=tld_create_url %}
         </div>
         {% endif %}
     </div>

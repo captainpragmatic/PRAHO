@@ -230,8 +230,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 
     def get_vat_rate_percent(self, obj: Order) -> str | None:
         """Show a single percentage only when all recorded lines use that rate."""
-        rates = {item.tax_rate for item in obj.items.all()}
-        return format((rates.pop() * 100).normalize(), "f") if len(rates) == 1 else None
+        return obj.uniform_vat_rate_percent
 
     class Meta:
         model = Order

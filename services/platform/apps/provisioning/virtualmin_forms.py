@@ -212,6 +212,27 @@ class VirtualminBackupForm(forms.Form):
         return cleaned_data
 
 
+class VirtualminRestorePairForm(forms.Form):
+    """Choose a differential backup; its base is the one it names. Restores both, in order."""
+
+    differential_id = forms.ChoiceField(
+        widget=PRAHOSelectWidget(), help_text=_("The differential to restore; its base backup is restored first")
+    )
+    confirm_restore = forms.BooleanField(
+        required=True,
+        widget=PRAHOCheckboxWidget(),
+        label=_("Confirm pair restore"),
+        help_text=_("I understand this overwrites the live domain and takes it offline until it is verified"),
+    )
+
+    def __init__(self, *args: Any, differentials: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["differential_id"]).choices = [
+            (item["backup_id"], f"{item['backup_id']} ({item['created_at']}, base {item['base_backup_id']})")
+            for item in differentials or []
+        ]
+
+
 class VirtualminRestoreForm(forms.Form):
     """
     Form for restoring Virtualmin domains from backups.
@@ -510,7 +531,8 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
         # Set default quota values
         self.fields["disk_quota_mb"].initial = 1000
         self.fields["bandwidth_quota_mb"].initial = 10000
-        self.fields["status"].initial = "active"
+        # Unverified until staff or the sync confirm it on the node: the model default, not "active"
+        self.fields["status"].initial = "provisioning"
 
     def clean_domain(self) -> str:
         """Validate domain format and uniqueness."""

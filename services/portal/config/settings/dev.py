@@ -2,6 +2,7 @@
 Development settings for PRAHO Portal Service
 """
 
+import copy
 import logging
 import os
 import sys
@@ -50,11 +51,8 @@ if _env_path is not None:
 
 from .base import *  # noqa: E402, F403
 
-# Own copies of the inherited lists: the in-place edits below must never reach base, which other
-# settings modules (and tests that import several of them) share.
-MIDDLEWARE = list(MIDDLEWARE)
-INSTALLED_APPS = list(INSTALLED_APPS)
-CSRF_TRUSTED_ORIGINS = list(CSRF_TRUSTED_ORIGINS)
+# Levels below are adjusted per environment; work on a copy so base's dict stays as it is.
+LOGGING = copy.deepcopy(LOGGING)
 
 # Debug mode
 DEBUG = True
@@ -82,16 +80,15 @@ ALLOWED_HOSTS = ["*"]
 # ===============================================================================
 
 # Insert debug toolbar middleware into existing MIDDLEWARE list
-MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")
+# A new list: insert() would also change base.MIDDLEWARE, which `from .base import *` shares.
+MIDDLEWARE = [*MIDDLEWARE[:1], "debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE[1:]]
 
 # ===============================================================================
 # DEVELOPMENT APPS
 # ===============================================================================
 
 # Add debug toolbar to existing INSTALLED_APPS list
-INSTALLED_APPS += [
-    "debug_toolbar",
-]
+INSTALLED_APPS = [*INSTALLED_APPS, "debug_toolbar"]
 
 # django_extensions is dev-only (not installed in prod Docker images)
 try:
@@ -196,7 +193,8 @@ CSRF_COOKIE_SECURE = False
 # CSRF trusted origins for development
 # Extra development origins, e.g. another machine on a LAN or VPN, as a comma list in .env:
 # DEV_EXTRA_ORIGINS=http://100.64.0.1:8700,http://100.64.0.1:8701
-CSRF_TRUSTED_ORIGINS += [
+CSRF_TRUSTED_ORIGINS = [
+    *CSRF_TRUSTED_ORIGINS,
     "http://localhost:8701",
     "http://127.0.0.1:8701",
     *[o.strip() for o in os.environ.get("DEV_EXTRA_ORIGINS", "").split(",") if o.strip()],

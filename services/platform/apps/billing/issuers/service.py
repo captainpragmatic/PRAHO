@@ -22,7 +22,7 @@ import uuid
 from functools import partial
 from typing import TYPE_CHECKING, Any, assert_never
 
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils.translation import gettext as _
 
 from apps.billing.credit_note_lines import mirror_lines_negated
@@ -34,7 +34,7 @@ from apps.billing.invoice_models import (
     Invoice,
 )
 from apps.billing.tax_evidence import capture_credit_note_evidence
-from apps.common.transactions import best_effort_atomic
+from apps.common.transactions import best_effort_atomic, is_outside_transaction
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -61,7 +61,7 @@ def _refuse_if_inside_transaction() -> None:
     outer rollback would erase PRAHO's record of a call the provider already saw —
     the exact orphan ADR-0045 was written about.
     """
-    if connection.in_atomic_block or not transaction.get_autocommit():
+    if not is_outside_transaction():
         raise IssuanceTransactionError(
             "External issuance must not run inside a transaction: the claim has to "
             "commit before the provider call, or a rollback hides an issued document."

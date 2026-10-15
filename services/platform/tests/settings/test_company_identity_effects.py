@@ -1,6 +1,6 @@
 """The `company.*` identity settings, asserted where a reader actually sees them.
 
-The portal's legal pages state who the operator is (ADR-0058): the legal name, registration number,
+The portal's legal pages state who the operator is (ADR-0061): the legal name, registration number,
 address and contacts, which the portal reads from Platform's signed localisation payload. These
 tests write the setting and assert what the portal receives, which is the only place its effect
 on those pages can be observed from Platform. The portal's rendering of the payload is tested in

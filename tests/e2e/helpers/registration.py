@@ -43,14 +43,33 @@ def new_identity(company_suffix: str = "") -> Identity:
     return Identity(email=f"signup-{key}@e2e.test", company=f"E2E Signup {key}{suffix} SRL")
 
 
-def mailbox() -> set[Path]:
-    """The mails delivered so far; pass it to `delivered_to` to see only later ones."""
-    return set(MAIL_DIRECTORY.glob("*.log"))
+# What Django's file mail backend writes after every message.
+MESSAGE_SEPARATOR = b"\n" + b"-" * 79 + b"\n"
 
 
-def delivered_to(email: str, before: set[Path]) -> list[EmailMessage]:
-    messages = [BytesParser(policy=policy.default).parsebytes(path.read_bytes()) for path in mailbox() - before]
-    return [message for message in messages if message["To"] == email]
+def mailbox() -> dict[Path, int]:
+    """How much mail each file held so far; pass it to `delivered_to` to see only later mail.
+
+    Django's file backend names a file once per backend instance and appends to it, so two
+    mails can share a file, and a later mail can land in a file that already existed. A
+    snapshot is each file's size, not just the list of files.
+    """
+    return {path: path.stat().st_size for path in MAIL_DIRECTORY.glob("*.log")}
+
+
+def delivered_to(email: str, before: dict[Path, int]) -> list[EmailMessage]:
+    """Every mail to `email` written after the snapshot, wherever the backend put it."""
+    found = []
+    for path in mailbox():
+        with path.open("rb") as stream:
+            stream.seek(before.get(path, 0))
+            written = stream.read()
+        for chunk in written.split(MESSAGE_SEPARATOR):
+            if chunk.strip():
+                message = BytesParser(policy=policy.default).parsebytes(chunk)
+                if message["To"] == email:
+                    found.append(message)
+    return found
 
 
 def fill_registration(page: Page, email: str, company: str) -> None:
@@ -79,7 +98,7 @@ def submit_registration(page: Page, email: str, company: str) -> None:
     expect(page.get_by_text("Check your email for a message with the next step.")).to_be_visible()
 
 
-def confirmation_link(email: str, before: set[Path], run_queued_tasks) -> str:
+def confirmation_link(email: str, before: dict[Path, int], run_queued_tasks) -> str:
     """Deliver the queued registration mail and return the confirmation link it carries."""
     assert {"sent": True, "kind": "confirm"} in run_queued_tasks(DELIVER)
     [message] = delivered_to(email, before)

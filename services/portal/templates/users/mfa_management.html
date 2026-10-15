@@ -39,12 +39,6 @@
                   {% trans 'Authenticator App' %}
                 </div>
                 {% endif %}
-                {% if profile.webauthn_enabled %}
-                <div class="flex items-center text-green-400"> {# tmpl-allow TMPL005: needs alert nested_content #}
-                  <span class="mr-2">{% icon "lock" size="sm" %}</span>
-                  {% trans 'Passkeys/Hardware Keys' %}
-                </div>
-                {% endif %}
               </div>
             </dd>
           </div>
@@ -113,38 +107,6 @@
 
                 {% url 'users:mfa_setup_totp' as wp16_url %}
                 {% button _("Set Up Authenticator App") href=wp16_url variant="primary" class_="w-full text-center" %}
-              </div>
-            </div>
-
-            <!-- WebAuthn Method -->
-            <div class="bg-slate-700 rounded-lg p-4 border border-slate-600 hover:border-green-500 transition-colors relative">
-              <!-- Recommended Badge -->
-              <div class="absolute -top-2 left-1/2 transform -translate-x-1/2">
-                {% badge _("RECOMMENDED") variant="success" size="xs" rounded="full" %}
-              </div>
-
-              <div class="text-center">
-                <div class="text-green-400 mb-3">{% icon "lock" size="2xl" %}</div> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
-                <h5 class="font-medium text-white mb-2">{% trans 'Passkeys' %}</h5>
-                <p class="text-xs text-slate-400 mb-4">{% trans 'Face ID, Touch ID, fingerprint, hardware keys' %}</p>
-
-                <div class="text-left mb-4 space-y-1">
-                  <div class="flex items-center text-green-400 text-xs"> {# tmpl-allow TMPL005: needs alert nested_content #}
-                    <span class="mr-1">{% icon "check" size="xs" %}</span>
-                    {% trans 'Most secure' %}
-                  </div>
-                  <div class="flex items-center text-green-400 text-xs"> {# tmpl-allow TMPL005: needs alert nested_content #}
-                    <span class="mr-1">{% icon "check" size="xs" %}</span>
-                    {% trans 'Fastest login' %}
-                  </div>
-                </div>
-
-                <p class="text-center text-xs text-slate-400 mb-4">
-                  {% trans 'Contact support to enable passkey MFA for your account.' %}
-                </p>
-
-                {% trans 'Contact Support to Enable' as enable_support_label %}
-                {% button enable_support_label disabled=True variant="secondary" class_="w-full cursor-not-allowed" %}
               </div>
             </div>
           </div>

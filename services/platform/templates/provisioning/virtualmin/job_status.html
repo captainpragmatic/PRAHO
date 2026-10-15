@@ -19,7 +19,10 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if can_retry %}
-                {% trans "Retry Job" as bt1 %}{% button bt1 variant="warning" href="#" %}
+              <form method="post" action="{% url 'provisioning:virtualmin_job_retry' job.id %}">
+                {% csrf_token %}
+                {% trans "Retry Job" as bt1 %}{% button bt1 variant="warning" type="submit" icon="refresh" %}
+              </form>
             {% endif %}
             {% trans "← Back to Jobs" as bt2 %}{% button bt2 variant="secondary" href="/provisioning/virtualmin/servers/" %}
         </div>
@@ -94,6 +97,48 @@
 
             {% if job.status != 'failed' and job.status_message %}
             <p class="text-sm text-slate-300">{{ job.status_message }}</p>
+            {% endif %}
+
+            {% if can_resolve %}
+            <!-- =============================================================================== -->
+            <!-- OPERATOR RESOLUTION (uncertain job) -->
+            <!-- =============================================================================== -->
+            <div class="bg-amber-900/20 border border-amber-700 rounded-lg p-6 space-y-4">
+                <h3 class="text-sm font-medium text-amber-300">{% trans "This job needs an operator" %}</h3>
+                <p class="text-sm text-slate-300">
+                    {% trans "The account stays locked for backups, restores and deletes until the job is resolved." %}
+                </p>
+                {% trans 'Resolution note' as note_aria_label %}{% trans 'What did you check?' as note_placeholder %}
+                {% input_field "note" html_id="job-resolution-note" aria_label=note_aria_label maxlength=200 placeholder=note_placeholder %}
+                <div class="flex items-center space-x-3">
+                    {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                    <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
+                            hx-post="{% url 'provisioning:virtualmin_job_resolve' job.id %}"
+                            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                            hx-include="#job-resolution-note"
+                            {% if half_restore_safety_backup_id %}
+                            hx-confirm="{% blocktrans with backup_id=half_restore_safety_backup_id %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}"
+                            {% else %}
+                            hx-confirm="{% trans 'Confirm the remote operation has stopped. This releases the account.' %}"
+                            {% endif %}
+                            hx-swap="outerHTML"
+                            hx-target="body">
+                        {% trans "Confirm stopped" %}
+                    </button>
+                    {% if can_resolve_node_lost %}
+                    {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
+                    <button class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors"
+                            hx-post="{% url 'provisioning:virtualmin_job_node_lost' job.id %}"
+                            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                            hx-include="#job-resolution-note"
+                            hx-confirm="{% trans 'The node is lost: nothing on it can be cancelled. Its differential chain is discarded and a late result from it is ignored. Release the account?' %}"
+                            hx-swap="outerHTML"
+                            hx-target="body">
+                        {% trans "Node lost" %}
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
             {% endif %}
 
             <!-- Error Details (if failed) -->

@@ -519,6 +519,41 @@ class VirtualminQuotaExceededError(VirtualminAPIError):
     """Server quota exceeded - try different server"""
 
 
+def listing_attribute(values: dict[str, Any], label: str) -> str:
+    """One `list-domains --multiline` attribute, in either key form.
+
+    The text output labels attributes ("Username"); the JSON API of Virtualmin
+    8.x keys them in snake_case ("username"). Lists are joined to one string.
+    """
+    for key in (label, label.lower().replace(" ", "_")):
+        if key in values:
+            value = values[key]
+            if isinstance(value, list):
+                return " ".join(str(item) for item in value).strip()
+            return str(value).strip()
+    return ""
+
+
+def listing_enabled(values: dict[str, Any]) -> bool | None:
+    """Enabled state from a multiline listing row; None when nothing proves it.
+
+    Older output carries "Status: Enabled|Disabled". Virtualmin 8.x prints no
+    status at all: a disabled domain carries "Disabled: <reason>", an enabled
+    one does not. Absence of that marker only counts as enabled on a full
+    record (one with its id), so a truncated row stays unverifiable.
+    """
+    status = listing_attribute(values, "Status").lower()
+    if status.startswith("enable"):
+        return True
+    if status.startswith("disable"):
+        return False
+    if status:
+        return None
+    if listing_attribute(values, "Disabled"):
+        return False
+    return True if listing_attribute(values, "ID") else None
+
+
 def explicit_rejection(raw: str) -> str | None:
     """Extract explicit remote rejection evidence, or None when ambiguous.
 
@@ -540,6 +575,22 @@ def explicit_rejection(raw: str) -> str | None:
     if status in {"error", "failed", "failure"} or data.get("success") is False or data.get("error"):
         return str(data.get("error") or data.get("message") or status or "rejected")
     return None
+
+
+def is_absent_domain_rejection(response: VirtualminResponse, domain: str) -> bool:
+    """True only for Virtualmin's own "no such domain" answer to a single-domain listing.
+
+    Virtualmin 8.x answers `list-domains --domain <absent>` with a JSON failure
+    whose error is exactly "Virtual server <domain> does not exist" (observed in
+    deploy/virtualmin-lab). That one envelope proves absence; any other failure,
+    or the same text for another domain, stays an error, so a create retry never
+    re-creates on a guess.
+    """
+    return (
+        not response.success
+        and bool(domain)
+        and explicit_rejection(response.raw_response) == f"Virtual server {domain} does not exist"
+    )
 
 
 def has_explicit_success(response: VirtualminResponse) -> bool:
@@ -1140,6 +1191,9 @@ class VirtualminGateway:
             timeout_seconds=request_timeout,
             connect_timeout_seconds=min(10.0, request_timeout) if deadline is not None else 10.0,
             blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
+            # Virtualmin mutates over GET (create-domain, delete-domain), so the adapter's
+            # method check cannot tell a write from a read. Never replay after a reset.
+            retry_connection_errors=False,
         )
 
         return safe_request(
@@ -1369,10 +1423,7 @@ class VirtualminGateway:
         for item in response.data["data"]:
             if isinstance(item, dict) and item.get("name"):
                 values = item.get("values", {}) or {}
-                username = values.get("Username", "")
-                if isinstance(username, list):
-                    username = username[0] if username else ""
-                rows.append({"domain": str(item["name"]), "username": str(username)})
+                rows.append({"domain": str(item["name"]), "username": listing_attribute(values, "Username")})
         return Ok(rows)
 
     def get_domain_state(self, domain: str) -> Result[dict[str, Any], str]:
@@ -1381,6 +1432,8 @@ class VirtualminGateway:
         if result.is_err():
             return Err(f"Domain state probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
+        if is_absent_domain_rejection(response, domain):
+            return Ok({"exists": False, "enabled": None, "owner": ""})
         if not response.success:
             return Err(
                 f"Domain state probe rejected: {response.data.get('error', 'Unknown error')}",
@@ -1392,17 +1445,11 @@ class VirtualminGateway:
         for item in response.data["data"]:
             if isinstance(item, dict) and item.get("name") == domain:
                 values = item.get("values", {}) or {}
-                status = values.get("Status", "")
-                if isinstance(status, list):
-                    status = status[0] if status else ""
-                username = values.get("Username", "")
-                if isinstance(username, list):
-                    username = username[0] if username else ""
                 return Ok(
                     {
                         "exists": True,
-                        "enabled": (str(status).lower().startswith("enable")) if status else None,
-                        "owner": str(username),
+                        "enabled": listing_enabled(values),
+                        "owner": listing_attribute(values, "Username"),
                     }
                 )
         return Ok({"exists": False, "enabled": None, "owner": ""})
@@ -1419,6 +1466,8 @@ class VirtualminGateway:
         if result.is_err():
             return Err(f"Ownership probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
+        if is_absent_domain_rejection(response, domain):
+            return Ok(None)
         if not response.success:
             return Err(
                 f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}",
@@ -1432,10 +1481,7 @@ class VirtualminGateway:
         for item in response.data["data"]:
             if isinstance(item, dict) and item.get("name") == domain:
                 values = item.get("values", {}) or {}
-                username = values.get("Username", "")
-                if isinstance(username, list):
-                    username = username[0] if username else ""
-                return Ok(str(username))
+                return Ok(listing_attribute(values, "Username"))
         return Ok(None)
 
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:

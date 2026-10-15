@@ -6,6 +6,7 @@ Centralized configuration management with Redis caching and type safety.
 from __future__ import annotations
 
 import decimal
+import ipaddress
 import json
 import logging
 import re
@@ -280,7 +281,8 @@ class SettingsService:
         # string
         if not isinstance(value, str):
             raise ValidationError(_("%(key)s: value must be a string") % {"key": key})
-        return value
+        # Surrounding whitespace is never meaningful in a setting and breaks exact comparisons
+        return value.strip()
 
     @classmethod
     def _validation_rules_for(cls, setting: SystemSetting) -> dict[str, Any]:
@@ -329,6 +331,13 @@ class SettingsService:
             not isinstance(value, list) or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
         ):
             raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+        if rules.get("item_format") == "ip_network" and isinstance(value, list):
+            for item in value:
+                if not cls._is_specific_ip_network(item):
+                    raise ValidationError(
+                        _("%(key)s: '%(item)s' is not an IP address or network with no host bits set")
+                        % {"key": key, "item": item}
+                    )
         item_minimum = rules.get("item_min")
         if item_minimum is not None and isinstance(value, list) and any(item < int(item_minimum) for item in value):
             raise ValidationError(
@@ -343,6 +352,17 @@ class SettingsService:
         order = rules.get("order")
         if order == "descending" and isinstance(value, list) and value != sorted(value, reverse=True):
             raise ValidationError(_("%(key)s: list values must be in descending order") % {"key": key})
+
+    @staticmethod
+    def _is_specific_ip_network(item: object) -> bool:
+        """An address or a strict network (no host bits), never the catch-all /0."""
+        if not isinstance(item, str) or item != item.strip() or not item:
+            return False
+        try:
+            network = ipaddress.ip_network(item, strict=True)
+        except ValueError:
+            return False
+        return network.prefixlen > 0
 
     @classmethod
     def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:
@@ -372,8 +392,9 @@ class SettingsService:
         Here specifically, and not in a view: this is the one write chokepoint every
         caller reaches, single-key and change-set alike, so the guard cannot be
         sidestepped by the admin, a management command, a data migration or a direct
-        service call. It runs inside the caller's transaction, immediately before the
-        row lock, so two operators racing the same switch cannot both be told yes.
+        service call. It runs inside the caller's transaction, on the normalised value
+        and after the setting's row lock is held, so two operators racing the same
+        switch cannot both be told yes.
         """
         if key == "billing.default_currency":
             return cls._currency_switch_guard(key, value)
@@ -418,6 +439,31 @@ class SettingsService:
         return None
 
     @classmethod
+    def _normalise_and_check(
+        cls, key: str, data_type: str, rules: dict[str, Any], value: Any
+    ) -> Result[Any, SettingValidationError]:
+        """Coerce and normalise ``value``, then run the semantic guard and the catalog rules on it.
+
+        The guard judges the value that would be stored, never the raw input, so a padded
+        " smartbill " is the same question as "smartbill". It runs after the row lock
+        (a missing row is arbitrated by the creation savepoint, and a lost create race
+        comes back through the locked path), and before the catalog rules so a typo in an
+        issuer name still reports ``unknown_issuer`` rather than a bare "not one of".
+        """
+        try:
+            coerced = cls._coerce_value(key, data_type, value)
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
+        guard = cls._semantic_guard(key, coerced)
+        if guard is not None:
+            return Err(guard)
+        try:
+            cls._apply_rules(key, rules, coerced)
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
+        return Ok(coerced)
+
+    @classmethod
     def _write_setting_locked(  # noqa: PLR0911, PLR0913  # Distinct validation/conflict outcomes; keyword-only write context
         cls,
         key: str,
@@ -435,23 +481,18 @@ class SettingsService:
         retry and rollback policy. Creation happens inside a savepoint so a lost
         create race cannot poison the caller's transaction.
         """
-        guard = cls._semantic_guard(key, value)
-        if guard is not None:
-            return Err(guard)
-
         try:
             setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
         except SystemSetting.DoesNotExist:
             definition = CATALOG_BY_KEY.get(key)
             data_type = definition.data_type if definition else cls._infer_data_type(value)
-            try:
-                coerced = cls._coerce_value(key, data_type, value)
-                # Catalog rules apply on the FIRST write too — the creation branch
-                # must not persist an out-of-range value just because the row did
-                # not exist yet (review of #377).
-                cls._apply_rules(key, validation_rules_for_key(key), coerced)
-            except ValidationError as e:
-                return Err(cls._validation_error(key, e))
+            # Catalog rules apply on the FIRST write too — the creation branch
+            # must not persist an out-of-range value just because the row did
+            # not exist yet (review of #377).
+            normalised = cls._normalise_and_check(key, data_type, validation_rules_for_key(key), value)
+            if isinstance(normalised, Err):
+                return normalised
+            coerced = normalised.value
             try:
                 with transaction.atomic():
                     setting = SystemSetting(
@@ -496,11 +537,10 @@ class SettingsService:
         # str() forces lazy translation proxies (boolean displays are gettext-lazy) into
         # real strings — raw proxies fail JSON serialization at the audit INSERT.
         old_display = str(setting.get_display_value())
-        try:
-            coerced = cls._coerce_value(key, setting.data_type, value)
-            cls._apply_rules(key, cls._validation_rules_for(setting), coerced)
-        except ValidationError as e:
-            return Err(cls._validation_error(key, e))
+        normalised = cls._normalise_and_check(key, setting.data_type, cls._validation_rules_for(setting), value)
+        if isinstance(normalised, Err):
+            return normalised
+        coerced = normalised.value
 
         setting.value = cls._prepare_value_for_json(coerced, setting.data_type)
         setting._audit_context = {

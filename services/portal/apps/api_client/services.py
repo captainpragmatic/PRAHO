@@ -183,6 +183,17 @@ def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> N
         response.close()  # Returns a fully read connection to the pool; drops one cut short.
 
 
+_MAX_USER_AGENT_LENGTH = 512
+
+
+def _browser_payload(client_ip: str, user_agent: str) -> dict[str, str]:
+    """The customer's browser for Platform's audit trail: its address, when meaningful, and its user agent."""
+    payload = _client_ip_payload(client_ip)
+    if user_agent and user_agent.isprintable():
+        payload["client_user_agent"] = user_agent[:_MAX_USER_AGENT_LENGTH]
+    return payload
+
+
 def _client_ip_payload(client_ip: str) -> dict[str, str]:
     """Include a valid, normalized client IP in the signed request only when it means something.
 
@@ -1083,44 +1094,52 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
-    def verify_totp_mfa(self, customer_id: str, token: str, user_id: int | None = None) -> dict[str, Any] | None:
-        """Verify TOTP token and enable MFA"""
-        try:
-            data = self._make_request(
-                "POST", "/users/mfa/verify/", user_id=user_id, data={"customer_id": customer_id, "token": token}
-            )
-            return data if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_degraded:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
-            return None
+    def verify_totp_mfa(  # noqa: PLR0913  # The code, the password and who sent them, each one fact
+        self,
+        customer_id: str,
+        token: str,
+        password: str,
+        *,
+        user_id: int | None = None,
+        client_ip: str = "",
+        user_agent: str = "",
+    ) -> dict[str, Any]:
+        """Confirm the pending setup with a code and the current password; returns the recovery codes.
 
-    def setup_webauthn_mfa(self, customer_id: str) -> dict[str, Any] | None:
-        """Initialize WebAuthn/Passkey MFA setup"""
-        try:
-            data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
-            return data if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_degraded:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
-            return None
+        A refusal raises PlatformAPIError whose response_data carries Platform's code
+        (mfa_incorrect, mfa_setup_expired, mfa_already_enabled), so the caller can tell a wrong
+        guess from an expired setup or an account already enrolled.
+        """
+        return self._make_request(
+            "POST",
+            "/users/mfa/verify/",
+            user_id=user_id,
+            data={
+                "customer_id": customer_id,
+                "token": token,
+                "password": password,
+                **_browser_payload(client_ip, user_agent),
+            },
+        )
 
-    def regenerate_backup_codes(self, user_id: int, password: str, token: str) -> dict[str, Any]:
+    def regenerate_backup_codes(
+        self, user_id: int, password: str, token: str, *, client_ip: str = "", user_agent: str = ""
+    ) -> dict[str, Any]:
         return self._make_request(
             "POST",
             "/users/mfa/regenerate-backup-codes/",
             user_id=user_id,
-            data={"user_id": user_id, "password": password, "token": token},
+            data={"user_id": user_id, "password": password, "token": token, **_browser_payload(client_ip, user_agent)},
         )
 
-    def disable_mfa(self, user_id: int, password: str, token: str) -> dict[str, object] | None:
+    def disable_mfa(
+        self, user_id: int, password: str, token: str, *, client_ip: str = "", user_agent: str = ""
+    ) -> dict[str, object] | None:
         data = self._make_request(
             "POST",
             "/users/mfa/disable/",
             user_id=user_id,
-            data={"user_id": user_id, "password": password, "token": token},
+            data={"user_id": user_id, "password": password, "token": token, **_browser_payload(client_ip, user_agent)},
         )
         return data if data.get("success") else None
 
@@ -1163,42 +1182,6 @@ class PlatformAPIClient:
     ) -> dict[str, Any]:
         """GET a Platform billing API endpoint (/api/billing/<endpoint>); see `post_billing`."""
         return self._make_request("GET", f"/api/billing/{endpoint}", user_id=user_id, params=params)
-
-    def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
-        """Download invoice PDF."""
-        return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
-
-    def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
-        """Get invoice details"""
-        return self._make_request("GET", f"/billing/invoices/{invoice_id}/", user_id=user_id)
-
-    # ===============================================================================
-    # TICKETS API ENDPOINTS
-    # ===============================================================================
-
-    # (Legacy user-scoped GET ticket methods removed; use secure POST endpoints instead)
-
-    def get_ticket_details(self, ticket_id: int, user_id: int) -> dict[str, Any]:
-        """Get ticket details"""
-        return self._make_request("GET", f"/tickets/{ticket_id}/", user_id=user_id)
-
-    def create_ticket(self, ticket_data: dict[str, Any], user_id: int) -> dict[str, Any]:
-        """Create new support ticket"""
-        return self._make_request("POST", "/tickets/", user_id=user_id, data=ticket_data)
-
-    def add_ticket_comment(self, ticket_id: int, comment_data: dict[str, Any], user_id: int) -> dict[str, Any]:
-        """Add comment to ticket"""
-        return self._make_request("POST", f"/tickets/{ticket_id}/comments/", user_id=user_id, data=comment_data)
-
-    # ===============================================================================
-    # SERVICES API ENDPOINTS
-    # ===============================================================================
-
-    def get_customer_services(self, customer_id: int, user_id: int) -> list[dict[str, Any]]:
-        """Get services for customer"""
-        data = self._make_request("GET", f"/customers/{customer_id}/services/", user_id=user_id)
-        results = data.get("results", data.get("services", []))
-        return cast(list[dict[str, Any]], results) if isinstance(results, list) else []
 
     # ===============================================================================
     # DASHBOARD DATA
@@ -1258,33 +1241,10 @@ class PlatformAPIClient:
         request_data = {"customer_id": customer_id, "action": "get_tickets", "timestamp": time.time()}
         return self._make_request("POST", "/api/tickets/", data=request_data, idempotent=True)
 
-    def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> dict[str, Any]:
-        """🔒 Get ticket detail - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "ticket_number": ticket_number,
-            "action": "get_ticket_detail",
-            "timestamp": time.time(),
-        }
-        return self._make_request(
-            "POST", f"/api/tickets/{quote_path_segment(ticket_number)}/", data=request_data, idempotent=True
-        )
-
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "create_ticket", "timestamp": time.time(), **ticket_data}
         return self._make_request("POST", "/api/tickets/create/", data=request_data)
-
-    def reply_to_ticket_secure(self, customer_id: int, ticket_number: str, reply_content: str) -> dict[str, Any]:
-        """🔒 Reply to ticket - SECURE HMAC BODY"""
-        request_data = {
-            "customer_id": customer_id,
-            "ticket_number": ticket_number,
-            "content": reply_content,
-            "action": "reply_to_ticket",
-            "timestamp": time.time(),
-        }
-        return self._make_request("POST", f"/api/tickets/{quote_path_segment(ticket_number)}/reply/", data=request_data)
 
     # ===============================================================================
     # SECURE SERVICES API ENDPOINTS 📦

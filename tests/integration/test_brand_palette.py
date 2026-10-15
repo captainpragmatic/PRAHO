@@ -1,4 +1,4 @@
-"""A deployment restyles PRAHO through its brand folder alone (ADR-0058).
+"""A deployment restyles PRAHO through its brand folder alone (ADR-0061).
 
 The portal's templates colour with Tailwind's blue-* and slate-* utilities. Every blue-* shade
 resolves to the primary scale, so a brand.css that overrides --color-primary-* and --color-slate-*

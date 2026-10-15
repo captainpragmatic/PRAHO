@@ -3,6 +3,9 @@
   hosts: all
   gather_facts: false
   become: false
+  vars:
+    # Must match REMOTE_ARCHIVE_DIR in apps/provisioning/virtualmin_backup_service.py.
+    remote_archive_dir: /var/lib/praho-transfer
   tasks:
     - name: Validate single-host backup inputs
       ansible.builtin.assert:
@@ -12,10 +15,18 @@
           - spool_dir is match('^/')
           - expected_sha256 is match('^[0-9a-f]{64}$')
 
-    - name: Copy archive into the target temporary directory
+    - name: Ensure the private staging directory
+      ansible.builtin.file:
+        path: "{{ remote_archive_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copy archive into the private staging directory
       ansible.builtin.copy:
         src: "{{ spool_dir }}/{{ archive_name }}"
-        dest: "/tmp/{{ archive_name }}"
+        dest: "{{ remote_archive_dir }}/{{ archive_name }}"
         owner: root
         group: root
         mode: '0600'
@@ -23,7 +34,7 @@
 
     - name: Inspect the transferred archive
       ansible.builtin.stat:
-        path: "/tmp/{{ archive_name }}"
+        path: "{{ remote_archive_dir }}/{{ archive_name }}"
         checksum_algorithm: sha256
         follow: false
       register: backup_archive

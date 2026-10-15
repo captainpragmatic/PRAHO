@@ -1,4 +1,4 @@
-"""The legal pages are the portal's; these staff-side addresses send visitors there (ADR-0058)."""
+"""The legal pages are the portal's; these staff-side addresses send visitors there (ADR-0061)."""
 
 from __future__ import annotations
 

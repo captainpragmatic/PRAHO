@@ -76,9 +76,15 @@ class TOTPSetupTests(StaffTestBase):
         page = self.setup_page()
         secret = page.context["secret"]
         # The page offers it: someone whose app holds a different secret needs a way out.
-        self.assertContains(page, 'href="/auth/mfa/setup/totp/?restart=1"')
+        self.assertContains(page, 'name="restart"')
 
-        self.assertNotEqual(self.client.get(self.url, {"restart": "1"}, follow=True).context["secret"], secret)
+        restarted = self.client.post(self.url, {"restart": "1"}, follow=True)
+        self.assertNotEqual(restarted.context["secret"], secret)
+
+    def test_a_link_cannot_start_over(self) -> None:
+        """#689: starting over by GET let a link on another site swap the secret someone had scanned."""
+        secret = self.setup_page().context["secret"]
+        self.assertEqual(self.client.get(self.url, {"restart": "1"}).context["secret"], secret)
 
     def test_starting_over_then_submitting_enrols_with_the_new_secret(self) -> None:
         """The setup form has no action, so a browser posts back to the URL it came from.
@@ -86,13 +92,13 @@ class TOTPSetupTests(StaffTestBase):
         Starting over used to rotate the secret on any request with ?restart=1, including that
         POST, so the code from the app never matched and every try spent one of 15 an hour.
         """
-        restarted = self.client.get(self.url, {"restart": "1"})
+        restarted = self.client.post(self.url, {"restart": "1"})
         self.assertRedirects(restarted, self.url, fetch_redirect_response=False)
         secret = self.setup_page().context["secret"]
 
         response = self.client.post(self.url + "?restart=1", {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+        self.assertEqual(len(response.context["backup_codes"]), 8)
         self.user.refresh_from_db()
         self.assertTrue(self.user.two_factor_enabled)
         self.assertEqual(self.user.two_factor_secret, secret)
@@ -144,21 +150,22 @@ class TOTPSetupTests(StaffTestBase):
         self.assertFalse(self.user.two_factor_enabled)
 
     def test_the_setup_and_backup_code_pages_are_not_cached(self) -> None:
-        self.assertIn("no-store", self.setup_page()["Cache-Control"])
-        secret = self.client.session["2fa_secret"]
+        page = self.setup_page()
+        self.assertIn("no-store", page["Cache-Control"])
+        secret = page.context["secret"]
 
-        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD}, follow=True)
+        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
+        # The recovery codes are in this response (#689), so it must not be cached either.
+        self.assertIn("backup_codes", response.context)
         self.assertIn("no-store", response["Cache-Control"])
 
     def test_the_backup_code_page_counts_the_codes_it_shows(self) -> None:
-        session = self.client.session
-        session["new_backup_codes"] = ["11111111", "22222222", "33333333"]
-        session.save()
+        secret = self.setup_page().context["secret"]
 
-        response = self.client.get(reverse("users:mfa_backup_codes"))
+        response = self.client.post(self.url, {"token": pyotp.TOTP(secret).now(), "password": PASSWORD})
 
-        self.assertContains(response, "Your 3 backup codes")
+        self.assertContains(response, "Your 8 backup codes")
 
 
 class GenericErrorTests(StaffTestBase):
@@ -173,7 +180,8 @@ class GenericErrorTests(StaffTestBase):
                 {"password": PASSWORD, "token": "00000000"},
             ):
                 with self.subTest(url=url, data=data):
-                    response = self.client.post(url, data)
+                    confirmed = {**data, "confirm_disable": "on", "confirm_regenerate": "on"}
+                    response = self.client.post(url, confirmed)
                     self.assertContains(response, GENERIC_ERROR)
                     self.assertNotContains(response, "Invalid password.")
         self.user.refresh_from_db()
@@ -215,7 +223,8 @@ class RegenerateAuditTests(StaffTestBase):
         profile_events = AuditEvent.objects.filter(action="profile_updated").count()
 
         self.client.post(
-            reverse("users:mfa_regenerate_backup_codes"), {"password": PASSWORD, "token": pyotp.TOTP(secret).now()}
+            reverse("users:mfa_regenerate_backup_codes"),
+            {"password": PASSWORD, "token": pyotp.TOTP(secret).now(), "confirm_regenerate": "on"},
         )
 
         event = AuditEvent.objects.get(action="2fa_backup_codes_generated")

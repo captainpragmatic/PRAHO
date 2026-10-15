@@ -766,7 +766,7 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
     """Record a change to whether the customer was given the privacy notice.
 
     data_processing_consent records the notice, not a consent: the processing performs the
-    customer's contract (ADR-0058). The audit call is wrapped in a savepoint so a DatabaseError
+    customer's contract (ADR-0061). The audit call is wrapped in a savepoint so a DatabaseError
     during log_compliance_event cannot leave the connection in InFailedSqlTransaction state and
     force rollback of the outer transaction (the change itself).
     """

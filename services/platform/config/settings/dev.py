@@ -80,7 +80,8 @@ DISABLE_ACCOUNT_LOCKOUT = True
 # ===============================================================================
 
 # Insert debug toolbar middleware into existing MIDDLEWARE list
-MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")
+# A new list: insert() would also change base.MIDDLEWARE, which `from .base import *` shares.
+MIDDLEWARE = [*MIDDLEWARE[:1], "debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE[1:]]
 
 # Disable CSRF middleware for API development (allows Portal login)
 MIDDLEWARE = [mw for mw in MIDDLEWARE if "CsrfViewMiddleware" not in mw]
@@ -90,9 +91,7 @@ MIDDLEWARE = [mw for mw in MIDDLEWARE if "CsrfViewMiddleware" not in mw]
 # ===============================================================================
 
 # Add debug toolbar to existing INSTALLED_APPS list
-INSTALLED_APPS += [
-    "debug_toolbar",
-]
+INSTALLED_APPS = [*INSTALLED_APPS, "debug_toolbar"]
 
 # django_extensions is dev-only (not installed in prod Docker images)
 try:
@@ -172,7 +171,7 @@ if is_testing:
     # Disable rate limiting during tests to prevent 403 errors from race conditions
     configure_rate_limiting(globals(), enabled=False)
     # Disable DRF throttling in tests to prevent 429s from rapid API calls
-    REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+    REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
 else:
     # Ensure rate limiting is enabled in development (but allow override via env)
     configure_rate_limiting(globals(), enabled=True)
@@ -180,7 +179,7 @@ else:
 # When rate limiting is explicitly disabled (e.g. RATE_LIMITING_ENABLED=false make dev),
 # also disable DRF throttling so E2E tests don't hit 429s.
 if not RATE_LIMITING_ENABLED:
-    REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
+    REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
 
 # Webhook signing secret for platform→portal notifications (dev/test value)
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get(
@@ -190,7 +189,7 @@ PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get(
 # Portal payment webhook URL (defaults to local portal for development)
 PORTAL_PAYMENT_WEBHOOK_URL = os.environ.get(
     "PORTAL_PAYMENT_WEBHOOK_URL",
-    "http://localhost:8701/orders/payment/webhook/",
+    "http://localhost:8701/order/payment/webhook/",
 )
 
 # ===============================================================================

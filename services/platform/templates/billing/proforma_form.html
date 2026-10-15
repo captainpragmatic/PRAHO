@@ -78,20 +78,21 @@
               <label for="proforma-customer-select" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Select Customer' %} <span class="text-red-500">*</span>
               </label>
-              {# tmpl-allow TMPL003: options rendered inline from a customers loop, each carrying data-company/data-vat/data-email/data-terms read by the preview script; select components take a view-built options list #}
+              {# tmpl-allow TMPL003: options rendered inline from a customers loop, each carrying data-company/data-vat/data-email/data-terms read by the preview script and data-vat-rate read by the new-line VAT default; select components take a view-built options list #}
               <select name="customer" required
                 class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
                 id="proforma-customer-select">
                 <option value="">{% trans 'Choose a customer...' %}</option>
-                {% for customer in customers %}
+                {% for choice in customer_choices %}{% with customer=choice.customer %}
                 <option value="{{ customer.id }}" {% if proforma and customer.id == proforma.customer.id %}selected{% elif posted and posted.customer == customer.id|stringformat:"s" %}selected{% endif %}
                   data-company="{{ customer.company_name|default:customer.name }}"
                   data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                   data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
-                  data-terms="{{ customer.billing_profile.payment_terms|default:'14' }} days">
+                  data-terms="{{ customer.billing_profile.payment_terms|default:'14' }} days"
+                  data-vat-rate="{{ choice.vat_rate }}">
                   {{ customer.company_name|default:customer.name }}{% if customer.tax_profile.vat_number %} ({{ customer.tax_profile.vat_number }}){% endif %}
                 </option>
-                {% empty %}
+                {% endwith %}{% empty %}
                 <option value="" disabled>{% trans 'No customers available' %}</option>
                 {% endfor %}
               </select>
@@ -174,12 +175,13 @@
 
           <div class="space-y-4">
             <!-- Header Row (hidden on mobile — fields have labels instead) -->
-            <div class="hidden md:grid grid-cols-12 gap-3 text-sm font-medium text-slate-400 border-b border-slate-600 pb-2">
-              <div class="col-span-3">{% trans 'Description' %}</div>
-              <div class="col-span-2">{% trans 'Qty' %}</div>
-              <div class="col-span-2">{% trans 'Unit Price' %}</div>
-              <div class="col-span-2">{% trans 'VAT Rate' %}</div>
-              <div class="col-span-2">{% trans 'Total' %}</div>
+            <div class="hidden md:grid md:proforma-line-grid gap-3 text-sm font-medium text-slate-400 border-b border-slate-600 pb-2">
+              <div class="min-w-0">{% trans 'Description' %}</div>
+              <div class="min-w-0">{% trans 'Qty' %}</div>
+              <div class="min-w-0">{% trans 'Unit Price' %}</div>
+              <div class="min-w-0">{% trans 'VAT Rate' %}</div>
+              <div class="min-w-0 text-right">{% trans 'Total' %} (<span class="currency-label">{{ selected_currency }}</span>)</div>
+              <div class="min-w-0"></div>
             </div>
 
             <!-- Dynamic Line Items -->
@@ -187,38 +189,36 @@
               {% if lines %}
                 <!-- Existing lines (edit) or re-hydrated submitted lines (rejected create) -->
                 {% for line in lines %}
-                <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="{{ forloop.counter0 }}">
-                  <div class="col-span-2 md:col-span-3">
+                <div class="proforma-line grid grid-cols-2 md:proforma-line-grid gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="{{ forloop.counter0 }}">
+                  <div class="col-span-2 md:col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_{{ forloop.counter0 }}_description" aria-label="{% trans 'Description' %}" value="{{ line.description }}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_{{ forloop.counter0 }}_domain_name" aria-label="{% trans 'Domain name' %}" value="{{ line.domain_name }}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity|unlocalize }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price|unlocalize }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    {# tmpl-allow TMPL003: the row is mirrored in the addLineItem() script template, which cannot call a select component; options come from the view's vat_rate_options #}
+                    {# tmpl-allow TMPL003: options come from the view's TaxService rates plus every line's own; the markup is mirrored by the addLineItem() script, which cannot call the tag #}
                     <select name="line_{{ forloop.counter0 }}_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                      {% for option in vat_rate_options %}
-                        <option value="{{ option.value }}" {% if line.tax_rate|stringformat:".4f" == option.fraction %}selected{% endif %}>{{ option.label }}</option>
-                      {% endfor %}
+                      {% for option in vat_options %}<option value="{{ option.value }}" {% if option.value == line.vat_percent %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
                     </select>
                   </div>
-                  <div class="col-span-1 md:col-span-2">
-                    <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total whitespace-nowrap text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">{{ selected_currency }}</span></div>
+                  <div class="col-span-1 min-w-0">
+                    <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %} (<span class="currency-label">{{ selected_currency }}</span>)</label>
+                    <div class="line-total min-w-0 whitespace-nowrap tabular-nums text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }}</div>
                   </div>
-                  <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+                  <div class="col-span-2 md:col-span-1 min-w-0 flex md:block justify-end">
                     {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span #}
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
                   </div>
@@ -226,38 +226,36 @@
                 {% endfor %}
               {% else %}
                 <!-- Initial empty line for new proformas -->
-                <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="0">
-                  <div class="col-span-2 md:col-span-3">
+                <div class="proforma-line grid grid-cols-2 md:proforma-line-grid gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="0">
+                  <div class="col-span-2 md:col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_0_description" aria-label="{% trans 'Description' %}" placeholder="{% trans 'e.g. Web hosting package' %}" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="text" name="line_0_domain_name" aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}" class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_0_quantity" aria-label="{% trans 'Quantity' %}" value="1" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
                     <input type="number" name="line_0_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" placeholder="0.00" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
-                  <div class="col-span-1 md:col-span-2">
+                  <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    {# tmpl-allow TMPL003: the row is mirrored in the addLineItem() script template, which cannot call a select component; options come from the view's vat_rate_options #}
-                    <select name="line_0_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                      {% for option in vat_rate_options %}
-                        <option value="{{ option.value }}">{{ option.label }}</option>
-                      {% endfor %}
+                    {# tmpl-allow TMPL003: options come from the view's TaxService rates; data-vat-default lets the customer switch rewrite this untouched default; mirrored by the addLineItem() script #}
+                    <select name="line_0_vat_rate" aria-label="{% trans 'VAT Rate' %}" data-vat-default class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+                      {% for option in vat_options %}<option value="{{ option.value }}" {% if option.value == default_vat_rate %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
                     </select>
                   </div>
-                  <div class="col-span-1 md:col-span-2">
-                    <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total whitespace-nowrap text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">{{ selected_currency }}</span></div>
+                  <div class="col-span-1 min-w-0">
+                    <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %} (<span class="currency-label">{{ selected_currency }}</span>)</label>
+                    <div class="line-total min-w-0 whitespace-nowrap tabular-nums text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00</div>
                   </div>
-                  <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+                  <div class="col-span-2 md:col-span-1 min-w-0 flex md:block justify-end">
                     {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span; starts disabled and the script toggles disabled plus opacity classes #}
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>{% icon "x" %}</button>
                   </div>
@@ -368,13 +366,26 @@
   </form>
 </div>
 
+{{ proforma_form_config|json_script:"proforma-form-config" }}
 <script nonce="{{ csp_nonce }}">
+  // VAT choices, the supplier's default rate and the translated summary labels (from TaxService via the view).
+  const proformaConfig = JSON.parse(document.getElementById('proforma-form-config').textContent);
+
   // Initialize lineCounter based on existing / re-hydrated lines
   {% if lines %}
   let lineCounter = {{ lines|length }};
   {% else %}
   let lineCounter = 1;
   {% endif %}
+
+  // Amounts in the page's language, grouped, with two decimals: 999,999.99 (en) or 999.999,99 (ro)
+  const amountFormat = new Intl.NumberFormat(document.documentElement.lang || undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  function formatAmount(value) {
+    return amountFormat.format(value);
+  }
 
   // Enhanced calculation function
   function currentCurrency() {
@@ -395,8 +406,8 @@
       const lineVat = lineSubtotal * (vatRate / 100);
       const lineTotal = lineSubtotal + lineVat;
 
-      // Update line total display in the selected currency
-      line.querySelector('.line-total').textContent = lineTotal.toFixed(2) + ' ' + currency;
+      // The currency is named once, in the column header
+      line.querySelector('.line-total').textContent = formatAmount(lineTotal);
 
       subtotal += lineSubtotal;
       totalVat += lineVat;
@@ -405,26 +416,55 @@
     const grandTotal = subtotal + totalVat;
 
     // Update summary in the selected currency
-    document.getElementById('proforma-summary-subtotal').textContent = subtotal.toFixed(2) + ' ' + currency;
-    document.getElementById('proforma-summary-vat').textContent = totalVat.toFixed(2) + ' ' + currency;
-    document.getElementById('proforma-summary-total').textContent = grandTotal.toFixed(2) + ' ' + currency;
+    document.getElementById('proforma-summary-subtotal').textContent = formatAmount(subtotal) + ' ' + currency;
+    document.getElementById('proforma-summary-vat').textContent = formatAmount(totalVat) + ' ' + currency;
+    document.getElementById('proforma-summary-total').textContent = formatAmount(grandTotal) + ' ' + currency;
 
-    // Dynamic VAT label: show rate when uniform, "mixed" when lines differ
+    // Dynamic VAT label: name the rate when every line has the same one, else just "VAT"
     const vatRates = new Set();
     document.querySelectorAll('.proforma-line .line-vat').forEach(function (sel) { vatRates.add(sel.value); });
     const vatLabel = document.getElementById('proforma-summary-vat-label');
     if (vatLabel) {
-      if (vatRates.size === 1) {
-        vatLabel.textContent = '{% trans "VAT" %} (' + [...vatRates][0] + '%):';
-      } else if (vatRates.size > 1) {
-        vatLabel.textContent = '{% trans "VAT" %} ({% trans "mixed" %}):';
-      } else {
-        vatLabel.textContent = '{% trans "VAT:" %}';
-      }
+      vatLabel.textContent = vatRates.size === 1
+        ? proformaConfig.labels.vatRate.replace('{rate}', [...vatRates][0])
+        : proformaConfig.labels.vat;
     }
 
     // Update line count
     document.getElementById('proforma-line-count').textContent = document.querySelectorAll('.proforma-line').length;
+  }
+
+  // The VAT rate a new line starts with: the selected customer's, else the supplier's standard rate
+  function newLineVatRate() {
+    const select = document.getElementById('proforma-customer-select');
+    const option = select.options[select.selectedIndex];
+    return select.value && option && option.dataset.vatRate ? option.dataset.vatRate : proformaConfig.defaultVatRate;
+  }
+
+  // Select a rate, adding it first when it is not one of the offered rates (a customer's custom rate)
+  function selectVatRate(select, rate) {
+    if (![...select.options].some(option => option.value === rate)) {
+      select.add(new Option(rate + '%', rate));
+    }
+    select.value = rate;
+  }
+
+  // Lines still on their default follow the customer; a rate the operator chose or a saved line's never moves
+  function applyCustomerVatDefault() {
+    const rate = newLineVatRate();
+    document.querySelectorAll('.line-vat[data-vat-default]').forEach(select => selectVatRate(select, rate));
+    calculateTotals();
+  }
+
+  function keepChosenVatRate(select) {
+    select.addEventListener('change', () => select.removeAttribute('data-vat-default'));
+  }
+
+  // An added line offers the same rates and starts on the customer's default
+  function prepareNewLineVat(select) {
+    proformaConfig.vatOptions.forEach(option => select.add(new Option(option.label, option.value)));
+    selectVatRate(select, newLineVatRate());
+    keepChosenVatRate(select);
   }
 
   // Add new line item
@@ -432,8 +472,8 @@
     const container = document.getElementById('proforma-lines');
     const currency = currentCurrency();
     const lineHtml = `
-        <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="${lineCounter}">
-            <div class="col-span-2 md:col-span-3">
+        <div class="proforma-line grid grid-cols-2 md:proforma-line-grid gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="${lineCounter}">
+            <div class="col-span-2 md:col-span-1 min-w-0">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Description' %}</label>
                 {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="text" name="line_${lineCounter}_description"
@@ -444,33 +484,31 @@
                        aria-label="{% trans 'Domain name' %}" placeholder="{% trans 'e.g. example.com' %}"
                        class="line-domain w-full mt-1 px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded-md text-blue-400 text-xs placeholder-slate-500 focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="col-span-1 md:col-span-2">
+            <div class="col-span-1 min-w-0">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                 {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="number" name="line_${lineCounter}_quantity"
                        aria-label="{% trans 'Quantity' %}" value="1" min="0" step="1"
                        class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="col-span-1 md:col-span-2">
+            <div class="col-span-1 min-w-0">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
                 {# tmpl-allow TMPL001: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <input type="number" name="line_${lineCounter}_unit_price"
                        aria-label="{% trans 'Unit Price' %}" step="0.01" min="0" placeholder="0.00"
                        class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="col-span-1 md:col-span-2">
+            <div class="col-span-1 min-w-0">
                 <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                {# tmpl-allow TMPL003: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
-                <select name="line_${lineCounter}_vat_rate" aria-label="{% trans 'VAT Rate' %}"
-                       class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                    {% for option in vat_rate_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
-                </select>
+                {# tmpl-allow TMPL003: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it; its options are added from proforma-form-config #}
+                <select name="line_${lineCounter}_vat_rate" aria-label="{% trans 'VAT Rate' %}" data-vat-default
+                       class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500"></select>
             </div>
-            <div class="col-span-1 md:col-span-2">
-                <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                <div class="line-total whitespace-nowrap text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">${currency}</span></div>
+            <div class="col-span-1 min-w-0">
+                <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %} (<span class="currency-label">${currency}</span>)</label>
+                <div class="line-total min-w-0 whitespace-nowrap tabular-nums text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00</div>
             </div>
-            <div class="col-span-2 md:col-span-1 flex md:block justify-end">
+            <div class="col-span-2 md:col-span-1 min-w-0 flex md:block justify-end">
                 {# tmpl-allow TMPL002: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
             </div>
@@ -481,6 +519,7 @@
 
     // Add event listeners to new line
     const newLine = container.lastElementChild;
+    prepareNewLineVat(newLine.querySelector('.line-vat'));
     newLine.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
       input.addEventListener('input', calculateTotals);
     });
@@ -555,6 +594,7 @@
     document.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
       input.addEventListener('input', calculateTotals);
     });
+    document.querySelectorAll('.line-vat[data-vat-default]').forEach(keepChosenVatRate);
 
   // Add line button
   document.querySelector('.add-line-btn').addEventListener('click', function (e) {
@@ -598,7 +638,10 @@
     } else {
       preview.classList.add('hidden');
     }
+    applyCustomerVatDefault();
   });
+  // A customer already selected (an edit, or a restored form) sets the default of untouched lines too
+  applyCustomerVatDefault();
 
   updateRemoveButtons();
 });

@@ -21,7 +21,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.db.models import Exists, Max, OuterRef, Sum
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.audit.services import AuditService
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
@@ -540,7 +540,7 @@ class UsageBillingService:
                 continue
             try:
                 result = invoice_service.generate_invoice_from_cycle(str(cycle_id))
-            except (ValidationError, TransitionNotAllowed) as exc:
+            except (ValidationError, TransitionNotAllowed, ConcurrentTransition) as exc:
                 # A fiscally fail-closed cycle (e.g. missing provenanced FX rate)
                 # must not head-of-line-block the batch. Catching OUTSIDE the
                 # callee's transaction.atomic lets its writes roll back via

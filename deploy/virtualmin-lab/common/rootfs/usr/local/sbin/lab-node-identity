@@ -1,0 +1,23 @@
+#!/bin/bash
+# Generate per-container identity on boot: machine id, SSH host keys and, when
+# Webmin is installed, its TLS key pair. Nothing of this ships in an image layer.
+set -euo pipefail
+
+if [ ! -s /etc/machine-id ]; then
+  systemd-machine-id-setup
+fi
+
+# Creates only the missing host key types.
+ssh-keygen -A
+
+if [ -d /etc/webmin ] && [ ! -s /etc/webmin/miniserv.pem ]; then
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+  fqdn="$(hostname -f 2>/dev/null || hostname)"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    -subj "/CN=${fqdn}" -addext "subjectAltName=DNS:${fqdn}" \
+    -keyout "${workdir}/key.pem" -out "${workdir}/cert.pem" 2>/dev/null
+  umask 077
+  cat "${workdir}/key.pem" "${workdir}/cert.pem" > /etc/webmin/miniserv.pem.tmp
+  mv -f /etc/webmin/miniserv.pem.tmp /etc/webmin/miniserv.pem
+fi

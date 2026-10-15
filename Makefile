@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab virtualmin-probe
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -58,6 +58,9 @@ help:
 	@echo "  make test-e2e          - All E2E tests (requires both services)"
 	@echo "  make test-with-e2e     - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
+	@echo "  make virtualmin-lab-up   - Opt-in Docker Virtualmin lab (2 nodes + MinIO); virtualmin-lab-down stops it"
+	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab"
+	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
@@ -797,8 +800,14 @@ else
 	@$(MAKE) audit-a11y
 	@echo "📋 Phase 13: Dark-mode audit (blockers)"
 	@$(MAKE) audit-dark-mode
+	@echo "📋 Phase 14: Runtime media tracking check"
+	@$(MAKE) lint-runtime-media
 	@echo "🎉 All services linting complete!"
 endif
+
+.PHONY: lint-runtime-media
+lint-runtime-media:
+	@$(PYTHON_SHARED) scripts/lint_runtime_media.py
 
 lint-fix:
 ifdef FILE
@@ -1190,6 +1199,46 @@ docker-clean:
 	@echo "🧹 [Docker] Cleaning up containers and images..."
 	@docker compose -f deploy/docker-compose.dev.yml down --volumes --rmi all || true
 	@docker system prune -f
+
+# ===============================================================================
+# VIRTUALMIN LAB 🧪 (opt-in; two Docker Virtualmin nodes + MinIO, see deploy/virtualmin-lab/README.md)
+# ===============================================================================
+
+VIRTUALMIN_LAB = deploy/virtualmin-lab/lab.sh
+PYTHON_PLATFORM_LAB_MANAGE = cd services/platform && PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.lab $(PWD)/$(VENV_DIR)/bin/python manage.py
+
+virtualmin-lab-build:
+	@echo "🐳 [Virtualmin lab] Building praho-virtualmin-lab and praho-debian-node images..."
+	@$(VIRTUALMIN_LAB) build
+
+virtualmin-lab-up:
+	@echo "🧪 [Virtualmin lab] Starting nodes vm-a, vm-b and MinIO..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VIRTUALMIN_LAB) up
+	@$(PYTHON_PLATFORM_LAB_MANAGE) migrate --noinput
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_bootstrap
+	@$(VIRTUALMIN_LAB) apply-credentials
+	@echo "✅ [Virtualmin lab] Ready. Gate: make test-virtualmin-lab | Probe: make virtualmin-probe"
+
+virtualmin-lab-down:
+	@echo "🛑 [Virtualmin lab] Stopping and removing lab containers..."
+	@$(VIRTUALMIN_LAB) down
+
+test-virtualmin-lab:
+	@echo "🧪 [Virtualmin lab] Production-path backup + restore round trip (needs make virtualmin-lab-up)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_roundtrip
+	@echo "✅ [Virtualmin lab] Round trip passed"
+	@echo "🧪 [Virtualmin lab] Provisioning, differential-base, staging and node-playbook checks on vm-b..."
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_checks
+	@echo "✅ [Virtualmin lab] Checks passed"
+
+virtualmin-probe:
+	@echo "🔬 [Virtualmin lab] Incremental-backup contract probe (needs make virtualmin-lab-up)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.lab \
+		$(PWD)/$(VENV_DIR)/bin/python $(PWD)/scripts/virtualmin_incremental_probe.py \
+		--output $(PWD)/docs/domain/virtualmin-incremental-contract.md
 
 clean-cache:
 	@echo "🧹 Cleaning build artifacts across services..."

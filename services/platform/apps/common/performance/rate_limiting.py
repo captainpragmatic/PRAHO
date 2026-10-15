@@ -26,14 +26,14 @@ import math
 import re
 import time
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
 from rest_framework.request import Request
-from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
+from rest_framework.throttling import AnonRateThrottle, BaseThrottle, SimpleRateThrottle, UserRateThrottle
 
 from apps.common.request_ip import get_safe_client_ip
 
@@ -74,6 +74,14 @@ _KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
     "apps.api.users.views.SessionValidationThrottle": "session_validation",
     "rest_framework.throttling.AnonRateThrottle": "anon",
 }
+
+
+class RateLimitStoreUnavailable(Exception):  # noqa: N818  # names the condition, like DatabaseError
+    """The shared counter store could not be reached, so no request can be counted.
+
+    Answered 503, never 429: the caller was not throttled, the Platform could not tell.
+    ``platform_exception_handler`` turns it into the response; plain Django views catch it.
+    """
 
 
 def parse_rate_string(rate: str) -> tuple[int, int]:
@@ -128,35 +136,42 @@ def forwarded_client_ip(request: HttpRequest | Request) -> str | None:
 
 
 def fixed_window_limited(key: str, rate: str, *, charge: bool = True) -> tuple[bool, int]:
-    """Charge or peek at a fixed-window counter, denying requests if the store fails.
+    """Charge or peek at a fixed-window counter.
 
     A peek denies when the budget is exhausted. A charge denies when the new
     count exceeds the budget. Window identity is independent of backend TTLs.
+
+    Raises RateLimitStoreUnavailable when the counter store cannot be reached:
+    that is neither an admission nor a throttle, and each caller answers it with
+    the same 503 the HMAC middleware gives for the same condition.
     """
     if not getattr(settings, "RATE_LIMITING_ENABLED", True):
         return False, 0
-
-    # Deferred: apps.common.apps imports this module before the model registry is ready.
-    from apps.common import counters  # noqa: PLC0415
 
     max_calls, window = parse_rate_string(rate)
     now = time.time()
     window_index = int(now // window)
     counter_key = f"{key}:{window_index}"
     try:
-        if charge:
-            current = counters.increment(counter_key, window * 2)
-            limited = current > max_calls
-        else:
-            current = counters.peek(counter_key)
-            limited = current >= max_calls
+        current = _count_in_window(counter_key, window, charge=charge)
+    except Exception as error:
+        logger.error("🔥 [RateLimiter] Counter store failure during fixed-window rate limiting — answering 503")
+        raise RateLimitStoreUnavailable from error
 
-        if not limited:
-            return False, 0
-        return True, max(1, math.ceil(window - (now % window)))
-    except Exception:
-        logger.error("🔥 [RateLimiter] Counter store failure during fixed-window rate limiting — denying request")
-        return True, window
+    limited = current > max_calls if charge else current >= max_calls
+    if not limited:
+        return False, 0
+    return True, max(1, math.ceil(window - (now % window)))
+
+
+def _count_in_window(counter_key: str, window: int, *, charge: bool) -> int:
+    """Charge (or read) one window's counter; the key already names the window."""
+    # Deferred: apps.common.apps imports this module before the model registry is ready.
+    from apps.common import counters  # noqa: PLC0415
+
+    if charge:
+        return counters.increment(counter_key, window * 2)
+    return counters.peek(counter_key)
 
 
 def validate_throttle_rate_map(rates: dict[str, str]) -> None:
@@ -235,7 +250,7 @@ def _extract_hmac_identity(request: Request) -> str:
 
 
 class _CustomTimeRateMixin:
-    """Shorthand-rate parsing + the system-wide rate-limiting kill switch.
+    """Shorthand-rate parsing, the rate-limiting kill switch, and atomic fixed-window counting.
 
     #277: startup validation (``validate_throttle_rate_map``) accepts every format
     ``parse_rate_string`` accepts, but DRF's stock ``parse_rate`` keys the window on
@@ -248,9 +263,27 @@ class _CustomTimeRateMixin:
     (Customer/Burst/Standard/Auth) don't inherit — so ``RATE_LIMITING_ENABLED=False``
     silently failed to disable them (unexpected 429s in dev/E2E). Since this mixin is
     the one common ancestor of every project throttle, defining ``allow_request`` here
-    makes the switch universal. ``super().allow_request`` reaches the real throttle base
-    via cooperative MRO (the mixin is always followed by a DRF throttle class).
+    makes the switch universal.
+
+    Counting does not use DRF's request history. That history is read, trimmed and
+    written back through the default cache with no lock, so concurrent requests lose
+    each other's writes, and the default DatabaseCache can cull a live history away
+    (ADR-0050). Every hit instead charges one counter in the shared counter store, keyed
+    by the window it falls in (as ``fixed_window_limited`` does): the increment is
+    atomic and nothing culls an open window. The price of a fixed window is that a
+    client can use up to twice its rate across a window boundary.
     """
+
+    _retry_after: int = 1
+
+    # Supplied by the DRF throttle base that follows this mixin in every subclass's MRO.
+    rate: str | None
+    num_requests: int
+    duration: int
+    scope: str
+    if TYPE_CHECKING:
+
+        def get_cache_key(self, request: Request, view: Any) -> str | None: ...
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
         return parse_rate_string(rate)
@@ -258,10 +291,27 @@ class _CustomTimeRateMixin:
     def allow_request(self, request: Request, view: Any) -> bool:
         if not getattr(settings, "RATE_LIMITING_ENABLED", True):
             return True
-        # super() resolves to the DRF throttle base at runtime via cooperative MRO — this
-        # mixin is always mixed in *before* a SimpleRateThrottle subclass. mypy can't see
-        # that from the standalone mixin, hence the ignore.
-        return bool(super().allow_request(request, view))  # type: ignore[misc]  # cooperative-MRO super
+        if self.rate is None:
+            return True
+        key = self.get_cache_key(request, view)
+        if key is None:
+            return True
+
+        window = self.duration
+        now = time.time()
+        counter_key = f"{key}:{int(now // window)}"
+        try:
+            current = _count_in_window(counter_key, window, charge=True)
+        except Exception as error:
+            logger.error("🔥 [RateLimiter] Counter store failure for throttle %s — answering 503", self.scope)
+            raise RateLimitStoreUnavailable from error
+
+        self._retry_after = max(1, math.ceil(window - (now % window)))
+        return current <= self.num_requests
+
+    def wait(self) -> float | None:
+        """Seconds until the current window ends, which is when a refused client may retry."""
+        return self._retry_after
 
 
 class _ConfigurableRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
@@ -353,6 +403,37 @@ class ForwardedClientIPThrottle(EndpointRateThrottle):
         if ip is None:
             return None
         return self.cache_format % {"scope": self.scope, "ident": f"client_{ip}"}
+
+
+class MFACredentialThrottle(BaseThrottle):  # type: ignore[misc]  # DRF throttle base is untyped
+    """Each person's budget for checking a password or a code through the Portal (#689).
+
+    Charged on every call of enrolment verify, disable, backup-code regeneration and password
+    change, before the view runs, in the database counter store: a cache cull or a cache clear
+    cannot hand it back. Keyed on the person the HMAC middleware read from the verified body;
+    authentication accepts only that same person (secure_auth._signed_user_id), so a request
+    that names nobody, or two people, is refused there rather than going uncounted here.
+    """
+
+    scope = "mfa_credential"
+
+    def __init__(self) -> None:
+        self._wait: float | None = None
+
+    def allow_request(self, request: Request, view: Any) -> bool:
+        principal = getattr(request, "_portal_principal", None)
+        if not _is_portal_authenticated(request) or not isinstance(principal, str):
+            return True
+        if not principal.startswith("user:"):
+            return True
+        rest_framework = cast(dict[str, Any], settings.REST_FRAMEWORK)
+        rate = str(rest_framework["DEFAULT_THROTTLE_RATES"][self.scope])
+        limited, retry_after = fixed_window_limited(f"mfa_credential:{principal}", rate)
+        self._wait = float(retry_after) if limited else None
+        return not limited
+
+    def wait(self) -> float | None:
+        return self._wait
 
 
 class LoginClientIPThrottle(ForwardedClientIPThrottle):

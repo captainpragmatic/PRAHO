@@ -51,7 +51,6 @@ class ProvisioningTemplateBucketTests(SimpleTestCase):
             "provisioning/virtualmin/account_detail.html",
             "provisioning/virtualmin/accounts_list.html",
             "provisioning/virtualmin/migration_status.html",
-            "provisioning/virtualmin/partials/job_status.html",
         )
         findings = _findings("audit_accessibility", paths, frozenset({"critical", "serious"}))
         self.assertEqual(findings, [])

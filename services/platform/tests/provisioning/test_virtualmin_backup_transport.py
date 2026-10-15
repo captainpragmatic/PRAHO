@@ -56,7 +56,12 @@ def _response(program: str, *, success: bool = True, raw: str | None = None) -> 
     )
 
 
-class BackupTransportTests(task_tests.VirtualminTaskTestBase):
+class BackupNodeFixture(task_tests.VirtualminTaskTestBase):
+    """A fake managed node: server, deployment, gateway, S3, spool, and a playbook runner.
+
+    Subclasses supply ``_fake_fetch``, the stand-in the playbook runner calls.
+    """
+
     def setUp(self) -> None:
         super().setUp()
         provider = CloudProvider.objects.create(
@@ -134,6 +139,11 @@ class BackupTransportTests(task_tests.VirtualminTaskTestBase):
         self.addCleanup(ansible_patch.stop)
         self.ansible.run_playbook.side_effect = self._fake_fetch
 
+    def _fake_fetch(self, deployment: Any, playbook: str, variables: dict[str, Any], **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+
+class BackupTransportTests(BackupNodeFixture):
     def _fake_fetch(self, deployment: Any, playbook: str, variables: dict[str, Any], **kwargs: Any) -> Any:
         self.assertEqual(playbook, "virtualmin_backup_fetch.yml")
         self.assertEqual(deployment.virtualmin_server_id, self.server.pk)

@@ -2191,6 +2191,7 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
         from apps.orders.models import OrderItem
         from apps.provisioning.virtualmin_tasks import get_task_time_limit
+        from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
         task_budget = get_task_time_limit()
         order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
@@ -2221,7 +2222,7 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
                 params = {
                     "service_id": str(service.id),
                     "domain": primary_domain,
-                    "template": "Default",
+                    "template": DEFAULT_VIRTUALMIN_TEMPLATE,
                 }
                 async_task(
                     "apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params, timeout=task_budget

@@ -1,5 +1,13 @@
 # Backup Configuration Playbook for Virtualmin
-# Configures local (and future S3) backups
+# Creates the node's nightly full backup as a real Virtualmin scheduled backup
+# (and, for S3 storage, syncs the local archives offsite).
+#
+# Virtualmin 8 reads scheduled backups from /etc/webmin/virtual-server/backups/
+# and runs them from Webmin cron. It never reads the `sched` file earlier
+# versions of this play wrote, and the legacy `backup_dest` config key only
+# surfaced as a disabled schedule that produced an empty archive
+# (docs/domain/virtualmin-incremental-contract.md, Q4). The schedule is now
+# created with `virtualmin create-scheduled-backup`, which the lab proved.
 ---
 - name: Configure Virtualmin backups
   hosts: all
@@ -10,9 +18,12 @@
     backup_local_path: "/var/backups/virtualmin"
     backup_retention_days: 7
     backup_schedule: "0 2 * * *"  # 2 AM daily
+    # One dated directory per run, one archive per server. The destination is
+    # also how this play recognises its own schedule (create-scheduled-backup
+    # has no description field).
+    backup_schedule_dest: "{{ backup_local_path }}/%Y-%m-%d"
 
   tasks:
-    # Local backup setup
     - name: Create backup directory
       ansible.builtin.file:
         path: "{{ backup_local_path }}"
@@ -20,41 +31,93 @@
         owner: root
         group: root
         mode: '0700'
-      when: backup_enabled and backup_storage == 'local'
 
-    - name: Create Virtualmin backup schedule
-      ansible.builtin.template:
-        src: templates/virtualmin_backup_schedule.j2
-        dest: /etc/webmin/virtual-server/sched
-        mode: '0600'
-      when: backup_enabled
-      notify: Restart virtualmin
+    # Upgrade path: remove what earlier versions of this play wrote. Virtualmin
+    # ignores `sched`; `backup_dest` and its siblings define the disabled legacy
+    # schedule 1.
+    - name: Remove the unread schedule file
+      ansible.builtin.file:
+        path: /etc/webmin/virtual-server/sched
+        state: absent
 
-    - name: Configure backup retention
+    - name: Remove the legacy single-schedule config keys
       ansible.builtin.lineinfile:
         path: /etc/webmin/virtual-server/config
-        regexp: '^backup_strftime='
-        line: 'backup_strftime=%Y%m%d_%H%M%S'
-
-    - name: Set backup destination
-      ansible.builtin.lineinfile:
-        path: /etc/webmin/virtual-server/config
-        regexp: '^backup_dest='
-        line: "backup_dest={{ backup_local_path }}"
-      when: backup_storage == 'local'
-
-    - name: Configure backup features
-      ansible.builtin.lineinfile:
-        path: /etc/webmin/virtual-server/config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
+        regexp: "{{ item }}"
+        state: absent
       loop:
-        - { regexp: '^backup_virtualmin=', line: 'backup_virtualmin=1' }
-        - { regexp: '^backup_onebyone=', line: 'backup_onebyone=1' }
-        - { regexp: '^backup_compression=', line: 'backup_compression=1' }
-        - { regexp: '^backup_increment=', line: 'backup_increment=0' }  # Full backups
+        - '^backup_dest='
+        - '^backup_increment='
+        - '^backup_onebyone='
+        - '^backup_compression='
+        - '^backup_strftime='
+        - '^backup_virtualmin='
 
-    # S3 backup configuration
+    - name: Read the scheduled backups
+      ansible.builtin.command:
+        argv: [virtualmin, list-scheduled-backups, --json]
+      register: scheduled_backups_before
+      changed_when: false
+
+    - name: Find this play's schedules
+      ansible.builtin.set_fact:
+        praho_backup_schedule_ids: >-
+          {{ (scheduled_backups_before.stdout | from_json).data
+             | selectattr('values.destination.0', 'equalto', backup_schedule_dest)
+             | map(attribute='name') | list }}
+
+    # Replace rather than edit: create-scheduled-backup sets every field, so a
+    # changed variable (schedule, retention) always reaches the node.
+    - name: Delete this play's previous schedule
+      ansible.builtin.command:
+        argv: [virtualmin, delete-scheduled-backup, --id, "{{ item }}"]
+      loop: "{{ praho_backup_schedule_ids }}"
+
+    # Full backups of every server, never differential: --no-differential leaves
+    # each domain's differential base untouched, so the nightly backup never
+    # resets a base PRAHO relies on.
+    - name: Create the nightly full backup schedule
+      ansible.builtin.command:
+        argv:
+          - virtualmin
+          - create-scheduled-backup
+          - --all-domains
+          - --all-features
+          - --all-virtualmin
+          - --dest
+          - "{{ backup_schedule_dest }}"
+          - --strftime
+          - --newformat
+          - --mkdir
+          - --no-differential
+          - --schedule
+          - "{{ backup_schedule }}"
+          - --purge
+          - "{{ backup_retention_days }}"
+          - --email
+          - "{{ automatic_updates_mail_to | default('root') }}"
+          - --email-errors
+      when: backup_enabled
+
+    - name: Read the scheduled backups again
+      ansible.builtin.command:
+        argv: [virtualmin, list-scheduled-backups, --json]
+      register: scheduled_backups_after
+      changed_when: false
+
+    - name: Require exactly the configured schedule
+      vars:
+        praho_schedules: >-
+          {{ (scheduled_backups_after.stdout | from_json).data
+             | selectattr('values.destination.0', 'equalto', backup_schedule_dest) | list }}
+      ansible.builtin.assert:
+        that:
+          - praho_schedules | length == (1 if backup_enabled else 0)
+          - (not backup_enabled) or praho_schedules[0]['values']['enabled'][0] == 'Yes'
+          - (not backup_enabled) or praho_schedules[0]['values']['differential'][0] == 'No'
+        fail_msg: "Scheduled backups after configuration: {{ praho_schedules }}"
+
+    # S3 offsite copy of the local archives
     - name: Install AWS CLI for S3 backups
       ansible.builtin.apt:
         name: awscli
@@ -69,13 +132,6 @@
         group: root
         mode: '0700'
       when: backup_enabled and backup_storage == 's3'
-
-    - name: Set S3 backup destination in Virtualmin
-      ansible.builtin.lineinfile:
-        path: /etc/webmin/virtual-server/config
-        regexp: '^backup_dest='
-        line: "backup_dest=s3://{{ backup_s3_bucket }}/{{ backup_s3_prefix }}{{ inventory_hostname }}/"
-      when: backup_storage == 's3'
 
     - name: Create S3 backup sync script
       ansible.builtin.template:
@@ -98,19 +154,20 @@
         content: |
           #!/bin/bash
           # PRAHO Backup Cleanup Script
-          # Removes backups older than {{ backup_retention_days }} days
+          # Removes backups older than {{ backup_retention_days }} days, with their
+          # .info/.dom sidecars (the .dom files hold database passwords).
 
           BACKUP_DIR="{{ backup_local_path }}"
           RETENTION_DAYS={{ backup_retention_days }}
 
           if [ -d "$BACKUP_DIR" ]; then
-              find "$BACKUP_DIR" -type f -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete
-              find "$BACKUP_DIR" -type d -empty -delete
+              find "$BACKUP_DIR" -type f \( -name "*.tar.gz" -o -name "*.tar.gz.info" -o -name "*.tar.gz.dom" \) \
+                  -mtime +"$RETENTION_DAYS" -delete
+              find "$BACKUP_DIR" -mindepth 1 -type d -empty -delete
               echo "Cleanup completed: $(date)"
           fi
         dest: /usr/local/bin/praho-backup-cleanup.sh
         mode: '0755'
-      when: backup_storage == 'local'
 
     - name: Schedule backup cleanup cron job
       ansible.builtin.cron:
@@ -118,34 +175,15 @@
         minute: "30"
         hour: "4"
         job: "/usr/local/bin/praho-backup-cleanup.sh >> /var/log/praho-backup-cleanup.log 2>&1"
-      when: backup_storage == 'local'
-
-    # Verify backup configuration
-    - name: Test backup configuration
-      ansible.builtin.command: >
-        virtualmin list-backup-dests
-      register: backup_dests
-      changed_when: false
-      failed_when: false
-
-    - name: Display backup destinations
-      ansible.builtin.debug:
-        msg: "Backup destinations: {{ backup_dests.stdout_lines | default(['No destinations configured']) }}"
 
     - name: Create backup configuration marker
       ansible.builtin.copy:
         content: |
           PRAHO_BACKUP_CONFIGURED=true
           BACKUP_STORAGE={{ backup_storage }}
-          BACKUP_PATH={{ backup_local_path if backup_storage == 'local' else 's3://' + backup_s3_bucket | default('not-configured') }}
+          BACKUP_PATH={{ backup_schedule_dest }}
           BACKUP_RETENTION_DAYS={{ backup_retention_days }}
           BACKUP_SCHEDULE={{ backup_schedule }}
           CONFIG_DATE={{ ansible_date_time.iso8601 }}
         dest: /etc/praho-backup-config
         mode: '0644'
-
-  handlers:
-    - name: Restart virtualmin
-      ansible.builtin.service:
-        name: webmin
-        state: restarted

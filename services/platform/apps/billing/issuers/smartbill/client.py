@@ -41,6 +41,8 @@ SMARTBILL_POLICY = OutboundPolicy(
     # numbered invoice gets created. Retry decisions belong to the caller, which
     # can tell REJECTED from AMBIGUOUS.
     max_retries=0,
+    # A connection reset can arrive after the body was sent; replaying it mints a second invoice.
+    retry_connection_errors=False,
 )
 
 

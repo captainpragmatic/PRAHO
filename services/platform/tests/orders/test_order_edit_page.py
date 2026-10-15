@@ -180,7 +180,8 @@ class OrderItemFormTests(ItemFormTestBase):
 
         html = self.item_form(inline=False)
 
-        self.assertIn('data-vat-rate="0.1900"', html)
+        # The script reads the rate from json_script, so a Romanian locale cannot turn it into "0,1900".
+        self.assertIn('<script id="order-item-vat-rate" type="application/json">"0.1900"</script>', html)
         self.assertNotIn("21%", html)
 
 

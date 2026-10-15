@@ -16,7 +16,7 @@ from django.db import models
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django_fsm import FSMField, transition
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from .currency_models import Currency
 from .validators import validate_financial_amount, validate_financial_json, validate_financial_text_field
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 
-class Refund(models.Model):
+class Refund(ConcurrentTransitionMixin, models.Model):
     """
     Comprehensive refund tracking model.
     Supports both order and invoice refunds with audit trails and Romanian compliance.

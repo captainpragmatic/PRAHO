@@ -2,13 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
-from django.contrib.messages import get_messages
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIClient
+
+SETUP_ATTEMPT = {"token": "123456", "password": "Original-secure123!"}  # test fixture, not a credential
 
 
 @override_settings(
@@ -75,32 +76,29 @@ class MFASessionBindingTests(SimpleTestCase):
             patch("apps.api_client.services.portal_request", return_value=success),
             patch.object(SessionStore, "cycle_key", rotate),
         ):
-            response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+            response = self.client.post(reverse("users:mfa_setup_totp"), SETUP_ATTEMPT)
+        # The codes come back in this response and are kept in no session (#689).
+        self.assertEqual(response.context["backup_codes"], ["12345678"])
         self.assertEqual(binding_at_rotation, ["enabled"])
         self.assert_rotated_binding("enabled")
-        self.assertEqual(self.client.session["new_mfa_backup_codes"], ["12345678"])
+        self.assertNotIn("new_mfa_backup_codes", self.client.session)
 
     def test_verify_without_returned_binding_keeps_the_current_one(self) -> None:
         """An old Platform worker answers without the field; the binding it still accepts must survive."""
         success = self.transport_response({"success": True, "backup_codes": ["12345678"]})
         with patch("apps.api_client.services.portal_request", return_value=success):
-            response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+            response = self.client.post(reverse("users:mfa_setup_totp"), SETUP_ATTEMPT)
+        self.assertEqual(response.context["backup_codes"], ["12345678"])
         self.assert_rotated_binding("original")
 
     def test_verify_tolerates_missing_backup_codes(self) -> None:
         success = self.transport_response({"success": True, "session_auth_hash": "enabled"})
         with patch("apps.api_client.services.portal_request", return_value=success):
-            response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "123456"})
-        self.assertRedirects(response, reverse("users:mfa_backup_codes"), fetch_redirect_response=False)
+            response = self.client.post(reverse("users:mfa_setup_totp"), SETUP_ATTEMPT)
+        self.assertEqual(response.context["backup_codes"], [])
         self.assert_rotated_binding("enabled")
-        self.assertEqual(self.client.session["new_mfa_backup_codes"], [])
 
     def test_disable_stores_returned_hash_before_rotation(self) -> None:
-        session = self.client.session
-        session["new_mfa_backup_codes"] = ["12345678"]
-        session.save()
         success = self.transport_response({"success": True, "session_auth_hash": "disabled"})
         original_cycle = SessionStore.cycle_key
         binding_at_rotation: list[str] = []
@@ -119,7 +117,6 @@ class MFASessionBindingTests(SimpleTestCase):
         self.assertRedirects(response, reverse("users:mfa_management"), fetch_redirect_response=False)
         self.assertEqual(binding_at_rotation, ["disabled"])
         self.assert_rotated_binding("disabled")
-        self.assertNotIn("new_mfa_backup_codes", self.client.session)
 
     def test_disable_false_at_http_200_is_an_error(self) -> None:
         failure = self.transport_response({"success": False})
@@ -142,11 +139,15 @@ class MFASessionBindingTests(SimpleTestCase):
         self.assertEqual(self.client.session["session_auth_hash"], "original")
 
     def test_eight_digit_setup_code_shows_specific_error_without_rotation(self) -> None:
-        legacy_success = self.transport_response({"success": True, "backup_codes_remaining": 7})
-        with patch("apps.api_client.services.portal_request", return_value=legacy_success):
-            response = self.client.post(reverse("users:mfa_setup_totp"), {"token": "12345678"})
-        self.assertRedirects(response, reverse("users:mfa_setup_totp"), fetch_redirect_response=False)
-        errors = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertIn("Finish setup with the 6-digit code.", errors)
+        setup = self.transport_response(
+            {"success": True, "setup_data": {"qr_code_svg": "<svg></svg>", "manual_entry_key": "PENDING"}}
+        )
+        with patch("apps.api_client.services.portal_request", return_value=setup) as transport:
+            response = self.client.post(
+                reverse("users:mfa_setup_totp"), {**SETUP_ATTEMPT, "token": "12345678"}
+            )
+        # Shown on the same page, without asking Platform to check anything.
+        self.assertContains(response, "Enter the 6-digit code from your authenticator app.")
+        self.assertNotIn("/users/mfa/verify/", str(transport.call_args_list))
         self.assertEqual(self.client.session.session_key, self.old_key)
         self.assertEqual(self.client.session["session_auth_hash"], "original")

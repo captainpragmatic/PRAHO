@@ -48,7 +48,7 @@ class LocalisationMiddleware:
         # Document/API endpoints retain the pre-existing Django locale policy.
         if (
             "/api/" in request.path_info
-            or request.path_info.startswith(("/api/", "/admin/", "/i18n/", "/static/", "/media/", "/status/"))
+            or request.path_info.startswith(("/api/", "/i18n/", "/static/", "/media/", "/status/"))
             or request.path_info.rstrip("/").endswith("/pdf")
         ):
             return self.get_response(request)

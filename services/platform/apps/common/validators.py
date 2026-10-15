@@ -12,6 +12,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+import idna
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
@@ -44,15 +45,33 @@ SUSPICIOUS_PATTERNS = [
     r"javascript:",  # XSS
     r"on\w+\s*=",  # Event handlers
     r"(union|select|insert|update|delete|drop|create|alter)\s+",  # SQL injection
-    r"--\s*",  # SQL comments
+    # SQL comments. The "xn--" prefix of an IDNA A-label at the start of a label is not one
+    # (xn--bcher-kva.ro); a bare "xn--" with nothing after it still is.
+    r"(?<!^xn)(?<!\.xn)--\s*",
+    r"(?:^|\.)xn--(?![a-z0-9])",
     r"/\*.*?\*/",  # SQL comments
     r"eval\s*\(",  # Code execution
     r"exec\s*\(",  # Code execution
     r"[\r\n]",  # Newlines/control characters
 ]
 
-# Allowed user roles for customer membership
-ALLOWED_CUSTOMER_ROLES = ["owner", "admin", "manager", "viewer"]
+A_LABEL_PREFIX = "xn--"
+
+
+def has_invalid_a_label(hostname: str) -> bool:
+    """Whether any ``xn--`` label of ``hostname`` is not a valid IDNA A-label (IDNA 2008)."""
+    for label in hostname.lower().split("."):
+        if not label.startswith(A_LABEL_PREFIX):
+            continue
+        try:
+            idna.decode(label)
+        except UnicodeError:  # idna.IDNAError subclasses UnicodeError
+            return True
+    return False
+
+
+# Allowed user roles for customer membership, derived from the model so the two cannot drift
+ALLOWED_CUSTOMER_ROLES = tuple(value for value, _label in CustomerMembership.CUSTOMER_ROLE_CHOICES)
 
 # Admin-only fields that should never be in user input
 RESTRICTED_USER_FIELDS = [

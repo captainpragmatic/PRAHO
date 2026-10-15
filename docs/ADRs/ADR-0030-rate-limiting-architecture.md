@@ -72,6 +72,10 @@ Each principal budget must stay below its ceiling.
 
 **Deployment requirement.** Login and reset carry a signed `client_ip` only when the portal has trusted proxies configured. Production and staging refuse to start without them; elsewhere such traffic shares the `anonymous` bucket.
 
+**Counting store (amendment, 2026-10).** The DRF throttles do not keep DRF's request history in the default cache. That history is read, trimmed and written back without a lock, so concurrent requests lose each other's writes, and the default `DatabaseCache` can cull a live history away; ADR-0050 rules that store out for counters. Every project throttle charges one counter per window in the counter store (`apps.common.counters`), keyed by `<cache key>:<window index>`. The window is fixed, so a client can use up to twice its rate across a window boundary, as with the HMAC middleware. A refused client is told to retry when the window ends.
+
+**Store outage.** When the counter store cannot be reached, a throttle, the fixed-window helper and the login peek raise `RateLimitStoreUnavailable`, answered 503 with `Retry-After: 2` and the body the HMAC middleware uses (`apps.common.store_unavailable`). It is never a 429 (the client was not throttled) and never an admission.
+
 ### Layer 3: Portal middleware throttles
 
 Portal middleware limits request bursts before API calls, including auth and API-path protections.
