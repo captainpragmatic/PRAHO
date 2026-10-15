@@ -355,19 +355,19 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
     (7), and a differential when the last backup of the chain is older than
     `provisioning.chain_differential_interval_hours` (24). It decides from the
     chain, never from error text. Failures that leave the chain alone back off
-    (30 minutes, doubling to a day) and raise one audit alert at three in a
-    row; the node's evidence that a snapshot is absent or different ends the
+    (30 minutes, doubling to a day) and raise one audit alert at
+    `provisioning.chain_alert_after_failures` (3) in a row; the node's evidence that a snapshot is absent or different ends the
     chain and the next run takes a base. At most 20 jobs are admitted per
-    sweep. Register it with `setup_virtualmin_scheduled_tasks`.
+    sweep, stalest account first. Register it with `setup_virtualmin_scheduled_tasks`.
   - Staff: "Take base backup", "Take differential backup" (account page, only
-    while the flag is on) and "Restore pair" (always). CLI:
+    while the flag is on) and "Restore pair" (also only while the flag is on). CLI:
     `virtualmin_backup backup <domain> --chain-role base|differential` and
     `virtualmin_backup restore <domain> <base-id> --differential-backup-id <id>
     --force-restore`. No bulk differential actions.
   - Retention extends a base while a retained differential names it, and
-    deletion refuses a base any differential names. The flag gates only
-    creating bases and differentials; restores, retention and deletion of
-    existing pairs work whatever it says.
+    deletion refuses a base any differential names. The flag gates creating
+    bases and differentials and the pair restore; restoring a single backup,
+    retention and deletion work whatever it says.
 - Restores: fail-closed gates (backup↔account authorization, target-ownership
   that `force_restore` can never override, live-domain force requirement,
   pre-restore safety backup) → push playbook → `restore-domain` with an

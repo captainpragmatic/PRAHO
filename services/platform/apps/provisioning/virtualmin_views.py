@@ -476,7 +476,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
-        # Offered only while differential backups may be created; the pair restore above is not gated.
+        # The pair restore and the base/differential buttons are offered only while differential backups are enabled.
         "incremental_backups_enabled": VirtualminBackupManagementService.incremental_backups_enabled(),
         "take_base_url": reverse("provisioning:virtualmin_account_take_base", args=[account.id]),
         "take_differential_url": reverse("provisioning:virtualmin_account_take_differential", args=[account.id]),
@@ -780,6 +780,9 @@ def virtualmin_account_restore_pair(request: HttpRequest, account_id: str) -> Ht
     from .virtualmin_pair_restore import PAIR_RESTORE_LABEL  # noqa: PLC0415  # Circular
 
     account = get_object_or_404(VirtualminAccount, id=account_id)
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
     backups_result = VirtualminBackupService(account.server).list_backups(account=account)
     listed = backups_result.unwrap() if backups_result.is_ok() else []
     differentials = [item for item in listed if item.get("chain_role") == "differential" and item.get("base_backup_id")]

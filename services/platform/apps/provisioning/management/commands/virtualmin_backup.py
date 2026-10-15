@@ -207,13 +207,16 @@ class Command(BaseCommand):
     ) -> None:
         """Restore a base and its differential as one workflow.
 
-        Not gated by provisioning.incremental_backups_enabled: that flag stops new bases and
-        differentials being created, and existing pairs must stay restorable whatever it says.
+        Gated by provisioning.incremental_backups_enabled like creating a base or a differential (the
+        service refuses while it is off), and only on the account's own server: the pair's node state
+        (snapshot, chain lock) belongs to that server.
         """
         from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
 
         if any(options.get(skip) for skip in ("no_email", "no_databases", "no_files", "no_ssl")):
             raise CommandError("A pair restore restores every component; drop the --no-* options")
+        if target_server.pk != account.server_id:
+            raise CommandError("A pair restore runs on the account's own server; drop --target-server")
         management = VirtualminBackupManagementService(target_server)
         result = management.create_pair_restore_job(
             account,

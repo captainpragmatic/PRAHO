@@ -78,13 +78,13 @@ class AccountPageTests(StaffActionCase):
         self.assertIn("only what changed", differential_button)
         self.assertIn(reverse("provisioning:virtualmin_account_restore_pair", args=[self.account.pk]), page)
 
-    def test_with_the_flag_off_neither_is_offered_but_the_pair_restore_still_is(self) -> None:
+    def test_with_the_flag_off_none_of_the_differential_actions_is_offered(self) -> None:
         self.set_flag(False)
         page = self.client.get(self.detail).content.decode()
         self.assertNotIn(self.base_url, page)
         self.assertNotIn(self.differential_url, page)
         self.assertNotIn("Take base backup", page)
-        self.assertIn(reverse("provisioning:virtualmin_account_restore_pair", args=[self.account.pk]), page)
+        self.assertNotIn(reverse("provisioning:virtualmin_account_restore_pair", args=[self.account.pk]), page)
 
 
 class TakeActionTests(StaffActionCase):
@@ -232,6 +232,7 @@ class CliTests(StaffActionCase):
                 self.assertIn("Restore ID: r-9", output)
 
     def test_a_pair_restore_must_be_confirmed_and_restores_every_component(self) -> None:
+        self.set_flag(True)
         with self.assertRaisesRegex(CommandError, "confirmed"):
             self.run_command("restore", self.account.domain, "base-1", "--differential-backup-id", "diff-1")
         with self.assertRaisesRegex(CommandError, "every component"):

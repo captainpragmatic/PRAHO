@@ -1888,7 +1888,8 @@ class VirtualminBackupManagementService:
         """Admit a pair restore: a base and its differential, restored as one workflow.
 
         Refuses early what the workflow would refuse later (exact lineage, from the manifests), so
-        no job is created for a pair that cannot be restored. The budget covers both archives and
+        no job is created for a pair that cannot be restored. It follows
+        ``provisioning.incremental_backups_enabled`` like creating a base or a differential. The budget covers both archives and
         every stage of the workflow, and is checked against the broker visibility window by
         ``_admit_job`` like any other job. A pair restore always overwrites the live domain, so
         the caller must say so (``force_restore``).
@@ -1900,6 +1901,10 @@ class VirtualminBackupManagementService:
             pair_restore_task_timeout,
         )
 
+        if not self.incremental_backups_enabled():
+            # Differential backups are one feature: a pair restore follows the flag, like creation, in
+            # the staff page and the CLI alike (ADR-0059).
+            return Err("Differential backups are disabled (provisioning.incremental_backups_enabled)")
         if not force_restore:
             return Err("A pair restore overwrites the live domain; it must be confirmed explicitly")
         try:

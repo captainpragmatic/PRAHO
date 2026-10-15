@@ -150,6 +150,7 @@ class PairResultTests(SimpleTestCase):
 class PairRestoreCase(ChainFixtures, ExclusionCase):
     def setUp(self) -> None:
         super().setUp()
+        self.enable_incremental_backups()  # a pair restore follows the flag, like creation
         self.account = self._account()
         self.base, self.diff = manifests(self.account)
         self.events: list[str] = []

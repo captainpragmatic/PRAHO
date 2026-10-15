@@ -10,6 +10,7 @@ from django.urls import reverse
 from apps.common.types import Ok
 from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
+from apps.settings.services import SettingsService
 from apps.users.models import User
 from tests.provisioning.test_virtualmin_pair_restore import PairRestoreCase
 
@@ -44,6 +45,18 @@ class RestorePairViewTests(PairRestoreCase):
     def test_without_the_confirmation_nothing_is_queued(self) -> None:
         self.client.post(self.url, {"differential_id": "diff-1"})
         self.assertFalse(VirtualminProvisioningJob.objects.exists())
+
+    def test_with_the_flag_off_the_page_queues_nothing_and_the_account_page_hides_the_link(self) -> None:
+        SettingsService.update_setting("provisioning.incremental_backups_enabled", False)
+        response = self.client.post(self.url, {"differential_id": "diff-1", "confirm_restore": "on"}, follow=True)
+        self.assertContains(response, "Differential backups are not enabled")
+        self.assertFalse(VirtualminProvisioningJob.objects.exists())
+        self.assertRedirects(
+            self.client.get(self.url),
+            reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]),
+        )
+        detail = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
+        self.assertNotContains(detail, self.url)
 
     def test_the_account_page_links_to_it(self) -> None:
         page = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk])).content.decode()

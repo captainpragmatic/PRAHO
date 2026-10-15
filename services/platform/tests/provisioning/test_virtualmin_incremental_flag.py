@@ -6,10 +6,14 @@ standalone backups and the existing chain state are untouched.
 
 from __future__ import annotations
 
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
+
 from apps.provisioning.virtualmin_backup_service import BackupConfig, RestoreConfig
-from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
+from apps.provisioning.virtualmin_models import VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 from apps.settings.services import SettingsService
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
@@ -64,3 +68,35 @@ class IncrementalBackupFlagTests(ChainFixtures, ExclusionCase):
         with patch("django_q.tasks.async_task"):
             restore = self.management.create_restore_job(self.account, RestoreConfig(backup_id="b-1"))
         self.assertTrue(restore.is_ok(), restore)
+
+    def test_the_pair_restore_follows_the_flag_in_the_service_and_the_cli(self) -> None:
+        self.set_flag(False)
+        with patch("django_q.tasks.async_task"):
+            direct = self.management.create_pair_restore_job(self.account, "base-1", "diff-1", force_restore=True)
+        self.assertTrue(direct.is_err(), direct)
+        self.assertIn("disabled", direct.unwrap_err())
+        arguments = ("restore", self.account.domain, "base-1", "--differential-backup-id", "diff-1", "--force-restore")
+        with self.assertRaises(CommandError) as raised:
+            call_command("virtualmin_backup", *arguments, stdout=StringIO())
+        self.assertIn("disabled", str(raised.exception))
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(operation="restore_domain").exists())
+
+    def test_the_cli_pair_restore_refuses_another_target_server(self) -> None:
+        self.set_flag(True)
+        other = VirtualminServer.objects.create(
+            name="other-node", hostname="other-node.example.com", api_username="root", status="active"
+        )
+        arguments = (
+            "restore",
+            self.account.domain,
+            "base-1",
+            "--differential-backup-id",
+            "diff-1",
+            "--force-restore",
+            "--target-server",
+            other.hostname,
+        )
+        with self.assertRaises(CommandError) as raised:
+            call_command("virtualmin_backup", *arguments, stdout=StringIO())
+        self.assertIn("account's own server", str(raised.exception))
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(operation="restore_domain").exists())
