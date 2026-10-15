@@ -389,6 +389,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         self.assertEqual((response.status_code, response.json()["code"]), (409, "details_unavailable"))
 
     def test_a_valid_link_shows_what_it_would_create(self) -> None:
+        PendingRegistration.objects.filter(pk=self.row.pk).update(intent={"product": "web-hosting", "period": "annual"})
         response = self.portal_post(
             "/api/users/register/pending/", {"registration_id": str(self.row.pk), "token": self.row.token()}
         )
@@ -404,6 +405,8 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 # The company identifiers the confirmer checks.
                 "cui": "",
                 "registration_number": "",
+                # What the visitor came to buy, resumed once the account is confirmed.
+                "intent": {"product": "web-hosting", "period": "annual"},
                 # The terms release the confirmer accepts, and the privacy notice (none published here).
                 "terms_document": self.terms.reference(),
                 "privacy_document": None,

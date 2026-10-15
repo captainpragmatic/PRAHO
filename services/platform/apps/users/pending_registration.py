@@ -37,6 +37,8 @@ class PendingRegistration(models.Model):
     user_data = models.JSONField(default=dict)
     # customer_type, company_name, vat_number, cui, registration_number and the billing address.
     customer_data = models.JSONField(default=dict)
+    # What the visitor came to buy and where from (apps.common.intent), resumed after confirmation.
+    intent = models.JSONField(default=dict, blank=True)
     language = models.CharField(max_length=10, default="en")
     sent_at = models.DateTimeField(null=True, blank=True)
     consumed_at = models.DateTimeField(null=True, blank=True)

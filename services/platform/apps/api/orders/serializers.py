@@ -325,6 +325,8 @@ class OrderCreateInputSerializer(PromotionInputSerializer):
     # What the customer accepted at checkout (apps.orders.checkout_consents).
     terms_document_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     early_start_requested = serializers.BooleanField(default=False)
+    # First-touch UTM tags and referring site (apps.common.intent); only valid keys are kept.
+    attribution = serializers.DictField(child=serializers.CharField(allow_blank=True, max_length=300), default=dict)
 
     def validate_meta(self, value: dict[str, Any]) -> dict[str, Any]:
         """Limit metadata payload size to reduce abuse and parser pressure."""

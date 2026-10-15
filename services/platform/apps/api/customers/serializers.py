@@ -198,6 +198,8 @@ class CustomerRegistrationSerializer(serializers.Serializer):
     user_data = UserRegistrationDataSerializer()
     customer_data = CustomerRegistrationDataSerializer()
     language = serializers.ChoiceField(choices=[("en", "English"), ("ro", "Română")], default="en")
+    # The product the visitor chose and where they came from; the service keeps only valid keys.
+    intent = serializers.DictField(child=serializers.CharField(allow_blank=True, max_length=300), default=dict)
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """Store the registration and queue its mail; raise on refusals."""
@@ -217,6 +219,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
                 customer_data=customer_data,
                 request_ip=forwarded_client_ip(request) if request is not None else None,
                 language=validated_data["language"],
+                intent=validated_data["intent"],
             )
         except Exception as e:
             logger.error(f"🔥 [API Registration] Unexpected error: {e}")

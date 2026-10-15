@@ -14,8 +14,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
+from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.cache import never_cache
@@ -57,6 +58,12 @@ from apps.users.forms import (
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
     RegistrationConfirmForm,
+)
+from apps.users.intent_capture import (
+    capture_first_touch,
+    capture_intent,
+    registration_intent,
+    resume_after_confirmation,
 )
 
 logger = logging.getLogger(__name__)
@@ -264,6 +271,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     degraded_context: dict[str, object] = {}
 
     if request.method == "GET":
+        capture_first_touch(request)
         form = CustomerLoginForm()
     else:  # POST
         form = CustomerLoginForm(request.POST)
@@ -487,6 +495,8 @@ def register_view(request: HttpRequest) -> HttpResponse:
         return redirect("/dashboard/")
 
     if request.method == "GET":
+        capture_first_touch(request)
+        capture_intent(request)
         form = CustomerRegistrationForm()
     else:  # POST
         form = CustomerRegistrationForm(request.POST)
@@ -494,7 +504,9 @@ def register_view(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             try:
                 # Register customer via Platform API
-                registration_result = form.register_customer(client_ip=get_safe_client_ip(request))
+                registration_result = form.register_customer(
+                    client_ip=get_safe_client_ip(request), intent=registration_intent(request)
+                )
 
                 if registration_result:
                     # The same message whatever the address: Platform mails either a confirmation
@@ -895,9 +907,11 @@ def _terms_id(registration: dict[str, Any] | None) -> str:
 
 
 def _confirm_registration(
-    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any]
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], registration: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
     """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice.
+
+    On success the sign-in page leads on to the product the registration came for, if any.
 
     The notice `terms_changed` means the terms release the page showed is no longer the one to accept.
     """
@@ -943,7 +957,9 @@ def _confirm_registration(
         return None, status, retry_after, ""
     request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
     messages.success(request, _("Your account is confirmed. You can sign in now."))
-    response = redirect("users:login")
+    resume = resume_after_confirmation(request, registration.get("intent"))
+    login = reverse("users:login")
+    response = redirect(f"{login}?{urlencode({'next': resume})}" if resume else login)
     response["Referrer-Policy"] = "no-referrer"
     return response, 302, None, ""
 
@@ -983,7 +999,7 @@ def register_confirm_view(
         if request.POST.get("registration_id") != link["registration_id"]:
             status, notice = 409, _("This page was for an earlier link. Check these details and submit again.")
         elif posted.is_valid():
-            done, status, retry_after, gone = _confirm_registration(request, posted, link)
+            done, status, retry_after, gone = _confirm_registration(request, posted, link, registration)
             if done is not None:
                 return done
             form = posted

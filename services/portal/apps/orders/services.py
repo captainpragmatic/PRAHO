@@ -917,6 +917,7 @@ class OrderCreationService:
         promotion_quote: str = "",
         terms_document_id: str = "",
         early_start_requested: bool = False,
+        attribution: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Create draft order from cart items, with the consents the checkout page collected"""
 
@@ -948,6 +949,8 @@ class OrderCreationService:
                 # The terms release the page showed, and an EU consumer's early-start request.
                 "terms_document_id": terms_document_id,
                 "early_start_requested": early_start_requested,
+                # The visit's first UTM tags and referring site (apps.users.intent_capture).
+                "attribution": attribution or {},
             }
 
             # 🔒 SECURITY: Generate idempotency key to prevent race conditions and duplicate orders

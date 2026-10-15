@@ -33,6 +33,7 @@ from apps.billing.currency_policy import (
     require_current_selling_policy,
 )
 from apps.billing.models import Currency
+from apps.common.intent import ATTRIBUTION_KEYS, clean_intent
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country
 from apps.common.performance.rate_limiting import (
@@ -926,6 +927,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             promotion_quote=validated_data.get("promotion_quote", ""),
             gift_code=validated_data.get("gift_code", ""),
             consents=consents.unwrap(),
+            attribution=clean_intent(validated_data.get("attribution", {}), ATTRIBUTION_KEYS),
         )
 
         # Create order using platform service (idempotency_key set atomically in create_order)

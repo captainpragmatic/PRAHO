@@ -58,6 +58,7 @@ class TestLocalisationParity(TestCase):
             "localisation_middleware.py",
             "identity_fields.py",
             "legal_html.py",
+            "intent.py",
         ):
             with self.subTest(name=name):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())

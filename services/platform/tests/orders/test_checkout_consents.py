@@ -116,6 +116,26 @@ class CheckoutConsentTests(TestCase):
         self.assertEqual(status, 201, data)
         self.assertFalse(Order.objects.get(pk=data["order"]["id"]).early_start_requested)
 
+    def test_the_order_records_its_first_touch_attribution_cleaned(self) -> None:
+        # Sent with every order by the portal; the fields existed but nothing filled them.
+        status, data = self.place(
+            self.consumer,
+            terms_document_id=str(self.terms.pk),
+            early_start_requested=True,
+            attribution={
+                "utm_source": "newsletter",
+                "utm_campaign": "autumn",
+                "referrer": "https://blog.example.com/post?x=1",
+                "product": "not-attribution",
+            },
+        )
+        self.assertEqual(status, 201, data)
+        order = Order.objects.get(pk=data["order"]["id"])
+        self.assertEqual(
+            (order.utm_source, order.utm_medium, order.utm_campaign, order.referrer),
+            ("newsletter", "", "autumn", "https://blog.example.com"),
+        )
+
     def test_an_order_placed_while_no_terms_are_in_force_is_refused(self) -> None:
         with (
             patch("apps.orders.checkout_consents.legal_document_in_force", return_value=None),

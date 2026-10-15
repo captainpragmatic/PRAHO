@@ -34,10 +34,12 @@ from django.views.decorators.http import require_http_methods
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common import counters
 from apps.common.decorators import require_billing_access
+from apps.common.intent import INTENT_KEYS, clean_intent
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import store_unavailable_json, store_unavailable_response
+from apps.users.intent_capture import order_attribution
 
 from .security import OrderSecurityHardening
 from .services import (
@@ -431,6 +433,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 api_client_factory=PlatformAPIClient,
                 terms_document_id=ctx.terms_document_id,
                 early_start_requested=ctx.early_start_requested,
+                attribution=order_attribution(request),
             )
 
             if result.get("error"):
@@ -704,9 +707,15 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
                 existing_item = item
                 break
 
+        # A link from the operator's site, or the sign-in after registration, preselects these.
+        requested = clean_intent(
+            {key: request.GET[key] for key in ("period", "domain") if key in request.GET}, INTENT_KEYS
+        )
         context = {
             "product": product,
             "billing_periods": billing_periods,
+            "selected_period": requested.get("period", ""),
+            "requested_domain": requested.get("domain", ""),
             "existing_item": existing_item,
             "cart_count": cart.get_item_count(),
             "order_steps": ORDER_STEPS,

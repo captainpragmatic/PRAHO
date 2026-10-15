@@ -168,6 +168,8 @@ def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmR
             "vat_number": str(row.customer_data.get("vat_number", "")),
             "cui": str(row.customer_data.get("cui", "")),
             "registration_number": str(row.customer_data.get("registration_number", "")),
+            # What the visitor came to buy, resumed after the account is confirmed (apps.common.intent).
+            "intent": dict(row.intent),
             # The terms release to accept, in the registration's language; confirming another is refused.
             "terms_document": terms.unwrap().reference(),
             # The privacy notice the page links, if one is published.

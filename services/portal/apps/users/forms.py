@@ -380,10 +380,11 @@ class CustomerRegistrationForm(AltchaFormMixin, CountryDefaultsMixin, forms.Form
     # inventory guardrail does not mistake the non-profit key for an on*= event handler.
     _CUSTOMER_TYPE_TO_PLATFORM = dict(srl="company", sa="company", ong="ngo")  # noqa: C408
 
-    def register_customer(self, client_ip: str = "") -> dict[str, Any] | None:
+    def register_customer(self, client_ip: str = "", intent: dict[str, str] | None = None) -> dict[str, Any] | None:
         """
         Send the registration to Platform, which stores it and mails the address.
         Returns Platform's answer, the same for every address, or None on a refusal.
+        intent is what the visitor came to buy and where from (apps.users.intent_capture).
         """
         try:
             form_customer_type = self.cleaned_data["customer_type"]
@@ -408,6 +409,7 @@ class CustomerRegistrationForm(AltchaFormMixin, CountryDefaultsMixin, forms.Form
                     "terms_accepted": self.cleaned_data.get("terms_accepted", False),
                 },
                 "language": "ro" if (get_language() or "").startswith("ro") else "en",
+                "intent": intent or {},
             }
             return api_client.register_customer(registration_data, client_ip=client_ip)
 

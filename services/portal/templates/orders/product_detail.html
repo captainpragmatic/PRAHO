@@ -53,7 +53,7 @@
               {# tmpl-allow TMPL003: needs input_field formatted_option_labels #}
               <select id="id_billing_period" name="billing_period" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
                 {% for period in billing_periods %}
-                <option value="{{ period.value }}">{{ period.label }} — {{ period.amount|romanian_currency:product.prices.0.currency }}</option>
+                <option value="{{ period.value }}"{% if period.value == selected_period %} selected{% endif %}>{{ period.label }} — {{ period.amount|romanian_currency:product.prices.0.currency }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -63,7 +63,7 @@
             </div>
             {% if product.requires_domain %}
             <div class="mb-4">
-              {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="globe" %}
+              {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="globe" value=requested_domain %}
             </div>
             {% endif %}
             {% trans "Add to Cart" as bt1 %}{% button bt1 variant="success" size="md" type="submit" class="w-full" %}

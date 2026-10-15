@@ -55,6 +55,10 @@ class LocalisationMiddleware:
         policy = get_request_localisation(request)
         authenticated = bool(getattr(getattr(request, "user", None), "is_authenticated", False))
         if not authenticated:
+            # A link from the operator's site may name the language (?lang=ro); it lasts the visit.
+            linked = request.GET.get("lang")
+            if linked in LANGUAGES and hasattr(request, "session"):
+                request.session["_language"] = linked
             selected = next(
                 (
                     value

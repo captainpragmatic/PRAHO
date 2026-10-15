@@ -251,6 +251,8 @@ class OrderCreateData:
     currency_revision: int | None = None
     # What the customer accepted at checkout; staff-created orders carry none.
     consents: CheckoutConsents | None = None
+    # First-touch UTM tags and referring site, cleaned (apps.common.intent).
+    attribution: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -578,6 +580,10 @@ class OrderService:
                 billing_address=dict(data.billing_address),
                 terms_document=data.consents.terms if data.consents else None,
                 early_start_requested=bool(data.consents and data.consents.early_start_requested),
+                utm_source=data.attribution.get("utm_source", ""),
+                utm_medium=data.attribution.get("utm_medium", ""),
+                utm_campaign=data.attribution.get("utm_campaign", ""),
+                referrer=data.attribution.get("referrer", ""),
                 # Financial totals
                 **totals,
             )

@@ -26,6 +26,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
 from apps.common import counters
+from apps.common.intent import clean_intent
 from apps.common.legal import TERMS_UNAVAILABLE, LegalDocument, current_legal_document
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
@@ -361,7 +362,7 @@ class SecureUserRegistrationService:
 
     @classmethod
     @secure_user_registration()
-    def submit_pending_registration(
+    def submit_pending_registration(  # noqa: PLR0913  # The intent travels apart from the user and customer data
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
@@ -369,6 +370,7 @@ class SecureUserRegistrationService:
         user_agent: str | None = None,
         *,
         language: str = "en",
+        intent: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Result[PendingRegistration, str]:
         """Store a registration for its mailbox holder to confirm, and queue the mail.
@@ -393,6 +395,7 @@ class SecureUserRegistrationService:
             # Registration collects no CNP; one a caller passes anyway is never stored.
             customer_data={key: value for key, value in customer_data.items() if key != "cnp"},
             language=language,
+            intent=clean_intent(intent or {}),
         )
         row.save(force_insert=True)
         registration_id = str(row.pk)
