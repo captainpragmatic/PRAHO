@@ -10,6 +10,8 @@ on:
   push:
     branches: [master, staging]
     paths:
+      - 'deploy/**'
+      - '.env.example.*'
       - 'services/**'
       - 'shared/**'
       - 'scripts/**'
@@ -21,6 +23,8 @@ on:
   pull_request:
     branches: [master]
     paths:
+      - 'deploy/**'
+      - '.env.example.*'
       - 'services/**'
       - 'shared/**'
       - 'scripts/**'
