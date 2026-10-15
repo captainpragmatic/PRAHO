@@ -18,7 +18,7 @@
       "http_status": 200,
       "note": "the same domain created twice",
       "params": {
-        "bandwidth": "<id>",
+        "bandwidth": "10737418240",
         "default-features": "",
         "desc": "<redacted>",
         "domain": "contract-create.praho.test",
@@ -45,7 +45,7 @@
       "http_status": 200,
       "note": "PRAHO's own parameters: default template, default features, the recovery seed as description",
       "params": {
-        "bandwidth": "<id>",
+        "bandwidth": "10737418240",
         "default-features": "",
         "desc": "<redacted>",
         "domain": "contract-create.praho.test",
@@ -73,7 +73,7 @@
       "http_status": 200,
       "note": "a parameter the command lacks",
       "params": {
-        "bandwidth": "<id>",
+        "bandwidth": "10737418240",
         "bogus-flag": "",
         "default-features": "",
         "desc": "<redacted>",
@@ -102,7 +102,7 @@
       "http_status": 200,
       "note": "there is no template called Default on 8.x",
       "params": {
-        "bandwidth": "<id>",
+        "bandwidth": "10737418240",
         "default-features": "",
         "desc": "<redacted>",
         "domain": "contract-other.praho.test",

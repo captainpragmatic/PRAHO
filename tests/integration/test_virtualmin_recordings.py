@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.virtualmin_lab import drift
-from tests.virtualmin_lab.sanitise import find_leaks, sanitise_recording
+from tests.virtualmin_lab.sanitise import find_recording_leaks, sanitise_recording
 
 pytestmark = pytest.mark.integration
 
@@ -31,7 +31,7 @@ class TestCommittedFixtures:
     @pytest.mark.parametrize("path", _committed_fixtures(), ids=lambda path: f"{path.parent.name}/{path.name}")
     def test_every_recording_is_already_sanitised(self, path: Path) -> None:
         recording = json.loads(path.read_text())
-        assert find_leaks(recording) == []
+        assert find_recording_leaks(recording) == []
         assert sanitise_recording(recording) == recording, "re-run the contract suite: the fixture is not a fixed point"
         assert recording["program"] == path.stem
         assert recording["virtualmin_version"] == path.parent.name

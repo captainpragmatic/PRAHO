@@ -149,11 +149,26 @@ def sanitise_value(value: Any, *, key: str | None = None, dates: bool = True, _s
     return value
 
 
+def _sanitise_param(value: Any, *, key: str, secret: bool) -> Any:
+    if isinstance(value, list):
+        return [_sanitise_param(item, key=key, secret=secret) for item in value]
+    if not isinstance(value, str):
+        return value
+    if secret and value:
+        return REDACTED
+    if _ID_KEY.search(key) and value.isdigit():
+        return "<id>"
+    # Only what differs from run to run: random tokens in staging paths. Numbers stay exact, because
+    # quotas, bandwidth and sizes are what the contract pins.
+    return _LONG_HEX.sub("<hex>", value)
+
+
 def sanitise_params(params: dict[str, Any]) -> dict[str, Any]:
-    """The parameters of a call. Dates stay: `start`/`end` are part of what the caller sends."""
-    cleaned = sanitise_value(params, dates=False)
-    assert isinstance(cleaned, dict)
-    return cleaned
+    """The parameters of a call, kept as production sends them except secrets, ids and random path tokens."""
+    return {
+        str(name): _sanitise_param(value, key=str(name), secret=_is_sensitive_key(str(name)))
+        for name, value in params.items()
+    }
 
 
 def sanitise_recording(recording: dict[str, Any]) -> dict[str, Any]:
@@ -189,6 +204,23 @@ def _leaf_leak(key: str | None, value: str, *, secret: bool) -> str | None:
         if pattern.search(value):
             return label
     return None
+
+
+def find_recording_leaks(recording: dict[str, Any]) -> list[str]:
+    """Leaks in a whole recording file, judging each case's parameters by the parameter rules.
+
+    Parameters keep the numbers production sends, so they are checked against `sanitise_params`,
+    not against the response rules that treat every long number as a possible id.
+    """
+    found = find_leaks({**recording, "cases": {}})
+    for name, case in recording.get("cases", {}).items():
+        found.extend(find_leaks({**case, "params": {}}, path=f"$.cases.{name}"))
+        params = case.get("params", {})
+        cleaned = sanitise_params(params)
+        found.extend(
+            f"$.cases.{name}.params.{key}: not sanitised" for key in params if cleaned.get(key) != params[key]
+        )
+    return found
 
 
 def find_leaks(value: Any, *, path: str = "$", key: str | None = None, _secret: bool = False) -> list[str]:

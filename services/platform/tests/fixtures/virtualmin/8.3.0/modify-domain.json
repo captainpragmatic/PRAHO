@@ -61,7 +61,7 @@
       "http_status": 200,
       "note": "disaster recovery's quota restore: the bandwidth limit is --bw on modify-domain",
       "params": {
-        "bw": "<id>",
+        "bw": "104857600",
         "domain": "contract.praho.test",
         "quota": "2097152"
       }

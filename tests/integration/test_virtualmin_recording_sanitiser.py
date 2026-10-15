@@ -155,6 +155,28 @@ class TestSanitiseParams:
         }
 
 
+    def test_numbers_production_sends_are_kept_exactly(self) -> None:
+        """Quotas, bandwidth and sizes are what the contract pins; redacting them hides a wrong value."""
+        params = {"domain": "contract.praho.test", "bw": "104857600", "bandwidth": "1073741824", "quota": "2097152"}
+        assert sanitise_params(params) == params
+
+    def test_ids_and_random_path_tokens_still_vary_freely(self) -> None:
+        cleaned = sanitise_params(
+            {"id": "179191667478547", "dest": "/var/lib/praho-transfer/virtualmin_backup_9f1c2e7a5b3d4c6e.tar.gz"}
+        )
+        assert cleaned == {"id": "<id>", "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz"}
+
+
+class TestRecordingLeaks:
+    def test_kept_numbers_are_not_leaks_but_an_unredacted_secret_is(self) -> None:
+        from tests.virtualmin_lab.sanitise import find_recording_leaks  # noqa: PLC0415
+
+        clean = {"program": "modify-domain", "cases": {"ok": {"params": {"bw": "104857600"}, "body": "ok"}}}
+        assert find_recording_leaks(clean) == []
+        leaked = {"program": "create-domain", "cases": {"ok": {"params": {"pass": "Zz9!contractPw1x"}, "body": "ok"}}}
+        assert find_recording_leaks(leaked) == ["$.cases.ok.params.pass: not sanitised"]
+
+
 class TestSanitiseBody:
     def test_a_json_body_comes_back_as_data_in_a_stable_order(self) -> None:
         raw = '{"b" : 1, "a" : {"y": "89.44.228.9", "x": "ok"}}\n\n'
