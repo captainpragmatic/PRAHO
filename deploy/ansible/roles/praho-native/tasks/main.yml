@@ -16,15 +16,14 @@
   include_tasks: env_preflight.yml
 
 - name: Read .env file locally for role variables
-  shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
-  delegate_to: localhost
-  become: false
-  register: role_env_contents
-  changed_when: false
+  set_fact:
+    native_configuration: "{{ lookup('native_env', env_file_path) }}"
+  no_log: true
 
 - name: Parse .env vars for role use
   set_fact:
-    deployed_env: "{{ dict(role_env_contents.stdout_lines | map('split', '=', 1)) }}"
+    deployed_env: "{{ native_configuration['env'] }}"
+  no_log: true
 
 # ---------------------------------------------------------------------------
 # 1. PostgreSQL 15
@@ -68,6 +67,7 @@
     state: present
 
 - name: Create PostgreSQL user
+  no_log: true
   become_user: postgres
   community.postgresql.postgresql_user:
     name: "{{ deployed_env.DB_USER | default('praho') }}"
@@ -285,41 +285,37 @@
       See docs/deployment/DEPLOYMENT.md for details.
   when: not env_file_check.stat.exists
 
-- name: Validate required variables in .env file
-  shell: |
-    missing=""
-    while IFS='=' read -r key value; do
-      # Skip comments and empty lines
-      case "$key" in \#*|"") continue ;; esac
-      # Trim whitespace
-      key=$(echo "$key" | xargs)
-      value=$(echo "$value" | xargs)
-    done < "{{ env_file_path }}"
-    # Check critical vars
-    for var in DJANGO_SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
-      val=$(grep "^${var}=" "{{ env_file_path }}" | head -1 | cut -d'=' -f2-)
-      if [ -z "$val" ]; then missing="$missing $var"; fi
-    done
-    if [ -n "$missing" ]; then
-      echo "MISSING:$missing"
-      exit 1
-    fi
-  delegate_to: localhost
-  become: false
-  register: env_validation
-  changed_when: false
-
 - name: Copy environment file to server
   copy:
-    src: "{{ env_file_path }}"
+    content: "{{ native_configuration['systemd'] }}"
     dest: "{{ project_root }}/.env"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
     mode: "0600"
+  no_log: true
+  diff: false
   notify:
     - restart praho-platform
     - restart praho-portal
     - restart praho-qcluster
+
+- name: Create private credential directory
+  file:
+    path: "{{ project_root }}/credentials"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+
+- name: Install private PostgreSQL passfile for unattended backups
+  copy:
+    content: "{{ native_configuration['pgpass'] }}"
+    dest: "{{ project_root }}/credentials/postgresql.pgpass"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
 
 # deployed_env is already set from step 0 (parsed from local .env file)
 
@@ -331,6 +327,7 @@
 # settings don't load the .env, so pass the keys production refuses to import without. Only those the
 # .env defines are passed, so a staging environment is unchanged.
 - name: Set Django environment variables from .env file
+  no_log: true
   set_fact:
     django_env: "{{ praho_django_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
   vars:
@@ -360,6 +357,7 @@
       DJANGO_SECURE_SSL_REDIRECT: "{{ deployed_env.DJANGO_SECURE_SSL_REDIRECT | default('false') }}"
 
 - name: Run database migrations
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py migrate --noinput
   args:
@@ -368,6 +366,7 @@
   environment: "{{ django_env }}"
 
 - name: Create database cache table
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py createcachetable
   args:
@@ -377,6 +376,7 @@
   failed_when: false
 
 - name: Collect Platform static files
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
@@ -385,6 +385,7 @@
   environment: "{{ django_env }}"
 
 - name: Set Portal Django environment
+  no_log: true
   set_fact:
     portal_django_env: "{{ praho_portal_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
   vars:
@@ -414,6 +415,7 @@
     mode: "0700"
 
 - name: Run Portal migrations
+  no_log: true
   command:
     argv:
       - "{{ project_root }}/.venv-linux/bin/python"
@@ -430,6 +432,7 @@
   environment: "{{ portal_django_env }}"
 
 - name: Check Portal deployment
+  no_log: true
   command: "{{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR"
   args:
     chdir: "{{ project_root }}/src/services/portal"
@@ -438,6 +441,7 @@
   changed_when: false
 
 - name: Collect Portal static files
+  no_log: true
   command: "{{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput"
   args:
     chdir: "{{ project_root }}/src/services/portal"
@@ -445,6 +449,7 @@
   environment: "{{ portal_django_env }}"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py setup_initial_data
   args:
@@ -572,7 +577,8 @@
     dest: "{{ project_root }}/scripts/backup.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
-    mode: "0755"
+    mode: "0700"
+  diff: false
   when: backup_enabled
 
 - name: Template restore script
@@ -581,7 +587,8 @@
     dest: "{{ project_root }}/scripts/restore.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
-    mode: "0755"
+    mode: "0700"
+  diff: false
 
 - name: Template health check script
   template:

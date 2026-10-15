@@ -52,17 +52,9 @@
         tasks_from: env_preflight
 
     - name: Read env vars for pre-flight validation
-      shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
-      delegate_to: localhost
-      become: false
-      register: preflight_env_contents
-      changed_when: false
-
-    - name: Parse pre-flight env vars
       set_fact:
-        preflight_env: "{{ dict(preflight_env_contents.stdout_lines | map('split', '=', 1)) }}"
-      delegate_to: localhost
-      become: false
+        preflight_env: "{{ lookup('native_env', env_file_path)['env'] }}"
+      no_log: true
 
     - name: Validate required env vars
       assert:

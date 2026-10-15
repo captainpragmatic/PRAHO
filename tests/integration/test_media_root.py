@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shlex
 import subprocess
 import tarfile
 from pathlib import Path
@@ -174,6 +175,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
 
 def _render(template: str, root: Path) -> str:
     environment = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)  # noqa: S701  # Shell, not HTML
+    environment.filters["quote"] = shlex.quote
     return environment.from_string((TEMPLATES / template).read_text()).render(
         project_root=str(root),
         backup_directory=str(root / "backups"),
@@ -188,7 +190,9 @@ def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (root / "media" / "efactura" / "response.zip").write_bytes(b"anaf")
     stubs = tmp_path / "bin"
     stubs.mkdir()
-    (stubs / "pg_dump").write_text('#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n')
+    (stubs / "pg_dump").write_text(
+        '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+    )
     for tool in ("pg_restore", "systemctl", "sudo", "sleep"):
         (stubs / tool).write_text("#!/bin/sh\nexit 0\n")
     for stub in stubs.iterdir():
