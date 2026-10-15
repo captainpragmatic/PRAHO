@@ -272,6 +272,7 @@ class TestNativeMigrateEnvironment:
         jinja.filters["items2dict"] = lambda items: {i["key"]: i["value"] for i in items}
         context: dict[str, Any] = {
             "project_root": "/opt/praho",
+            "portal_state_directory": "/var/lib/praho-portal",
             "platform_port": 8700,
             "deployed_env": deployed_env,
             "django_settings_module": f"config.settings.{module}",
