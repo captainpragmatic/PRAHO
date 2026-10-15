@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-15 10:38+0300\n"
+"POT-Creation-Date: 2026-10-15 12:59+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -64,7 +64,7 @@ msgstr "Codul de TVA nu corespunde CUI-ului."
 msgid "Enter the company's VAT number or CUI."
 msgstr "Introduceți codul de TVA sau CUI-ul firmei."
 
-#: apps/api/customers/serializers.py:143 apps/common/validators.py:198
+#: apps/api/customers/serializers.py:143 apps/common/validators.py:217
 msgid "Enter a valid trade registry number."
 msgstr "Introduceți un număr de înregistrare la Registrul Comerțului valid."
 
@@ -126,11 +126,11 @@ msgstr "Validarea comenzii a întâmpinat o eroare neașteptată. Vă rugăm să
 msgid "Expected a text reason."
 msgstr "Se aștepta un motiv de tip text."
 
-#: apps/api/services/views.py:223
+#: apps/api/services/views.py:218
 msgid "Service not found or access denied"
 msgstr "Serviciul nu a fost găsit sau accesul a fost refuzat"
 
-#: apps/api/services/views.py:229
+#: apps/api/services/views.py:224
 msgid "Unable to fetch service domains"
 msgstr "Nu s-au putut prelua domeniile serviciului"
 
@@ -1091,8 +1091,8 @@ msgstr "Operațiunile upsert pentru corecții fiscale nu sunt acceptate; ar supr
 #: apps/provisioning/service_models.py:578
 #: apps/provisioning/virtualmin_migration_models.py:22
 #: apps/provisioning/virtualmin_migration_models.py:120
-#: apps/provisioning/virtualmin_models.py:534
-#: apps/provisioning/virtualmin_models.py:934
+#: apps/provisioning/virtualmin_models.py:553
+#: apps/provisioning/virtualmin_models.py:953
 #: templates/audit/gdpr_dashboard.html:168
 #: templates/audit/gdpr_management_dashboard.html:37
 #: templates/audit/gdpr_management_dashboard.html:120
@@ -1106,7 +1106,7 @@ msgstr "Operațiunile upsert pentru corecții fiscale nu sunt acceptate; ar supr
 #: templates/provisioning/partials/services_list.html:197
 #: templates/provisioning/service_detail.html:26
 #: templates/provisioning/service_list.html:47
-#: templates/provisioning/virtualmin/account_detail.html:380
+#: templates/provisioning/virtualmin/account_detail.html:414
 msgid "Pending"
 msgstr "În așteptare"
 
@@ -2068,7 +2068,7 @@ msgstr "Utilizare API"
 #: templates/domains/domain_detail.html:15
 #: templates/domains/domain_register.html:16
 #: templates/domains/domain_renew.html:15
-#: templates/provisioning/virtualmin/account_detail.html:128
+#: templates/provisioning/virtualmin/account_detail.html:162
 #: templates/provisioning/virtualmin/server_detail.html:65
 #: templates/provisioning/virtualmin/servers_list.html:115
 msgid "Domains"
@@ -2083,7 +2083,7 @@ msgstr "Certificate SSL"
 #: apps/settings/catalog.py:1860 apps/settings/catalog.py:1872
 #: apps/settings/catalog.py:1881 apps/settings/catalog.py:1889
 #: apps/settings/catalog.py:1897 apps/settings/catalog.py:1906
-#: templates/provisioning/virtualmin/account_detail.html:167
+#: templates/provisioning/virtualmin/account_detail.html:201
 msgid "Backups"
 msgstr "Copii de siguranță"
 
@@ -2328,8 +2328,8 @@ msgstr "Restant"
 #: apps/provisioning/virtualmin_migration_models.py:32
 #: apps/provisioning/virtualmin_migration_models.py:125
 #: apps/provisioning/virtualmin_models.py:70
-#: apps/provisioning/virtualmin_models.py:537
-#: apps/provisioning/virtualmin_views.py:1177
+#: apps/provisioning/virtualmin_models.py:556
+#: apps/provisioning/virtualmin_views.py:1251
 #: templates/audit/gdpr_dashboard.html:166
 #: templates/audit/gdpr_management_dashboard.html:76
 #: templates/audit/gdpr_management_dashboard.html:123
@@ -2343,8 +2343,8 @@ msgstr "Restant"
 #: templates/orders/partials/order_items_list.html:107
 #: templates/orders/partials/order_list.html:47
 #: templates/provisioning/service_list.html:57
-#: templates/provisioning/virtualmin/account_detail.html:301
-#: templates/provisioning/virtualmin/account_detail.html:376
+#: templates/provisioning/virtualmin/account_detail.html:335
+#: templates/provisioning/virtualmin/account_detail.html:410
 #: templates/provisioning/virtualmin/job_status.html:54
 msgid "Failed"
 msgstr "Eșuat"
@@ -2676,7 +2676,7 @@ msgstr "Reușită"
 #: apps/notifications/models.py:561 apps/orders/models.py:63
 #: apps/orders/models.py:672
 #: apps/provisioning/virtualmin_migration_models.py:124
-#: apps/provisioning/virtualmin_models.py:538 apps/tickets/models.py:77
+#: apps/provisioning/virtualmin_models.py:557 apps/tickets/models.py:77
 #: templates/billing/partials/billing_list.html:102
 #: templates/domains/staff/domain_admin_list.html:105
 #: templates/orders/order_detail.html:97 templates/orders/order_detail.html:337
@@ -2944,8 +2944,8 @@ msgstr "Taxe totale percepute de furnizorul de plăți"
 #: apps/billing/payment_models.py:898 apps/infrastructure/models.py:839
 #: apps/provisioning/service_models.py:579
 #: apps/provisioning/virtualmin_migration_models.py:121
-#: apps/provisioning/virtualmin_models.py:535
-#: templates/provisioning/virtualmin/account_detail.html:378
+#: apps/provisioning/virtualmin_models.py:554
+#: templates/provisioning/virtualmin/account_detail.html:412
 #: templates/provisioning/virtualmin/job_status.html:56
 msgid "Running"
 msgstr "Se execută"
@@ -2958,8 +2958,8 @@ msgstr "Se execută"
 #: apps/provisioning/service_request_models.py:27
 #: apps/provisioning/virtualmin_migration_models.py:31
 #: apps/provisioning/virtualmin_migration_models.py:123
-#: apps/provisioning/virtualmin_models.py:536
-#: apps/provisioning/virtualmin_views.py:1176
+#: apps/provisioning/virtualmin_models.py:555
+#: apps/provisioning/virtualmin_views.py:1250
 #: templates/audit/gdpr_dashboard.html:207
 #: templates/audit/gdpr_management_dashboard.html:63
 #: templates/audit/gdpr_management_dashboard.html:122
@@ -2969,9 +2969,9 @@ msgstr "Se execută"
 #: templates/orders/order_list.html:117 templates/orders/order_list.html:171
 #: templates/orders/order_list.html:219 templates/orders/order_list.html:320
 #: templates/orders/partials/order_list.html:43
-#: templates/provisioning/virtualmin/account_detail.html:297
-#: templates/provisioning/virtualmin/account_detail.html:360
-#: templates/provisioning/virtualmin/account_detail.html:374
+#: templates/provisioning/virtualmin/account_detail.html:331
+#: templates/provisioning/virtualmin/account_detail.html:394
+#: templates/provisioning/virtualmin/account_detail.html:408
 #: templates/provisioning/virtualmin/job_status.html:52
 msgid "Completed"
 msgstr "Finalizată"
@@ -4303,7 +4303,7 @@ msgstr "Se încarcă"
 #: apps/billing/views.py:2642 apps/infrastructure/models.py:719
 #: apps/provisioning/virtualmin_models.py:269
 #: templates/billing/efactura_document_detail.html:74
-#: templates/provisioning/virtualmin/account_detail.html:399
+#: templates/provisioning/virtualmin/account_detail.html:433
 msgid "Error"
 msgstr "Eroare"
 
@@ -4563,102 +4563,102 @@ msgstr "Suprascrierea ratei personalizate refuzată: fără dovezi VIES"
 msgid "custom rate exemption reason: %(reason)s"
 msgstr "Motiv scutire rată personalizată: %(reason)s"
 
-#: apps/common/validators.py:130 apps/common/validators.py:149
-#: apps/common/validators.py:163 apps/common/validators.py:195
-#: apps/common/validators.py:257 apps/common/validators.py:368
-#: apps/common/validators.py:380 apps/common/validators.py:397
-#: apps/provisioning/virtualmin_validators.py:145
-#: apps/provisioning/virtualmin_validators.py:193
-#: apps/provisioning/virtualmin_validators.py:246
-#: apps/provisioning/virtualmin_validators.py:340
-#: apps/provisioning/virtualmin_validators.py:394
-#: apps/provisioning/virtualmin_validators.py:488
-#: apps/provisioning/virtualmin_validators.py:524
+#: apps/common/validators.py:149 apps/common/validators.py:168
+#: apps/common/validators.py:182 apps/common/validators.py:214
+#: apps/common/validators.py:276 apps/common/validators.py:387
+#: apps/common/validators.py:399 apps/common/validators.py:416
+#: apps/provisioning/virtualmin_validators.py:148
+#: apps/provisioning/virtualmin_validators.py:200
+#: apps/provisioning/virtualmin_validators.py:253
+#: apps/provisioning/virtualmin_validators.py:347
+#: apps/provisioning/virtualmin_validators.py:401
+#: apps/provisioning/virtualmin_validators.py:495
+#: apps/provisioning/virtualmin_validators.py:531
 msgid "Invalid input format"
 msgstr "Format de intrare invalid"
 
-#: apps/common/validators.py:135 apps/common/validators.py:167
+#: apps/common/validators.py:154 apps/common/validators.py:186
 msgid "Input too long"
 msgstr "Intrare prea lungă"
 
-#: apps/common/validators.py:174
+#: apps/common/validators.py:193
 msgid "Invalid characters detected"
 msgstr "Au fost detectate caractere invalide"
 
-#: apps/common/validators.py:181
+#: apps/common/validators.py:200
 msgid "Required field cannot be empty"
 msgstr "Câmpul obligatoriu nu poate fi gol"
 
-#: apps/common/validators.py:225
+#: apps/common/validators.py:244
 msgid "Invalid URL format"
 msgstr "Format URL invalid"
 
-#: apps/common/validators.py:228
+#: apps/common/validators.py:247
 msgid "URL too long"
 msgstr "URL prea lung"
 
-#: apps/common/validators.py:263
+#: apps/common/validators.py:282
 msgid "Invalid role specified"
 msgstr "Rol specificat invalid"
 
-#: apps/common/validators.py:306
+#: apps/common/validators.py:325
 msgid "Bank detail field too long"
 msgstr "Câmpul cu detalii bancare este prea lung"
 
-#: apps/common/validators.py:315
+#: apps/common/validators.py:334
 msgid "Invalid account number format"
 msgstr "Format invalid al numărului de cont"
 
-#: apps/common/validators.py:319
+#: apps/common/validators.py:338
 msgid "Invalid IBAN format"
 msgstr "Format IBAN invalid"
 
-#: apps/common/validators.py:326
+#: apps/common/validators.py:345
 msgid "Invalid SWIFT code format"
 msgstr "Format invalid al codului SWIFT"
 
-#: apps/common/validators.py:339
+#: apps/common/validators.py:358
 msgid "Invalid input data"
 msgstr "Date de intrare invalide"
 
-#: apps/common/validators.py:345 apps/common/validators.py:352
-#: apps/common/validators.py:354
+#: apps/common/validators.py:364 apps/common/validators.py:371
+#: apps/common/validators.py:373
 msgid "Required field missing"
 msgstr "Câmp obligatoriu lipsă"
 
-#: apps/common/validators.py:442
+#: apps/common/validators.py:461
 msgid "Invalid input detected"
 msgstr "A fost detectată o intrare invalidă"
 
-#: apps/common/validators.py:472
+#: apps/common/validators.py:491
 msgid "Permission denied"
 msgstr "Permisiune refuzată"
 
-#: apps/common/validators.py:477
+#: apps/common/validators.py:496
 msgid "Account not active"
 msgstr "Contul nu este activ"
 
-#: apps/common/validators.py:502 apps/users/services.py:688
+#: apps/common/validators.py:521 apps/users/services.py:688
 msgid "User already has access to this organization"
 msgstr "Utilizatorul are deja acces la această organizație"
 
-#: apps/common/validators.py:524 apps/common/validators.py:525
+#: apps/common/validators.py:543 apps/common/validators.py:544
 msgid "Registration could not be completed. Please contact support."
 msgstr "Înregistrarea nu a putut fi finalizată. Vă rugăm să contactați suportul."
 
-#: apps/common/validators.py:526
+#: apps/common/validators.py:545
 msgid "Invitation could not be sent. Please try again later."
 msgstr "Invitația nu a putut fi trimisă. Vă rugăm să încercați mai târziu."
 
-#: apps/common/validators.py:527
+#: apps/common/validators.py:546
 msgid "The provided information is invalid."
 msgstr "Informațiile furnizate sunt invalide."
 
-#: apps/common/validators.py:528
+#: apps/common/validators.py:547
 msgid "You don't have permission to perform this action."
 msgstr "Nu aveți permisiunea să efectuați această acțiune."
 
-#: apps/common/validators.py:529
+#: apps/common/validators.py:548
 msgid "An error occurred. Please try again later."
 msgstr "A apărut o eroare. Vă rugăm să încercați mai târziu."
 
@@ -5724,7 +5724,7 @@ msgid "Format Valid (VIES unavailable)"
 msgstr "Format valid (VIES indisponibil)"
 
 #: apps/customers/profile_models.py:95
-#: apps/provisioning/virtualmin_models.py:599
+#: apps/provisioning/virtualmin_models.py:618
 msgid "Not Applicable"
 msgstr "Nu se aplică"
 
@@ -5849,7 +5849,7 @@ msgid "New user '{}' created and assigned to customer."
 msgstr "Utilizator nou '{}' creat și asignat clientului."
 
 #: apps/customers/user_management_views.py:179
-#: apps/provisioning/virtualmin_models.py:551
+#: apps/provisioning/virtualmin_models.py:570
 msgid "Create User"
 msgstr "Creați utilizator"
 
@@ -6266,7 +6266,7 @@ msgstr "O ofertă de domeniu pregătită nu poate fi retarificată; creați o no
 msgid "Registration accepted by the registrar and awaiting confirmation — do not resubmit."
 msgstr "Înregistrare acceptată de registrar, în așteptarea confirmării — nu o retrimiteți."
 
-#: apps/domains/services.py:172 apps/provisioning/virtualmin_validators.py:141
+#: apps/domains/services.py:172 apps/provisioning/virtualmin_validators.py:144
 msgid "Domain name is required"
 msgstr "Numele domeniului este obligatoriu"
 
@@ -7111,7 +7111,7 @@ msgstr "Sincronizare automată"
 msgid "Remediated"
 msgstr "Remediat"
 
-#: apps/infrastructure/models.py:897 apps/provisioning/virtualmin_models.py:937
+#: apps/infrastructure/models.py:897 apps/provisioning/virtualmin_models.py:956
 msgid "Ignored"
 msgstr "Ignorat"
 
@@ -7206,10 +7206,10 @@ msgid "Pending Approval"
 msgstr "În Așteptarea Aprobării"
 
 #: apps/infrastructure/models.py:990 apps/orders/models.py:669
-#: apps/provisioning/virtualmin_views.py:1178 apps/tickets/models.py:66
+#: apps/provisioning/virtualmin_views.py:1252 apps/tickets/models.py:66
 #: apps/tickets/views.py:54 templates/dashboard.html:259
 #: templates/infrastructure/dashboard.html:55
-#: templates/provisioning/virtualmin/account_detail.html:303
+#: templates/provisioning/virtualmin/account_detail.html:337
 #: templates/provisioning/virtualmin/restore_form.html:232
 #: templates/tickets/partials/status_and_comments.html:21
 #: templates/tickets/partials/tickets_table.html:56
@@ -7222,7 +7222,7 @@ msgstr "În Desfășurare"
 msgid "Rolled Back"
 msgstr "Revenit la starea anterioară"
 
-#: apps/infrastructure/models.py:994 apps/provisioning/virtualmin_models.py:602
+#: apps/infrastructure/models.py:994 apps/provisioning/virtualmin_models.py:621
 msgid "Rollback Failed"
 msgstr "Rollback Eșuat"
 
@@ -8151,19 +8151,19 @@ msgstr "În revizuire"
 #: apps/provisioning/virtualmin_models.py:265 apps/settings/catalog.py:2297
 #: apps/settings/catalog.py:2309 apps/settings/catalog.py:2321
 #: apps/settings/catalog.py:2332 apps/settings/catalog.py:2346
-#: apps/settings/catalog.py:2361 apps/settings/catalog.py:2377
-#: apps/settings/catalog.py:2390 apps/settings/catalog.py:2403
-#: apps/settings/catalog.py:2416 apps/settings/catalog.py:2426
-#: apps/settings/catalog.py:2439 apps/settings/catalog.py:2451
-#: apps/settings/catalog.py:2464 apps/settings/catalog.py:2476
-#: apps/settings/catalog.py:2489 apps/settings/catalog.py:2500
-#: apps/settings/catalog.py:2511 apps/settings/catalog.py:2522
-#: apps/settings/catalog.py:2534 apps/settings/catalog.py:2546
-#: apps/settings/catalog.py:2558 apps/settings/catalog.py:2570
-#: apps/settings/catalog.py:2582 apps/settings/catalog.py:2594
-#: apps/settings/catalog.py:2606 templates/orders/order_list.html:105
-#: templates/orders/order_list.html:170 templates/orders/order_list.html:217
-#: templates/orders/order_list.html:318
+#: apps/settings/catalog.py:2362 apps/settings/catalog.py:2377
+#: apps/settings/catalog.py:2393 apps/settings/catalog.py:2406
+#: apps/settings/catalog.py:2419 apps/settings/catalog.py:2432
+#: apps/settings/catalog.py:2442 apps/settings/catalog.py:2455
+#: apps/settings/catalog.py:2467 apps/settings/catalog.py:2480
+#: apps/settings/catalog.py:2492 apps/settings/catalog.py:2505
+#: apps/settings/catalog.py:2516 apps/settings/catalog.py:2527
+#: apps/settings/catalog.py:2538 apps/settings/catalog.py:2550
+#: apps/settings/catalog.py:2562 apps/settings/catalog.py:2574
+#: apps/settings/catalog.py:2586 apps/settings/catalog.py:2598
+#: apps/settings/catalog.py:2610 apps/settings/catalog.py:2622
+#: templates/orders/order_list.html:105 templates/orders/order_list.html:170
+#: templates/orders/order_list.html:217 templates/orders/order_list.html:318
 #: templates/orders/partials/order_items_list.html:103
 #: templates/orders/partials/order_list.html:41
 #: templates/provisioning/partials/services_list.html:135
@@ -11026,103 +11026,108 @@ msgstr "👥 Membri ai Grupului de Servicii"
 msgid "Service must belong to same customer as group"
 msgstr "Serviciul trebuie să aparțină aceluiași client ca grupul"
 
-#: apps/provisioning/security_utils.py:92
+#: apps/provisioning/security_utils.py:96
 msgid "Parameter integrity check failed"
 msgstr "Verificarea integrității parametrului a eșuat"
 
-#: apps/provisioning/security_utils.py:96
+#: apps/provisioning/security_utils.py:100
 msgid "Invalid parameter format"
 msgstr "Format de parametru invalid"
 
-#: apps/provisioning/security_utils.py:101
+#: apps/provisioning/security_utils.py:105
 #, python-format
 msgid "Parameter decryption failed: %(error)s"
 msgstr "Decriptarea parametrului a eșuat: %(error)s"
 
-#: apps/provisioning/security_utils.py:122
+#: apps/provisioning/security_utils.py:126
 msgid "Domain cannot be empty"
 msgstr "Domeniul nu poate fi gol"
 
-#: apps/provisioning/security_utils.py:129
+#: apps/provisioning/security_utils.py:133
 #, python-format
 msgid "Domain too long (max %(max)s characters)"
 msgstr "Domeniu prea lung (maximum %(max)s caractere)"
 
-#: apps/provisioning/security_utils.py:132
+#: apps/provisioning/security_utils.py:136
 #, python-format
 msgid "Domain too short (minimum %(min)s characters)"
 msgstr "Domeniu prea scurt (minim %(min)s caractere)"
 
-#: apps/provisioning/security_utils.py:136
+#: apps/provisioning/security_utils.py:140
 msgid "Invalid domain format"
 msgstr "Format de domeniu invalid"
 
-#: apps/provisioning/security_utils.py:149
+#: apps/provisioning/security_utils.py:153
 #, python-format
 msgid "Domain contains dangerous pattern: %(pattern)s"
 msgstr "Domeniul conține un model periculos: %(pattern)s"
 
-#: apps/provisioning/security_utils.py:168
+#: apps/provisioning/security_utils.py:156
+#: apps/provisioning/virtualmin_validators.py:177
+msgid "Invalid internationalized domain name"
+msgstr "Nume de domeniu internaționalizat invalid"
+
+#: apps/provisioning/security_utils.py:175
 #, python-format
 msgid "Domain contains restricted component: %(part)s"
 msgstr "Domeniul conține o componentă restricționată: %(part)s"
 
-#: apps/provisioning/security_utils.py:193
+#: apps/provisioning/security_utils.py:200
 #, python-format
 msgid "Username too long (max %(max)s characters)"
 msgstr "Nume de utilizator prea lung (maximum %(max)s caractere)"
 
-#: apps/provisioning/security_utils.py:196
+#: apps/provisioning/security_utils.py:203
 #, python-format
 msgid "Username too short (minimum %(min)s characters)"
 msgstr "Nume de utilizator prea scurt (minim %(min)s caractere)"
 
-#: apps/provisioning/security_utils.py:202
+#: apps/provisioning/security_utils.py:209
 msgid "Invalid username format (must start with letter, contain only lowercase letters, numbers, underscore, hyphen)"
 msgstr "Format nevalid al numelui de utilizator (trebuie să înceapă cu o literă și să conțină doar litere mici, cifre, underscore și cratimă)"
 
-#: apps/provisioning/security_utils.py:241
+#: apps/provisioning/security_utils.py:248
 #, python-format
 msgid "Username '%(username)s' is reserved"
 msgstr "Numele de utilizator '%(username)s' este rezervat"
 
-#: apps/provisioning/security_utils.py:249
-#: apps/provisioning/security_utils.py:260
+#: apps/provisioning/security_utils.py:256
+#: apps/provisioning/security_utils.py:267
 msgid "Service ID must be a positive integer"
 msgstr "ID-ul serviciului trebuie să fie un număr întreg pozitiv"
 
-#: apps/provisioning/security_utils.py:253
-#: apps/provisioning/security_utils.py:264
+#: apps/provisioning/security_utils.py:260
+#: apps/provisioning/security_utils.py:271
 msgid "Service ID must be a positive integer within the primary key range"
 msgstr "ID-ul serviciului trebuie să fie un număr întreg pozitiv în intervalul cheii primare"
 
-#: apps/provisioning/security_utils.py:258
+#: apps/provisioning/security_utils.py:265
 msgid "Service ID cannot be empty"
 msgstr "ID-ul serviciului nu poate fi gol"
 
-#: apps/provisioning/security_utils.py:271
+#: apps/provisioning/security_utils.py:278
 msgid "Server ID cannot be empty"
 msgstr "ID-ul serverului nu poate fi gol"
 
-#: apps/provisioning/security_utils.py:276
+#: apps/provisioning/security_utils.py:283
 #, python-format
 msgid "Invalid server ID format: %(error)s"
 msgstr "Format de ID server invalid: %(error)s"
 
-#: apps/provisioning/security_utils.py:278
+#: apps/provisioning/security_utils.py:285
 msgid "Server ID must be a valid UUID4"
 msgstr "ID-ul serverului trebuie să fie un UUID4 valid"
 
-#: apps/provisioning/security_utils.py:303
+#: apps/provisioning/security_utils.py:310
 #, python-format
 msgid "Template name too long (max %(max)s characters)"
 msgstr "Nume de șablon prea lung (maximum %(max)s caractere)"
 
-#: apps/provisioning/security_utils.py:308
+#: apps/provisioning/security_utils.py:315
 msgid "Template name contains invalid characters"
 msgstr "Numele șablonului conține caractere nevalide"
 
-#: apps/provisioning/security_utils.py:314
+#: apps/provisioning/security_utils.py:321
 #, python-format
 msgid "Template name contains dangerous pattern: %(pattern)s"
 msgstr "Numele șablonului conține un model periculos: %(pattern)s"
@@ -11203,7 +11208,7 @@ msgid "Monthly Traffic (GB)"
 msgstr "Trafic lunar (GB)"
 
 #: apps/provisioning/service_models.py:80
-#: templates/provisioning/virtualmin/account_detail.html:142
+#: templates/provisioning/virtualmin/account_detail.html:176
 msgid "Email Accounts"
 msgstr "Conturi email"
 
@@ -11393,7 +11398,7 @@ msgstr "Următoarea Întreținere"
 #: apps/provisioning/service_models.py:358
 #: templates/provisioning/server_list.html:41
 #: templates/provisioning/service_detail.html:256
-#: templates/provisioning/virtualmin/account_detail.html:206
+#: templates/provisioning/virtualmin/account_detail.html:240
 #: templates/provisioning/virtualmin/account_form.html:60
 #: templates/provisioning/virtualmin/bulk_actions.html:23
 #: templates/provisioning/virtualmin/bulk_actions.html:63
@@ -11748,22 +11753,22 @@ msgstr "Acest cont nu are niciun serviciu."
 msgid "Service {name} is {status}; manage it from the service page."
 msgstr "Serviciul {name} este {status}; gestionați-l din pagina serviciului."
 
-#: apps/provisioning/virtualmin_backup_service.py:1107
+#: apps/provisioning/virtualmin_backup_service.py:1111
 #, python-format
 msgid "Backup %(backup_id)s deletion incomplete: %(errors)s"
 msgstr "Ștergerea copiei de rezervă %(backup_id)s este incompletă: %(errors)s"
 
-#: apps/provisioning/virtualmin_backup_service.py:1348
+#: apps/provisioning/virtualmin_backup_service.py:1352
 #, python-format
 msgid "Failed to get domain info: %(error)s"
 msgstr "Nu s-au putut obține informațiile despre domeniu: %(error)s"
 
-#: apps/provisioning/virtualmin_backup_service.py:1352
+#: apps/provisioning/virtualmin_backup_service.py:1356
 #, python-format
 msgid "Domain %(domain)s not found on server"
 msgstr "Domeniul %(domain)s nu a fost găsit pe server"
 
-#: apps/provisioning/virtualmin_backup_service.py:1748
+#: apps/provisioning/virtualmin_backup_service.py:1752
 #, python-format
 msgid "Backup is missing requested feature members: %(features)s"
 msgstr "Copia de rezervă nu conține componentele funcției solicitate: %(features)s"
@@ -12018,19 +12023,19 @@ msgstr "Toate serverele"
 msgid "All statuses"
 msgstr "Toate statusurile"
 
-#: apps/provisioning/virtualmin_forms.py:541
+#: apps/provisioning/virtualmin_forms.py:542
 msgid "Domain is required"
 msgstr "Domeniul este obligatoriu"
 
-#: apps/provisioning/virtualmin_forms.py:549
+#: apps/provisioning/virtualmin_forms.py:550
 msgid "An account with this domain already exists"
 msgstr "Există deja un cont cu acest domeniu"
 
-#: apps/provisioning/virtualmin_forms.py:558
+#: apps/provisioning/virtualmin_forms.py:559
 msgid "Target server"
 msgstr "Server țintă"
 
-#: apps/provisioning/virtualmin_forms.py:562
+#: apps/provisioning/virtualmin_forms.py:563
 msgid "I understand the downtime, retained-copy, and manual routing/DNS requirements."
 msgstr "Înțeleg cerințele privind timpul de nefuncționare, copia reținută și rutarea/DNS manuală."
 
@@ -12226,7 +12231,7 @@ msgid "Bandwidth Quota (MB)"
 msgstr "Cotă Lățime de Bandă (MB)"
 
 #: apps/provisioning/virtualmin_models.py:329
-#: templates/provisioning/virtualmin/account_detail.html:484
+#: templates/provisioning/virtualmin/account_detail.html:518
 msgid "Use -1 for unlimited bandwidth"
 msgstr "Utilizați -1 pentru lățimea de bandă nelimitată"
 
@@ -12263,145 +12268,157 @@ msgstr "Amprenta instantaneului (sha256:dimensiune) lăsat de copia de bază pe 
 msgid "Bumped every time the chain is invalidated or restarted"
 msgstr "Crește de fiecare dată când lanțul este invalidat sau repornit"
 
-#: apps/provisioning/virtualmin_models.py:390
+#: apps/provisioning/virtualmin_models.py:391
+msgid "Why reconcile must leave this account disabled; empty when nothing holds it"
+msgstr ""
+"Motivul pentru care reconcilierea trebuie să lase acest cont dezactivat; gol "
+"când nimic nu îl blochează"
+
+#: apps/provisioning/virtualmin_models.py:398
+msgid "The safety backup taken before the restore that left the domain half-restored"
+msgstr ""
+"Copia de siguranță făcută înainte de restaurarea care a lăsat domeniul pe "
+"jumătate restaurat"
+
+#: apps/provisioning/virtualmin_models.py:409
 msgid "Virtualmin Account"
 msgstr "Cont Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:391
+#: apps/provisioning/virtualmin_models.py:410
 #: templates/provisioning/virtualmin/accounts_list.html:5
 #: templates/provisioning/virtualmin/bulk_actions.html:5
 msgid "Virtualmin Accounts"
 msgstr "Conturi Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:542
+#: apps/provisioning/virtualmin_models.py:561
 msgid "Needs Attention"
 msgstr "Necesită atenție"
 
-#: apps/provisioning/virtualmin_models.py:546
+#: apps/provisioning/virtualmin_models.py:565
 msgid "Create Domain"
 msgstr "Creați Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:547
+#: apps/provisioning/virtualmin_models.py:566
 msgid "Delete Domain"
 msgstr "Ștergeți Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:548
+#: apps/provisioning/virtualmin_models.py:567
 msgid "Modify Domain"
 msgstr "Modifică Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:549
+#: apps/provisioning/virtualmin_models.py:568
 msgid "Suspend Domain"
 msgstr "Suspendă Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:550
+#: apps/provisioning/virtualmin_models.py:569
 msgid "Unsuspend Domain"
 msgstr "Reactivează Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:552
+#: apps/provisioning/virtualmin_models.py:571
 msgid "Delete User"
 msgstr "Ștergeți Utilizator"
 
-#: apps/provisioning/virtualmin_models.py:553
+#: apps/provisioning/virtualmin_models.py:572
 msgid "Create Database"
 msgstr "Creați Baza de Date"
 
-#: apps/provisioning/virtualmin_models.py:554
+#: apps/provisioning/virtualmin_models.py:573
 msgid "Delete Database"
 msgstr "Ștergeți Baza de Date"
 
-#: apps/provisioning/virtualmin_models.py:555
+#: apps/provisioning/virtualmin_models.py:574
 msgid "Install SSL Certificate"
 msgstr "Instalează Certificat SSL"
 
-#: apps/provisioning/virtualmin_models.py:556
+#: apps/provisioning/virtualmin_models.py:575
 msgid "Backup Domain"
 msgstr "Backup Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:557
+#: apps/provisioning/virtualmin_models.py:576
 msgid "Restore Domain"
 msgstr "Restaurează Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:558
+#: apps/provisioning/virtualmin_models.py:577
 msgid "Migrate Domain"
 msgstr "Migrare Domeniu"
 
-#: apps/provisioning/virtualmin_models.py:564
+#: apps/provisioning/virtualmin_models.py:583
 msgid "Correlation ID for tracking across systems"
 msgstr "ID de corelare pentru urmărire în sisteme"
 
-#: apps/provisioning/virtualmin_models.py:593
+#: apps/provisioning/virtualmin_models.py:612
 msgid "Rollback Executed"
 msgstr "Rollback Executat"
 
-#: apps/provisioning/virtualmin_models.py:593
+#: apps/provisioning/virtualmin_models.py:612
 msgid "Whether rollback was attempted after failure"
 msgstr "Dacă rollback-ul a fost încercat după eșec"
 
-#: apps/provisioning/virtualmin_models.py:600
+#: apps/provisioning/virtualmin_models.py:619
 msgid "Rollback Successful"
 msgstr "Rollback Reușit"
 
-#: apps/provisioning/virtualmin_models.py:601
+#: apps/provisioning/virtualmin_models.py:620
 msgid "Rollback Partially Successful"
 msgstr "Rollback Parțial Reușit"
 
-#: apps/provisioning/virtualmin_models.py:604
+#: apps/provisioning/virtualmin_models.py:623
 msgid "Rollback Status"
 msgstr "Stare Rollback"
 
-#: apps/provisioning/virtualmin_models.py:605
+#: apps/provisioning/virtualmin_models.py:624
 msgid "Status of rollback operation if executed"
 msgstr "Starea operației de rollback dacă a fost executată"
 
-#: apps/provisioning/virtualmin_models.py:608
+#: apps/provisioning/virtualmin_models.py:627
 msgid "Details of rollback operations performed"
 msgstr "Detaliile operațiilor de rollback efectuate"
 
-#: apps/provisioning/virtualmin_models.py:630
+#: apps/provisioning/virtualmin_models.py:649
 msgid "Virtualmin Provisioning Job"
 msgstr "Sarcina de Furnizare Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:631
+#: apps/provisioning/virtualmin_models.py:650
 msgid "Virtualmin Provisioning Jobs"
 msgstr "Sarcini de Furnizare Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:925
+#: apps/provisioning/virtualmin_models.py:944
 msgid "Missing in Virtualmin"
 msgstr "Lipsă în Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:926
+#: apps/provisioning/virtualmin_models.py:945
 msgid "Missing in PRAHO"
 msgstr "Lipsă în PRAHO"
 
-#: apps/provisioning/virtualmin_models.py:927
+#: apps/provisioning/virtualmin_models.py:946
 msgid "Status Mismatch"
 msgstr "Nepotrivire de Stare"
 
-#: apps/provisioning/virtualmin_models.py:928
+#: apps/provisioning/virtualmin_models.py:947
 msgid "Quota Mismatch"
 msgstr "Nepotrivire de Cotă"
 
-#: apps/provisioning/virtualmin_models.py:929
+#: apps/provisioning/virtualmin_models.py:948
 msgid "Feature Mismatch"
 msgstr "Nepotrivire de Funcție"
 
-#: apps/provisioning/virtualmin_models.py:930
+#: apps/provisioning/virtualmin_models.py:949
 msgid "Metadata Mismatch"
 msgstr "Nepotrivire de Metadate"
 
-#: apps/provisioning/virtualmin_models.py:935
+#: apps/provisioning/virtualmin_models.py:954
 msgid "Auto Fixed"
 msgstr "Fixat Automat"
 
-#: apps/provisioning/virtualmin_models.py:936
+#: apps/provisioning/virtualmin_models.py:955
 msgid "Manual Fixed"
 msgstr "Fixat Manual"
 
-#: apps/provisioning/virtualmin_models.py:962
+#: apps/provisioning/virtualmin_models.py:981
 msgid "Virtualmin Drift Record"
 msgstr "Înregistrare Drift Virtualmin"
 
-#: apps/provisioning/virtualmin_models.py:963
+#: apps/provisioning/virtualmin_models.py:982
 msgid "Virtualmin Drift Records"
 msgstr "Înregistrări Drift Virtualmin"
 
@@ -12409,362 +12426,400 @@ msgstr "Înregistrări Drift Virtualmin"
 msgid "Restores the base backup and then the differential. Files deleted after the base was taken will reappear, and databases come from the differential's full dump. The domain is taken offline (maintenance page and disabled) until the restore is verified."
 msgstr "Restaurează copia de bază, apoi copia diferențială. Fișierele șterse după crearea copiei de bază vor reapărea, iar bazele de date provin din dump-ul complet al copiei diferențiale. Domeniul este scos din funcțiune (pagină de mentenanță și dezactivat) până la verificarea restaurării."
 
-#: apps/provisioning/virtualmin_service.py:167
+#: apps/provisioning/virtualmin_pair_restore.py:84
+msgid "A pair restore was stopped after it had started restoring; the domain may be half-restored and stays disabled until staff re-enable it as it is or restore the safety backup"
+msgstr ""
+"O restaurare de pereche a fost oprită după ce începuse să restaureze; "
+"domeniul poate fi pe jumătate restaurat și rămâne dezactivat până când "
+"personalul îl reactivează așa cum este sau restaurează copia de siguranță"
+
+#: apps/provisioning/virtualmin_service.py:168
 msgid "No server specified for gateway"
 msgstr "Niciun server specificat pentru gateway"
 
-#: apps/provisioning/virtualmin_service.py:562
+#: apps/provisioning/virtualmin_service.py:571
 #, python-format
 msgid "Insufficient disk space: %(available)sMB available, %(requested)sMB requested"
 msgstr "Spațiu pe disc insuficient: %(available)sMB disponibil, %(requested)sMB solicitat"
 
-#: apps/provisioning/virtualmin_service.py:777
+#: apps/provisioning/virtualmin_service.py:786
 msgid "Provisioning failed - rollback executed"
 msgstr "Aprovizionare eșuată - rollback executat"
 
-#: apps/provisioning/virtualmin_service.py:1455
+#: apps/provisioning/virtualmin_service.py:1464
 msgid "No available servers can host new domains"
 msgstr "Niciun server disponibil nu poate găzdui domenii noi"
 
-#: apps/provisioning/virtualmin_validators.py:155
+#: apps/provisioning/virtualmin_validators.py:158
 msgid "Domain name must be at least 3 characters"
 msgstr "Domeniul trebuie să conțină cel puțin 3 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:157
+#: apps/provisioning/virtualmin_validators.py:160
 msgid "Domain name must be less than 253 characters"
 msgstr "Domeniul trebuie să conțină mai puțin de 253 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:161
-#: apps/provisioning/virtualmin_validators.py:170
+#: apps/provisioning/virtualmin_validators.py:164
+#: apps/provisioning/virtualmin_validators.py:173
 msgid "Invalid domain name format"
 msgstr "Format de nume de domeniu invalid"
 
-#: apps/provisioning/virtualmin_validators.py:166
+#: apps/provisioning/virtualmin_validators.py:169
 msgid "Domain name is reserved"
 msgstr "Domeniul este rezervat"
 
-#: apps/provisioning/virtualmin_validators.py:189
-#: apps/provisioning/virtualmin_validators.py:242
+#: apps/provisioning/virtualmin_validators.py:196
+#: apps/provisioning/virtualmin_validators.py:249
 msgid "Username is required"
 msgstr "Numele de utilizator este obligatoriu"
 
-#: apps/provisioning/virtualmin_validators.py:200
-#: apps/provisioning/virtualmin_validators.py:253
+#: apps/provisioning/virtualmin_validators.py:207
+#: apps/provisioning/virtualmin_validators.py:260
 msgid "Username must be at least 3 characters"
 msgstr "Numele de utilizator trebuie să conțină cel puțin 3 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:202
-#: apps/provisioning/virtualmin_validators.py:255
+#: apps/provisioning/virtualmin_validators.py:209
+#: apps/provisioning/virtualmin_validators.py:262
 msgid "Username must be less than 32 characters"
 msgstr "Numele de utilizator trebuie să conțină mai puțin de 32 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:206
-#: apps/provisioning/virtualmin_validators.py:259
+#: apps/provisioning/virtualmin_validators.py:213
+#: apps/provisioning/virtualmin_validators.py:266
 msgid "Username can only contain letters, numbers, and underscores"
 msgstr "Numele de utilizator poate conține doar litere, cifre și liniuțe de subliniere"
 
-#: apps/provisioning/virtualmin_validators.py:223
-#: apps/provisioning/virtualmin_validators.py:276
+#: apps/provisioning/virtualmin_validators.py:230
+#: apps/provisioning/virtualmin_validators.py:283
 msgid "Username is reserved"
 msgstr "Numele de utilizator este rezervat"
 
-#: apps/provisioning/virtualmin_validators.py:295
+#: apps/provisioning/virtualmin_validators.py:302
 msgid "Password is required"
 msgstr "Parola este obligatorie"
 
-#: apps/provisioning/virtualmin_validators.py:299
+#: apps/provisioning/virtualmin_validators.py:306
 msgid "Password must be at least 8 characters"
 msgstr "Parola trebuie să conțină cel puțin 8 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:301
+#: apps/provisioning/virtualmin_validators.py:308
 msgid "Password must be less than 128 characters"
 msgstr "Parola trebuie să conțină mai puțin de 128 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:305
+#: apps/provisioning/virtualmin_validators.py:312
 msgid "Password contains invalid characters"
 msgstr "Parola conține caractere nevalide"
 
-#: apps/provisioning/virtualmin_validators.py:316
+#: apps/provisioning/virtualmin_validators.py:323
 msgid "Password must contain at least 3 of: uppercase, lowercase, digits, special characters"
 msgstr "Parola trebuie să conțină cel puțin 3 din următoarele: litere mari, litere mici, cifre, caractere speciale"
 
-#: apps/provisioning/virtualmin_validators.py:336
+#: apps/provisioning/virtualmin_validators.py:343
 msgid "Email address is required"
 msgstr "Adresa de email este obligatorie"
 
-#: apps/provisioning/virtualmin_validators.py:349
+#: apps/provisioning/virtualmin_validators.py:356
 msgid "Email address is too long"
 msgstr "Adresa de email este prea lungă"
 
-#: apps/provisioning/virtualmin_validators.py:353
+#: apps/provisioning/virtualmin_validators.py:360
 msgid "Invalid email address format"
 msgstr "Format de adresă de email invalid"
 
-#: apps/provisioning/virtualmin_validators.py:357
+#: apps/provisioning/virtualmin_validators.py:364
 msgid "Email address must contain exactly one @ symbol"
 msgstr "Adresa de email trebuie să conțină exact un simbol @"
 
-#: apps/provisioning/virtualmin_validators.py:363
+#: apps/provisioning/virtualmin_validators.py:370
 msgid "Email local part is too long"
 msgstr "Partea locală a adresei de email este prea lungă"
 
-#: apps/provisioning/virtualmin_validators.py:365
+#: apps/provisioning/virtualmin_validators.py:372
 msgid "Email local part is required"
 msgstr "Partea locală a adresei de email este obligatorie"
 
-#: apps/provisioning/virtualmin_validators.py:371
+#: apps/provisioning/virtualmin_validators.py:378
 #, python-format
 msgid "Invalid email domain: %(error)s"
 msgstr "Domeniu de email invalid: %(error)s"
 
-#: apps/provisioning/virtualmin_validators.py:401
+#: apps/provisioning/virtualmin_validators.py:408
 msgid "Template name must be less than 50 characters"
 msgstr "Numele șablonului trebuie să conțină mai puțin de 50 caractere"
 
-#: apps/provisioning/virtualmin_validators.py:406
+#: apps/provisioning/virtualmin_validators.py:413
 msgid "Template name can only contain letters, numbers, hyphens, underscores and single spaces"
 msgstr "Numele șablonului poate conține doar litere, cifre, cratime, liniuțe de subliniere și spații simple"
 
-#: apps/provisioning/virtualmin_validators.py:429
+#: apps/provisioning/virtualmin_validators.py:436
 msgid "Quota must be an integer"
 msgstr "Cota trebuie să fie un număr întreg"
 
-#: apps/provisioning/virtualmin_validators.py:432
+#: apps/provisioning/virtualmin_validators.py:439
 msgid "Quota cannot be negative"
 msgstr "Cota nu poate fi negativă"
 
-#: apps/provisioning/virtualmin_validators.py:436
+#: apps/provisioning/virtualmin_validators.py:443
 msgid "Quota too large (maximum 1TB)"
 msgstr "Cota este prea mare (maxim 1TB)"
 
-#: apps/provisioning/virtualmin_validators.py:458
+#: apps/provisioning/virtualmin_validators.py:465
 msgid "Bandwidth must be an integer"
 msgstr "Lățimea de bandă trebuie să fie un număr întreg"
 
-#: apps/provisioning/virtualmin_validators.py:461
+#: apps/provisioning/virtualmin_validators.py:468
 msgid "Bandwidth cannot be negative"
 msgstr "Lățimea de bandă nu poate fi negativă"
 
-#: apps/provisioning/virtualmin_validators.py:465
+#: apps/provisioning/virtualmin_validators.py:472
 msgid "Bandwidth too large (maximum 10TB/month)"
 msgstr "Lățimea de bandă este prea mare (maxim 10TB/lună)"
 
-#: apps/provisioning/virtualmin_validators.py:484
+#: apps/provisioning/virtualmin_validators.py:491
 msgid "Server hostname is required"
 msgstr "Hostname-ul serverului este obligatoriu"
 
-#: apps/provisioning/virtualmin_validators.py:520
+#: apps/provisioning/virtualmin_validators.py:527
 msgid "Program name is required"
 msgstr "Numele programului este obligatoriu"
 
-#: apps/provisioning/virtualmin_validators.py:530
+#: apps/provisioning/virtualmin_validators.py:537
 #, python-format
 msgid "Program '%(program)s' is not allowed"
 msgstr "Programul '%(program)s' nu este permis"
 
-#: apps/provisioning/virtualmin_validators.py:556
+#: apps/provisioning/virtualmin_validators.py:563
 #, python-format
 msgid "Format '%(format)s' not supported. Use: %(allowed)s"
 msgstr "Formatul '%(format)s' nu este suportat. Utilizați: %(allowed)s"
 
-#: apps/provisioning/virtualmin_validators.py:577
+#: apps/provisioning/virtualmin_validators.py:575
+#, python-format
+msgid "Parameter '%(key)s' is not a valid domain name"
+msgstr "Parametrul „%(key)s” nu este un nume de domeniu valid"
+
+#: apps/provisioning/virtualmin_validators.py:592
 msgid "Parameters must be a dictionary"
 msgstr "Parametrii trebuie să fie un dicționar"
 
-#: apps/provisioning/virtualmin_validators.py:584
+#: apps/provisioning/virtualmin_validators.py:599
 msgid "Invalid parameter name"
 msgstr "Nume de parametru invalid"
 
-#: apps/provisioning/virtualmin_validators.py:593
+#: apps/provisioning/virtualmin_validators.py:608
 #, python-format
 msgid "Parameter '%(key)s' list values must be strings"
 msgstr "Valorile listei parametrului '%(key)s' trebuie să fie șiruri de caractere"
 
-#: apps/provisioning/virtualmin_validators.py:597
-#: apps/provisioning/virtualmin_validators.py:608
+#: apps/provisioning/virtualmin_validators.py:613
+#: apps/provisioning/virtualmin_validators.py:625
 #, python-format
 msgid "Parameter '%(key)s' value too long"
 msgstr "Valoarea parametrului '%(key)s' este prea lungă"
 
-#: apps/provisioning/virtualmin_views.py:512
+#: apps/provisioning/virtualmin_views.py:519
 msgid "Migration queued. Follow its status before changing routing/DNS."
 msgstr "Migrare pusă în coadă. Urmăriți starea acesteia înainte de a modifica rutarea/DNS."
 
-#: apps/provisioning/virtualmin_views.py:519
+#: apps/provisioning/virtualmin_views.py:526
 msgid "Migrate Virtualmin account"
 msgstr "Migrare cont Virtualmin"
 
-#: apps/provisioning/virtualmin_views.py:545
+#: apps/provisioning/virtualmin_views.py:552
 msgid "That migration is no longer awaiting review; re-check the current status."
 msgstr "Acea migrare nu mai așteaptă revizuirea; verificați din nou starea curentă."
 
-#: apps/provisioning/virtualmin_views.py:549
+#: apps/provisioning/virtualmin_views.py:556
 msgid "Migration marked resolved. The account is unlocked."
 msgstr "Migrarea a fost marcată ca rezolvată. Contul este deblocat."
 
-#: apps/provisioning/virtualmin_views.py:562
+#: apps/provisioning/virtualmin_views.py:569
 msgid "operator confirmed remote state"
 msgstr "operatorul a confirmat starea la distanță"
 
-#: apps/provisioning/virtualmin_views.py:597
+#: apps/provisioning/virtualmin_views.py:604
 msgid "Job marked resolved. The account is unlocked."
 msgstr "Sarcina a fost marcată ca rezolvată. Contul este deblocat."
 
-#: apps/provisioning/virtualmin_views.py:599
+#: apps/provisioning/virtualmin_views.py:606
 msgid "Only a job awaiting attention can be resolved."
 msgstr "Doar o sarcină care necesită atenție poate fi rezolvată."
 
-#: apps/provisioning/virtualmin_views.py:610
+#: apps/provisioning/virtualmin_views.py:617
 msgid "operator confirmed the node is lost"
 msgstr "operatorul a confirmat că nodul este pierdut"
 
-#: apps/provisioning/virtualmin_views.py:623
+#: apps/provisioning/virtualmin_views.py:630
 msgid "Job marked resolved as node lost. The account is unlocked."
 msgstr "Sarcina a fost marcată ca rezolvată, nodul fiind pierdut. Contul este deblocat."
 
-#: apps/provisioning/virtualmin_views.py:694
+#: apps/provisioning/virtualmin_views.py:646
+msgid "The hold is released. The domain will be enabled again as it is."
+msgstr "Blocarea a fost ridicată. Domeniul va fi reactivat așa cum este."
+
+#: apps/provisioning/virtualmin_views.py:648
+msgid "This account is not held."
+msgstr "Acest cont nu este blocat."
+
+#: apps/provisioning/virtualmin_views.py:661
+msgid "This account has no safety backup to restore."
+msgstr "Acest cont nu are nicio copie de siguranță de restaurat."
+
+#: apps/provisioning/virtualmin_views.py:671
+#, python-format
+msgid "Could not start the restore of the safety backup: %(error)s"
+msgstr "Restaurarea copiei de siguranță nu a putut porni: %(error)s"
+
+#: apps/provisioning/virtualmin_views.py:675
+msgid "Restoring the safety backup. The hold ends when it completes."
+msgstr ""
+"Se restaurează copia de siguranță. Blocarea se încheie când restaurarea se "
+"termină."
+
+#: apps/provisioning/virtualmin_views.py:765
+#: apps/provisioning/virtualmin_views.py:855
 msgid "Differential backups are not enabled."
 msgstr "Copiile de siguranță diferențiale nu sunt activate."
 
-#: apps/provisioning/virtualmin_views.py:701
+#: apps/provisioning/virtualmin_views.py:772
 #, python-brace-format
 msgid "The backup could not be started: {error}"
 msgstr "Copia de siguranță nu a putut fi pornită: {error}"
 
-#: apps/provisioning/virtualmin_views.py:704
+#: apps/provisioning/virtualmin_views.py:775
 msgid "Base backup queued."
 msgstr "Copia de siguranță de bază a fost pusă în coadă."
 
-#: apps/provisioning/virtualmin_views.py:704
+#: apps/provisioning/virtualmin_views.py:775
 msgid "Differential backup queued."
 msgstr "Copia de siguranță diferențială a fost pusă în coadă."
 
-#: apps/provisioning/virtualmin_views.py:722
+#: apps/provisioning/virtualmin_views.py:793
 msgid "No backups available for this account."
 msgstr "Nu sunt disponibile backup-uri pentru acest cont."
 
-#: apps/provisioning/virtualmin_views.py:787
+#: apps/provisioning/virtualmin_views.py:861
 msgid "No differential backups are available for this account."
 msgstr "Nu sunt disponibile copii de siguranță diferențiale pentru acest cont."
 
-#: apps/provisioning/virtualmin_views.py:802
+#: apps/provisioning/virtualmin_views.py:876
 msgid "Pair restore queued."
 msgstr "Restaurarea perechii a fost pusă în coadă."
 
-#: apps/provisioning/virtualmin_views.py:1070
+#: apps/provisioning/virtualmin_views.py:1144
 msgid "Test Failed"
 msgstr "Test eșuat"
 
-#: apps/provisioning/virtualmin_views.py:1073
+#: apps/provisioning/virtualmin_views.py:1147
 #, python-format
 msgid "An error occurred during connection test: %(error)s"
 msgstr "A apărut o eroare la testarea conexiunii: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:1132
+#: apps/provisioning/virtualmin_views.py:1206
 msgid "No active Virtualmin servers found"
 msgstr "Nu s-au găsit servere Virtualmin active"
 
-#: apps/provisioning/virtualmin_views.py:1146
+#: apps/provisioning/virtualmin_views.py:1220
 msgid "Maximum backup age must be a positive integer."
 msgstr "Vârsta maximă a copiei de siguranță trebuie să fie un număr întreg pozitiv."
 
-#: apps/provisioning/virtualmin_views.py:1171
+#: apps/provisioning/virtualmin_views.py:1245
 #: templates/provisioning/virtualmin/backup_form.html:161
 msgid "Full Backup"
 msgstr "Copie de Siguranță Completă"
 
-#: apps/provisioning/virtualmin_views.py:1172
+#: apps/provisioning/virtualmin_views.py:1246
 #: templates/provisioning/virtualmin/backup_form.html:167
 msgid "Incremental Backup"
 msgstr "Copie de Siguranță Incrementală"
 
-#: apps/provisioning/virtualmin_views.py:1173
+#: apps/provisioning/virtualmin_views.py:1247
 #: templates/provisioning/virtualmin/backup_form.html:173
 msgid "Configuration Only"
 msgstr "Doar Configurare"
 
-#: apps/provisioning/virtualmin_views.py:1181
-#: apps/provisioning/virtualmin_views.py:1182
+#: apps/provisioning/virtualmin_views.py:1255
+#: apps/provisioning/virtualmin_views.py:1256
 msgid "Unknown"
 msgstr "Necunoscut"
 
-#: apps/provisioning/virtualmin_views.py:1258
+#: apps/provisioning/virtualmin_views.py:1332
 msgid "Invalid filter."
 msgstr "Filtru invalid."
 
-#: apps/provisioning/virtualmin_views.py:1287
+#: apps/provisioning/virtualmin_views.py:1361
 #: templates/provisioning/virtualmin/accounts_list.html:39
 msgid "Bulk Actions"
 msgstr "Acțiuni în masă"
 
-#: apps/provisioning/virtualmin_views.py:1342
+#: apps/provisioning/virtualmin_views.py:1416
 #, python-format
 msgid "Backup operation failed and was rolled back. Errors: %(errors)s%(omission)s"
 msgstr "Operația de copiere de siguranță a eșuat și a fost anulată. Erori: %(errors)s%(omission)s"
 
-#: apps/provisioning/virtualmin_views.py:1362
+#: apps/provisioning/virtualmin_views.py:1436
 #, python-brace-format
 msgid "Queued {done} of {total} accounts; the reconciler applies each change."
 msgstr "Au fost puse în coadă {done} din {total} conturi; reconcilierea aplică fiecare modificare."
 
-#: apps/provisioning/virtualmin_views.py:1372
+#: apps/provisioning/virtualmin_views.py:1446
 #, python-brace-format
 msgid "{count} refused: {reasons}{more}"
 msgstr "{count} refuzate: {reasons}{more}"
 
-#: apps/provisioning/virtualmin_views.py:1577
+#: apps/provisioning/virtualmin_views.py:1651
 msgid "Invalid disk usage data"
 msgstr "Date de utilizare a spațiului pe disc invalide"
 
-#: apps/provisioning/virtualmin_views.py:1592
-#: apps/provisioning/virtualmin_views.py:1595
-#: apps/provisioning/virtualmin_views.py:1646
+#: apps/provisioning/virtualmin_views.py:1666
+#: apps/provisioning/virtualmin_views.py:1669
+#: apps/provisioning/virtualmin_views.py:1720
 msgid "Health check timed out"
 msgstr "Verificarea stării de sănătate a depășit timpul de așteptare"
 
-#: apps/provisioning/virtualmin_views.py:1598
+#: apps/provisioning/virtualmin_views.py:1672
 msgid "Virtualmin server connectivity failed"
 msgstr "Conexiunea la serverul Virtualmin a eșuat"
 
-#: apps/provisioning/virtualmin_views.py:1721
+#: apps/provisioning/virtualmin_views.py:1795
 #, python-format
 msgid "Health check failed for %(domain)s: %(error)s"
 msgstr "Verificarea stării de sănătate a eșuat pentru %(domain)s: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:1727
+#: apps/provisioning/virtualmin_views.py:1801
 #, python-format
 msgid "Health check error for %(domain)s: %(error)s"
 msgstr "Eroare la verificarea stării de sănătate pentru %(domain)s: %(error)s"
 
-#: apps/provisioning/virtualmin_views.py:1736
+#: apps/provisioning/virtualmin_views.py:1810
 #, python-format
 msgid "Health check timed out for %(domain)s"
 msgstr "Verificarea stării de sănătate pentru %(domain)s a depășit timpul de așteptare"
 
-#: apps/provisioning/virtualmin_views.py:1800
+#: apps/provisioning/virtualmin_views.py:1874
 msgid "No active Virtualmin servers found to sync from"
 msgstr "Nu s-au găsit servere Virtualmin active de pe care să se sincronizeze"
 
-#: apps/provisioning/virtualmin_views.py:1945
+#: apps/provisioning/virtualmin_views.py:2114
 #, python-format
-msgid "No active monthly price for plan %(plan)s in %(currency)s."
-msgstr "Nu există preț lunar activ pentru planul %(plan)s în %(currency)s."
+msgid "%(count)d unassigned account(s) on the nodes were not imported: %(rows)s%(more)s. Attach each one to a customer's service first."
+msgstr ""
+"%(count)d conturi neatribuite de pe noduri nu au fost importate: "
+"%(rows)s%(more)s. Atașați mai întâi fiecare cont la serviciul unui client."
 
-#: apps/provisioning/virtualmin_views.py:2117
+#: apps/provisioning/virtualmin_views.py:2192
 #, python-brace-format
 msgid "Suspension of {account} is queued; its service is suspended."
 msgstr "Suspendarea contului {account} este în coadă; serviciul său este suspendat."
 
-#: apps/provisioning/virtualmin_views.py:2163
+#: apps/provisioning/virtualmin_views.py:2238
 #, python-brace-format
 msgid "Activation of {account} is queued."
 msgstr "Activarea contului {account} este în coadă."
 
-#: apps/provisioning/virtualmin_views.py:2329
+#: apps/provisioning/virtualmin_views.py:2411
 msgid "This job cannot be retried."
 msgstr "Această sarcină nu poate fi reîncercată."
 
-#: apps/provisioning/virtualmin_views.py:2336
+#: apps/provisioning/virtualmin_views.py:2418
 msgid "The job is queued for another attempt."
 msgstr "Sarcina a fost pusă în coadă pentru o nouă încercare."
 
@@ -13462,12 +13517,12 @@ msgstr "Prag ridicat al serviciilor"
 msgid "Services medium threshold"
 msgstr "Prag mediu al serviciilor"
 
-#: apps/settings/catalog.py:1095 apps/settings/catalog.py:2595
+#: apps/settings/catalog.py:1095 apps/settings/catalog.py:2611
 msgid "Task soft time limit"
 msgstr "Limită de timp flexibilă pentru sarcini"
 
 #: apps/settings/catalog.py:1107 apps/settings/catalog.py:2171
-#: apps/settings/catalog.py:2607
+#: apps/settings/catalog.py:2623
 msgid "Task time limit"
 msgstr "Limită de timp pentru sarcini"
 
@@ -13601,8 +13656,8 @@ msgstr "Dimensiune lot"
 
 #: apps/settings/catalog.py:1355 apps/settings/catalog.py:1366
 #: apps/settings/catalog.py:1377 apps/settings/catalog.py:1388
-#: apps/settings/catalog.py:1399 apps/settings/catalog.py:2854
-#: apps/settings/catalog.py:2865
+#: apps/settings/catalog.py:1399 apps/settings/catalog.py:2870
+#: apps/settings/catalog.py:2881
 msgid "Rate limits"
 msgstr "Limite de frecvență"
 
@@ -13652,7 +13707,7 @@ msgstr "Întârziere reîncercare 4"
 msgid "Retry 5 delay"
 msgstr "Întârziere reîncercare 5"
 
-#: apps/settings/catalog.py:1471 apps/settings/catalog.py:2845
+#: apps/settings/catalog.py:1471 apps/settings/catalog.py:2861
 msgid "Max retries"
 msgstr "Numărul maxim de reîncercări"
 
@@ -13884,7 +13939,7 @@ msgstr "Backup activat"
 msgid "Recommended. Configures daily Virtualmin backups on new nodes."
 msgstr "Recomandat. Configurează backup-uri zilnice Virtualmin pe noduri noi."
 
-#: apps/settings/catalog.py:1861 apps/settings/catalog.py:2427
+#: apps/settings/catalog.py:1861 apps/settings/catalog.py:2443
 msgid "Backup retention"
 msgstr "Retenție backup"
 
@@ -14195,323 +14250,334 @@ msgid "Allow base and differential Virtualmin backups. Turning it off stops new 
 msgstr "Permite copii de siguranță Virtualmin de bază și diferențiale. Dezactivarea oprește crearea de noi copii de bază și diferențiale; restaurările, copiile de siguranță obișnuite și cele existente nu sunt afectate."
 
 #: apps/settings/catalog.py:2347
+msgid "Chain backup alert threshold"
+msgstr "Prag de alertă pentru copiile de siguranță în lanț"
+
+#: apps/settings/catalog.py:2349
+msgid "How many scheduled base or differential backups of one account must fail in a row, leaving its chain intact, before staff are alerted."
+msgstr ""
+"Câte copii de siguranță programate (de bază sau diferențiale) ale unui cont "
+"trebuie să eșueze la rând, lăsând lanțul intact, înainte ca personalul să "
+"fie alertat."
+
+#: apps/settings/catalog.py:2363
 msgid "Base backup interval"
 msgstr "Intervalul copiei de siguranță de bază"
 
-#: apps/settings/catalog.py:2349
+#: apps/settings/catalog.py:2365
 msgid "How often the hourly schedule takes a new base backup of each account, when differential backups are enabled."
 msgstr "Cât de des face programarea orară o nouă copie de siguranță de bază a fiecărui cont, când copiile diferențiale sunt activate."
 
-#: apps/settings/catalog.py:2362
+#: apps/settings/catalog.py:2378
 msgid "Differential backup interval"
 msgstr "Intervalul copiei de siguranță diferențiale"
 
-#: apps/settings/catalog.py:2364
+#: apps/settings/catalog.py:2380
 msgid "How often the hourly schedule takes a differential backup of each account with a live base, when differential backups are enabled."
 msgstr "Cât de des face programarea orară o copie de siguranță diferențială a fiecărui cont care are o bază activă, când copiile diferențiale sunt activate."
 
-#: apps/settings/catalog.py:2378
+#: apps/settings/catalog.py:2394
 msgid "Migration backup and restore timeout"
 msgstr "Timeout backup și restaurare la migrare"
 
-#: apps/settings/catalog.py:2379
+#: apps/settings/catalog.py:2395
 msgid "Timeout for each synchronous migration backup or restore."
 msgstr "Timeout pentru fiecare operație sincronă de backup sau restaurare la migrare."
 
-#: apps/settings/catalog.py:2391
+#: apps/settings/catalog.py:2407
 msgid "Minimum assumed transfer throughput"
 msgstr "Debit minim de transfer presupus"
 
-#: apps/settings/catalog.py:2392
+#: apps/settings/catalog.py:2408
 msgid "Floor throughput (MiB/s) used to derive per-job backup and restore time budgets."
 msgstr "Debit minim (MiB/s) folosit pentru a calcula bugetele de timp pentru backup și restaurare pentru fiecare job."
 
-#: apps/settings/catalog.py:2404
+#: apps/settings/catalog.py:2420
 msgid "Migration transfer timeout"
 msgstr "Timeout transfer la migrare"
 
-#: apps/settings/catalog.py:2405
+#: apps/settings/catalog.py:2421
 msgid "Timeout for each migration fetch or push playbook."
 msgstr "Timeout pentru fiecare playbook de fetch sau push al migrării."
 
-#: apps/settings/catalog.py:2417
+#: apps/settings/catalog.py:2433
 msgid "Migration spool directory"
 msgstr "Director spool pentru migrare"
 
-#: apps/settings/catalog.py:2418
+#: apps/settings/catalog.py:2434
 msgid "Private absolute directory for migration archives on the platform worker."
 msgstr "Director absolut privat pentru arhivele de migrare de pe worker-ul platformei."
 
-#: apps/settings/catalog.py:2428
+#: apps/settings/catalog.py:2444
 msgid "Days to retain provisioning backups"
 msgstr "Zile de păstrare a backup-urilor de provizionare"
 
-#: apps/settings/catalog.py:2440
+#: apps/settings/catalog.py:2456
 msgid "Cache timeout"
 msgstr "Timeout cache"
 
-#: apps/settings/catalog.py:2452
+#: apps/settings/catalog.py:2468
 msgid "Legacy RON high value service threshold"
 msgstr "Prag moștenit pentru serviciile RON de valoare ridicată"
 
-#: apps/settings/catalog.py:2453
+#: apps/settings/catalog.py:2469
 msgid "RON service and plan audit records use this floor when no explicit RON threshold is configured."
 msgstr "Înregistrările de audit pentru serviciile și planurile RON folosesc această valoare minimă când nu este configurat niciun prag RON explicit."
 
-#: apps/settings/catalog.py:2465
+#: apps/settings/catalog.py:2481
 msgid "High value service thresholds by currency"
 msgstr "Praguri pentru serviciile de valoare ridicată, pe monedă"
 
-#: apps/settings/catalog.py:2467
+#: apps/settings/catalog.py:2483
 msgid "Map currency codes to nonnegative amounts in cents. Foreign services without a limit are flagged."
 msgstr "Asociați codurile de monedă cu sume nenegative în cenți. Serviciile în valută fără limită sunt marcate."
 
-#: apps/settings/catalog.py:2477
+#: apps/settings/catalog.py:2493
 msgid "Max backup size"
 msgstr "Dimensiune maximă a backup-ului"
 
-#: apps/settings/catalog.py:2478
+#: apps/settings/catalog.py:2494
 msgid "Maximum backup size per account in GB"
 msgstr "Dimensiune maximă a backup-ului per cont în GB"
 
-#: apps/settings/catalog.py:2490
+#: apps/settings/catalog.py:2506
 msgid "Max concurrent health checks"
 msgstr "Număr maxim de verificări de stare simultane"
 
-#: apps/settings/catalog.py:2501
+#: apps/settings/catalog.py:2517
 msgid "Max error display"
 msgstr "Număr maxim de erori afișate"
 
-#: apps/settings/catalog.py:2512
+#: apps/settings/catalog.py:2528
 msgid "Max username uniqueness attempts"
 msgstr "Număr maxim de încercări pentru unicitatea numelui de utilizator"
 
-#: apps/settings/catalog.py:2523
+#: apps/settings/catalog.py:2539
 msgid "Overall health check timeout"
 msgstr "Timeout global pentru verificarea de stare"
 
-#: apps/settings/catalog.py:2535
+#: apps/settings/catalog.py:2551
 msgid "Recovery excellent threshold"
 msgstr "Prag de recuperare excelent"
 
-#: apps/settings/catalog.py:2536
+#: apps/settings/catalog.py:2552
 msgid "Recovery rate above this = excellent health."
 msgstr "Rata de recuperare peste această valoare = stare de sănătate excelentă."
 
-#: apps/settings/catalog.py:2547
+#: apps/settings/catalog.py:2563
 msgid "Recovery good threshold"
 msgstr "Prag de recuperare bun"
 
-#: apps/settings/catalog.py:2548
+#: apps/settings/catalog.py:2564
 msgid "Recovery rate above this = good health."
 msgstr "Rata de recuperare peste această valoare = stare de sănătate bună."
 
-#: apps/settings/catalog.py:2559
+#: apps/settings/catalog.py:2575
 msgid "Recovery warning threshold"
 msgstr "Prag de avertizare recuperare"
 
-#: apps/settings/catalog.py:2560
+#: apps/settings/catalog.py:2576
 msgid "Recovery rate below this = warning status."
 msgstr "Rata de recuperare sub această valoare = stare de avertizare."
 
-#: apps/settings/catalog.py:2571
+#: apps/settings/catalog.py:2587
 msgid "SSH timeout"
 msgstr "Timeout SSH"
 
-#: apps/settings/catalog.py:2583
+#: apps/settings/catalog.py:2599
 msgid "Sudo command timeout"
 msgstr "Timeout comandă sudo"
 
-#: apps/settings/catalog.py:2618 apps/settings/catalog.py:2630
-#: apps/settings/catalog.py:2642 apps/settings/catalog.py:2658
-#: apps/settings/catalog.py:2670
+#: apps/settings/catalog.py:2634 apps/settings/catalog.py:2646
+#: apps/settings/catalog.py:2658 apps/settings/catalog.py:2674
+#: apps/settings/catalog.py:2686
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/settings/catalog.py:2619
+#: apps/settings/catalog.py:2635
 msgid "Max session age"
 msgstr "Durată maximă a sesiunii"
 
-#: apps/settings/catalog.py:2631
+#: apps/settings/catalog.py:2647
 msgid "Registration rate limit per ip"
 msgstr "Limită de rată pentru înregistrări pe IP"
 
-#: apps/settings/catalog.py:2632
+#: apps/settings/catalog.py:2648
 msgid "Maximum registrations per IP per hour"
 msgstr "Număr maxim de înregistrări pe IP pe oră"
 
-#: apps/settings/catalog.py:2643
+#: apps/settings/catalog.py:2659
 msgid "Membership invitation limit"
 msgstr "Limită pentru invitații de membru"
 
-#: apps/settings/catalog.py:2645
+#: apps/settings/catalog.py:2661
 msgid "Maximum initial membership invitations allowed separately for each inviter and each source IP per hour. Zero blocks invitations."
 msgstr "Număr maxim de invitații inițiale de membru permise separat pentru fiecare invitator și fiecare IP sursă pe oră. Zero blochează invitațiile."
 
-#: apps/settings/catalog.py:2659
+#: apps/settings/catalog.py:2675
 msgid "Suspicious ip threshold"
 msgstr "Prag IP suspect"
 
-#: apps/settings/catalog.py:2660
+#: apps/settings/catalog.py:2676
 msgid "Failed requests before IP is flagged for review."
 msgstr "Număr de cereri eșuate înainte ca IP-ul să fie marcat pentru revizuire."
 
-#: apps/settings/catalog.py:2671
+#: apps/settings/catalog.py:2687
 msgid "Welcome-invite resend limit"
 msgstr "Limită pentru retrimiterile invitației de bun venit"
 
-#: apps/settings/catalog.py:2673
+#: apps/settings/catalog.py:2689
 msgid "Maximum welcome or password-reset invite emails sent to one target user per hour. Zero blocks resends."
 msgstr "Număr maxim de emailuri de invitație de bun venit sau de reinițializare a parolei trimise unui utilizator țintă pe oră. Zero blochează retrimiterile."
 
-#: apps/settings/catalog.py:2685
+#: apps/settings/catalog.py:2701
 msgid "Customer portal"
 msgstr "Portal client"
 
-#: apps/settings/catalog.py:2686
+#: apps/settings/catalog.py:2702
 msgid "Customer portal URL"
 msgstr "URL portal client"
 
-#: apps/settings/catalog.py:2688
+#: apps/settings/catalog.py:2704
 msgid "Public base URL of the customer portal, e.g. https://portal.example.com. Used in customer-facing links such as password reset emails."
 msgstr "URL de bază public al portalului client, de ex. https://portal.example.com. Utilizat în linkuri destinate clienților, cum ar fi emailurile de reinițializare a parolei."
 
-#: apps/settings/catalog.py:2698
+#: apps/settings/catalog.py:2714
 msgid "Staff access"
 msgstr "Accesul personalului"
 
-#: apps/settings/catalog.py:2699
+#: apps/settings/catalog.py:2715
 msgid "Require two-factor authentication for staff"
 msgstr "Autentificare în doi pași obligatorie pentru personal"
 
-#: apps/settings/catalog.py:2701
+#: apps/settings/catalog.py:2717
 msgid "When enabled, a staff account without two-factor authentication must set it up before using the platform, and gets no API token or customer portal session until it does. Staff cannot disable it while this is on."
 msgstr "Când este activată, un cont de personal fără autentificare în doi pași trebuie să o configureze înainte de a folosi platforma și nu primește token API sau sesiune în portalul clienților până nu o face. Personalul nu o poate dezactiva cât timp setarea este activă."
 
-#: apps/settings/catalog.py:2713
+#: apps/settings/catalog.py:2729
 msgid "Availability"
 msgstr "Disponibilitate"
 
-#: apps/settings/catalog.py:2714
+#: apps/settings/catalog.py:2730
 msgid "Maintenance mode"
 msgstr "Mod de întreținere"
 
-#: apps/settings/catalog.py:2715
+#: apps/settings/catalog.py:2731
 msgid "When enabled, only staff users can access the system."
 msgstr "Când este activat, doar membrii personalului pot accesa sistemul."
 
-#: apps/settings/catalog.py:2724 apps/settings/catalog.py:2748
+#: apps/settings/catalog.py:2740 apps/settings/catalog.py:2764
 msgid "Attachments"
 msgstr "Atașamente"
 
-#: apps/settings/catalog.py:2725
+#: apps/settings/catalog.py:2741
 msgid "Allowed file extensions"
 msgstr "Extensii de fișier permise"
 
-#: apps/settings/catalog.py:2726
+#: apps/settings/catalog.py:2742
 msgid "Permitted upload file extensions, including the dot (e.g. .pdf)."
 msgstr "Extensii de fișiere de încărcare permise, inclusiv punctul (ex. .pdf)."
 
-#: apps/settings/catalog.py:2734
+#: apps/settings/catalog.py:2750
 msgid "Ticket lifecycle"
 msgstr "Ciclul de viață al biletului de suport"
 
-#: apps/settings/catalog.py:2735
+#: apps/settings/catalog.py:2751
 msgid "Auto-close inactive tickets"
 msgstr "Închidere automată a biletelor inactive"
 
-#: apps/settings/catalog.py:2737
+#: apps/settings/catalog.py:2753
 msgid "Close tickets that have been waiting for a customer response for this many hours. Set to 0 to disable."
 msgstr "Închideți biletele care așteaptă răspunsul clientului de atâtea ore. Setați la 0 pentru a dezactiva."
 
-#: apps/settings/catalog.py:2749
+#: apps/settings/catalog.py:2765
 msgid "Max file size"
 msgstr "Dimensiune maximă fișier"
 
-#: apps/settings/catalog.py:2750
+#: apps/settings/catalog.py:2766
 msgid "Maximum upload size in bytes. Default: 2MB (2097152)."
 msgstr "Dimensiune maximă de încărcare în octeți. Implicit: 2MB (2097152)."
 
-#: apps/settings/catalog.py:2760 apps/tickets/views.py:154
+#: apps/settings/catalog.py:2776 apps/tickets/views.py:154
 msgid "Tickets"
 msgstr "Bilete"
 
-#: apps/settings/catalog.py:2761
+#: apps/settings/catalog.py:2777
 msgid "Security alert threshold"
 msgstr "Prag de alertă de securitate"
 
-#: apps/settings/catalog.py:2762
+#: apps/settings/catalog.py:2778
 msgid "Number of suspicious events before alerting security team."
 msgstr "Numărul de evenimente suspecte înainte de a alerta echipa de securitate."
 
-#: apps/settings/catalog.py:2772
+#: apps/settings/catalog.py:2788
 msgid "Sessions"
 msgstr "Sesiuni"
 
-#: apps/settings/catalog.py:2773
+#: apps/settings/catalog.py:2789
 msgid "Admin session timeout"
 msgstr "Timeout sesiune administrator"
 
-#: apps/settings/catalog.py:2774
+#: apps/settings/catalog.py:2790
 msgid "Shorter than regular sessions for security."
 msgstr "Mai scurtă decât sesiunile obișnuite, din motive de securitate."
 
-#: apps/settings/catalog.py:2784 templates/users/user_detail.html:21
+#: apps/settings/catalog.py:2800 templates/users/user_detail.html:21
 msgid "Two-factor authentication"
 msgstr "Autentificare în doi pași"
 
-#: apps/settings/catalog.py:2785
+#: apps/settings/catalog.py:2801
 msgid "Authenticator setup lifetime"
 msgstr "Valabilitatea configurării autentificatorului"
 
-#: apps/settings/catalog.py:2787
+#: apps/settings/catalog.py:2803
 msgid "How long a setup code stays valid after it was last shown. Showing it again extends it, so someone who scanned it is not handed a different one while they are still typing."
 msgstr "Cât timp rămâne valabil un cod de configurare după ultima afișare. Afișarea lui din nou îl prelungește, astfel încât cine l-a scanat să nu primească altul cât timp încă îl introduce."
 
-#: apps/settings/catalog.py:2799 apps/users/models.py:147
+#: apps/settings/catalog.py:2815 apps/users/models.py:147
 #: templates/audit/partials/search_suggestions.html:19
 #: templates/users/user_list.html:5 templates/users/user_list.html:9
 msgid "Users"
 msgstr "Utilizatori"
 
-#: apps/settings/catalog.py:2800
+#: apps/settings/catalog.py:2816
 msgid "Security lockout failure threshold"
 msgstr "Prag de eșecuri pentru blocarea de securitate"
 
-#: apps/settings/catalog.py:2801
+#: apps/settings/catalog.py:2817
 msgid "Failed attempts before security lockout"
 msgstr "Încercări eșuate înainte de blocarea de securitate"
 
-#: apps/settings/catalog.py:2811 apps/settings/catalog.py:2844
-#: apps/settings/catalog.py:2876
+#: apps/settings/catalog.py:2827 apps/settings/catalog.py:2860
+#: apps/settings/catalog.py:2892
 msgid "Connection"
 msgstr "Conexiune"
 
-#: apps/settings/catalog.py:2812
+#: apps/settings/catalog.py:2828
 msgid "Auth fallback enabled"
 msgstr "Fallback de autentificare activat"
 
-#: apps/settings/catalog.py:2821 apps/settings/catalog.py:2833
+#: apps/settings/catalog.py:2837 apps/settings/catalog.py:2849
 msgid "Quotas"
 msgstr "Cote"
 
-#: apps/settings/catalog.py:2822
+#: apps/settings/catalog.py:2838
 msgid "Bandwidth quota default"
 msgstr "Cotă implicită de lățime de bandă"
 
-#: apps/settings/catalog.py:2834
+#: apps/settings/catalog.py:2850
 msgid "Domain quota default"
 msgstr "Cotă implicită de domenii"
 
-#: apps/settings/catalog.py:2855
+#: apps/settings/catalog.py:2871
 msgid "Rate limit max calls per hour"
 msgstr "Limita maximă de apeluri pe oră"
 
-#: apps/settings/catalog.py:2866
+#: apps/settings/catalog.py:2882
 msgid "Rate limit qps"
 msgstr "Limita cererilor pe secundă"
 
-#: apps/settings/catalog.py:2877
+#: apps/settings/catalog.py:2893
 msgid "Request timeout"
 msgstr "Timeout cerere"
 
@@ -14909,7 +14975,7 @@ msgid "%(key)s: value must be a JSON list"
 msgstr "%(key)s: valoarea trebuie să fie o listă JSON"
 
 #: apps/settings/services.py:267 apps/settings/services.py:277
-#: apps/settings/services.py:331
+#: apps/settings/services.py:332
 #, python-format
 msgid "%(key)s: list values must be integers"
 msgstr "%(key)s: valorile listei trebuie să fie întregi"
@@ -14919,80 +14985,80 @@ msgstr "%(key)s: valorile listei trebuie să fie întregi"
 msgid "%(key)s: value must be a string"
 msgstr "%(key)s: valoarea trebuie să fie un șir de caractere"
 
-#: apps/settings/services.py:297
+#: apps/settings/services.py:298
 #, python-format
 msgid "%(key)s: value must be at least %(min)s"
 msgstr "%(key)s: valoarea trebuie să fie cel puțin %(min)s"
 
-#: apps/settings/services.py:300
+#: apps/settings/services.py:301
 #, python-format
 msgid "%(key)s: value must be at most %(max)s"
 msgstr "%(key)s: valoarea trebuie să fie cel mult %(max)s"
 
-#: apps/settings/services.py:304
+#: apps/settings/services.py:305
 #, python-format
 msgid "%(key)s: value must be one of %(choices)s"
 msgstr "%(key)s: valoarea trebuie să fie una dintre %(choices)s"
 
-#: apps/settings/services.py:308
+#: apps/settings/services.py:309
 #, python-format
 msgid "%(key)s: value does not match the required pattern"
 msgstr "%(key)s: valoarea nu respectă tiparul necesar"
 
-#: apps/settings/services.py:314
+#: apps/settings/services.py:315
 #, python-format
 msgid "%(key)s: all JSON object values must be integers"
 msgstr "%(key)s: toate valorile obiectului JSON trebuie să fie întregi"
 
-#: apps/settings/services.py:323
+#: apps/settings/services.py:324
 #, python-format
 msgid "%(key)s: list must contain at least %(min_items)s item(s)"
 msgstr "%(key)s: lista trebuie să conțină cel puțin %(min_items)s element(e)"
 
-#: apps/settings/services.py:327
+#: apps/settings/services.py:328
 #, python-format
 msgid "%(key)s: list values must be strings"
 msgstr "%(key)s: valorile listei trebuie să fie șiruri de caractere"
 
-#: apps/settings/services.py:336
+#: apps/settings/services.py:337
 #, python-format
 msgid "%(key)s: '%(item)s' is not an IP address or network with no host bits set"
 msgstr "%(key)s: '%(item)s' nu este o adresă IP sau o rețea fără biți de gazdă setați"
 
-#: apps/settings/services.py:342
+#: apps/settings/services.py:343
 #, python-format
 msgid "%(key)s: list values must be at least %(item_min)s"
 msgstr "%(key)s: valorile listei trebuie să fie cel puțin %(item_min)s"
 
-#: apps/settings/services.py:349
+#: apps/settings/services.py:350
 #, python-format
 msgid "%(key)s: list values must be unique"
 msgstr "%(key)s: valorile listei trebuie să fie unice"
 
-#: apps/settings/services.py:352
+#: apps/settings/services.py:353
 #, python-format
 msgid "%(key)s: list values must be in descending order"
 msgstr "%(key)s: valorile listei trebuie să fie în ordine descrescătoare"
 
-#: apps/settings/services.py:655
+#: apps/settings/services.py:676
 #, python-format
 msgid "Setting override cleared: %(key)s"
 msgstr "Suprascrierea setării a fost ștearsă: %(key)s"
 
-#: apps/settings/services.py:1085
+#: apps/settings/services.py:1106
 msgid "JSON too large - exceeds 1MB limit"
 msgstr "JSON prea mare - depășește limita de 1MB"
 
-#: apps/settings/services.py:1090
+#: apps/settings/services.py:1111
 msgid "JSON too deeply nested"
 msgstr "JSON imbricat prea adânc"
 
-#: apps/settings/services.py:1107
+#: apps/settings/services.py:1128
 #, python-format
 msgid "Invalid JSON format: %(error)s"
 msgstr "Format JSON invalid: %(error)s"
 
-#: apps/settings/services.py:1109
+#: apps/settings/services.py:1130
 #, python-format
 msgid "JSON nesting too deep - exceeds %(depth)s levels"
 msgstr "Imbricarea JSON prea adâncă - depășește %(depth)s niveluri"
@@ -15194,8 +15260,8 @@ msgid "Contact Person"
 msgstr "Persoană de Contact"
 
 #: apps/tickets/models.py:111
-#: templates/provisioning/virtualmin/account_detail.html:217
-#: templates/provisioning/virtualmin/account_detail.html:443
+#: templates/provisioning/virtualmin/account_detail.html:251
+#: templates/provisioning/virtualmin/account_detail.html:477
 msgid "Contact Email"
 msgstr "Email de Contact"
 
@@ -16277,7 +16343,7 @@ msgstr "Ultima actualizare:"
 #: templates/audit/management_dashboard.html:98 templates/dashboard.html:310
 #: templates/domains/domain_detail.html:236
 #: templates/products/product_detail.html:295
-#: templates/provisioning/virtualmin/account_detail.html:226
+#: templates/provisioning/virtualmin/account_detail.html:260
 #: templates/provisioning/virtualmin/partials/quick_actions.html:14
 msgid "Quick Actions"
 msgstr "Acțiuni Rapide"
@@ -16288,9 +16354,9 @@ msgid "Export My Data"
 msgstr "Exportă Datele Mele"
 
 #: templates/audit/gdpr_dashboard.html:85
-#: templates/provisioning/virtualmin/account_detail.html:254
-#: templates/provisioning/virtualmin/account_detail.html:258
-#: templates/provisioning/virtualmin/account_detail.html:264
+#: templates/provisioning/virtualmin/account_detail.html:288
+#: templates/provisioning/virtualmin/account_detail.html:292
+#: templates/provisioning/virtualmin/account_detail.html:298
 #: templates/provisioning/virtualmin/partials/quick_actions.html:7
 #: templates/provisioning/virtualmin/partials/quick_actions.html:34
 #: templates/provisioning/virtualmin/partials/quick_actions.html:40
@@ -16348,7 +16414,7 @@ msgid "Ready"
 msgstr "Gata"
 
 #: templates/audit/gdpr_dashboard.html:160
-#: templates/provisioning/virtualmin/account_detail.html:299
+#: templates/provisioning/virtualmin/account_detail.html:333
 msgid "Download"
 msgstr "Descarcă"
 
@@ -16468,7 +16534,7 @@ msgstr "Solicitați exportul"
 #: templates/products/product_price_form.html:160
 #: templates/provisioning/service_activate.html:64
 #: templates/provisioning/service_suspend.html:80
-#: templates/provisioning/virtualmin/account_detail.html:491
+#: templates/provisioning/virtualmin/account_detail.html:525
 #: templates/provisioning/virtualmin/account_form.html:150
 #: templates/provisioning/virtualmin/backup_form.html:148
 #: templates/provisioning/virtualmin/migrate_form.html:34
@@ -16552,7 +16618,7 @@ msgstr "Primiți buletine informative, actualizări de produs și conținut prom
 #: templates/orders/order_item_form.html:147
 #: templates/orders/partials/order_item_inline_form.html:188
 #: templates/products/product_form.html:236
-#: templates/provisioning/virtualmin/account_detail.html:490
+#: templates/provisioning/virtualmin/account_detail.html:524
 #: templates/users/profile.html:88
 msgid "Save Changes"
 msgstr "Salvează Modificările"
@@ -16904,7 +16970,7 @@ msgstr "ID Obiect"
 #: templates/infrastructure/deployment_maintenance.html:25
 #: templates/infrastructure/deployment_upgrade.html:25
 #: templates/provisioning/service_detail.html:271
-#: templates/provisioning/virtualmin/account_detail.html:211
+#: templates/provisioning/virtualmin/account_detail.html:245
 msgid "IP Address"
 msgstr "Adresă IP"
 
@@ -17086,7 +17152,7 @@ msgstr "Domeniu de aplicare:"
 
 #: templates/audit/partials/gdpr_export_requests_list.html:95
 #: templates/orders/order_list.html:388
-#: templates/provisioning/virtualmin/account_detail.html:388
+#: templates/provisioning/virtualmin/account_detail.html:422
 msgid "View Details"
 msgstr "Vizualizați detaliile"
 
@@ -17728,7 +17794,7 @@ msgstr "Răspunsul ANAF"
 
 #: templates/billing/efactura_document_detail.html:156
 #: templates/infrastructure/deployment_detail.html:188
-#: templates/provisioning/virtualmin/job_status.html:189
+#: templates/provisioning/virtualmin/job_status.html:193
 msgid "Timeline"
 msgstr "Cronologie"
 
@@ -17739,10 +17805,10 @@ msgstr "Cronologie"
 #: templates/notifications/template_detail.html:174
 #: templates/products/product_detail.html:86
 #: templates/provisioning/partials/services_list.html:223
-#: templates/provisioning/virtualmin/account_detail.html:202
-#: templates/provisioning/virtualmin/account_detail.html:355
+#: templates/provisioning/virtualmin/account_detail.html:236
+#: templates/provisioning/virtualmin/account_detail.html:389
 #: templates/provisioning/virtualmin/backups_list.html:47
-#: templates/provisioning/virtualmin/job_status.html:203
+#: templates/provisioning/virtualmin/job_status.html:207
 #: templates/provisioning/virtualmin/partials/accounts_table.html:35
 #: templates/provisioning/virtualmin/server_detail.html:338
 #: templates/settings/api_tokens.html:62
@@ -20050,7 +20116,7 @@ msgstr "Nesetat"
 
 #: templates/domains/domain_detail.html:122
 #: templates/domains/domain_renew.html:95
-#: templates/provisioning/virtualmin/account_detail.html:264
+#: templates/provisioning/virtualmin/account_detail.html:298
 #: templates/provisioning/virtualmin/partials/quick_actions.html:40
 msgid "Protected"
 msgstr "Protejat"
@@ -20661,7 +20727,7 @@ msgstr "Calcul"
 #: templates/infrastructure/cost_dashboard.html:157
 #: templates/infrastructure/cost_history.html:34
 #: templates/provisioning/service_detail.html:205
-#: templates/provisioning/virtualmin/account_detail.html:110
+#: templates/provisioning/virtualmin/account_detail.html:144
 msgid "Bandwidth"
 msgstr "Lățime de Bandă"
 
@@ -20757,7 +20823,7 @@ msgid "Regions"
 msgstr "Regiuni"
 
 #: templates/infrastructure/dashboard.html:187
-#: templates/provisioning/virtualmin/account_detail.html:179
+#: templates/provisioning/virtualmin/account_detail.html:213
 #: templates/settings/group.html:5 templates/settings/group.html:20
 #: templates/settings/home.html:5 templates/settings/home.html:13
 msgid "Settings"
@@ -23562,7 +23628,7 @@ msgstr "total"
 
 #: templates/provisioning/partials/services_list.html:90
 #: templates/provisioning/partials/services_list.html:212
-#: templates/provisioning/virtualmin/account_detail.html:198
+#: templates/provisioning/virtualmin/account_detail.html:232
 #: templates/provisioning/virtualmin/partials/accounts_table.html:29
 msgid "Plan"
 msgstr "Plan"
@@ -23850,7 +23916,7 @@ msgstr "Sigur doriți să activați acest cont?"
 msgid "Backup Now"
 msgstr "Backup Acum"
 
-#: templates/provisioning/virtualmin/account_detail.html:59
+#: templates/provisioning/virtualmin/account_detail.html:60
 #: templates/provisioning/virtualmin/restore_pair_form.html:5
 #: templates/provisioning/virtualmin/restore_pair_form.html:43
 msgid "Restore pair"
@@ -23872,147 +23938,183 @@ msgstr "Faceți o copie de siguranță diferențială? Conține doar ce s-a schi
 msgid "Take differential backup"
 msgstr "Faceți copie diferențială"
 
-#: templates/provisioning/virtualmin/account_detail.html:94
+#: templates/provisioning/virtualmin/account_detail.html:88
+msgid "This domain may be half-restored and stays disabled"
+msgstr "Acest domeniu poate fi pe jumătate restaurat și rămâne dezactivat"
+
+#: templates/provisioning/virtualmin/account_detail.html:90
+#, python-format
+msgid "A pair restore was stopped after it had started restoring. Nothing re-enables the domain on its own. Re-enable it as it is, or restore the safety backup %(backup_id)s that was taken just before the restore."
+msgstr ""
+"O restaurare de pereche a fost oprită după ce începuse să restaureze. Nimic "
+"nu reactivează singur domeniul. Reactivați-l așa cum este sau restaurați "
+"copia de siguranță %(backup_id)s făcută chiar înainte de restaurare."
+
+#: templates/provisioning/virtualmin/account_detail.html:97
+msgid "Re-enable the domain as it is? Its files and databases may be a mix of the base backup and the differential, or of what the stopped restore left."
+msgstr ""
+"Reactivați domeniul așa cum este? Fișierele și bazele de date pot fi un "
+"amestec între copia de bază și cea diferențială sau ce a lăsat restaurarea "
+"oprită."
+
+#: templates/provisioning/virtualmin/account_detail.html:100
+msgid "Re-enable as is"
+msgstr "Reactivează așa cum este"
+
+#: templates/provisioning/virtualmin/account_detail.html:107
+#, python-format
+msgid "Restore the safety backup %(backup_id)s? It overwrites the domain with what it held just before the pair restore. The domain stays disabled until that restore completes."
+msgstr ""
+"Restaurați copia de siguranță %(backup_id)s? Suprascrie domeniul cu ce "
+"conținea chiar înainte de restaurarea de pereche. Domeniul rămâne dezactivat "
+"până când această restaurare se termină."
+
+#: templates/provisioning/virtualmin/account_detail.html:110
+#, python-format
+msgid "Restore the safety backup %(backup_id)s"
+msgstr "Restaurează copia de siguranță %(backup_id)s"
+
+#: templates/provisioning/virtualmin/account_detail.html:128
 #: templates/provisioning/virtualmin/partials/accounts_table.html:32
 #: templates/provisioning/virtualmin/server_detail.html:85
 #: templates/provisioning/virtualmin/servers_list.html:118
 msgid "Disk Usage"
 msgstr "Utilizare Spațiu pe Disc"
 
-#: templates/provisioning/virtualmin/account_detail.html:113
+#: templates/provisioning/virtualmin/account_detail.html:147
 msgid "Unlimited"
 msgstr "Nelimitat"
 
-#: templates/provisioning/virtualmin/account_detail.html:130
+#: templates/provisioning/virtualmin/account_detail.html:164
 msgid "total domains"
 msgstr "domenii totale"
 
-#: templates/provisioning/virtualmin/account_detail.html:144
+#: templates/provisioning/virtualmin/account_detail.html:178
 msgid "total accounts"
 msgstr "conturi totale"
 
-#: templates/provisioning/virtualmin/account_detail.html:161
+#: templates/provisioning/virtualmin/account_detail.html:195
 msgid "Overview"
 msgstr "Prezentare generală"
 
-#: templates/provisioning/virtualmin/account_detail.html:173
+#: templates/provisioning/virtualmin/account_detail.html:207
 msgid "Jobs"
 msgstr "Sarcini"
 
-#: templates/provisioning/virtualmin/account_detail.html:191
+#: templates/provisioning/virtualmin/account_detail.html:225
 #: templates/provisioning/virtualmin/account_form.html:35
 msgid "Account Details"
 msgstr "Detalii Cont"
 
-#: templates/provisioning/virtualmin/account_detail.html:194
+#: templates/provisioning/virtualmin/account_detail.html:228
 #: templates/provisioning/virtualmin/account_form.html:90
 #: templates/provisioning/virtualmin/server_detail.html:263
 #: templates/provisioning/virtualmin/server_detail.html:332
 msgid "Username"
 msgstr "Nume de utilizator"
 
-#: templates/provisioning/virtualmin/account_detail.html:237
-#: templates/provisioning/virtualmin/account_detail.html:242
+#: templates/provisioning/virtualmin/account_detail.html:271
+#: templates/provisioning/virtualmin/account_detail.html:276
 #: templates/provisioning/virtualmin/partials/quick_actions.html:6
 #: templates/provisioning/virtualmin/partials/quick_actions.html:23
 msgid "Disable Protection"
 msgstr "Dezactivați Protecția"
 
-#: templates/provisioning/virtualmin/account_detail.html:238
+#: templates/provisioning/virtualmin/account_detail.html:272
 #: templates/provisioning/virtualmin/partials/quick_actions.html:8
 msgid "Deletion protection will be turned off for this account."
 msgstr "Protecția la ștergere va fi dezactivată pentru acest cont."
 
-#: templates/provisioning/virtualmin/account_detail.html:239
-#: templates/provisioning/virtualmin/account_detail.html:256
+#: templates/provisioning/virtualmin/account_detail.html:273
+#: templates/provisioning/virtualmin/account_detail.html:290
 #: templates/provisioning/virtualmin/partials/quick_actions.html:10
 #: tests/provisioning/test_account_detail_confirmations.py:163
 msgid "I really am sure I want to do this!"
 msgstr "Sunt sigur că vreau să fac acest lucru!"
 
-#: templates/provisioning/virtualmin/account_detail.html:244
+#: templates/provisioning/virtualmin/account_detail.html:278
 #: templates/provisioning/virtualmin/partials/quick_actions.html:6
 #: templates/provisioning/virtualmin/partials/quick_actions.html:25
 msgid "Enable Protection"
 msgstr "Activați Protecția"
 
-#: templates/provisioning/virtualmin/account_detail.html:255
+#: templates/provisioning/virtualmin/account_detail.html:289
 #: templates/provisioning/virtualmin/partials/quick_actions.html:9
 msgid "This action cannot be undone."
 msgstr "Această acțiune nu poate fi anulată."
 
-#: templates/provisioning/virtualmin/account_detail.html:276
+#: templates/provisioning/virtualmin/account_detail.html:310
 msgid "Backup History"
 msgstr "Istoric Backup"
 
-#: templates/provisioning/virtualmin/account_detail.html:277
+#: templates/provisioning/virtualmin/account_detail.html:311
 #: templates/provisioning/virtualmin/backup_form.html:149
 msgid "Create Backup"
 msgstr "Creați Backup"
 
-#: templates/provisioning/virtualmin/account_detail.html:298
+#: templates/provisioning/virtualmin/account_detail.html:332
 msgid "Restore"
 msgstr "Restaurați"
 
-#: templates/provisioning/virtualmin/account_detail.html:314
+#: templates/provisioning/virtualmin/account_detail.html:348
 msgid "No backups found for this account"
 msgstr "Nu au fost găsite copii de siguranță pentru acest cont"
 
-#: templates/provisioning/virtualmin/account_detail.html:316
+#: templates/provisioning/virtualmin/account_detail.html:350
 msgid "Create First Backup"
 msgstr "Creați Primul Backup"
 
-#: templates/provisioning/virtualmin/account_detail.html:326
+#: templates/provisioning/virtualmin/account_detail.html:360
 msgid "Provisioning Jobs"
 msgstr "Sarcini de Aprovizionare"
 
-#: templates/provisioning/virtualmin/account_detail.html:327
+#: templates/provisioning/virtualmin/account_detail.html:361
 msgid "Recent operations and their status"
 msgstr "Operații recente și statutul lor"
 
-#: templates/provisioning/virtualmin/account_detail.html:357
-#: templates/provisioning/virtualmin/job_status.html:223
+#: templates/provisioning/virtualmin/account_detail.html:391
+#: templates/provisioning/virtualmin/job_status.html:227
 #: templates/provisioning/virtualmin/server_detail.html:393
 msgid "Started"
 msgstr "Început"
 
-#: templates/provisioning/virtualmin/account_detail.html:412
+#: templates/provisioning/virtualmin/account_detail.html:446
 msgid "View all jobs for this server"
 msgstr "Vizualizați toate sarcinile pentru acest server"
 
-#: templates/provisioning/virtualmin/account_detail.html:421
+#: templates/provisioning/virtualmin/account_detail.html:455
 msgid "No provisioning jobs found"
 msgstr "Nu au fost găsite sarcini de aprovizionare"
 
-#: templates/provisioning/virtualmin/account_detail.html:424
+#: templates/provisioning/virtualmin/account_detail.html:458
 msgid "Jobs will appear here when operations are performed on this account"
 msgstr "Sarcinile vor apărea aici atunci când se efectuează operații pe acest cont"
 
-#: templates/provisioning/virtualmin/account_detail.html:434
+#: templates/provisioning/virtualmin/account_detail.html:468
 msgid "Account Settings"
 msgstr "Setări Cont"
 
-#: templates/provisioning/virtualmin/account_detail.html:439
+#: templates/provisioning/virtualmin/account_detail.html:473
 msgid "Basic Settings"
 msgstr "Setări de Bază"
 
-#: templates/provisioning/virtualmin/account_detail.html:452
+#: templates/provisioning/virtualmin/account_detail.html:486
 msgid "PHP Version"
 msgstr "Versiune PHP"
 
-#: templates/provisioning/virtualmin/account_detail.html:465
+#: templates/provisioning/virtualmin/account_detail.html:499
 msgid "Resource Limits"
 msgstr "Limite de Resurse"
 
-#: templates/provisioning/virtualmin/account_detail.html:469
+#: templates/provisioning/virtualmin/account_detail.html:503
 msgid "Disk Quota"
 msgstr "Cota de Disc"
 
-#: templates/provisioning/virtualmin/account_detail.html:478
+#: templates/provisioning/virtualmin/account_detail.html:512
 msgid "Bandwidth Quota"
 msgstr "Cota de Bandă"
 
-#: templates/provisioning/virtualmin/account_detail.html:482
+#: templates/provisioning/virtualmin/account_detail.html:516
 msgid "Use -1 for unlimited"
 msgstr "Utilizați -1 pentru nelimitat"
 
@@ -24348,39 +24450,48 @@ msgstr "Notă de rezolvare"
 msgid "What did you check?"
 msgstr "Ce ați verificat?"
 
-#: templates/provisioning/virtualmin/job_status.html:119
+#: templates/provisioning/virtualmin/job_status.html:120
+#, python-format
+msgid "The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup %(backup_id)s. Continue?"
+msgstr ""
+"Restaurarea începuse deja, deci domeniul poate fi pe jumătate restaurat. "
+"Confirmarea ridică bariera, dar domeniul rămâne dezactivat și nimic nu îl "
+"reactivează până când îl reactivați așa cum este sau restaurați copia de "
+"siguranță %(backup_id)s. Continuați?"
+
+#: templates/provisioning/virtualmin/job_status.html:122
 msgid "Confirm the remote operation has stopped. This releases the account."
 msgstr "Confirmați că operațiunea de la distanță s-a oprit. Aceasta eliberează contul."
 
-#: templates/provisioning/virtualmin/job_status.html:122
+#: templates/provisioning/virtualmin/job_status.html:126
 msgid "Confirm stopped"
 msgstr "Confirmați oprirea"
 
-#: templates/provisioning/virtualmin/job_status.html:130
+#: templates/provisioning/virtualmin/job_status.html:134
 msgid "The node is lost: nothing on it can be cancelled. Its differential chain is discarded and a late result from it is ignored. Release the account?"
 msgstr "Nodul este pierdut: nimic de pe el nu mai poate fi anulat. Lanțul său diferențial este eliminat, iar un rezultat tardiv de la el este ignorat. Eliberați contul?"
 
-#: templates/provisioning/virtualmin/job_status.html:133
+#: templates/provisioning/virtualmin/job_status.html:137
 msgid "Node lost"
 msgstr "Nod pierdut"
 
-#: templates/provisioning/virtualmin/job_status.html:149
+#: templates/provisioning/virtualmin/job_status.html:153
 msgid "Error Details"
 msgstr "Detalii eroare"
 
-#: templates/provisioning/virtualmin/job_status.html:163
+#: templates/provisioning/virtualmin/job_status.html:167
 msgid "Job Parameters"
 msgstr "Parametri job"
 
-#: templates/provisioning/virtualmin/job_status.html:175
+#: templates/provisioning/virtualmin/job_status.html:179
 msgid "Response Data"
 msgstr "Date răspuns"
 
-#: templates/provisioning/virtualmin/job_status.html:262
+#: templates/provisioning/virtualmin/job_status.html:266
 msgid "Live Logs"
 msgstr "Jurnale în timp real"
 
-#: templates/provisioning/virtualmin/job_status.html:276
+#: templates/provisioning/virtualmin/job_status.html:280
 msgid "Loading logs..."
 msgstr "Se încarcă jurnalele..."
 
@@ -26284,6 +26395,10 @@ msgstr "Pagini utilizator"
 #: tests/common/pagination_assertions.py:21
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#, python-format
+#~ msgid "No active monthly price for plan %(plan)s in %(currency)s."
+#~ msgstr "Nu există preț lunar activ pentru planul %(plan)s în %(currency)s."
 
 #~ msgid "Canceled"
 #~ msgstr "Anulată"
