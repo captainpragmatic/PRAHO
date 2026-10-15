@@ -357,3 +357,29 @@ class TestUbuntuVersion:
         match = re.search(r"version\('(\d+\.\d+)', '>='\)", NATIVE_PLAYBOOK.read_text())
         assert match
         assert f"Ubuntu {match.group(1)}+" in (PROJECT_ROOT / "README.md").read_text()
+
+
+def test_rsync_excludes_controller_state_but_preserves_existing_runtime_state(tmp_path: Path) -> None:
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    sync = next(task["ansible.posix.synchronize"] for task in tasks if "ansible.posix.synchronize" in task)
+    source, target = tmp_path / "source", tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    private = ("terraform.tfstate", "terraform.tfstate.backup", "operator.tfvars", "operator.tfvars.json", "saved.tfplan")
+    for name in private:
+        (source / name).write_text("private-controller-fixture")
+    for directory in (".terraform", ".state"):
+        (source / directory).mkdir()
+        (source / directory / "credentials").write_text("private-controller-fixture")
+    (source / "main.tf").write_text("# public configuration\n")
+    (source / "terraform.tfvars.example").write_text("# public example\n")
+    retained = target / "runtime.tfstate"
+    retained.write_text("existing-runtime-state")
+    completed = subprocess.run(  # noqa: S603 -- real rsync against temporary fixture directories and role options.
+        [shutil.which("rsync") or "rsync", "-a", "--delete", *sync["rsync_opts"], f"{source}/", f"{target}/"],
+        capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert retained.read_text() == "existing-runtime-state"
+    assert (target / "main.tf").is_file() and (target / "terraform.tfvars.example").is_file()
+    assert not any((target / name).exists() for name in (*private, ".terraform", ".state"))

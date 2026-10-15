@@ -1415,6 +1415,15 @@ health-check:
 
 .PHONY: infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev
 
+.PHONY: infra-validate
+infra-validate:
+	@set -eu; \
+	terraform fmt -check -recursive deploy/terraform; \
+	terraform_validation_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/praho-terraform-validate.XXXXXX"); \
+	trap 'rm -rf "$$terraform_validation_dir"' EXIT; \
+	TF_DATA_DIR="$$terraform_validation_dir" terraform -chdir=deploy/terraform init -backend=false -lockfile=readonly -input=false; \
+	TF_DATA_DIR="$$terraform_validation_dir" terraform -chdir=deploy/terraform validate
+
 infra-init:
 	@echo "☁️ [Infra] Initializing Terraform..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
