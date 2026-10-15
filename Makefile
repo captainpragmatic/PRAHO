@@ -1437,27 +1437,19 @@ infra-destroy-dev:
 deploy-dev-native:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env dev
 
 deploy-staging:
 	@test -f .env.staging || (echo "❌ Missing .env.staging — run: cp .env.example.staging .env.staging"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@set -a && . $(PWD)/.env.staging && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
-		playbooks/native-single-server.yml -e praho_env=staging \
-		-e env_file_path=$(PWD)/.env.staging -v
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env staging --env-file $(PWD)/.env.staging
 
 deploy-prod:
 	@test -f .env.prod || (echo "❌ Missing .env.prod — run: cp .env.example.prod .env.prod"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to production (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@set -a && . $(PWD)/.env.prod && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
-		playbooks/native-single-server.yml -e praho_env=prod \
-		-e env_file_path=$(PWD)/.env.prod \
-		$(if $(VERSION),-e cli_version=$(VERSION),) \
-		-v
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env prod --env-file $(PWD)/.env.prod $(if $(VERSION),--version $(VERSION),)
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜
@@ -1472,6 +1464,4 @@ ansible-backup:
 	@case "$(ENV)" in staging|prod) ;; *) echo "❌ Usage: make ansible-backup ENV=staging|prod [FETCH=true]"; exit 1 ;; esac
 	@test -f .env.$(ENV) || (echo "❌ Missing .env.$(ENV) — run: cp .env.example.$(ENV) .env.$(ENV)"; exit 1)
 	@echo "📜 [Ansible] Remote backup ($(ENV))..."
-	@set -a && . $(PWD)/.env.$(ENV) && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
-		$(if $(FETCH),-e fetch_backup=$(FETCH),)
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env $(ENV) --env-file $(PWD)/.env.$(ENV) --backup $(if $(FETCH),--fetch $(FETCH),)

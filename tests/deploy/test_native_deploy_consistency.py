@@ -134,17 +134,17 @@ def _dry_run(target: str, *variables: str) -> str:
 class TestBackupMakeTarget:
     @pytest.mark.integration
     def test_fetch_true_asks_the_playbook_to_download(self) -> None:
-        assert "-e fetch_backup=true" in _dry_run("ansible-backup", "ENV=staging", "FETCH=true")
+        assert "--fetch true" in _dry_run("ansible-backup", "ENV=staging", "FETCH=true")
 
     @pytest.mark.integration
     def test_without_fetch_it_only_backs_up(self) -> None:
-        assert "fetch_backup" not in _dry_run("ansible-backup", "ENV=staging")
+        assert "--fetch" not in _dry_run("ansible-backup", "ENV=staging")
 
     @pytest.mark.integration
     def test_it_loads_the_environments_connection_settings(self) -> None:
         # The inventory reads PRAHO_SERVER_IP and the SSH settings from the environment; without the
         # file, Ansible connects to an empty host.
-        assert "/.env.staging && set +a" in _dry_run("ansible-backup", "ENV=staging")
+        assert "native_env.py run --env staging --env-file" in _dry_run("ansible-backup", "ENV=staging")
 
 
 class TestSingleServerMakeTarget:
@@ -153,13 +153,12 @@ class TestSingleServerMakeTarget:
     @pytest.mark.integration
     def test_it_deploys_through_the_environments_own_target(self) -> None:
         dry_run = _dry_run("ansible-single-server", "ENV=staging")
-        assert "/.env.staging && set +a" in dry_run
-        assert "-e env_file_path=" in dry_run
-        assert "playbooks/native-single-server.yml" in dry_run
+        assert "native_env.py run --env staging --env-file" in dry_run
+        assert "/.env.staging" in dry_run
 
     @pytest.mark.integration
     def test_a_production_version_reaches_the_playbook(self) -> None:
-        assert "-e cli_version=v9.9.9" in _dry_run("ansible-single-server", "ENV=prod", "VERSION=v9.9.9")
+        assert "--version v9.9.9" in _dry_run("ansible-single-server", "ENV=prod", "VERSION=v9.9.9")
 
 
 class TestNativeMakeTargets:
@@ -181,9 +180,10 @@ class TestNativeMakeTargets:
     @pytest.mark.integration
     def test_every_recipe_using_the_native_inventory_loads_an_env_file(self) -> None:
         recipes = re.findall(r"^([\w-]+):.*\n((?:\t.*\n)+)", (PROJECT_ROOT / "Makefile").read_text(), re.MULTILINE)
-        users = {name: body for name, body in recipes if "inventory/native-single-server.yml" in body}
-        assert users
-        assert sorted(name for name, body in users.items() if r". $(PWD)/.env." not in body) == []
+        users = {name: body for name, body in recipes if name in {"deploy-staging", "deploy-prod", "ansible-backup"}}
+        assert len(users) == 3
+        assert all("native_env.py run" in body and "--env-file" in body for body in users.values())
+        assert all("set -a" not in body for body in users.values())
 
 
 class TestNativeBackupScript:

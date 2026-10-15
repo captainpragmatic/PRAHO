@@ -30,6 +30,19 @@ The service processes read that directory. Docker uses a private controller home
 units use separate mode-0700 runtime directories under `/run`. Native `ProtectHome` and `ProtectSystem`
 remain enabled. Portal does not need these
 tools. Installing Ansible only on the deployment laptop does not supply the application runtime.
+Native Make targets decode `.env.prod`, `.env.staging` or `.env.dev` as data, without sourcing shell
+code. Use one `KEY=value` assignment per line; quote values containing spaces. Single quotes preserve
+literal dollars and backticks. Multiline values, interpolation, `export` declarations and inline
+comments are refused with key/line diagnostics. The last declaration wins. The native role uses the
+same decoder and writes an escaped runtime EnvironmentFile, so quoted credentials mean the same thing
+to deployment commands and systemd. For a remote dev host, start with the staging example and select
+`config.settings.dev`; the local-only `.env.example.dev` is not a remote-server configuration.
+
+Database credentials for unattended native backup/restore live in the mode-0600
+`/opt/praho/credentials/postgresql.pgpass`, inside a mode-0700 directory. The generated executables
+are mode 0700 and contain only its path. Do not copy credential files or verbose historical deployment
+logs to shared storage. Existing-host credential rotation, if exposure occurred, is an operator rollout
+step; deployment does not silently rotate the database password.
 
 PRAHO rejects unknown SSH host keys for node validation, Virtualmin fallback access, pooled SSH connections, and Ansible maintenance. Before enabling infrastructure automation, provision a `known_hosts` file for the operating-system account that runs Platform and its Django-Q workers.
 
