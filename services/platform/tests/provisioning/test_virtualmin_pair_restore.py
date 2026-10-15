@@ -286,6 +286,19 @@ class PairWorkflowTests(PairRestoreCase):
         self.assertCountEqual(self.cleaned, [BASE_ARCHIVE, DIFF_ARCHIVE])
         self.assertFalse(account_has_active_operation(self.account))
 
+    def test_a_refusal_whose_undo_left_the_domain_disabled_is_never_marked_active(self) -> None:
+        # The node refused before restoring anything, but enabling the domain again failed.
+        self.node_outcome = node_result(
+            "failed", "barrier_undo_incomplete", checkpoints=(checkpoint("barrier_up", odd_hosts="301"),)
+        )
+        job = self.execute(self.admit().unwrap())
+        self.assertEqual(job.status, "attention", job.status_message)
+        self.assertIn("left disabled", job.status_message)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended", "PRAHO agrees with the node: the domain is off")
+        self.assertTrue(account_has_active_operation(self.account), "the exclusion holds until an operator resolves it")
+        self.assertEqual(self.cleaned, [], "the operator's resolution removes the staged archives")
+
     def test_any_failure_after_the_barrier_parks_the_job_with_its_checkpoints(self) -> None:
         stopped = (checkpoint("barrier_up"), checkpoint("after_base"))
         cases = {

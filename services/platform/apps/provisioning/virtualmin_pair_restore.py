@@ -466,6 +466,15 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         if step.outcome == "refused" and not step.ran:
             determinate = True  # the node is as it was: reconcile has nothing to undo
             return Err(f"Pair restore refused by the node: {step.reason}", retriability=Retriability.NOT_RETRIABLE)
+        if step.outcome == "failed" and step.reason == "barrier_undo_incomplete":
+            # The barrier could not be verified, nothing was restored, and the undo could not enable the
+            # domain again: it is left disabled. The account stays suspended in PRAHO's view and the job
+            # is parked, so it is never marked active over a domain the node holds off.
+            return Err(
+                "Pair restore was refused before anything was restored, but the domain could not be enabled "
+                "again and is left disabled; an operator must resolve it",
+                retriability=Retriability.UNKNOWN,
+            )
         if step.outcome != "ok":
             return Err(
                 f"Pair restore stopped on the node ({step.reason}); the domain stays disabled behind the "

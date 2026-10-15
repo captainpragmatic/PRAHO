@@ -270,10 +270,15 @@ virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
 checkpoint barrier_up
 if ! barrier_holds; then
   # Nothing destructive has run: undo our own changes and refuse, so a refusal always means
-  # the node is as it was.
+  # the node is as it was. If the domain cannot be enabled again it is NOT as it was: that is
+  # reported as such (a failure PRAHO parks for an operator), never as a clean refusal.
   barrier_down
   if [[ $pre_disabled == false ]] && is_disabled; then
     virtualmin enable-domain --domain "$domain" >/dev/null 2>&1 || true
+    if is_disabled; then
+      emit failed barrier_undo_incomplete true
+      exit 0
+    fi
   fi
   emit refused barrier_not_verified false
   exit 0

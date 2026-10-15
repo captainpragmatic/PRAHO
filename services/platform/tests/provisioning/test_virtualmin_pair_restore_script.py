@@ -255,6 +255,13 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertFalse((self.state / "apache").exists(), "Apache was never touched")
         self.assertFalse(self.disabled())
 
+    def test_a_refusal_whose_undo_cannot_enable_the_domain_says_it_is_left_disabled(self) -> None:
+        result = self.step(FAKE_NO_503="1", FAKE_ENABLE_FAILS="1")
+        self.assertEqual((result.outcome, result.reason, result.ran), ("failed", "barrier_undo_incomplete", True))
+        self.assertEqual(self.restores(), [])
+        self.assertTrue(self.disabled(), "the node really is left disabled")
+        self.assertFalse(self.maint.exists(), "the maintenance section was taken down")
+
     def test_an_archive_that_does_not_match_its_checksum_is_refused_before_the_barrier(self) -> None:
         (self.staging / DIFF).write_bytes(b"tampered")
         result = self.step()
