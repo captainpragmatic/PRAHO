@@ -998,6 +998,8 @@ class VirtualminBackupService:
             models.Q(parameters__backup_id=backup_id)
             | models.Q(parameters__base_backup_id=backup_id)
             | models.Q(parameters__differential_backup_id=backup_id)
+            # The safety backup taken before a restore is the only way back from a half-restored domain.
+            | models.Q(parameters__safety_backup_id=backup_id)
         )
         if pinned.exists():
             return f"Backup {backup_id} is named by a restore that has not finished"

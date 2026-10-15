@@ -166,6 +166,19 @@ class PinnedDeletionTests(LineageFixture):
         job.delete()
         self.assertTrue(self.backups.delete_backup("diff-1").is_ok())
 
+    def test_the_safety_backup_of_a_restore_in_attention_cannot_be_deleted(self) -> None:
+        # The safety backup is the only way back from a half-restored domain.
+        for status in ("pending", "running", "attention"):
+            with self.subTest(status=status):
+                self.store("safety-1")
+                job = self.restore_job(status, backup_id="plain-1", safety_backup_id="safety-1")
+                result = self.backups.delete_backup("safety-1")
+                self.assertTrue(result.is_err(), result)
+                self.assertIn("restore that has not finished", result.unwrap_err())
+                self.assertEqual(self.stored(), {"safety-1"})
+                job.delete()
+        self.assertTrue(self.backups.delete_backup("safety-1").is_ok())
+
     def test_finished_restores_do_not_pin(self) -> None:
         self.store("plain-1")
         for status in ("failed", "completed", "cancelled"):
