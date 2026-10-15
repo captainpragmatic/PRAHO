@@ -57,6 +57,11 @@ IDEMPOTENCY_TTL_SECONDS = 6 * 3600
 _IDEMPOTENCY_IN_PROGRESS = "__in_progress__"
 
 
+def registrant_entity_type(customer_type: str) -> str:
+    """The entity sent to registrars; PFA and NGO currently use individual contacts."""
+    return "company" if customer_type == "company" else "individual"
+
+
 def _redact_secrets(result: Any) -> Any:
     """Return a copy of a gateway result with any secret-bearing field cleared.
 
@@ -245,6 +250,10 @@ class BaseRegistrarGateway(ABC):
     # Registrars with a separate contact or nameserver API override these hooks.
     registration_sets_nameservers: ClassVar[bool] = True
     registration_requires_contact: ClassVar[bool] = False
+
+    def registrant_requirements(self, customer_type: str, country: str) -> frozenset[str]:
+        """Extra identity fields required for this registrant, beyond contact details."""
+        return frozenset()
 
     def validate_registration_data(self, registrant_data: dict[str, Any]) -> None:
         """Raise a definite validation error before external registration work."""

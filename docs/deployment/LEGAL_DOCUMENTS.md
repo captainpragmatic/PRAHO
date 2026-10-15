@@ -40,6 +40,10 @@ Name in your Privacy Policy the ones your deployment enables:
 | Cloud providers (Hetzner, DigitalOcean, Vultr, Linode, AWS) | Staff deploy hosting nodes | Server configuration, no customer data |
 | S3-compatible storage | `MEDIA_STORAGE=s3` | Invoice PDFs, ticket attachments, GDPR exports |
 
+## CNP collected for a .ro registration
+
+When a .ro registrar requires a Romanian individual's CNP, checkout collects it through the write-only tax-profile API and stores it encrypted on `CustomerTaxProfile.cnp`. That profile also supplies the buyer identifier on subsequent proformas, invoices and e-Factura submissions. The registration and checkout notices state both uses; describe both, the registrar and enabled invoice recipients, and the applicable retention in your published Privacy Policy. The API never returns the CNP and its audit event records only that it was set.
+
 ## Development and tests
 
 `generate_sample_data` and the e2e seed publish a SAMPLE release of each document in English and Romanian, marked as not legal text.

@@ -111,6 +111,7 @@
             {% trans "By creating an account you acknowledge the" %}
             <a href="{% url 'privacy_policy' %}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>. {# tmpl-allow TMPL005: needs button inline_link #}
           </p>
+          <p class="text-sm text-slate-400">{% trans "When a .ro registrar requires your CNP, we store it on your tax profile. It is also used as your buyer identifier on proformas, invoices and e-Factura." %}</p>
         </div>
 
         {% include "components/altcha_widget.html" %}

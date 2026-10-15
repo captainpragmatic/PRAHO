@@ -265,7 +265,7 @@ def handle_tax_profile_changes(
             _validate_romanian_cui(instance)
 
         # A new or changed CUI cannot keep the previous one's ANAF evidence: look it up again.
-        if created or old_values.get("cui") != instance.cui:
+        if (created and instance.cui) or (not created and old_values.get("cui") != instance.cui):
             _refresh_anaf_evidence(instance, created=created)
 
         # A changed number cannot inherit the previous number's evidence.

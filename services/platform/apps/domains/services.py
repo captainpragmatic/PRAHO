@@ -31,6 +31,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .domain_names import canonicalize_domain_name, longest_matching_tld_suffix
+from .gateways.base import registrant_entity_type
 from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
 from .order_fulfilment import ORDERABLE_DOMAIN_ACTIONS, claim_order_line, fail_order_line
 
@@ -526,7 +527,7 @@ class DomainLifecycleService:
         present. Returns Err(message) listing any missing fields so registration is
         rejected in PRAHO instead of sending blank contact data to the registrar.
         """
-        entity_type = "company" if customer.customer_type == "company" else "individual"
+        entity_type = registrant_entity_type(customer.customer_type)
         address = customer.get_billing_address()
         tax = customer.get_tax_profile()
 

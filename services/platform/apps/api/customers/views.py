@@ -30,6 +30,7 @@ from apps.api.secure_auth import (
     require_customer_role_in,
     require_portal_authentication,
 )
+from apps.common.cnp_validator import CNPValidator
 from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
@@ -1418,7 +1419,8 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitted field before saving the profile
+@transaction.atomic
+def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate each permitted field before saving the profile
     request: HttpRequest, customer: Customer
 ) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
@@ -1432,6 +1434,13 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
         return _uniform_error_response()
+
+    cnp: str | None = None
+    if "cnp" in data:
+        raw_cnp = data["cnp"]
+        cnp = raw_cnp.strip().replace(" ", "") if isinstance(raw_cnp, str) else ""
+        if not cnp.isascii() or not CNPValidator.validate(cnp).is_valid:
+            return Response({"success": False, "error": _("Enter a valid CNP.")}, status=status.HTTP_400_BAD_REQUEST)
 
     tax_bool_fields = {"is_vat_payer"}
     tax_string_fields = {"cui", "vat_number", "registration_number"}
@@ -1477,6 +1486,10 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
 
             update_fields.append(field)
 
+    if cnp is not None:
+        tax_profile.cnp = cnp
+        update_fields.append("cnp")
+
     if tax_profile.vat_number and "vat_number" in update_fields and "is_vat_payer" not in data:
         # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
         tax_profile.is_vat_payer = True
@@ -1487,7 +1500,23 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
-    return Response({"success": True, "message": "Tax profile updated."})
+    if cnp is not None:
+        from apps.audit.services import (  # noqa: PLC0415  # Cross-app audit (ADR-0007).
+            AuditContext,
+            AuditEventData,
+            AuditService,
+        )
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type="tax_profile_cnp_set",
+                content_object=tax_profile,
+                description=_("A CNP was set on the tax profile."),
+            ),
+            AuditContext(user=membership.user),
+        )
+
+    return Response({"success": True, "message": "Tax profile updated."}, headers={"Cache-Control": "no-store"})
 
 
 @api_view(["POST"])

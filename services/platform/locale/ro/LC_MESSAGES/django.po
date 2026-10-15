@@ -27102,3 +27102,12 @@ msgstr "Afișați acest cod de transfer și consemnați accesul în jurnalul de 
 
 msgid "Show transfer code"
 msgstr "Afișează codul de transfer"
+
+msgid "When a .ro registrar requires your CNP, we store it on your tax profile. It is also used as your buyer identifier on proformas, invoices and e-Factura."
+msgstr "Când un registrator .ro solicită CNP-ul dvs., îl stocăm în profilul fiscal. Acesta este folosit și ca identificator al cumpărătorului pe proforme, facturi și în e-Factura."
+
+msgid "Enter a valid CNP."
+msgstr "Introduceți un CNP valid."
+
+msgid "A CNP was set on the tax profile."
+msgstr "A fost setat un CNP în profilul fiscal."

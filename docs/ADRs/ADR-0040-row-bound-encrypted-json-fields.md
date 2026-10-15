@@ -228,6 +228,12 @@ and is the only code that reads or writes those bytes.
   keyring until every export file encrypted under it has been deleted: 7 days plus a day of
   cleanup, provided the cleanup task has reported no failures.
 
+## Addendum (2026-10-15): registrar CNP and fiscal identity
+
+A CNP required by a .ro registrar is collected at checkout through the owner/billing-only, write-only tax-profile API and stored in the existing row-bound encrypted `CustomerTaxProfile.cnp` field. It is validated before creating a profile. Responses and audit metadata never carry the value. A CNP-only save does not refresh ANAF evidence.
+
+The deployment decision explicitly accepts the fiscal use of this same field: the CNP is also the buyer identifier on subsequent proformas, invoices and e-Factura. Registration and checkout notices disclose both uses, and `docs/deployment/LEGAL_DOCUMENTS.md` tells deployers to cover them in their published Privacy Policy. CNP is not collected at account registration.
+
 ## Related
 
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) - AES-256-GCM
