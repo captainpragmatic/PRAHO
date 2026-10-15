@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab virtualmin-probe
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract virtualmin-probe
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -59,7 +59,8 @@ help:
 	@echo "  make test-with-e2e     - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make virtualmin-lab-up   - Opt-in Docker Virtualmin lab (2 nodes + MinIO); virtualmin-lab-down stops it"
-	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab"
+	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab (+ the contract suite)"
+	@echo "  make test-virtualmin-contract - Opt-in: every allowlisted Virtualmin program against the lab node"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
@@ -1223,9 +1224,15 @@ test-virtualmin-lab:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_roundtrip
 	@echo "✅ [Virtualmin lab] Round trip passed"
+	@$(MAKE) --no-print-directory test-virtualmin-contract
 	@echo "🧪 [Virtualmin lab] Provisioning, differential-base, staging and node-playbook checks on vm-b..."
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_checks
 	@echo "✅ [Virtualmin lab] Checks passed"
+
+test-virtualmin-contract:
+	@echo "🧪 [Virtualmin lab] Contract suite: every allowlisted program against the real node (needs make virtualmin-lab-up)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_contract.sh
 
 virtualmin-probe:
 	@echo "🔬 [Virtualmin lab] Incremental-backup contract probe (needs make virtualmin-lab-up)..."
