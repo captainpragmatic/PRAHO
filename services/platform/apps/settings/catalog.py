@@ -2325,6 +2325,67 @@ CATALOG: tuple[SettingDef, ...] = (
         advanced=True,
     ),
     SettingDef(
+        key="provisioning.incremental_backups_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Enable differential backups"),
+        help_text=_(
+            "Allow base and differential Virtualmin backups. Turning it off stops new base and "
+            "differential backups; restores, standalone backups and existing backups are unaffected."
+        ),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
+        key="provisioning.chain_alert_after_failures",
+        data_type="integer",
+        default=3,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Chain backup alert threshold"),
+        help_text=_(
+            "How many scheduled base or differential backups of one account must fail in a row, leaving its "
+            "chain intact, before staff are alerted."
+        ),
+        unit="failures",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.chain_base_interval_days",
+        data_type="integer",
+        default=7,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Base backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a new base backup of each account, when differential backups are enabled."
+        ),
+        unit="days",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.chain_differential_interval_hours",
+        data_type="integer",
+        default=24,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Differential backup interval"),
+        help_text=_(
+            "How often the hourly schedule takes a differential backup of each account with a live base, "
+            "when differential backups are enabled."
+        ),
+        unit="hours",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="provisioning.migration_backup_timeout_seconds",
         data_type="integer",
         default=1800,

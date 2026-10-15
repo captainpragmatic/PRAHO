@@ -37,7 +37,7 @@ from .security_utils import (
     sanitize_log_parameters,
 )
 from .virtualmin_drain_service import NodeDrainService
-from .virtualmin_migration_models import NodeDrain
+from .virtualmin_migration_models import NodeDrain, account_blocks_reconcile
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminProvisioningJob,
@@ -823,16 +823,46 @@ def _audit_job(job_id: Any) -> None:
         audit_job_status_transition(job)
 
 
-def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901  # Cohesive claim→run→terminal pipeline
+def _queue_reconcile_after_pair(job: VirtualminProvisioningJob, params: dict[str, Any]) -> None:
+    """After a pair restore ends (finished, or refused with the node untouched), converge the account.
+
+    A pair restore leaves the domain disabled and the account suspended in PRAHO's view; the
+    reconcile - the single writer of the enabled state (ADR-0051) - enables it again when the
+    service is active. It is queued only once the job is terminal, because reconcile yields to a
+    running restore.
+    """
+    if str(params.get("restore_mode", "")) == "pair" and job.account is not None and job.account.service_id:
+        reconcile_virtualmin_service_state_async(str(job.account.service_id))
+
+
+def _release_hold_after_safety_restore(job: VirtualminProvisioningJob, params: dict[str, Any]) -> None:
+    """A completed restore of the safety backup of a half-restored domain is the staff action that ends its hold."""
+    if job.account_id is None or str(params.get("restore_mode", "")) == "pair":
+        return
+    from .virtualmin_pair_restore import release_restore_hold  # noqa: PLC0415  # Circular
+
+    held_backup = (
+        VirtualminAccount.objects.filter(pk=job.account_id)
+        .values_list("restore_hold_safety_backup_id", flat=True)
+        .first()
+    )
+    if held_backup and held_backup == str(params.get("backup_id", "")):
+        release_restore_hold(job.account_id, how="safety_backup_restored", actor=str(params.get("initiated_by", "")))
+
+
+def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Cohesive claim→run→terminal pipeline
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
 
     from .virtualmin_backup_service import (  # noqa: PLC0415
         CHAIN_ROLE_STANDALONE,
         BackupConfig,
+        ChainContext,
         RestoreConfig,
         VirtualminBackupService,
     )
+    from .virtualmin_chain import chain_state_after_failure, complete_chain_job, is_chain_job  # noqa: PLC0415
+    from .virtualmin_chain_schedule import note_chain_failure  # noqa: PLC0415
 
     try:
         job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
@@ -862,6 +892,22 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
 
     service = VirtualminBackupService(job.server)
     params = job.parameters
+
+    def persist_note(note: dict[str, Any]) -> int:
+        # Token-fenced parameter merge: evidence (e.g. the safety backup id, a chain job's domain
+        # id) is durable BEFORE any destructive dispatch, and a superseded runner cannot write it.
+        # Returns the rows written: 0 means the runner was superseded and the caller must not dispatch.
+        current = (
+            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
+            .values_list("parameters", flat=True)
+            .first()
+        )
+        if current is None:
+            return 0
+        return VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
+            parameters={**current, **note}, updated_at=timezone.now()
+        )
+
     if operation == "backup_domain":
         config = BackupConfig(
             backup_type=str(params.get("backup_type", "full")),
@@ -872,32 +918,34 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             # Jobs admitted before roles existed carry none: they were standalone.
             # Any other value is refused by the service before dispatch.
             chain_role=str(params.get("chain_role", CHAIN_ROLE_STANDALONE)),
+            chain=(
+                ChainContext(
+                    token=str(params.get("chain_token", "")),
+                    epoch=int(params.get("chain_epoch", 0)),
+                    base_backup_id=str(params.get("base_backup_id", "")),
+                    base_job_id=str(params.get("base_job_id", "")),
+                    expected_fp=str(params.get("expected_fp", "")),
+                )
+                if str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE
+                else None
+            ),
         )
-        result = service.backup_domain(account=job.account, config=config, progress_key=str(job.pk), ownership=owns)
+        result = service.backup_domain(
+            account=job.account, config=config, progress_key=str(job.pk), ownership=owns, note_sink=persist_note
+        )
     else:
+        pair = str(params.get("restore_mode", "")) == "pair"
         restore_config = RestoreConfig(
-            backup_id=str(params.get("backup_id", "")),
+            backup_id=str(params.get("base_backup_id" if pair else "backup_id", "")),
+            differential_backup_id=str(params.get("differential_backup_id", "")) if pair else "",
+            pair_token=str(params.get("pair_token", "")),
+            pair_step_hold_seconds=int(params.get("pair_step_hold_seconds", 0) or 0),
             restore_email=bool(params.get("restore_email", True)),
             restore_databases=bool(params.get("restore_databases", True)),
             restore_files=bool(params.get("restore_files", True)),
             restore_ssl=bool(params.get("restore_ssl", True)),
             force_restore=bool(params.get("force_restore", False)),
         )
-
-        def persist_note(note: dict[str, Any]) -> None:
-            # Token-fenced parameter merge: evidence (e.g. the safety backup id)
-            # is durable BEFORE any destructive dispatch, and a superseded
-            # runner cannot write it.
-            current = (
-                VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
-                .values_list("parameters", flat=True)
-                .first()
-            )
-            if current is None:
-                return
-            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
-                parameters={**current, **note}, updated_at=timezone.now()
-            )
 
         result = service.restore_domain(
             account=job.account,
@@ -910,8 +958,10 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
 
     if result.is_err():
         error = str(result.unwrap_err())
-        if operation == "restore_domain" and retriability_of(result) is Retriability.UNKNOWN:
-            # Uncertain mutation: park for operator attention; exclusion holds.
+        uncertain_mutation = operation == "restore_domain" or is_chain_job(operation, params)
+        if uncertain_mutation and retriability_of(result) is Retriability.UNKNOWN:
+            # Uncertain mutation (a restore, or a base/differential step that may still be
+            # running on the node): park for operator attention; exclusion holds.
             rows = VirtualminProvisioningJob.finish_execution(
                 job.pk, token, "attention", error, {"retriability": retriability_of(result).value}
             )
@@ -919,18 +969,145 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
                 _audit_job(job.pk)
             logger.warning("⚠️ [BackupJobs] restore job %s parked for attention: %s", job_id, error)
             return {"status": "attention" if rows else "superseded", "job_id": job_id, "error": error}
-        rows = VirtualminProvisioningJob.finish_execution(
-            job.pk, token, "failed", error, {"retriability": retriability_of(result).value}
-        )
+        failed_result: dict[str, Any] = {"retriability": retriability_of(result).value}
+        chain_job = is_chain_job(operation, params)
+        if chain_job:
+            # Whether the node's evidence ended the chain or the failure left it alone: the schedule
+            # backs off and alerts on the second kind only, and takes a base after the first.
+            failed_result["chain_state"] = chain_state_after_failure(job)
+        rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "failed", error, failed_result)
         if rows:
             _audit_job(job.pk)
+            _queue_reconcile_after_pair(job, params)
+            if chain_job:
+                note_chain_failure(job.pk)
         logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
         return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
+    if operation == "backup_domain" and str(params.get("chain_role", CHAIN_ROLE_STANDALONE)) != CHAIN_ROLE_STANDALONE:
+        # Link the base (or finish the differential) in the one fenced transaction.
+        final_status = complete_chain_job(job, token, dict(result.unwrap()))
+        if final_status != "superseded":
+            _audit_job(job.pk)
+        logger.info("✅ [BackupJobs] chain %s job %s -> %s", operation, job_id, final_status)
+        return {"status": final_status, "job_id": job_id}
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
     if rows:
         _audit_job(job.pk)
+        _queue_reconcile_after_pair(job, params)
+        if operation == "restore_domain":
+            _release_hold_after_safety_restore(job, params)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
+
+
+def remove_chain_job_archive(job_id: str) -> dict[str, Any]:
+    """Remove the archive a resolved chain job left staged on its node (best effort, never raises)."""
+    from .virtualmin_chain import remove_stranded_archive  # noqa: PLC0415
+
+    job = VirtualminProvisioningJob.objects.select_related("server").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    warning = remove_stranded_archive(job)
+    return {"success": not warning, "job_id": job_id, "warning": warning}
+
+
+PAIR_RELEASE_RETRY_SECONDS = 900
+PAIR_RELEASE_MAX_ATTEMPTS = 96  # a day at the retry interval
+
+
+def _remove_pair_archives(job: VirtualminProvisioningJob) -> dict[str, Any]:
+    """Remove the archives a pair restore left staged on its node. The caller has released the node first."""
+    from .virtualmin_backup_service import VirtualminBackupService  # noqa: PLC0415
+
+    service = VirtualminBackupService(job.server)
+    warnings = []
+    for archive_name in (job.parameters or {}).get("pair_archives", []):
+        removed = service.remove_staged_archive(str(archive_name))
+        if removed.is_err():
+            warnings.append(f"staged archive cleanup failed for {archive_name}: {removed.unwrap_err()}")
+    if warnings:
+        logger.warning("⚠️ [PairRestore] %s (job %s)", "; ".join(warnings), job.pk)
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+            status_message=f"{job.status_message} ({'; '.join(warnings)})".strip(), updated_at=timezone.now()
+        )
+    return {"success": not warnings, "job_id": str(job.pk), "warning": "; ".join(warnings)}
+
+
+def remove_pair_job_archives(job_id: str) -> dict[str, Any]:
+    """Remove the archives a pair restore left staged on its node, after taking the node lock (best effort, never raises).
+
+    Releasing the pair takes the per-domain lock and writes the job's cancel marker, so a restore that is
+    still running or waiting for the lock can neither lose its archives mid-run nor start afterwards.
+    When the node cannot be released the archives are left alone.
+    """
+    from .virtualmin_pair_restore import release_pair_on_node  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.select_related("server", "account").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    released = release_pair_on_node(job)
+    if released.is_err():
+        return {"success": False, "job_id": job_id, "error": released.unwrap_err()}
+    return _remove_pair_archives(job)
+
+
+def release_lost_pair_node(job_id: str, attempt: int = 1) -> dict[str, Any]:
+    """Release a pair restore declared lost once its node answers: lock, cancel marker, barrier down, then clean up.
+
+    "Node lost" only fails the job and holds the account in PRAHO; a node that was merely marked failed
+    may still carry the maintenance section (answering 503 for the domain) and no cancel marker. This
+    retries until the node answers, then removes the staged archives and queues a reconcile. If it never
+    answers within a day an audit alert tells staff the node needs a manual look.
+    """
+    from django_q.models import Schedule  # noqa: PLC0415
+    from django_q.tasks import schedule  # noqa: PLC0415
+
+    from .virtualmin_pair_restore import release_pair_on_node  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.select_related("server", "account").filter(pk=job_id).first()
+    if job is None:
+        return {"success": False, "job_id": job_id, "error": "missing"}
+    released = release_pair_on_node(job)
+    if released.is_err():
+        error = released.unwrap_err()
+        if attempt >= PAIR_RELEASE_MAX_ATTEMPTS:
+            logger.error(
+                "🔥 [PairRestore] Lost node never released after %s attempts: job=%s %s", attempt, job.pk, error
+            )
+            if job.account is not None:
+                from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
+
+                AuditService.log_event(
+                    AuditEventData(
+                        event_type="virtualmin_pair_release_abandoned",
+                        content_object=job.account,
+                        description=f"The maintenance section of {job.account.domain} could not be released on its node: {error}",
+                    ),
+                    AuditContext(
+                        actor_type="system",
+                        metadata={
+                            "source_app": "provisioning",
+                            "severity": "high",
+                            "requires_review": True,
+                            "job_id": str(job.pk),
+                        },
+                    ),
+                )
+            return {"success": False, "job_id": job_id, "error": error, "abandoned": True}
+        schedule(
+            "apps.provisioning.virtualmin_tasks.release_lost_pair_node",
+            job_id,
+            attempt + 1,
+            name=f"release-lost-pair-{job_id}-{attempt + 1}",
+            schedule_type=Schedule.ONCE,
+            next_run=timezone.now() + timedelta(seconds=PAIR_RELEASE_RETRY_SECONDS),
+        )
+        logger.warning("⚠️ [PairRestore] Lost node not released yet (attempt %s): job=%s %s", attempt, job.pk, error)
+        return {"success": False, "job_id": job_id, "error": error, "retry": attempt + 1}
+    outcome = _remove_pair_archives(job)
+    if job.account is not None and job.account.service_id:
+        reconcile_virtualmin_service_state_async(str(job.account.service_id))
+    return {**outcome, "released": True}
 
 
 def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
@@ -939,6 +1116,21 @@ def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
 
 def run_virtualmin_restore(job_id: str) -> dict[str, Any]:
     return _run_backup_restore_job(job_id, "restore_domain")
+
+
+def schedule_virtualmin_chain_backups() -> dict[str, Any]:
+    """Hourly: admit the base or differential backup each account's chain is due for (ADR-0059).
+
+    A no-op while ``provisioning.incremental_backups_enabled`` is off. Never raises: a Django-Q
+    schedule that raised would only be retried into the same failure.
+    """
+    from .virtualmin_chain_schedule import run_chain_backup_sweep  # noqa: PLC0415
+
+    try:
+        return run_chain_backup_sweep()
+    except Exception as e:
+        logger.exception("💥 [VirtualminTask] Chain backup schedule failed: %s", e)
+        return {"success": False, "error": str(e)}
 
 
 _SPOOL_ORPHAN_MAX_AGE_HOURS = 48
@@ -969,6 +1161,7 @@ def _sweep_spool_orphans(counts: dict[str, int]) -> None:
 
 def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
     """Two-clock recovery: dispatch window for pending, own deadline for running."""
+    from .virtualmin_chain import is_chain_job  # noqa: PLC0415
     from .virtualmin_migration_models import SpoolReservation  # noqa: PLC0415
 
     now = timezone.now()
@@ -997,9 +1190,14 @@ def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
     )[:_RECLAIM_BATCH]
     for job in overdue:
         # A killed restore worker is an UNCERTAIN mutation: park for operator
-        # attention (retains the account-operation exclusion). Backups are
-        # read-only remotely; failed is honest.
-        takeover_status = "attention" if job.operation == "restore_domain" else "failed"
+        # attention (retains the account-operation exclusion). So is a killed base or
+        # differential: its node step may still be running or waiting for the lock. A
+        # standalone backup is read-only remotely; failed is honest.
+        takeover_status = (
+            "attention"
+            if job.operation == "restore_domain" or is_chain_job(job.operation, job.parameters)
+            else "failed"
+        )
         rows = VirtualminProvisioningJob.take_over_execution(
             job.pk, takeover_status, "Worker interrupted; execution deadline exceeded"
         )
@@ -1128,6 +1326,12 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
     if account is not None and _migration_locked(account):
         return {"success": True, "action": "migration_locked"}
+    # A restore, a delete or any running job owns the account: converging its enabled state
+    # now could re-enable a domain a restore keeps disabled, or race a deletion. A parked or
+    # queued backup does not (account_blocks_reconcile).
+    if account is not None and account_blocks_reconcile(account):
+        logger.info("✅ [VirtualminTask] Active operation: account=%s", account.pk)
+        return {"success": True, "action": "operation_active"}
 
     if service.status == "active":
         if account is None:
@@ -1244,7 +1448,11 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
     # are excluded before the cap: they are not divergent, and re-queuing them every
     # run would starve the accounts that are (#566).
     for sid in (
-        exclude_domain_disabled(VirtualminAccount.objects.filter(status="suspended", service__status="active"))
+        # Accounts under a restore hold are excluded too: reconcile would only skip them, and they would
+        # fill the cap.
+        exclude_domain_disabled(
+            VirtualminAccount.objects.filter(status="suspended", service__status="active", restore_hold="")
+        )
         .order_by("pk")
         .values_list("service_id", flat=True)[:50]
     ):
@@ -1901,6 +2109,20 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         },
     )
     tasks_created["reconcile_divergence"] = "created" if created else "updated"
+
+    # Differential-chain backups, hourly. Registered whatever the flag says: the task itself does
+    # nothing while provisioning.incremental_backups_enabled is off, so turning the flag on needs no
+    # second setup run. UPSERT by name, like the sweeps above, so a drifted row is repaired.
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-chain-backups",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.schedule_virtualmin_chain_backups",
+            "schedule_type": "I",
+            "minutes": 60,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["chain_backups"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

@@ -52,9 +52,36 @@ urlpatterns = [
         name="virtualmin_account_backup",
     ),
     path(
+        "accounts/<uuid:account_id>/backup/base/",
+        virtualmin_views.virtualmin_account_chain_backup,
+        {"role": "base"},
+        name="virtualmin_account_take_base",
+    ),
+    path(
+        "accounts/<uuid:account_id>/backup/differential/",
+        virtualmin_views.virtualmin_account_chain_backup,
+        {"role": "differential"},
+        name="virtualmin_account_take_differential",
+    ),
+    path(
+        "accounts/<uuid:account_id>/hold/reenable/",
+        virtualmin_views.virtualmin_account_hold_reenable,
+        name="virtualmin_account_hold_reenable",
+    ),
+    path(
+        "accounts/<uuid:account_id>/hold/restore-safety/",
+        virtualmin_views.virtualmin_account_hold_restore_safety,
+        name="virtualmin_account_hold_restore_safety",
+    ),
+    path(
         "accounts/<uuid:account_id>/restore/",
         virtualmin_views.virtualmin_account_restore,
         name="virtualmin_account_restore",
+    ),
+    path(
+        "accounts/<uuid:account_id>/restore-pair/",
+        virtualmin_views.virtualmin_account_restore_pair,
+        name="virtualmin_account_restore_pair",
     ),
     path(
         "accounts/<uuid:account_id>/suspend/",
@@ -78,6 +105,11 @@ urlpatterns = [
         "jobs/<uuid:job_id>/resolve/",
         virtualmin_views.virtualmin_job_resolve,
         name="virtualmin_job_resolve",
+    ),
+    path(
+        "jobs/<uuid:job_id>/node-lost/",
+        virtualmin_views.virtualmin_job_node_lost,
+        name="virtualmin_job_node_lost",
     ),
     path("jobs/<uuid:job_id>/retry/", virtualmin_views.virtualmin_job_retry, name="virtualmin_job_retry"),
     path("jobs/<uuid:job_id>/logs/", virtualmin_views.virtualmin_job_logs, name="virtualmin_job_logs"),

@@ -33,6 +33,11 @@ HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
 HEALTH_AUTO_FAIL_THRESHOLD = 6
 _EXECUTION_RECOVERY_MARGIN_SECONDS = 60
 
+# Operations whose interruption or unknown outcome parks the job in attention (keeping the
+# account's operation exclusion) instead of failing it into the retry pool: the command may
+# already have destroyed the domain, so a blind replay or a released exclusion is unsafe.
+UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS = ("delete_domain",)
+
 # Keys a persisted job result never keeps. Job results hold Virtualmin
 # response envelopes, and 8.x listing rows carry `hashed_password` and
 # `password_for_mysql`; the create-domain parameters carry `pass`.
@@ -348,6 +353,51 @@ class VirtualminAccount(models.Model):
     current_disk_usage_mb = models.PositiveIntegerField(default=0)
     current_bandwidth_usage_mb = models.PositiveIntegerField(default=0)
 
+    # Differential-backup chain (docs/domain/virtualmin-incremental-contract.md). Virtualmin keeps one
+    # snapshot per domain; the chain is "live" only while this points at the base backup job whose
+    # snapshot is still on the node. Anything that can reset or lose the snapshot (a restore, a new
+    # base, a migration, a delete) clears it in its admission transaction and bumps the epoch, so a
+    # job pinned to an older epoch can never extend a chain that has since been broken.
+    chain_base = models.ForeignKey(
+        "provisioning.VirtualminProvisioningJob",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Differential chain base"),
+        help_text=_("The base backup job a differential would extend; empty when no chain is live"),
+    )
+    chain_base_fingerprint = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Snapshot fingerprint (sha256:size) the base left on the node"),
+    )
+    chain_epoch = models.PositiveIntegerField(
+        default=0, editable=False, help_text=_("Bumped every time the chain is invalidated or restarted")
+    )
+
+    # A staff-resolved pair restore that had already restored something leaves a half-restored domain. The
+    # reconciler (ADR-0051) and the divergence backstop leave the account alone while this is set, so the
+    # site is never brought live by a routine pass; only an explicit staff action clears it: "Re-enable as
+    # is", or restoring the safety backup taken before the pair restore.
+    restore_hold = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("Why reconcile must leave this account disabled; empty when nothing holds it"),
+    )
+    restore_hold_safety_backup_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_("The safety backup taken before the restore that left the domain half-restored"),
+    )
+
     # Timestamps
     provisioned_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
@@ -648,7 +698,7 @@ class VirtualminProvisioningJob(models.Model):
             cls.objects.filter(status__in=("pending", "running"))
             # Backup/restore have their own execution_deadline and janitor.
             .exclude(operation__in=("backup_domain", "restore_domain"))
-            .only("status", "parameters", "claimed_at", "started_at", "updated_at")
+            .only("operation", "status", "parameters", "claimed_at", "started_at", "updated_at")
         )
         recovered = 0
         for job in jobs.iterator():
@@ -663,13 +713,27 @@ class VirtualminProvisioningJob(models.Model):
             if expired:
                 # Fence against a worker completing, starting or refreshing the row
                 # after this sweep read it.
-                recovered += cls.objects.filter(
+                fenced = cls.objects.filter(
                     pk=job.pk,
                     status=job.status,
                     claimed_at=job.claimed_at,
                     started_at=job.started_at,
                     updated_at=job.updated_at,
-                ).update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time)
+                )
+                if job.status == "running" and job.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
+                    # A dead delete worker may have deleted the domain: replaying it blind, and
+                    # releasing the account's exclusion, is not safe. An operator resolves it.
+                    recovered += fenced.update(
+                        status="attention",
+                        status_message="Worker interrupted; execution deadline exceeded",
+                        next_retry_at=None,
+                        claimed_at=None,
+                        updated_at=recovery_time,
+                    )
+                else:
+                    recovered += fenced.update(
+                        status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time
+                    )
         return recovered
 
     @classmethod
@@ -768,6 +832,41 @@ class VirtualminProvisioningJob(models.Model):
             self.execution_time_seconds = Decimal(str(duration.total_seconds()))
 
         self.save(update_fields=["status", "completed_at", "result", "execution_time_seconds", "updated_at"])
+
+    def mark_attention(self, error_message: str, result: dict[str, Any] | None = None) -> None:
+        """Park an uncertain mutation for an operator instead of failing it.
+
+        The command may already have run, so the job neither retries nor releases the account's
+        operation exclusion (``attention`` is an active status); it stays until resolved.
+        """
+        now = timezone.now()
+        self.status = "attention"
+        self.status_message = error_message
+        self.completed_at = now
+        self.result = {**without_secrets(dict(result or self.result or {})), "retriability": Retriability.UNKNOWN.value}
+        self.next_retry_at = None
+        if self.started_at:
+            self.execution_time_seconds = Decimal(str((now - self.started_at).total_seconds()))
+        self.save(
+            update_fields=[
+                "status",
+                "status_message",
+                "completed_at",
+                "result",
+                "execution_time_seconds",
+                "next_retry_at",
+                "updated_at",
+            ]
+        )
+
+    def settle_failure(
+        self, error_message: str, result: dict[str, Any] | None = None, *, retriability: Retriability
+    ) -> None:
+        """Fail the job, or park it when an UNKNOWN outcome leaves a destructive command uncertain."""
+        if retriability is Retriability.UNKNOWN and self.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
+            self.mark_attention(error_message, result)
+        else:
+            self.mark_failed(error_message, result, retriability=retriability)
 
     def mark_failed(  # noqa: PLR0913  # Cohesive persisted failure transition
         self,

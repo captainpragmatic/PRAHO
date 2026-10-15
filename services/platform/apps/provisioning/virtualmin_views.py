@@ -38,6 +38,13 @@ from apps.users.models import User
 from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
+from .virtualmin_chain import (
+    is_chain_domain,
+    is_chain_job,
+    node_lost_refusal,
+    resolve_chain_job,
+    resolve_chain_job_node_lost,
+)
 from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
@@ -45,12 +52,19 @@ from .virtualmin_forms import (
     VirtualminBulkFilterForm,
     VirtualminMigrationForm,
     VirtualminRestoreForm,
+    VirtualminRestorePairForm,
     VirtualminServerForm,
 )
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from .virtualmin_pair_restore import (
+    is_pair_job,
+    pair_restore_may_have_restored,
+    resolve_pair_job,
+    resolve_pair_job_node_lost,
+)
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -466,6 +480,13 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
+        "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
+        "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),
+        # The pair restore and the base/differential buttons are offered only while differential backups are enabled.
+        "incremental_backups_enabled": VirtualminBackupManagementService.incremental_backups_enabled(),
+        "take_base_url": reverse("provisioning:virtualmin_account_take_base", args=[account.id]),
+        "take_differential_url": reverse("provisioning:virtualmin_account_take_differential", args=[account.id]),
         "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
@@ -547,15 +568,32 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
     actor = request.user.email if request.user.is_authenticated else "system"
-    # CharField job status; attention -> failed is the only edge.
-    rows = VirtualminProvisioningJob.objects.filter(
-        pk=job.pk, status="attention"
-    ).update(  # fsm-bypass: CharField status
-        status="failed",
-        status_message=f"Manually resolved by {actor}: {note}",
-        next_retry_at=None,
-        updated_at=timezone.now(),
-    )
+    if job.status == "attention" and is_chain_job(job.operation, job.parameters):
+        # A base or differential step may still be running on the node: confirm it is stopped
+        # (cancel marker under the lock), clear the chain, then release.
+        resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    elif job.status == "attention" and is_pair_job(job.operation, job.parameters or {}):
+        # A pair restore leaves the domain behind a maintenance page and disabled: the node is
+        # asked to release it (cancel marker, barrier down) before the account is released.
+        resolved = resolve_pair_job(job, resolved_by=actor, note=str(note))
+        if resolved.is_err():
+            messages.error(request, resolved.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    else:
+        # CharField job status; attention -> failed is the only edge.
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job.pk, status="attention"
+        ).update(  # fsm-bypass: CharField status
+            status="failed",
+            status_message=f"Manually resolved by {actor}: {note}",
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
     if rows:
         from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
 
@@ -567,6 +605,94 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_job_node_lost")
+def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Operator resolution of a chain job or pair restore in attention whose node is lost (failed or decommissioned)."""
+    job = get_object_or_404(VirtualminProvisioningJob.objects.select_related("server", "account"), pk=job_id)
+    note = request.POST.get("note", "").strip() or _("operator confirmed the node is lost")
+    actor = request.user.email if request.user.is_authenticated else "system"
+    if is_pair_job(job.operation, job.parameters or {}):
+        resolved = resolve_pair_job_node_lost(job, resolved_by=actor, note=str(note))
+    else:
+        resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
+    if resolved.is_err():
+        messages.error(request, resolved.unwrap_err())
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+    job.refresh_from_db()
+    audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
+    messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_reenable")
+def virtualmin_account_hold_reenable(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: accept a half-restored domain as it is and let reconcile enable it."""
+    from .virtualmin_pair_restore import release_restore_hold  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, pk=account_id)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    if release_restore_hold(account.pk, how="re_enabled_as_is", actor=str(actor)):
+        _audit_hold_decision(request, account, "re_enabled_as_is")
+        messages.success(request, _("The hold is released. The domain will be enabled again as it is."))
+    else:
+        messages.error(request, _("This account is not held."))
+    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_hold_restore_safety")
+def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff decision: restore the safety backup taken before the pair restore; the hold ends when it completes."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    safety_id = account.restore_hold_safety_backup_id
+    if not account.restore_hold or not safety_id:
+        messages.error(request, _("This account has no safety backup to restore."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    actor = request.user.email if request.user.is_authenticated else "system"
+    created = VirtualminBackupManagementService(account.server).create_restore_job(
+        account=account,
+        config=RestoreConfig(backup_id=safety_id, force_restore=True),
+        initiated_by=f"staff:{actor}",
+    )
+    if created.is_err():
+        messages.error(
+            request, _("Could not start the restore of the safety backup: %(error)s") % {"error": created.unwrap_err()}
+        )
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    _audit_hold_decision(request, account, "restore_safety_backup", detail={"safety_backup_id": safety_id})
+    messages.success(request, _("Restoring the safety backup. The hold ends when it completes."))
+    return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
+
+
+def _audit_hold_decision(
+    request: HttpRequest, account: VirtualminAccount, decision: str, *, detail: dict[str, Any] | None = None
+) -> None:
+    """Record who decided what about a half-restored account."""
+    from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
+
+    AuditService.log_event(
+        AuditEventData(
+            event_type="virtualmin_restore_hold_decision",
+            content_object=account,
+            description=f"Staff decision on the half-restored domain {account.domain}: {decision}",
+        ),
+        AuditContext(
+            user=request.user if request.user.is_authenticated else None,
+            metadata={"source_app": "provisioning", "decision": decision, "domain": account.domain, **(detail or {})},
+        ),
+    )
 
 
 @login_required
@@ -624,6 +750,30 @@ def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResp
     }
 
     return render(request, "provisioning/virtualmin/backup_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_POST
+@audit_service_call("virtualmin_chain_backup")
+def virtualmin_account_chain_backup(request: HttpRequest, account_id: str, role: str) -> HttpResponse:
+    """💾 Take a base or a differential backup of one account (never in bulk)."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    if role not in ("base", "differential"):
+        return HttpResponseBadRequest("Unknown backup role")
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+    management = VirtualminBackupManagementService(account.server)
+    take = management.take_base_backup if role == "base" else management.take_differential_backup
+    created = take(account, initiated_by=f"staff:{cast(User, request.user).email}")
+    if created.is_err():
+        messages.error(request, _("The backup could not be started: {error}").format(error=created.unwrap_err()))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    job = created.unwrap()
+    messages.success(request, _("Base backup queued.") if role == "base" else _("Differential backup queued."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -691,6 +841,57 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     }
 
     return render(request, "provisioning/virtualmin/restore_form.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@audit_service_call("virtualmin_restore_pair_form")
+def virtualmin_account_restore_pair(request: HttpRequest, account_id: str) -> HttpResponse:
+    """🔄 Restore a base backup and the differential taken against it, as one workflow."""
+    from .virtualmin_pair_restore import PAIR_RESTORE_LABEL  # noqa: PLC0415  # Circular
+
+    account = get_object_or_404(VirtualminAccount, id=account_id)
+    if not VirtualminBackupManagementService.incremental_backups_enabled():
+        messages.error(request, _("Differential backups are not enabled."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+    backups_result = VirtualminBackupService(account.server).list_backups(account=account)
+    listed = backups_result.unwrap() if backups_result.is_ok() else []
+    differentials = [item for item in listed if item.get("chain_role") == "differential" and item.get("base_backup_id")]
+    if not differentials:
+        messages.error(request, _("No differential backups are available for this account."))
+        return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+
+    if request.method == "POST":
+        form = VirtualminRestorePairForm(request.POST, differentials=differentials)
+        if form.is_valid():
+            chosen = next(item for item in differentials if item["backup_id"] == form.cleaned_data["differential_id"])
+            created = VirtualminBackupManagementService(account.server).create_pair_restore_job(
+                account,
+                str(chosen["base_backup_id"]),
+                str(chosen["backup_id"]),
+                force_restore=True,  # the confirmation checkbox is the explicit consent
+                initiated_by=f"staff:{cast(User, request.user).email}",
+            )
+            if created.is_ok():
+                messages.success(request, _("Pair restore queued."))
+                return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().id)
+            messages.error(request, f"Failed to create pair restore: {created.unwrap_err()}")
+    else:
+        form = VirtualminRestorePairForm(differentials=differentials)
+
+    context = {
+        "page_title": f"Restore pair: {account.domain}",
+        "account": account,
+        "breadcrumb_items": [
+            {"text": "Accounts", "url": reverse("provisioning:virtualmin_accounts")},
+            {"text": account.domain, "url": reverse("provisioning:virtualmin_account_detail", args=[account.id])},
+            {"text": "Restore pair"},
+        ],
+        "form": form,
+        "pair_label": PAIR_RESTORE_LABEL,
+        "cancel_url": reverse("provisioning:virtualmin_account_detail", args=[account.id]),
+    }
+    return render(request, "provisioning/virtualmin/restore_pair_form.html", context)
 
 
 # ===============================================================================
@@ -1714,6 +1915,12 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
                 if not domain_name or not username:
                     continue
+                if not is_chain_domain(domain_name):
+                    # The domain later reaches the node's chain scripts as a strict-alphabet input.
+                    error_msg = f"Skipped {username}: {domain_name!r} is not a valid domain name"
+                    sync_results["errors"].append(error_msg)
+                    logger.warning("⚠️ [AccountSync] %s", error_msg)
+                    continue
 
                 if username not in accounts_by_username:
                     accounts_by_username[username] = {
@@ -2065,7 +2272,7 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
     if request.method == "POST":
         # Toggle the protection status
         account.protected_from_deletion = not account.protected_from_deletion
-        account.save()
+        account.save(update_fields=["protected_from_deletion", "updated_at"])
 
         action = "enabled" if account.protected_from_deletion else "disabled"
         icon = "🔒" if account.protected_from_deletion else "🔓"
@@ -2155,6 +2362,19 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "page_title": f"Job Status - {job.operation}",
         "breadcrumb_items": breadcrumb_items,
         "can_retry": _job_can_be_retried(job),
+        "can_resolve": job.status == "attention",
+        "half_restore_safety_backup_id": (
+            str((job.parameters or {}).get("safety_backup_id", ""))
+            if job.status == "attention"
+            and is_pair_job(job.operation, job.parameters or {})
+            and pair_restore_may_have_restored(job.parameters or {})
+            else ""
+        ),
+        "can_resolve_node_lost": (
+            job.status == "attention"
+            and (is_chain_job(job.operation, job.parameters or {}) or is_pair_job(job.operation, job.parameters or {}))
+            and node_lost_refusal(job.server) is None
+        ),
     }
 
     return render(request, "provisioning/virtualmin/job_status.html", context)

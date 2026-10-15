@@ -150,12 +150,21 @@ class RestoreFailClosedTests(TestCase):
             result = self.service.restore_domain(
                 account=self.account,
                 config=self.config,
-                note_sink=lambda note: (notes.append(note), order.append("note"))[0],
+                note_sink=lambda note: (notes.append(note), order.append("note"), 1)[2],
             )
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(notes, [{"safety_backup_id": "safety-1"}])
         self.assertEqual(order, ["note", "push"])
         self.assertEqual(result.unwrap()["safety_backup_id"], "safety-1")
+
+    def test_an_unrecorded_safety_backup_id_stops_the_restore_before_the_push(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", True)])
+        self.config.force_restore = True
+        with patch.object(VirtualminBackupService, "backup_domain", return_value=Ok({"backup_id": "safety-1"})):
+            result = self.service.restore_domain(account=self.account, config=self.config, note_sink=lambda note: 0)
+        self.assertTrue(result.is_err())
+        self.assertIn("not recorded", result.unwrap_err())
+        self.push.assert_not_called()
 
     def test_retriable_download_error_propagates_not_parked_unknown(self) -> None:
         """C1: a RETRIABLE download failure must reach the caller RETRIABLE, not UNKNOWN."""

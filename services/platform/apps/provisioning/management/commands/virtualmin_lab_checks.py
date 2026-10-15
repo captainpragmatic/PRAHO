@@ -20,6 +20,17 @@ never touches the round-trip domain on vm-a. Each check fails the command:
 4. Node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
    non-differential schedule and no legacy one; Webmin cron runs it; running
    it as cron does writes a non-empty archive and keeps the differential base.
+4c. Chain state through the service entry points (take_base_backup, take_differential_backup,
+   confirm stopped): a base links chain_base to a fresh snapshot, a second base replaces
+   it, a differential extends it without moving the snapshot, and a restore ends it; a
+   parked differential is confirmed stopped by writing its cancel marker, after which
+   its token refuses to run.
+4b. Chain step (virtualmin_chain_backup.yml, through AnsibleService): a base resets
+   the snapshot to a fresh fingerprint, and a base with nothing changed still
+   changes it (so a fingerprint can tell two bases apart); a differential passes
+   the fingerprint check, leaves the snapshot byte-identical and archives only
+   the changed files; a stale fingerprint, a cancelled token and a held lock
+   each refuse before any backup runs, and a refused differential archives nothing.
 5. Node deploy (virtualmin.yml post-install tasks on an installed node): the
    play succeeds, and the API user it creates authenticates, can disable and
    enable a domain, lists the templates, and runs PRAHO's own backup (with
@@ -44,6 +55,8 @@ import io
 import logging
 import re
 import subprocess
+import threading
+import time
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -64,6 +77,8 @@ logger = logging.getLogger(__name__)
 
 CHECK_DOMAIN = "labcheck.praho.test"
 CHECK_USER = "labcheck"
+HTTPS_PORT = 443
+MIN_PROBES = 20  # at 50 ms spacing plus curl latency, two restores last far longer
 _ARCHIVE_RE = re.compile(r"^virtualmin_backup_[0-9a-f]{32}\.tar\.gz(\.dom|\.info)?$")
 
 
@@ -83,6 +98,10 @@ class Command(BaseCommand):
             try:
                 base = self._check_differential_base_and_staging(account, node)
                 self._check_node_backup_playbook(server, node, base)
+                self._check_chain_node_step(server, node)
+                self._check_chain_state(account, node)
+                self._check_chain_schedule(account, node)
+                self._check_pair_restore(account, node)
                 user, password, api_gateway = self._check_node_deploy_playbook(server)
                 self._check_api_user_lock(node, user, password, api_gateway)
                 self._check_firewall(server, node, api_gateway)
@@ -347,6 +366,801 @@ class Command(BaseCommand):
         after = self._file_state(node, base)
         self._ok("the scheduled run kept the differential base", after == before, f"{before} -> {after}")
         node_exec(node.container, "sh", "-c", "rm -rf /var/backups/virtualmin/????-??-??")
+
+    # ------------------------------------------------------------- check 4b
+
+    def _chain_step(  # noqa: PLR0913  # Mirrors the playbook's inputs
+        self,
+        server: Any,
+        node: LabNode,
+        mode: str,
+        token: str,
+        *,
+        expected_fp: str = "",
+        action: str = "run",
+        lock_wait: int = 60,
+        archive: str = "",
+    ) -> Any:
+        """Run virtualmin_chain_backup.yml through AnsibleService; return the parsed result line."""
+        from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
+            VirtualminBackupService,
+        )
+
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        variables: dict[str, Any] = {
+            "chain_action": action,
+            "chain_mode": mode if action == "run" else "",
+            "chain_domain": CHECK_DOMAIN,
+            "chain_domain_id": domain_id,
+            "chain_token": token,
+            "chain_lock_wait_seconds": lock_wait,
+            "chain_archive": (archive or f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz") if action == "run" else "",
+        }
+        if expected_fp:
+            variables["chain_expected_fp"] = expected_fp
+        outcome = VirtualminBackupService(server).run_chain_step(
+            variables, token=token, mode=mode if action == "run" else "cancel", domain_id=domain_id
+        )
+        if outcome.is_err():
+            raise CommandError(f"chain step {mode}/{action} unusable: {outcome.unwrap_err()}")
+        return outcome.unwrap()
+
+    def _check_chain_node_step(self, server: Any, node: LabNode) -> None:  # noqa: PLR0915  # One linear lab scenario
+        """The locked node-side step: fresh snapshot, differential contents, and every refusal."""
+        from apps.provisioning.virtualmin_backup_service import REMOTE_ARCHIVE_DIR  # noqa: PLC0415
+
+        self.stdout.write("Check 4b: the chain step (virtualmin_chain_backup.yml)")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+
+        def token() -> str:
+            return str(uuid.uuid4())  # One fresh run token per step
+
+        def write_file(name: str, content: str) -> None:
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf "%s\n" "$2" > "$1" && chown "$3" "$1"',
+                "sh",
+                f"{home}/{name}",
+                content,
+                CHECK_USER,
+            )
+
+        def staged() -> list[str]:
+            return self._staged(node)
+
+        def regular_files(archive: str) -> set[str]:
+            """Regular files in the archive's directory member (dirs and special entries excluded)."""
+            listing = node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'set -e; d=$(mktemp -d); trap \'rm -rf "$d"\' EXIT; tar -xzf "$1" -C "$d"; '
+                'tar -tvf "$d"/*_dir.tar > "$d/list"; awk \'/^-/ {print $NF}\' "$d/list"',
+                "sh",
+                f"{REMOTE_ARCHIVE_DIR}/{archive}",
+            )
+            return {line.strip() for line in listing.splitlines() if line.strip()}
+
+        def discard(*steps: Any) -> None:
+            for step in steps:
+                path = f"{REMOTE_ARCHIVE_DIR}/{step.archive}"
+                node_exec(node.container, "rm", "-f", path, f"{path}.dom", f"{path}.info")
+
+        write_file("chain-keep.txt", "unchanged after the base")
+        write_file("chain-edit.txt", "first")
+        try:
+            base = self._chain_step(server, node, "base", token())
+            self._ok("a base step succeeds", base.outcome == "ok" and base.ran, base)
+            self._ok(
+                "a base leaves a fresh snapshot (present, not the one before)",
+                base.fp_after not in ("", "ABSENT", base.fp_before),
+                base,
+            )
+            self._ok(
+                "the step's fp_after is the snapshot on the node",
+                base.fp_after == self._fingerprint(node, domain_id),
+                base,
+            )
+            self._ok(
+                "a base archive is complete (holds the unchanged file)",
+                "./public_html/chain-keep.txt" in regular_files(base.archive),
+            )
+
+            again = self._chain_step(server, node, "base", token())
+            self._ok(
+                "Q9: a base with NO change still changes the snapshot hash",
+                again.outcome == "ok" and again.fp_before == base.fp_after and again.fp_after != again.fp_before,
+                (again.fp_before, again.fp_after),
+            )
+            discard(base)
+
+            write_file("chain-edit.txt", "second")
+            write_file("chain-new.txt", "new file")
+            diff = self._chain_step(server, node, "differential", token(), expected_fp=again.fp_after)
+            self._ok("a differential passes the fingerprint check", diff.outcome == "ok" and diff.ran, diff)
+            self._ok(
+                "a differential leaves the snapshot byte-identical",
+                diff.fp_after == diff.fp_before == again.fp_after == self._fingerprint(node, domain_id),
+                diff,
+            )
+            files = regular_files(diff.archive)
+            self._ok(
+                "a differential archive holds only the changed files",
+                {"./public_html/chain-edit.txt", "./public_html/chain-new.txt"} <= files
+                and "./public_html/chain-keep.txt" not in files,
+                sorted(files),
+            )
+            self._ok(
+                "a differential archive is smaller than the base archive",
+                diff.size < again.size,
+                (diff.size, again.size),
+            )
+            discard(diff, again)
+
+            stale = self._chain_step(server, node, "differential", token(), expected_fp="0" * 64 + ":1")
+            self._ok(
+                "a differential with a stale fingerprint is refused before any backup runs",
+                (stale.outcome, stale.reason, stale.ran) == ("refused", "fingerprint_mismatch", False),
+                stale,
+            )
+            self._ok("the refused differential archived nothing", not staged(), staged())
+
+            cancelled = token()
+            marker = self._chain_step(server, node, "base", cancelled, action="cancel")
+            self._ok("a cancel writes its marker under the lock", marker.outcome == "cancelled", marker)
+            refused = self._chain_step(server, node, "base", cancelled)
+            self._ok(
+                "a cancelled token refuses to run",
+                (refused.outcome, refused.reason, refused.ran) == ("refused", "cancelled", False) and not staged(),
+                refused,
+            )
+            fresh = self._chain_step(server, node, "base", token())
+            self._ok("another token still runs", fresh.outcome == "ok", fresh)
+            discard(fresh)
+
+            held = subprocess.Popen(  # Holds the node's per-domain lock for the check
+                ["docker", "exec", node.container, "flock", f"/run/praho/chain-{domain_id}.lock", "sleep", "40"],  # noqa: S607
+            )
+            try:
+                time.sleep(3)
+                busy = self._chain_step(server, node, "base", token(), lock_wait=5)
+                self._ok(
+                    "a step cannot start while the lock is held",
+                    (busy.outcome, busy.reason, busy.ran) == ("refused", "lock_busy", False),
+                    busy,
+                )
+            finally:
+                held.terminate()
+                held.wait(timeout=30)
+        finally:
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f /run/praho/chain-"$1".* "$2"/virtualmin_backup_*',
+                "sh",
+                domain_id,
+                REMOTE_ARCHIVE_DIR,
+            )
+            node_exec(
+                node.container, "rm", "-f", f"{home}/chain-keep.txt", f"{home}/chain-edit.txt", f"{home}/chain-new.txt"
+            )
+        logger.info("✅ [VirtualminLab] Chain step checks passed")
+
+    # ------------------------------------------------------------- check 4e
+
+    def _check_chain_schedule(self, account: Any, node: LabNode) -> None:
+        """The hourly schedule on the lab account: a base, then a differential, then a base after the node loses the snapshot."""
+        from datetime import timedelta  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.provisioning import virtualmin_tasks  # noqa: PLC0415
+        from apps.provisioning.virtualmin_chain_schedule import run_chain_backup_sweep  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        self.stdout.write("Check 4e: the hourly schedule takes a base, then a differential, then a base again")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+        flag = "provisioning.incremental_backups_enabled"
+        only_this_account = VirtualminAccount.objects.filter(pk=account.pk)
+        start = timezone.now()
+
+        def reload() -> Any:
+            return VirtualminAccount.objects.get(pk=account.pk)
+
+        def sweep_and_run(ahead: timedelta) -> tuple[list[dict[str, Any]], list[Any]]:
+            """One schedule pass, then run what it admitted in-process (the lab has no worker)."""
+            with patch("django_q.tasks.async_task"):
+                outcome = run_chain_backup_sweep(now=start + ahead, accounts=only_this_account)
+            jobs = []
+            for admitted in outcome["admitted"]:
+                virtualmin_tasks.run_virtualmin_backup(admitted["job_id"])
+                jobs.append(VirtualminProvisioningJob.objects.get(pk=admitted["job_id"]))
+            return outcome["admitted"], jobs
+
+        SettingsService.update_setting(flag, False)
+        admitted, _ = sweep_and_run(timedelta(0))
+        self._ok("with the flag off the schedule admits nothing", admitted == [], admitted)
+
+        SettingsService.update_setting(flag, True)
+        try:
+            admitted, jobs = sweep_and_run(timedelta(0))
+            self._ok(
+                "an account with no chain gets a base",
+                [row["role"] for row in admitted] == ["base"] and jobs[0].status == "completed",
+                (admitted, [job.status_message for job in jobs]),
+            )
+            state = reload()
+            self._ok("the base is the live chain", state.chain_base_id == jobs[0].pk, state.chain_base_id)
+            pinned = state.chain_base_fingerprint
+
+            admitted, _ = sweep_and_run(timedelta(minutes=5))
+            self._ok("a fresh chain is left alone", admitted == [], admitted)
+
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf scheduled > "$1" && chown "$2" "$1"',
+                "sh",
+                f"{home}/chain-schedule.txt",
+                CHECK_USER,
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=25))
+            self._ok(
+                "a day later it takes a differential, which leaves the snapshot where it was",
+                [row["role"] for row in admitted] == ["differential"]
+                and jobs[0].status == "completed"
+                and self._fingerprint(node, domain_id) == pinned,
+                (admitted, [job.status_message for job in jobs]),
+            )
+
+            # The node loses the snapshot (somebody restored the domain in Virtualmin directly).
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f /var/webmin/modules/virtual-server/incremental/"$1"',
+                "sh",
+                domain_id,
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=50))
+            self._ok(
+                "it admitted a differential for the missing snapshot",
+                [row["role"] for row in admitted] == ["differential"],
+                admitted,
+            )
+            self._ok(
+                "the node refuses it and the chain ends",
+                jobs[0].status == "failed"
+                and "fingerprint_mismatch" in jobs[0].status_message
+                and reload().chain_base_id is None,
+                (jobs[0].status, jobs[0].status_message),
+            )
+            admitted, jobs = sweep_and_run(timedelta(hours=50, minutes=1))
+            self._ok(
+                "the next pass takes a base at once, with no backoff",
+                [row["role"] for row in admitted] == ["base"]
+                and jobs[0].status == "completed"
+                and bool(reload().chain_base_id),
+                (admitted, [job.status_message for job in jobs]),
+            )
+            self._ok("nothing is left staged by the schedule", not self._staged(node), self._staged(node))
+        finally:
+            SettingsService.update_setting(flag, False)
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f "$1"/chain-schedule.txt /run/praho/chain-"$2".*',
+                "sh",
+                home,
+                domain_id,
+            )
+        logger.info("✅ [VirtualminLab] Chain schedule checks passed")
+
+    # ------------------------------------------------------------- check 4c
+
+    def _check_chain_state(self, account: Any, node: LabNode) -> None:  # noqa: PLR0915  # One linear lab scenario
+        """take_base_backup / take_differential_backup through the job layer, and confirm-stopped."""
+        from apps.provisioning.virtualmin_backup_service import (  # noqa: PLC0415
+            REMOTE_ARCHIVE_DIR,
+            RestoreConfig,
+        )
+        from apps.provisioning.virtualmin_chain import resolve_chain_job  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        self.stdout.write("Check 4c: chain state through take_base_backup / take_differential_backup")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+        management = VirtualminBackupManagementService(account.server)
+        flag = "provisioning.incremental_backups_enabled"
+
+        def reload() -> Any:
+            return VirtualminAccount.objects.get(pk=account.pk)
+
+        refused = management.take_base_backup(account)
+        self._ok(
+            "with the flag off a base is refused", refused.is_err() and "disabled" in refused.unwrap_err(), refused
+        )
+        SettingsService.update_setting(flag, True)
+        try:
+            before = self._fingerprint(node, domain_id)
+            first = management.take_base_backup(account, execute_inline=True)
+            self._ok("take_base_backup completes through the job layer", first.is_ok(), first)
+            base_one = first.unwrap()
+            state = reload()
+            self._ok("the base installs chain_base", state.chain_base_id == base_one.pk, state.chain_base_id)
+            fresh = self._fingerprint(node, domain_id)
+            self._ok("a fresh snapshot is on the node", fresh not in ("ABSENT", before), (before, fresh))
+            self._ok(
+                "the account pins exactly that fingerprint",
+                state.chain_base_fingerprint == fresh,
+                state.chain_base_fingerprint,
+            )
+            self._ok("nothing left staged after the base", not self._staged(node), self._staged(node))
+
+            second = management.take_base_backup(account, execute_inline=True).unwrap()
+            state = reload()
+            self._ok(
+                "a second base replaces the first (new snapshot, new epoch)",
+                state.chain_base_id == second.pk and state.chain_base_fingerprint != fresh and state.chain_epoch > 1,
+                (state.chain_base_id, state.chain_epoch),
+            )
+            epoch = state.chain_epoch
+            pinned = state.chain_base_fingerprint
+
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf changed > "$1" && chown "$2" "$1"',
+                "sh",
+                f"{home}/chain-state.txt",
+                CHECK_USER,
+            )
+            diff = management.take_differential_backup(account, execute_inline=True)
+            self._ok("take_differential_backup completes through the job layer", diff.is_ok(), diff)
+            state = reload()
+            self._ok(
+                "a differential extends the chain without moving the snapshot",
+                (state.chain_base_id, state.chain_epoch, state.chain_base_fingerprint) == (second.pk, epoch, pinned)
+                and self._fingerprint(node, domain_id) == pinned,
+                (state.chain_base_id, state.chain_epoch),
+            )
+            self._ok(
+                "the differential recorded its lineage",
+                diff.unwrap().result.get("fp_after") == pinned,
+                diff.unwrap().result,
+            )
+
+            # Confirm stopped: a parked differential's token can never run once resolved.
+            token = str(uuid.uuid4())
+            parked = VirtualminProvisioningJob.objects.create(
+                operation="backup_domain",
+                account=state,
+                server=account.server,
+                status="attention",
+                parameters={
+                    "chain_role": "differential",
+                    "chain_token": token,
+                    "chain_epoch": epoch,
+                    "virtualmin_domain_id": domain_id,
+                },
+                result={"retriability": "unknown"},
+            )
+            resolved = resolve_chain_job(parked, resolved_by="lab", note="lab check")
+            self._ok("confirm stopped succeeds on a reachable node", resolved.is_ok(), resolved)
+            parked.refresh_from_db()
+            state = reload()
+            self._ok(
+                "it cleared the chain and released the job",
+                parked.status == "failed" and state.chain_base_id is None and state.chain_epoch == epoch + 1,
+                (parked.status, state.chain_base_id, state.chain_epoch),
+            )
+            late = self._chain_step(account.server, node, "differential", token, expected_fp=pinned)
+            self._ok(
+                "the resolved token refuses to run, even for a delayed invocation",
+                (late.outcome, late.reason, late.ran) == ("refused", "cancelled", False),
+                late,
+            )
+
+            # Stranded archive: a step ran and its result was lost, so its archive and the .dom
+            # sidecar (database passwords) sit in staging. Confirm stopped removes them.
+            stranded_token = str(uuid.uuid4())
+            stranded_archive = f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz"
+            ran = self._chain_step(account.server, node, "base", stranded_token, archive=stranded_archive)
+            staged = self._staged(node)
+            self._ok(
+                "a step whose result was lost leaves its archive and sidecar staged",
+                ran.outcome == "ok" and stranded_archive in staged and f"{stranded_archive}.dom" in staged,
+                staged,
+            )
+            parked = VirtualminProvisioningJob.objects.create(
+                operation="backup_domain",
+                account=reload(),
+                server=account.server,
+                status="attention",
+                parameters={
+                    "chain_role": "base",
+                    "chain_token": stranded_token,
+                    "chain_epoch": reload().chain_epoch,
+                    "virtualmin_domain_id": domain_id,
+                    "archive_name": stranded_archive,
+                },
+                result={"retriability": "unknown"},
+            )
+            resolved = resolve_chain_job(parked, resolved_by="lab", note="stranded archive check")
+            self._ok("confirm stopped releases the stranded job", resolved.is_ok(), resolved)
+            self._ok(
+                "nothing is left in staging (archive, .dom and .info are gone)",
+                not self._staged(node),
+                self._staged(node),
+            )
+
+            # A restore ends the chain too.
+            third = management.take_base_backup(account, execute_inline=True).unwrap()
+            self._ok("a new base starts a new chain", reload().chain_base_id == third.pk)
+            restore = management.create_restore_job(
+                account, RestoreConfig(backup_id="lab-check", force_restore=True), execute_inline=False
+            )
+            self._ok("restore admission clears the chain", restore.is_ok() and reload().chain_base_id is None, restore)
+            if restore.is_ok():
+                VirtualminProvisioningJob.objects.filter(
+                    pk=restore.unwrap().pk
+                ).update(  # fsm-bypass: lab cleanup of a job that never ran
+                    status="failed"
+                )
+        finally:
+            SettingsService.update_setting(flag, False)
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f "$1"/chain-state.txt /run/praho/chain-"$2".* "$3"/virtualmin_backup_*',
+                "sh",
+                home,
+                domain_id,
+                REMOTE_ARCHIVE_DIR,
+            )
+        logger.info("✅ [VirtualminLab] Chain state checks passed")
+
+    def _check_pair_restore(self, account: Any, node: LabNode) -> None:  # noqa: C901, PLR0915  # One linear lab scenario
+        """Pair restore against the real node: barrier, ordering, data, and a failure between the restores.
+
+        Check 4d. A base and its differential are restored as one workflow while a probe on the node
+        requests the domain on ports 80 and 443 every 50 ms. The probe must see 503 from the moment
+        the barrier is verified until the second restore has finished; every checkpoint must show the
+        domain disabled; the data must be base plus differential (files deleted after the base
+        reappear, as documented); reconcile alone re-enables the domain. A second run is stopped
+        between the two restores by a cancel marker: the domain must stay disabled behind the
+        maintenance page and the job must sit in attention until it is resolved.
+        """
+        from apps.provisioning import virtualmin_tasks  # noqa: PLC0415
+        from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
+        from apps.provisioning.virtualmin_pair_restore import release_restore_hold, resolve_pair_job  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        self.stdout.write("Check 4d: pair restore behind the write barrier")
+        domain_id = node_exec(
+            node.container, "virtualmin", "list-domains", "--domain", CHECK_DOMAIN, "--id-only"
+        ).strip()
+        home = f"/home/{CHECK_USER}/public_html"
+        management = VirtualminBackupManagementService(account.server)
+        flag = "provisioning.incremental_backups_enabled"
+        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # Inside the lab container
+
+        def write(name: str, content: str) -> None:
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'printf %s "$2" > "$1" && chown "$3" "$1"',
+                "sh",
+                f"{home}/{name}",
+                content,
+                CHECK_USER,
+            )
+
+        def read(name: str) -> str:
+            return node_exec(
+                node.container, "sh", "-c", 'cat "$1" 2>/dev/null || printf ABSENT', "sh", f"{home}/{name}"
+            ).strip()
+
+        def remove(name: str) -> None:
+            node_exec(node.container, "rm", "-f", f"{home}/{name}")
+
+        def disabled_on_node() -> bool:
+            listing = node_exec(node.container, "virtualmin", "list-domains", "--disabled", "--name-only")
+            return CHECK_DOMAIN in listing.split()
+
+        def maintenance_up() -> bool:
+            listing = node_exec(
+                node.container, "sh", "-c", "ls /etc/apache2/conf-enabled | grep -c praho-maint || true"
+            )
+            return listing.strip() not in ("", "0")
+
+        def http_code(port: int) -> str:
+            ip = node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'virtualmin list-domains --domain "$1" --multiline | sed -n "s/^ *IP address: *\\([0-9.]*\\).*/\\1/p" | head -n 1',
+                "sh",
+                CHECK_DOMAIN,
+            ).strip()
+            scheme = "https" if port == HTTPS_PORT else "http"
+            return node_exec(
+                node.container,
+                "curl",
+                "-sk",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "5",
+                "--resolve",
+                f"{CHECK_DOMAIN}:{port}:{ip}",
+                f"{scheme}://{CHECK_DOMAIN}/",
+            ).strip()
+
+        # Every name the virtual host answers to, in the spellings a client may use, a Host header that
+        # names nothing (the domain's virtual host is the node's default for its address) and the bare IP.
+        odd_hosts = (
+            CHECK_DOMAIN.upper(),
+            f"{CHECK_DOMAIN}.",
+            f"www.{CHECK_DOMAIN}",
+            f"mail.{CHECK_DOMAIN}",
+            f"webmail.{CHECK_DOMAIN}",
+            f"admin.{CHECK_DOMAIN}",
+            "unknown.invalid",
+        )
+
+        def start_probe() -> subprocess.Popen[bytes]:
+            names = " ".join((CHECK_DOMAIN, *odd_hosts))
+            loop = (
+                f"rm -f {probe_stop} {probe_log}; "
+                f'ip=$(virtualmin list-domains --domain {CHECK_DOMAIN} --multiline | sed -n "s/^ *IP address: *\\([0-9.]*\\).*/\\1/p" | head -n 1); '
+                f"while [ ! -e {probe_stop} ]; do t=$(date +%s.%N); "
+                f"for h in {names}; do "
+                f'a=$(curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve $h:80:$ip http://$h/); '
+                f'b=$(curl -sk -o /dev/null -w "%{{http_code}}" --max-time 3 --resolve $h:443:$ip https://$h/); '
+                f'echo "$t $h $a $b" >> {probe_log}; done; '
+                f'a=$(curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 http://$ip/); '
+                f'b=$(curl -sk -o /dev/null -w "%{{http_code}}" --max-time 3 https://$ip/); '
+                f'echo "$t IP-LITERAL $a $b" >> {probe_log}; sleep 0.05; done'
+            )
+            return subprocess.Popen(["docker", "exec", node.container, "sh", "-c", loop])  # noqa: S607  # Fixed argv, lab container
+
+        def stop_probe(process: subprocess.Popen[bytes]) -> list[tuple[float, str, str, str]]:
+            node_exec(node.container, "touch", probe_stop)
+            process.wait(timeout=30)
+            rows = []
+            for line in node_exec(node.container, "cat", probe_log).splitlines():
+                at, host, port80, port443 = line.split()
+                rows.append((float(at), host, port80, port443))
+            return rows
+
+        SettingsService.update_setting(flag, True)
+        probe: subprocess.Popen[bytes] | None = None
+        try:
+            # S0 -> base -> S1 -> differential -> damage.
+            write("keep.txt", "keep")
+            write("change.txt", "v0")
+            write("delete-me.txt", "gone-soon")
+            base = management.take_base_backup(account, execute_inline=True).unwrap()
+            write("change.txt", "v1")
+            write("added.txt", "added")
+            remove("delete-me.txt")
+            diff = management.take_differential_backup(account, execute_inline=True).unwrap()
+            base_id, diff_id = base.result["backup_id"], diff.result["backup_id"]
+            write("change.txt", "damaged")
+            remove("added.txt")
+            self._ok("the domain is serving before the restore", http_code(80) not in ("503", "000"), http_code(80))
+            self.stdout.write(
+                "  odd Host spellings probed during the restore: " + ", ".join((*odd_hosts, "IP-LITERAL"))
+            )
+
+            probe = start_probe()
+            time.sleep(1)
+            admitted = management.create_pair_restore_job(
+                account, base_id, diff_id, force_restore=True, execute_inline=True
+            )
+            rows = stop_probe(probe)
+            probe = None
+            if admitted.is_err():
+                latest = (
+                    VirtualminProvisioningJob.objects.filter(operation="restore_domain").order_by("-created_at").first()
+                )
+                self.stdout.write(
+                    f"  pair checkpoints reached: {latest.parameters.get('pair_checkpoints') if latest else None}"
+                )
+                self.stdout.write(
+                    node_exec(
+                        node.container, "sh", "-c", f"cat /run/praho/pair-{domain_id}.diag 2>&1 | head -60 || true"
+                    )
+                )
+            self._ok("the pair restore completes through the job layer", admitted.is_ok(), admitted)
+            job = admitted.unwrap()
+            checkpoints = job.result["pair_checkpoints"]
+            self._ok(
+                "the node reached every checkpoint in order",
+                [c["step"] for c in checkpoints] == ["barrier_up", "after_base", "after_differential", "barrier_down"],
+                [c["step"] for c in checkpoints],
+            )
+            self._ok(
+                "the domain was disabled at every checkpoint", all(c["disabled"] for c in checkpoints), checkpoints
+            )
+            start, end = float(checkpoints[0]["at"]), float(checkpoints[2]["at"])
+            inside = [row for row in rows if start <= row[0] <= end]
+            self._ok(
+                "requests got 503 on ports 80 and 443 throughout both restores",
+                len(inside) >= MIN_PROBES and all(row[2] == "503" and row[3] == "503" for row in inside),
+                (len(inside), [row for row in inside if row[2:] != ("503", "503")][:5]),
+            )
+            probed_hosts = {row[1] for row in inside}
+            self._ok(
+                "every odd Host spelling, every alias, an unnamed Host and the bare IP were probed",
+                {CHECK_DOMAIN, *odd_hosts, "IP-LITERAL"} <= probed_hosts,
+                sorted(probed_hosts),
+            )
+            self._ok(
+                "the domain was serving before the barrier",
+                any(row[2] not in ("503", "000") for row in rows if row[0] < start and row[1] == CHECK_DOMAIN),
+                rows[:3],
+            )
+            self._ok("the data is base plus differential: changed file", read("change.txt") == "v1", read("change.txt"))
+            self._ok(
+                "the data is base plus differential: file added after the base",
+                read("added.txt") == "added",
+                read("added.txt"),
+            )
+            self._ok("the base's file is there", read("keep.txt") == "keep", read("keep.txt"))
+            self._ok(
+                "a file deleted after the base reappears (documented)",
+                read("delete-me.txt") == "gone-soon",
+                read("delete-me.txt"),
+            )
+            self._ok("the domain is left disabled by the workflow", disabled_on_node() and not maintenance_up())
+            self._ok("nothing is left in staging", not self._staged(node), self._staged(node))
+            state = VirtualminAccount.objects.get(pk=account.pk)
+            self._ok("PRAHO holds the account suspended until reconcile", state.status == "suspended", state.status)
+            reconciled = virtualmin_tasks.reconcile_virtualmin_service_state(str(state.service_id))
+            self._ok(
+                "reconcile alone re-enables the domain",
+                reconciled.get("action") == "unsuspended" and not disabled_on_node(),
+                reconciled,
+            )
+
+            # A stop between the two restores: a cancel marker lands while the node holds the pair.
+            write("change.txt", "damaged-again")
+            remove("added.txt")
+            second = management.create_pair_restore_job(
+                account, base_id, diff_id, force_restore=True, execute_inline=False, step_hold_seconds=6
+            ).unwrap()
+            token = second.parameters["pair_token"]
+            marker = f"/run/praho/chain-{domain_id}.cancelled.{token}"
+            progress = f"/run/praho/pair-{domain_id}.progress"
+            stopper_error: list[str] = []
+
+            def cancel_between_the_restores() -> None:
+                deadline = time.monotonic() + 600
+                while time.monotonic() < deadline:
+                    cancel = f"grep -q after_base {progress} 2>/dev/null && : > {marker} && echo hit"
+                    seen = self._docker("exec", node.container, "sh", "-c", cancel)
+                    if "hit" in seen.stdout:
+                        return
+                    time.sleep(0.2)
+                stopper_error.append("never saw the base restore finish")
+
+            stopper = threading.Thread(target=cancel_between_the_restores)
+            stopper.start()
+            virtualmin_tasks.run_virtualmin_restore(str(second.pk))
+            stopper.join(timeout=30)
+            second.refresh_from_db()
+            self._ok("the injected stop was delivered between the restores", not stopper_error, stopper_error)
+            self._ok("the job is in attention", second.status == "attention", (second.status, second.status_message))
+            steps = [c["step"] for c in second.parameters.get("pair_checkpoints", [])]
+            self._ok(
+                "it stopped after the base and before the differential", steps == ["barrier_up", "after_base"], steps
+            )
+            self._ok("the domain stays disabled", disabled_on_node())
+            self._ok(
+                "the maintenance page stays up", maintenance_up() and http_code(80) == "503" and http_code(443) == "503"
+            )
+            self._ok("the account stays excluded", account_has_active_operation(account))
+            self._ok(
+                "the node holds the base but not the differential's changes",
+                read("change.txt") == "v0" and read("added.txt") == "ABSENT",
+                (read("change.txt"), read("added.txt")),
+            )
+
+            resolved = resolve_pair_job(second, resolved_by="lab", note="stopped between the restores")
+            self._ok("the operator's resolution releases the node first", resolved.is_ok(), resolved)
+            self._ok(
+                "the maintenance page is down and the domain still disabled",
+                not maintenance_up() and disabled_on_node(),
+            )
+            self._ok("the stranded archives are removed", not self._staged(node), self._staged(node))
+            held = VirtualminAccount.objects.get(pk=account.pk)
+            self._ok(
+                "the half-restored account is held with its safety backup named",
+                held.restore_hold == "half_restored" and bool(held.restore_hold_safety_backup_id),
+                (held.restore_hold, held.restore_hold_safety_backup_id),
+            )
+            reconciled = virtualmin_tasks.reconcile_virtualmin_service_state(str(account.service_id))
+            self._ok(
+                "reconcile leaves the held domain disabled",
+                reconciled.get("action") == "operation_active" and disabled_on_node(),
+                reconciled,
+            )
+            backstop = virtualmin_tasks.reconcile_divergent_services_task()
+            self._ok(
+                "the divergence backstop leaves it alone too",
+                not backstop.get("queued") and disabled_on_node(),
+                backstop,
+            )
+            self._ok(
+                "the job is failed and the account released from the job",
+                VirtualminProvisioningJob.objects.get(pk=second.pk).status == "failed",
+            )
+            # Only an explicit staff decision brings it live: "Re-enable as is".
+            self._ok("staff re-enable it as it is", release_restore_hold(account.pk, how="lab", actor="lab"))
+            reconciled = virtualmin_tasks.reconcile_virtualmin_service_state(str(account.service_id))
+            self._ok(
+                "reconcile enables it only after that decision",
+                reconciled.get("action") == "unsuspended" and not disabled_on_node(),
+                reconciled,
+            )
+        finally:
+            if probe is not None:
+                node_exec(node.container, "touch", probe_stop)
+            SettingsService.update_setting(flag, False)
+            node_exec(
+                node.container,
+                "sh",
+                "-c",
+                'rm -f "$1"/keep.txt "$1"/change.txt "$1"/added.txt "$1"/delete-me.txt /etc/apache2/conf-enabled/zz-praho-maint-* '
+                '/run/praho/chain-"$2".* /run/praho/pair-"$2".* /run/praho/maint-"$2".pem "$3"/virtualmin_backup_* '
+                '&& virtualmin enable-domain --domain "$4" >/dev/null 2>&1; true',
+                "sh",
+                home,
+                domain_id,
+                "/var/lib/praho-transfer",
+                CHECK_DOMAIN,
+            )
+        logger.info("✅ [VirtualminLab] Pair restore checks passed")
+
+    def _fingerprint(self, node: LabNode, domain_id: str) -> str:
+        """The node's snapshot fingerprint, computed independently of the step's script."""
+        return node_exec(
+            node.container,
+            "sh",
+            "-c",
+            'f=/var/webmin/modules/virtual-server/incremental/"$1"; if [ -f "$f" ]; '
+            'then printf "%s:%s" "$(sha256sum < "$f" | cut -d" " -f1)" "$(stat -c %s "$f")"; else printf ABSENT; fi',
+            "sh",
+            domain_id,
+        ).strip()
 
     # ------------------------------------------------------------- check 5
 

@@ -288,4 +288,4 @@ class Command(BaseCommand):
         if created or not account.encrypted_password:
             account.set_password(secrets.token_urlsafe(18))
         account.server = server
-        account.save()
+        account.save(update_fields=["encrypted_password", "server", "updated_at"])

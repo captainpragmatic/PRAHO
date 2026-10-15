@@ -88,6 +88,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) | The Portal Serves Requests on Threads | Accepted | 2026-10-10 |
 | [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) | Media Lives on the Filesystem, or in a Private Bucket on Container Platforms | Accepted | 2026-10-12 |
 | [ADR-0058](ADR-0058-pending-totp-enrolment.md) | A TOTP Secret Waiting for Its First Code Lives in Its Own Row | Accepted | 2026-10-13 |
+| [ADR-0059](ADR-0059-differential-virtualmin-backups.md) | Differential Virtualmin Backups Are a Chain PRAHO Tracks and Fences | Accepted | 2026-10-15 |
 | [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) | The Virtualmin API User Is a Master Administrator, Locked Down | Accepted | 2026-10-14 |
 
 ### 🟡 Partially Superseded
@@ -143,6 +144,9 @@ Token & Inter-Service Auth
 
 Encryption Architecture
   ADR-0033 (AES-256-GCM consolidation) ──extended by──▶ ADR-0040 (row-bound encrypted JSON)
+
+Virtualmin Backups
+  ADR-0059 (differential chain) ──related──▶ ADR-0051 (enabled-state ownership), ADR-0060 (API user)
 
 Node Access
   ADR-0060 (locked-down master-admin API user) ──related──▶ ADR-0033 (vault-held API credential)
@@ -213,13 +217,14 @@ Billing Ownership
 - [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) — PRAHO-owned subscriptions, consent, collection, and usage billing
 - [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) — provenanced FX snapshots and multi-currency e-Factura VAT
 - [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) — every settled refund issues a storno credit note: amount, allocation, numbering, communication, e-Factura gate
+- [ADR-0059](ADR-0059-differential-virtualmin-backups.md) — differential Virtualmin backups: a chain tracked on the account with epoch-fenced transitions, node-side binding under a lock with fingerprints, a two-layer write barrier for pair restores, retention that keeps bases, an hourly scheduler; the flag gates creation only
 
 ---
 
 ## Statistics
 
-- **Total ADRs**: 59 (ADR-0001 through ADR-0058, and ADR-0060)
-- **Active**: 53 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 60 (ADR-0001 through ADR-0060)
+- **Active**: 54 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0059 (reserved for the differential-backup decision, #498), then ADR-0061
+- **Next available**: ADR-0061

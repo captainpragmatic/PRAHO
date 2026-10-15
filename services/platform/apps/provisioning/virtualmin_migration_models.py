@@ -163,22 +163,59 @@ def account_has_active_migration(account: VirtualminAccount) -> bool:
     return VirtualminMigration.objects.filter(account_id=account.pk).exclude(status__in=_TERMINAL_STATUSES).exists()
 
 
-# Backup/restore job statuses that hold the account-operation exclusion.
+# Job statuses that hold the account-operation exclusion.
 # "attention" is non-terminal by design: an uncertain mutation keeps ownership
 # until an operator resolves it.
 _ACTIVE_JOB_STATUSES = ("pending", "running", "attention")
+ACTIVE_JOB_STATUSES = _ACTIVE_JOB_STATUSES
+
+# Operations that take the account exclusion: backups and restores, and deletion
+# (a delete mutates the very domain a backup or restore is reading or writing).
+_EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain")
 
 
-def account_has_active_operation(account: VirtualminAccount) -> bool:
-    """Two-sided admission: migrations and backup/restore jobs mutually exclude."""
+def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: uuid.UUID | None = None) -> bool:
+    """Two-sided admission: migrations, backups, restores and deletes mutually exclude.
+
+    ``ignore_job_id`` names the job asking: a retried job is itself the account's
+    operation and must not refuse itself.
+    """
     from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
     if account_has_active_migration(account):
         return True
-    return VirtualminProvisioningJob.objects.filter(
+    active = VirtualminProvisioningJob.objects.filter(
         account_id=account.pk,
-        operation__in=("backup_domain", "restore_domain"),
+        operation__in=_EXCLUSIVE_JOB_OPERATIONS,
         status__in=_ACTIVE_JOB_STATUSES,
+    )
+    if ignore_job_id is not None:
+        active = active.exclude(pk=ignore_job_id)
+    return active.exists()
+
+
+def account_blocks_reconcile(account: VirtualminAccount) -> bool:
+    """True when the state reconciler must leave the account alone.
+
+    Narrower than ``account_has_active_operation`` (which admission uses): the reconciler writes
+    the domain's enabled state, so it yields to what writes or deletes the domain - a migration,
+    a restore or delete in any active state, any job currently running - and to a restore hold (a
+    half-restored domain that only staff may release). A backup that is
+    queued, or a chain job parked in attention, does not write the domain, so a suspend or an
+    unsuspend after payment must not wait for an operator to resolve it.
+    """
+    from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415  # Circular
+
+    if account_has_active_migration(account):
+        return True
+    # A half-restored domain stays disabled until staff decide (re-enable it, or restore the safety backup).
+    # Read from the database, not from the possibly stale instance the caller holds.
+    if VirtualminAccount.objects.filter(pk=account.pk).exclude(restore_hold="").exists():
+        return True
+    return VirtualminProvisioningJob.objects.filter(
+        models.Q(operation__in=("restore_domain", "delete_domain"), status__in=_ACTIVE_JOB_STATUSES)
+        | models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status="running"),
+        account_id=account.pk,
     ).exists()
 
 
