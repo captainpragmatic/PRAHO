@@ -319,11 +319,16 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
     note_sink: Callable[[dict[str, Any]], int] | None,
 ) -> Result[dict[str, Any], str]:
     """The pair restore workflow (see the module docstring). Never raises for an expected failure."""
-    from .spool import release_spool_reservation, renew_spool_reservation  # noqa: PLC0415
+    from .spool import (  # noqa: PLC0415
+        estimated_transfer_bytes,
+        release_spool_reservation,
+        renew_spool_reservation,
+    )
     from .virtualmin_backup_service import (  # noqa: PLC0415  # Circular
         CHAIN_ROLE_STANDALONE,
         BackupConfig,
         VirtualminBackupService,
+        backup_task_timeout,
     )
 
     if not (config.restore_email and config.restore_databases and config.restore_files and config.restore_ssl):
@@ -370,6 +375,10 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             )
 
         # ---- one standalone safety backup of the target -------------------------------------------
+        # The two archives sit in the spool while it runs: their leases are extended past its own budget.
+        safety_lease = lease + backup_task_timeout(estimated_transfer_bytes(account.current_disk_usage_mb or 0))
+        for _path, name in held:
+            renew_spool_reservation(name, safety_lease)
         service._update_restore_progress(restore_id, "safety_backup", 35)
         safety = VirtualminBackupService(target_server).backup_domain(
             account=account,
@@ -390,6 +399,8 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         # ---- push both archives; the leases of what is still held are renewed at every stage -----
         for label in ("base", "differential"):
             if not service._owns_execution():
+                # Nothing destructive was issued: what an earlier push left on the node goes with this runner.
+                determinate = True
                 return _superseded()
             for _path, name in held:
                 renew_spool_reservation(name, lease)

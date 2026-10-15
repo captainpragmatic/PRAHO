@@ -161,6 +161,9 @@ class PairRestoreCase(ChainFixtures, ExclusionCase):
 
         def push(service: Any, server: Any, archive_name: str, sha: str) -> Any:
             self.events.append(f"push {archive_name[18:20]}")
+            self.pushed.append(archive_name)
+            if self.after_push is not None:
+                self.after_push(len(self.pushed))
             return self.push_result
 
         def node(server: Any, variables: dict[str, Any], **kwargs: Any) -> Any:
@@ -170,6 +173,8 @@ class PairRestoreCase(ChainFixtures, ExclusionCase):
             return self.node_outcome
 
         self.push_result: Any = Ok(None)
+        self.pushed: list[str] = []
+        self.after_push: Any = None
         self.node_outcome: Any = node_result()
         self.node_variables: dict[str, Any] = {}
         self.account_status_during_step = ""
@@ -340,6 +345,41 @@ class PairWorkflowTests(PairRestoreCase):
         self.assertFalse(any(event.startswith("push") for event in self.events))
         self.assertEqual(job.status, "attention", "the takeover's verdict stands")
 
+    def test_the_spool_leases_cover_the_safety_backup(self) -> None:
+        # The two archives sit in the spool while the safety backup runs; their leases must outlive it.
+        job = self.admit().unwrap()
+        renewals: list[tuple[str, int]] = []
+        at_safety_backup: list[int] = []
+
+        def safety_backup(*args: Any, **kwargs: Any) -> Any:
+            at_safety_backup.append(len(renewals))
+            return Ok({"backup_id": "safety-1"})
+
+        with (
+            patch("apps.provisioning.spool.renew_spool_reservation", side_effect=lambda n, t: renewals.append((n, t))),
+            patch.object(VirtualminBackupService, "backup_domain", side_effect=safety_backup),
+        ):
+            self.execute(job)
+        self.assertEqual(at_safety_backup, [2], "both held archives were renewed before the safety backup started")
+        transfer_lease = 3600 + 600
+        self.assertTrue(
+            all(ttl > transfer_lease for _name, ttl in renewals[:2]),
+            "the lease is the transfer lease plus the safety backup's own budget",
+        )
+
+    def test_a_runner_superseded_at_the_second_push_cleans_the_first_archive(self) -> None:
+        job = self.admit().unwrap()
+
+        def take_over_after_the_first_push(count: int) -> None:
+            if count == 1:
+                VirtualminProvisioningJob.take_over_execution(job.pk, "attention", "Worker interrupted")
+
+        self.after_push = take_over_after_the_first_push
+        job = self.execute(job)
+        self.assertEqual(self.pushed, [BASE_ARCHIVE], "the second archive was never pushed")
+        self.assertEqual(self.cleaned, [BASE_ARCHIVE], "the first archive does not stay behind on the node")
+        self.assertNotIn("node step", self.events)
+
     def test_a_push_failure_is_definite_and_removes_what_was_pushed(self) -> None:
         results = iter([Ok(None), Err("copy failed", retriability=Retriability.NOT_RETRIABLE)])
         self.push_result = None
@@ -475,5 +515,6 @@ class PairBudgetSettingsTests(PairRestoreCase):
         with patch("apps.provisioning.spool.renew_spool_reservation", side_effect=lambda name, ttl: leases.append(ttl)):
             outcome = pair.restore_pair(VirtualminBackupService(self.server), self.account, config, self.server, "r-1", None)
         self.assertTrue(outcome.is_ok(), outcome)
-        self.assertEqual(set(leases), {1234 + 600})
-        self.assertEqual(len(leases), 4, "both held archives, before each of the two pushes")
+        self.assertEqual(len(leases), 6, "both held archives, before the safety backup and before each push")
+        self.assertEqual(set(leases[2:]), {1234 + 600}, "the push stages use the transfer lease")
+        self.assertTrue(all(ttl > 1234 + 600 for ttl in leases[:2]), "the safety backup stage adds its own budget")
