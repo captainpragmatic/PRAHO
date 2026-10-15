@@ -79,13 +79,77 @@ def create(dump: Path) -> Path:
     return destination
 
 
+def validate(dump: Path, database_major: int, *, portal: bool) -> dict[str, str]:
+    """Bind the exact pair to source image IDs and the running database major, never an mtime."""
+    data: object = json.loads(manifest_path(dump).read_text())
+    if not isinstance(data, dict) or data.get("format_version") != 1 or data.get("database_major") != database_major:
+        raise ValueError("unsupported metadata or database major mismatch")
+    media = dump.with_name(dump.name.removesuffix(".sql.gz") + ".media.tar.gz")
+    for key, path in (("database", dump), ("media", media)):
+        artifact = data.get(key)
+        if (
+            not isinstance(artifact, dict)
+            or artifact.get("file") != path.name
+            or artifact.get("sha256") != checksum(path)
+        ):
+            raise ValueError("backup pair filename or checksum mismatch")
+    images = data.get("images")
+    if not isinstance(images, dict):
+        raise ValueError("source application image metadata is missing")
+    expected: dict[str, str] = {}
+    for role in ("platform", "portal") if portal else ("platform",):
+        image = images.get(role)
+        if not isinstance(image, dict) or not isinstance(image.get("id"), str) or not IMAGE_ID.fullmatch(image["id"]):
+            raise ValueError("source application image ID is missing or invalid")
+        expected[role] = image["id"]
+    if "qcluster" in images:
+        worker = images["qcluster"]
+        if not isinstance(worker, dict) or worker.get("id") != expected["platform"]:
+            raise ValueError("source worker and Platform images differ; operator review required")
+    return expected
+
+
+def compose_images(*, portal: bool) -> dict[str, str]:
+    """Read Compose JSON in-process and emit image references only, never its environment values."""
+    data: object = json.load(sys.stdin)
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        raise ValueError("Compose service configuration is missing")
+    references: dict[str, str] = {}
+    for role in ("platform", "portal", "qcluster") if portal else ("platform", "qcluster"):
+        service = services.get(role)
+        reference = service.get("image") if isinstance(service, dict) else None
+        if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]*", reference):
+            raise ValueError("target application image reference is missing or invalid")
+        references[role] = reference
+    if references.pop("qcluster") != references["platform"]:
+        raise ValueError("target worker and Platform image references differ")
+    return references
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("create",))
-    parser.add_argument("dump", type=Path)
+    commands = parser.add_subparsers(dest="action", required=True)
+    producer = commands.add_parser("create")
+    producer.add_argument("dump", type=Path)
+    consumer = commands.add_parser("validate")
+    consumer.add_argument("dump", type=Path)
+    consumer.add_argument("--database-major", type=int, required=True)
+    consumer.add_argument("--portal", action="store_true")
+    images = commands.add_parser("images")
+    images.add_argument("--portal", action="store_true")
     args = parser.parse_args()
     try:
-        create(args.dump)
+        if args.action == "create":
+            create(args.dump)
+        else:
+            result = (
+                validate(args.dump, args.database_major, portal=args.portal)
+                if args.action == "validate"
+                else compose_images(portal=args.portal)
+            )
+            for role, value in result.items():
+                print(f"{role}={value}")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Backup metadata failed: {error}", file=sys.stderr)
         return 1

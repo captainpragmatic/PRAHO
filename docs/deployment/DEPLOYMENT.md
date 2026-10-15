@@ -937,11 +937,19 @@ make rollback-db
 
 ### Full Rollback
 
-Roll back both version and database:
+Use `make rollback-full VERSION=v1.2.3 BACKUP=/private/backups/praho_backup_SELECTED.sql.gz`
+(`DEPLOY_TYPE=platform-only` on a platform-only host, `DEPLOY_ENV=staging` for staging).
+The matching media archive and metadata must accompany that explicit dump. The command verifies
+both checksums, PostgreSQL major and immutable target application image IDs before downtime.
+Missing targets are pulled and checked first. A newest timestamp or tag name alone never establishes
+compatibility. Legacy backups remain usable with standalone restore and manual operator planning.
 
-```bash
-./deploy/scripts/rollback.sh full v1.2.3
-```
+After confirmation, restore takes a mandatory safety backup and leaves all local writers stopped.
+Only then does Compose start the selected old images with the same local topology. The current
+application entrypoint never runs against the restored old database. SQL/media or target readiness
+failures require operator recovery; no automatic data rollback runs. A platform-only host creates
+no Portal; coordinate any remote Portal release separately. Reserve disk space for private staging
+and the safety backup. The env file is not edited, so a later deploy still uses its configured version.
 
 ### Rollback on a native server
 
