@@ -12,7 +12,7 @@
 #   2. barrier layer (b): disable-domain, verified;
 #   3. restore the base, then re-apply and verify both layers;
 #   4. restore the differential, then re-apply and verify both layers;
-#   5. verify, and only then take the maintenance virtual host down.
+#   5. verify, and only then take the 503 section down.
 #
 # The domain is left DISABLED on success: enabling it again belongs to PRAHO's reconcile
 # (ADR-0051), never to this script. Any failure after the barrier is up leaves both layers up
@@ -181,7 +181,7 @@ if ! listed_id=$(virtualmin list-domains --domain "$domain" --id-only 2>/dev/nul
   exit 0
 fi
 
-# ---- layer (a): the maintenance virtual host; layer (b): disable-domain -----------------------
+# ---- layer (a): the server-level 503 section; layer (b): disable-domain -----------------------
 pre_disabled=false
 is_disabled && pre_disabled=true
 barrier_up

@@ -1,13 +1,13 @@
 ---
 # Restore a base backup and its differential as ONE locked node execution, or release a pair
 # restore that stopped midway. files/praho-pair-restore.sh does all of it under the per-domain
-# chain lock: a maintenance virtual host (503) plus disable-domain as a two-layer write barrier,
+# chain lock: a server-level Apache section answering 503 (a virtual host is rewritten by restore-domain) plus disable-domain as a two-layer write barrier,
 # re-applied and verified after each restore step. The domain is left disabled; PRAHO's
 # reconcile (ADR-0051) is the only thing that enables it again.
 #
 #   pair_action=restore  restores pair_base_archive, then pair_diff_archive (both already pushed
 #                        to the private staging directory), verifying their sha256 first
-#   pair_action=release  writes the job's cancel marker and takes the maintenance host down
+#   pair_action=release  writes the job's cancel marker and takes the 503 section down
 - name: Restore a backup pair behind a write barrier, or release one
   hosts: all
   gather_facts: false

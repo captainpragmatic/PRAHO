@@ -15,7 +15,7 @@ The workflow, in order, and what each stage may leave behind:
 3. one standalone safety backup of the target;
 4. both archives pushed to the node's private staging directory;
 5. ONE locked node execution (files/praho-pair-restore.sh) behind a two-layer write barrier: a
-   maintenance virtual host answering 503 plus disable-domain, re-applied and verified after
+   server-level Apache section (not a virtual host) answering 503 plus disable-domain, re-applied and verified after
    each restore step;
 6. verification. The domain is left disabled: PRAHO's reconcile (ADR-0051) enables it again.
 
@@ -123,9 +123,9 @@ class PairStepResult:
     def barrier_broken(self) -> str | None:
         """Why a result that claims success cannot be believed, or None.
 
-        Every checkpoint must show the domain disabled; every one taken while the maintenance host
+        Every checkpoint must show the domain disabled; every one taken while the 503 section
         was supposed to be up must show it answering 503. (The last checkpoint is taken after the
-        maintenance host came down and only has to show the domain still disabled.)
+        503 section came down and only has to show the domain still disabled.)
         """
         for checkpoint in self.checkpoints:
             if checkpoint.step == "barrier_down":
@@ -527,7 +527,7 @@ def resolve_pair_job(job: VirtualminProvisioningJob, *, resolved_by: str, note: 
     """Operator resolution of a pair restore parked in attention.
 
     The node is asked to release the pair: under the per-domain lock it writes the job's cancel
-    marker (a late invocation can never start), takes the maintenance host down and leaves the
+    marker (a late invocation can never start), takes the 503 section down and leaves the
     domain disabled. Only when that is confirmed is the job failed and the account released; the
     account stays suspended in PRAHO's view, so reconcile enables the domain again (ADR-0051)
     when its service is active. A job that never reached the node needs no release.

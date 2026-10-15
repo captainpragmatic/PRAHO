@@ -170,6 +170,7 @@ python manage.py qcluster
 - Health Check: Every hour
 - Statistics Update: Every 6 hours
 - Retry Failed Jobs: Every 15 minutes
+- Chain backups (differential, flag-gated): Every hour
 
 ## 🚀 Usage Examples
 
@@ -323,14 +324,58 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
   `base` omits it; config-only or partial backups cannot be a base. The role
   is stored in the job parameters (a job without one is standalone) and in the
   manifest. Any restore still deletes the base (contract Q8).
+- Differential chains (ADR-0059, off by default behind
+  `provisioning.incremental_backups_enabled`):
+  - A **base** is a complete backup that resets the node's snapshot; a
+    **differential** holds only what changed since the live base. Neither goes
+    through remote.cgi: each is one allowlisted playbook run
+    (`virtualmin_chain_backup.yml`) that, under `flock` on a per-domain lock,
+    fingerprints the snapshot before and after the backup and refuses a
+    differential whose expected fingerprint differs. The chain lives on the
+    account (`chain_base`, `chain_base_fingerprint`, `chain_epoch`) and every
+    transition is fenced by the job's token and the epoch
+    (`virtualmin_chain.py`).
+  - Anything that can reset the snapshot (a restore, a new base, a migration,
+    a delete) clears the chain in its admission transaction. A step that is
+    uncertain (timeout, ambiguous error, dead worker) parks in `attention` and
+    keeps the account; "Confirm stopped" writes a cancel marker on the node,
+    and "Node lost" (failed server or destroyed deployment only) releases a
+    chain job or a pair restore without it.
+  - **Pair restore** (`virtualmin_pair_restore.py`, `virtualmin_pair_restore.yml`):
+    base then differential in one locked node execution, behind a server-level
+    Apache `<If>` section answering 503 plus `disable-domain`, re-applied and
+    verified after each restore. Files deleted after the base was taken
+    reappear, and databases come from the differential's full dump. A
+    maintenance virtual host is not a barrier: Virtualmin rewrites it during
+    `restore-domain`. The domain stays disabled and the account suspended;
+    reconcile (ADR-0051) enables it.
+  - **Scheduler** (`virtualmin_chain_schedule.py`): the hourly Django-Q
+    schedule `virtualmin-chain-backups` takes a base when an account has no
+    live base or the base is older than `provisioning.chain_base_interval_days`
+    (7), and a differential when the last backup of the chain is older than
+    `provisioning.chain_differential_interval_hours` (24). It decides from the
+    chain, never from error text. Failures that leave the chain alone back off
+    (30 minutes, doubling to a day) and raise one audit alert at three in a
+    row; the node's evidence that a snapshot is absent or different ends the
+    chain and the next run takes a base. At most 20 jobs are admitted per
+    sweep. Register it with `setup_virtualmin_scheduled_tasks`.
+  - Staff: "Take base backup", "Take differential backup" (account page, only
+    while the flag is on) and "Restore pair" (always). CLI:
+    `virtualmin_backup backup <domain> --chain-role base|differential` and
+    `virtualmin_backup restore <domain> <base-id> --differential-backup-id <id>
+    --force-restore`. No bulk differential actions.
+  - Retention extends a base while a retained differential names it, and
+    deletion refuses a base any differential names. The flag gates only
+    creating bases and differentials; restores, retention and deletion of
+    existing pairs work whatever it says.
 - Restores: fail-closed gates (backup↔account authorization, target-ownership
   that `force_restore` can never override, live-domain force requirement,
   pre-restore safety backup) → push playbook → `restore-domain` with an
   explicit-success envelope → post-restore verification. Ambiguous outcomes
   park the job in the non-terminal `attention` status for operator review.
 - Budgets derive from each job's size estimate against
-  `provisioning.backup_min_transfer_mib_s`; full + config backups only
-  (incremental was removed until a real incremental contract exists).
+  `provisioning.backup_min_transfer_mib_s`; chain steps and pair restores add
+  their own stage budgets (`backup_task_timeout`, `pair_restore_task_timeout`).
 - remote.cgi turns each parameter into argv. An empty value is a bare
   `--flag`; any other value is `--flag value`; a list repeats the pair.
   Flags must therefore be sent as `""`, never `True`. Virtualmin 8.3.0 rejects
