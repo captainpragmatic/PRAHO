@@ -27111,3 +27111,63 @@ msgstr "Introduceți un CNP valid."
 
 msgid "A CNP was set on the tax profile."
 msgstr "A fost setat un CNP în profilul fiscal."
+
+msgid "Complete the registrant identity fields required by this domain registrar."
+msgstr "Completați datele de identificare ale titularului solicitate de acest registrator de domenii."
+
+msgid "Current prices are unavailable. Please try again later."
+msgstr "Prețurile curente nu sunt disponibile. Încercați din nou mai târziu."
+
+msgid "Domain is available"
+msgstr "Domeniul este disponibil"
+
+msgid "Enter one domain per order line."
+msgstr "Introduceți un singur domeniu pe fiecare linie de comandă."
+
+msgid "Register a domain"
+msgstr "Înregistrează un domeniu"
+
+msgid "Transfer a domain"
+msgstr "Transferă un domeniu"
+
+msgid "Domain action"
+msgstr "Operațiune pentru domeniu"
+
+msgid "Check availability"
+msgstr "Verifică disponibilitatea"
+
+msgid "Registration price"
+msgstr "Prețul înregistrării"
+
+msgid "Your registrar requires a CNP at checkout."
+msgstr "Registratorul solicită un CNP la finalizarea comenzii."
+
+msgid "Check domain prices"
+msgstr "Verifică prețurile domeniilor"
+
+msgid "Registrant identity"
+msgstr "Identitatea titularului"
+
+msgid "Save registrant identity"
+msgstr "Salvează identitatea titularului"
+
+msgid "Registrant identity saved."
+msgstr "Identitatea titularului a fost salvată."
+
+msgid "Could not save registrant identity. Enter a valid CNP and try again."
+msgstr "Identitatea titularului nu a putut fi salvată. Introduceți un CNP valid și încercați din nou."
+
+msgid "Transfer code received."
+msgstr "Codul de transfer a fost primit."
+
+msgid "Could not save the transfer code. Check the code and the order status."
+msgstr "Codul de transfer nu a putut fi salvat. Verificați codul și starea comenzii."
+
+msgid "Save transfer code"
+msgstr "Salvează codul de transfer"
+
+msgid "Domain name (required)"
+msgstr "Nume de domeniu (obligatoriu)"
+
+msgid "Back to catalog"
+msgstr "Înapoi la catalog"

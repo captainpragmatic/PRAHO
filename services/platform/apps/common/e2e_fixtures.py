@@ -437,6 +437,39 @@ def _order_edit_scenario(key: str) -> dict[str, Any]:
     }
 
 
+def _domain_checkout_scenario(key: str) -> dict[str, str | int]:
+    """An owned consumer with no fiscal identifier; the browser places the order itself."""
+    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+    from apps.products.models import Product  # noqa: PLC0415
+    from apps.users.models import CustomerMembership, UserProfile  # noqa: PLC0415
+
+    customer = _customer(f"domain-{key}", name=f"E2E Domain {key}")
+    customer.customer_type = "individual"
+    customer.company_name = ""
+    customer.save(update_fields=["customer_type", "company_name", "updated_at"])
+    profile = CustomerTaxProfile.objects.get(customer=customer)
+    profile.cui = ""
+    profile.vat_number = ""
+    profile.is_vat_payer = False
+    profile.save(update_fields=["cui", "vat_number", "is_vat_payer", "updated_at"])
+    user = _user(f"domain-{key}@e2e.test")
+    UserProfile.objects.update_or_create(user=user, defaults={"preferred_language": "en"})
+    CustomerMembership.objects.create(user=user, customer=customer, role="owner", is_primary=True)
+    call_command("ensure_domain_product", stdout=StringIO())
+    product = Product.objects.filter(product_type="domain").order_by("created_at").first()
+    if product is None:
+        raise CommandError("No domain product was created")
+    return {
+        "customer_id": customer.pk,
+        "user_id": user.pk,
+        "email": user.email,
+        "password": PASSWORD,
+        "product_slug": product.slug,
+        "registration_domain": f"register-{key}.ro",
+        "transfer_domain": f"transfer-{key}.ro",
+    }
+
+
 @transaction.atomic
 def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
     from apps.customers.models import CustomerAddress  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -453,6 +486,8 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             meta={"fixture_owner": OWNER, "fixture_name": key},
         )
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
+    if scenario == "domain_checkout":
+        return _domain_checkout_scenario(key)
     if scenario == "order_edit":
         return _order_edit_scenario(key)
     if scenario == "staff_mfa":

@@ -2681,7 +2681,7 @@ class Command(BaseCommand):
 
         tld_data = [
             {
-                "extension": ".com",
+                "extension": "com",
                 "description": "Commercial domain",
                 "registration_price_cents": 4999,
                 "renewal_price_cents": 5999,
@@ -2691,7 +2691,7 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
             {
-                "extension": ".ro",
+                "extension": "ro",
                 "description": "Romania country-code domain",
                 "registration_price_cents": 2999,
                 "renewal_price_cents": 2999,
@@ -2702,7 +2702,7 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
             {
-                "extension": ".eu",
+                "extension": "eu",
                 "description": "European Union domain",
                 "registration_price_cents": 3499,
                 "renewal_price_cents": 3999,
@@ -2711,7 +2711,7 @@ class Command(BaseCommand):
                 "grace_period_days": 40,
             },
             {
-                "extension": ".net",
+                "extension": "net",
                 "description": "Network infrastructure domain",
                 "registration_price_cents": 5499,
                 "renewal_price_cents": 5999,
@@ -2720,7 +2720,7 @@ class Command(BaseCommand):
                 "grace_period_days": 45,
             },
             {
-                "extension": ".org",
+                "extension": "org",
                 "description": "Organization domain",
                 "registration_price_cents": 4999,
                 "renewal_price_cents": 5499,
@@ -2729,7 +2729,7 @@ class Command(BaseCommand):
                 "grace_period_days": 45,
             },
             {
-                "extension": ".tech",
+                "extension": "tech",
                 "description": "Technology domain",
                 "registration_price_cents": 1999,
                 "renewal_price_cents": 4999,
@@ -2785,13 +2785,13 @@ class Command(BaseCommand):
 
         # TLD → Registrar assignments
         assignments = [
-            (".com", "namecheap", True, 1),
-            (".com", "godaddy", False, 2),
-            (".ro", "rotld", True, 1),
-            (".eu", "namecheap", True, 1),
-            (".net", "namecheap", True, 1),
-            (".org", "namecheap", True, 1),
-            (".tech", "namecheap", True, 1),
+            ("com", "namecheap", True, 1),
+            ("com", "godaddy", False, 2),
+            ("ro", "rotld", True, 1),
+            ("eu", "namecheap", True, 1),
+            ("net", "namecheap", True, 1),
+            ("org", "namecheap", True, 1),
+            ("tech", "namecheap", True, 1),
         ]
 
         for ext, reg_name, is_primary, priority in assignments:
@@ -2822,7 +2822,7 @@ class Command(BaseCommand):
             tld = _cycle(tlds, i)
             registrar = _cycle(registrars, i)
             status = _cycle(domain_statuses, i)
-            domain_name = f"{fake.domain_word()}-{customer.id}-{i}{tld.extension}"
+            domain_name = f"{fake.domain_word()}-{customer.id}-{i}.{tld.extension.lstrip('.')}"
 
             domain_kwargs: dict[str, Any] = {
                 "name": domain_name,

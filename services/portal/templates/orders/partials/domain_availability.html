@@ -1,0 +1,20 @@
+{% load i18n ui_components formatting %}
+{% if availability.success %}
+  {% if availability.orderable %}
+    {% if availability.available %}
+      {% alert _("Domain is available") variant="success" %}
+    {% else %}
+      {% alert _("Domain is not available") variant="warning" %}
+    {% endif %}
+    <p class="text-sm text-slate-200">{{ availability.domain_name }}</p>
+    <dl class="text-sm text-slate-300">
+      <dt>{% trans "Registration price" %}</dt><dd>{{ availability.register_price_cents|cents_to_currency|romanian_currency:availability.currency }}</dd>
+      <dt>{% trans "Transfer price" %}</dt><dd>{{ availability.transfer_price_cents|cents_to_currency|romanian_currency:availability.currency }}</dd>
+    </dl>
+    {% if "cnp" in availability.requires %}<p class="text-sm text-slate-300">{% trans "Your registrar requires a CNP at checkout." %}</p>{% endif %}
+  {% else %}
+    {% alert _("This domain extension cannot be ordered right now.") variant="warning" %}
+  {% endif %}
+{% else %}
+  {% alert availability.error variant="warning" %}
+{% endif %}

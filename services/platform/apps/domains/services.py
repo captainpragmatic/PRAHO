@@ -1436,7 +1436,7 @@ class DomainOrderService:
 
     @staticmethod
     @transaction.atomic
-    def create_domain_order_item(  # Domain order requires multiple configuration parameters  # domain registration fields  # noqa: PLR0913  # Business logic parameters
+    def create_domain_order_item(  # noqa: C901, PLR0911, PLR0912, PLR0913  # Validate the period, registrar identity and ownership before recording a domain item.
         order: Order,
         domain_name: str,
         action: str,
@@ -1479,6 +1479,12 @@ class DomainOrderService:
         registrar = registrar or (
             RegistrarService.select_best_registrar_for_tld(tld) if action in ORDERABLE_DOMAIN_ACTIONS else None
         )
+
+        if order_item is not None and registrar is not None:
+            from .registrants import missing_registrant_fields, registrant_identity_error  # noqa: PLC0415
+
+            if missing_registrant_fields(registrar, order.customer, action):
+                return False, registrant_identity_error()
 
         if action in {"register", "renew"}:
             period_error = (

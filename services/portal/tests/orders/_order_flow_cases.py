@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 from django.contrib.sessions.backends.cache import SessionStore
 from django.test import Client, TestCase, override_settings
 
+SEAL_FIXTURE = "test-secret-key-for-hmac-seal"  # Public signing input used only by these tests.
+
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
     "CACHES": {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
@@ -430,7 +432,7 @@ class TestProductTypeInCartItem(TestCase):
         mock_cls.return_value = self._make_api_mock("domain")
 
         cart = GDPRCompliantCartSession(self.session)
-        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="annual")
+        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="annual", domain_name="example.ro")
 
         items = cart.get_items()
         self.assertIn("product_type", items[0])
@@ -880,7 +882,7 @@ class TestStripeFailureRedirectsToConfirmation(TestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(**_CACHE_SETTINGS, SECRET_KEY="test-secret-key-for-hmac-seal")
+@override_settings(**_CACHE_SETTINGS, SECRET_KEY=SEAL_FIXTURE)
 class TestPriceSealingRequiredKeys(TestCase):
     """seal_price_data must return all required fields and produce deterministic signatures."""
 
@@ -911,7 +913,7 @@ class TestPriceSealingRequiredKeys(TestCase):
 
         price_data = {"price_cents": 2999, "currency": "RON"}
         client_ip = "10.0.0.1"
-        secret_key = "test-secret-key-for-hmac-seal"
+        secret_key = SEAL_FIXTURE
         timestamp = 1700000000
         nonce = "abc123"
 

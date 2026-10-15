@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -380,8 +381,11 @@ class GDPRCompliantCartSession:
             raise ValidationError(_("Current prices are unavailable. Please try again later.")) from e
 
         # Validate domain requirement
-        if product_data.get("requires_domain") and not domain_name:
+        if (product_data.get("requires_domain") or product_data.get("product_type") == "domain") and not domain_name:
             raise ValidationError(_("This product requires a domain name"))
+
+        if product_data.get("product_type") == "domain" and quantity != 1:
+            raise ValidationError(_("Enter one domain per order line."))
 
         # Validate and sanitize config
         clean_config = OrderInputValidator.validate_config(config or {}, product_data.get("product_type", ""))
@@ -392,7 +396,9 @@ class GDPRCompliantCartSession:
         # product_slug is the stable public identifier used for all API calls.
         try:
             item = {
-                "item_id": self._generate_item_id(product_slug, billing_period),
+                "item_id": self._generate_item_id(
+                    product_slug, billing_period, domain_name if product_data.get("product_type") == "domain" else ""
+                ),
                 "product_slug": product_slug,
                 "product_name": product_data.get("name") or product_slug,
                 "product_type": product_data.get("product_type", ""),
@@ -409,7 +415,7 @@ class GDPRCompliantCartSession:
             raise
 
         # Update or add item (same product + billing period = update quantity)
-        existing_index = self._find_item_index(product_slug, billing_period)
+        existing_index = self._find_item_index(product_slug, billing_period, domain_name)
         if existing_index >= 0:
             self.cart["items"][existing_index] = item
             logger.info(f"🔄 [Cart] Updated existing item: {product_slug}")
@@ -421,12 +427,18 @@ class GDPRCompliantCartSession:
 
         self._save_cart()
 
-    def update_item_quantity(self, product_slug: str, billing_period: str, quantity: int) -> None:
+    def update_item_quantity(
+        self, product_slug: str, billing_period: str, quantity: int, domain_name: str = ""
+    ) -> None:
         """Update quantity for existing cart item"""
         quantity = OrderInputValidator.validate_quantity(quantity)
 
-        item_index = self._find_item_index(product_slug, billing_period)
+        item_index = self._find_item_index(
+            product_slug, billing_period, OrderInputValidator.validate_domain_name(domain_name)
+        )
         if item_index >= 0:
+            if self.cart["items"][item_index].get("product_type") == "domain" and quantity != 1:
+                raise ValidationError(_("Enter one domain per order line."))
             self.cart["items"][item_index]["quantity"] = quantity
             self.cart["items"][item_index]["updated_at"] = timezone.now().isoformat()
             self._save_cart()
@@ -434,9 +446,11 @@ class GDPRCompliantCartSession:
         else:
             raise ValidationError(_("Product not found in cart"))
 
-    def remove_item(self, product_slug: str, billing_period: str) -> None:
+    def remove_item(self, product_slug: str, billing_period: str, domain_name: str = "") -> None:
         """Remove item from cart"""
-        item_index = self._find_item_index(product_slug, billing_period)
+        item_index = self._find_item_index(
+            product_slug, billing_period, OrderInputValidator.validate_domain_name(domain_name)
+        )
         if item_index >= 0:
             removed_item = self.cart["items"].pop(item_index)
             self._save_cart()
@@ -467,14 +481,19 @@ class GDPRCompliantCartSession:
         """Check if cart has any items"""
         return self.get_item_count() > 0
 
-    def _generate_item_id(self, product_slug: str, billing_period: str) -> str:
+    def _generate_item_id(self, product_slug: str, billing_period: str, domain_name: str = "") -> str:
         """Generate deterministic item id for product/billing combination."""
-        return hashlib.sha256(f"{product_slug}:{billing_period}".encode()).hexdigest()[:24]
+        identity = f"{product_slug}:{billing_period}" + (f":{domain_name}" if domain_name else "")
+        return hashlib.sha256(identity.encode()).hexdigest()[:24]
 
-    def _find_item_index(self, product_slug: str, billing_period: str) -> int:
+    def _find_item_index(self, product_slug: str, billing_period: str, domain_name: str = "") -> int:
         """Find index of item in cart by product and billing period"""
         for index, item in enumerate(self.cart.get("items", [])):
-            if item["product_slug"] == product_slug and item["billing_period"] == billing_period:
+            if (
+                item["product_slug"] == product_slug
+                and item["billing_period"] == billing_period
+                and (item.get("product_type") != "domain" or item.get("domain_name") == domain_name)
+            ):
                 return index
         return -1
 
@@ -718,7 +737,12 @@ def _checkout_requirements(value: object) -> dict[str, Any]:
         uuid.UUID(str(terms.get("document_id")))
     except ValueError:
         return none
-    return {"terms_document": terms, "early_start_required": value.get("early_start_required") is True}
+    result = {"terms_document": terms, "early_start_required": value.get("early_start_required") is True}
+    if isinstance(value.get("registrant_requires"), list):
+        result["registrant_requires"] = [
+            field for field in value["registrant_requires"] if field in ("cnp", "cui", "registration_number")
+        ]
+    return result
 
 
 class OrderCreationService:
@@ -997,3 +1021,13 @@ class OrderCreationService:
             if "PROMOTION_QUOTE_CHANGED" in str(details):
                 raise ValidationError(_("An offer changed. Review and confirm the updated checkout total.")) from e
             raise ValidationError(_("Error creating order")) from e
+
+
+def cart_item_key(item: Mapping[str, object]) -> tuple[str, str, str]:
+    """Domain API lines use a one-off billing period; the canonical name identifies them."""
+    period = (
+        "once"
+        if item.get("product_type") == "domain" or item.get("billing_period") == "once"
+        else str(item.get("billing_period", ""))
+    )
+    return str(item.get("product_slug", "")), period, str(item.get("domain_name", ""))

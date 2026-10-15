@@ -104,6 +104,15 @@ class OrderPreflightValidationService:
                     quoted = DomainOrderService.quote_order_item(item, order.currency.code)
                     if quoted.is_err():
                         errors.append(str(_("Item '{}': {}").format(item.product_name, quoted.unwrap_err())))
+                    else:
+                        from apps.domains.registrants import (  # noqa: PLC0415
+                            missing_registrant_fields,
+                            registrant_identity_error,
+                        )
+
+                        quote = quoted.unwrap()
+                        if missing_registrant_fields(quote.registrar, order.customer, quote.action):
+                            errors.append(registrant_identity_error())
                     continue
 
                 # Price availability in catalog for the order currency

@@ -12,7 +12,7 @@ from typing import Any
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
@@ -137,6 +137,15 @@ class ProductCatalogThrottle(EndpointRateThrottle):
     # intended ceiling on these two views for both traffic shapes.
 
 
+def _catalog_products(currency_code: str) -> QuerySet[Product]:
+    """Domains use TLD prices; other public products need an active catalog price."""
+    return (
+        Product.objects.filter(is_active=True, is_public=True)
+        .filter(Q(product_type="domain") | Q(prices__is_active=True, prices__currency_id=currency_code))
+        .distinct()
+    )
+
+
 @public_api_endpoint
 @api_view(["GET"])
 @authentication_classes([])  # public: consumes no credential, so a stray or invalid
@@ -159,9 +168,7 @@ def product_list(request: Request) -> Response:
 
     # Build queryset
     policy = get_selling_currency_policy()
-    queryset = Product.objects.filter(
-        is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
-    )
+    queryset = _catalog_products(policy.currency_code)
 
     if product_type:
         queryset = queryset.filter(product_type=product_type)
@@ -196,10 +203,14 @@ def product_detail(request: Request, slug: str) -> Response:
 
     policy = get_selling_currency_policy()
     try:
-        product = Product.objects.prefetch_related(
-            Prefetch("prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code))
-        ).get(
-            slug=slug, is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
+        product = (
+            _catalog_products(policy.currency_code)
+            .prefetch_related(
+                Prefetch(
+                    "prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code)
+                )
+            )
+            .get(slug=slug)
         )
     except Product.DoesNotExist:
         return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -688,6 +699,22 @@ def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: mul
         # What the checkout page shows and sends back with the order (apps.orders.checkout_consents).
         checkout, checkout_errors = checkout_requirements(customer, request.data.get("language"))
         error_messages += checkout_errors
+        if any(item.get("product_type") == "domain" for item in preview_items):
+            from apps.domains.registrants import missing_registrant_fields, registrant_identity_error  # noqa: PLC0415
+            from apps.domains.services import DomainOrderService  # noqa: PLC0415
+
+            missing_fields: set[str] = set()
+            for item in preview_items:
+                if item.get("product_type") == "domain":
+                    quoted = DomainOrderService.quote_order_line(
+                        item["domain_name"], item["meta"]["domain_mode"], currency.code
+                    )
+                    if quoted.is_ok():
+                        quote = quoted.unwrap()
+                        missing_fields.update(missing_registrant_fields(quote.registrar, customer, quote.action))
+            checkout["registrant_requires"] = sorted(missing_fields)
+            if missing_fields:
+                error_messages.append(registrant_identity_error())
 
         success = len(error_messages) == 0
 

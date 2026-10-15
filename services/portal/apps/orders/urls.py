@@ -16,6 +16,9 @@ urlpatterns = [
     path("cart/", views.cart_review, name="cart_review"),
     path("checkout/", views.checkout, name="checkout"),
     path("confirmation/<uuid:order_id>/", views.order_confirmation, name="confirmation"),
+    path("domains/availability/", views.domain_availability, name="domain_availability"),
+    path("checkout/registrant/", views.registrant_identity, name="registrant_identity"),
+    path("confirmation/<uuid:order_id>/items/<uuid:item_id>/transfer-code/", views.transfer_code, name="transfer_code"),
     # Cart operations (POST - state changing)
     path("cart/add/", views.add_to_cart, name="add_to_cart"),
     path("cart/update/", views.update_cart_item, name="update_cart_item"),

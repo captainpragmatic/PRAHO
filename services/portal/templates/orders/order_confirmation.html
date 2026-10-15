@@ -132,6 +132,19 @@
     </div>
   </div>
 
+  {% for item in order.items %}
+    {% if item.can_submit_transfer_code %}
+    <div class="mb-6 rounded-lg border border-slate-700 bg-slate-800 p-6">
+      <h2 class="text-lg font-medium text-white mb-3">{% trans "Transfer code" %}: {{ item.domain_name }}</h2>
+      <form method="post" action="{% url 'orders:transfer_code' order.id item.id %}" class="space-y-4">
+        {% csrf_token %}
+        {% input_field "transfer_code" input_type="password" html_id=item.id label=_("Transfer code") required=True autocomplete="off" maxlength=64 %}
+        {% button _("Save transfer code") type="submit" variant="primary" %}
+      </form>
+    </div>
+    {% endif %}
+  {% endfor %}
+
   <!-- Payment Section for Pending Orders -->
   {% if payment_info and stripe_config %}{% if order.status == 'awaiting_payment' %}
   <div class="bg-gradient-to-r from-blue-900/40 to-green-900/40 border border-blue-700/50 rounded-lg mb-8">

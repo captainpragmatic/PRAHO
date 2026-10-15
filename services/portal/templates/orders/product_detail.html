@@ -63,7 +63,7 @@
             </div>
             {% if product.requires_domain %}
             <div class="mb-4">
-              {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="globe" value=requested_domain %}
+              {% input_field "domain_name" label=_("Domain name (required)") placeholder="example.ro" required=True icon_left="globe" value=requested_domain %}
             </div>
             {% endif %}
             {% trans "Add to Cart" as bt1 %}{% button bt1 variant="success" size="md" type="submit" class="w-full" %}

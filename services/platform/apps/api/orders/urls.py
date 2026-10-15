@@ -13,6 +13,7 @@ urlpatterns = [
     # Product catalog (public endpoints)
     path("products/", views.product_list, name="product_list"),
     path("products/<slug:slug>/", views.product_detail, name="product_detail"),
+    path("domains/availability/", domain_views.availability, name="domain_availability"),
     # Cart operations (customer authenticated)
     path("calculate/", views.calculate_cart_totals, name="calculate_cart"),
     path("preflight/", views.preflight_order, name="preflight_order"),

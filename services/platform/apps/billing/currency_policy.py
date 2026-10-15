@@ -95,7 +95,7 @@ def currency_switch_blockers(currency_code: str) -> list[str]:
     blockers.extend(
         _("%(product)s needs an active %(currency)s price.") % {"product": product.name, "currency": code}
         for product in products
-        if not product.prices.filter(currency_id=code, is_active=True).exists()
+        if product.product_type != "domain" and not product.prices.filter(currency_id=code, is_active=True).exists()
     )
     blockers.extend(_service_plan_price_blockers(code))
     blockers.extend(_domain_price_blockers(code))

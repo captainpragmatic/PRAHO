@@ -22,6 +22,17 @@
 
     <!-- Order Form -->
     <div class="lg:col-span-2">
+      {% if "cnp" in checkout.registrant_requires %}
+      <div class="mb-6 rounded-lg border border-slate-700 bg-slate-800 p-6">
+        <h2 class="text-lg font-medium text-white mb-3">{% trans "Registrant identity" %}</h2>
+        <p class="text-sm text-slate-300 mb-4">{% trans "When a .ro registrar requires your CNP, we store it on your tax profile. It is also used as your buyer identifier on proformas, invoices and e-Factura." %}</p>
+        <form method="post" action="{% url 'orders:registrant_identity' %}" class="space-y-4">
+          {% csrf_token %}
+          {% input_field "cnp" input_type="password" label=_("CNP") required=True autocomplete="off" maxlength=13 %}
+          {% button _("Save registrant identity") type="submit" variant="primary" %}
+        </form>
+      </div>
+      {% endif %}
       <div class="bg-slate-800 rounded-lg border border-slate-700">
 
         <!-- Form Header -->
