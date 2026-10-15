@@ -101,7 +101,8 @@ class PairNodeLostTests(ChainFixtures, ExclusionCase):
                 self.server.refresh_from_db()
                 self.declare_lost()
                 self.assertEqual(self.job.status, "failed" if allowed else "attention")
-                VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="attention")
+                self.assertEqual(self.job.execution_token != self.token, allowed, "only a released job loses its token")
+                VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(status="attention", execution_token=self.token)
 
     def test_a_late_runner_of_a_lost_pair_restore_can_finish_nothing(self) -> None:
         VirtualminServer.objects.filter(pk=self.server.pk).update(status="failed")
