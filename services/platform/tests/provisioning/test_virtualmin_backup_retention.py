@@ -12,10 +12,12 @@ import hashlib
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.db import connection
 from django.db.models.query import QuerySet
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
@@ -209,6 +211,47 @@ class PinnedDeletionTests(LineageFixture):
             self.assertTrue(self.backups.delete_backup("plain-1").is_ok())
         self.assertEqual(locked_models, ["VirtualminAccount"])
         self.assertEqual(atomic_during_delete, [True], "the pin check and the delete share one locked transaction")
+
+
+class AccountLockQueryTests(LineageFixture):
+    """The account lock is taken on the account row alone (a join to the nullable chain base is rejected)."""
+
+    def locking_query(self) -> str:
+        with CaptureQueriesContext(connection) as queries:
+            self.backups.delete_backup("plain-1")
+        accounts = [
+            entry["sql"] for entry in queries.captured_queries if 'FROM "provisioning_virtualmin_accounts"' in entry["sql"]
+        ]
+        self.assertTrue(accounts, "the delete read the owning account")
+        return accounts[0]
+
+    def test_the_lock_query_joins_no_table(self) -> None:
+        # PostgreSQL: "FOR UPDATE cannot be applied to the nullable side of an outer join".
+        self.store("plain-1")
+        self.assertNotIn("JOIN", self.locking_query())
+
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks; exercised in Integration CI")
+    def test_a_delete_is_not_rejected_by_the_database(self) -> None:
+        self.store("plain-1")
+        result = self.backups.delete_backup("plain-1")
+        self.assertTrue(result.is_ok(), result)
+
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks; exercised in Integration CI")
+    def test_the_live_base_is_refused_for_its_own_reason_not_the_databases(self) -> None:
+        self.store("base-1", "base")
+        base_job = VirtualminProvisioningJob.objects.create(
+            operation="backup_domain",
+            account=self.account,
+            server=self.server,
+            status="completed",
+            result={"backup_id": "base-1"},
+        )
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(
+            chain_base=base_job, chain_base_fingerprint="a" * 64 + ":1"
+        )
+        result = self.backups.delete_backup("base-1")
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("live base", result.unwrap_err())
 
 
 class RetentionTests(LineageFixture):

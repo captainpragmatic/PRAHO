@@ -1073,11 +1073,11 @@ class VirtualminBackupService:
             except ValueError:
                 service_id = None
             with transaction.atomic():
+                # No select_related here: chain_base is a nullable foreign key, and PostgreSQL refuses
+                # FOR UPDATE on the nullable side of the outer join it would need. The chain base is read
+                # after the lock, by the pin check.
                 account = (
-                    VirtualminAccount.objects.select_for_update()
-                    .select_related("chain_base")
-                    .filter(service_id=service_id)
-                    .first()
+                    VirtualminAccount.objects.select_for_update(of=("self",)).filter(service_id=service_id).first()
                     if service_id is not None
                     else None
                 )
