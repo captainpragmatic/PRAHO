@@ -69,19 +69,22 @@ RUN keydir="$(mktemp -d)" \
  && echo "deb [signed-by=/usr/share/keyrings/debian-virtualmin-developers.gpg] ${VIRTUALMIN_REPO} virtualmin main" \
       > /etc/apt/sources.list.d/virtualmin-stable.list
 
+# An empty version argument installs the repository's latest package of that name: the nightly drift check
+# (`VIRTUALMIN_LAB_UNPINNED=1 lab.sh build`) builds that way. The pinned build expands to exactly `name=version`.
+#
 # Installer phase 3, exactly as virtualmin-install.sh runs it for
 # `--minimal --bundle LAMP`: webmin first, then virtualmin-core plus the
 # minimal LAMP stack, with recommends.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-      "webmin=${WEBMIN_VERSION}" \
+      "webmin${WEBMIN_VERSION:+=${WEBMIN_VERSION}}" \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-      "webmin-virtual-server=${VIRTUAL_SERVER_VERSION}" \
-      "virtualmin-core=${VIRTUALMIN_CORE_VERSION}" \
-      "virtualmin-config=${VIRTUALMIN_CONFIG_VERSION}" \
-      "virtualmin-lamp-stack-minimal=${VIRTUALMIN_STACK_VERSION}" \
+      "webmin-virtual-server${VIRTUAL_SERVER_VERSION:+=${VIRTUAL_SERVER_VERSION}}" \
+      "virtualmin-core${VIRTUALMIN_CORE_VERSION:+=${VIRTUALMIN_CORE_VERSION}}" \
+      "virtualmin-config${VIRTUALMIN_CONFIG_VERSION:+=${VIRTUALMIN_CONFIG_VERSION}}" \
+      "virtualmin-lamp-stack-minimal${VIRTUALMIN_STACK_VERSION:+=${VIRTUALMIN_STACK_VERSION}}" \
  && apt-mark hold webmin webmin-virtual-server virtualmin-core virtualmin-config virtualmin-lamp-stack-minimal \
  && rm -rf /var/lib/apt/lists/*
 

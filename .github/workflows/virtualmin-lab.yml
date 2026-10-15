@@ -1,0 +1,254 @@
+# ===============================================================================
+# VIRTUALMIN LAB — PRAHO AGAINST REAL VIRTUALMIN (Docker, systemd, two nodes + MinIO)
+# ===============================================================================
+# Three runs, one lab (deploy/virtualmin-lab, see its README):
+#
+#   pull request   Touches provisioning, the node playbooks, the lab or its tests: the round trip, the contract
+#                  suite, the workflow suite and the lab checks (make test-virtualmin-lab) on the PINNED version.
+#   nightly full   03:30 UTC, skipped when nothing changed in 24h: the same, plus the from-scratch node deploy,
+#                  fault injection and the browser smoke tests (make test-virtualmin-lab-full), PINNED version.
+#   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
+#                  LATEST packages, then the contract suite, recording nothing, on amd64 and arm64.
+#
+# Every step is a make target, so each can be run locally. The lab needs privileged containers with systemd as PID 1
+# on cgroup v2: the setup action checks that first and fails with the reason.
+# A failed SCHEDULED run opens (or comments on) the `virtualmin-lab-failure` issue, as nightly.yml does.
+# workflow_dispatch runs the suite named in the `suite` input on the branch it was dispatched from; the ref is
+# never interpolated into shell.
+
+name: Virtualmin Lab
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'services/platform/apps/provisioning/**'
+      - 'services/platform/infrastructure/ansible/**'
+      - 'deploy/virtualmin-lab/**'
+      - 'tests/virtualmin_lab/**'
+      - '.github/workflows/virtualmin-lab.yml'
+      - '.github/actions/virtualmin-lab-setup/**'
+  schedule:
+    - cron: '30 3 * * *'
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Which run to start
+        type: choice
+        options: [full, drift]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: virtualmin-lab-${{ github.event_name }}-${{ github.ref }}-${{ github.event.schedule }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Nightly full run only: skip when master saw no commit or pull request activity in 24h.
+  # ---------------------------------------------------------------------------
+  check-activity:
+    if: github.event_name == 'schedule' && github.event.schedule == '30 3 * * *'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent activity on master
+        id: check
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SINCE=$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+          COMMITS=$(git log origin/master --since="$SINCE" --oneline 2>/dev/null | wc -l)
+          PRS=$(gh api "repos/$REPO/pulls?state=all&sort=updated&direction=desc&per_page=10" \
+            --jq "[.[] | select(.updated_at > \"$SINCE\")] | length" 2>/dev/null || echo "0")
+          echo "master commits: $COMMITS, active PRs: $PRS"
+          if [ "$((COMMITS + PRS))" -gt 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No activity in the last 24h: skipping the nightly lab run"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Pull requests: the lab suites on the pinned Virtualmin.
+  # ---------------------------------------------------------------------------
+  pull-request:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+
+      - name: Fetch the published lab image, if there is one
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          version="$(sed -n 's/^ARG VIRTUAL_SERVER_VERSION=\([0-9][0-9.]*\).*/\1/p' deploy/virtualmin-lab/virtualmin/Dockerfile)"
+          # Built by virtualmin-lab-image.yml. A missing or private image only costs the build below.
+          if docker pull "ghcr.io/${owner}/praho-virtualmin-lab:${version}"; then
+            docker tag "ghcr.io/${owner}/praho-virtualmin-lab:${version}" "praho-virtualmin-lab:${version}"
+          else
+            echo "No published image: make virtualmin-lab-up will build it"
+          fi
+
+      - name: Start the lab
+        run: make virtualmin-lab-up
+
+      - name: Lab suites (round trip, contract, workflows, checks)
+        run: make test-virtualmin-lab
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for node in vmlab-a vmlab-b vmlab-minio; do
+            echo "::group::docker logs ${node}"
+            docker logs --tail 200 "${node}" || true
+            echo "::endgroup::"
+          done
+
+      - name: Stop the lab
+        if: always()
+        run: make virtualmin-lab-down
+
+  # ---------------------------------------------------------------------------
+  # Nightly: everything, on the pinned Virtualmin.
+  # ---------------------------------------------------------------------------
+  nightly-full:
+    needs: check-activity
+    if: >-
+      always() && (
+        (needs.check-activity.result == 'success' && needs.check-activity.outputs.run == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.suite == 'full')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+        with:
+          browser: 'true'
+
+      - name: Start the lab
+        run: make virtualmin-lab-up
+
+      - name: Full lab run (suites, node deploy, faults, browser tests)
+        run: make test-virtualmin-lab-full
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for node in vmlab-a vmlab-b vmlab-minio; do
+            echo "::group::docker logs ${node}"
+            docker logs --tail 200 "${node}" || true
+            echo "::endgroup::"
+          done
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtualmin-lab-evidence
+          path: |
+            output/playwright/virtualmin-lab/
+            logs/virtualmin_e2e_server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop the lab
+        if: always()
+        run: |
+          make virtualmin-lab-down
+          deploy/virtualmin-lab/lab.sh node-down || true
+
+  # ---------------------------------------------------------------------------
+  # Nightly drift: the contract suite against whatever Virtualmin ships today.
+  # A failure means a program PRAHO calls answers differently (or the installer broke): read the assertion.
+  # ---------------------------------------------------------------------------
+  nightly-drift:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '30 5 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'drift')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # The lab images build for both architectures: a node that answers differently on one is also drift.
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+
+      - name: Contract suite against the latest Virtualmin
+        run: make test-virtualmin-drift
+
+      - name: Report the versions that were tested
+        if: always()
+        run: |
+          {
+            echo "### Virtualmin drift on $(uname -m)"
+            echo '```'
+            docker exec vmlab-b dpkg-query -W webmin webmin-virtual-server virtualmin-core virtualmin-config 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs --tail 200 vmlab-b || true
+
+      - name: Stop the lab
+        if: always()
+        run: make virtualmin-lab-down
+
+  # ---------------------------------------------------------------------------
+  # A red SCHEDULED run must reach a person (a failed scheduled job notifies nobody).
+  # One issue, opened on the first failure and commented on by every later one; a person closes it.
+  # ---------------------------------------------------------------------------
+  notify-scheduled-failure:
+    needs: [nightly-full, nightly-drift]
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the virtualmin-lab-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create virtualmin-lab-failure --color B60205 \
+            --description "A scheduled Virtualmin lab run failed" --force
+          existing=$(gh issue list --label virtualmin-lab-failure --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "The scheduled Virtualmin lab run failed again: $RUN_URL"
+          else
+            gh issue create --label virtualmin-lab-failure --title "Virtualmin lab run failing" \
+              --body "A scheduled Virtualmin lab run failed: $RUN_URL
+
+          Read the failing job, not the run: the full run (pinned Virtualmin) and the drift run (latest Virtualmin, amd64 and arm64) fail for different reasons. A drift failure means a program PRAHO calls now answers differently. Close this issue once both are green."
+          fi

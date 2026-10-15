@@ -6,9 +6,14 @@
 #   lab.sh down               stop the lab and remove its containers and data
 #   lab.sh apply-credentials  re-apply .state/<node>/inject on running nodes
 #   lab.sh status             show container health
+#   lab.sh healthy            exit 0 only when both nodes and MinIO are up and healthy (no output on success path beyond one line)
 #   lab.sh node-up            start the bare Debian node and wait for sshd
 #   lab.sh node-down          remove the bare Debian node and its data (a rebuild starts from the image)
 #   lab.sh build-node         build praho-debian-node:12 only
+#
+# VIRTUALMIN_LAB_UNPINNED=1 builds the Virtualmin image from the repository's latest packages instead of the
+# pinned versions (the nightly drift check, make test-virtualmin-drift). Use it with VIRTUALMIN_LAB_TAG=latest so
+# the pinned image keeps its own tag.
 #
 # Works with macOS bash 3.2. Image pulls that hang on a credential helper can
 # use an anonymous config: LAB_DOCKER_CONFIG=/path/with/empty/config.json.
@@ -83,9 +88,16 @@ wait_healthy() {
 
 cmd_build() {
   local revision
+  local -a unpinned=()
   revision="$(git -C "${LAB_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  docker build --build-arg "VCS_REF=${revision}" -f "${LAB_DIR}/virtualmin/Dockerfile" \
-    -t "praho-virtualmin-lab:${VIRTUALMIN_TAG}" "${LAB_DIR}"
+  if [ "${VIRTUALMIN_LAB_UNPINNED:-0}" = "1" ]; then
+    [ "${VIRTUALMIN_TAG}" != "8.3.0" ] || die "an unpinned build needs its own tag: set VIRTUALMIN_LAB_TAG=latest"
+    unpinned=(--build-arg WEBMIN_VERSION= --build-arg VIRTUAL_SERVER_VERSION= --build-arg VIRTUALMIN_CORE_VERSION=
+      --build-arg VIRTUALMIN_CONFIG_VERSION= --build-arg VIRTUALMIN_STACK_VERSION=)
+  fi
+  # bash 3.2 treats an empty array as unset under set -u, hence the ${arr[@]+...} form.
+  docker build --build-arg "VCS_REF=${revision}" ${unpinned[@]+"${unpinned[@]}"} \
+    -f "${LAB_DIR}/virtualmin/Dockerfile" -t "praho-virtualmin-lab:${VIRTUALMIN_TAG}" "${LAB_DIR}"
   docker build --build-arg "VCS_REF=${revision}" -f "${LAB_DIR}/debian-node/Dockerfile" \
     -t praho-debian-node:12 "${LAB_DIR}"
   info "built praho-virtualmin-lab:${VIRTUALMIN_TAG} and praho-debian-node:12"
@@ -125,6 +137,18 @@ cmd_apply_credentials() {
   done
 }
 
+cmd_healthy() {
+  local name state
+  for name in ${NODES} vmlab-minio; do
+    state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${name}" 2>/dev/null || echo missing)"
+    case "${state}" in
+      healthy|running) ;;
+      *) echo "${name} is ${state}"; return 1 ;;
+    esac
+  done
+  info "lab is up"
+}
+
 cmd_status() {
   ensure_state
   compose --profile debian-node ps
@@ -158,6 +182,7 @@ case "${1:-}" in
   down) cmd_down ;;
   apply-credentials) cmd_apply_credentials ;;
   status) cmd_status ;;
+  healthy) cmd_healthy ;;
   node-up) cmd_node_up ;;
   *) sed -n '2,13p' "${BASH_SOURCE[0]}" >&2; exit 2 ;;
 esac

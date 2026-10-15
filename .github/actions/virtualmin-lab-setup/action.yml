@@ -1,0 +1,52 @@
+name: Set up the Virtualmin lab runner
+description: >
+  Checks that the runner can run privileged systemd containers on cgroup v2, installs the Python environment
+  (Ansible is part of it) and, when asked, the browser the lab smoke tests drive. The lab itself is started by
+  `make virtualmin-lab-up`, so everything here is also what a developer needs locally.
+
+inputs:
+  browser:
+    description: Install Playwright's Chromium for make test-virtualmin-e2e ('true' or 'false')
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # The lab nodes run systemd as PID 1 (privileged, cgroup: host, /sys/fs/cgroup mounted rw). That needs a
+    # unified (v2) cgroup hierarchy and a Docker that accepts those flags. Fail here, with the reason, rather
+    # than as an unhealthy container ten minutes later.
+    - name: Check the runner can run systemd containers
+      shell: bash
+      run: |
+        set -euo pipefail
+        arch="$(uname -m)"
+        cgroup_fs="$(stat -fc %T /sys/fs/cgroup)"
+        docker_cgroup="$(docker info --format '{{.CgroupVersion}}')"
+        echo "arch=${arch} cgroup_fs=${cgroup_fs} docker_cgroup_version=${docker_cgroup}"
+        if [ "${cgroup_fs}" != "cgroup2fs" ] || [ "${docker_cgroup}" != "2" ]; then
+          echo "::error::The Virtualmin lab needs cgroup v2 (found ${cgroup_fs}, Docker reports v${docker_cgroup})."
+          exit 1
+        fi
+        docker run --rm --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+          debian:12-slim sh -c 'test -r /sys/fs/cgroup/cgroup.controllers && test -w /sys/fs/cgroup'
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        uv python install
+        uv sync --all-groups
+        # The platform finds ansible-playbook on PATH (AnsibleService._find_ansible_playbook).
+        echo "${UV_PROJECT_ENVIRONMENT}/bin" >> "${GITHUB_PATH}"
+
+    - name: Install the browser Playwright drives
+      if: inputs.browser == 'true'
+      shell: bash
+      run: '"${UV_PROJECT_ENVIRONMENT}/bin/playwright" install --with-deps chromium'

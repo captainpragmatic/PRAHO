@@ -3,10 +3,13 @@
 #
 #   run_contract.sh                 run the suite, then compare the fresh recording with the committed fixtures
 #   RECORD=update run_contract.sh   run the suite and write the recording over the committed fixtures
+#   RECORD=none run_contract.sh     run the suite, write no recording and compare nothing (the nightly drift check
+#                                   against the latest Virtualmin: the assertions are the drift report)
 #
 # Environment:
 #   VENV_DIR   the repository's virtualenv directory (the Makefile passes it; default .venv-<os>)
-#   RECORD     "update" rewrites services/platform/tests/fixtures/virtualmin/<version>/; anything else checks drift
+#   RECORD     "update" rewrites services/platform/tests/fixtures/virtualmin/<version>/; "none" records nothing;
+#              anything else checks drift
 #
 # The suite needs the lab: `make virtualmin-lab-up`. It fails, never skips, when a node is not healthy.
 # Works with macOS bash 3.2.
@@ -33,6 +36,8 @@ done
 
 if [ "${RECORD}" = "update" ]; then
   record_dir="${FIXTURES}"
+elif [ "${RECORD}" = "none" ]; then
+  record_dir=""
 else
   record_dir="$(mktemp -d "${TMPDIR:-/tmp}/virtualmin-contract.XXXXXX")"
   trap 'rm -rf "${record_dir}"' EXIT
@@ -54,6 +59,10 @@ info "the contract suite passed"
 
 if [ "${RECORD}" = "update" ]; then
   info "recordings written to ${FIXTURES}"
+  exit 0
+fi
+if [ "${RECORD}" = "none" ]; then
+  info "no recording written and none compared"
   exit 0
 fi
 

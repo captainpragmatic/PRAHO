@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e virtualmin-probe
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e test-virtualmin-lab-full test-virtualmin-drift virtualmin-lab-ensure dev-platform-lab virtualmin-probe
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -65,6 +65,9 @@ help:
 	@echo "  make test-virtualmin-node-deploy - Nightly, opt-in: virtualmin.yml + virtualmin_harden.yml on the bare Debian node, then the contract smoke checks"
 	@echo "  make test-virtualmin-faults - Nightly, opt-in: stop Webmin, cut the network and time calls out while PRAHO backs up and restores"
 	@echo "  make test-virtualmin-e2e - Opt-in: Playwright smoke tests of the staff pages against the lab (starts and stops its own server; not part of make test-e2e)"
+	@echo "  make test-virtualmin-lab-full - Opt-in, long: test-virtualmin-lab + node-deploy + faults + the browser tests (the nightly run)"
+	@echo "  make test-virtualmin-drift - Opt-in: build the lab from the LATEST Virtualmin (replaces a running lab) and run the contract suite, recording nothing"
+	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
@@ -273,8 +276,15 @@ dev-all: check-venv-platform build-css
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
 
+# VIRTUALMIN_LAB=1 make dev: Platform against the Docker Virtualmin lab (see deploy/virtualmin-lab/README.md).
+# Plain `make dev` is the recipe below the else, unchanged.
+ifeq ($(VIRTUALMIN_LAB),1)
+dev: virtualmin-lab-ensure
+	@$(MAKE) dev-platform-lab
+else
 dev:
 	@$(MAKE) dev-all
+endif
 
 # E2E uses dedicated settings/databases and an owned supervisor in both modes.
 dev-e2e: check-venv-platform build-css
@@ -1245,6 +1255,26 @@ virtualmin-lab-up:
 	@$(VIRTUALMIN_LAB_SH) apply-credentials
 	@echo "✅ [Virtualmin lab] Ready. Gate: make test-virtualmin-lab | Probe: make virtualmin-probe"
 
+# Start and register the lab only when it is not already usable: registering rotates every node credential.
+virtualmin-lab-ensure:
+	@if $(VIRTUALMIN_LAB_SH) healthy >/dev/null 2>&1 \
+		&& [ -f deploy/virtualmin-lab/.state/staff.env ] \
+		&& ( $(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_pins >/dev/null 2>&1 ); then \
+		echo "✅ [Virtualmin lab] Already up and registered"; \
+	else \
+		$(MAKE) --no-print-directory virtualmin-lab-up; \
+	fi
+
+# Platform on :8700 under the lab settings, inside the lab transport, with a queue worker (VIRTUALMIN_LAB=1 make dev).
+# The portal is not started: its HMAC keys come from your .env, which the lab settings do not read.
+dev-platform-lab: check-venv-platform build-css
+	@echo "🏗️ [Platform] Starting Platform against the Virtualmin lab..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PLATFORM_LAB_MANAGE) migrate --noinput
+	@echo "🔑 Staff login: $$(sed -n 's/^LAB_STAFF_EMAIL=//p' deploy/virtualmin-lab/.state/staff.env)  (password: deploy/virtualmin-lab/.state/staff.env)"
+	@echo "🌐 http://127.0.0.1:8700 - migration, drain and differential backups are switched on in the lab database"
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_runserver 127.0.0.1:8700 --features
+
 virtualmin-lab-down:
 	@echo "🛑 [Virtualmin lab] Stopping and removing lab containers..."
 	@$(VIRTUALMIN_LAB_SH) down
@@ -1279,6 +1309,25 @@ test-virtualmin-faults:
 	@echo "🧪 [Virtualmin lab] Fault injection: Webmin stopped, network cut and calls timed out mid-operation (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_faults.sh $(FAULT_ARGS)
+
+# The nightly run: every leg runs even when an earlier one fails, and the failed legs are named at the end.
+test-virtualmin-lab-full:
+	@echo "🧪 [Virtualmin lab] Full run: lab suites, node deploy, fault injection, browser tests (needs make virtualmin-lab-up; takes a long while)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@failed=""; \
+	for leg in test-virtualmin-lab test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e; do \
+		$(MAKE) --no-print-directory $$leg || failed="$$failed $$leg"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "🔥 [Virtualmin lab] Failed legs:$$failed"; exit 1; fi; \
+	echo "✅ [Virtualmin lab] Every leg passed"
+
+# Replaces a running lab: the latest Virtualmin uses the same container names, ports and state as the pinned one.
+# Afterwards `make virtualmin-lab-down virtualmin-lab-up` brings the pinned lab back.
+test-virtualmin-drift:
+	@echo "🧪 [Virtualmin lab] Drift: the contract suite against the LATEST Virtualmin (builds the image unpinned; replaces a running lab)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@export VIRTUALMIN_LAB_TAG=latest VIRTUALMIN_LAB_UNPINNED=1; \
+	$(VIRTUALMIN_LAB_SH) down && $(MAKE) --no-print-directory virtualmin-lab-up && RECORD=none $(MAKE) --no-print-directory test-virtualmin-contract
 
 test-virtualmin-e2e:
 	@echo "🧪 [Virtualmin lab] Browser smoke tests: staff pages against the lab, then the nodes (needs make virtualmin-lab-up; separate from make test-e2e)..."
