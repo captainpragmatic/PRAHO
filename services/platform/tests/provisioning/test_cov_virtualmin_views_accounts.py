@@ -121,14 +121,15 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
 
     def test_sync_skips_a_listed_domain_the_chain_scripts_would_refuse(self) -> None:
         # The synced name is later handed to node scripts as a strict-alphabet input.
+        self.account.delete()
         self.payload["data"] = [
             {"name": "tail.example.com-", "values": {"Username": ["tailuser"], "Status": ["Enabled"]}},
-            {"name": "good.example.com", "values": {"Username": ["gooduser"], "Status": ["Enabled"]}},
+            {"name": self.service.domain, "values": {"Username": [self.service.username], "Status": ["Enabled"]}},
         ]
         response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
         self.assertFalse(VirtualminAccount.objects.filter(virtualmin_username="tailuser").exists())
         self.assertFalse(Service.objects.filter(domain="tail.example.com-").exists())
-        self.assertTrue(VirtualminAccount.objects.filter(virtualmin_username="gooduser").exists())
+        self.assertTrue(VirtualminAccount.objects.filter(service=self.service).exists())
         self.assertIn("1 errors occurred", self.messages(response))
 
     def test_sync_gateway_denial_leaves_usage_untouched(self) -> None:
