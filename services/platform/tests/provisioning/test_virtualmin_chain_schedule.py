@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.test import override_settings
 from django.utils import timezone
 from django_q.models import Schedule
 
@@ -33,6 +34,7 @@ from apps.provisioning.virtualmin_chain_schedule import (
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.settings.services import SettingsService
+from config.settings.test import LOCMEM_TEST_CACHE
 from tests.helpers.fsm_helpers import force_status
 from tests.helpers.legacy_settings import store_legacy_integer
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
@@ -233,6 +235,103 @@ class DueSelectionTests(ScheduleCase):
         second = self.sweep()
         self.assertEqual(len(second["admitted"]), 3, "the account left over plus the two that did not fit")
         self.assertEqual(len({job.account_id for job in self.chain_jobs()}), MAX_ADMISSIONS_PER_SWEEP + 3)
+
+
+class FairnessTests(ScheduleCase):
+    """With more due accounts than a sweep may admit, every account still gets its turn."""
+
+    def make_accounts(self, count: int) -> list[VirtualminAccount]:
+        return [
+            VirtualminAccount.objects.create(
+                service=self._service_for(index),
+                server=self.server,
+                domain=f"bulk{index}.example.com",
+                virtualmin_username=f"bulk{index}",
+                status="active",
+                praho_customer_id=self.customer.pk,
+            )
+            for index in range(count)
+        ]
+
+    def test_every_due_account_is_admitted_within_ceil_n_over_cap_sweeps(self) -> None:
+        from math import ceil  # noqa: PLC0415
+
+        from apps.provisioning.virtualmin_chain_schedule import MAX_ADMISSIONS_PER_SWEEP  # noqa: PLC0415
+
+        accounts = [self.account, *self.make_accounts(MAX_ADMISSIONS_PER_SWEEP * 2 + 5)]
+        sweeps = ceil(len(accounts) / MAX_ADMISSIONS_PER_SWEEP)
+        admitted: set[str] = set()
+        for _ in range(sweeps):
+            outcome = self.sweep()
+            admitted |= {entry["domain"] for entry in outcome["admitted"]}
+            # The jobs end without leaving a chain (the node was busy): the accounts are due again.
+            VirtualminProvisioningJob.objects.filter(status="pending", operation="backup_domain").update(
+                status="failed", completed_at=self.now, result={"chain_state": "moved"}
+            )
+        self.assertEqual(admitted, {account.domain for account in accounts}, "pk order would starve the tail")
+
+    def test_an_account_that_never_had_a_chain_job_goes_before_one_that_did(self) -> None:
+        from apps.provisioning.virtualmin_chain_schedule import MAX_ADMISSIONS_PER_SWEEP  # noqa: PLC0415
+
+        accounts = self.make_accounts(MAX_ADMISSIONS_PER_SWEEP + 1)
+        # Every account but the last (in pk order) has run before.
+        for account in [self.account, *accounts[:-1]]:
+            VirtualminProvisioningJob.objects.create(
+                operation="backup_domain",
+                account=account,
+                server=self.server,
+                status="failed",
+                completed_at=self.now,
+                parameters={"chain_role": "base"},
+                result={"chain_state": "moved"},
+            )
+        outcome = self.sweep()
+        self.assertIn(accounts[-1].domain, [entry["domain"] for entry in outcome["admitted"]])
+
+
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_deferral_that_persists_across_sweeps_raises_one_alert_per_window(self) -> None:
+        from apps.provisioning.virtualmin_chain_schedule import (  # noqa: PLC0415
+            DEFERRED_SWEEPS_ALERT,
+            MAX_ADMISSIONS_PER_SWEEP,
+        )
+
+        cache.clear()
+        self.make_accounts(MAX_ADMISSIONS_PER_SWEEP * 3)
+        alerts = AuditEvent.objects.filter(action="virtualmin_chain_schedule_deferred")
+        for sweep_number in range(1, DEFERRED_SWEEPS_ALERT + 1):
+            outcome = self.sweep()
+            self.assertTrue(outcome.get("deferred"), sweep_number)
+            VirtualminProvisioningJob.objects.filter(status="pending", operation="backup_domain").update(
+                status="failed", completed_at=self.now, result={"chain_state": "moved"}
+            )
+            expected = 1 if sweep_number == DEFERRED_SWEEPS_ALERT else 0
+            self.assertEqual(alerts.count(), expected, sweep_number)
+
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_a_sweep_that_fits_resets_the_deferral_count(self) -> None:
+        from apps.provisioning.virtualmin_chain_schedule import (  # noqa: PLC0415
+            DEFERRED_SWEEPS_ALERT,
+            MAX_ADMISSIONS_PER_SWEEP,
+        )
+
+        cache.clear()
+        extra = self.make_accounts(MAX_ADMISSIONS_PER_SWEEP)
+
+        def end_pending_jobs() -> None:
+            VirtualminProvisioningJob.objects.filter(status="pending", operation="backup_domain").update(
+                status="failed", completed_at=self.now, result={"chain_state": "moved"}
+            )
+
+        for _ in range(DEFERRED_SWEEPS_ALERT - 1):
+            self.assertTrue(self.sweep().get("deferred"))
+            end_pending_jobs()
+        VirtualminAccount.objects.filter(pk__in=[account.pk for account in extra]).update(status="suspended")
+        self.assertFalse(self.sweep().get("deferred"))
+        end_pending_jobs()
+        VirtualminAccount.objects.filter(pk__in=[account.pk for account in extra]).update(status="active")
+        self.assertTrue(self.sweep().get("deferred"))
+        self.assertEqual(AuditEvent.objects.filter(action="virtualmin_chain_schedule_deferred").count(), 0)
 
 
 class FlagAndEligibilityTests(ScheduleCase):

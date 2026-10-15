@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
+from django.db.models import F, OuterRef, Subquery
 from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
@@ -47,6 +48,10 @@ ALERT_AFTER_FAILURES = 3
 # At most this many jobs are admitted per sweep, so enabling the flag on a large fleet spreads
 # its first bases over several hours instead of queueing every account at once.
 MAX_ADMISSIONS_PER_SWEEP = 20
+# Sweeps in a row that stopped at the cap before staff are alerted: the fleet is larger than the schedule can serve.
+DEFERRED_SWEEPS_ALERT = 6
+_DEFERRED_SWEEPS_KEY = "chain-schedule-deferred-sweeps"
+_DEFERRED_SWEEPS_TTL_SECONDS = 24 * 3600
 
 _DEFAULT_BASE_INTERVAL_DAYS = 7
 _DEFAULT_DIFFERENTIAL_INTERVAL_HOURS = 24
@@ -253,6 +258,40 @@ def _consider(account: VirtualminAccount, now: datetime, outcome: dict[str, Any]
     _alert_admission_refused(account, decision.role, str(result.unwrap_err()))
 
 
+def _note_deferral(deferred: bool) -> None:
+    """Count sweeps in a row that stopped at the cap, and alert staff when that keeps happening.
+
+    Ordering by staleness serves every account in turn, but a fleet bigger than the cap can serve
+    in a day means some accounts wait longer than their interval: someone should raise the cap.
+    """
+    if not deferred:
+        cache.delete(_DEFERRED_SWEEPS_KEY)
+        return
+    count = int(cache.get(_DEFERRED_SWEEPS_KEY, 0)) + 1
+    cache.set(_DEFERRED_SWEEPS_KEY, count, _DEFERRED_SWEEPS_TTL_SECONDS)
+    if count % DEFERRED_SWEEPS_ALERT:
+        return
+    message = (
+        f"The chain-backup schedule stopped at its limit of {MAX_ADMISSIONS_PER_SWEEP} jobs in {count} sweeps in a row; "
+        "some accounts wait longer than their backup interval"
+    )
+    logger.error("🔥 [ChainSchedule] %s", message)
+    AuditService.log_event(
+        AuditEventData(event_type="virtualmin_chain_schedule_deferred", description=message),
+        AuditContext(
+            actor_type="system",
+            metadata={
+                "source_app": "provisioning",
+                "severity": "high",
+                "requires_review": True,
+                "operational_event": True,
+                "consecutive_deferred_sweeps": count,
+                "admissions_per_sweep": MAX_ADMISSIONS_PER_SWEEP,
+            },
+        ),
+    )
+
+
 def run_chain_backup_sweep(
     now: datetime | None = None, *, accounts: QuerySet[VirtualminAccount] | None = None
 ) -> dict[str, Any]:
@@ -269,7 +308,20 @@ def run_chain_backup_sweep(
         (accounts if accounts is not None else VirtualminAccount.objects.all())
         .filter(status="active", server__status="active", server__is_draining=False)
         .select_related("server", "server__node_deployment", "service", "chain_base")
-        .order_by("pk")
+        .annotate(
+            last_chain_job_at=Subquery(
+                VirtualminProvisioningJob.objects.filter(
+                    account_id=OuterRef("pk"),
+                    operation="backup_domain",
+                    parameters__chain_role__in=(ROLE_BASE, ROLE_DIFFERENTIAL),
+                )
+                .order_by("-created_at")
+                .values("created_at")[:1]
+            )
+        )
+        # Stalest first: accounts that never had a chain job, then the oldest last one. A sweep that stops
+        # at the cap must not always stop at the same accounts (pk order starved everything past the cap).
+        .order_by(F("last_chain_job_at").asc(nulls_first=True), "pk")
     )
     for account in candidates.iterator(chunk_size=200):
         if len(outcome["admitted"]) >= MAX_ADMISSIONS_PER_SWEEP:
@@ -280,6 +332,7 @@ def run_chain_backup_sweep(
         except Exception:
             outcome["errors"] += 1
             logger.exception("🔥 [ChainSchedule] Could not consider account %s", account.pk)
+    _note_deferral(bool(outcome.get("deferred")))
     logger.info(
         "✅ [ChainSchedule] Sweep done: %s admitted, skipped %s, %s errors",
         len(outcome["admitted"]),
