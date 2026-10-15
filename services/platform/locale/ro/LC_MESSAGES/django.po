@@ -26991,3 +26991,69 @@ msgstr "Înregistrarea a eșuat: {error}"
 
 msgid "It stalled after it was claimed, before the registrar was asked"
 msgstr "Procesarea s-a oprit după preluarea comenzii, înainte de solicitarea registratorului"
+
+msgid "This line is not a domain registration or transfer."
+msgstr "Această linie nu este o înregistrare sau un transfer de domeniu."
+
+msgid "The order is not eligible for recording a registrar answer."
+msgstr "Comanda nu permite înregistrarea răspunsului registratorului."
+
+msgid "The linked domain does not match the purchased line."
+msgstr "Domeniul asociat nu corespunde liniei achiziționate."
+
+msgid "Enter a future expiry date and the registrar domain ID."
+msgstr "Introduceți o dată de expirare viitoare și ID-ul domeniului la registrator."
+
+msgid "This domain line cannot be completed in its current state."
+msgstr "Această linie de domeniu nu poate fi finalizată în starea curentă."
+
+msgid "The registrar recorded for this purchase is required."
+msgstr "Este necesar registratorul înregistrat pentru această achiziție."
+
+msgid "This domain cannot be recorded in its current state."
+msgstr "Acest domeniu nu poate fi înregistrat în starea curentă."
+
+msgid "A domain with this name already exists; review its ownership first."
+msgstr "Există deja un domeniu cu acest nume; verificați mai întâi proprietarul."
+
+msgid "Registrar registration or transfer recorded by staff."
+msgstr "Înregistrarea sau transferul la registrator a fost consemnat de personal."
+
+msgid "Only an unconfirmed domain operation in progress can be refused."
+msgstr "Poate fi refuzată doar o operațiune de domeniu în curs, neconfirmată."
+
+msgid "Registrar refusal recorded by staff."
+msgstr "Refuzul registratorului a fost consemnat de personal."
+
+msgid "This domain line cannot be failed in its current state."
+msgstr "Această linie de domeniu nu poate fi marcată ca eșuată în starea curentă."
+
+msgid "Only admin or billing staff can record registrar answers."
+msgstr "Doar administratorii sau personalul de facturare pot consemna răspunsurile registratorului."
+
+msgid "Recorded %(count)s domain order line(s)."
+msgstr "S-au consemnat %(count)s linii de domeniu din comandă."
+
+msgid "Registrar refusal recorded."
+msgstr "Refuzul registratorului a fost consemnat."
+
+msgid "Record the answer confirmed by the registrar."
+msgstr "Consemnați răspunsul confirmat de registrator."
+
+msgid "Confirm that the registrar registered or transferred this domain?"
+msgstr "Confirmați că registratorul a înregistrat sau transferat acest domeniu?"
+
+msgid "Expiry date"
+msgstr "Data expirării"
+
+msgid "Registrar domain ID"
+msgstr "ID-ul domeniului la registrator"
+
+msgid "Registered at the registrar"
+msgstr "Înregistrat la registrator"
+
+msgid "Confirm that the registrar refused this domain operation?"
+msgstr "Confirmați că registratorul a refuzat această operațiune de domeniu?"
+
+msgid "Refused by the registrar"
+msgstr "Refuzat de registrator"

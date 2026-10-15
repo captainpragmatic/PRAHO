@@ -1,0 +1,27 @@
+{% load i18n ui_components %}
+{% for item in domain_resolution_items %}
+  {% with item_id=item.id|stringformat:"s" %}
+    {% with expiry_id="domain-expiry-"|add:item_id registry_id="domain-registry-"|add:item_id %}
+      <section class="mt-6 p-6 bg-slate-800 rounded-lg border border-slate-700" aria-labelledby="domain-resolution-{{ item.id }}">
+        <h3 id="domain-resolution-{{ item.id }}" class="text-lg text-white font-semibold">{{ item.domain_name }}</h3>
+        <p class="mt-2 text-sm text-slate-400">{% trans "Record the answer confirmed by the registrar." %}</p>
+        <form method="post" action="{% url 'orders:domain_record' pk=order.id item_pk=item.id %}" hx-post="{% url 'orders:domain_record' pk=order.id item_pk=item.id %}" hx-confirm="{% trans 'Confirm that the registrar registered or transferred this domain?' %}" class="mt-4 space-y-3">
+          {% csrf_token %}
+          {% trans "Expiry date" as expiry_label %}
+          {% input_field "expires_on" label=expiry_label input_type="date" html_id=expiry_id required=True %}
+          {% trans "Registrar domain ID" as registry_label %}
+          {% input_field "registrar_domain_id" label=registry_label html_id=registry_id maxlength=100 required=True %}
+          {% trans "Registered at the registrar" as record_label %}
+          {% button record_label type="submit" variant="primary" %}
+        </form>
+        {% if item.provisioning_status == "in_progress" %}
+          <form method="post" action="{% url 'orders:domain_refuse' pk=order.id item_pk=item.id %}" hx-post="{% url 'orders:domain_refuse' pk=order.id item_pk=item.id %}" hx-confirm="{% trans 'Confirm that the registrar refused this domain operation?' %}" class="mt-3">
+            {% csrf_token %}
+            {% trans "Refused by the registrar" as refuse_label %}
+            {% button refuse_label type="submit" variant="danger" %}
+          </form>
+        {% endif %}
+      </section>
+    {% endwith %}
+  {% endwith %}
+{% endfor %}

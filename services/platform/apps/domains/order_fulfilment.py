@@ -60,7 +60,7 @@ def claim_order_line(domain_item: DomainOrderItem) -> bool:
     return True
 
 
-def fail_order_line(domain_item: DomainOrderItem, reason: str) -> bool:
+def fail_order_line(domain_item: DomainOrderItem, reason: str, *, notify_staff: bool = True) -> bool:
     """Fail a line nothing is pending for at the registrar, and tell staff why; False when it was not."""
     from apps.notifications.services import NotificationService  # noqa: PLC0415  # Deferred: avoids circular import
 
@@ -81,6 +81,8 @@ def fail_order_line(domain_item: DomainOrderItem, reason: str) -> bool:
         line.fail_provisioning()
         line.save(update_fields=["provisioning_status", "provisioning_notes", "updated_at"])
     logger.warning("⚠️ [Domain] Order line %s failed: %s", line.pk, reason)
+    if not notify_staff:
+        return True
     NotificationService.send_admin_alert(
         subject=f"Domain order needs staff: {domain_item.domain_name}",
         message=f"The {domain_item.action} of {domain_item.domain_name} was not completed: {reason}",
