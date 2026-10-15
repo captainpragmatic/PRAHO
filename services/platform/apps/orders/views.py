@@ -327,7 +327,7 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
     """Resolve VAT from the order snapshot plus any explicit customer override."""
     from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
-    country = "RO"
+    country = operator_country()
     try:
         customer = order.customer
         billing_address = order.billing_address or {}
@@ -1577,6 +1577,8 @@ def _render_order_item_form(
         "billing_period_options": billing_period_options,
         "selected_billing_period": item.billing_period if item else "monthly",
         "action": action,
+        # The rate a new item is saved with, for the tax preview.
+        "vat_rate": _get_vat_rate_for_order(order),
     }
 
     # Check if this is a request from expandable row (check for inline parameter or HX-Request header)

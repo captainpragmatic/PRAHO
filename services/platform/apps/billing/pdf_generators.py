@@ -425,10 +425,10 @@ class RomanianDocumentPDFGenerator:
         richer per-rate breakdown is exact and kept.
         """
         self.canvas.setFont(_FONT, 11)
-        line_tmpl = gettext("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
+        line_tmpl = gettext("VAT {rate}%: {tax} {currency} (base: {base} {currency})")
         # Signed: a credit note's discount is negative. Gated on `> 0` this branch never
         # ran for one, so the breakdown re-derived the tax from the GROSS lines and printed
-        # a rate line contradicting the Total TVA directly beneath it.
+        # a rate line contradicting the total VAT directly beneath it.
         if discount != 0:
             # Deterministically pick the dominant (largest-base) rate for the collapsed
             # net bucket — independent of queryset ordering. Single-category invoices
@@ -559,7 +559,7 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(
             12 * cm,
             totals_y,
-            str(gettext("Total TVA: {amount} {currency}")).format(
+            str(gettext("Total VAT: {amount} {currency}")).format(
                 amount=f"{self.document.tax_amount:.2f}", currency=currency
             ),
         )

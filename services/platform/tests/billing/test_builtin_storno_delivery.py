@@ -108,7 +108,15 @@ class StornoDocumentTests(StornoTestCase):
         self.assertIn("FACTURĂ FISCALĂ", rows)
         self.assertIn("TOTAL DE PLATĂ: 121.00 RON", rows)
         self.assertIn("Furnizor:", rows)
+        self.assertIn("TVA 21%: 21.00 RON (baza: 100.00 RON)", rows)
+        self.assertIn("Total TVA: 21.00 RON", rows)
         self.assertNotIn("FISCAL INVOICE", rows)
+
+    def test_an_english_invoice_pdf_names_vat_in_english(self) -> None:
+        rows = pdf_rows(self.original())
+
+        self.assertIn("VAT 21%: 21.00 RON (base: 100.00 RON)", rows)
+        self.assertIn("Total VAT: 21.00 RON", rows)
 
 
 @SELLER

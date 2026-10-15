@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load l10n %}
 {% load ui_components %}
 
 {% block title %}
@@ -197,20 +198,20 @@
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
-                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity|unlocalize }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
-                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price|unlocalize }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    {# tmpl-allow TMPL003: options rendered inline from literal VAT rates; select components take a view-built options list #}
+                    {# tmpl-allow TMPL003: the row is mirrored in the addLineItem() script template, which cannot call a select component; options come from the view's vat_rate_options #}
                     <select name="line_{{ forloop.counter0 }}_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                      <option value="21" {% if line.tax_rate|floatformat:4 == "0.2100" %}selected{% endif %}>21% ({% trans 'Standard' %})</option>
-                      <option value="11" {% if line.tax_rate|floatformat:4 == "0.1100" %}selected{% endif %}>11% ({% trans 'Reduced' %})</option>
-                      <option value="0" {% if line.tax_rate|floatformat:4 == "0.0000" %}selected{% endif %}>0% ({% trans 'Exempt' %})</option>
+                      {% for option in vat_rate_options %}
+                        <option value="{{ option.value }}" {% if line.tax_rate|stringformat:".4f" == option.fraction %}selected{% endif %}>{{ option.label }}</option>
+                      {% endfor %}
                     </select>
                   </div>
                   <div class="col-span-1 md:col-span-2">
@@ -245,11 +246,11 @@
                   </div>
                   <div class="col-span-1 md:col-span-2">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
-                    {# tmpl-allow TMPL003: options rendered inline from literal VAT rates; select components take a view-built options list #}
+                    {# tmpl-allow TMPL003: the row is mirrored in the addLineItem() script template, which cannot call a select component; options come from the view's vat_rate_options #}
                     <select name="line_0_vat_rate" aria-label="{% trans 'VAT Rate' %}" class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                      <option value="21">21% ({% trans 'Standard' %})</option>
-                      <option value="11">11% ({% trans 'Reduced' %})</option>
-                      <option value="0">0% ({% trans 'Exempt' %})</option>
+                      {% for option in vat_rate_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                      {% endfor %}
                     </select>
                   </div>
                   <div class="col-span-1 md:col-span-2">
@@ -414,11 +415,11 @@
     const vatLabel = document.getElementById('proforma-summary-vat-label');
     if (vatLabel) {
       if (vatRates.size === 1) {
-        vatLabel.textContent = 'TVA (' + [...vatRates][0] + '%):';
+        vatLabel.textContent = '{% trans "VAT" %} (' + [...vatRates][0] + '%):';
       } else if (vatRates.size > 1) {
-        vatLabel.textContent = 'TVA ({% trans "mixed" %}):';
+        vatLabel.textContent = '{% trans "VAT" %} ({% trans "mixed" %}):';
       } else {
-        vatLabel.textContent = 'TVA:';
+        vatLabel.textContent = '{% trans "VAT:" %}';
       }
     }
 
@@ -462,9 +463,7 @@
                 {# tmpl-allow TMPL003: element is built client-side inside the addLineItem() JavaScript template literal (name uses ${lineCounter}); a server-side tag cannot render it #}
                 <select name="line_${lineCounter}_vat_rate" aria-label="{% trans 'VAT Rate' %}"
                        class="line-vat w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                    <option value="21">21% ({% trans 'Standard' %})</option>
-                    <option value="11">11% ({% trans 'Reduced' %})</option>
-                    <option value="0">0% ({% trans 'Exempt' %})</option>
+                    {% for option in vat_rate_options %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
                 </select>
             </div>
             <div class="col-span-1 md:col-span-2">

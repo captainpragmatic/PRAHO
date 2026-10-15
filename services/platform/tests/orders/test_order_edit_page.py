@@ -6,20 +6,24 @@
 - The item form read `billing_period`, `amount_cents` and `amount` from `ProductPrice`, which has
   none of them, so opening "Add item" for any product priced in the order's currency crashed.
 - `requires_domain` reached the page as "True"/"False", and the script compares with "true".
+- The item form's tax preview used a literal 21% instead of the order's rate.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import date
+from decimal import Decimal
 from html.parser import HTMLParser
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import escapejs
 
 from apps.billing.models import Currency
+from apps.billing.tax_models import TaxRule
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductPrice
@@ -164,6 +168,20 @@ class OrderItemFormTests(ItemFormTestBase):
         full_page = self.item_form(inline=False)
         self.assertEqual(self.product_option(full_page, self.hosting)["data-requires_domain"], "true")
         self.assertEqual(self.product_option(full_page, self.addon)["data-requires_domain"], "false")
+
+    @override_settings(COMPANY_COUNTRY_CODE="DE")
+    def test_the_tax_preview_uses_the_rate_the_item_is_saved_with(self) -> None:
+        # The preview multiplied by a literal 0.21 and said "VAT (21%)" whatever the order's rate.
+        TaxRule.objects.create(country_code="DE", rate=Decimal("0.19"), valid_from=date(2020, 1, 1))
+        self.order.billing_address = {"country": "DE"}
+        self.order.save(update_fields=["billing_address"])
+        self.staff.profile.preferred_language = "ro"  # a localised "0,1900" breaks the script
+        self.staff.profile.save()
+
+        html = self.item_form(inline=False)
+
+        self.assertIn('data-vat-rate="0.1900"', html)
+        self.assertNotIn("21%", html)
 
 
 class OrderItemBillingPeriodTests(ItemFormTestBase):

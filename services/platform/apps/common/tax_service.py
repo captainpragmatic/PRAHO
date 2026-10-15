@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
-from typing import Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
 from django.core.cache import cache
@@ -21,6 +21,9 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common.operator import operator_country
+
+if TYPE_CHECKING:
+    from apps.billing.tax_models import TaxRule
 
 logger = logging.getLogger(__name__)
 
@@ -249,29 +252,38 @@ class TaxConfiguration:
         return min(cls.CACHE_TIMEOUT, int(end_of_lookup_date.timestamp() - timezone.now().timestamp()))
 
     @classmethod
-    def _get_rate_from_database(cls, country_code: str, on_date: date | None = None) -> Decimal | None:
-        """Get the VAT rate in force on on_date (default: today, Romanian calendar) as a percentage."""
+    def get_reduced_vat_rate(cls, country_code: str) -> Decimal | None:
+        """The reduced VAT rate in force today as a percentage, or None when no rule records one."""
+        rule = cls._rule_in_force(country_code or cls.get_supplier_country())
+        if rule is None or rule.reduced_rate is None:
+            return None
+        return (rule.reduced_rate * Decimal("100")).quantize(Decimal("0.01"))
+
+    @classmethod
+    def _rule_in_force(cls, country_code: str, on_date: date | None = None) -> TaxRule | None:
+        """The VAT rule in force on on_date (default: today, operator calendar), if the table holds one."""
         try:
             from apps.billing.tax_models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 TaxRule,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            # A rule is in force for a Romanian calendar date; the UTC date lags it by up to three hours.
+            # A rule is in force for a local calendar date; the UTC date lags it by up to three hours.
             today = on_date if on_date is not None else timezone.localdate()
-            rule = (
+            return (
                 TaxRule.objects.filter(country_code=country_code.upper(), tax_type="vat", valid_from__lte=today)
                 .filter(models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=today))
                 .order_by("-valid_from", "-created_at")
                 .first()
             )
-
-            if rule:
-                return (rule.rate * Decimal("100")).quantize(Decimal("0.01"))
-
         except Exception as e:
             logger.debug(f"Database tax rules not available: {e}")
+            return None
 
-        return None
+    @classmethod
+    def _get_rate_from_database(cls, country_code: str, on_date: date | None = None) -> Decimal | None:
+        """Get the VAT rate in force on on_date (default: today, operator calendar) as a percentage."""
+        rule = cls._rule_in_force(country_code, on_date)
+        return (rule.rate * Decimal("100")).quantize(Decimal("0.01")) if rule else None
 
     @classmethod
     def _get_rate_from_settings(cls, country_code: str) -> Decimal | None:

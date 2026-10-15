@@ -2,6 +2,7 @@
 # COMPREHENSIVE BILLING PDF GENERATORS TESTS
 # ===============================================================================
 
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -1179,8 +1180,8 @@ class EN16931PDFComplianceTests(TestCase):
         )
         calls = self._get_canvas_calls(invoice=multi)
         text = ' '.join(calls)
-        self.assertIn('TVA 21%', text)
-        self.assertIn('TVA 9%', text)
+        self.assertIn('VAT 21%', text)
+        self.assertIn('VAT 9%', text)
 
     def test_fractional_vat_rate_not_truncated(self):
         """A fractional VAT rate (9.5%) must render as 9.5%, not be truncated to 9%."""
@@ -1193,7 +1194,7 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(calls)
         # The breakdown must show the exact rate, and 9.5% must be a distinct bucket
         # from any 9% line (int(0.095*100) would have collapsed both to "9").
-        self.assertIn('TVA 9.5%', text)
+        self.assertIn('VAT 9.5%', text)
 
     def test_reverse_charge_notation(self):
         """Reverse charge notice must appear when any line has tax_category_code=AE."""
@@ -1367,7 +1368,7 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(self._get_canvas_calls(invoice=discounted))
         self.assertIn('100.00', text)                   # gross subtotal (sum of line nets)
         self.assertRegex(text, r'[Dd]iscount.*10\.00')  # the document discount line
-        self.assertRegex(text, r'baza:\s*90\.00')       # VAT base re-based to NET (gross - discount)
+        self.assertRegex(text, r'base:\s*90\.00')       # VAT base re-based to NET (gross - discount)
         self.assertIn('17.10', text)                    # VAT == invoice.tax_amount (single TaxSubtotal)
         self.assertIn('107.10', text)                   # grand total
 
@@ -1392,9 +1393,9 @@ class EN16931PDFComplianceTests(TestCase):
         )
         with self.assertLogs('apps.billing.pdf_generators', level='WARNING'):
             text = ' '.join(self._get_canvas_calls(invoice=multi))
-        self.assertEqual(text.count('TVA '), 1, 'discounted invoice collapses to one VAT line')
-        self.assertIn('TVA 19%', text)                  # dominant (largest-base) rate, deterministic
-        self.assertRegex(text, r'baza:\s*135\.00')      # net = gross(150) - discount(15)
+        self.assertEqual(len(re.findall(r'VAT \d', text)), 1, 'discounted invoice collapses to one VAT line')
+        self.assertIn('VAT 19%', text)                  # dominant (largest-base) rate, deterministic
+        self.assertRegex(text, r'base:\s*135\.00')      # net = gross(150) - discount(15)
         self.assertIn('20.00', text)                    # invoice tax
         self.assertIn('155.00', text)                   # grand total reconciles
         self.assertRegex(text, r'[Dd]iscount.*15\.00')

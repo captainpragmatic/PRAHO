@@ -23,6 +23,7 @@ from apps.api.secure_auth import (
 )
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.recurring_locking import lock_recurring_collection_customer
+from apps.common.operator import operator_country
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan
@@ -287,8 +288,8 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         costs: dict[str, Decimal] = {}
         for service in active_services:
             costs[service.currency_id] = costs.get(service.currency_id, Decimal("0")) + service_monthly_price(service)
-        # Calculate cost with current Romanian VAT rate
-        vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
+        # Calculate cost with the operator's current domestic VAT rate
+        vat_multiplier = Decimal("1") + TaxService.get_vat_rate(operator_country(), as_decimal=True)
         monthly_costs = [
             {
                 "currency_code": code,

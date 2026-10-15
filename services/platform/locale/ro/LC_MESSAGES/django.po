@@ -3112,11 +3112,6 @@ msgstr "Perioada: {start} - {end}"
 msgid "Cod produs: {code}"
 msgstr "Cod produs: {code}"
 
-#: apps/billing/pdf_generators.py:420
-#, python-brace-format
-msgid "TVA {rate}%: {tax} {currency} (baza: {base} {currency})"
-msgstr "TVA {rate}%: {tax} {currency} (baza: {base} {currency})"
-
 #: apps/billing/pdf_generators.py:532
 #, python-brace-format
 msgid "Subtotal: {amount} {currency}"
@@ -3126,11 +3121,6 @@ msgstr "Subtotal: {amount} {currency}"
 #, python-brace-format
 msgid "Discount: {amount} {currency}"
 msgstr "Reducere: {amount} {currency}"
-
-#: apps/billing/pdf_generators.py:554
-#, python-brace-format
-msgid "Total TVA: {amount} {currency}"
-msgstr "Total TVA: {amount} {currency}"
 
 #: apps/billing/pdf_generators.py:576
 #, python-brace-format
@@ -21772,11 +21762,6 @@ msgstr "Adăugați articol de comandă"
 msgid "Edit Order Item"
 msgstr "Editați articolul de comandă"
 
-#: templates/orders/order_item_form.html:31
-#, python-format
-msgid "VAT will be automatically calculated at 21%% for Romanian customers. Prices are stored in cents for precision."
-msgstr "Taxa pe Valoarea Adăugată va fi calculată automat la 21%% pentru clienții români. Prețurile sunt stocate în cenți pentru precizie."
-
 #: templates/orders/order_item_form.html:57
 msgid "Pricing Information"
 msgstr "Informații despre Preț"
@@ -21802,13 +21787,6 @@ msgstr "Configurație Avansată"
 #: templates/orders/order_item_form.html:110
 msgid "Tax Calculation Preview"
 msgstr "Previzualizare Calcul TVA"
-
-#: templates/orders/order_item_form.html:118
-#: templates/orders/partials/financial_summary.html:18
-#: templates/orders/partials/order_items_list.html:201
-#, python-format
-msgid "VAT (21%%):"
-msgstr "TVA (21%%):"
 
 #: templates/orders/order_item_form.html:144
 #: templates/orders/partials/_order_items_js.html:23
@@ -26961,3 +26939,15 @@ msgstr "Sumar TVA pentru raportarea fiscală"
 
 msgid "Your personal data is processed according to the GDPR (EU 2016/679)."
 msgstr "Datele dvs. personale sunt prelucrate conform GDPR (UE 2016/679)."
+
+msgid "VAT {rate}%: {tax} {currency} (base: {base} {currency})"
+msgstr "TVA {rate}%: {tax} {currency} (baza: {base} {currency})"
+
+msgid "Total VAT: {amount} {currency}"
+msgstr "Total TVA: {amount} {currency}"
+
+msgid "Prices include VAT"
+msgstr "Prețurile includ TVA"
+
+msgid "VAT follows the customer's country and VAT status. Prices are stored in cents for precision."
+msgstr "TVA depinde de țara clientului și de statutul său de plătitor de TVA. Prețurile sunt stocate în cenți pentru precizie."

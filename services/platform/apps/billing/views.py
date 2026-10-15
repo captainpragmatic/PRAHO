@@ -13,6 +13,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apps.users.models import User
 
 from http import HTTPStatus
@@ -736,13 +738,15 @@ def _posted_proforma_lines(post: QueryDict) -> list[dict[str, Any]]:
     """
     from decimal import Decimal, InvalidOperation  # noqa: PLC0415
 
+    standard = TaxService.get_vat_rate(operator_country(), as_decimal=True)
     lines: list[dict[str, Any]] = []
     index = 0
     while f"line_{index}_description" in post:
         try:
-            tax_rate = Decimal((post.get(f"line_{index}_vat_rate") or "21").strip()) / 100
+            posted_rate = (post.get(f"line_{index}_vat_rate") or "").strip()
+            tax_rate = Decimal(posted_rate) / 100 if posted_rate else standard
         except (InvalidOperation, ArithmeticError):
-            tax_rate = Decimal("0.21")
+            tax_rate = standard
         lines.append(
             {
                 "description": post.get(f"line_{index}_description", ""),
@@ -755,6 +759,35 @@ def _posted_proforma_lines(post: QueryDict) -> list[dict[str, Any]]:
         )
         index += 1
     return lines
+
+
+def _percent_text(rate: Decimal) -> str:
+    """A percentage as the proforma form posts it: "21", "5.5", never localised or "2E+1"."""
+    return format(rate.normalize(), "f")
+
+
+def _vat_rate_options(line_rates: Iterable[Decimal] = ()) -> list[dict[str, str]]:
+    """The VAT rates a proforma line can take: the operator's standard and reduced rates and zero.
+
+    Any other rate a line already carries is added, so opening and saving a proforma never
+    re-rates a line. ``fraction`` is what the template compares with a line's stored rate; it is
+    built unlocalised because a Romanian ``0,2100`` never matched and every line fell back to the
+    first option.
+    """
+    country = operator_country()
+    named: dict[Decimal, str] = {TaxService.get_vat_rate(country): str(_("Standard"))}
+    reduced = TaxService.get_reduced_vat_rate(country)
+    if reduced is not None:
+        named.setdefault(reduced, str(_("Reduced")))
+    named.setdefault(Decimal(0), str(_("Exempt")))
+    for fraction in line_rates:
+        named.setdefault(Decimal(fraction) * 100, "")
+    options = []
+    for rate, name in named.items():
+        percent = _percent_text(rate)
+        label = f"{percent}% ({name})" if name else f"{percent}%"
+        options.append({"value": percent, "fraction": f"{rate / 100:.4f}", "label": label})
+    return options
 
 
 def _render_proforma_create_form(request: HttpRequest, *, error: str | None = None) -> HttpResponse:
@@ -771,12 +804,13 @@ def _render_proforma_create_form(request: HttpRequest, *, error: str | None = No
     if error:
         messages.error(request, _("❌ {error}").format(error=error))
     posted = request.POST if request.method == "POST" else None
+    lines = _posted_proforma_lines(posted) if posted else []
     context = {
         "customers": _get_customers_for_edit_form(request.user),
-        "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
+        "vat_rate_options": _vat_rate_options(line["tax_rate"] for line in lines),
         "document_type": "proforma",
         "posted": posted,
-        "lines": _posted_proforma_lines(posted) if posted else None,
+        "lines": lines,
         **get_selling_currency_policy().as_dict(),
     }
     return render(request, "billing/proforma_form.html", context)
@@ -1163,8 +1197,8 @@ def _parse_line_unit_price(request_data: dict[str, Any], line_counter: int) -> t
 def _parse_line_vat_rate(request_data: dict[str, Any], line_counter: int) -> tuple[Decimal, list[str]]:
     """Parse and validate line item VAT rate."""
     errors = []
-    default_rate = TaxService.get_vat_rate("RO", as_decimal=False)
-    default_rate_str = str(int(default_rate))
+    default_rate = TaxService.get_vat_rate(operator_country(), as_decimal=False)
+    default_rate_str = _percent_text(default_rate)
     try:
         vat_rate_str = (request_data.get(f"line_{line_counter}_vat_rate") or default_rate_str).strip()
         vat_rate = Decimal(vat_rate_str) if vat_rate_str else default_rate
@@ -1254,9 +1288,11 @@ def proforma_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     # GET request - render form
     customers = _get_customers_for_edit_form(request.user)
+    lines = list(proforma.lines.all())
     context = {
         "proforma": proforma,
-        "lines": proforma.lines.all(),
+        "lines": lines,
+        "vat_rate_options": _vat_rate_options(line.tax_rate for line in lines),
         "customers": customers,
         "document_type": "proforma",
     }

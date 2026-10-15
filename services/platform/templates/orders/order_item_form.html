@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load l10n %}
 {% load ui_components %}
 
 <form method="POST"
@@ -28,7 +29,7 @@
         <div class="ml-3">
           <h4 class="text-sm font-medium text-blue-200">{% trans 'VAT' %}</h4>
           <div class="mt-1 text-sm text-blue-300">
-            <p>{% trans 'VAT will be automatically calculated at 21% for Romanian customers. Prices are stored in cents for precision.' %}</p>
+            <p>{% trans "VAT follows the customer's country and VAT status. Prices are stored in cents for precision." %}</p>
           </div>
         </div>
       </div>
@@ -109,13 +110,13 @@
         <div class="ml-3">
           <h4 class="text-sm font-medium text-green-200">{% trans 'Tax Calculation Preview' %}</h4>
           <div class="mt-2 text-sm text-green-300">
-            <div class="space-y-1" id="tax-preview">
+            <div class="space-y-1" id="tax-preview" data-vat-rate="{{ vat_rate|unlocalize }}">
               <div class="flex justify-between">
                 <span>{% trans "Subtotal:" %}</span>
                 <span id="preview-subtotal">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between">
-                <span>{% trans "VAT (21%):" %}</span>
+                <span>{% trans "VAT:" %}</span>
                 <span id="preview-vat">{{ order.currency }} 0.00</span>
               </div>
               <div class="flex justify-between font-semibold border-t border-green-700 pt-1">
@@ -171,7 +172,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // As OrderItem computes it: the setup fee is charged once, not per unit.
         const lineTotal = unitPriceCents * quantity + setupCents;
         const subtotal = lineTotal / 100;
-        const vatAmount = subtotal * 0.21; // 21% VAT
+        const vatAmount = subtotal * (parseFloat(document.getElementById('tax-preview').dataset.vatRate) || 0);
         const total = subtotal + vatAmount;
 
         document.getElementById('preview-subtotal').textContent = `${currency} ${subtotal.toFixed(2)}`;
