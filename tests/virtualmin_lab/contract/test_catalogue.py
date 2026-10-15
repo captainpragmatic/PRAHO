@@ -8,7 +8,6 @@ from tests.virtualmin_lab.contract.harness import (
     Lab,
     assert_accepted,
     assert_refused,
-    assert_unavailable_command,
     covers,
 )
 
@@ -87,15 +86,6 @@ def test_list_plans(lab: Lab) -> None:
         assert_refused(refused, error="Unknown parameter --bogus", retriability=Retriability.UNKNOWN, exact=True)
 
     lab.prove_read_only("list-plans", run)
-
-
-@covers("get-plan")
-def test_get_plan(lab: Lab) -> None:
-    """Virtualmin 8.3 has no get-plan: `list-plans --id` or `--name` reads one plan."""
-    exchange = lab.prove_read_only(
-        "get-plan", lambda: lab.call("get-plan", {"id": "0"}, case="unavailable", note="8.3 reads a plan with list-plans")
-    )
-    assert_unavailable_command(exchange)
 
 
 @covers("list-bandwidth")

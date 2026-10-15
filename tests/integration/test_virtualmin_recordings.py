@@ -26,7 +26,7 @@ def _committed_fixtures() -> list[Path]:
 
 class TestCommittedFixtures:
     def test_there_are_committed_recordings(self) -> None:
-        assert len(_committed_fixtures()) >= 36, f"run: make test-virtualmin-contract RECORD=update ({FIXTURE_ROOT})"
+        assert len(_committed_fixtures()) == 26, f"run: make test-virtualmin-contract RECORD=update ({FIXTURE_ROOT})"
 
     @pytest.mark.parametrize("path", _committed_fixtures(), ids=lambda path: f"{path.parent.name}/{path.name}")
     def test_every_recording_is_already_sanitised(self, path: Path) -> None:

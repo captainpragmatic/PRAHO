@@ -18,7 +18,6 @@ from tests.virtualmin_lab.contract.harness import (
     assert_accepted,
     assert_mutating,
     assert_refused,
-    assert_unavailable_command,
     covers,
 )
 
@@ -239,13 +238,3 @@ def test_enable_domain(lab: Lab) -> None:
     assert_refused(
         absent, error=f"Virtual server {ABSENT} does not exist", retriability=Retriability.NOT_RETRIABLE, exact=True
     )
-
-
-@covers("get-domain")
-def test_get_domain(lab: Lab) -> None:
-    """Virtualmin 8.3 has no get-domain: `list-domains --domain` is how a single domain is read."""
-    exchange = lab.prove_read_only(
-        "get-domain",
-        lambda: lab.call("get-domain", {"domain": SANDBOX_DOMAIN}, case="unavailable", note="the command is not there"),
-    )
-    assert_unavailable_command(exchange)

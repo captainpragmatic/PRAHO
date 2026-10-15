@@ -359,14 +359,3 @@ def assert_refused(exchange: Exchange, *, error: str, retriability: Retriability
     assert rejection is not None, exchange.body[:500]
     assert (rejection == error) if exact else (error in rejection), rejection
     assert classify_virtualmin_application_error(response) is retriability, rejection
-
-
-def assert_unavailable_command(exchange: Exchange) -> None:
-    """The node has no such command: a status "error" envelope, a definite and permanent refusal."""
-    assert_refused(
-        exchange,
-        error=f"Remote program {exchange.program} does not exist",
-        retriability=Retriability.NOT_RETRIABLE,
-        exact=True,
-    )
-    assert exchange.response.data["status"] == "error"

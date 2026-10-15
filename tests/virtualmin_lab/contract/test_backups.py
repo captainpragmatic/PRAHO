@@ -22,7 +22,6 @@ from tests.virtualmin_lab.contract.harness import (
     assert_accepted,
     assert_mutating,
     assert_refused,
-    assert_unavailable_command,
     covers,
 )
 
@@ -192,13 +191,3 @@ def test_restore_domain(lab: Lab) -> None:
             )
     finally:
         _remove_archives(lab, archive)
-
-
-@covers("list-backups")
-def test_list_backups(lab: Lab) -> None:
-    """Virtualmin 8.3 lists logged backups with list-backup-logs; list-backups does not exist."""
-    exchange = lab.prove_read_only(
-        "list-backups",
-        lambda: lab.call("list-backups", {"domain": SANDBOX_DOMAIN}, case="unavailable", note="8.3 has list-backup-logs"),
-    )
-    assert_unavailable_command(exchange)

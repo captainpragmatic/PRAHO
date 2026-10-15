@@ -70,7 +70,7 @@ class TestSanitiseText:
     def test_the_text_the_gateway_classifies_on_is_untouched(self) -> None:
         for text in (
             "Virtual server nope.praho.test does not exist",
-            "Remote program get-domain does not exist",
+            "Remote program frobnicate-domain does not exist",
             "Unknown parameter --format",
             "Virtual server contract.praho.test is already disabled",
             "The BIND DNS server is not enabled for Virtualmin",

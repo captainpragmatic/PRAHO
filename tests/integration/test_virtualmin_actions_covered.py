@@ -254,9 +254,9 @@ class TestScannerSeesTheRealCode:
 
     def test_the_allowlist_is_read_in_full(self, allowlist: tuple[set[str], set[str]]) -> None:
         allowed, read_only = allowlist
-        assert len(allowed) == 36
+        assert len(allowed) == 26
         assert "info" in allowed
-        assert len(read_only) == 15
+        assert len(read_only) == 10
         assert read_only <= allowed
 
     def test_the_scan_finds_every_real_call_style(self, sites: list[CallSite]) -> None:
@@ -279,7 +279,7 @@ class TestScannerSeesTheRealCode:
         assert found == set(DYNAMIC_SITES), "a declared dynamic site no longer exists"
 
     def test_the_contract_tests_are_found(self, contract_tests: list[ContractTest]) -> None:
-        assert len(contract_tests) == 36
+        assert len(contract_tests) == 26
         assert "test_node_transfer.py" not in {test.path for test in contract_tests}
         assert ("test_backups.py", "restore-domain") in {(test.path, test.program) for test in contract_tests}
 
