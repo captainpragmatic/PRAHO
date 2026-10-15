@@ -9,6 +9,7 @@ Docker daemon and never touch a real env file; one test runs the real `docker co
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
@@ -54,19 +55,40 @@ argv = sys.argv[1:]
 with open(os.environ["DOCKER_LOG"], "a") as log:
     log.write(json.dumps({{"argv": argv, "env": {{k: os.environ.get(k) for k in {recorded!r}}}}}) + "\\n")
 if argv[:1] == ["ps"]:
-    print("praho_db\\npraho_platform\\npraho_portal\\npraho_caddy")
+    if os.environ.get("DOCKER_PS_FAILS"):
+        sys.exit(1)
+    names = ["praho_db", "praho_platform", "praho_qcluster", "praho_caddy"]
+    if not os.environ.get("DOCKER_ABSENT_PORTAL"):
+        names.append("praho_portal")
+    print("\\n".join(names))
 elif argv[:1] == ["inspect"]:
     print(os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy")))
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
+elif argv[:3] == ["exec", "-i", "praho_db"]:
+    sql = sys.stdin.read()
+    if os.environ.get("DOCKER_SQL_INPUT"):
+        with open(os.environ["DOCKER_SQL_INPUT"], "w") as output:
+            output.write(sql)
+    if os.environ.get("DOCKER_SQL_ERROR"):
+        sys.exit(3 if "--set=ON_ERROR_STOP=1" in argv else 0)
+elif argv[:1] == ["exec"] and os.environ.get("DOCKER_PREPARE_FAILS") and any("DROP SCHEMA" in a for a in argv):
+    sys.exit(1)
+elif argv[:1] == ["stop"] and os.environ.get("DOCKER_STOP_FAILS"):
+    sys.exit(1)
 elif argv[:2] == ["container", "inspect"] and os.environ.get("DOCKER_CONTAINER_MISSING"):
     sys.exit(1)
 elif argv[:1] == ["cp"] and os.environ.get("DOCKER_CP_FAILS"):
     sys.exit(1)
+elif argv[:2] == ["cp", "-a"] and os.environ.get("DOCKER_MEDIA_RESTORE_FAILS"):
+    sys.exit(1)
 """
-# A gzip stream of no data, which the restore pipes into psql.
+# Archive fixtures: a plain pg_dump envelope and an empty tar, with intact compression.
+SQL_DUMP = b"-- PostgreSQL database dump\nSET statement_timeout = 0;\n-- PostgreSQL database dump complete\n"
+DUMP_GZIP = gzip.compress(SQL_DUMP)
+MEDIA_GZIP = gzip.compress(bytes(10240))
 EMPTY_GZIP = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
 
@@ -312,17 +334,17 @@ class TestRollbackAndRestore:
         assert [a for a in pull if not a.startswith("-")] == ["pull", "platform", "portal"]
 
     @pytest.mark.integration
-    def test_restore_restarts_through_the_env_file_and_waits_on_container_health(self, project: Project) -> None:
+    def test_a_failed_restart_does_not_recreate_a_different_topology(self, project: Project) -> None:
         env_file = project.write_env(".env.staging", STAGING_ENV)
         backups = project.root / "backups"
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
-        backup.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        backup.write_bytes(DUMP_GZIP)
         result = project.run("restore.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
-        assert result.returncode == 0, result.stdout + result.stderr
-        (call,) = project.compose_calls()
-        assert call["argv"][2] == str(env_file)
-        assert "--wait" in _subcommand(call)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "starting the local services failed" in result.stdout
+        assert env_file.read_text() == STAGING_ENV
+        assert project.compose_calls() == []
         assert "curl" not in project.log.read_text()
 
     @pytest.mark.integration
@@ -331,7 +353,7 @@ class TestRollbackAndRestore:
         backups = project.root / "backups"
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
-        backup.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        backup.write_bytes(DUMP_GZIP)
         result = project.run("restore.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
         assert "Starting services" in result.stdout, result.stdout + result.stderr
         assert result.returncode != 0, result.stdout
@@ -415,7 +437,7 @@ class TestBackupFiles:
         project.write_env(".env.staging", STAGING_ENV)
         backups = project.root / "backups"
         backups.mkdir()
-        (backups / "praho_backup_20261008_020000_4242.sql.gz").write_bytes(EMPTY_GZIP)
+        (backups / "praho_backup_20261008_020000_4242.sql.gz").write_bytes(DUMP_GZIP)
         result = project.run("restore.sh", "--env", "staging", stdin="1\nyes\n")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1) 20261008_020000 (" in result.stderr

@@ -796,8 +796,10 @@ stacks of Options 4 and 5 (ADR-0054).
 ```
 
 The portal reaches the platform at `https://<platform domain>/api` through the platform server's Caddy,
-where `/api/*` is public and Django's HMAC check guards it. `rollback.sh` and `restore.sh` assume the
-single-server stack: on a split deployment, roll back by redeploying an earlier `VERSION` on each server.
+where `/api/*` is public and Django's HMAC check guards it. Database restore supports the local bundled
+`praho_db` on a single-server or platform-only host and restarts only its existing local application
+containers. It does not operate the remote portal or an external database. `rollback.sh` still assumes
+the single-server stack: on a split deployment, redeploy an earlier `VERSION` on each server.
 
 ---
 
@@ -865,6 +867,16 @@ make restore
 # Native deployment
 /opt/praho/scripts/restore.sh --latest
 ```
+
+Docker restore privately stages the selected dump and companion media archive before creating its
+safety backup, so retention cannot remove the input during the restore. It checks compression, the
+plain `pg_dump` envelope and tar integrity before stopping services; these checks do not prove SQL
+compatibility with the target database. A failed safety backup aborts before downtime. SQL errors stop
+the restore and leave applications offline for recovery using the safety backup. Restart failures are
+reported without creating containers from a different deployment topology.
+
+Run the offline recovery contracts with `make test-deploy`. `make test-deploy-docker` runs the
+disposable Caddy acceptance tests and requires a working Docker daemon.
 
 ### Backup Retention
 
