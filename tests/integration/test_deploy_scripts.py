@@ -70,6 +70,12 @@ if argv[:1] == ["ps"]:
     if not os.environ.get("DOCKER_ABSENT_PORTAL"):
         names.append("praho_portal")
     print("\\n".join(names))
+elif argv[:1] == ["inspect"] and "{{{{.Image}}}}" in argv:
+    print(os.environ.get("DOCKER_SOURCE_IMAGE", "sha256:" + ("b" if argv[-1] == "praho_portal" else "a") * 64))
+elif argv[:1] == ["inspect"] and "{{{{.Config.Image}}}}" in argv:
+    print("praho-" + ("portal" if argv[-1] == "praho_portal" else "platform") + ":v1.0.0")
+elif argv[:1] == ["exec"] and "SHOW server_version_num" in argv:
+    print("160010")
 elif argv[:1] == ["inspect"]:
     print(os.environ.get("DOCKER_HEALTH_" + argv[-1], os.environ.get("DOCKER_HEALTH", "healthy")))
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
