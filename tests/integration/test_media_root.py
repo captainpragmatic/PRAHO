@@ -20,7 +20,7 @@ import jinja2
 import pytest
 import yaml
 
-from tests.integration.test_deploy_scripts import EMPTY_GZIP, PROD_ENV, Project
+from tests.integration.test_deploy_scripts import DUMP_GZIP, EMPTY_GZIP, MEDIA_GZIP, PROD_ENV, Project
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SETTINGS = PROJECT_ROOT / "services/platform/config/settings"
@@ -99,21 +99,21 @@ def test_a_restore_puts_the_media_back_before_the_services_start(project: Projec
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
-    (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
+    (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(MEDIA_GZIP)
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     argvs = [call["argv"] for call in project.calls()]
     restore = argvs.index(["cp", "-a", "-", "praho_platform:/app"])
-    assert argvs.index(["stop", "praho_qcluster", "praho_platform", "praho_portal"]) < restore
+    assert argvs.index(["stop", "praho_platform", "praho_portal", "praho_qcluster"]) < restore
     assert restore < argvs.index(["start", "praho_platform", "praho_portal", "praho_qcluster"])
 
 
-def _dump_with_media(project: Project, media: bytes = EMPTY_GZIP) -> Path:
+def _dump_with_media(project: Project, media: bytes = MEDIA_GZIP) -> Path:
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
     (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(media)
     return dump
 
@@ -125,7 +125,7 @@ def _dropped(project: Project) -> bool:
 @pytest.mark.parametrize(
     ("case", "media", "env"),
     [
-        ("container removed", EMPTY_GZIP, {"DOCKER_CONTAINER_MISSING": "1"}),
+        ("container removed", MEDIA_GZIP, {"DOCKER_CONTAINER_MISSING": "1"}),
         ("damaged archive", b"not a gzip stream", {}),
     ],
 )
@@ -141,7 +141,7 @@ def test_a_restore_that_could_not_restore_the_media_changes_nothing(
 
 def test_a_media_failure_after_the_database_still_brings_the_services_back(project: Project) -> None:
     dump = _dump_with_media(project)
-    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_CP_FAILS="1")
+    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_MEDIA_RESTORE_FAILS="1")
     assert result.returncode != 0
     assert "restoring the media failed" in result.stdout, result.stdout
     assert ["start", "praho_platform", "praho_portal", "praho_qcluster"] in [call["argv"] for call in project.calls()]
@@ -163,7 +163,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "No media archive" in result.stdout

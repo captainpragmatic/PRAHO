@@ -476,6 +476,13 @@ coverage-portal-union:
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 
+.PHONY: test-deploy test-deploy-docker
+test-deploy:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/ tests/integration/test_deploy_scripts.py tests/integration/test_media_root.py tests/integration/test_restore_safety.py -m 'not docker' -q
+
+test-deploy-docker:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_caddy_routing.py -m docker -q
+
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
