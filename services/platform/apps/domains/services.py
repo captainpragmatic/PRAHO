@@ -32,6 +32,7 @@ from apps.settings.services import SettingsService
 
 from .domain_names import canonicalize_domain_name, longest_matching_tld_suffix
 from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
+from .order_fulfilment import ORDERABLE_DOMAIN_ACTIONS, claim_order_line, fail_order_line
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -365,6 +366,16 @@ class RegistrarService:
         ).order_by("tld_assignments__priority")
 
     @staticmethod
+    def serves_tld(registrar: Registrar, tld: TLD) -> bool:
+        """Still active, actively assigned to the TLD and usable by this operator."""
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
+
+        assigned = Registrar.objects.filter(
+            pk=registrar.pk, status="active", tld_assignments__tld=tld, tld_assignments__is_active=True
+        ).exists()
+        return assigned and RegistrarGatewayFactory.serves_operator(registrar)
+
+    @staticmethod
     def select_best_registrar_for_tld(tld: TLD) -> Registrar | None:
         """🎯 The primary registrar, else the highest-priority backup, skipping any this operator may not use"""
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
@@ -439,6 +450,11 @@ class DomainLifecycleService:
             return Err(components.unwrap_err())
 
         tld, registrar = components.unwrap()
+        if order_item is not None:
+            # A paid line goes to the registrar it was sold with, never a substitute.
+            if order_item.registrar is None or not RegistrarService.serves_tld(order_item.registrar, tld):
+                return Err(cast(str, _("The registrar this domain was sold with no longer offers it.")))
+            registrar = order_item.registrar
 
         period_error = TLDService.validate_registration_period(tld, years)
         if period_error is not None:
@@ -668,7 +684,7 @@ class DomainLifecycleService:
             )
             return Err(cast(str, _("Transfer was submitted but the registrar did not confirm it — do not resubmit.")))
         logger.warning("Transfer rejected for %s (records removed for clean retry): %s", domain_name, error.code.value)
-        domain.delete()  # cascades to the DomainOperation row
+        DomainOperationService.discard_unconfirmed(domain.pk)  # cascades to the DomainOperation row
         return Err(cast(str, _("Registrar rejected the transfer: {error}")).format(error=error.code.value))
 
     @staticmethod
@@ -1314,9 +1330,6 @@ class DomainLineQuote:
         return self.unit_price_cents * self.years
 
 
-ORDERABLE_DOMAIN_ACTIONS = ("register", "transfer")
-
-
 class DomainOrderService:
     """
     🛒 Domain order processing service
@@ -1416,6 +1429,10 @@ class DomainOrderService:
         if not tld:
             return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
 
+        registrar = registrar or (
+            RegistrarService.select_best_registrar_for_tld(tld) if action in ORDERABLE_DOMAIN_ACTIONS else None
+        )
+
         if action in {"register", "renew"}:
             period_error = (
                 TLDService.validate_registration_period(tld, years)
@@ -1500,8 +1517,6 @@ class DomainOrderService:
     @staticmethod
     def _process_registration(order: Order, item: DomainOrderItem) -> Domain | None:
         """Register one item; a paid line is claimed first, so the registrar sees it at most once."""
-        from .order_fulfilment import claim_order_line, fail_order_line  # noqa: PLC0415  # Deferred: imports orders
-
         if item.order_item_id is not None and not claim_order_line(item):
             return None
         result: Result[Domain, str]
@@ -1515,8 +1530,9 @@ class DomainOrderService:
                 order_item=item,
             )
         except Exception as exc:  # A claimed line must not wait in progress unnoticed.
-            logger.exception("🔥 [Domain] Registration of %s crashed", item.domain_name)
-            result = Err(f"Registration crashed: {exc}")
+            # Its kind only: the text of an error raised here may quote registrant data.
+            logger.error("🔥 [Domain] Registration of %s crashed: %s", item.domain_name, type(exc).__name__)
+            result = Err(_("Registration crashed: {error}").format(error=type(exc).__name__))
         if result.is_ok():
             logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
             return result.unwrap()

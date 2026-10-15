@@ -633,10 +633,12 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
             if item.service:
                 _send_service_ready_email(item)
 
-            # Check if all items in order are provisioned
+            # Check if all items in order are provisioned. The order is locked first, so two lines
+            # completing together cannot each read the other as unfinished.
             order = item.order
             items: list[OrderItem] | None = None
             with best_effort_atomic(logger=logger, scope="Order", message="Failed to load provisioning items"):
+                order = Order.objects.select_for_update(of=("self",)).get(pk=item.order_id)
                 items = list(order.items.all())
             if items is None:
                 return

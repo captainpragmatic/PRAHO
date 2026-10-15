@@ -26982,3 +26982,12 @@ msgstr "Această extensie de domeniu nu poate fi comandată acum."
 
 msgid "We could not complete this domain automatically. Our team will finish it and contact you."
 msgstr "Nu am putut finaliza automat acest domeniu. Echipa noastră îl va finaliza și vă va contacta."
+
+msgid "The registrar this domain was sold with no longer offers it."
+msgstr "Registratorul cu care a fost vândut acest domeniu nu îl mai oferă."
+
+msgid "Registration crashed: {error}"
+msgstr "Înregistrarea a eșuat: {error}"
+
+msgid "It stalled after it was claimed, before the registrar was asked"
+msgstr "Procesarea s-a oprit după preluarea comenzii, înainte de solicitarea registratorului"

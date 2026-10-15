@@ -21,6 +21,8 @@ from .gateways.contracts import parse_date
 from .models import Domain, DomainOperation, DomainOrderItem
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from .gateways import BaseRegistrarGateway
     from .services import DomainRegistrationConfig
 
@@ -165,10 +167,7 @@ class DomainOperationService:
             operation.refresh_from_db()
             if operation.state == "failed":
                 # Only explicit rejection, never a not-found read, frees the name.
-                with transaction.atomic():
-                    locked = Domain.objects.select_for_update().get(pk=domain.pk)
-                    if locked.status == "pending":
-                        locked.delete()
+                cls.discard_unconfirmed(domain.pk)
             return Err(str(payload.get("error", "Registration unconfirmed — do not resubmit.")))
         if payload.get("pending") or not payload.get("expires_at"):
             return Err(str(REGISTRATION_PENDING_MESSAGE))
@@ -176,6 +175,16 @@ class DomainOperationService:
         cls.resume_registration_nameservers(domain)
         domain.refresh_from_db()
         return Ok(domain)
+
+    @staticmethod
+    def discard_unconfirmed(domain_id: UUID) -> bool:
+        """Delete a refused domain row, unless a webhook or staff confirmed it meanwhile."""
+        with transaction.atomic():
+            locked = Domain.objects.select_for_update().filter(pk=domain_id).first()
+            if locked is None or locked.status not in ("pending", "transfer_in"):
+                return False
+            locked.delete()
+        return True
 
     @staticmethod
     def _link_order_item(order_item: DomainOrderItem | None, domain: Domain) -> None:
@@ -195,7 +204,7 @@ class DomainOperationService:
             if availability.is_err() or not availability.unwrap().available:
                 operation.mark_failed("Domain availability could not be confirmed")
                 operation.save()
-                operation.domain.delete()
+                DomainOperationService.discard_unconfirmed(operation.domain_id)
                 return Err("Domain availability could not be confirmed")
             operation.parameters = {**operation.parameters, "contact_dispatched": True}
             operation.save(update_fields=["parameters", "updated_at"])
@@ -203,7 +212,7 @@ class DomainOperationService:
         if result.is_err():
             operation.error_message = str(result.unwrap_err())
             if retriability_of(result) != Retriability.UNKNOWN:
-                operation.domain.delete()
+                DomainOperationService.discard_unconfirmed(operation.domain_id)
                 return Err(operation.error_message)
             DomainOperationService.request_review(operation, "Contact creation unconfirmed")
             return Err("Contact creation unconfirmed; review the registration before retrying.")

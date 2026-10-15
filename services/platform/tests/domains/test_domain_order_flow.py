@@ -294,7 +294,9 @@ class DomainOrderFulfilmentTests(DomainOrderLineFixture, TransactionTestCase):
         register.assert_not_called()
         line.refresh_from_db()
         self.assertEqual(line.provisioning_status, "failed")
-        self.assertIn("db down", alert.call_args.kwargs["message"])
+        # Staff read what kind of failure it was; its text may quote registrant data or a transfer code.
+        self.assertIn("RuntimeError", alert.call_args.kwargs["message"])
+        self.assertNotIn("db down", alert.call_args.kwargs["message"])
 
     @override_settings(REGISTRAR_ADAPTERS_VERIFIED=False)
     def test_unverified_adapter_refusal_fails_the_line_and_alerts_staff(self) -> None:

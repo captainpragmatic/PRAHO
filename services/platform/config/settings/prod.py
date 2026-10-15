@@ -11,7 +11,6 @@ try:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
-    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     HAS_SENTRY = True
 except ImportError:
@@ -292,18 +291,11 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN and HAS_SENTRY:
     sentry_logging = LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)
 
+    from .sentry import sentry_options  # Needs sentry_sdk, present only here
+
     sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            DjangoIntegration(),
-            sentry_logging,
-        ],
-        traces_sample_rate=0.1,
-        send_default_pii=False,
-        # Frame variables are captured whatever send_default_pii says: never send a CNP.
-        event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "cnp"]),
-        environment="production",
-        release=os.environ.get("APP_VERSION", "unknown"),
+        integrations=[DjangoIntegration(), sentry_logging],
+        **sentry_options(SENTRY_DSN, release=os.environ.get("APP_VERSION", "unknown")),
     )
 
 # ===============================================================================
