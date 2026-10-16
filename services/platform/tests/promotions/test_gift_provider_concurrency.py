@@ -67,7 +67,7 @@ class GiftProviderConcurrencyTests(TransactionTestCase):
                 actor = User.objects.get(pk=self.staff.pk)
                 return refund_purchase(self.purchase.pk, 3000, "same-request", actor=actor).pk
             finally:
-                close_old_connections()
+                connection.close()
 
         with patch("apps.billing.gateways.PaymentGatewayFactory.create_gateway") as factory:
             factory.return_value.refund_payment.side_effect = remote
@@ -98,7 +98,7 @@ class GiftProviderConcurrencyTests(TransactionTestCase):
             try:
                 return deliver_gift_card(voucher.pk)
             finally:
-                close_old_connections()
+                connection.close()
 
         with patch("django.core.mail.EmailMessage.send", side_effect=remote) as send, ThreadPoolExecutor(max_workers=2) as pool:
             first = pool.submit(run)

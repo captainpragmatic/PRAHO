@@ -24,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = PROJECT_ROOT / ".github" / "workflows"
 TESTS = PROJECT_ROOT / "services" / "platform" / "tests"
 SCRIPT = "scripts/pg_gated_test_modules.py"
+GATED_TARGET = "test-platform-postgres-gated"
 # The scan is the source of truth; this floor only catches a scan that silently finds nothing.
 MINIMUM_GATED_MODULES = 30
 
@@ -84,12 +85,14 @@ def _postgres_ci_runs(job: dict[str, object]) -> list[str]:
 
 
 def _ci_runs(job: dict[str, Any]) -> list[str]:
-    """The `run:` text of every step that uses the PostgreSQL CI settings."""
+    """The `run:` text of every step that uses the PostgreSQL CI settings, set on the step or the job."""
+    job_settings = str((job.get("env") or {}).get("DJANGO_SETTINGS_MODULE", ""))
     return [
         step["run"]
         for step in job.get("steps", [])
         if "run" in step
-        and "config.settings.ci" in (step["run"] + str((step.get("env") or {}).get("DJANGO_SETTINGS_MODULE", "")))
+        and "config.settings.ci"
+        in (step["run"] + str((step.get("env") or {}).get("DJANGO_SETTINGS_MODULE", job_settings)))
     ]
 
 
@@ -107,6 +110,25 @@ def _derived_step_runs_in_postgres_job() -> bool:
     return any(any(SCRIPT in run for run in _postgres_ci_runs(job)) for _file, _name, job in _workflow_jobs())
 
 
+def _triggers(workflow_file: str) -> set[str]:
+    document = yaml.safe_load((WORKFLOWS / workflow_file).read_text())
+    # YAML 1.1 reads a bare `on:` key as the boolean True.
+    triggers = document.get("on", document.get(True)) or {}
+    return {triggers} if isinstance(triggers, str) else set(triggers)
+
+
+def _make_recipe(target: str) -> str:
+    """The recipe lines of one Makefile target, joined as make sees them."""
+    lines = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"{target}:")
+    recipe = []
+    for line in lines[start + 1 :]:
+        if not line.startswith("\t"):
+            break
+        recipe.append(line.strip())
+    return "\n".join(recipe)
+
+
 def _covered(module: str, labels: set[str]) -> bool:
     return any(module == label or module.startswith(label + ".") for label in labels)
 
@@ -120,6 +142,16 @@ class TestPostgresGatedTestsRunInCi:
         # Canaries for each gate idiom the platform tests use.
         assert "tests.promotions.test_concurrency" in modules  # @skipUnless(connection.vendor == ...)
         assert "tests.users.test_lockout_counter_concurrency" in modules  # self.skipTest("... PostgreSQL ...")
+        assert "tests.users.test_apitoken_expiry_indexes" in modules  # if connection.vendor == "sqlite": ... else
+
+    def test_a_sqlite_branch_is_a_gate_but_a_mention_of_sqlite_is_not(self) -> None:
+        """The other side of a SQLite branch is what PostgreSQL runs, so it needs a PostgreSQL step."""
+        is_gated = _scanner().is_gated
+
+        assert is_gated('if connection.vendor == "sqlite":\n    pass\nelse:\n    run_concurrently()')
+        assert is_gated("@skipUnless(connection.vendor != 'sqlite', 'needs row locks')")
+        assert not is_gated('ENGINE = "django.db.backends.sqlite3"  # the default test database')
+        assert not is_gated('"""SQLite runs these sequentially."""')
 
     def test_the_scan_misses_no_test_that_skips_near_a_mention_of_postgresql(self) -> None:
         """A looser, independent net: a skip call with PostgreSQL named within three lines."""
@@ -165,6 +197,26 @@ class TestPostgresGatedTestsRunInCi:
                 assert invocation, "the step must run the platform tests"
                 assert not re.findall(r"\btests(?:\.\w+)+", invocation.group(1)), "no hand-named labels"
         assert seen == 1
+
+    def test_the_make_target_runs_the_scan_output_and_stops_on_a_failed_or_empty_scan(self) -> None:
+        recipe = _make_recipe(GATED_TARGET)
+
+        assert f"{SCRIPT}) || exit 1" in recipe, "a failing scan must stop the target, not run everything"
+        assert '[ -z "$$modules" ]' in recipe and "exit 1" in recipe, "an empty scan must fail, not pass"
+        invocation = re.search(r"manage\.py test(.*?)--settings=config\.settings\.ci", recipe, flags=re.DOTALL)
+        assert invocation, "the target must run the platform tests under config.settings.ci"
+        assert invocation.group(1).split() == ["$$modules", "\\"], "no hand-named labels"
+
+    def test_pull_requests_run_the_gated_tests_on_postgres(self) -> None:
+        """Before this job they first ran in the nightly, after merge, and a PR broke three of them."""
+        jobs = [
+            name
+            for file, name, job in _workflow_jobs()
+            if "pull_request" in _triggers(file)
+            and any(f"make {GATED_TARGET}" in run for run in _postgres_ci_runs(job))
+        ]
+
+        assert jobs, f"no pull-request job runs `make {GATED_TARGET}` after a PostgreSQL bootstrap"
 
 
 def test_bootstrap_must_precede_gated_steps_and_must_be_required() -> None:
