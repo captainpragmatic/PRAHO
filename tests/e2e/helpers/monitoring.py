@@ -56,6 +56,9 @@ class _ConsoleCollector:
         self.page_errors.append(getattr(error, "message", None) or str(error))
 
     def attach(self, page: Page) -> None:
+        # Each monitored block starts clean, so a reused monitor never fails on an earlier block.
+        self.messages.clear()
+        self.page_errors.clear()
         page.on("console", self._on_console)
         page.on("pageerror", self._on_page_error)
         self._page = page

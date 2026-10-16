@@ -101,6 +101,19 @@ def test_console_monitor_collects_a_page_error_that_arrives_as_it_exits(
         page.goto(local_site.url("/"))
 
 
+def test_a_reused_console_monitor_starts_each_block_clean(page: Page, local_site: LocalSite) -> None:
+    local_site.route("/boom", "<script>undefinedFn()</script>")
+    local_site.route("/", "<p>hi</p>")
+    monitor = monitoring.ConsoleMonitor(page, "selftest")
+
+    with pytest.raises(AssertionError, match="undefinedFn"), monitor:
+        page.goto(local_site.url("/boom"))
+    with monitor:
+        page.goto(local_site.url("/"))
+
+    assert monitor.console_messages == []
+
+
 def test_events_the_final_check_triggers_are_still_collected(
     page: Page, local_site: LocalSite, monkeypatch: pytest.MonkeyPatch
 ) -> None:
