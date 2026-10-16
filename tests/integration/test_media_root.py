@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shlex
 import subprocess
 import tarfile
 from pathlib import Path
@@ -20,7 +21,7 @@ import jinja2
 import pytest
 import yaml
 
-from tests.integration.test_deploy_scripts import EMPTY_GZIP, PROD_ENV, Project
+from tests.integration.test_deploy_scripts import DUMP_GZIP, EMPTY_GZIP, MEDIA_GZIP, PROD_ENV, Project
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SETTINGS = PROJECT_ROOT / "services/platform/config/settings"
@@ -105,21 +106,21 @@ def test_a_restore_puts_the_media_back_before_the_services_start(project: Projec
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
-    (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
+    (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(MEDIA_GZIP)
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     argvs = [call["argv"] for call in project.calls()]
     restore = argvs.index(["cp", "-a", "-", "praho_platform:/app"])
-    assert argvs.index(["stop", "praho_qcluster", "praho_platform", "praho_portal"]) < restore
+    assert argvs.index(["stop", "praho_platform", "praho_portal", "praho_qcluster"]) < restore
     assert restore < argvs.index(["start", "praho_platform", "praho_portal", "praho_qcluster"])
 
 
-def _dump_with_media(project: Project, media: bytes = EMPTY_GZIP) -> Path:
+def _dump_with_media(project: Project, media: bytes = MEDIA_GZIP) -> Path:
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
     (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(media)
     return dump
 
@@ -131,7 +132,7 @@ def _dropped(project: Project) -> bool:
 @pytest.mark.parametrize(
     ("case", "media", "env"),
     [
-        ("container removed", EMPTY_GZIP, {"DOCKER_CONTAINER_MISSING": "1"}),
+        ("container removed", MEDIA_GZIP, {"DOCKER_CONTAINER_MISSING": "1"}),
         ("damaged archive", b"not a gzip stream", {}),
     ],
 )
@@ -147,7 +148,7 @@ def test_a_restore_that_could_not_restore_the_media_changes_nothing(
 
 def test_a_media_failure_after_the_database_still_brings_the_services_back(project: Project) -> None:
     dump = _dump_with_media(project)
-    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_CP_FAILS="1")
+    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_MEDIA_RESTORE_FAILS="1")
     assert result.returncode != 0
     assert "restoring the media failed" in result.stdout, result.stdout
     assert ["start", "praho_platform", "praho_portal", "praho_qcluster"] in [call["argv"] for call in project.calls()]
@@ -169,7 +170,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
     backups = project.root / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
-    dump.write_bytes(EMPTY_GZIP)
+    dump.write_bytes(DUMP_GZIP)
     result = project.run("restore.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "No media archive" in result.stdout
@@ -181,10 +182,14 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
 
 def _render(template: str, root: Path) -> str:
     environment = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)  # noqa: S701  # Shell, not HTML
+    environment.filters["quote"] = shlex.quote
     return environment.from_string((TEMPLATES / template).read_text()).render(
         project_root=str(root),
+        project_user="praho",
         backup_directory=str(root / "backups"),
         backup_retention_days=7,
+        platform_port=8700,
+        portal_port=8701,
         deployed_env={"DB_PASSWORD": "x", "DB_USER": "praho", "DB_NAME": "praho"},
     )
 
@@ -195,9 +200,14 @@ def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (root / "media" / "efactura" / "response.zip").write_bytes(b"anaf")
     stubs = tmp_path / "bin"
     stubs.mkdir()
-    (stubs / "pg_dump").write_text('#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n')
-    for tool in ("pg_restore", "systemctl", "sudo", "sleep"):
+    (stubs / "pg_dump").write_text(
+        '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -f ] && echo dump > "$2"; shift; done\n'
+    )
+    for tool in ("systemctl", "sudo", "sleep"):
         (stubs / tool).write_text("#!/bin/sh\nexit 0\n")
+    (stubs / "sudo").write_text('#!/bin/sh\nshift 2\n[ "$1" = tar ] && exec "$@"\nexit 0\n')
+    (stubs / "pg_restore").write_text('#!/bin/sh\n[ "$1" = --list ] && echo "1; 0 1 TABLE DATA public django_migrations praho"\nexit 0\n')
+    (stubs / "curl").write_text('#!/bin/sh\nprintf 200\n')
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     (root / "scripts").mkdir()

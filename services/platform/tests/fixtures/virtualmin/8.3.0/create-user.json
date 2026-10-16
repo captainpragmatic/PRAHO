@@ -1,0 +1,77 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "create-user",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nAdds a new mailbox user to an existing Virtualmin domain.\n\nvirtualmin create-user --domain domain.name\n                       --user new-username\n                       --pass \"password-for-new-user\" |\n                       --encpass encrypted-password |\n                       --random-pass |\n                       --passfile password-file\n                      [--ssh-pubkey \"key\" | pubkey-file <--ssh-pubkey-id id]\n                      [--real real-name-for-new-user]\n                      [--ftp]\n                      [--shell /path/to/shell]\n                      [--noemail]\n                      [--db-only <--mysql db>*]\n                      [--webserver-only <--webserver-dir path>*]\n                      [--mysql db]*\n                      [--extra email.address@some.domain]\n                      [--recovery address@offsite.com]\n                      [--group name]*\n                      [--web]\n                      [--no-creation-mail]\n                      [--home directory]\n                      [--noappend]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test",
+        "pass": "<redacted>",
+        "real": "Carol",
+        "user": "carol"
+      }
+    },
+    "already_exists": {
+      "body": {
+        "command": "create-user",
+        "error": "A user or mail alias with the same name and domain already exists",
+        "full_error": "A user or mail alias with the same name and domain already exists\n\nAdds a new mailbox user to an existing Virtualmin domain.\n\nvirtualmin create-user --domain domain.name\n                       --user new-username\n                       --pass \"password-for-new-user\" |\n                       --encpass encrypted-password |\n                       --random-pass |\n                       --passfile password-file\n                      [--ssh-pubkey \"key\" | pubkey-file <--ssh-pubkey-id id]\n                      [--real real-name-for-new-user]\n                      [--ftp]\n                      [--shell /path/to/shell]\n                      [--noemail]\n                      [--db-only <--mysql db>*]\n                      [--webserver-only <--webserver-dir path>*]\n                      [--mysql db]*\n                      [--extra email.address@some.domain]\n                      [--recovery address@offsite.com]\n                      [--group name]*\n                      [--web]\n                      [--no-creation-mail]\n                      [--home directory]\n                      [--noappend]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "A user or mail alias with the same name and domain already exists",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the same user twice",
+      "params": {
+        "domain": "contract.praho.test",
+        "pass": "<redacted>",
+        "real": "Carol",
+        "user": "carol"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "create-user",
+        "output": "User carol@contract.praho.test created successfully\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "a plain user with a real name",
+      "params": {
+        "domain": "contract.praho.test",
+        "pass": "<redacted>",
+        "real": "Carol",
+        "user": "carol"
+      }
+    }
+  },
+  "program": "create-user",
+  "virtualmin_version": "8.3.0"
+}

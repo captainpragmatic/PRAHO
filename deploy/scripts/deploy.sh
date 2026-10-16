@@ -94,6 +94,9 @@ compose_up() {
     local type="$1"
     shift
     local up=(up -d --wait --wait-timeout "$WAIT_TIMEOUT")
+    if [ "$type" = single-server ] || { [ "$type" = platform-only ] && [ "$BUNDLED_DB" = true ]; }; then
+        praho_compose "$type" "$@" config --format json | python3 "$SCRIPT_DIR/check_postgres_version.py"
+    fi
     if [ "$NO_CACHE" = true ]; then
         praho_compose "$type" "$@" build --no-cache
     elif [ "$BUILD" = true ]; then

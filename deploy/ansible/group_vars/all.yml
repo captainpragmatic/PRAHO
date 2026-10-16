@@ -43,7 +43,3 @@ praho_git_repo: "https://github.com/captainpragmatic/PRAHO.git"
 
 # Firewall
 firewall_enabled: true
-allowed_ports:
-  - 22
-  - 80
-  - 443

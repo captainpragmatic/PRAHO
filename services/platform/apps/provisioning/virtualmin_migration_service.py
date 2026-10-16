@@ -18,7 +18,12 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
-from .virtualmin_backup_service import CHAIN_ROLE_STANDALONE, REMOTE_ARCHIVE_DIR, differential_flags
+from .virtualmin_backup_service import (
+    CHAIN_ROLE_STANDALONE,
+    REMOTE_ARCHIVE_DIR,
+    differential_flags,
+    restore_domain_params,
+)
 from .virtualmin_chain import invalidate_chain
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
@@ -522,8 +527,9 @@ class VirtualminMigrationService:
                 migration,
                 migration.target_server,
                 "restore-domain",
-                source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
-                **{"all-features": ""},
+                **restore_domain_params(
+                    domain=migration.account.domain, source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}"
+                ),
             )
         except DefiniteMigrationFailureError as error:
             self._abort(migration, token, error, target_delete_allowed=True)

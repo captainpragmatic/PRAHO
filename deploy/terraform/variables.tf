@@ -67,8 +67,8 @@ variable "firewall_ssh_sources" {
     Example: ["203.0.113.0/24"]  # office/VPN CIDR
     Never use ["0.0.0.0/0", "::/0"] in production.
   EOT
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
 
   validation {
     condition     = length(var.firewall_ssh_sources) > 0
@@ -88,9 +88,9 @@ variable "firewall_ssh_sources" {
 locals {
   # Server type defaults per environment
   default_server_type = {
-    dev     = "cx23"  # 2 vCPU, 4GB, €2.99/mo
-    staging = "cx23"  # 2 vCPU, 4GB, €2.99/mo
-    prod    = "cx33"  # 4 vCPU, 8GB, €4.99/mo
+    dev     = "cx23" # 2 vCPU, 4GB, €2.99/mo
+    staging = "cx23" # 2 vCPU, 4GB, €2.99/mo
+    prod    = "cx33" # 4 vCPU, 8GB, €4.99/mo
   }
 
   platform_type = var.platform_server_type != "" ? var.platform_server_type : local.default_server_type[var.environment]

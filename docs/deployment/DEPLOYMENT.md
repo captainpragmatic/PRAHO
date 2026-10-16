@@ -30,6 +30,19 @@ The service processes read that directory. Docker uses a private controller home
 units use separate mode-0700 runtime directories under `/run`. Native `ProtectHome` and `ProtectSystem`
 remain enabled. Portal does not need these
 tools. Installing Ansible only on the deployment laptop does not supply the application runtime.
+Native Make targets decode `.env.prod`, `.env.staging` or `.env.dev` as data, without sourcing shell
+code. Use one `KEY=value` assignment per line; quote values containing spaces. Single quotes preserve
+literal dollars and backticks. Multiline values, interpolation, `export` declarations and inline
+comments are refused with key/line diagnostics. The last declaration wins. The native role uses the
+same decoder and writes an escaped runtime EnvironmentFile, so quoted credentials mean the same thing
+to deployment commands and systemd. For a remote dev host, start with the staging example and select
+`config.settings.dev`; the local-only `.env.example.dev` is not a remote-server configuration.
+
+Database credentials for unattended native backup/restore live in the mode-0600
+`/opt/praho/credentials/postgresql.pgpass`, inside a mode-0700 directory. The generated executables
+are mode 0700 and contain only its path. Do not copy credential files or verbose historical deployment
+logs to shared storage. Existing-host credential rotation, if exposure occurred, is an operator rollout
+step; deployment does not silently rotate the database password.
 
 PRAHO rejects unknown SSH host keys for node validation, Virtualmin fallback access, pooled SSH connections, and Ansible maintenance. Before enabling infrastructure automation, provision a `known_hosts` file for the operating-system account that runs Platform and its Django-Q workers.
 
@@ -306,7 +319,7 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 ```
 
 **What it installs:**
-- PostgreSQL 15 (from official APT repo)
+- PostgreSQL 16 (from official APT repo)
 - Python 3.13 (from deadsnakes PPA)
 - uv (Python package manager)
 - Caddy (automatic HTTPS via Let's Encrypt)
@@ -509,7 +522,6 @@ Override defaults with `-e` flags:
 | `gunicorn_workers_portal` | 2 | Portal Gunicorn workers |
 | `gunicorn_worker_class_portal` | gthread | Portal worker class: `gthread`, or `sync` to roll back (ADR-0056) |
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
-| `qcluster_workers` | 2 | Django-Q2 background workers |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
 | `deploy_method` | rsync | `rsync` (dev/staging) or `git` (prod) |
@@ -783,8 +795,10 @@ stacks of Options 4 and 5 (ADR-0054).
 ```
 
 The portal reaches the platform at `https://<platform domain>/api` through the platform server's Caddy,
-where `/api/*` is public and Django's HMAC check guards it. `rollback.sh` and `restore.sh` assume the
-single-server stack: on a split deployment, roll back by redeploying an earlier `VERSION` on each server.
+where `/api/*` is public and Django's HMAC check guards it. Database restore supports the local bundled
+`praho_db` on a single-server or platform-only host and restarts only its existing local application
+containers. It does not operate the remote portal or an external database. `rollback.sh` still assumes
+the single-server stack: on a split deployment, redeploy an earlier `VERSION` on each server.
 
 ---
 
@@ -853,6 +867,16 @@ make restore
 /opt/praho/scripts/restore.sh --latest
 ```
 
+Docker restore privately stages the selected dump and companion media archive before creating its
+safety backup, so retention cannot remove the input during the restore. It checks compression, the
+plain `pg_dump` envelope and tar integrity before stopping services; these checks do not prove SQL
+compatibility with the target database. A failed safety backup aborts before downtime. SQL errors stop
+the restore and leave applications offline for recovery using the safety backup. Restart failures are
+reported without creating containers from a different deployment topology.
+
+Run the offline recovery contracts with `make test-deploy`. `make test-deploy-docker` runs the
+disposable Caddy acceptance tests and requires a working Docker daemon.
+
 ### Backup Retention
 
 Backups older than 30 days are automatically deleted. Configure with:
@@ -889,6 +913,21 @@ make rollback VERSION=v1.2.3
 
 **Native installs rolling back past the log rotation change** (releases before Platform and the portal stopped rotating their own log files): remove `/etc/logrotate.d/praho-platform` and `/etc/logrotate.d/praho-portal` first. The older release rotates those files in process again, and logrotate moving them as well would race it. The next deploy of a current release installs them again.
 
+### PostgreSQL version and existing data
+
+Fresh bundled/native installations use PostgreSQL 16. Existing 15 data requires an explicit
+[migration procedure](POSTGRESQL_16_UPGRADE.md); preflight refuses an implicit image or cluster-major
+replacement before startup. Docker preflight uses Python 3.9+ and a read-only volume inspection.
+
+### Backup recovery metadata
+
+Docker `backup.sh` also writes a mode-0600 `.metadata.json` beside each completed database/media
+pair. It records SHA-256 checksums, PostgreSQL major version and immutable source application image
+IDs/references, without environment secrets. Keep all three files together. The operator host needs
+Python 3.9+ for this stdlib-only metadata helper. A metadata failure is reported as a failed backup
+run while retaining the completed dump/media for manual recovery. Existing legacy pairs remain
+restorable; metadata does not change their format or prove cross-release schema compatibility.
+
 ### Database Rollback
 
 Restore the latest database backup:
@@ -903,11 +942,19 @@ make rollback-db
 
 ### Full Rollback
 
-Roll back both version and database:
+Use `make rollback-full VERSION=v1.2.3 BACKUP=/private/backups/praho_backup_SELECTED.sql.gz`
+(`DEPLOY_TYPE=platform-only` on a platform-only host, `DEPLOY_ENV=staging` for staging).
+The matching media archive and metadata must accompany that explicit dump. The command verifies
+both checksums, PostgreSQL major and immutable target application image IDs before downtime.
+Missing targets are pulled and checked first. A newest timestamp or tag name alone never establishes
+compatibility. Legacy backups remain usable with standalone restore and manual operator planning.
 
-```bash
-./deploy/scripts/rollback.sh full v1.2.3
-```
+After confirmation, restore takes a mandatory safety backup and leaves all local writers stopped.
+Only then does Compose start the selected old images with the same local topology. The current
+application entrypoint never runs against the restored old database. SQL/media or target readiness
+failures require operator recovery; no automatic data rollback runs. A platform-only host creates
+no Portal; coordinate any remote Portal release separately. Reserve disk space for private staging
+and the safety backup. The env file is not edited, so a later deploy still uses its configured version.
 
 ### Rollback on a native server
 
@@ -920,6 +967,13 @@ make deploy-prod VERSION=v1.2.3
 ```
 
 ---
+
+## Terraform validation and state recovery
+
+`make infra-validate` checks formatting and validates with the committed provider lock, a temporary
+plugin cache and backend initialization disabled. It makes no plan/apply or backend migration.
+Keep environment workspaces and private state backups according to the
+[state recovery runbook](TERRAFORM_STATE_RECOVERY.md) before operating infrastructure.
 
 ## Makefile Commands
 
@@ -943,6 +997,10 @@ make deploy-prod VERSION=v1.2.3
 ## Environment Variables
 
 ### Native Deployment (Ansible)
+
+The native inventory deploys the complete single-server stack. The common role controls firewall
+ports, and Django controls worker configuration; inventory flags and role defaults do not disable
+individual services or tune qcluster. Worker startup is separate from proving queued work executes.
 
 All variables live in your `.env.{env}` file. See `.env.example.prod` for the full list with descriptions. Key required variables:
 
@@ -1000,6 +1058,40 @@ PRAHO ships no legal text. After the first deploy, an administrator publishes th
 
 ### Portal-Specific Variables
 
+Native Portal identity upgrade (planned maintenance, existing hosts):
+
+1. Take and verify a private backup of the Portal SQLite session/counter store and logs. Record the
+   configured `SESSION_DB_PATH`; the previous default was `/opt/praho/src/services/portal/portal.sqlite3`.
+2. Stop `praho-portal` and disable its counter-cull cron job while moving state. Ensure no Portal
+   process is writing; checkpoint SQLite WAL with the matching SQLite tool before moving the database,
+   and retain any WAL/SHM sidecars with the safety copy. Do not start with an empty database by accident.
+3. Create the system account/group `praho-portal` (nologin, no shared supplementary groups). Create
+   `/var/lib/praho-portal` and `/var/log/praho/portal` owned by that account with mode 0700. Move the
+   existing database to `/var/lib/praho-portal/portal.sqlite3`, set ownership to `praho-portal:praho-portal`
+   and mode 0600, and migrate existing Portal log ownership while stopped. Inspect symlinks before
+   changing individual files; do not recursively chown the application tree or Platform credentials.
+4. Set `SESSION_DB_PATH=/var/lib/praho-portal/portal.sqlite3` and a distinct
+   `PORTAL_DJANGO_SECRET_KEY` in the operator configuration. The key change invalidates old sessions;
+   preserving the counter database retains replay/idempotency history. Deploy normally. Preflight
+   refuses a legacy session path or log/database files still owned by the shared identity.
+5. Verify Portal can create sessions/counters and write its logs, and that it cannot read Platform's
+   `.env`, credential passfile or media, or write the source/venv. Verify Platform, worker and Caddy
+   health separately. Retain the safety copy privately until the maintenance is accepted.
+
+Fresh hosts use the private directories automatically. Portal's source and collected static files
+remain readable and owned by the deployment account, and systemd permits Portal writes only in its
+state/log directories. No live account, ownership or session migration is performed by this change.
+
+Native Portal uses `/opt/praho/.portal.env`, generated from the same filtered values used for
+its migrations and static collection. It contains Portal API credentials and its own
+`PORTAL_DJANGO_SECRET_KEY` (mapped to Django's `DJANGO_SECRET_KEY`), but excludes the Platform
+DB password, encryption key and vault key. Set a nonempty Portal key distinct from the Platform
+key before upgrading; replacing the previously shared key invalidates existing Portal sessions.
+Keep `STATIC_ROOT=/opt/praho/static` for Platform: Portal always uses `/opt/praho/portal-static`,
+which is also Caddy's Portal static root. Both staging and production use this contract.
+The existing shared OS identity still allows access to Platform-owned files; the separate Portal
+identity migration must be completed before treating this as filesystem isolation.
+
 These are set in the `.env` file and used by the Portal service:
 
 | Variable | Description | Required When |
@@ -1013,6 +1105,17 @@ These are set in the `.env` file and used by the Portal service:
 ## Troubleshooting
 
 ### Check Service Health
+
+`make docker-dev` starts the development task worker only after Platform migrations, setup and its
+HTTP health check finish. It shares Platform's dev image, database, source and media; it has no HTTP
+health probe. A running worker is not evidence that a queued task executed.
+
+For Docker hosts, run `deploy/scripts/health-check.sh single-server`, `platform-only`, `portal-only`
+or `container-service` for the local topology. Split hosts omit remote services. Use `--with-db`
+when a platform-only host includes the bundled database and `--with-caddy` when its optional Caddy
+must be present; `--without-caddy` selects an external edge. An optional Caddy that exists is still
+checked. Missing/unknown/starting/unhealthy state or Docker inspection errors fail the check.
+Set `PLATFORM_URL` and/or `PORTAL_URL` to additionally test public routes with bounded HTTP probes.
 
 ```bash
 # Using script
@@ -1197,3 +1300,13 @@ deploy/
             ├── tasks/main.yml         # 11-step deployment (validates + copies .env)
             └── templates/             # systemd units, Caddyfile, backup/restore scripts
 ```
+
+Native recovery stages the selected custom dump and optional companion media privately before the
+safety backup can apply retention. It reads the TOC and renders every dump data block to a discarded
+SQL stream without connecting; corrupt/truncated/empty inputs stop before downtime. This is an
+integrity check, not proof of application-schema compatibility. Use trusted backup pairs selected
+for the intended application release. Recovery supports the bundled local PostgreSQL on port 5432.
+The pre-restore backup and stopping all writers are mandatory. SQL errors leave services stopped;
+failed starts or bounded readiness checks stop them again. Inspect the failure and safety backup
+before explicitly restarting. A running worker service still requires a separate queue execution
+check. The script does not roll back a partially restored database automatically.

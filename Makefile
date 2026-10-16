@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab virtualmin-probe
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract virtualmin-probe
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -59,7 +59,8 @@ help:
 	@echo "  make test-with-e2e     - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make virtualmin-lab-up   - Opt-in Docker Virtualmin lab (2 nodes + MinIO); virtualmin-lab-down stops it"
-	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab"
+	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab (+ the contract suite)"
+	@echo "  make test-virtualmin-contract - Opt-in: every allowlisted Virtualmin program against the lab node"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
@@ -117,6 +118,7 @@ help:
 	@echo "⏪ ROLLBACK:"
 	@echo "  make rollback VERSION=X - Roll back to version X"
 	@echo "  make rollback-db        - Restore latest database backup"
+	@echo "  make rollback-full VERSION=X BACKUP=PATH - Restore a verified pair with its application images"
 	@echo "  make health-check       - Check service health"
 	@echo ""
 	@echo "☁️  INFRASTRUCTURE (Terraform → Hetzner):"
@@ -476,6 +478,13 @@ coverage-portal-union:
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 
+.PHONY: test-deploy test-deploy-docker
+test-deploy:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/ tests/integration/test_deploy_scripts.py tests/integration/test_media_root.py tests/integration/test_restore_safety.py -m 'not docker' -q
+
+test-deploy-docker:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_caddy_routing.py -m docker -q
+
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -594,6 +603,15 @@ test-e2e-orm:
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@E2E_STRICT=1 DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/orm/ -v
 	@echo "✅ ORM E2E tests completed!"
+
+.PHONY: ci-postgres-start ci-postgres-stop
+CI_POSTGRES_IMAGE_TAG ?= 16
+ci-postgres-start:
+	@./scripts/start_ci_postgres.sh "$(CI_POSTGRES_IMAGE_TAG)"
+
+ci-postgres-stop:
+	@./scripts/start_ci_postgres.sh --stop
+
 
 test:
 	@echo "🔄 [All Tests] Running comprehensive test suite (post Redis removal)..."
@@ -1191,6 +1209,7 @@ docker-build:
 docker-dev:
 	@echo "🚀 [Docker] Starting development services (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@docker compose -f deploy/docker-compose.dev.yml config --format json | python3 deploy/scripts/check_postgres_version.py
 	@docker compose -f deploy/docker-compose.dev.yml up --build
 
 docker-stop:
@@ -1231,9 +1250,15 @@ test-virtualmin-lab:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_roundtrip
 	@echo "✅ [Virtualmin lab] Round trip passed"
+	@$(MAKE) --no-print-directory test-virtualmin-contract
 	@echo "🧪 [Virtualmin lab] Provisioning, differential-base, staging and node-playbook checks on vm-b..."
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_checks
 	@echo "✅ [Virtualmin lab] Checks passed"
+
+test-virtualmin-contract:
+	@echo "🧪 [Virtualmin lab] Contract suite: every allowlisted program against the real node (needs make virtualmin-lab-up)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_contract.sh
 
 virtualmin-probe:
 	@echo "🔬 [Virtualmin lab] Incremental-backup contract probe (needs make virtualmin-lab-up)..."
@@ -1294,7 +1319,7 @@ clean-nuke:
 # PRODUCTION DEPLOYMENT 🚀
 # ===============================================================================
 
-.PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db health-check
+.PHONY: deploy-single-server deploy-platform deploy-portal deploy-stop deploy-status deploy-logs backup restore rollback rollback-db rollback-full health-check
 
 # The standalone Compose deployments read .env.prod or .env.staging (never the development .env).
 DEPLOY_ENV ?= prod
@@ -1369,6 +1394,17 @@ endif
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@./deploy/scripts/rollback.sh version $(VERSION) --env $(DEPLOY_ENV)
 
+rollback-full:
+ifndef VERSION
+	@echo "VERSION and BACKUP are required: make rollback-full VERSION=v1.2.3 BACKUP=/path/backup.sql.gz"
+	@exit 1
+endif
+ifndef BACKUP
+	@echo "BACKUP is required; full rollback never guesses compatibility from the latest file"
+	@exit 1
+endif
+	@./deploy/scripts/rollback.sh full "$(VERSION)" --backup "$(BACKUP)" --topology "$(DEPLOY_TYPE)" --env "$(DEPLOY_ENV)"
+
 rollback-db:
 	@echo "⏪ [Rollback] Restoring database from latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1381,13 +1417,22 @@ rollback-db:
 health-check:
 	@echo "🏥 [Health] Checking service health..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/health-check.sh
+	@./deploy/scripts/health-check.sh "$(DEPLOY_TYPE)" $(HEALTH_FLAGS)
 
 # ===============================================================================
 # INFRASTRUCTURE PROVISIONING (Terraform → Hetzner) ☁️
 # ===============================================================================
 
 .PHONY: infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev
+
+.PHONY: infra-validate
+infra-validate:
+	@set -eu; \
+	terraform fmt -check -recursive deploy/terraform; \
+	terraform_validation_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/praho-terraform-validate.XXXXXX"); \
+	trap 'rm -rf "$$terraform_validation_dir"' EXIT; \
+	TF_DATA_DIR="$$terraform_validation_dir" terraform -chdir=deploy/terraform init -backend=false -lockfile=readonly -input=false; \
+	TF_DATA_DIR="$$terraform_validation_dir" terraform -chdir=deploy/terraform validate
 
 infra-init:
 	@echo "☁️ [Infra] Initializing Terraform..."
@@ -1437,27 +1482,19 @@ infra-destroy-dev:
 deploy-dev-native:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env dev
 
 deploy-staging:
 	@test -f .env.staging || (echo "❌ Missing .env.staging — run: cp .env.example.staging .env.staging"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@set -a && . $(PWD)/.env.staging && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
-		playbooks/native-single-server.yml -e praho_env=staging \
-		-e env_file_path=$(PWD)/.env.staging -v
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env staging --env-file $(PWD)/.env.staging
 
 deploy-prod:
 	@test -f .env.prod || (echo "❌ Missing .env.prod — run: cp .env.example.prod .env.prod"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to production (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@set -a && . $(PWD)/.env.prod && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
-		playbooks/native-single-server.yml -e praho_env=prod \
-		-e env_file_path=$(PWD)/.env.prod \
-		$(if $(VERSION),-e cli_version=$(VERSION),) \
-		-v
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env prod --env-file $(PWD)/.env.prod $(if $(VERSION),--version $(VERSION),)
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜
@@ -1472,6 +1509,4 @@ ansible-backup:
 	@case "$(ENV)" in staging|prod) ;; *) echo "❌ Usage: make ansible-backup ENV=staging|prod [FETCH=true]"; exit 1 ;; esac
 	@test -f .env.$(ENV) || (echo "❌ Missing .env.$(ENV) — run: cp .env.example.$(ENV) .env.$(ENV)"; exit 1)
 	@echo "📜 [Ansible] Remote backup ($(ENV))..."
-	@set -a && . $(PWD)/.env.$(ENV) && set +a && \
-		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
-		$(if $(FETCH),-e fetch_backup=$(FETCH),)
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env $(ENV) --env-file $(PWD)/.env.$(ENV) --backup $(if $(FETCH),--fetch $(FETCH),)

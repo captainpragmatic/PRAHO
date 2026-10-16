@@ -16,19 +16,94 @@
   include_tasks: env_preflight.yml
 
 - name: Read .env file locally for role variables
-  shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
-  delegate_to: localhost
-  become: false
-  register: role_env_contents
-  changed_when: false
+  set_fact:
+    native_configuration: "{{ lookup('native_env', env_file_path) }}"
+  no_log: true
 
 - name: Parse .env vars for role use
   set_fact:
-    deployed_env: "{{ dict(role_env_contents.stdout_lines | map('split', '=', 1)) }}"
+    deployed_env: "{{ native_configuration['env'] }}"
+  no_log: true
+
+# Existing hosts must move their session store while stopped before changing identities.
+- name: Inspect legacy Portal session store
+  stat:
+    path: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+  register: legacy_portal_session
+
+- name: Require explicit Portal state migration on existing hosts
+  assert:
+    that:
+      - not legacy_portal_session.stat.exists or (deployed_env.SESSION_DB_PATH | default('')) == portal_state_directory + '/portal.sqlite3'
+      - (deployed_env.SESSION_DB_PATH | default(portal_state_directory + '/portal.sqlite3')) == portal_state_directory + '/portal.sqlite3'
+    fail_msg: "Move Portal state while stopped and set SESSION_DB_PATH as described in docs/deployment/DEPLOYMENT.md before changing its OS identity."
+
+- name: Inspect existing Portal log ownership
+  find:
+    paths: /var/log/praho/portal
+    recurse: false
+    file_type: any
+    hidden: true
+  register: legacy_portal_logs
+
+- name: Require explicit Portal log migration on existing hosts
+  assert:
+    that:
+      - legacy_portal_logs.files | rejectattr('pw_name', 'equalto', portal_user) | list | length == 0
+      - not legacy_portal_session.stat.exists or legacy_portal_session.stat.pw_name == portal_user
+    fail_msg: "Stop Portal and migrate its session/log ownership according to docs/deployment/DEPLOYMENT.md before deploying the isolated identity."
+
+- name: Create isolated Portal group
+  group:
+    name: "{{ portal_group }}"
+    system: true
+
+- name: Create isolated Portal user
+  user:
+    name: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    system: true
+    create_home: false
+    home: "{{ portal_state_directory }}"
+    shell: /usr/sbin/nologin
+
+- name: Create private Portal writable directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    mode: "0700"
+  loop:
+    - "{{ portal_state_directory }}"
+    - /var/log/praho/portal
 
 # ---------------------------------------------------------------------------
-# 1. PostgreSQL 15
+# 1. PostgreSQL 16
 # ---------------------------------------------------------------------------
+
+# Inspect registered clusters before installing a new major or changing any database settings.
+- name: Detect existing PostgreSQL cluster tool
+  stat:
+    path: /usr/bin/pg_lsclusters
+  register: postgres_cluster_tool
+
+- name: Inspect registered PostgreSQL clusters
+  command: /usr/bin/pg_lsclusters --no-header
+  register: postgres_clusters
+  changed_when: false
+  when: postgres_cluster_tool.stat.exists
+
+- name: Record existing PostgreSQL major versions
+  set_fact:
+    postgres_major_versions: "{{ postgres_clusters.stdout_lines | default([]) | map('split') | map('first') | map('int') | list }}"
+
+- name: Refuse implicit native PostgreSQL major upgrades
+  assert:
+    that:
+      - postgres_major_versions | reject('equalto', 16) | list | length == 0
+      - (deployed_env.DB_PORT | default('5432') | string) == '5432'
+    fail_msg: "Native deployment targets PostgreSQL 16 on port 5432. Migrate and retire legacy clusters explicitly first; see docs/deployment/POSTGRESQL_16_UPGRADE.md."
 
 - name: Create keyrings directory
   file:
@@ -47,11 +122,11 @@
     repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
     state: present
 
-- name: Install PostgreSQL 15
+- name: Install PostgreSQL 16
   apt:
     name:
-      - postgresql-15
-      - postgresql-client-15
+      - postgresql-16
+      - postgresql-client-16
       - libpq-dev
     state: present
     update_cache: yes
@@ -68,6 +143,7 @@
     state: present
 
 - name: Create PostgreSQL user
+  no_log: true
   become_user: postgres
   community.postgresql.postgresql_user:
     name: "{{ deployed_env.DB_USER | default('praho') }}"
@@ -150,7 +226,6 @@
     - "{{ project_root }}/media"
     - "{{ project_root }}/logs"
     - /var/log/praho
-    - /var/log/praho/portal
 
 - name: Install logrotate
   apt:
@@ -164,6 +239,14 @@
     delete: yes
     rsync_opts:
       - "--exclude=.git"
+      # Controller/lab state and saved plans can contain credentials; never ship them as code.
+      - "--exclude=.terraform"
+      - "--exclude=.state"
+      - "--exclude=*.tfstate"
+      - "--exclude=*.tfstate.*"
+      - "--exclude=*.tfplan"
+      - "--exclude=*.tfvars"
+      - "--exclude=*.tfvars.json"
       - "--exclude=.venv"
       - "--exclude=.venv-darwin"
       - "--exclude=.venv-linux"
@@ -285,41 +368,37 @@
       See docs/deployment/DEPLOYMENT.md for details.
   when: not env_file_check.stat.exists
 
-- name: Validate required variables in .env file
-  shell: |
-    missing=""
-    while IFS='=' read -r key value; do
-      # Skip comments and empty lines
-      case "$key" in \#*|"") continue ;; esac
-      # Trim whitespace
-      key=$(echo "$key" | xargs)
-      value=$(echo "$value" | xargs)
-    done < "{{ env_file_path }}"
-    # Check critical vars
-    for var in DJANGO_SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
-      val=$(grep "^${var}=" "{{ env_file_path }}" | head -1 | cut -d'=' -f2-)
-      if [ -z "$val" ]; then missing="$missing $var"; fi
-    done
-    if [ -n "$missing" ]; then
-      echo "MISSING:$missing"
-      exit 1
-    fi
-  delegate_to: localhost
-  become: false
-  register: env_validation
-  changed_when: false
-
 - name: Copy environment file to server
   copy:
-    src: "{{ env_file_path }}"
+    content: "{{ native_configuration['systemd'] }}"
     dest: "{{ project_root }}/.env"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
     mode: "0600"
+  no_log: true
+  diff: false
   notify:
     - restart praho-platform
     - restart praho-portal
     - restart praho-qcluster
+
+- name: Create private credential directory
+  file:
+    path: "{{ project_root }}/credentials"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+
+- name: Install private PostgreSQL passfile for unattended backups
+  copy:
+    content: "{{ native_configuration['pgpass'] }}"
+    dest: "{{ project_root }}/credentials/postgresql.pgpass"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
 
 # deployed_env is already set from step 0 (parsed from local .env file)
 
@@ -331,6 +410,7 @@
 # settings don't load the .env, so pass the keys production refuses to import without. Only those the
 # .env defines are passed, so a staging environment is unchanged.
 - name: Set Django environment variables from .env file
+  no_log: true
   set_fact:
     django_env: "{{ praho_django_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
   vars:
@@ -365,6 +445,7 @@
       DJANGO_SECURE_SSL_REDIRECT: "{{ deployed_env.DJANGO_SECURE_SSL_REDIRECT | default('false') }}"
 
 - name: Run database migrations
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py migrate --noinput
   args:
@@ -373,6 +454,7 @@
   environment: "{{ django_env }}"
 
 - name: Create database cache table
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py createcachetable
   args:
@@ -382,6 +464,7 @@
   failed_when: false
 
 - name: Collect Platform static files
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
@@ -390,18 +473,30 @@
   environment: "{{ django_env }}"
 
 - name: Set Portal Django environment
+  no_log: true
   set_fact:
     portal_django_env: "{{ praho_portal_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
   vars:
     # Production portal settings refuse to import without it (see the platform task above).
     praho_passthrough:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+      - PORTAL_GUNICORN_WORKER_CLASS
+      - PORTAL_GUNICORN_WORKERS
+      - PORTAL_GUNICORN_THREADS
+      - PORTAL_ID
+      - PORTAL_HMAC_SECRET
+      - PLATFORM_API_TIMEOUT
+      - PLATFORM_API_TOTAL_BUDGET_SECONDS
+      - PLATFORM_API_AUTH_MIN_DURATION_SECONDS
+      - CSP_PROFILE
+      - CSP_REPORT_ONLY
+      - DJANGO_LOG_LEVEL
       - TIME_ZONE
       - BRAND_DIR
     praho_portal_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/portal"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.PORTAL_DJANGO_SECRET_KEY }}"
       ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
       PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
       PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
@@ -409,18 +504,31 @@
       DJANGO_SECURE_SSL_REDIRECT: "false"
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/portal-static"
-      SESSION_DB_PATH: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+      PORTAL_LOG_DIR: /var/log/praho/portal
+      SESSION_DB_PATH: "{{ portal_state_directory + '/portal.sqlite3' }}"
       PORTAL_TRUSTED_PROXY_CIDRS: "{{ deployed_env.PORTAL_TRUSTED_PROXY_CIDRS | default('127.0.0.1/32,::1/128') }}"
+
+- name: Install filtered Portal runtime environment
+  copy:
+    content: "{{ portal_django_env | native_systemd_env }}"
+    dest: "{{ project_root }}/.portal.env"
+    owner: root
+    group: "{{ portal_group }}"
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: restart praho-portal
 
 - name: Create Portal database directory
   file:
     path: "{{ portal_django_env.SESSION_DB_PATH | dirname }}"
     state: directory
-    owner: "{{ project_user }}"
-    group: "{{ project_group }}"
+    owner: "{{ portal_user }}"
+    group: "{{ portal_group }}"
     mode: "0700"
 
 - name: Run Portal migrations
+  no_log: true
   command:
     argv:
       - "{{ project_root }}/.venv-linux/bin/python"
@@ -433,18 +541,20 @@
     - common
   args:
     chdir: "{{ project_root }}/src/services/portal"
-  become_user: "{{ project_user }}"
+  become_user: "{{ portal_user }}"
   environment: "{{ portal_django_env }}"
 
 - name: Check Portal deployment
+  no_log: true
   command: "{{ project_root }}/.venv-linux/bin/python manage.py check --deploy --fail-level ERROR"
   args:
     chdir: "{{ project_root }}/src/services/portal"
-  become_user: "{{ project_user }}"
+  become_user: "{{ portal_user }}"
   environment: "{{ portal_django_env }}"
   changed_when: false
 
 - name: Collect Portal static files
+  no_log: true
   command: "{{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput"
   args:
     chdir: "{{ project_root }}/src/services/portal"
@@ -452,6 +562,7 @@
   environment: "{{ portal_django_env }}"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
+  no_log: true
   command: >
     {{ project_root }}/.venv-linux/bin/python manage.py setup_initial_data
   args:
@@ -579,7 +690,8 @@
     dest: "{{ project_root }}/scripts/backup.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
-    mode: "0755"
+    mode: "0700"
+  diff: false
   when: backup_enabled
 
 - name: Template restore script
@@ -588,7 +700,8 @@
     dest: "{{ project_root }}/scripts/restore.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
-    mode: "0755"
+    mode: "0700"
+  diff: false
 
 - name: Template health check script
   template:
@@ -614,13 +727,13 @@
     hour: "2"
     job: >-
       cd {{ project_root }}/src/services/portal &&
-      set -a && . {{ project_root }}/.env && set +a &&
+      set -a && . {{ project_root }}/.portal.env && set +a &&
       SESSION_DB_PATH={{ portal_django_env.SESSION_DB_PATH }}
       PYTHONPATH={{ project_root }}/src/services/portal
       DJANGO_SETTINGS_MODULE={{ django_settings_module }}
       {{ project_root }}/.venv-linux/bin/python manage.py cull_counters
-      >> {{ project_root }}/logs/portal-cull.log 2>&1
-    user: "{{ project_user }}"
+      >> /var/log/praho/portal/cull.log 2>&1
+    user: "{{ portal_user }}"
 
 # ---------------------------------------------------------------------------
 # 11. Health check
@@ -657,8 +770,8 @@
       Portal:    https://{{ deployed_env.PORTAL_DOMAIN }}
       Platform:  https://{{ deployed_env.PLATFORM_DOMAIN }}
       Local:     http://localhost:{{ platform_port }} / http://localhost:{{ portal_port }}
-      Q-Cluster: running ({{ qcluster_workers }} workers)
-      Database:  PostgreSQL 15 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
+      Q-Cluster: service enabled (verify actual queued work separately)
+      Database:  PostgreSQL 16 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
       Method:    {{ deploy_method }}
       Version:   {{ deploy_git_version + ' (' + deployed_sha.stdout + ')' if deploy_method == 'git' else 'rsync (local)' }}
       Env file:  {{ env_file_path }}
@@ -716,10 +829,10 @@
 # there (an app.log.2.gz pointing at a system file) would write through it.
 - name: Hand log backups left by in-process rotation over to logrotate
   become: yes
-  become_user: "{{ project_user }}"
+  become_user: "{{ item.user }}"
   shell: |
     set -eu
-    find /var/log/praho -maxdepth 2 -type f -regextype posix-extended \
+    find "{{ item.path }}" -maxdepth 1 -type f -regextype posix-extended \
       -regex '.*/[a-z]+\.log\.([2-9]|[1-9][0-9]+)' |
       while IFS= read -r backup; do
         if [ -e "$backup.gz" ]; then
@@ -730,8 +843,13 @@
         fi
         echo "$backup"
       done
-    find /var/log/praho/portal -maxdepth 1 -type f -regextype posix-extended \
+    if [ "{{ item.portal }}" = "yes" ]; then
+      find "{{ item.path }}" -maxdepth 1 -type f -regextype posix-extended \
       -regex '.*/[a-z]+\.log\.(1[5-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\.gz' -print -delete
+    fi
+  loop:
+    - {path: /var/log/praho, user: "{{ project_user }}", portal: "no"}
+    - {path: /var/log/praho/portal, user: "{{ portal_user }}", portal: "yes"}
   register: legacy_log_backups
   changed_when: legacy_log_backups.stdout | length > 0
 

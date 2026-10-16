@@ -19,8 +19,4 @@ all:
       hosts:
         praho-dev:
       vars:
-        deploy_platform: true
-        deploy_portal: true
-        deploy_database: true
-        deploy_caddy: true
         praho_env: dev

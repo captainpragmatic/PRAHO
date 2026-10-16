@@ -19,9 +19,6 @@ gunicorn_worker_class_portal: gthread  # gthread, or sync to roll back (services
 gunicorn_threads_portal: 4  # threads per worker under gthread; sync always has one
 gunicorn_timeout_platform: 120
 
-# Django-Q2
-qcluster_workers: 2
-
 # Systemd memory limits
 platform_memory_max: 1G
 portal_memory_max: 512M
@@ -29,9 +26,11 @@ qcluster_memory_max: 512M
 
 # Django — django_settings_module is derived from `praho_env` in group_vars/all.yml
 
-# PostgreSQL
-db_port: 5432
-
 # Staff access uses the immediate peer IP; override with staff/VPN CIDRs at upgrade.
 # An empty list also falls back to loopback; it never enables unrestricted access.
 platform_allowed_ips: ["127.0.0.1/32", "::1/128"]
+
+# Portal has no access to Platform credentials or writable business data.
+portal_user: praho-portal
+portal_group: praho-portal
+portal_state_directory: /var/lib/praho-portal

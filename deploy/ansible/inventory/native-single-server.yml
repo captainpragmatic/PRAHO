@@ -5,7 +5,7 @@
 # Works for ALL environments — pass -e praho_env=staging|prod
 #
 # Connection vars (PRAHO_SERVER_IP, PRAHO_SSH_USER, PRAHO_SSH_KEY) are read
-# from the .env.{env} file. The Makefile sources the file before calling Ansible.
+# from .env.{env} as data by the native launcher before Ansible runs.
 #
 # Deploy:
 #   make deploy-staging   # reads .env.staging
@@ -22,8 +22,3 @@ all:
     praho:
       hosts:
         praho-server:
-      vars:
-        deploy_platform: true
-        deploy_portal: true
-        deploy_database: true
-        deploy_caddy: true

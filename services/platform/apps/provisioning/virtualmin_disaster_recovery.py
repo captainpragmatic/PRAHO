@@ -15,10 +15,10 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, explicit_rejection, has_explicit_success
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminProvisioningService
-from .virtualmin_units import quota_parameters
+from .virtualmin_units import modify_quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -416,19 +416,23 @@ class VirtualminDisasterRecoveryService:
     ) -> None:
         """Restore disk and bandwidth quotas for a rebuilt domain via Virtualmin API."""
         # The same conversion create-domain applies: disk in KiB, bandwidth in bytes, -1 sent as 0.
-        params: dict[str, str] = {"domain": domain, **quota_parameters(disk_quota_mb, bandwidth_quota_mb)}
+        params: dict[str, str] = {"domain": domain, **modify_quota_parameters(disk_quota_mb, bandwidth_quota_mb)}
 
         try:
             config = VirtualminConfig(server=server)
             gateway = VirtualminGateway(config)
             result = gateway.call("modify-domain", params)
-            if result.is_ok():
+            if result.is_err():
+                logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {result.unwrap_err()}")
+            elif not has_explicit_success(result.unwrap()):
+                # A refusal is an answer, not a transport error: Virtualmin replies 200 with a failure envelope.
+                refusal = explicit_rejection(result.unwrap().raw_response) or "no explicit success in the response"
+                logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {refusal}")
+            else:
                 logger.info(
                     f"✅ [DisasterRecovery] Restored quotas for {domain}: "
                     f"disk={disk_quota_mb}MB, bandwidth={bandwidth_quota_mb}MB"
                 )
-            else:
-                logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {result.unwrap_err()}")
         except Exception as e:
             logger.warning(f"⚠️ [DisasterRecovery] Quota restoration error for {domain}: {e}")
 

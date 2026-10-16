@@ -1,0 +1,158 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "backup-domain",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nCreates a Virtualmin backup, for the domains and features specified\non the command line.\n\nvirtualmin backup-domain [--dest file]+\n                         [--test]\n                         [--domain name] | [--all-domains]\n                         [--parent]\n                         [--user name]\n                         [--reseller name]\n                         [--plan name]\n                         [--feature name] | [--all-features]\n                                            [--except-feature name]\n                         [--ignore-errors]\n                         [--newformat]\n                         [--onebyone]\n                         [--strftime] [--purge days]\n                         [--differential | --no-differential |\n                          --differential-of backup-id]\n                         [--all-virtualmin] | [--virtualmin config] |\n                                              [--except-virtualmin config]\n                         [--option \"feature name value\"]\n                         [--as-owner]\n                         [--exclude file]*\n                         [--include file]*\n                         [--purge days]\n                         [--purge-debug]\n                         [--kill-running | --wait-running]\n                         [--compression gzip|bzip2|tar|zip|zstd]\n\nMultiple domains may be specified with multiple --domain parameters.\nFeatures must be specified using their short names, like web and dns.\n\nThe destination can be one of :\n - A local file, like /backup/yourdomain.com.tgz\n - A local directory can be given while passing --newformat option, like /backup/\n - An FTP destination, like ftp://login:pass@server/backup/yourdomain.com.tgz\n - An SSH destination, like ssh://login:pass@server/backup/yourdomain.com.tgz\n - An S3 bucket, like s3://accesskey:secretkey@bucket\n - A Rackspace container, like rs://user:apikey@container\n - A Google Cloud Storage bucket, like gcs://bucket\n - A Dropbox folder, like dropbox://folder\nMultiple destinations can be given by repeating this flag.\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "all-features": "",
+        "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz",
+        "domain": "contract-absent.praho.test",
+        "mkdir": "",
+        "no-differential": ""
+      }
+    },
+    "boolean_flag": {
+      "body": {
+        "command": "backup-domain",
+        "error": "Unknown parameter True",
+        "full_error": "Unknown parameter True\n\nCreates a Virtualmin backup, for the domains and features specified\non the command line.\n\nvirtualmin backup-domain [--dest file]+\n                         [--test]\n                         [--domain name] | [--all-domains]\n                         [--parent]\n                         [--user name]\n                         [--reseller name]\n                         [--plan name]\n                         [--feature name] | [--all-features]\n                                            [--except-feature name]\n                         [--ignore-errors]\n                         [--newformat]\n                         [--onebyone]\n                         [--strftime] [--purge days]\n                         [--differential | --no-differential |\n                          --differential-of backup-id]\n                         [--all-virtualmin] | [--virtualmin config] |\n                                              [--except-virtualmin config]\n                         [--option \"feature name value\"]\n                         [--as-owner]\n                         [--exclude file]*\n                         [--include file]*\n                         [--purge days]\n                         [--purge-debug]\n                         [--kill-running | --wait-running]\n                         [--compression gzip|bzip2|tar|zip|zstd]\n\nMultiple domains may be specified with multiple --domain parameters.\nFeatures must be specified using their short names, like web and dns.\n\nThe destination can be one of :\n - A local file, like /backup/yourdomain.com.tgz\n - A local directory can be given while passing --newformat option, like /backup/\n - An FTP destination, like ftp://login:pass@server/backup/yourdomain.com.tgz\n - An SSH destination, like ssh://login:pass@server/backup/yourdomain.com.tgz\n - An S3 bucket, like s3://accesskey:secretkey@bucket\n - A Rackspace container, like rs://user:apikey@container\n - A Google Cloud Storage bucket, like gcs://bucket\n - A Dropbox folder, like dropbox://folder\nMultiple destinations can be given by repeating this flag.\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Unknown parameter True",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a flag sent as the text True: remote.cgi turns it into the argument --all-features True",
+      "params": {
+        "all-features": "True",
+        "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz",
+        "domain": "contract.praho.test",
+        "mkdir": "",
+        "no-differential": ""
+      }
+    },
+    "config_only": {
+      "body": {
+        "command": "backup-domain",
+        "output": "Starting backup..\nTesting backup destination local file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz ..\n.. done\n\nCreating backup for virtual server contract.praho.test ..\n    Copying virtual server configuration ..\n    .. done\n\n    Creating TAR file of home directory ..\n    .. done\n\n.. completed in <n> seconds\n\nCreating final backup archive ..\n.. done\n\n1 virtual servers backed up successfully\nBackup completed successfully. Final size was <size>\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the configuration-only backup",
+      "params": {
+        "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz",
+        "domain": "contract.praho.test",
+        "feature": [
+          "virtualmin",
+          "dir"
+        ],
+        "mkdir": "",
+        "no-differential": ""
+      }
+    },
+    "full": {
+      "body": {
+        "command": "backup-domain",
+        "output": "Starting backup..\nTesting backup destination local file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz ..\n.. done\n\nCreating backup for virtual server contract.praho.test ..\n    Copying virtual server configuration ..\n    .. done\n\n    Backing up Cron jobs ..\n    .. none defined\n\n    Creating TAR file of home directory ..\n    .. done\n\n    Copying Apache virtual host configuration ..\n    .. done\n\n    Copying Apache log files ..\n    .. done\n\n    Copying SSL Apache virtual host configuration and certificate ..\n    .. done\n\n    Copying Logrotate configuration ..\n    .. done\n\n    Copying MariaDB user details ..\n    .. done\n\n    Dumping MariaDB database contract ..\n    .. done\n\n    Backing up Webmin ACL files ..\n    .. done\n\n    Backing up AWStats configuration file ..\n    .. done\n\n.. completed in <n> seconds\n\nCreating final backup archive ..\n.. done\n\n1 virtual servers backed up successfully\nBackup completed successfully. Final size was <size>\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the ordinary full backup, mail left out (the lab domain has no mail feature)",
+      "params": {
+        "all-features": "",
+        "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz",
+        "domain": "contract.praho.test",
+        "except-feature": [
+          "mail"
+        ],
+        "mkdir": "",
+        "no-differential": ""
+      }
+    },
+    "migration": {
+      "body": {
+        "command": "backup-domain",
+        "output": "Starting backup..\nTesting backup destination local file /var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz ..\n.. done\n\nCreating backup for virtual server contract.praho.test ..\n    Copying virtual server configuration ..\n    .. done\n\n    Backing up Cron jobs ..\n    .. none defined\n\n    Creating TAR file of home directory ..\n    .. done\n\n    Copying Apache virtual host configuration ..\n    .. done\n\n    Copying Apache log files ..\n    .. done\n\n    Copying SSL Apache virtual host configuration and certificate ..\n    .. done\n\n    Copying Logrotate configuration ..\n    .. done\n\n    Copying MariaDB user details ..\n    .. done\n\n    Dumping MariaDB database contract ..\n    .. done\n\n    Backing up Webmin ACL files ..\n    .. done\n\n    Backing up AWStats configuration file ..\n    .. done\n\n.. completed in <n> seconds\n\nCreating final backup archive ..\n.. done\n\n1 virtual servers backed up successfully\nBackup completed successfully. Final size was <size>\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the source-node backup of a migration",
+      "params": {
+        "all-features": "",
+        "dest": "/var/lib/praho-transfer/virtualmin_backup_<hex>.tar.gz",
+        "domain": "contract.praho.test",
+        "mkdir": "",
+        "no-differential": ""
+      }
+    },
+    "unwritable_destination": {
+      "body": {
+        "command": "backup-domain",
+        "error": "Starting backup..",
+        "full_error": "Starting backup..\nTesting backup destination local file /nonexistent-dir/contract.tar.gz ..\n.. done\n\nCreating backup for virtual server contract.praho.test ..\n    Copying virtual server configuration ..\n    .. done\n\n    Backing up Cron jobs ..\n    .. none defined\n\n    Creating TAR file of home directory ..\n    .. done\n\n    Copying Apache virtual host configuration ..\n    .. done\n\n    Copying Apache log files ..\n    .. done\n\n    Copying SSL Apache virtual host configuration and certificate ..\n    .. done\n\n    Copying Logrotate configuration ..\n    .. done\n\n    Copying MariaDB user details ..\n    .. done\n\n    Dumping MariaDB database contract ..\n    .. done\n\n    Backing up Webmin ACL files ..\n    .. done\n\n    Backing up AWStats configuration file ..\n    .. done\n\n[15/Oct/<ip> +0000] [<ip>] Failed to open /nonexistent-dir/contract.tar.gz for writing : No such file or directory\nError\n-----\nFailed to open /nonexistent-dir/contract.tar.gz for writing : No such file or directory\n-----\n.. completed in <n> seconds\n\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Starting backup..",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a destination directory that does not exist and was not asked for with mkdir",
+      "params": {
+        "all-features": "",
+        "dest": "/nonexistent-dir/contract.tar.gz",
+        "domain": "contract.praho.test",
+        "no-differential": ""
+      }
+    }
+  },
+  "program": "backup-domain",
+  "virtualmin_version": "8.3.0"
+}

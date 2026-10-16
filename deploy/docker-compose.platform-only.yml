@@ -27,7 +27,7 @@ services:
   # DATABASE (optional - use profile: with-db or full)
   # ===========================================================================
   db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: praho_db
     environment:
       POSTGRES_DB: praho

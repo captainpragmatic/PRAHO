@@ -256,7 +256,12 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
     )
     def test_registration_really_throttles_and_duplicate_attempt_keeps_original_account(self):
         client = {"client_ip": "203.0.113.9"}
-        with patch.object(RegistrationClientIPThrottle, "rate", "2/min", create=True):
+        # All three requests belong to one fixed window; CI may cross a minute boundary.
+        with (
+            patch.object(RegistrationClientIPThrottle, "rate", "2/min", create=True),
+            patch("apps.common.performance.rate_limiting.time") as throttle_clock,
+        ):
+            throttle_clock.time.return_value = 1_800_000_030.0
             user, customer = self.register({**self.registration(), **client})
             duplicate = {**self.registration(), **client}
             duplicate["customer_data"]["company_name"] = "Replacement name"

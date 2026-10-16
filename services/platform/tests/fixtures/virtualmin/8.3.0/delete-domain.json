@@ -1,0 +1,47 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "delete-domain",
+        "error": "Virtual server contract-delete.praho.test does not exist",
+        "full_error": "Virtual server contract-delete.praho.test does not exist\n\nDeletes an existing Virtualmin virtual server and all sub-servers,\nmailboxes and alias domains.\n\nvirtualmin delete-domain [--domain domain.name]*\n                         [--user username]*\n                         [--only]\n                         [--preserve-remote]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-delete.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "the domain deleted above",
+      "params": {
+        "domain": "contract-delete.praho.test"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "delete-domain",
+        "output": "Deleting virtual server contract-delete.praho.test ..\n    Deleting mail aliases ..\n    .. done\n\n    Deleting AWStats configuration file and Cron job ..\n    .. done\n\n    Removing password protection for AWStats ..\n    .. done\n\n    Deleting Webmin login ..\n    .. done\n\n    Deleting MariaDB database contractdelete ..\n    .. done\n\n    Deleting MariaDB login ..\n    .. done\n\n    Disabling log file rotation ..\n    .. done\n\n    Deleting SSL virtual website ..\n    .. done\n\n    Deleting virtual website ..\n    .. done\n\n    Deleting Apache log files ..\n    .. done\n\n    Deleting home directory ..\n    .. done\n\n    Deleting administration user ..\n    .. done\n\n    Deleting administration group ..\n    .. done\n\n    Deleting server details for contract-delete.praho.test ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\n    Re-loading Webmin ..\n    .. done\n\n    Applying webserver configuration ..\n    .. done\n\n    Restarting PHP-FPM 8.2 server ..\n    .. done\n\n.. deleted\n\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "an existing domain",
+      "params": {
+        "domain": "contract-delete.praho.test"
+      }
+    }
+  },
+  "program": "delete-domain",
+  "virtualmin_version": "8.3.0"
+}

@@ -101,6 +101,26 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
             self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
             self.assertIn("Validation error:", str(result.unwrap_err()))
 
+    def test_programs_absent_from_virtualmin_8_are_refused_before_any_request_is_sent(self) -> None:
+        absent = (
+            "get-domain",
+            "create-subdomain",
+            "delete-subdomain",
+            "list-subdomains",
+            "request-letsencrypt-cert",
+            "create-dns",
+            "delete-dns",
+            "list-dns",
+            "list-backups",
+            "get-plan",
+        )
+        for program in absent:
+            with self.subTest(program=program):
+                result = self.gateway.call(program, {"domain": "alpha.example.test"})  # setUp fails any dispatch
+                self.assertIsInstance(result, Err)
+                self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
+                self.assertIn(f"Program '{program}' is not allowed", str(result.unwrap_err()))
+
     def test_inactive_server_refuses_operations_but_auto_failed_server_allows_health_probe(self) -> None:
         self.gateway.server.status = "failed"
         self.gateway.server.failed_by_health_check = True

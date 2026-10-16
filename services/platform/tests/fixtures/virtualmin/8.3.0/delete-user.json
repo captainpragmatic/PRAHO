@@ -1,0 +1,49 @@
+{
+  "cases": {
+    "no_such_user": {
+      "body": {
+        "command": "delete-user",
+        "error": "No user named ghost was found in the server contract.praho.test",
+        "full_error": "No user named ghost was found in the server contract.praho.test\n\nDeletes an existing mail, FTP or database user from a Virtualmin domain.\n\nvirtualmin delete-user --domain domain.name\n                       --user username\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "No user named ghost was found in the server contract.praho.test",
+        "explicit_success": false,
+        "read_only": false,
+        "retriability": "unknown",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a user that is not there",
+      "params": {
+        "domain": "contract.praho.test",
+        "user": "ghost"
+      }
+    },
+    "success": {
+      "body": {
+        "command": "delete-user",
+        "output": "User frank@contract.praho.test deleted successfully\n",
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": false,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "an existing user",
+      "params": {
+        "domain": "contract.praho.test",
+        "user": "frank"
+      }
+    }
+  },
+  "program": "delete-user",
+  "virtualmin_version": "8.3.0"
+}

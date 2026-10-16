@@ -11,6 +11,7 @@
 #   ./backup.sh --cleanup [days]   # Remove backups older than N days
 
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
@@ -33,7 +34,21 @@ log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Refuse a linked directory and change only this user's regular backup artifacts.
+if [ -L "$BACKUP_DIR" ]; then
+    echo "ERROR: Backup directory must not be a symlink" >&2
+    exit 1
+fi
 mkdir -p "$BACKUP_DIR"
+if [ ! -O "$BACKUP_DIR" ]; then
+    echo "ERROR: Backup directory must belong to the backup user" >&2
+    exit 1
+fi
+chmod 0700 "$BACKUP_DIR"
+find "$BACKUP_DIR" -maxdepth 1 -type f -user "$(id -un)" \
+    \( -name 'praho_backup_*.sql.gz' -o -name 'praho_backup_*.dump' \
+       -o -name 'praho_backup_*.metadata.json' -o -name 'praho_backup_*.media.tar.gz' \
+       -o -name 'praho_backup_*.partial' \) -exec chmod 0600 {} +
 
 list_backups() {
     echo "Available backups in ${BACKUP_DIR}:"
@@ -48,7 +63,7 @@ list_backups() {
 # A killed backup skips its EXIT trap. A partial untouched for a day (1440 minutes) is abandoned;
 # one being written changes as the dump streams in.
 remove_abandoned_partials() {
-    find "${BACKUP_DIR}" -name "praho_backup_*.partial" -mmin +1440 -delete
+    find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.partial" -mmin +1440 -delete
 }
 
 cleanup_backups() {
@@ -56,12 +71,13 @@ cleanup_backups() {
     log_info "Removing backups older than ${DAYS} days..."
     remove_abandoned_partials
 
-    local COUNT=$(find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
-    # A media archive goes with its dump.
-    find "${BACKUP_DIR}" -name "praho_backup_*.media.tar.gz" -mtime "+${DAYS}" -delete
+    local COUNT=$(find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.sql.gz" -mtime +${DAYS} | wc -l)
+    # Metadata and media go with their dump.
+    find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.metadata.json" -mtime "+${DAYS}" -delete
+    find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.media.tar.gz" -mtime "+${DAYS}" -delete
 
     if [ "$COUNT" -gt 0 ]; then
-        find "${BACKUP_DIR}" -name "praho_backup_*.sql.gz" -mtime +${DAYS} -delete
+        find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.sql.gz" -mtime +${DAYS} -delete
         log_success "Removed ${COUNT} old backup(s)"
     else
         log_info "No old backups to remove"
@@ -116,6 +132,12 @@ create_backup() {
         log_info "Size: ${SIZE}"
 
         backup_media
+        # Metadata is published only for a complete pair; it contains no credentials.
+        if ! python3 "${SCRIPT_DIR}/backup_manifest.py" create "$BACKUP_FILE"; then
+            log_error "Backup pair retained, but recovery metadata could not be written"
+            cleanup_backups
+            exit 1
+        fi
 
         # Auto cleanup
         cleanup_backups

@@ -91,6 +91,10 @@ runtime. A change to one side is checked against the other:
 - Ansible no longer installs Docker or schedules backups on a Docker host. `deploy.sh` expects a host
   with Docker Compose v2, and an operator schedules `deploy/scripts/backup.sh` there.
 - `make deploy-dev-native` replaces `make deploy-dev` for the remote dev box; it uses the same inventory.
-- The two-server staging and production layout has no automated deploy, and `rollback.sh` and
-  `restore.sh` handle only the single-server stack. Before a split portal host goes live, the native role
-  gains two-host support or the recovery scripts become topology-aware.
+- The two-server staging and production layout has no automated deploy. `restore.sh` can restore the
+  bundled database and existing local writers on a platform-only host; it does not operate the remote
+  portal or an external database. Full rollback accepts an explicit checksummed database/media pair
+  with source-image and PostgreSQL-major metadata for either local topology. It prepares and verifies
+  target images before downtime, restores with writers stopped, then starts only the selected images.
+  Version-only rollback still assumes single-server. Before a split portal host goes live,
+  coordinated recovery needs a tested procedure for both hosts.

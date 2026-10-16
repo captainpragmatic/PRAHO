@@ -19,3 +19,15 @@ def quota_parameters(disk_quota_mb: int | None, bandwidth_quota_mb: int | None) 
     if bandwidth_quota_mb is not None:
         params["bandwidth"] = str(max(0, bandwidth_quota_mb) * _BYTES_PER_MIB)
     return params
+
+
+def modify_quota_parameters(disk_quota_mb: int | None, bandwidth_quota_mb: int | None) -> dict[str, str]:
+    """The same quotas for modify-domain, which names the bandwidth limit ``bw``.
+
+    create-domain takes ``--bandwidth``. modify-domain takes ``--bw`` and refuses ``--bandwidth``
+    ("Unknown parameter", Virtualmin 8.3), which discards the disk quota sent alongside it too.
+    """
+    params = quota_parameters(disk_quota_mb, bandwidth_quota_mb)
+    if "bandwidth" in params:
+        params["bw"] = params.pop("bandwidth")
+    return params

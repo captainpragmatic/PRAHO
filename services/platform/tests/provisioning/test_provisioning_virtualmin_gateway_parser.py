@@ -172,7 +172,7 @@ class ParserJSONEdgeCasesTest(SimpleTestCase):
 
     def test_status_failure_with_error(self):
         raw = json.dumps({"status": "failure", "error": "Domain missing"})
-        result = VirtualminResponseParser.parse_response(raw, "get-domain")
+        result = VirtualminResponseParser.parse_response(raw, "list-domains")
         self.assertFalse(result["success"])
 
 
@@ -266,7 +266,7 @@ class ParserTextErrorTest(SimpleTestCase):
 
     def test_not_found_pattern(self):
         text = "Virtual server ghost.com not found"
-        result = VirtualminResponseParser.parse_response(text, "get-domain")
+        result = VirtualminResponseParser.parse_response(text, "list-domains")
         self.assertFalse(result["success"])
 
     def test_permission_denied_pattern(self):
@@ -377,7 +377,7 @@ class ParserFixtureIntegrationTest(SimpleTestCase):
 
     def test_all_error_fixtures(self):
         self.assertFalse(self._parse_fixture(errors.auth_failure(), "list-domains")["success"])
-        self.assertFalse(self._parse_fixture(errors.not_found(), "get-domain")["success"])
+        self.assertFalse(self._parse_fixture(errors.not_found(), "list-domains")["success"])
         self.assertFalse(self._parse_fixture(errors.generic(), "modify-domain")["success"])
         self.assertFalse(self._parse_fixture(errors.rate_limited(), "create-domain")["success"])
         self.assertFalse(self._parse_fixture(errors.server_offline(), "info")["success"])

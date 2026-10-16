@@ -1,0 +1,86 @@
+{
+  "cases": {
+    "absent_domain": {
+      "body": {
+        "command": "list-databases",
+        "error": "Virtual server contract-absent.praho.test does not exist",
+        "full_error": "Virtual server contract-absent.praho.test does not exist\n\nLists the databases associated with some virtual server.\n\nvirtualmin list-databases --domain domain.name\n                         [--multiline | --json | --xml | --name-only]\n                         [--type dbtype]\n",
+        "status": "failure"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": "Virtual server contract-absent.praho.test does not exist",
+        "explicit_success": false,
+        "read_only": true,
+        "retriability": "not_retriable",
+        "success": false
+      },
+      "http_status": 200,
+      "note": "a domain that is not there",
+      "params": {
+        "domain": "contract-absent.praho.test"
+      }
+    },
+    "name_only": {
+      "body": {
+        "command": "list-databases",
+        "data": [
+          {
+            "name": "contract",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the lab's database check",
+      "params": {
+        "domain": "contract.praho.test",
+        "name-only": ""
+      }
+    },
+    "table": {
+      "body": {
+        "command": "list-databases",
+        "data": [
+          {
+            "name": "Database                       Type                 Size            Tables    ",
+            "values": {}
+          },
+          {
+            "name": "------------------------------ -------------------- --------------- ----------",
+            "values": {}
+          },
+          {
+            "name": "contract                       mysql                <size>           0         ",
+            "values": {}
+          }
+        ],
+        "status": "success"
+      },
+      "body_format": "json",
+      "classification": {
+        "explicit_rejection": null,
+        "explicit_success": true,
+        "read_only": true,
+        "retriability": null,
+        "success": true
+      },
+      "http_status": 200,
+      "note": "the plain table",
+      "params": {
+        "domain": "contract.praho.test"
+      }
+    }
+  },
+  "program": "list-databases",
+  "virtualmin_version": "8.3.0"
+}
