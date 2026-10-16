@@ -611,17 +611,19 @@ class ComprehensivePageMonitor:
         if not self.check_console:
             return []
 
-        # A response a test provoked on purpose also logs browser and HTMX lines naming its path.
-        excused_paths = [
-            record.requested_path
+        # A response a test provoked on purpose also makes HTMX log "Response Status Error Code
+        # <status> from <path>", directly and inside the base templates' "HTMX Error:" detail. Only
+        # that diagnostic is excused: another error that merely names the path still fails.
+        excused_diagnostics = [
+            f"Response Status Error Code {record.status} from {record.requested_path}"
             for record in self._responses.records
-            if record.excused and len(record.requested_path) > 1
+            if record.excused
         ]
         issues: list[str] = []
         try:
             assert_no_console_errors(
                 self._console.messages,
-                ignore_patterns=self.ignore_patterns + excused_paths,
+                ignore_patterns=self.ignore_patterns + excused_diagnostics,
                 context=self.context
             )
         except AssertionError as e:

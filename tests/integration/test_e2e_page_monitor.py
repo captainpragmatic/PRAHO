@@ -267,4 +267,9 @@ def test_an_expected_htmx_4xx_does_not_fail_the_console_check(page: Page, local_
 
     assert "boom" in str(raised.value)
     assert "HTMX Error" not in str(raised.value)
+
+    # An unrelated error is not excused just because it names the excused path.
+    with pytest.raises(AssertionError, match="parser crashed for /validate/"), _monitor(page) as monitor:
+        submit_invalid_form(monitor)
+        page.evaluate("() => console.error('parser crashed for /validate/')")
     assert "Response Status Error Code" not in str(raised.value)
