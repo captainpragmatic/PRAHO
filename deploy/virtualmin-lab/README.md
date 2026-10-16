@@ -10,6 +10,9 @@ It is not part of `make test`.
 make virtualmin-lab-up      # build images if missing, start, register in the lab DB, inject credentials
 make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
 make test-virtualmin-contract # every allowlisted Virtualmin program against the real node (also run by test-virtualmin-lab)
+make test-virtualmin-faults # nightly: Webmin stopped, network cut and calls timed out while PRAHO backs up and restores
+make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.yml on the bare node, then the contract smoke checks
+make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data
 make virtualmin-lab-build   # rebuild both images
@@ -40,7 +43,7 @@ The nodes run with `privileged`, `cgroup: host`, the host's `/sys/fs/cgroup` mou
 | Image | Dockerfile | Contents |
 |---|---|---|
 | `praho-virtualmin-lab:8.3.0` | `virtualmin/Dockerfile` | `debian:12-slim` (pinned by digest), systemd, OpenSSH, Virtualmin GPL |
-| `praho-debian-node:12` | `debian-node/Dockerfile` | `debian:12-slim` (same digest), systemd, OpenSSH, nothing else |
+| `praho-debian-node:12` | `debian-node/Dockerfile` | `debian:12-slim` (same digest), systemd, OpenSSH, and the Ansible prerequisites (`python3`, `iproute2`, `ca-certificates`) |
 
 Both use `deploy/virtualmin-lab/` as the build context. Both are multi-arch clean: no architecture-specific URLs.
 
@@ -148,14 +151,58 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
 
 `make test-virtualmin-contract` runs `tests/virtualmin_lab/contract/` against vm-b through PRAHO's own `VirtualminGateway`. There is one test per program on `VIRTUALMIN_ALLOWED_PROGRAMS` (`@covers("<program>")`). Each sends PRAHO's parameters (built by the same functions production uses) and asserts `has_explicit_success`, `explicit_rejection`, the read-only replay classification and the retriability of a refusal on the real answer: a success case and, where the lab can produce one, a refusal. The lab has no mail, BIND or public DNS, so aliases, DNS and certificate issuance are pinned by their refusals. The allowlist holds only programs that exist on Virtualmin 8.3; PRAHO calls nothing else, and the gateway refuses any other program before sending it. The suite uses its own `contract*.praho.test` domains on vm-b and removes them.
 
+### The workflow suite
+
+`make test-virtualmin-workflows` runs `tests/virtualmin_lab/workflows/` through PRAHO's own services, signals, jobs and tasks, not raw gateway calls. The lab has no Django-Q worker, so `Bench.run_queue` plays its part: it takes what the code under test queued from the ORM broker and calls the task by its dotted path. Each workflow asserts both ledgers: PRAHO (rows, jobs, audit events) and the node (`list-domains`, file content, database rows). It does not repeat what `virtualmin_lab_checks` proves (create-domain parameters, the chain step, the schedule, the pair restore's write barrier, the access lock); it builds on it.
+
+| File | Workflow |
+|---|---|
+| `test_account_lifecycle.py` | a Service becomes active and the signal, reconcile and provisioning task create the account; staff suspend and activate through the Service (ADR-0051); a plan change; the deletion protection toggle; delete |
+| `test_backup_restore.py` | full and config-only backup and restore as queued jobs; a restore of a backup that does not exist |
+| `test_differential_chain.py` | base, differential and pair restore with the flag on (ADR-0059), and the end of the chain |
+| `test_migration_drain.py` | migration and drain from vm-a to vm-b, data verified on vm-b; the drain moves the round-trip account too, and the test puts it back |
+| `test_sync.py` | the usage sync command (it runs cleanly and stamps the account; the lab reports no usage values), the health and statistics tasks, and the divergence backstop |
+| `test_disaster_recovery.py` | the integrity report, the dry-run plan and the refusal of a real rebuild, and recovery from a backup onto another node |
+
+Workflow domains are `wf*.example.com`: the provisioning pipeline refuses a domain with a `test` label, so `*.praho.test` cannot go through it. The bench moves placement to vm-a by server weight, and puts weights, settings and domain counts back at the end.
+
+Two things the workflows pinned down about today's behaviour:
+- A plan change edits the Service and nothing else. No path pushes new quotas to the node ("Unsupported automated plan changes remain unavailable", docs/domain/CUSTOMER_RECOVERY_AND_SERVICE_REQUESTS.md), and the lab nodes report no quotas at all.
+- `delete_account` only accepts an account that is `terminated` or in `error`. A healthy account is refused whatever its protection flag says.
+
+### Fault injection
+
+`make test-virtualmin-faults` (nightly) breaks the lab while PRAHO works and asserts how PRAHO reads it. Each test provisions its own `wffault*.example.com` account and puts the node back afterwards.
+
+| Fault | When | What it asserts |
+|---|---|---|
+| `systemctl stop webmin` | in the middle of a backup | the job fails once with an unknown outcome; one `backup-domain` request was sent; nothing is published to the object store; the account is released; the domain is unchanged |
+| `docker network disconnect` | in the middle of a backup | the same, through a read timeout |
+| `systemctl stop webmin` | in the middle of a restore | the job is parked in `attention`; one `restore-domain` request was sent; no job reads as completed; backup, restore and migration admission are refused; the reconciler yields; the pushed archive is kept; an operator's resolve frees the account |
+| `docker network disconnect` | in the middle of a restore | the same, through a read timeout |
+| `docker pause` | a read-only program, then a mutating one | the read-only program is sent three times (`virtualmin.max_retries`), the mutation once, both with an unknown outcome (the handshake stalls, so this shows the classification, not an in-flight request) |
+| a 2 s read timeout | a `backup-domain` the node runs to the end | one request was sent; the node still finished the archive; nothing sent it again |
+| `docker pause` | a suspend | the account is not marked suspended; the job is not completed; the retry pool does not send `disable-domain` again |
+| `docker pause` | a delete | the job is parked in `attention`; the account is not marked terminated; `delete-domain` is not sent again; the exclusion holds |
+
+The fault is applied by a thread that watches the node (an archive appearing in the staging directory) and fires while the call is in flight; a fault that could not be applied is a failed test. The requests are counted at the gateway's transport seam, so the count is what reached the wire.
+
+The lab is restored whatever happens: after every test, and again by the runner's trap, which unpauses and reconnects both nodes, starts Webmin, waits for them to be healthy and checks that each node still presents the certificate its `VirtualminServer` pins (`manage.py virtualmin_lab_pins`). A node restart regenerates its TLS identity and invalidates the pin, so a mismatch re-runs `virtualmin_lab_bootstrap` and `lab.sh apply-credentials`. Nothing in the suite restarts a node on purpose.
+
 ### Node deploy from scratch (`praho-debian-node`)
 
-`virtualmin.yml` was run end to end against a fresh `praho-debian-node` container (SSH on 127.0.0.1:2722): the Virtualmin 8 installer installed Virtualmin 8.3.0 / Webmin 2.670, the play finished with `failed=0`, and the API user it created could create and delete a domain over remote.cgi. That run is not part of `make test-virtualmin-lab`. Three things a cloud image has and the bare image lacks had to be added first:
-- `python3`, for Ansible;
-- `iproute2`, or the installer cannot find the primary interface;
-- the removal of `/etc/apt/apt.conf.d/docker-clean`, which deletes downloaded packages before dpkg installs them.
+`make test-virtualmin-node-deploy` is the nightly run. It is not part of `make test-virtualmin-lab`, because the Virtualmin 8 installer alone takes several minutes and is not pinned to 8.3.0. On a freshly created container of the bare image (SSH on 127.0.0.1:2722, the panel published on 10103 once installed) it:
+- registers a deployment and a new managed SSH key, pins the node's host keys, and sets the node admin allowlist (ADR-0060) to the lab's address, the compose network gateway;
+- runs `virtualmin.yml` and `virtualmin_harden.yml` through `AnsibleService`, with an API password generated the way a deployment generates it;
+- registers the node as a `VirtualminServer` pinned to the certificate the installer produced, and activates it through `NodeRegistrationService.verify_and_activate`;
+- reads the API user's ACL and IP lock and the UFW rules on the node, and checks that vm-a, outside the allowlist, cannot reach port 10000;
+- runs the contract suite's `smoke` subset against it, without comparing or writing recordings.
 
-The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. Clear it between rebuilds.
+The container is recreated every run and removed at the end, whatever the outcome. vm-a, vm-b and MinIO are not touched.
+
+The image holds only what Ansible itself needs on top of systemd and OpenSSH: `python3`, `iproute2` (the installer cannot find the primary interface without it) and `ca-certificates`, and `docker-clean` is removed from apt's configuration because it deletes downloaded packages before dpkg installs them. Nothing of Virtualmin is in the image.
+
+The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. The node deploy clears it before every run.
 
 ### Transport adaptations (lab only)
 

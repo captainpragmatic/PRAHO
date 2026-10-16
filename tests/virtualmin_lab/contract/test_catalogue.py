@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.common.types import Retriability
 from tests.virtualmin_lab.contract.harness import (
     SANDBOX_DOMAIN,
@@ -15,6 +17,7 @@ ABSENT = "contract-absent.praho.test"
 TEMPLATES = ["Default Settings", "Settings For Sub-Servers"]
 
 
+@pytest.mark.smoke
 @covers("info")
 def test_info(lab: Lab) -> None:
     def run() -> None:
@@ -35,6 +38,7 @@ def test_info(lab: Lab) -> None:
     lab.prove_read_only("info", run)
 
 
+@pytest.mark.smoke
 @covers("list-templates")
 def test_list_templates(lab: Lab) -> None:
     def run() -> None:

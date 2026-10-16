@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# Bare Debian 12 node: debian:12-slim + systemd (PID 1) + OpenSSH, nothing else.
-# A clean target for exercising node provisioning playbooks from scratch.
+# Bare Debian 12 node: debian:12-slim + systemd (PID 1) + OpenSSH, and what Ansible itself needs
+# (python3, iproute2 for the Virtualmin installer's interface lookup, ca-certificates for its HTTPS
+# downloads). Nothing of Virtualmin, a web server or a database: a clean target for exercising node
+# provisioning playbooks from scratch. docker-clean is removed because it makes apt delete downloaded
+# packages before dpkg installs them, which breaks the installer.
 # Host keys and machine id are generated at boot; credentials are injected
 # through /etc/lab-node/inject (see ../README.md).
 
@@ -12,7 +15,7 @@ ARG DEBIAN_IMAGE
 ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.title="debian-node" \
-      org.opencontainers.image.description="Debian 12 slim with systemd and OpenSSH, for node provisioning tests" \
+      org.opencontainers.image.description="Debian 12 slim with systemd, OpenSSH and the Ansible prerequisites, for node provisioning tests" \
       org.opencontainers.image.source="https://github.com/captainpragmatic/PRAHO" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.version="12" \
@@ -28,9 +31,9 @@ RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
  && chmod 0755 /usr/sbin/policy-rc.d \
  && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      systemd systemd-sysv dbus openssh-server \
+      systemd systemd-sysv dbus openssh-server python3 iproute2 ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && rm -f /usr/sbin/policy-rc.d /etc/ssh/ssh_host_* /var/lib/dbus/machine-id \
+ && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d /etc/ssh/ssh_host_* /var/lib/dbus/machine-id \
  && : > /etc/machine-id
 
 # Build context is deploy/virtualmin-lab/.

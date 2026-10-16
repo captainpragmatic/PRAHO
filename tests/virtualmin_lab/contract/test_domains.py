@@ -6,6 +6,8 @@ Refusal texts are Virtualmin 8.3's own, observed on the lab node.
 
 from __future__ import annotations
 
+import pytest
+
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRecoveryService
 from apps.provisioning.virtualmin_gateway import is_absent_domain_rejection, listing_attribute, listing_enabled
@@ -26,6 +28,7 @@ SEED = "contract-recovery-seed"
 DEFAULT_FEATURES = {"unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"}
 
 
+@pytest.mark.smoke
 @covers("create-domain")
 def test_create_domain(lab: Lab) -> None:
     assert_mutating("create-domain")
@@ -80,6 +83,7 @@ def test_create_domain(lab: Lab) -> None:
         lab.remove_domain(domain)
 
 
+@pytest.mark.smoke
 @covers("delete-domain")
 def test_delete_domain(lab: Lab) -> None:
     assert_mutating("delete-domain")
@@ -99,6 +103,7 @@ def test_delete_domain(lab: Lab) -> None:
         )
 
 
+@pytest.mark.smoke
 @covers("list-domains")
 def test_list_domains(lab: Lab) -> None:
     def run() -> None:
@@ -158,6 +163,7 @@ def test_list_domains(lab: Lab) -> None:
     lab.prove_read_only("list-domains", run)
 
 
+@pytest.mark.smoke
 @covers("modify-domain")
 def test_modify_domain(lab: Lab) -> None:
     assert_mutating("modify-domain")
@@ -196,6 +202,7 @@ def test_modify_domain(lab: Lab) -> None:
     assert_refused(bad_quota, error="Quota must be a number of blocks", retriability=Retriability.UNKNOWN, exact=True)
 
 
+@pytest.mark.smoke
 @covers("disable-domain")
 def test_disable_domain(lab: Lab) -> None:
     assert_mutating("disable-domain")
@@ -217,6 +224,7 @@ def test_disable_domain(lab: Lab) -> None:
     )
 
 
+@pytest.mark.smoke
 @covers("enable-domain")
 def test_enable_domain(lab: Lab) -> None:
     assert_mutating("enable-domain")

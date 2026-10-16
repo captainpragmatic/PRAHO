@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.common.types import Retriability
 from tests.virtualmin_lab.contract.harness import (
     SANDBOX_DOMAIN,
@@ -26,6 +28,7 @@ def _drop(lab: Lab, name: str) -> None:
         assert_accepted(lab.quiet("delete-database", {"domain": SANDBOX_DOMAIN, "name": name, "type": "mysql"}))
 
 
+@pytest.mark.smoke
 @covers("list-databases")
 def test_list_databases(lab: Lab) -> None:
     def run() -> None:
@@ -51,6 +54,7 @@ def test_list_databases(lab: Lab) -> None:
     lab.prove_read_only("list-databases", run)
 
 
+@pytest.mark.smoke
 @covers("create-database")
 def test_create_database(lab: Lab) -> None:
     assert_mutating("create-database")
@@ -76,6 +80,7 @@ def test_create_database(lab: Lab) -> None:
     )
 
 
+@pytest.mark.smoke
 @covers("delete-database")
 def test_delete_database(lab: Lab) -> None:
     assert_mutating("delete-database")

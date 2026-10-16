@@ -28,9 +28,9 @@ import socket
 import subprocess
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 from django.conf import settings
@@ -38,6 +38,10 @@ from django.core.management.base import CommandError
 from django.test import override_settings
 
 from apps.common.types import Err, Ok, Result
+
+if TYPE_CHECKING:
+    from apps.infrastructure.models import NodeDeployment
+    from apps.provisioning.virtualmin_models import VirtualminServer
 
 LAB_SETTINGS_MODULES = frozenset({"config.settings.lab"})
 LAB_LOOPBACK = "127.0.0.1"
@@ -51,6 +55,15 @@ class LabNode:
     deployment_hostname: str
     api_port: int
     ssh_port: int
+
+
+# The bare Debian node a from-scratch deploy installs Virtualmin on (make test-virtualmin-node-deploy). It is
+# not part of lab.json: the lab commands never see it unless `with_deploy_node` adds it. Its server hostname
+# is the deployment's FQDN, as a production registration records it.
+DEPLOY_NODE_ZONE = "praho.test"
+DEPLOY_NODE = LabNode(
+    "node-c", "vmlab-debian-node", f"dev-sha-lab-ro-vmlc-003.{DEPLOY_NODE_ZONE}", "dev-sha-lab-ro-vmlc-003", 10103, 2722
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +89,109 @@ class LabState:
         tmp.write_text(json.dumps(payload, indent=2) + "\n")
         tmp.chmod(0o600)
         tmp.replace(path)
+
+
+def with_deploy_node(state: LabState) -> LabState:
+    """The lab plus the node-deploy node, with the known_hosts file that holds all three nodes' host keys.
+
+    The deploy node's host keys are generated at every boot, so the node-deploy command writes that file
+    after the node is up; the ordinary lab keeps its own.
+    """
+    known_hosts = Path(state.state_dir) / "known_hosts-with-node-c"
+    return replace(state, nodes=(*state.nodes, DEPLOY_NODE), known_hosts=str(known_hosts))
+
+
+def write_private(path: Path, content: str) -> None:
+    """Write a file only its owner can read, replacing any earlier one in one step."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content)
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+
+def ensure_lab_deployment(
+    node: LabNode, state_dir: Path, *, server: VirtualminServer | None = None, dns_zone: str = ""
+) -> NodeDeployment:
+    """The NodeDeployment the transport needs for a lab node, with a fresh managed SSH key.
+
+    No provider type fits a local container; the provider, region and size rows exist only so the
+    deployment has the foreign keys it requires, and stay inactive. The public key is written to the node's
+    inject directory, where `lab-node-credentials` installs it.
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        CloudProvider,
+        NodeDeployment,
+        NodeRegion,
+        NodeSize,
+        PanelType,
+    )
+    from apps.infrastructure.ssh_key_manager import get_ssh_key_manager  # noqa: PLC0415
+
+    provider, _ = CloudProvider.objects.get_or_create(
+        code="lab",
+        defaults={
+            "name": "Virtualmin lab (Docker)",
+            "provider_type": "hetzner",
+            "is_active": False,
+            "credential_identifier": "virtualmin-lab",
+        },
+    )
+    region, _ = NodeRegion.objects.get_or_create(
+        provider=provider,
+        provider_region_id="lab1",
+        defaults={
+            "name": "Virtualmin lab",
+            "normalized_code": "lab1",
+            "country_code": "ro",
+            "city": "Docker",
+            "is_active": False,
+        },
+    )
+    size, _ = NodeSize.objects.get_or_create(
+        provider=provider,
+        provider_type_id="lab",
+        defaults={
+            "name": "Virtualmin lab node",
+            "display_name": "Lab",
+            "vcpus": 1,
+            "memory_gb": 2,
+            "disk_gb": 10,
+            "hourly_cost_eur": Decimal("0"),
+            "monthly_cost_eur": Decimal("0"),
+            "is_active": False,
+        },
+    )
+    panel, _ = PanelType.objects.get_or_create(
+        panel_type="virtualmin",
+        defaults={"name": "Virtualmin", "ansible_playbook": "virtualmin.yml"},
+    )
+    deployment, _ = NodeDeployment.objects.update_or_create(
+        hostname=node.deployment_hostname,
+        defaults={
+            "environment": "dev",
+            "node_type": "sha",
+            "provider": provider,
+            "region": region,
+            "node_size": size,
+            "panel_type": panel,
+            "node_number": int(node.deployment_hostname.rsplit("-", 1)[1]),
+            "display_name": f"Virtualmin lab {node.key}",
+            "ipv4_address": LAB_LOOPBACK,
+            "dns_zone": dns_zone,
+            "virtualmin_server": server,
+            "status": "completed",
+            "backup_enabled": True,
+            "backup_storage": "local",
+        },
+    )
+    key = get_ssh_key_manager().generate_deployment_key(deployment)
+    if key.is_err():
+        raise CommandError(f"SSH key generation failed for {node.key}: {key.unwrap_err()}")
+    write_private(state_dir / node.key / "inject" / "authorized_keys", key.unwrap().public_key.strip() + "\n")
+    return deployment
 
 
 def refuse_unless_lab_settings() -> None:
