@@ -206,3 +206,34 @@ class DispatchEntryPointTests(HostingWorkflowCase):
         )
         Order.objects.filter(pk=order.pk).update(invoice=invoice)
         return invoice
+
+
+class PaidInvoiceQueuesNoDirectCreateTests(HostingWorkflowCase):
+    def test_a_paid_invoice_never_queues_a_virtualmin_create_directly(self) -> None:
+        """Only line fulfilment, through the Service's activation, leads to an account create.
+
+        The invoice-paid hook used to queue provision_virtualmin_account itself, beside the line dispatch,
+        so two creates could race for one Service on a direct-invoice order.
+        """
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.billing.signals import _handle_invoice_paid  # noqa: PLC0415
+
+        order = self.create_order(
+            items=[
+                {
+                    "product_id": self.product.pk,
+                    "quantity": 1,
+                    "unit_price_cents": 10000,
+                    "setup_cents": 0,
+                    "billing_period": "monthly",
+                    "description": self.product.name,
+                    "domain_name": "direct-shop.ro",
+                }
+            ]
+        )
+        invoice = Invoice.objects.create(customer=self.customer, currency=self.currency, number="DIRECT-1")
+        Order.objects.filter(pk=order.pk).update(invoice=invoice)
+        Service.objects.filter(pk=order.items.get().service_id).update(status="provisioning")
+        with patch("django_q.tasks.async_task") as enqueue, self.captureOnCommitCallbacks(execute=True):
+            _handle_invoice_paid(invoice)
+        self.assertNotIn(CREATE, [call.args[0] for call in enqueue.call_args_list])
