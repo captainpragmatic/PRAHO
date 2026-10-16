@@ -35,11 +35,19 @@ _SECRET_LINE = re.compile(
 )
 _PASSWORD_HASH = re.compile(r"\$[0-9a-z]{1,3}(?:\$[^\s$\"'\\]+){2,}")
 _TIMESTAMPS = (
+    # Webmin and Apache log form, "16/Oct/2026:06:53:56 +0000": before the IP rules, which would
+    # read its time as an IPv6 address and leave the date behind.
+    re.compile(r"\d{1,2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2}(?: [+-]\d{4})?"),
     re.compile(r"\d{1,2}/\d{1,2}/\d{4},? \d{1,2}:\d{2}(?::\d{2})?(?: ?[AP]M)?"),
     re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z| ?UTC|[+-]\d{2}:?\d{2})?"),
     re.compile(r"(?<![0-9])1[5-9]\d{8}(?![0-9])"),
 )
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# Facts about the machine the node runs on, not about Virtualmin: they differ between a laptop and a CI runner.
+_HOST_FACTS = (
+    (re.compile(r"(?m)^(\s*device: ).+$"), r"\1<device>"),
+    (re.compile(r"(?m)^(\s*arch: ).+$"), r"\1<arch>"),
+)
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 _IPV6 = re.compile(
     r"(?<![\w:])(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}(?![\w:])"
@@ -88,6 +96,8 @@ def sanitise_text(text: str, *, dates: bool = True) -> str:
     cleaned = _SIZE.sub("<size>", cleaned)
     cleaned = _DURATION.sub("<n>", cleaned)
     if "\n" in cleaned:
+        for pattern, replacement in _HOST_FACTS:
+            cleaned = pattern.sub(replacement, cleaned)
         cleaned = _FEATURE_COUNTS.sub("fcount: <counts>\n", cleaned)
         cleaned = _BARE_NUMBER_LINE.sub(r"\1<n>", cleaned)
         cleaned = _LABELLED_NUMBER_LINE.sub(r"\1 <n>", cleaned)

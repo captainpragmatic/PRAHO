@@ -83,6 +83,21 @@ class TestSanitiseText:
         assert sanitise_text(once) == once
 
 
+class TestHostIndependence:
+    """Recordings made on one machine must match those made on another (a laptop, a CI runner)."""
+
+    def test_a_webmin_log_timestamp_is_replaced_whole(self) -> None:
+        line = "[16/Oct/2026:06:53:56 +0000] [10.0.0.7] Failed to open /tmp/x"
+        assert sanitise_text(line) == "[<timestamp>] [<ip>] Failed to open /tmp/x"
+
+    def test_the_disk_device_and_the_cpu_architecture_are_host_facts(self) -> None:
+        for device, arch in (("/dev/vda1", "aarch64"), ("/dev/root", "x86_64")):
+            text = f"disk_fs: \n    * \n        device: {device}\n        dir: /\nkernel: \n    arch: {arch}\n    os: Linux\n"
+            assert sanitise_text(text) == (
+                "disk_fs: \n    * \n        device: <device>\n        dir: /\nkernel: \n    arch: <arch>\n    os: Linux\n"
+            )
+
+
 class TestSanitiseValue:
     def test_secret_keys_lose_their_value_and_keep_their_name(self) -> None:
         cleaned = sanitise_value(
