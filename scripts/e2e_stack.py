@@ -61,6 +61,88 @@ def environment(service: str = "platform") -> dict[str, str]:
     return env
 
 
+STRICT_CSP_PROFILES = ("phase2-target", "phase3-target")
+CSP_CONTROL_URL = f"http://localhost:{SERVICES['portal']}/__e2e__/csp-violation/"
+
+
+def parse_csp(header: str) -> dict[str, list[str]]:
+    """A policy's directives and their sources; a directive named twice is refused."""
+    directives: dict[str, list[str]] = {}
+    for part in header.split(";"):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        name, *sources = tokens
+        if name in directives:
+            raise ValueError(f"Duplicate CSP directive {name!r} in {header!r}")
+        directives[name] = sources
+    return directives
+
+
+def expected_script_sources(profile: str, nonce_source: str) -> list[str]:
+    """The exact script-src a strict profile serves, in order."""
+    sources = ["'self'", nonce_source]
+    if profile == "phase2-target":
+        sources.append("'unsafe-eval'")
+    sources.append("https://js.stripe.com")
+    return sources
+
+
+def strict_profile_problem(header: str, profile: str) -> str | None:
+    """Why an enforced policy is not the given strict profile, or None when it is.
+
+    The single definition of "serves this profile": the browser oracle gate and `csp-check` both use it,
+    so the check can never accept a policy the gate rejects.
+    """
+    try:
+        directives = parse_csp(header)
+    except ValueError as exc:
+        return str(exc)
+    if directives.get("script-src-attr") != ["'none'"]:
+        return f"Expected \"script-src-attr 'none'\"; received {header!r}"
+    if "script-src" not in directives:
+        return f"No script-src directive in {header!r}"
+    sources = directives["script-src"]
+    nonces = [source for source in sources if source.startswith("'nonce-") and source.endswith("'")]
+    if len(nonces) != 1:
+        return f"Expected exactly one request nonce in script-src; received {sources!r}"
+    expected = expected_script_sources(profile, nonces[0])
+    if sources != expected:
+        return f"Expected script-src sources {expected!r}; received {sources!r}"
+    return None
+
+
+def csp_check(expected_profile: str) -> str:
+    """Refuse a running stack that does not serve `expected_profile`, enforced, before any browser starts."""
+    if expected_profile not in STRICT_CSP_PROFILES:
+        raise RuntimeError(f"EXPECTED_CSP_PROFILE must be phase2-target or phase3-target; got {expected_profile!r}")
+    restart = f"Run make stop-e2e, then make dev-e2e-csp-bg CSP_PROFILE={expected_profile}."
+    try:
+        response = requests.get(CSP_CONTROL_URL, timeout=10, allow_redirects=False)
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"No E2E stack answered at {CSP_CONTROL_URL} ({type(exc).__name__}). "
+            f"Start one with make dev-e2e-csp-bg CSP_PROFILE={expected_profile}."
+        ) from exc
+    if response.status_code != 200:
+        raise RuntimeError(f"{CSP_CONTROL_URL} returned HTTP {response.status_code}; is this the E2E stack? {restart}")
+    if "Content-Security-Policy-Report-Only" in response.headers:
+        raise RuntimeError(
+            f"Running stack serves CSP in Report-Only mode; expected enforced {expected_profile}. {restart}"
+        )
+    header = response.headers.get("Content-Security-Policy")
+    if not header:
+        raise RuntimeError(f"Running stack sends no enforced Content-Security-Policy header. {restart}")
+    problem = strict_profile_problem(header, expected_profile)
+    if problem is not None:
+        served = next(
+            (p for p in STRICT_CSP_PROFILES if p != expected_profile and strict_profile_problem(header, p) is None),
+            "an unrecognised policy",
+        )
+        raise RuntimeError(f"Running stack serves {served}; expected {expected_profile}. {problem}. {restart}")
+    return expected_profile
+
+
 def manage(service: str, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "manage.py", *args],
@@ -478,7 +560,7 @@ def source_fingerprint() -> dict[str, str | bool]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("serve", "start", "stop", "check", "test"))
+    parser.add_argument("action", choices=("serve", "start", "stop", "check", "csp-check", "test"))
     parser.add_argument("--instance", default=uuid4().hex)
     parser.add_argument("paths", nargs="*")
     args = parser.parse_args()
@@ -499,6 +581,9 @@ def main() -> int:
             print(
                 "E2E prerequisites verified: owned servers, logs, fixtures, sessions and signed portal communication."
             )
+        elif args.action == "csp-check":
+            served = csp_check(os.environ.get("EXPECTED_CSP_PROFILE", ""))
+            print(f"🔒 [CSP E2E] The running stack serves the enforced {served} policy.")
         else:
             return test(args.paths)
     except (RuntimeError, subprocess.CalledProcessError, requests.RequestException) as exc:

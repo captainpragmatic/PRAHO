@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The strict-CSP E2E gates check the stack before they run.** `make test-e2e-csp` now stops with the profile the running stack serves, the one it expected and the restart command, instead of failing one of its four browser files against a stack started by `make dev-e2e-bg` (which serves the portal default, phase3-target). The new `make dev-e2e-csp-bg CSP_PROFILE=phase2-target|phase3-target` starts the matching stack in the background. Native deployments also pass `ANAF_TRANSPORT_ENABLED` to their deploy-time `manage.py` commands, so they agree with the services, and the staging example sets it to `false`.
+
 - **Customer links work on a fresh deployment.** The customer portal URL used in registration and password-reset emails, invoice links and the legal-page redirects now defaults to `https://` and `PORTAL_DOMAIN`, which production already requires. Before, it started blank, and those emails failed until staff typed the same domain into Settings. A URL staff set still wins.
 
 - **PRAHO no longer ships another operator's identity.** Database, cache and cookie defaults are named `praho`, sender and contact defaults use `example.com`, and the company settings start from an obvious placeholder ("Example Company", `support@example.com`). A deployment brings its own identity through its environment and settings.
