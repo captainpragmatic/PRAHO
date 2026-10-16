@@ -177,7 +177,7 @@ class IssuedDocumentSettlementTests(TestCase):
             self.quarantine()
         activated: list[Invoice] = []
         with (
-            patch("apps.billing.signals._trigger_virtualmin_provisioning_on_payment", side_effect=activated.append),
+            patch("apps.billing.signals._activate_pending_services", side_effect=activated.append),
             self.captureOnCommitCallbacks(execute=True),
         ):
             result = self.reconcile() if reconciled else self.confirm()
@@ -272,7 +272,7 @@ class IssuedDocumentSettlementTests(TestCase):
                 "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit",
                 side_effect=AssertionError("Resubmitted"),
             ),
-            patch("apps.billing.signals._trigger_virtualmin_provisioning_on_payment", side_effect=activated.append),
+            patch("apps.billing.signals._activate_pending_services", side_effect=activated.append),
             self.captureOnCommitCallbacks(execute=True),
         ):
             first = self.recovery_sweep()

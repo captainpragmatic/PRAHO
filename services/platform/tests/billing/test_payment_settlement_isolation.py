@@ -218,11 +218,11 @@ class PaymentSettlementTests(TestCase):
         payment.succeed()
         payment.save(update_fields=["status"])
         queued: list[Invoice] = []
-        with patch.object(signals, "_trigger_virtualmin_provisioning_on_payment", side_effect=queued.append):
+        # The paid invoice's service activation runs once, with the converged document.
+        with patch.object(signals, "_activate_pending_services", side_effect=queued.append):
             with self.captureOnCommitCallbacks(execute=True):
                 result = PaymentSuccessService.converge_local_paid_document(payment.pk)
                 self.assertTrue(result.is_ok(), str(result))
-                self.assertEqual(queued, [])
             self.assertEqual([invoice.pk for invoice in queued], [self.invoice.pk])
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.status, "paid")
