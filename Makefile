@@ -168,6 +168,8 @@ install:
 	fi
 	@echo "📦 Syncing all dependency groups via uv → $(VENV_DIR)/..."
 	uv sync --all-groups
+	@echo "🌐 Installing Chromium for the page-monitor self-tests and the e2e suite (skipped when cached)..."
+	$(VENV_DIR)/bin/playwright install chromium
 	@echo "🔗 Installing pre-commit hooks..."
 	$(VENV_DIR)/bin/pre-commit install
 	@echo "🔧 Patching pre-commit hook for cross-platform dynamic resolution..."
