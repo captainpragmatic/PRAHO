@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The browser suite fails on uncaught JavaScript errors.** An exception a page throws never reaches the console, so the page monitor missed it; it now listens for page errors as well. The monitor also removes its listeners when it exits, including when it fails to start, so a page monitored twice no longer collects into a stale monitor. Its self-tests drive a real Chromium against a local site in `make test-integration`, and CI installs the browser for them.
 - **Customer links work on a fresh deployment.** The customer portal URL used in registration and password-reset emails, invoice links and the legal-page redirects now defaults to `https://` and `PORTAL_DOMAIN`, which production already requires. Before, it started blank, and those emails failed until staff typed the same domain into Settings. A URL staff set still wins.
 
 - **PRAHO no longer ships another operator's identity.** Database, cache and cookie defaults are named `praho`, sender and contact defaults use `example.com`, and the company settings start from an obvious placeholder ("Example Company", `support@example.com`). A deployment brings its own identity through its environment and settings.

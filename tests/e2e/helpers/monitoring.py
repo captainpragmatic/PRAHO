@@ -4,9 +4,11 @@ E2E Page Quality Monitoring — console, network, HTML, CSS, accessibility, perf
 Contains ComprehensivePageMonitor, ConsoleMonitor, and all quality check functions.
 """
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 from tests.e2e.helpers.constants import DJANGO_Q_LOG_FILE, PLATFORM_LOG_FILE, PORTAL_LOG_FILE
@@ -16,7 +18,48 @@ from tests.e2e.helpers.server_logs import ServerLogScanner
 # CONSOLE ERROR MONITORING
 # ===============================================================================
 
-def setup_console_monitoring_standalone(page: Page) -> list:
+class _ConsoleCollector:
+    """Console errors, warnings and uncaught page errors, with a listener that can be removed.
+
+    An uncaught exception is not a console message in Playwright: it only fires ``pageerror``.
+    """
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+        self.page_errors: list[str] = []
+        self._page: Page | None = None
+
+        # One stable callable per event, so ``remove_listener`` finds what ``on`` registered. They
+        # look the handler up on each call, so a test can observe delivery by patching the class.
+        def on_console(msg: Any) -> None:
+            self.handle_console(msg)
+
+        def on_page_error(error: Any) -> None:
+            self.handle_page_error(error)
+
+        self._on_console = on_console
+        self._on_page_error = on_page_error
+
+    def handle_console(self, msg: Any) -> None:
+        if msg.type in ("error", "warning"):
+            self.messages.append({"type": msg.type, "text": msg.text, "location": msg.location})
+
+    def handle_page_error(self, error: Any) -> None:
+        self.page_errors.append(getattr(error, "message", None) or str(error))
+
+    def attach(self, page: Page) -> None:
+        page.on("console", self._on_console)
+        page.on("pageerror", self._on_page_error)
+        self._page = page
+
+    def detach(self) -> None:
+        if self._page is not None:
+            self._page.remove_listener("console", self._on_console)
+            self._page.remove_listener("pageerror", self._on_page_error)
+            self._page = None
+
+
+def setup_console_monitoring_standalone(page: Page) -> list[dict[str, Any]]:
     """
     Set up console message monitoring for the page (standalone utility function).
 
@@ -29,29 +72,18 @@ def setup_console_monitoring_standalone(page: Page) -> list:
     Example:
         console_messages = setup_console_monitoring_standalone(page)
     """
-    console_messages = []
-
-    def handle_console_message(msg):
-        if msg.type in ['error', 'warning']:
-            message_text = msg.text
-            console_messages.append({
-                'type': msg.type,
-                'text': message_text,
-                'location': msg.location
-            })
-
-    # Set up listener to capture console messages
-    page.on("console", handle_console_message)
-    return console_messages
+    collector = _ConsoleCollector()
+    collector.attach(page)
+    return collector.messages
 
 
-def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] | None = None,
+def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patterns: list[str] | None = None,
                            context: str = "") -> None:
     """
     Assert that there are no JavaScript console errors.
 
     Args:
-        console_messages: List of console messages from setup_console_monitoring
+        console_messages: List of console messages from setup_console_monitoring_standalone
         ignore_patterns: List of error message patterns to ignore
         context: Context description for better error messages
 
@@ -59,7 +91,7 @@ def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] 
         AssertionError: If console errors are found
 
     Example:
-        console_messages = setup_console_monitoring(page)
+        console_messages = setup_console_monitoring_standalone(page)
         # ... perform actions ...
         assert_no_console_errors(console_messages, context="after login")
     """
@@ -416,6 +448,10 @@ class ComprehensivePageMonitor:
     """
     Comprehensive monitoring for all aspects of page quality during test execution.
 
+    Events count when the browser delivered them before the monitor's final sync point in
+    ``__exit__``; a test that starts background work it cares about must await it before
+    leaving the block.
+
     Example:
         with ComprehensivePageMonitor(page, "login process") as monitor:
             login_user(page, email, password)
@@ -448,13 +484,13 @@ class ComprehensivePageMonitor:
         self.check_accessibility = config.check_accessibility
         self.check_performance = config.check_performance
         self.ignore_patterns = list(config.ignore_patterns)
-        self.console_messages: list[str] = []
         self.check_server_logs = config.check_server_logs
         self._request_ids: set[str] = set()
         self._http_500s: list[str] = []
         self._log_scanner: ServerLogScanner | None = None
         self._expected_error_patterns: list[str] = []
         self._response_listener: Any | None = None
+        self._console = _ConsoleCollector()
 
         # Security hardening: never suppress auth/access-denied/not-found errors by default.
         if not allow_auth_error_ignores and self.ignore_patterns:
@@ -465,43 +501,72 @@ class ComprehensivePageMonitor:
         if not self.check_accessibility and self.check_html and self.check_css and not allow_accessibility_skip:
             self.check_accessibility = True
 
+    @property
+    def console_messages(self) -> list[dict[str, Any]]:
+        return self._console.messages
+
     def __enter__(self):
-        if self.check_console:
-            self.console_messages = setup_console_monitoring_standalone(self.page)
+        try:
+            if self.check_console:
+                self._console.attach(self.page)
 
-        if self.check_server_logs:
-            self._log_scanner = ServerLogScanner([PLATFORM_LOG_FILE, PORTAL_LOG_FILE, DJANGO_Q_LOG_FILE])
-            if self._log_scanner.available:
-                self._log_scanner.mark_position()
-            else:
-                print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
+            if self.check_server_logs:
+                self._log_scanner = ServerLogScanner([PLATFORM_LOG_FILE, PORTAL_LOG_FILE, DJANGO_Q_LOG_FILE])
+                if self._log_scanner.available:
+                    self._log_scanner.mark_position()
+                else:
+                    print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
 
-            def _collect_response(response: Any) -> None:
-                req_id = response.headers.get("x-request-id")
-                if req_id:
-                    self._request_ids.add(req_id)
-                if response.status >= 500:
-                    self._http_500s.append(f"{response.status} {response.url}")
+                def _collect_response(response: Any) -> None:
+                    req_id = response.headers.get("x-request-id")
+                    if req_id:
+                        self._request_ids.add(req_id)
+                    if response.status >= 500:
+                        self._http_500s.append(f"{response.status} {response.url}")
 
-            self._response_listener = _collect_response
-            self.page.on("response", _collect_response)
+                self._response_listener = _collect_response
+                self.page.on("response", _collect_response)
+        except BaseException:
+            self._detach()
+            raise
 
         return self
 
+    def _sync_point(self) -> None:
+        """One round trip, so every event the browser has already emitted reaches the collectors."""
+        # A closed or navigating page has nothing left to deliver; the checks that need the page
+        # report their own failure.
+        with contextlib.suppress(PlaywrightError):
+            self.page.evaluate("() => null")
+
+    def _detach(self) -> None:
+        self._console.detach()
+        # Unregister the response listener to prevent callback accumulation
+        # when the monitor is reused on the same page object.
+        if self._response_listener is not None:
+            self.page.remove_listener("response", self._response_listener)
+            self._response_listener = None
+
     def _check_console_issues(self) -> list[str]:
-        """Check for console errors and return issues."""
+        """Console errors and uncaught page errors."""
         if not self.check_console:
             return []
 
+        issues: list[str] = []
         try:
             assert_no_console_errors(
-                self.console_messages,
+                self._console.messages,
                 ignore_patterns=self.ignore_patterns,
                 context=self.context
             )
-            return []
         except AssertionError as e:
-            return [f"Console: {e!s}"]
+            issues.append(f"Console: {e!s}")
+        issues.extend(
+            f"PageError: {error}"
+            for error in self._console.page_errors
+            if not any(pattern.lower() in error.lower() for pattern in self.ignore_patterns)
+        )
+        return issues
 
     def _check_network_issues(self) -> list[str]:
         """Check for network errors and return issues."""
@@ -596,18 +661,6 @@ class ComprehensivePageMonitor:
 
         return issues
 
-    def _get_all_quality_issues(self) -> list[str]:
-        """Collect all quality issues from different checks."""
-        all_issues = []
-        all_issues.extend(self._check_console_issues())
-        all_issues.extend(self._check_network_issues())
-        all_issues.extend(self._check_html_issues())
-        all_issues.extend(self._check_css_issues())
-        all_issues.extend(self._check_accessibility_issues())
-        all_issues.extend(self._check_performance_issues())
-        all_issues.extend(self._check_server_log_issues())
-        return all_issues
-
     def _get_checks_performed(self) -> list[str]:
         """Get list of checks that were performed."""
         checks_performed = []
@@ -638,17 +691,30 @@ class ComprehensivePageMonitor:
             print(f"  ✅ Page quality verified ({checks_str})")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Unregister the response listener to prevent callback accumulation
-        # when the monitor is reused on the same page object.
-        if self._response_listener is not None:
-            self.page.remove_listener("response", self._response_listener)
-            self._response_listener = None
-
         # Only check quality issues if the test didn't already fail
         if exc_type is not None:
+            self._detach()
             return
 
-        all_issues = self._get_all_quality_issues()
+        # The checks that drive the page run while the collectors still listen, so an error the
+        # page raises meanwhile is caught; the listeners go before the verdict, never after it.
+        try:
+            page_issues = [
+                *self._check_network_issues(),
+                *self._check_html_issues(),
+                *self._check_css_issues(),
+                *self._check_accessibility_issues(),
+                *self._check_performance_issues(),
+            ]
+            self._sync_point()
+        finally:
+            self._detach()
+
+        all_issues = [
+            *self._check_console_issues(),
+            *page_issues,
+            *self._check_server_log_issues(),
+        ]
 
         if all_issues:
             context_msg = f" {self.context}" if self.context else ""
@@ -672,13 +738,18 @@ class ConsoleMonitor:
         self.page = page
         self.context = context
         self.ignore_patterns = ignore_patterns or []
-        self.console_messages: list[str] = []
+        self._console = _ConsoleCollector()
+
+    @property
+    def console_messages(self) -> list[dict[str, Any]]:
+        return self._console.messages
 
     def __enter__(self):
-        self.console_messages = setup_console_monitoring_standalone(self.page)
+        self._console.attach(self.page)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._console.detach()
         # Only check console errors if the test didn't already fail
         if exc_type is None:
             assert_no_console_errors(
@@ -686,3 +757,9 @@ class ConsoleMonitor:
                 ignore_patterns=self.ignore_patterns,
                 context=self.context
             )
+            page_errors = [
+                error for error in self._console.page_errors
+                if not any(pattern.lower() in error.lower() for pattern in self.ignore_patterns)
+            ]
+            if page_errors:
+                raise AssertionError("Uncaught page errors:\n" + "\n".join(f"  - {e}" for e in page_errors))

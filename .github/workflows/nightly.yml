@@ -197,6 +197,9 @@ jobs:
         cd services/portal
         PYTHONPATH= PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
 
+    - name: Install the browser the page-monitor self-tests drive
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
     - name: Integration tests
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci

@@ -6,10 +6,8 @@ Platform (:8700) and Portal (:8701) authentication helpers.
 
 import json
 import time
-from collections.abc import Generator
 from urllib.parse import quote, urlsplit
 
-import pytest
 from playwright.sync_api import Page
 
 from tests.e2e.helpers.constants import (
@@ -247,32 +245,6 @@ def navigate_to_platform_page(page: Page, path: str, expected_url_fragment: str 
     except Exception as e:
         print(f"❌ Platform navigation error: {str(e)[:100]}")
         return False
-
-
-# ===============================================================================
-# SHARED FIXTURES
-# ===============================================================================
-
-@pytest.fixture(autouse=True)
-def setup_console_monitoring(page: Page) -> Generator[Page]:
-    """
-    Automatically monitor console errors for all E2E tests.
-
-    This fixture runs automatically for every test and tracks
-    JavaScript console errors, making them available via page.console_errors.
-    """
-    console_errors = []
-
-    def handle_console(msg):
-        if msg.type == "error":
-            console_errors.append(msg.text)
-            print(f"🚨 Console Error: {msg.text}")
-
-    page.on("console", handle_console)
-
-    # Make console_errors available to tests (dynamic attribute)
-    page.console_errors = console_errors
-    yield page
 
 
 # ===============================================================================
