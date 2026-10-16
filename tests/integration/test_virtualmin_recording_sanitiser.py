@@ -9,6 +9,8 @@ must keep (the error text PRAHO classifies on), and that every committed fixture
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -81,6 +83,21 @@ class TestSanitiseText:
         raw = f"IP 10.1.2.3 id 17920605682563 {PEM} Created on: 10/15/2026 10:36 AM"
         once = sanitise_text(raw)
         assert sanitise_text(once) == once
+
+
+class TestHostIndependence:
+    """Recordings made on one machine must match those made on another (a laptop, a CI runner)."""
+
+    def test_a_webmin_log_timestamp_is_replaced_whole(self) -> None:
+        line = "[16/Oct/2026:06:53:56 +0000] [10.0.0.7] Failed to open /tmp/x"
+        assert sanitise_text(line) == "[<timestamp>] [<ip>] Failed to open /tmp/x"
+
+    def test_the_disk_device_and_the_cpu_architecture_are_host_facts(self) -> None:
+        for device, arch in (("/dev/vda1", "aarch64"), ("/dev/root", "x86_64")):
+            text = f"disk_fs: \n    * \n        device: {device}\n        dir: /\nkernel: \n    arch: {arch}\n    os: Linux\n"
+            assert sanitise_text(text) == (
+                "disk_fs: \n    * \n        device: <device>\n        dir: /\nkernel: \n    arch: <arch>\n    os: Linux\n"
+            )
 
 
 class TestSanitiseValue:
@@ -207,3 +224,50 @@ class TestLeakDetection:
             "password": "hunter2hunter2",
         }
         assert find_leaks(sanitise_value(raw)) == []
+
+
+class TestInfoIsAMachineInventory:
+    """`info` prints the whole machine: the kernel, the CPU, the pending package updates, installed versions.
+
+    Two runs of the same Virtualmin on different hosts (a laptop container and a CI runner) must record the
+    same `info`. The two samples are the committed recording's body and the body a GitHub runner produced.
+    """
+
+    SAMPLES = Path(__file__).parent / "virtualmin_info_samples"
+
+    @classmethod
+    def _recorded(cls, sample: str) -> Any:
+        return sanitise_body((cls.SAMPLES / sample).read_text(), program="info")
+
+    def test_the_same_virtualmin_on_two_hosts_records_the_same_info(self) -> None:
+        laptop = self._recorded("arm64-linuxkit.json")
+        runner = self._recorded("x86_64-azure.json")
+        assert laptop == runner
+
+    def test_host_inventory_does_not_reach_the_recording(self) -> None:
+        output = str(self._recorded("x86_64-azure.json")["output"])
+        for host_fact in ("azure", "linuxkit", "EPYC", "AuthenticAMD", "10.11.", "2.4.68", "8.2.34", "libmariadb3"):
+            assert host_fact not in output
+        assert "poss" not in output
+
+    def test_what_praho_reads_survives(self) -> None:
+        body = self._recorded("arm64-linuxkit.json")
+        assert body["command"] == "info"
+        assert body["status"] == "success"
+        lines = str(body["output"]).splitlines()
+        for kept in ("virtualmin version: 8.3.0", "virtualmin edition: GPL", "os: Debian Linux 12"):
+            assert any(line.strip() == kept for line in lines), kept
+        # The gateway reads these keys by name: they stay even though their values are placeholders.
+        assert {"disk_free:", "disk_total:", "disk_used:", "host:"} <= {line.split()[0] for line in lines if line}
+
+    def test_normalising_twice_changes_nothing(self) -> None:
+        once = self._recorded("x86_64-azure.json")
+        assert sanitise_body(json.dumps(once), program="info") == once
+
+    def test_a_program_that_is_not_an_inventory_is_not_reduced(self) -> None:
+        raw = (self.SAMPLES / "arm64-linuxkit.json").read_text()
+        assert sanitise_body(raw, program="list-domains") == sanitise_body(raw)
+
+    def test_a_refusal_from_info_keeps_its_text(self) -> None:
+        refusal = json.dumps({"status": "failure", "error": "Permission denied", "output": None})
+        assert sanitise_body(refusal, program="info") == {"status": "failure", "error": "Permission denied", "output": None}

@@ -158,7 +158,7 @@ class Recorder:
     def add(self, exchange: Exchange, case: str, note: str) -> None:
         program_cases = self.cases.setdefault(exchange.program, {})
         assert case not in program_cases, f"{exchange.program}: case {case!r} recorded twice"
-        body = sanitise_body(exchange.body)
+        body = sanitise_body(exchange.body, program=exchange.program)
         program_cases[case] = {
             "note": note,
             "params": sanitise_params(exchange.params),

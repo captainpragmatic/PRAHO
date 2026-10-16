@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 REDACTED = "<redacted>"
@@ -35,11 +36,19 @@ _SECRET_LINE = re.compile(
 )
 _PASSWORD_HASH = re.compile(r"\$[0-9a-z]{1,3}(?:\$[^\s$\"'\\]+){2,}")
 _TIMESTAMPS = (
+    # Webmin and Apache log form, "16/Oct/2026:06:53:56 +0000": before the IP rules, which would
+    # read its time as an IPv6 address and leave the date behind.
+    re.compile(r"\d{1,2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2}(?: [+-]\d{4})?"),
     re.compile(r"\d{1,2}/\d{1,2}/\d{4},? \d{1,2}:\d{2}(?::\d{2})?(?: ?[AP]M)?"),
     re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z| ?UTC|[+-]\d{2}:?\d{2})?"),
     re.compile(r"(?<![0-9])1[5-9]\d{8}(?![0-9])"),
 )
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# Facts about the machine the node runs on, not about Virtualmin: they differ between a laptop and a CI runner.
+_HOST_FACTS = (
+    (re.compile(r"(?m)^(\s*device: ).+$"), r"\1<device>"),
+    (re.compile(r"(?m)^(\s*arch: ).+$"), r"\1<arch>"),
+)
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 _IPV6 = re.compile(
     r"(?<![\w:])(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}(?![\w:])"
@@ -88,6 +97,8 @@ def sanitise_text(text: str, *, dates: bool = True) -> str:
     cleaned = _SIZE.sub("<size>", cleaned)
     cleaned = _DURATION.sub("<n>", cleaned)
     if "\n" in cleaned:
+        for pattern, replacement in _HOST_FACTS:
+            cleaned = pattern.sub(replacement, cleaned)
         cleaned = _FEATURE_COUNTS.sub("fcount: <counts>\n", cleaned)
         cleaned = _BARE_NUMBER_LINE.sub(r"\1<n>", cleaned)
         cleaned = _LABELLED_NUMBER_LINE.sub(r"\1 <n>", cleaned)
@@ -181,14 +192,66 @@ def sanitise_recording(recording: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def sanitise_body(raw: str) -> Any:
-    """A response body as sanitised data: parsed JSON when it is JSON, sanitised text otherwise."""
+# What PRAHO reads from `info` (the gateway's `_available_disk_mb` takes `disk_free`; the lab checks read the
+# Virtualmin version) is a handful of lines. The rest of the answer is an inventory of the machine, which differs
+# by host (kernel, CPU model, filesystem) and over time (load, pending package updates, installed versions).
+_INFO_TOP_KEY = re.compile(r"^([A-Za-z_][\w ]*):")
+_INFO_KEPT_BLOCKS = frozenset({"disk_free", "disk_total", "disk_used", "fcount", "ftypes"})
+# Listed only while the package manager has updates pending: the key itself comes and goes with the day.
+_INFO_UPDATE_KEYS = frozenset({"poss", "vposs"})
+_INFO_HOST_LABELS = frozenset({"os", "virtualmin edition", "virtualmin version"})
+_INFO_DROPPED = "<host>"
+
+
+def _normalise_info_output(output: str) -> str:
+    """`info` text reduced to its stable lines; the name of every other block stays, its content goes."""
+    blocks: list[tuple[str, list[str]]] = []
+    for line in output.splitlines():
+        top = _INFO_TOP_KEY.match(line)
+        if top is not None:
+            blocks.append((top.group(1), [line]))
+        elif blocks:
+            blocks[-1][1].append(line)
+    kept: list[str] = []
+    for key, lines in blocks:
+        if key in _INFO_UPDATE_KEYS:
+            continue
+        if key in _INFO_KEPT_BLOCKS:
+            kept.extend(lines)
+        elif key == "host":
+            kept.append("host: ")
+            kept.extend(line for line in lines[1:] if line.strip().partition(":")[0] in _INFO_HOST_LABELS)
+        else:
+            kept.append(f"{key}: {_INFO_DROPPED}")
+    return "\n".join(kept) + "\n"
+
+
+def _normalise_info(body: Any) -> Any:
+    if not isinstance(body, dict) or not isinstance(body.get("output"), str):
+        return body
+    return {**body, "output": _normalise_info_output(body["output"])}
+
+
+# Per-program reducers, applied to a sanitised JSON body: a program whose answer is a machine inventory keeps
+# only the part that is stable and meaningful to PRAHO.
+_NORMALISERS: dict[str, Callable[[Any], Any]] = {"info": _normalise_info}
+
+
+def sanitise_body(raw: str, *, program: str | None = None) -> Any:
+    """A response body as sanitised data: parsed JSON when it is JSON, sanitised text otherwise.
+
+    `program` names the Virtualmin program that answered; the programs in `_NORMALISERS` then have the
+    host-dependent part of their answer reduced to what is stable.
+    """
     text = (raw or "").strip()
     if text.startswith(("{", "[")):
         try:
-            return sanitise_value(json.loads(text))
+            body = sanitise_value(json.loads(text))
         except ValueError:
             pass
+        else:
+            normaliser = _NORMALISERS.get(program or "")
+            return normaliser(body) if normaliser is not None else body
     return sanitise_text(text)
 
 

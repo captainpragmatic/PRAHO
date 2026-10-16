@@ -9,7 +9,8 @@ Creates or refreshes, for each lab node:
 
 It also writes the port-keyed known_hosts file, points the backup.* settings at
 the lab MinIO, gives the lab a private transfer spool, and creates the customer,
-service and VirtualminAccount the round-trip gate backs up.
+service and VirtualminAccount the round-trip gate backs up, plus a staff login
+(`lab-staff@praho.test`, password in `.state/staff.env`) for the dev server and the browser tests.
 
 Refuses to run unless DJANGO_SETTINGS_MODULE=config.settings.lab and DEBUG.
 """
@@ -37,6 +38,7 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     LabState,
     container_address,
     ensure_lab_deployment,
+    ensure_lab_staff,
     lab_state_dir,
     read_env_file,
     refuse_unless_lab_settings,
@@ -102,6 +104,7 @@ class Command(BaseCommand):
                 self._register_node(node, state_dir)
             self._configure_backup_settings(lab_env, options["s3_port"], spool)
             self._ensure_account()
+            ensure_lab_staff(state_dir)
 
         state = LabState(
             state_dir=str(state_dir),
@@ -115,6 +118,7 @@ class Command(BaseCommand):
         state.save()
         logger.info("✅ [VirtualminLab] Registered %s nodes; state in %s", len(NODES), state_dir)
         self.stdout.write(self.style.SUCCESS(f"Lab registered: {', '.join(n.server_hostname for n in NODES)}"))
+        self.stdout.write(f"Staff login: see {state_dir / 'staff.env'}")
         self.stdout.write("Next: deploy/virtualmin-lab/lab.sh apply-credentials")
 
     def _register_node(self, node: LabNode, state_dir: Path) -> None:
