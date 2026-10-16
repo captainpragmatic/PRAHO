@@ -196,6 +196,9 @@ jobs:
     - name: Database cache tests (make test-cache)
       run: make test-cache
 
+    - name: Install the browser the page-monitor self-tests drive
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
     - name: Integration test suite (make test-integration)
       run: make test-integration
 

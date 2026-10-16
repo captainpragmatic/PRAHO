@@ -16,7 +16,7 @@ from decimal import Decimal
 from functools import cached_property
 from unittest.mock import MagicMock, patch
 
-from django.conf import settings
+from django.db import connection
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
@@ -269,8 +269,7 @@ class MeteringServiceTransactionTests(TransactionTestCase):
         # Check if using SQLite (which doesn't support concurrent writes)
         # PostgreSQL exercises concurrent writes in the branch below.
 
-        db_engine = settings.DATABASES["default"]["ENGINE"]
-        is_sqlite = "sqlite" in db_engine
+        is_sqlite = connection.vendor == "sqlite"
 
         if is_sqlite:
             # For SQLite, just verify the basic idempotency works sequentially
@@ -322,6 +321,9 @@ class MeteringServiceTransactionTests(TransactionTestCase):
                     return result
                 except Exception as e:
                     return e
+                finally:
+                    # Persistent test connections are never closed by close_old_connections().
+                    connection.close()
 
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(record_event) for _ in range(5)]

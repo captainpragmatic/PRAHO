@@ -27,7 +27,6 @@ from tests.e2e.helpers.auth import (
     logout_user,
     navigate_to_platform_page,
     require_authentication,
-    setup_console_monitoring,
     wait_for_alpine,
     wait_for_server_ready,
 )
@@ -192,7 +191,6 @@ __all__ = [
     "run_responsive_breakpoints_test",
     "run_standard_mobile_test",
     "safe_click_element",
-    "setup_console_monitoring",
     "setup_console_monitoring_standalone",
     "test_users",
     "verify_admin_access",

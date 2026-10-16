@@ -5,8 +5,8 @@
 # PRs:         Affected-module detection for focused test runs (~30s)
 # Master push: Full suite + coverage
 #
-# PostgreSQL production-parity testing is in nightly.yml and full-test.yml
-# (requires test suite hardening — tracked as tech debt).
+# PostgreSQL: every PR and push also runs the PostgreSQL-gated tests (platform-postgres), which
+# skip themselves on SQLite. The full suite on PostgreSQL is in nightly.yml and full-test.yml.
 # Linting is consolidated in integration.yml (make lint).
 
 name: Platform Service CI/CD
@@ -18,6 +18,10 @@ on:
       - 'services/platform/**'
       - 'shared/**'
       - 'scripts/affected_test_modules.py'
+      # What platform-postgres runs: its Makefile target, the scan, and the database bootstrap.
+      - 'Makefile'
+      - 'scripts/pg_gated_test_modules.py'
+      - 'scripts/start_ci_postgres.sh'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/**'
@@ -133,6 +137,42 @@ jobs:
           services/platform/htmlcov/
           services/platform/coverage-platform.xml
         if-no-files-found: warn
+
+  # The tests that skip themselves on SQLite, found by scanning the tests. Without this job they
+  # first ran after merge, in the nightly, so a PR could break one and still merge green.
+  platform-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.ci
+      DB_NAME: postgres
+      DB_USER: test
+      DB_PASSWORD: test
+      DB_HOST: localhost
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Start PostgreSQL (registry fallback)
+      run: make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16
+      env:
+        CI_POSTGRES_USER: ${{ env.DB_USER }}
+        POSTGRES_PASSWORD: ${{ env.DB_PASSWORD }}
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    - name: PostgreSQL-gated tests (derived from the tests themselves)
+      run: make test-platform-postgres-gated
 
   platform-security:
     runs-on: ubuntu-latest
