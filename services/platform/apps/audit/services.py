@@ -14,7 +14,6 @@ from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
-from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -23,6 +22,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
@@ -50,7 +50,7 @@ HIGH_COMPLEXITY_FILTER_THRESHOLD = _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
 MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 
 # Business logic constants
-HIGH_VALUE_PLAN_THRESHOLD_RON = 500  # 500 RON threshold for high-value plans
+HIGH_VALUE_PLAN_THRESHOLD_RON = 500  # 500 in the default selling currency, which legacy plan prices use
 SERVER_OVERLOAD_THRESHOLD_PERCENT = 85  # 85% resource usage threshold
 LONG_RUNNING_TASK_THRESHOLD_SECONDS = 1800  # 30 minutes (1800 seconds)
 
@@ -788,7 +788,7 @@ class AuditService:
             "data_protection": ["data_export_", "data_deletion_"],
             "integration": ["api_", "webhook_"],
             "system_admin": ["system_", "backup_", "configuration_", "user_impersonation"],
-            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule"],
+            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_", "early_performance_"],
             "business_operation": [
                 "proforma_",
                 "invoice_",
@@ -1270,7 +1270,7 @@ class GDPRExportService:
                 "export_type": "gdpr_data_portability",
                 "praho_platform_version": "1.0.0",
                 "gdpr_article": "Articles 15 and 20 - Right of access and right to data portability",
-                "legal_basis": "Romanian Law 190/2018, GDPR Articles 15 and 20",
+                "legal_basis": "GDPR Articles 15 and 20",
             },
             "user_profile": {},
             "customers": [],
@@ -1295,7 +1295,7 @@ class GDPRExportService:
                 if user.last_privacy_policy_accepted
                 else None,
                 "terms_accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
-                "terms_version": user.terms_version,
+                "terms_document": user.terms_document.reference() if user.terms_document else None,
                 "account_status": "active" if user.is_active else "inactive",
             }
 
@@ -1612,7 +1612,7 @@ class GDPRDeletionService:
         "gdpr_consent_date",
         "last_privacy_policy_accepted",
         "terms_accepted_at",
-        "terms_version",
+        "terms_document",
         "password",
         "two_factor_enabled",
         "_two_factor_secret",
@@ -1642,7 +1642,7 @@ class GDPRDeletionService:
         user.gdpr_consent_date = None
         user.last_privacy_policy_accepted = None
         user.terms_accepted_at = None
-        user.terms_version = ""
+        user.terms_document = None
 
         # Clear sensitive fields
         # The unusable password revokes sessions independently of the MFA credential version.
@@ -1853,7 +1853,9 @@ class GDPRConsentService:
         """Withdraw specific types of consent"""
 
         try:
-            valid_types = ["data_processing", "marketing", "analytics", "cookies"]
+            # Not "data_processing": it performs the account's contract and is no consent (ADR-0061).
+            # Erasing the account is a deletion request (GDPRDeletionService).
+            valid_types = ["marketing", "analytics", "cookies"]
             invalid_types = [ct for ct in consent_types if ct not in valid_types]
             if invalid_types:
                 return Err(f"Invalid consent types: {invalid_types}")
@@ -1873,32 +1875,6 @@ class GDPRConsentService:
                 # (#226). Propagate to every customer the user belongs to.
                 cls._propagate_marketing_consent(user, consent=False)
                 changes_made.append("marketing_communications")
-
-            # Data processing consent withdrawal triggers anonymization
-            if "data_processing" in consent_types:
-                # This is a full GDPR deletion request
-                deletion_result = GDPRDeletionService.create_deletion_request(
-                    user, "anonymize", request_ip, "Data processing consent withdrawn"
-                )
-                if deletion_result.is_err():
-                    error_msg = deletion_result.error if hasattr(deletion_result, "error") else str(deletion_result)
-                    # Err without raising would COMMIT the marketing propagation above
-                    # while the user flag never persists — roll the whole withdrawal back.
-                    transaction.set_rollback(True)
-                    return Err(f"Failed to process consent withdrawal: {error_msg}")
-
-                # Immediately process the deletion request
-                # Type-safe extraction after confirming it's Ok
-                deletion_request = deletion_result.unwrap()
-                process_result = GDPRDeletionService.process_deletion_request(deletion_request)
-                if process_result.is_err():
-                    error_msg = process_result.error if hasattr(process_result, "error") else str(process_result)
-                    # Err without raising would COMMIT the marketing propagation above
-                    # while the user flag never persists — roll the whole withdrawal back.
-                    transaction.set_rollback(True)
-                    return Err(f"Failed to anonymize user data: {error_msg}")
-
-                changes_made.append("data_processing")
 
             if changes_made:
                 # Each change above has already been written: the marketing flag by name, and the
@@ -1969,14 +1945,18 @@ class GDPRConsentService:
         ip_address: str | None = None,
         user_agent: str = "",
         user_id: int | None = None,
+        language: str = "",
     ) -> Result[CookieConsent, str]:
         """
         Record cookie consent from Portal (via GDPR API).
 
         Handles both anonymous (cookie_id only) and authenticated (user_id) consent.
         When user_id is provided with a cookie_id, also links any prior anonymous
-        CookieConsent records with the same cookie_id to this user.
+        CookieConsent records with the same cookie_id to this user. The choice records the
+        Cookie Policy release in force in the visitor's language.
         """
+        from apps.common.legal import LegalDocument, current_legal_document  # noqa: PLC0415  # ADR-0007
+
         from .signals import (  # noqa: PLC0415  # Deferred: avoids circular import
             cookie_consent_updated,  # Circular: signals<->services  # Deferred: avoids circular import
         )
@@ -1995,6 +1975,7 @@ class GDPRConsentService:
                 with contextlib.suppress(User.DoesNotExist):
                     user = User.objects.get(id=user_id, is_active=True)
 
+            policy = current_legal_document(LegalDocument.Kind.COOKIES, language)
             defaults = {
                 "status": consent_status,
                 "essential_cookies": True,
@@ -2003,7 +1984,8 @@ class GDPRConsentService:
                 "marketing_cookies": marketing,
                 "ip_address": ip_address,
                 "user_agent": (user_agent or "")[:500],
-                "consent_version": "1.0",
+                "cookie_document": policy,
+                "consent_version": policy.release if policy else "",
             }
 
             # Always use cookie_id as the SOLE lookup key — one cookie_id = one row.
@@ -2713,7 +2695,7 @@ class CustomersAuditService:
             "customer_name": billing_profile.customer.get_display_name(),
             "payment_terms": billing_profile.payment_terms,
             "credit_limit": float(billing_profile.credit_limit),
-            "credit_limit_currency": "RON",
+            "credit_limit_currency": default_selling_currency(),
             "preferred_currency": billing_profile.preferred_currency,
             "account_balances": {
                 code: format(amount, ".2f") for code, amount in billing_profile.get_account_balances().items()
@@ -4735,12 +4717,12 @@ class AuditRetentionService:
     def financial_retention_cutoff(cls, now: datetime | None = None) -> datetime:
         """The instant before which financial evidence may be removed.
 
-        A record drawn up in year Y is kept until 1 July of Y+1+5, Romanian time. So from 1 July
+        A record drawn up in year Y is kept until 1 July of Y+1+5, on the operator's clock. So from 1 July
         of year N, records from N-6 and earlier are past it (cutoff 1 January of N-5); before
         1 July, records from N-7 and earlier (cutoff 1 January of N-6). The configured time zone
         is used explicitly, not the active one, which a request or task may have changed.
         """
-        zone = ZoneInfo(settings.TIME_ZONE)
+        zone = timezone.get_default_timezone()
         local = (now or timezone.now()).astimezone(zone)
         years_back = (
             cls.FINANCIAL_RETENTION_YEARS if (local.month, local.day) >= (7, 1) else cls.FINANCIAL_RETENTION_YEARS + 1
@@ -6001,10 +5983,10 @@ class DomainsAuditService:
             "order_item_id": str(domain_order_item.id),
             "order_id": str(domain_order_item.order.id) if domain_order_item.order else None,
             "domain_name": domain_order_item.domain_name,
-            "operation_type": domain_order_item.operation_type,
+            "action": domain_order_item.action,
             "registrar": domain_order_item.registrar.name if domain_order_item.registrar else None,
             "tld_extension": domain_order_item.tld.extension if domain_order_item.tld else None,
-            "price_cents": domain_order_item.price_cents,
+            "total_price_cents": domain_order_item.total_price_cents,
             "customer_id": str(domain_order_item.order.customer.id)
             if domain_order_item.order and domain_order_item.order.customer
             else None,
@@ -6026,7 +6008,7 @@ class DomainsAuditService:
 
         # Generate description if not provided
         if not description:
-            description = f"Domain order {event_type.replace('_', ' ')}: {domain_order_item.domain_name} ({domain_order_item.operation_type})"
+            description = f"Domain order {event_type.replace('_', ' ')}: {domain_order_item.domain_name} ({domain_order_item.action})"
 
         # Create audit event
         audit_event_data = AuditEventData(

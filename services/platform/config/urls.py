@@ -14,13 +14,8 @@ from django.http.response import HttpResponseBase
 from django.urls import include, path
 from django.views.generic import RedirectView
 
-# Import legal views
-from apps.common.legal_views import (
-    cookie_policy,
-    data_processors,
-    privacy_policy,
-    terms_of_service,
-)
+# The legal pages are the portal's: these routes redirect there
+from apps.common.legal_views import cookie_policy, privacy_policy, terms_of_service
 
 # Import dashboard view
 from apps.common.views import dashboard_view, system_status_refresh
@@ -47,9 +42,7 @@ urlpatterns = [
     # ===============================================================================
     path("privacy-policy/", privacy_policy, name="privacy_policy"),
     path("terms-of-service/", terms_of_service, name="terms_of_service"),
-    # Cookie policy kept for staff reference; consent banner + proxy moved to Portal
     path("cookie-policy/", cookie_policy, name="cookie_policy"),
-    path("data-processors/", data_processors, name="data_processors"),
     # Authentication URLs (canonical prefix)
     path("auth/", include("apps.users.urls")),
     # Django i18n for language switching

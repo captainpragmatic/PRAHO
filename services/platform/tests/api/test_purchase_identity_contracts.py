@@ -7,17 +7,17 @@ from django.test import TestCase, override_settings
 
 from apps.api.orders.serializers import OrderDetailSerializer
 from apps.billing.models import Currency
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.performance.rate_limiting import RegistrationClientIPThrottle
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.services import OrderService, StatusChangeData
 from apps.products.models import Product, ProductPrice
-from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from apps.users.services import SecureUserRegistrationService
+from tests.helpers.checkout import checkout_consents
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 from tests.helpers.task_queue import run_queued
 
 CHOSEN = "Registration-pass123!"
@@ -32,16 +32,7 @@ DELIVER = "apps.users.tasks.deliver_registration"
 class PurchaseIdentityContracts(HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": "https://customers.example.test",
-                "default_value": "",
-            },
-        )
+        self.terms = publish_release()
 
     def registration(self, email="purchase@example.com", phone="+40722123456"):
         return {
@@ -60,7 +51,6 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "county": "București",
                 "postal_code": "010061",
                 "country": "România",
-                "data_processing_consent": True,
             },
         }
 
@@ -78,9 +68,8 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "token": row.token(),
                 "password": password,
                 "password_confirm": password,
-                "data_processing_consent": True,
                 "terms_accepted": True,
-                "terms_version": TERMS_OF_SERVICE_VERSION,
+                "terms_document_id": str(self.terms.pk),
             },
         )
 
@@ -151,9 +140,8 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                         "token": row.token(),
                         "password": password,
                         "password_confirm": password,
-                        "data_processing_consent": True,
                         "terms_accepted": True,
-                        "terms_version": TERMS_OF_SERVICE_VERSION,
+                        "terms_document_id": str(self.terms.pk),
                     },
                 )
                 self.assertEqual(response.status_code, 400, response.content)
@@ -175,22 +163,23 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
             self.assertFalse(customer.data_processing_consent)
 
     def test_romanian_phones_are_normalized_and_invalid_lengths_rejected(self):
-        for index, phone in enumerate(("+40.722.123.456", "0722 123 456")):
+        # The portal sends the international form, having read a national number in the customer's country.
+        for index, phone in enumerate(("+40.722.123.456", "+40 722 123 456")):
             user, _customer = self.register(
                 {
                     **self.registration(f"phone{index}@example.com", phone),
                     "customer_data": {**self.registration()["customer_data"], "company_name": f"Phone Company {index}"},
                 }
             )
-            self.assertEqual(user.phone, phone.replace(".", "").replace(" ", ""))
-        for phone in ("+4072212345", "+407221234567", "+40722123456junk"):
+            self.assertEqual(user.phone, "+40722123456")  # stored in international form either way
+        for phone in ("+4072212345", "+407221234567", "+40722123456junk", "0722 123 456"):
             response = self.submit(self.registration(phone=phone))
             self.assertEqual(response.status_code, 400, response.content)
         self.assertEqual(User.objects.count(), 2)
         self.assertEqual(PendingRegistration.objects.filter(consumed_at__isnull=True).count(), 0)
 
     def test_invalid_registration_is_atomic(self):
-        for field, value in (("address_line1", ""), ("data_processing_consent", False)):
+        for field, value in (("address_line1", ""), ("city", "")):
             data = self.registration()
             data["customer_data"][field] = value
             response = self.submit(data)
@@ -212,6 +201,7 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
                 "customer_id": customer.pk,
                 "user_id": user.pk,
                 "idempotency_key": "bank-order-contract",
+                **checkout_consents(),
                 "currency": "RON",
                 "currency_revision": 1,
                 "payment_method": "bank_transfer",

@@ -28,6 +28,7 @@ from .billing import urls as billing_urls
 
 # Import domain-specific URL patterns
 from .customers import urls as customer_urls
+from .legal.views import legal_document
 from .localisation.views import localisation_defaults
 from .orders import urls as order_urls
 from .services import urls as services_urls
@@ -41,6 +42,7 @@ app_name = "api"
 
 urlpatterns = [
     path("localisation/", localisation_defaults, name="localisation"),
+    path("legal/document/", legal_document, name="legal_document"),
     # Users & Authentication APIs (for portal service)
     path("users/", include("apps.api.users.urls")),
     # Customer Management APIs

@@ -1,64 +1,30 @@
-"""Smoke tests for legal views (privacy, terms, cookie, data processors).
+"""The legal pages are the portal's: Platform's legal addresses redirect there (ADR-0061)."""
 
-Validates that all 4 legal views return HTTP 200 with correct datetime usage.
-"""
-
-from django.contrib.auth.models import AnonymousUser
-from django.test import RequestFactory, TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from apps.common.legal_views import cookie_policy, data_processors, privacy_policy, terms_of_service
+from tests.helpers.portal import set_portal_origin
+
+PORTAL = "https://portal.example.test"  # From the test settings' PORTAL_DOMAIN
 
 
-class LegalViewsSmokeTestCase(TestCase):
-    """Smoke tests verifying all legal views return HTTP 200."""
+class LegalRedirectTests(TestCase):
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
 
-    def setUp(self):
-        self.factory = RequestFactory()
+    def test_each_legal_address_redirects_to_the_portal_page(self) -> None:
+        for name, path in (
+            ("terms_of_service", "/terms/"),
+            ("privacy_policy", "/privacy-policy/"),
+            ("cookie_policy", "/cookie-policy/"),
+        ):
+            with self.subTest(name):
+                response = self.client.get(reverse(name))
+                self.assertRedirects(response, PORTAL + path, fetch_redirect_response=False)
 
-    def _make_request(self, path):
-        """Create a GET request with an anonymous user attached."""
-        request = self.factory.get(path)
-        request.user = AnonymousUser()
-        return request
-
-    def test_privacy_policy_returns_200(self):
-        request = self._make_request("/privacy-policy/")
-        response = privacy_policy(request)
-        self.assertEqual(response.status_code, 200)
-
-    def test_terms_of_service_returns_200(self):
-        request = self._make_request("/terms-of-service/")
-        response = terms_of_service(request)
-        self.assertEqual(response.status_code, 200)
-
-    def test_cookie_policy_returns_200(self):
-        request = self._make_request("/cookie-policy/")
-        response = cookie_policy(request)
-        self.assertEqual(response.status_code, 200)
-
-    def test_data_processors_returns_200(self):
-        request = self._make_request("/data-processors/")
-        response = data_processors(request)
-        self.assertEqual(response.status_code, 200)
-
-
-class TermsOfServiceVersionTests(TestCase):
-    """The page states the version Platform records when a customer accepts the terms."""
-
-    def test_the_page_states_the_recorded_version(self):
-        from apps.common.legal import TERMS_OF_SERVICE_VERSION  # noqa: PLC0415
-
-        response = self.client.get(reverse("terms_of_service"))
-        self.assertContains(response, TERMS_OF_SERVICE_VERSION)
-        self.assertEqual(response.context["effective_date"].isoformat(), TERMS_OF_SERVICE_VERSION)
-
-
-class PrivacyPolicyContactTests(TestCase):
-    """company.email_privacy says it is shown on the privacy policy; it now is."""
-
-    def test_the_page_shows_the_privacy_contact(self):
-        from apps.settings.services import SettingsService  # noqa: PLC0415
-
-        response = self.client.get(reverse("privacy_policy"))
-        self.assertContains(response, str(SettingsService.DEFAULT_SETTINGS["company.email_privacy"]))
+    @override_settings(PORTAL_DOMAIN="")
+    def test_without_a_portal_origin_the_address_is_not_found(self) -> None:
+        set_portal_origin("")
+        self.assertEqual(self.client.get(reverse("terms_of_service")).status_code, 404)

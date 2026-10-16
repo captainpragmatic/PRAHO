@@ -1,8 +1,9 @@
-"""Seed the selling-currency policy row, billing.default_currency = RON.
+"""Seed the selling-currency policy row, billing.default_currency.
 
-The runtime falls back to the same value when the row is missing
-(billing/currency_policy.py), so this keeps a fresh install identical to an
-upgraded one: the row exists, at revision 1, until an explicit validated
+The value is the operator's home currency when PRAHO can sell in it, else the euro
+(`default_selling_currency()`): RON for a Romanian operator. The runtime falls back to the
+same value when the row is missing (billing/currency_policy.py), so this keeps a fresh install
+identical to an upgraded one: the row exists, at revision 1, until an explicit validated
 switch. Carried forward from settings 0007 of the old history (ADR-0052).
 Reversing must not discard the operator's explicit selling policy.
 """
@@ -11,14 +12,17 @@ from typing import Any
 
 from django.db import migrations
 
+from apps.billing.currency_service import default_selling_currency
+
 
 def seed_selling_currency(apps: Any, schema_editor: Any) -> None:
     setting = apps.get_model("settings", "SystemSetting")
+    default = default_selling_currency()
     setting.objects.using(schema_editor.connection.alias).get_or_create(
         key="billing.default_currency",
         defaults={
-            "value": "RON",
-            "default_value": "RON",
+            "value": default,
+            "default_value": default,
             "name": "Selling currency",
             "description": "Currency for new sales; existing money keeps its original currency.",
             "category": "billing",

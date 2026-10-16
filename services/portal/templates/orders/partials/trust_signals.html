@@ -1,18 +1,15 @@
 {% load i18n ui_components %}
 
-<!-- Trust Signals for Romanian Hosting Provider -->
+{# Trust signals: facts about the service, never a jurisdiction #}
 <div class="bg-slate-800/50 rounded-lg p-4 mb-6 border border-slate-700">
   <div class="flex items-center justify-center flex-wrap gap-4 sm:gap-6 text-sm">
     {% badge _("SSL Secured") variant="success" icon="lock" %}
     {% badge _("Instant Setup") variant="primary" icon="lightning" %}
     {# tmpl-allow TMPL005: needs badge purple_variant #}
     <div class="flex items-center text-purple-400 min-w-0">
-      <span class="mr-2" aria-hidden="true">{% icon "flag" size="sm" %}</span>
+      <span class="mr-2" aria-hidden="true">{% icon "check" size="sm" %}</span>
       <span class="font-medium">{% trans "VAT Included" %}</span>
     </div>
     {% badge _("24/7 Support") variant="warning" icon="phone" %}
-    <div class="hidden sm:block">
-      {% badge _("Romanian Data Center") variant="danger" icon="building" %}
-    </div>
   </div>
 </div>

@@ -32,3 +32,20 @@ def operator_country() -> str:
         if normalized := normalize_country_code(candidate):
             return normalized
     return REFERENCE_OPERATOR_COUNTRY
+
+
+def operator_is_romanian() -> bool:
+    """Whether the operator is established in Romania: e-Factura, D390, SmartBill and ROTLD apply."""
+    return operator_serves("RO")
+
+
+def operator_in_eu() -> bool:
+    """Whether the operator is established in an EU member state (ISO codes: Greece is GR, not EL)."""
+    from apps.billing.config import is_eu_country  # noqa: PLC0415  # ADR-0007: deferred cross-app import
+
+    return is_eu_country(operator_country())
+
+
+def operator_serves(jurisdiction: str) -> bool:
+    """Whether a feature bound to one jurisdiction ("" for none) applies to this operator."""
+    return not jurisdiction or jurisdiction == operator_country()

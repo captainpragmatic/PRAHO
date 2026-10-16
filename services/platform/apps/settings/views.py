@@ -42,6 +42,7 @@ from .catalog import (
     SettingDef,
     defs_for_group,
     groups_in_zone,
+    is_visible,
 )
 from .models import SystemSetting
 from .services import SettingsService
@@ -594,12 +595,12 @@ def settings_home(request: HttpRequest) -> HttpResponse:
     )
 
     integration_state = []
-    for slug in INTEGRATION_GROUPS:
-        secret_defs = [d for d in defs_for_group(slug) if d.sensitive]
+    for group in groups_in_zone(ZONE_INTEGRATIONS):
+        secret_defs = [d for d in defs_for_group(group.slug) if d.sensitive]
         configured = all(rows.get(d.key) is not None and rows[d.key].value not in (None, "") for d in secret_defs)
         integration_state.append(
             {
-                "group": GROUPS_BY_SLUG[slug],
+                "group": group,
                 "configured": configured if secret_defs else True,
             }
         )
@@ -681,7 +682,7 @@ def api_token_revoke(request: HttpRequest, token_id: int) -> HttpResponse:
 def settings_group(request: HttpRequest, group_slug: str) -> HttpResponse:
     """📂 One settings group page (business, integration, platform, or advanced)"""
     group = GROUPS_BY_SLUG.get(group_slug)
-    if group is None:
+    if group is None or not is_visible(group):
         raise Http404("Unknown settings group")
     if group.zone != ZONE_BUSINESS and not _is_admin(request.user):
         return HttpResponse(status=403)
@@ -929,6 +930,8 @@ def settings_search(request: HttpRequest) -> HttpResponse:
             elif query in str(definition.help_text).lower():
                 field_rank = 2
             else:
+                continue
+            if not is_visible(definition):
                 continue
             # Operator-policy results outrank tuning internals
             zone_rank = 0 if group.zone == ZONE_BUSINESS else 1

@@ -792,6 +792,10 @@ class PlatformAPIClient:
         """Read the explicit, non-sensitive portal display contract."""
         return self._make_request("POST", "/localisation/", data={})
 
+    def get_legal_document(self, request: dict[str, str]) -> dict[str, Any]:
+        """A published legal document: {"kind", "language"} for the one in force, or {"id"}; 404 if none."""
+        return self._make_request("POST", "/legal/document/", data=request)
+
     def authenticate_customer(
         self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
     ) -> dict[str, Any] | None:
@@ -890,6 +894,18 @@ class PlatformAPIClient:
             "POST", "/customers/register/", data={**registration_data, **_client_ip_payload(client_ip)}
         )
 
+    def read_registration_prefill(self, token: str, client_ip: str = "") -> dict[str, Any]:
+        """The details a staff-minted registration link fills in; Platform reads the token. Propagate errors."""
+        return self._make_request(
+            "POST", "/users/register/prefill/", data={"token": token, **_client_ip_payload(client_ip)}
+        )
+
+    def company_lookup(self, cui: str, client_ip: str = "") -> dict[str, Any]:
+        """A Romanian company as ANAF's register states it, through Platform; propagate errors."""
+        return self._make_request(
+            "POST", "/customers/company-lookup/", data={"cui": cui, **_client_ip_payload(client_ip)}
+        )
+
     def get_pending_registration(self, registration_id: str, token: str, client_ip: str = "") -> dict[str, Any]:
         """What confirming a registration link would create; propagate Platform errors."""
         return self._make_request(
@@ -905,10 +921,9 @@ class PlatformAPIClient:
         password: str,
         password_confirm: str,
         *,
-        data_processing_consent: bool,
         marketing_consent: bool,
         terms_accepted: bool,
-        terms_version: str,
+        terms_document_id: str,
         client_ip: str = "",
     ) -> dict[str, Any]:
         """Finish a pending registration with the confirmer's password; propagate Platform errors."""
@@ -920,10 +935,9 @@ class PlatformAPIClient:
                 "token": token,
                 "password": password,
                 "password_confirm": password_confirm,
-                "data_processing_consent": data_processing_consent,
                 "marketing_consent": marketing_consent,
                 "terms_accepted": terms_accepted,
-                "terms_version": terms_version,
+                "terms_document_id": terms_document_id,
                 **_client_ip_payload(client_ip),
             },
         )

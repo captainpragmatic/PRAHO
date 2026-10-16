@@ -40,11 +40,13 @@ from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.financial_arithmetic import MAX_AMOUNT_CENTS, parse_major_units_to_cents
 from apps.common.mixins import get_search_context
+from apps.common.operator import operator_country
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.utils import json_error, json_success
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
+from apps.domains.order_fulfilment import ORDERABLE_DOMAIN_ACTIONS
 from apps.products.models import Product
 from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import User
@@ -600,7 +602,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     order = get_object_or_404(
         Order.objects.select_related("customer").prefetch_related(
-            "items__product", "items__service", "status_history__changed_by"
+            "items__product", "items__service", "items__domain_order_item", "status_history__changed_by"
         ),
         id=pk,
     )
@@ -614,6 +616,18 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     editable_fields = order.get_editable_fields()
 
     can_edit = _staff_can_edit(request.user, order, editable_fields)
+    can_record_domains = request.user.is_superuser or request.user.staff_role in _REVIEW_APPROVE_ROLES
+    domain_resolution_items = [
+        item
+        for item in order.items.all()
+        if can_record_domains
+        and order.status in ("provisioning", "cancelled")
+        and item.is_domain_line
+        and hasattr(item, "domain_order_item")
+        and item.domain_order_item.action in ORDERABLE_DOMAIN_ACTIONS
+        and item.provisioning_status in ("pending", "failed", "in_progress")
+        and (order.status == "provisioning" or item.provisioning_status == "in_progress")
+    ]
 
     # Preflight validation (only for draft orders)
     preflight_errors: list[str] = []
@@ -630,6 +644,8 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     context = {
         "order": order,
         "is_staff": is_staff,
+        "can_record_domains": can_record_domains,
+        "domain_resolution_items": domain_resolution_items,
         "refund_request_key": str(uuid.uuid4()),
         "unfinished_refund": order.invoice.tender_refund_commands.exclude(status="completed").first()
         if order.invoice is not None
@@ -734,7 +750,7 @@ def order_create(request: HttpRequest) -> HttpResponse:
                             "city": "",
                             "county": "",
                             "postal_code": "",
-                            "country": "România",  # Default to Romania
+                            "country": operator_country(),
                             "vat_id": tax_profile.vat_number if tax_profile else "",
                             "contact_person": customer.get_display_name(),
                             "contact_email": customer.primary_email,
@@ -988,7 +1004,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     "city": "",
                     "county": "",
                     "postal_code": "",
-                    "country": "România",
+                    "country": operator_country(),
                     "vat_id": tax_profile.vat_number if tax_profile else "",
                     "contact_person": customer.get_display_name(),
                     "contact_email": customer.primary_email,

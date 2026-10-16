@@ -60,7 +60,6 @@ class Invoice:
     number: str
     status: str
     currency: Currency
-    exchange_to_ron: Decimal | None
     subtotal_cents: int
     tax_cents: int
     total_cents: int

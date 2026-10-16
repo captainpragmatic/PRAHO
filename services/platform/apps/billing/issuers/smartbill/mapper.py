@@ -155,8 +155,8 @@ def _collect_refusals(invoice: Invoice, lines: list[Any]) -> list[str]:  # noqa:
     if not (invoice.bill_to_country or "").strip():
         problems.append("Missing bill_to_country; assuming Romania would invent a fiscal fact")
 
-    if invoice.currency_id != "RON" and invoice.exchange_to_ron is None:
-        problems.append("Foreign-currency invoice has no frozen exchange rate")
+    if invoice.currency_id != "RON" and invoice.ron_exchange_rate() is None:
+        problems.append("Foreign-currency invoice has no frozen exchange rate to RON")
 
     # P1-2: VAT registration is a recorded fact, not something to infer from the
     # presence of a tax ID — a Romanian company can hold a CUI without being
@@ -285,9 +285,9 @@ def build_invoice_payload(  # noqa: C901  # Payload assembly plus the pre-POST c
     if invoice.due_at:
         payload["dueDate"] = ro_local_date(invoice.due_at).isoformat()
     if invoice.currency_id != "RON":
-        frozen_rate = invoice.exchange_to_ron
+        frozen_rate = invoice.ron_exchange_rate()
         if frozen_rate is None:  # already refused above; keeps the guarantee local and checkable
-            return Err(("Foreign-currency invoice has no frozen exchange rate",))
+            return Err(("Foreign-currency invoice has no frozen exchange rate to RON",))
         payload["currency"] = invoice.currency_id
         # Romanian law requires the BNR rate for the RON accounting totals, and
         # PRAHO froze that rate at issuance. Per-line rates are omitted: they can

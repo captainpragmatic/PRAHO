@@ -119,9 +119,6 @@ class Order(ConcurrentTransitionMixin, models.Model):
 
     # Financial information
     currency = models.ForeignKey("billing.Currency", on_delete=models.PROTECT, help_text=_("Order currency"))
-    exchange_to_ron = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True, help_text=_("Exchange rate to RON at time of order")
-    )
 
     # Amounts in cents for precision
     subtotal_cents = models.BigIntegerField(default=0, help_text=_("Subtotal before tax in cents"))
@@ -133,7 +130,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
     customer_email = models.EmailField(help_text=_("Customer email at time of order"))
     customer_name = models.CharField(max_length=255, help_text=_("Customer name at time of order"))
     customer_company = models.CharField(max_length=255, blank=True, help_text=_("Company name if business customer"))
-    customer_vat_id = models.CharField(max_length=50, blank=True, help_text=_("VAT ID for Romanian compliance"))
+    customer_vat_id = models.CharField(max_length=50, blank=True, help_text=_("Customer VAT ID at time of order"))
 
     # Billing address snapshot
     billing_address = models.JSONField(default=dict, help_text=_("Billing address snapshot"))
@@ -194,6 +191,15 @@ class Order(ConcurrentTransitionMixin, models.Model):
         blank=True,
         default="",
         help_text=_("Client-provided idempotency key to prevent duplicate orders"),
+    )
+
+    # What the customer accepted at checkout (apps.orders.checkout_consents). Empty for orders
+    # staff created, which no customer accepted through the portal.
+    terms_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    early_start_requested = models.BooleanField(
+        default=False, help_text=_("The customer asked for the services to start within the withdrawal period")
     )
 
     # Metadata
@@ -842,6 +848,11 @@ class OrderItem(models.Model):
     def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
         return Decimal(self.subtotal_cents) / 100
+
+    @property
+    def is_domain_line(self) -> bool:
+        """A domain registration or transfer: fulfilled by the registrar, never by a hosting service."""
+        return self.product_type == "domain"
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""

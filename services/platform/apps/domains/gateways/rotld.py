@@ -30,6 +30,7 @@ from .base import (
     DomainTransferResult,
     NameserverUpdateResult,
     RegistrarGatewayFactory,
+    registrant_entity_type,
 )
 from .contracts import api_endpoint, domain_identity, invalid_response, parse_date, required_contact, string_list
 from .errors import (
@@ -58,6 +59,7 @@ ROTLD_POLICY = OutboundPolicy(
 
 
 class ROTLDGateway(BaseRegistrarGateway):
+    jurisdiction: ClassVar[str] = "RO"  # ROTLD partners are Romanian operators
     registration_sets_nameservers: ClassVar[bool] = False
     registration_requires_contact: ClassVar[bool] = True
 
@@ -137,13 +139,28 @@ class ROTLDGateway(BaseRegistrarGateway):
             )
         return Err(error, retriability=Retriability.NOT_RETRIABLE)
 
+    def registrant_requirements(self, customer_type: str, country: str) -> frozenset[str]:
+        if country != "RO":
+            return frozenset()
+        return frozenset(
+            {"cui", "registration_number"} if registrant_entity_type(customer_type) == "company" else {"cnp"}
+        )
+
     def validate_registration_data(self, registrant_data: dict[str, Any]) -> None:
         _ = self._api_base
         required_contact(registrant_data, ("email", "phone", "address", "city", "country_code"))
         company = registrant_data.get("entity_type") == "company"
         required_contact(registrant_data, ("company_name",) if company else ("first_name", "last_name"))
-        if registrant_data.get("country_code") == "RO":
-            required_contact(registrant_data, ("cui", "registration_number") if company else ("cnp",))
+        required_contact(
+            registrant_data,
+            tuple(
+                sorted(
+                    self.registrant_requirements(
+                        str(registrant_data.get("entity_type", "")), str(registrant_data.get("country_code", ""))
+                    )
+                )
+            ),
+        )
         self._contact_phone(str(registrant_data["phone"]))
 
     @staticmethod

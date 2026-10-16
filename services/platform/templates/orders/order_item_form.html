@@ -19,7 +19,7 @@
       {% endif %}
     </h3>
 
-    <!-- Romanian Business Notice -->
+    <!-- Pricing and tax notice -->
     <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
       <div class="flex items-start">
         <div class="flex-shrink-0">
@@ -60,7 +60,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Unit Price -->
         <div>
-          {% input_field "unit_price_cents" input_type="number" label="Unit Price (cents)" html_id="id_unit_price_cents" placeholder="0" required=True value=form.unit_price_cents.value help_text="Price per unit in cents (e.g., 1999 for 19.99 RON)" error=form.unit_price_cents.errors.0 %}
+          {% input_field "unit_price_cents" input_type="number" label="Unit Price (cents)" html_id="id_unit_price_cents" placeholder="0" required=True value=form.unit_price_cents.value help_text="Price per unit in cents (e.g., 1999 for 19.99)" error=form.unit_price_cents.errors.0 %}
         </div>
 
         <!-- Setup Fee -->
@@ -101,7 +101,7 @@
       </details>
     </div>
 
-    <!-- Romanian Compliance Summary -->
+    <!-- VAT summary -->
     <div class="bg-green-900 border border-green-700 rounded-lg p-4">
       <div class="flex items-start">
         <div class="flex-shrink-0">

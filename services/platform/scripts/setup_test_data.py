@@ -69,7 +69,7 @@ def create_test_data() -> (  # Complexity: multi-step business logic
     with transaction.atomic():
         # 1. Create superuser
         superuser, created = User.objects.get_or_create(
-            email="admin@pragmatichost.com",
+            email="admin@praho.test",
             defaults={
                 "first_name": "Super",
                 "last_name": "Admin",
@@ -153,7 +153,7 @@ def create_test_data() -> (  # Complexity: multi-step business logic
 
         # 6. Create customer user
         customer_user, created = User.objects.get_or_create(
-            email="customer@pragmatichost.com",
+            email="customer@praho.test",
             defaults={
                 "first_name": "Ion",
                 "last_name": "Popescu",
@@ -1231,21 +1231,15 @@ def main() -> (  # Complexity: multi-step business logic
         print("ℹ️  Test data already exists. Retrieving existing data...")  # Intentional: emoji logging
 
         try:
-            # Get existing test accounts - try both possible emails
-            superuser = None
-            for email in ["admin@pragmatichost.com", "admin@example.com"]:
-                try:
-                    superuser = User.objects.get(email=email)
-                    break
-                except User.DoesNotExist:
-                    continue
-
-            if not superuser:
-                superuser = User.objects.filter(is_staff=True, is_superuser=True).first()
+            # Get the existing test admin, or any superuser
+            superuser = (
+                User.objects.filter(email="admin@praho.test").first()
+                or User.objects.filter(is_staff=True, is_superuser=True).first()
+            )
 
             # Try to find customer user (could be different email)
             customer_user = None
-            for email in ["customer@pragmatichost.com", "user@testcompany.com", "customer@test.com"]:
+            for email in ["customer@praho.test", "user@testcompany.com", "customer@test.com"]:
                 try:
                     customer_user = User.objects.get(email=email)
                     break

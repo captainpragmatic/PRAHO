@@ -22,6 +22,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.operator import operator_country
 from apps.common.security_decorators import (
     atomic_with_retry,
     audit_service_call,
@@ -34,7 +35,7 @@ from .catalog import DEFAULTS as CATALOG_DEFAULTS
 from .models import SystemSetting
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -400,19 +401,22 @@ class SettingsService:
         if key != "billing.invoice_issuer":
             return None
 
-        from apps.billing.issuers.base import get_registered_issuers  # noqa: PLC0415  # ADR-0007
+        from apps.billing.issuers.base import (  # noqa: PLC0415  # ADR-0007
+            get_registered_issuers,
+            issuer_serves_operator,
+        )
         from apps.billing.issuers.policy import can_switch_invoice_issuer  # noqa: PLC0415  # ADR-0007
 
         target = str(value or "").strip()
-        registered = get_registered_issuers()
-        if target not in registered:
+        if not issuer_serves_operator(target):
             # Refusing here is what lets `default_issuer_provider()` stay non-raising
-            # inside the payment-convergence transaction: an unknown issuer never
-            # reaches storage, so it never has to be survived at read time.
+            # inside the payment-convergence transaction: an unknown issuer, or one bound
+            # to another country, never reaches storage, so it never has to be survived at read time.
+            available = [name for name in get_registered_issuers() if issuer_serves_operator(name)]
             return SettingValidationError(
                 key=key,
                 field="value",
-                message=f"Unknown invoice issuer '{target}'. Available: {', '.join(sorted(registered))}.",
+                message=f"Invoice issuer '{target}' is not available. Available: {', '.join(available)}.",
                 code="unknown_issuer",
             )
 
@@ -1021,6 +1025,41 @@ def get_default_from_email() -> str:
     return str(stored)
 
 
+def get_brand_name() -> str:
+    """The name customers see (portal, emails, authenticator apps); PRAHO's own until a deployment sets one."""
+    return str(SettingsService.get_setting("company.brand_name") or CATALOG_BY_KEY["company.brand_name"].default)
+
+
+def get_support_email() -> str:
+    """The support address customers are told to write to."""
+    return str(SettingsService.get_setting("company.email_support") or "")
+
+
+def get_default_country() -> str:
+    """Initial country for new customers: staff's choice, else the country the operator is established in."""
+    stored = SettingsService.get_stored_setting("system.default_country")
+    if stored in (None, ""):
+        return operator_country()
+    return str(stored)
+
+
+def get_portal_public_base_url() -> str:
+    """Where customer links point: staff's own URL, else https:// and the deployment's PORTAL_DOMAIN."""
+    stored = SettingsService.get_stored_setting("portal.public_base_url")
+    if stored in (None, ""):
+        domain = str(getattr(django_settings, "PORTAL_DOMAIN", "") or "").strip()
+        return f"https://{domain}" if domain else ""
+    return str(stored)
+
+
+def get_company_legal_name() -> str:
+    """The operator's public legal name: staff's own, else the seller name invoices are issued under."""
+    stored = SettingsService.get_stored_setting("company.legal_name")
+    if stored in (None, ""):
+        return str(django_settings.COMPANY_NAME)
+    return str(stored)
+
+
 def _efactura_deployment_value(key: str) -> object:
     """Use the consumer's deployment/default tiers and type conversion without reading a row."""
     from apps.billing.efactura.settings import EFacturaSettings  # noqa: PLC0415  # ADR-0007
@@ -1045,6 +1084,15 @@ def _efactura_deployment_value(key: str) -> object:
     return cast("object", reader._get_setting(key))
 
 
+# Keys whose consumer resolves its own inheritance: the fallback is what that resolver reads with no row.
+_RESOLVED_FALLBACKS: dict[str, Callable[[], object]] = {
+    "company.email_noreply": get_default_from_email,
+    "company.legal_name": get_company_legal_name,
+    "portal.public_base_url": get_portal_public_base_url,
+    "system.default_country": get_default_country,
+}
+
+
 def get_deployment_fallback(key: str) -> object:
     """Resolve the same inherited value as the consumer, even while an override exists."""
     oauth_fields = {
@@ -1054,8 +1102,8 @@ def get_deployment_fallback(key: str) -> object:
     keys = frozenset(oauth_fields) if key in oauth_fields else frozenset({key})
     token = _DEPLOYMENT_READ_KEYS.set(keys)
     try:
-        if key == "company.email_noreply":
-            return get_default_from_email()
+        if resolver := _RESOLVED_FALLBACKS.get(key):
+            return resolver()
         if key.startswith("efactura.company."):
             from apps.billing.efactura.xml_builder import (  # noqa: PLC0415  # ADR-0007
                 _supplier_setting,

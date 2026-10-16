@@ -104,6 +104,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "auth_reset_ip",
             "auth_register_ip",
             "auth_register_confirm_ip",
+            "public_lookup_ip",
             "mfa_credential",
             "sustained",
 
@@ -608,7 +609,7 @@ REMOVED_THROTTLE_NAMES = (
     "ServiceRateThrottle",
     "EndpointThrottle",
 )
-EXPECTED_SCOPED_THROTTLE_COUNT = 19
+EXPECTED_SCOPED_THROTTLE_COUNT = 20
 
 
 def _scoped_throttle_classes() -> dict[str, type[BaseThrottle]]:

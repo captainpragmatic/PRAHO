@@ -846,7 +846,7 @@ class CouponRedemption(models.Model):
         default=0,
         help_text=_("Actual discount amount applied in cents"),
     )
-    currency_code = models.CharField(max_length=3, default="RON", help_text=_("Currency of discount"))
+    currency_code = models.CharField(max_length=3, help_text=_("Currency of discount"))
 
     # Order context at redemption
     order_subtotal_cents = models.BigIntegerField(help_text=_("Order subtotal before discount"))

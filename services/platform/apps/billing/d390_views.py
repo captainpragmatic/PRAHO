@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.audit.services import AuditService
 from apps.common.decorators import billing_staff_required
+from apps.common.operator import operator_is_romanian
 
 from .d390 import D390ExportError, Declarant, render_d390_xml, render_reconciliation_csv, validate_supplier
 from .ec_sales_service import ReportingPeriod, aggregate_ec_services
@@ -22,6 +23,8 @@ from .forms import D390ExportForm, D390PeriodForm
 @require_http_methods(["GET", "POST"])
 def d390_report(request: HttpRequest) -> HttpResponse:
     """Recompute the report on every export; the browser cannot authorize a partial XML."""
+    if not operator_is_romanian():
+        raise Http404  # D390 is a Romanian declaration
     data = request.POST if request.method == "POST" else request.GET
     period_form = D390PeriodForm(data if data else {"month": ReportingPeriod.previous().label})
     report = None

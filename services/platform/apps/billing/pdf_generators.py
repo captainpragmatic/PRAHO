@@ -25,7 +25,9 @@ from apps.billing.bank_transfer import bank_transfer_instructions
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
-from apps.common.utils import format_romanian_date
+from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country, operator_is_romanian
+from apps.common.utils import format_document_date
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,13 @@ logger = logging.getLogger(__name__)
 _FONT = "DejaVuSans"
 _FONT_BOLD = "DejaVuSans-Bold"
 _FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+
+
+def _tax_identity_labels(country: str) -> tuple[str, str]:
+    """Tax-ID and registration labels for a party: Romanian CUI/CIF and Nr. Reg. Com., else generic ones."""
+    if country == "RO":
+        return str(gettext("CUI/CIF: {tax_id}")), str(gettext("Nr. Reg. Com.: {reg}"))
+    return str(gettext("VAT ID: {tax_id}")), str(gettext("Company reg. no.: {reg}"))
 
 
 def _register_fonts() -> None:
@@ -143,19 +152,19 @@ class RomanianDocumentPDFGenerator:
         return f"{pct.normalize()}"
 
     def _get_company_info(self) -> dict[str, str]:
-        """Get company information from settings with Romanian defaults."""
+        """Get the seller identity from settings (blank values are omitted from the document)."""
         bank = bank_transfer_instructions(self._get_currency_code()) or {}
         return {
-            "name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
-            "address": getattr(settings, "COMPANY_ADDRESS", "Str. Exemplu Nr. 1"),
-            "city": getattr(settings, "COMPANY_CITY", "București"),
-            "country": getattr(settings, "COMPANY_COUNTRY", "România"),
-            "cui": getattr(settings, "COMPANY_CUI", "RO12345678"),
-            "email": getattr(settings, "COMPANY_EMAIL", "contact@praho.ro"),
-            "registration_number": getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
+            "name": settings.COMPANY_NAME,
+            "address": settings.COMPANY_ADDRESS,
+            "city": settings.COMPANY_CITY,
+            "country": settings.COMPANY_COUNTRY,
+            "cui": settings.COMPANY_CUI,
+            "email": settings.COMPANY_EMAIL,
+            "registration_number": settings.COMPANY_REGISTRATION_NUMBER,
             "bank_name": bank.get("bank_name", ""),
             "bank_account": bank.get("iban", ""),
-            "phone": getattr(settings, "COMPANY_PHONE", ""),
+            "phone": settings.COMPANY_PHONE,
         }
 
     def _setup_document_header(self) -> None:
@@ -200,19 +209,21 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(2 * cm, current_y, company_info["name"])
         current_y -= step
 
-        self.canvas.drawString(
-            2 * cm, current_y, f"{company_info['address']}, {company_info['city']}, {company_info['country']}"
+        seller_address = ", ".join(
+            part for part in (company_info["address"], company_info["city"], company_info["country"]) if part
         )
-        current_y -= step
+        if seller_address:
+            self.canvas.drawString(2 * cm, current_y, seller_address)
+            current_y -= step
 
-        self.canvas.drawString(2 * cm, current_y, str(gettext("CUI/CIF: {cui}")).format(cui=company_info["cui"]))
-        current_y -= step
+        tax_id_label, registration_label = _tax_identity_labels(operator_country())
+        if company_info["cui"]:
+            self.canvas.drawString(2 * cm, current_y, tax_id_label.format(tax_id=company_info["cui"]))
+            current_y -= step
 
         if company_info["registration_number"]:
             self.canvas.drawString(
-                2 * cm,
-                current_y,
-                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=company_info["registration_number"]),
+                2 * cm, current_y, registration_label.format(reg=company_info["registration_number"])
             )
             current_y -= step
 
@@ -281,19 +292,16 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(x_pos, current_y, self.document.bill_to_country)
             current_y -= step
 
-        # Tax ID
+        tax_id_label, registration_label = _tax_identity_labels(
+            normalize_country_code(self.document.bill_to_country) or operator_country()
+        )
         if self.document.bill_to_tax_id:
-            self.canvas.drawString(
-                x_pos, current_y, str(gettext("CUI/CIF: {tax_id}")).format(tax_id=self.document.bill_to_tax_id)
-            )
+            self.canvas.drawString(x_pos, current_y, tax_id_label.format(tax_id=self.document.bill_to_tax_id))
             current_y -= step
 
-        # Registration number
         if self.document.bill_to_registration_number:
             self.canvas.drawString(
-                x_pos,
-                current_y,
-                str(gettext("Nr. Reg. Com.: {reg}")).format(reg=self.document.bill_to_registration_number),
+                x_pos, current_y, registration_label.format(reg=self.document.bill_to_registration_number)
             )
             current_y -= step
 
@@ -417,10 +425,10 @@ class RomanianDocumentPDFGenerator:
         richer per-rate breakdown is exact and kept.
         """
         self.canvas.setFont(_FONT, 11)
-        line_tmpl = gettext("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
+        line_tmpl = gettext("VAT {rate}%: {tax} {currency} (base: {base} {currency})")
         # Signed: a credit note's discount is negative. Gated on `> 0` this branch never
         # ran for one, so the breakdown re-derived the tax from the GROSS lines and printed
-        # a rate line contradicting the Total TVA directly beneath it.
+        # a rate line contradicting the total VAT directly beneath it.
         if discount != 0:
             # Deterministically pick the dominant (largest-base) rate for the collapsed
             # net bucket — independent of queryset ordering. Single-category invoices
@@ -467,7 +475,7 @@ class RomanianDocumentPDFGenerator:
 
         return getattr(self.document, "document_kind", "") == DOCUMENT_KIND_CREDIT_NOTE
 
-    def _render_totals_section(self) -> None:  # noqa: PLR0915  # A totals block: one statement per rendered row
+    def _render_totals_section(self) -> None:
         """Render totals section with the document-level discount and a VAT breakdown that
         reconciles with the e-Factura XML (BG-20 allowance + single net TaxSubtotal)."""
         currency = self._get_currency_code()
@@ -551,7 +559,7 @@ class RomanianDocumentPDFGenerator:
         self.canvas.drawString(
             12 * cm,
             totals_y,
-            str(gettext("Total TVA: {amount} {currency}")).format(
+            str(gettext("Total VAT: {amount} {currency}")).format(
                 amount=f"{self.document.tax_amount:.2f}", currency=currency
             ),
         )
@@ -579,20 +587,19 @@ class RomanianDocumentPDFGenerator:
             )
             totals_y -= 0.5 * cm
 
-        # Exchange rate line for non-RON currencies
-        if currency != "RON":
-            meta = self.document.meta or {}
-            exchange_rate = meta.get("exchange_rate")
-            if exchange_rate:
-                self.canvas.setFont(_FONT, 9)
-                self.canvas.drawString(
-                    2 * cm,
-                    totals_y,
-                    str(gettext("Curs valutar: 1 {currency} = {rate} RON")).format(
-                        currency=currency, rate=exchange_rate
-                    ),
-                )
-                totals_y -= 0.5 * cm
+        # The rate frozen at issue, for an invoice in a foreign currency (a proforma has none)
+        exchange_rate = getattr(self.document, "exchange_rate_to_home", None)
+        home_currency = getattr(self.document, "home_currency_code", None)
+        if exchange_rate is not None and home_currency:
+            self.canvas.setFont(_FONT, 9)
+            self.canvas.drawString(
+                2 * cm,
+                totals_y,
+                str(gettext("Exchange rate: 1 {currency} = {rate} {home}")).format(
+                    currency=currency, rate=format(exchange_rate.normalize(), "f"), home=home_currency
+                ),
+            )
+            totals_y -= 0.5 * cm
 
         # Additional status information
         self._render_status_information(totals_y)
@@ -610,7 +617,8 @@ class RomanianDocumentPDFGenerator:
         company_info = self._get_company_info()
 
         self.canvas.setFont(_FONT, 8)
-        self.canvas.drawString(2 * cm, 2 * cm, str(self._get_legal_disclaimer()))
+        if disclaimer := str(self._get_legal_disclaimer()):
+            self.canvas.drawString(2 * cm, 2 * cm, disclaimer)
         self.canvas.drawString(
             2 * cm,
             1.5 * cm,
@@ -644,6 +652,9 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         return f"{prefix}_{self.invoice.display_number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
+        # The mention the Romanian Fiscal Code requires on an invoice; other jurisdictions have none.
+        if not operator_is_romanian():
+            return ""
         return gettext("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")
 
     def _get_total_label(self) -> str:
@@ -663,21 +674,21 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 self.height - 5.5 * cm,
-                str(gettext("Issue date: {date}")).format(date=format_romanian_date(self.invoice.issued_at)),
+                str(gettext("Issue date: {date}")).format(date=format_document_date(self.invoice.issued_at)),
             )
 
         if self.invoice.due_at:
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
-                str(gettext("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
+                str(gettext("Due date: {date}")).format(date=format_document_date(self.invoice.due_at)),
             )
 
         # Art. 330 requires a correction to reference the invoice it corrects. A credit note has no
         # due date, so the reference takes that line.
         original = self.invoice.reverses_invoice if self._is_credit_note() else None
         if original is not None:
-            original_date = format_romanian_date(original.issued_at) if original.issued_at else ""
+            original_date = format_document_date(original.issued_at) if original.issued_at else ""
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
@@ -707,7 +718,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
             due_date_str = (
-                format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(gettext("undefined"))
+                format_document_date(self.invoice.due_at) if self.invoice.due_at else str(gettext("undefined"))
             )
             self.canvas.drawString(
                 2 * cm, totals_y - 0.5 * cm, str(gettext("Unpaid invoice - Due: {date}")).format(date=due_date_str)
@@ -717,7 +728,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 totals_y - 0.5 * cm,
-                str(gettext("Invoice paid on: {date}")).format(date=format_romanian_date(self.invoice.paid_at)),
+                str(gettext("Invoice paid on: {date}")).format(date=format_document_date(self.invoice.paid_at)),
             )
 
 
@@ -749,12 +760,12 @@ class RomanianProformaPDFGenerator(RomanianDocumentPDFGenerator):
         self.canvas.drawString(
             2 * cm,
             self.height - 5.5 * cm,
-            str(gettext("Date: {date}")).format(date=format_romanian_date(self.proforma.created_at)),
+            str(gettext("Date: {date}")).format(date=format_document_date(self.proforma.created_at)),
         )
         self.canvas.drawString(
             2 * cm,
             self.height - 6 * cm,
-            str(gettext("Valid until: {date}")).format(date=format_romanian_date(self.proforma.valid_until)),
+            str(gettext("Valid until: {date}")).format(date=format_document_date(self.proforma.valid_until)),
         )
 
 

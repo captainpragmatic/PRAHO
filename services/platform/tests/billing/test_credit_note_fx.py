@@ -48,7 +48,8 @@ class ReversalKeepsTheOriginalRateTests(TestCase):
             bill_to_name="Test Company SRL",
             bill_to_country="RO",
             issuer_provider=ISSUER_SMARTBILL,
-            exchange_to_ron=Decimal("4.9750"),
+            exchange_rate_to_home=Decimal("4.9750"),
+            home_currency_code="RON",
             exchange_rate_as_of=date(2026, 1, 15),
             exchange_rate_source="BNR",
             exchange_rate_source_reference="bnr:2026-01-15",
@@ -72,7 +73,7 @@ class ReversalKeepsTheOriginalRateTests(TestCase):
 
         credit_note = self._reverse(original)
 
-        self.assertEqual(credit_note.exchange_to_ron, original.exchange_to_ron)
+        self.assertEqual(credit_note.exchange_rate_to_home, original.exchange_rate_to_home)
         self.assertEqual(credit_note.exchange_rate_as_of, original.exchange_rate_as_of)
         self.assertEqual(credit_note.exchange_rate_source, original.exchange_rate_source)
         self.assertEqual(
@@ -98,7 +99,7 @@ class ReversalKeepsTheOriginalRateTests(TestCase):
 
         resolve.assert_not_called()
         credit_note.refresh_from_db()
-        self.assertEqual(credit_note.exchange_to_ron, Decimal("4.9750"))
+        self.assertEqual(credit_note.exchange_rate_to_home, Decimal("4.9750"))
 
     def test_a_ron_reversal_carries_no_snapshot(self) -> None:
         """The regression guard: RON documents must stay snapshot-free."""
@@ -119,7 +120,7 @@ class ReversalKeepsTheOriginalRateTests(TestCase):
 
         credit_note = self._reverse(original)
 
-        self.assertIsNone(credit_note.exchange_to_ron)
+        self.assertIsNone(credit_note.exchange_rate_to_home)
 
 
 class ResumingAnExistingReversalTests(TestCase):
@@ -154,7 +155,8 @@ class ResumingAnExistingReversalTests(TestCase):
             bill_to_name="Test Company SRL",
             bill_to_country="RO",
             issuer_provider=ISSUER_SMARTBILL,
-            exchange_to_ron=Decimal("4.9750"),
+            exchange_rate_to_home=Decimal("4.9750"),
+            home_currency_code="RON",
             exchange_rate_as_of=date(2026, 1, 15),
             exchange_rate_source="BNR",
             exchange_rate_source_reference="bnr:2026-01-15",
@@ -175,7 +177,8 @@ class ResumingAnExistingReversalTests(TestCase):
         credit_note = _get_or_create_credit_note(original, h.correction_of(original))
         Invoice.objects.filter(pk=credit_note.pk).update(
             discount_cents=0,
-            exchange_to_ron=None,
+            exchange_rate_to_home=None,
+            home_currency_code=None,
             exchange_rate_as_of=None,
             exchange_rate_source="",
             exchange_rate_source_reference="",
@@ -194,7 +197,7 @@ class ResumingAnExistingReversalTests(TestCase):
 
         resumed = _get_or_create_credit_note(original, h.correction_of(original))
 
-        self.assertIsNone(resumed.exchange_to_ron, "an issued reversal must be left exactly as filed")
+        self.assertIsNone(resumed.exchange_rate_to_home, "an issued reversal must be left exactly as filed")
         self.assertEqual(resumed.discount_cents, 0)
 
 
@@ -251,7 +254,7 @@ class ReversalRepairSafetyTests(TransactionTestCase):
         self._reverse(original)
 
         resumed = Invoice.objects.get(pk=credit_note.pk)
-        self.assertEqual(resumed.exchange_to_ron, original.exchange_to_ron)
+        self.assertEqual(resumed.exchange_rate_to_home, original.exchange_rate_to_home)
         self.assertEqual(resumed.exchange_rate_as_of, original.exchange_rate_as_of)
         self.assertEqual(resumed.exchange_rate_source, original.exchange_rate_source)
         self.assertEqual(resumed.exchange_rate_source_reference, original.exchange_rate_source_reference)
@@ -309,7 +312,7 @@ class ReversalRepairSafetyTests(TransactionTestCase):
         self.assertTrue(result.is_err(), f"an unknown outcome must refuse; got {result}")
         untouched = Invoice.objects.get(pk=credit_note.pk)
         self.assertIsNone(
-            untouched.exchange_to_ron,
+            untouched.exchange_rate_to_home,
             "a reversal that may already exist at the provider must not be rewritten",
         )
         self.assertEqual(untouched.discount_cents, 0)

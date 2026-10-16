@@ -6,8 +6,7 @@ apps.billing.schemas. No database access — pure Python dataclass logic.
 """
 
 import unittest
-from datetime import datetime, timezone as dt_timezone
-from decimal import Decimal
+from datetime import UTC, datetime
 
 from apps.billing.schemas import Currency, Invoice
 
@@ -15,13 +14,12 @@ from apps.billing.schemas import Currency, Invoice
 def _make_invoice(status: str) -> Invoice:
     """Helper: build a minimal valid Invoice dataclass with the given status."""
     currency = Currency(id=1, code='RON', name='Romanian Leu', symbol='lei', decimal_places=2)
-    now = datetime.now(tz=dt_timezone.utc)
+    now = datetime.now(tz=UTC)
     return Invoice(
         id=1,
         number='INV-000001',
         status=status,
         currency=currency,
-        exchange_to_ron=None,
         subtotal_cents=10000,
         tax_cents=2100,
         total_cents=12100,

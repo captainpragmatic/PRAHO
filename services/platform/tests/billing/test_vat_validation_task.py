@@ -84,6 +84,33 @@ class VATValidationEvidencePersistenceTests(TestCase):
                 self.profile.refresh_from_db()
                 self.assertEqual(self.profile.vies_verification_status, "valid")
 
+    def test_unconfigured_seller_cui_checks_anonymously(self) -> None:
+        # A blank COMPANY_CUI (the default outside production) must not abort the check,
+        # and must never send a placeholder requester to VIES.
+        response = VIESResponse(
+            is_valid=True, country_code="DE", vat_number="136695976", api_available=True,
+            request_identifier="anonymous-check",
+        )
+        with override_settings(COMPANY_CUI=""), patch(_GATEWAY, return_value=response) as gateway:
+            validate_vat_number(str(self.profile.pk))
+        gateway.assert_called_once()
+        self.assertNotIn("requester_number", gateway.call_args.kwargs)
+        self.assertNotIn("requester_member_state_code", gateway.call_args.kwargs)
+
+    def test_seller_vat_id_is_read_in_the_operator_country(self) -> None:
+        # A German operator's unprefixed VAT number is a German requester, not a Romanian one.
+        response = VIESResponse(
+            is_valid=True, country_code="DE", vat_number="136695976", api_available=True,
+            request_identifier="german-requester",
+        )
+        with (
+            override_settings(COMPANY_CUI="811569869", COMPANY_COUNTRY_CODE="DE"),
+            patch(_GATEWAY, return_value=response) as gateway,
+        ):
+            validate_vat_number(str(self.profile.pk))
+        self.assertEqual(gateway.call_args.kwargs["requester_member_state_code"], "DE")
+        self.assertEqual(gateway.call_args.kwargs["requester_number"], "811569869")
+
     def test_vies_outage_keeps_recent_valid_profile(self) -> None:
         validation = VATValidation.objects.create(
             country_code="DE", vat_number="136695976", full_vat_number="DE136695976",

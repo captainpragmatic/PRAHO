@@ -18,6 +18,7 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+from apps.common.utils import operator_local_date
 
 
 class ServicePlan(models.Model):
@@ -40,12 +41,12 @@ class ServicePlan(models.Model):
     plan_type = models.CharField(max_length=30, choices=PLAN_TYPE_CHOICES, verbose_name=_("Plan Type"))
     description = models.TextField(blank=True, verbose_name=_("Description"))
 
-    # Pricing (Romanian Lei)
+    # Pricing: legacy single-currency columns, mirrored to the default-currency price row
     price_monthly = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal("0.00"))],
-        verbose_name=_("Monthly Price (RON)"),
+        verbose_name=_("Monthly Price"),
     )
     price_quarterly = models.DecimalField(
         max_digits=10,
@@ -53,7 +54,7 @@ class ServicePlan(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(Decimal("0.00"))],
-        verbose_name=_("Quarterly Price (RON)"),
+        verbose_name=_("Quarterly Price"),
     )
     price_annual = models.DecimalField(
         max_digits=10,
@@ -61,12 +62,12 @@ class ServicePlan(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(Decimal("0.00"))],
-        verbose_name=_("Annual Price (RON)"),
+        verbose_name=_("Annual Price"),
     )
 
     # Setup/installation fee
     setup_fee = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Setup Fee (RON)")
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Setup Fee")
     )
 
     # Features/specifications (JSON for flexibility)
@@ -115,8 +116,9 @@ class ServicePlan(models.Model):
 
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Keep the legacy RON editor as a compatibility view of the RON price."""
+        """Keep the legacy price editor as a compatibility view of the default-currency price."""
         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
 
         get_selling_currency_policy(lock=True)
         price_fields = ("price_monthly", "price_quarterly", "price_annual", "setup_fee")
@@ -129,7 +131,7 @@ class ServicePlan(models.Model):
         if previous is None or previous != saved:
             ServicePlanPrice.objects.update_or_create(
                 service_plan=self,
-                currency_id="RON",
+                currency_id=default_selling_currency(),
                 defaults={
                     "monthly_price_cents": int(saved["price_monthly"] * 100),
                     "quarterly_price_cents": int(saved["price_quarterly"] * 100)
@@ -169,13 +171,14 @@ class ServicePlanPrice(models.Model):
     @transaction.atomic
     def save(self, *args: Any, **kwargs: Any) -> None:
         from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
 
         get_selling_currency_policy(lock=True)
         super().save(*args, **kwargs)
         if kwargs.get("update_fields") is not None and not kwargs["update_fields"]:
             return
         saved = type(self).objects.get(pk=self.pk)
-        if saved.currency_id == "RON":
+        if saved.currency_id == default_selling_currency():
             ServicePlan.objects.filter(pk=saved.service_plan_id).update(
                 price_monthly=Decimal(saved.monthly_price_cents) / 100,
                 price_quarterly=Decimal(saved.quarterly_price_cents) / 100
@@ -275,7 +278,7 @@ class Server(models.Model):
 
     # Cost tracking
     monthly_cost = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Monthly Cost (RON)")
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Monthly Cost")
     )
 
     # Maintenance
@@ -436,7 +439,7 @@ class Service(ConcurrentTransitionMixin, models.Model):
         if not self.activated_at:
             return None
 
-        base_date = self.activated_at.date()
+        base_date = operator_local_date(self.activated_at)  # the operator's day, not the UTC one
 
         if self.billing_cycle == "monthly":
             return base_date + relativedelta(months=1)

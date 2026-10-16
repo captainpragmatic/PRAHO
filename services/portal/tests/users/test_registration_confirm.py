@@ -1,5 +1,6 @@
 """The holder of a registration link checks the details and chooses the password on the portal."""
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
@@ -13,6 +14,7 @@ REGISTRATION_ID = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"
 LINK = f"/register/confirm/{REGISTRATION_ID}/correct-token/"
 PAGE = "/register/confirm/"
 CHOSEN = " Chosen-at-confirm-2026! "
+TERMS_DOCUMENT_ID = "6f0c1b1e-3d2a-4c5b-8e9f-0a1b2c3d4e5f"
 DETAILS = {
     "registration": {
         "email": "new@example.test",
@@ -20,7 +22,14 @@ DETAILS = {
         "last_name": "Marlowe",
         "company_name": "Quill Lantern SRL",
         "vat_number": "RO12345678",
-        "terms_version": "2024-12-27",  # Platform names the version to accept (#670)
+        # Platform names the terms release to accept (ADR-0061).
+        "terms_document": {
+            "document_id": TERMS_DOCUMENT_ID,
+            "kind": "terms",
+            "language": "en",
+            "release": "2024-12-27.1",
+            "sha256": "0" * 64,
+        },
     }
 }
 
@@ -30,8 +39,8 @@ def form(**overrides: object) -> dict[str, object]:
         "registration_id": REGISTRATION_ID,
         "new_password": CHOSEN,
         "confirm_password": CHOSEN,
-        "data_processing_consent": "on",
         "terms_accepted": "on",  # Required since the page asks for the Terms of Service
+        "terms_document_id": TERMS_DOCUMENT_ID,  # The release the page linked, sent back
         **overrides,
     }
 
@@ -77,10 +86,9 @@ class RegistrationConfirmViewTests(TestCase):
             "correct-token",
             CHOSEN,
             CHOSEN,
-            data_processing_consent=True,
             marketing_consent=True,
             terms_accepted=True,
-            terms_version="2024-12-27",
+            terms_document_id=TERMS_DOCUMENT_ID,
             client_ip="127.0.0.1",
         )
         self.assertTrue(any("can sign in now" in str(m) for m in get_messages(response.wsgi_request)))
@@ -126,11 +134,16 @@ class RegistrationConfirmViewTests(TestCase):
         self.assertContains(response, "temporarily unavailable", status_code=503)
         self.assertIn("registration_confirm_link", self.client.session)
 
-    def test_consent_is_required_before_calling_platform(self) -> None:
+    def test_the_page_shows_a_privacy_notice_and_asks_for_no_consent(self) -> None:
+        privacy_id = "0d1c2b3a-4f5e-4a6b-8c7d-9e0f1a2b3c4d"
+        details = deepcopy(DETAILS)
+        details["registration"]["privacy_document"] = {"document_id": privacy_id}
+        self.api.get_pending_registration.return_value = details
         self.client.get(LINK)
-        response = self.client.post(PAGE, form(data_processing_consent=""))
-        self.assertEqual(response.status_code, 400)
-        self.api.confirm_registration.assert_not_called()
+        page = self.client.get(PAGE)
+        self.assertContains(page, "By creating an account you acknowledge the")
+        self.assertContains(page, f'href="/legal/{privacy_id}/"')  # The release the notice names
+        self.assertNotContains(page, 'name="data_processing_consent"')
 
     def test_a_rejected_password_keeps_the_link(self) -> None:
         self.client.get(LINK)

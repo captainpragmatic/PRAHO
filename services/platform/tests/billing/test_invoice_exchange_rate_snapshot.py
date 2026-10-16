@@ -57,7 +57,7 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.save()
 
         self.assertEqual(invoice.tax_point_date, date(2026, 7, 20))
-        self.assertIsNone(invoice.exchange_to_ron)
+        self.assertIsNone(invoice.exchange_rate_to_home)
         self.assertIsNone(invoice.exchange_rate_as_of)
         self.assertEqual(invoice.exchange_rate_source, "")
         self.assertEqual(invoice.exchange_rate_source_reference, "")
@@ -72,20 +72,20 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.save()
 
         self.assertEqual(invoice.tax_point_date, date(2026, 7, 20))
-        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+        self.assertEqual(invoice.exchange_rate_to_home, expected.rate)
         self.assertEqual(invoice.exchange_rate_as_of, expected.as_of)
         self.assertEqual(invoice.exchange_rate_source, FXRate.Source.BNR)
         self.assertEqual(invoice.exchange_rate_source_reference, expected.source_reference)
 
     @patch("apps.billing.invoice_models.timezone.now")
     def test_partial_legacy_snapshot_is_not_consumed_and_fails_closed(self, now: object) -> None:
-        # A pre-migration-0039 invoice can carry a bare exchange_to_ron with blank provenance.
+        # A pre-migration-0039 invoice can carry a bare exchange_rate_to_home with blank provenance.
         # issue() must NOT consume that partial value (locking legally incomplete FX evidence);
         # with no resolvable rate it must fail closed instead.
         now.return_value = self.issued_at
         invoice = self._invoice(self.eur, "INV-EUR-PARTIAL-LEGACY")
-        invoice.exchange_to_ron = Decimal("4.90000000")  # legacy rate, but no as_of / source
-        invoice.save(update_fields=["exchange_to_ron"])
+        invoice.exchange_rate_to_home = Decimal("4.90000000")  # legacy rate, but no as_of / source
+        invoice.save(update_fields=["exchange_rate_to_home"])
 
         with self.assertRaises(ValidationError):  # no FXRate → resolution fails closed
             invoice.issue()
@@ -99,13 +99,13 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         now.return_value = self.issued_at
         expected = self._rate()
         invoice = self._invoice(self.eur, "INV-EUR-PARTIAL-REPLACE")
-        invoice.exchange_to_ron = Decimal("4.90000000")
-        invoice.save(update_fields=["exchange_to_ron"])
+        invoice.exchange_rate_to_home = Decimal("4.90000000")
+        invoice.save(update_fields=["exchange_rate_to_home"])
 
         invoice.issue()
         invoice.save()
 
-        self.assertEqual(invoice.exchange_to_ron, expected.rate)  # fresh, not the legacy 4.90
+        self.assertEqual(invoice.exchange_rate_to_home, expected.rate)  # fresh, not the legacy 4.90
         self.assertEqual(invoice.exchange_rate_as_of, expected.as_of)
         self.assertEqual(invoice.exchange_rate_source, FXRate.Source.BNR)
 
@@ -142,9 +142,9 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.save()
         invoice.refresh_from_db()
 
-        invoice.exchange_to_ron = Decimal("5.99999999")
+        invoice.exchange_rate_to_home = Decimal("5.99999999")
         with self.assertRaises(ValidationError):
-            invoice.save(update_fields=["exchange_to_ron"])
+            invoice.save(update_fields=["exchange_rate_to_home"])
 
         invoice.refresh_from_db()
         invoice.currency = self.ron
@@ -171,7 +171,8 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice = self._invoice(self.eur, "INV-EUR-PREFROZEN")
         # Freeze a DIFFERENT snapshot on the draft, as conversion would:
         invoice.tax_point_date = date(2026, 7, 20)
-        invoice.exchange_to_ron = Decimal("4.00000000")
+        invoice.exchange_rate_to_home = Decimal("4.00000000")
+        invoice.home_currency_code = "RON"
         invoice.exchange_rate_as_of = date(2026, 7, 19)
         invoice.exchange_rate_source = FXRate.Source.BNR
         invoice.exchange_rate_source_reference = "frozen-at-conversion"
@@ -179,7 +180,7 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.issue()
         invoice.save()
 
-        self.assertEqual(invoice.exchange_to_ron, Decimal("4.00000000"))
+        self.assertEqual(invoice.exchange_rate_to_home, Decimal("4.00000000"))
         self.assertEqual(invoice.exchange_rate_source_reference, "frozen-at-conversion")
 
     @patch("apps.billing.invoice_models.timezone.now")
@@ -194,7 +195,7 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.freeze_fx_snapshot()
 
         self.assertEqual(invoice.tax_point_date, date(2026, 7, 20))
-        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+        self.assertEqual(invoice.exchange_rate_to_home, expected.rate)
 
         # A shadow row that a re-resolve would now prefer (later as_of):
         FXRate.objects.create(
@@ -206,7 +207,7 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         invoice.issue()
         invoice.save()
 
-        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+        self.assertEqual(invoice.exchange_rate_to_home, expected.rate)
 
     @patch("apps.billing.invoice_models.timezone.now")
     def test_status_only_save_persists_complete_issue_snapshot(self, now: object) -> None:
@@ -222,5 +223,5 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         self.assertEqual(invoice.issued_at, self.issued_at)
         self.assertIsNotNone(invoice.locked_at)
         self.assertEqual(invoice.tax_point_date, date(2026, 7, 20))
-        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+        self.assertEqual(invoice.exchange_rate_to_home, expected.rate)
         self.assertEqual(invoice.exchange_rate_as_of, expected.as_of)

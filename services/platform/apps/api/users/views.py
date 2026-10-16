@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -38,6 +38,7 @@ from apps.api.secure_auth import (
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.legal import TERMS_UNAVAILABLE
 from apps.common.localisation import resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.common.performance.rate_limiting import (
@@ -47,6 +48,7 @@ from apps.common.performance.rate_limiting import (
     MFACredentialThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    PublicLookupClientIPThrottle,
     RateLimitStoreUnavailable,
     RegistrationConfirmClientIPThrottle,
     ResetClientIPThrottle,
@@ -56,6 +58,7 @@ from apps.common.performance.rate_limiting import (
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import store_unavailable_response
 from apps.common.transactions import best_effort_atomic
+from apps.common.types import Err
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
 from apps.users.mfa import (
@@ -83,6 +86,9 @@ from .serializers import (
     RegistrationLinkSerializer,
     TokenObtainRequestSerializer,
 )
+
+if TYPE_CHECKING:
+    from apps.users.registration_confirmation import ConfirmRefusal
 
 logger = logging.getLogger(__name__)
 
@@ -905,6 +911,54 @@ def password_reset_request_api(request: HttpRequest) -> Response:
         )
 
 
+def _refusal_answer(refusal: "ConfirmRefusal | None") -> tuple[int, dict[str, Any]]:
+    """The status and body answering a refused registration preview or confirmation."""
+    code = "unavailable" if refusal is None else refusal.code
+    answers: dict[str, tuple[int, dict[str, Any]]] = {
+        "invalid_link": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "invalid_link", "error": _("This link has expired or was already used.")},
+        ),
+        "password_rejected": (
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "validation_failed", "errors": {"password": [] if refusal is None else refusal.messages}},
+        ),
+        "details_unavailable": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "details_unavailable",
+                "error": _("These details are no longer available. Please register again."),
+            },
+        ),
+        "terms_changed": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "terms_changed",
+                "error": _("The Terms of Service have changed. Please read them again before confirming."),
+            },
+        ),
+        "terms_unavailable": (
+            status.HTTP_409_CONFLICT,
+            {
+                "code": "terms_unavailable",
+                "error": TERMS_UNAVAILABLE,
+            },
+        ),
+        "terms_required": (
+            status.HTTP_400_BAD_REQUEST,
+            {
+                "code": "validation_failed",
+                "errors": {"terms_accepted": [_("You must accept the Terms of Service.")]},
+            },
+        ),
+        "unavailable": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "unavailable", "error": _("Your account could not be created right now. Please try again.")},
+        ),
+    }
+    return answers[code]
+
+
 @api_view(["POST"])
 @authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
 @permission_classes([AllowAny])
@@ -924,25 +978,54 @@ def registration_pending_api(request: HttpRequest) -> Response:
 
     POST /api/users/register/pending/ {"registration_id": "<uuid>", "token": "<hex>"}
 
-    200 with the email, name, company and VAT number; 400 `invalid_link` for a link that is
-    wrong, used or expired.
+    200 with the email, name, company, VAT number and the terms release to accept; 400
+    `invalid_link` for a link that is wrong, used or expired; 409 `terms_unavailable` while no
+    Terms of Service are in force.
     """
     from apps.users import registration_confirmation  # noqa: PLC0415  # Deferred: users services import cycle
 
     serializer = RegistrationLinkSerializer(data=request.data)
-    details = (
-        registration_confirmation.preview(
-            str(serializer.validated_data["registration_id"]), serializer.validated_data["token"]
-        )
-        if serializer.is_valid()
-        else None
-    )
-    if details is None:
+    if not serializer.is_valid():
         return Response(
             {"success": False, "code": "invalid_link", "error": _("This link has expired or was already used.")},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    return Response({"success": True, "registration": details})
+    details = registration_confirmation.preview(
+        str(serializer.validated_data["registration_id"]), serializer.validated_data["token"]
+    )
+    if isinstance(details, Err):
+        answer_status, payload = _refusal_answer(details.unwrap_err())
+        return Response({"success": False, **payload}, status=answer_status)
+    return Response({"success": True, "registration": details.unwrap()})
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        PublicLookupClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def registration_prefill_api(request: HttpRequest) -> Response:
+    """
+    The details a staff-minted registration link fills in (apps.users.registration_prefill).
+
+    POST /api/users/register/prefill/ {"token": "<the link's p>"}
+
+    200 with {"fields": ..., "intent": ...}, or an empty prefill for a token that is not an intact,
+    unexpired prefill token: the answer never says which.
+    """
+    from apps.users.registration_prefill import read_registration_prefill  # noqa: PLC0415
+
+    data = request.data if isinstance(request.data, dict) else {}
+    token = data.get("token")
+    return Response({"success": True, "prefill": read_registration_prefill(token if isinstance(token, str) else "")})
 
 
 @api_view(["POST"])
@@ -970,14 +1053,14 @@ def registration_confirm_api(request: HttpRequest) -> Response:
         "token": "<hex>",
         "password": "...",
         "password_confirm": "...",
-        "data_processing_consent": true,
         "marketing_consent": false
     }
 
     201 on success. 400 `invalid_link` for a link that is wrong, used or expired; 400
     `validation_failed` for the form or a rejected password; 409 `details_unavailable` when the
     email or company was taken meanwhile; 409 `terms_changed` when the accepted Terms of Service
-    version is no longer current; 503 when the account could not be created now.
+    release is no longer the one in force, `terms_unavailable` while none is; 503 when the account
+    could not be created now.
     """
     from apps.users import registration_confirmation  # noqa: PLC0415  # Deferred: users services import cycle
 
@@ -994,9 +1077,8 @@ def registration_confirm_api(request: HttpRequest) -> Response:
             data["token"],
             data["password"],
             accepts_marketing=data["marketing_consent"],
-            data_processing_consent=data["data_processing_consent"],
             terms_accepted=data["terms_accepted"],
-            terms_version=data["terms_version"],
+            terms_document_id=str(data["terms_document_id"] or ""),
             request_ip=forwarded_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
         )
@@ -1009,51 +1091,7 @@ def registration_confirm_api(request: HttpRequest) -> Response:
         logger.info("✅ [Registration] Pending registration confirmed for user %s", user.pk)
         return Response({"success": True, "email": user.email}, status=status.HTTP_201_CREATED)
 
-    refusal = None if result is None else result.unwrap_err()
-    code = "unavailable" if refusal is None else refusal.code
-    answers: dict[str, tuple[int, dict[str, Any]]] = {
-        "invalid_link": (
-            status.HTTP_400_BAD_REQUEST,
-            {"code": "invalid_link", "error": _("This link has expired or was already used.")},
-        ),
-        "consent_required": (
-            status.HTTP_400_BAD_REQUEST,
-            {
-                "code": "validation_failed",
-                "errors": {"data_processing_consent": [_("Data processing consent is required.")]},
-            },
-        ),
-        "password_rejected": (
-            status.HTTP_400_BAD_REQUEST,
-            {"code": "validation_failed", "errors": {"password": [] if refusal is None else refusal.messages}},
-        ),
-        "details_unavailable": (
-            status.HTTP_409_CONFLICT,
-            {
-                "code": "details_unavailable",
-                "error": _("These details are no longer available. Please register again."),
-            },
-        ),
-        "terms_changed": (
-            status.HTTP_409_CONFLICT,
-            {
-                "code": "terms_changed",
-                "error": _("The Terms of Service have changed. Please read them again before confirming."),
-            },
-        ),
-        "terms_required": (
-            status.HTTP_400_BAD_REQUEST,
-            {
-                "code": "validation_failed",
-                "errors": {"terms_accepted": [_("You must accept the Terms of Service.")]},
-            },
-        ),
-        "unavailable": (
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            {"code": "unavailable", "error": _("Your account could not be created right now. Please try again.")},
-        ),
-    }
-    answer_status, payload = answers[code]
+    answer_status, payload = _refusal_answer(None if result is None else result.unwrap_err())
     return Response({"success": False, **payload}, status=answer_status)
 
 

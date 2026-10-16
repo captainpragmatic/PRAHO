@@ -102,6 +102,7 @@ class LoginViewTest(BaseViewTestCase):
         self.assertContains(response, "Email")
         self.assertContains(response, "Password")
         self.assertIsInstance(response.context["form"], LoginForm)
+        self.assertContains(response, "brand/logo.svg")  # the deployment's mark, not a drawn tile
 
     def test_authenticated_user_redirect(self) -> None:
         """Test authenticated staff user gets redirected"""

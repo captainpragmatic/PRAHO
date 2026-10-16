@@ -8,10 +8,9 @@ from __future__ import annotations
 import hmac
 import secrets
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 from typing import Any, TypeVar
-from zoneinfo import ZoneInfo
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -109,43 +108,25 @@ def api_require_permission(permission: str) -> Callable[[Callable[..., Any]], Ca
 # ===============================================================================
 
 
-def get_romanian_now() -> datetime:
-    """Get current time in Romanian timezone"""
-    return datetime.now(ZoneInfo("Europe/Bucharest"))
+def operator_local_date(dt: datetime) -> date:
+    """The operator's calendar day for an aware instant, in TIME_ZONE whatever zone is active.
 
-
-def _to_romanian_local(dt: datetime) -> datetime:
-    """Convert an aware datetime to the Romanian wall clock; pass naive datetimes through.
-
-    With USE_TZ=True the ORM hands back aware datetimes in UTC, so formatting one directly
-    renders the UTC wall clock — the PREVIOUS day for anything between 00:00 and 02:00/03:00
-    Romanian time. Customer-facing dates (invoice PDFs, notification emails) must show the
-    Romanian day, matching the date filed with ANAF (see #286, #220).
-
-    The target zone is pinned to Europe/Bucharest rather than Django's active timezone:
-    these helpers promise the ROMANIAN wall clock, and a future timezone.activate() with a
-    user timezone must not make the PDF disagree with the e-Factura XML, whose conversion
-    (apps.billing.efactura.settings.ro_local_date) is likewise pinned.
-
-    Naive datetimes carry no timezone to convert from, so they are returned unchanged rather
-    than assumed to be UTC: callers holding an already-local wall clock keep working. This is
-    deliberately laxer than ro_local_date(), which raises on naive input — that helper feeds
-    mandatory legal XML fields where every caller is a guaranteed-aware ORM datetime, while
-    these are generic formatters with pre-existing naive-input callers in tests.
+    With USE_TZ=True the ORM hands back aware datetimes in UTC, so `.date()` is the UTC day, the
+    PREVIOUS day for anything just after the operator's midnight. Billing periods and document
+    dates are the operator's day (#220, #286). A Romanian operator runs on Bucharest time
+    (prod.py), so this is also the day the e-Factura XML carries. It reads the configured zone,
+    not the active one, so a user's activated timezone never moves a document's date.
     """
-    if timezone.is_aware(dt):
-        return timezone.localtime(dt, ZoneInfo("Europe/Bucharest"))
-    return dt
+    return timezone.localdate(dt, timezone.get_default_timezone())
 
 
-def format_romanian_date(dt: datetime) -> str:
-    """Format date in Romanian style: DD.MM.YYYY"""
-    return _to_romanian_local(dt).strftime("%d.%m.%Y")
+def format_document_date(dt: datetime) -> str:
+    """A document date as the operator's calendar day, DD.MM.YYYY (invoice PDFs, emails).
 
-
-def format_romanian_datetime(dt: datetime) -> str:
-    """Format datetime in Romanian style: DD.MM.YYYY HH:MM"""
-    return _to_romanian_local(dt).strftime("%d.%m.%Y %H:%M")
+    A naive datetime carries no zone to convert from, so it is formatted as given rather than
+    assumed to be UTC: callers holding an already-local wall clock keep working.
+    """
+    return (operator_local_date(dt) if timezone.is_aware(dt) else dt).strftime("%d.%m.%Y")
 
 
 # ===============================================================================

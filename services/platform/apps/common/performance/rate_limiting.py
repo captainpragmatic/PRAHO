@@ -464,6 +464,12 @@ class RegistrationConfirmClientIPThrottle(ForwardedClientIPThrottle):
     scope = "auth_register_confirm_ip"
 
 
+class PublicLookupClientIPThrottle(ForwardedClientIPThrottle):
+    """Limit the public lookups (company register) from an authenticated forwarded client IP."""
+
+    scope = "public_lookup_ip"
+
+
 class CustomerRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Rate throttling based on customer account.

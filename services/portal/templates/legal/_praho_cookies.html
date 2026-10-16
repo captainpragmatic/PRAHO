@@ -1,0 +1,33 @@
+{% load i18n ui_components %}
+{% comment %}
+  What PRAHO itself stores in the visitor's browser, under the operator's own Cookie Policy.
+  Context: cookies, rows of (name, purpose, kept for) built from the code that sets them.
+{% endcomment %}
+<section class="mt-10 bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6">
+  <h2 class="text-lg font-medium text-white mb-2">{% trans "What this site stores in your browser" %}</h2>
+  <p class="text-sm text-slate-400 mb-4">{% trans "The portal software sets these itself. Nothing else is stored unless you allow it." %}</p>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="text-xs text-slate-400 border-b border-slate-700">
+        <tr>
+          <th class="py-2 pr-4">{% trans "Name" %}</th>
+          <th class="py-2 pr-4">{% trans "Purpose" %}</th>
+          <th class="py-2">{% trans "Kept for" %}</th>
+        </tr>
+      </thead>
+      <tbody class="text-slate-300 divide-y divide-slate-700/50">
+        {% for name, purpose, kept in cookies %}
+        <tr>
+          <td class="py-2 pr-4 font-mono text-xs">{{ name }}</td>
+          <td class="py-2 pr-4">{{ purpose }}</td>
+          <td class="py-2">{{ kept }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="mt-6">
+    {% trans "Change your cookie choices" as cookie_preferences_label %}
+    {% button cookie_preferences_label data_action="cookie-prefs" variant="primary" %}
+  </div>
+</section>

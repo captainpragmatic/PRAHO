@@ -18,11 +18,11 @@ from django_q.models import OrmQ
 
 from apps.api.users.serializers import InvalidPasswordResetLink, MFADisableSerializer, PasswordResetConfirmSerializer
 from apps.audit.models import AuditEvent
-from apps.settings.models import SystemSetting
 from apps.users.forms import LoginForm
 from apps.users.models import User
 from apps.users.tasks import PASSWORD_RESET_MAIL_MAX_AGE_SECONDS, send_password_reset_email
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal import set_portal_origin
 from tests.helpers.task_queue import queued, run_queued
 
 RESET_TASK = "apps.users.tasks.send_password_reset_email"
@@ -37,11 +37,6 @@ RESET_TASK = "apps.users.tasks.send_password_reset_email"
 class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
-                      "value": "https://customers.example.test", "default_value": ""},
-        )
         self.user = User.objects.create_user(email="recovery@example.test", password="Original-password-827!")
         self.uid = urlsafe_base64_encode(force_bytes(self.user.pk))
         self.token = default_token_generator.make_token(self.user)
@@ -111,12 +106,12 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         message = mail.outbox[0]
         self.assertEqual(message.to, [self.user.email])
-        self.assertEqual(message.subject, "Password Reset Request - PRAHO Platform")
-        self.assertIn(f"https://customers.example.test/password-reset/confirm/{self.uid}/", message.body)
+        self.assertEqual(message.subject, "Password Reset Request - PRAHO")  # The default brand name
+        self.assertIn(f"https://portal.example.test/password-reset/confirm/{self.uid}/", message.body)
         self.assertNotIn("localhost:8700", message.body)
         self.assertIn("can only be used once", message.body)
         self.assertTrue(message.alternatives)
-        self.assertIn("https://customers.example.test/password-reset/confirm/", message.alternatives[0].content)
+        self.assertIn("https://portal.example.test/password-reset/confirm/", message.alternatives[0].content)
 
     def test_unknown_and_inactive_accounts_match_known_response(self):
         known = self.portal_post("/api/users/password/reset/", {"email": self.user.email})
@@ -277,10 +272,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_malformed_portal_origin_is_rejected_without_sending(self):
-        SystemSetting.objects.filter(key="portal.public_base_url").update(
-            value="https://attacker.example@customers.example.test/path"
-        )
-        cache.clear()
+        set_portal_origin("https://attacker.example@customers.example.test/path")
         with self.assertLogs("apps.api.users", level="ERROR"):
             response = self.request_reset(self.user.email)
         self.assertEqual(response.status_code, 200)
@@ -290,8 +282,7 @@ class PasswordRecoveryAPITests(HMACTestMixin, TestCase):
 
     def test_an_origin_broken_after_the_request_sends_nothing(self):
         self.request_reset(self.user.email)
-        SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://customers.example.test")
-        cache.clear()
+        set_portal_origin("http://customers.example.test")
         with self.assertLogs("apps.users.tasks", level="ERROR"):
             self.assertEqual(self.deliver_queued_resets(), [{"sent": False, "reason": "configuration"}])
         self.assertEqual(len(mail.outbox), 0)

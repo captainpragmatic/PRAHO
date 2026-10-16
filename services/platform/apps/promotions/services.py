@@ -343,7 +343,7 @@ class CouponService:
         # Minimum order check
         if coupon.min_order_cents and order.subtotal_cents < coupon.min_order_cents:
             min_order = coupon.min_order_cents / 100
-            currency = order.currency.code if order.currency else "RON"
+            currency = order.currency_id
             return ValidationResult(
                 is_valid=False,
                 error_message=f"Minimum order of {min_order:.2f} {currency} required",
@@ -735,7 +735,7 @@ class CouponService:
                 else Decimal(locked_coupon.discount_amount_cents or 0) / 100
             ),
             discount_cents=discount_result.discount_cents,
-            currency_code=order.currency.code if order.currency else "RON",
+            currency_code=order.currency_id,
             order_subtotal_cents=order.subtotal_cents,
             order_total_cents=order.total_cents,
             applied_to_items=discount_result.applied_to_items or [],

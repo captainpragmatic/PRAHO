@@ -22,11 +22,10 @@ from django.utils.translation import gettext, gettext_noop
 from django.views.decorators.debug import sensitive_variables
 
 from apps.common import counters
-from apps.common.encryption import DecryptionError
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
+from apps.common.legal import LegalDocument, current_legal_document
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import SecureInputValidator, log_security_event
-from apps.settings.services import get_default_from_email
+from apps.settings.services import get_brand_name, get_default_from_email
 
 from .models import User
 from .pending_registration import CLEANUP_MARGIN, CONFIRMATION_LINK_LIFETIME, PendingRegistration
@@ -47,12 +46,12 @@ RECIPIENT_DAILY_LIMIT = 5
 
 ConfirmRefusalCode = Literal[
     "invalid_link",
-    "consent_required",
     "password_rejected",
     "details_unavailable",
     "unavailable",
     "terms_changed",
     "terms_required",
+    "terms_unavailable",
 ]
 
 
@@ -105,15 +104,17 @@ def deliver(registration_id: str) -> dict[str, Any]:
     existing_account = User.objects.filter(email__iexact=row.email).exists()
     if existing_account:
         template, context = "existing_account", {"login_url": f"{base}/login/", "reset_url": f"{base}/password-reset/"}
-        subject = gettext_noop("You already have a PRAHO account")
+        subject = gettext_noop("You already have a %(brand)s account")
     else:
         template, context = "confirm", {"confirm_url": f"{base}/register/confirm/{row.pk}/{row.token()}/"}
-        subject = gettext_noop("Confirm your PRAHO account")
+        subject = gettext_noop("Confirm your %(brand)s account")
+    brand = get_brand_name()
+    context["brand_name"] = brand
 
     with translation.override(row.language):
         text_message = render_to_string(f"users/emails/registration_{template}.txt", context)
         html_message = render_to_string(f"users/emails/registration_{template}.html", context)
-        subject = gettext(subject)
+        subject = gettext(subject) % {"brand": brand}
 
     if existing_account:
         _send(row.email, subject, text_message, html_message)
@@ -145,36 +146,42 @@ def _send(recipient: str, subject: str, text_message: str, html_message: str) ->
         raise OSError("Email backend did not accept the registration message")
 
 
-def preview(registration_id: str, token: str) -> dict[str, str] | None:
-    """What a usable link would create, for its holder to check before confirming, or None.
+def preview(registration_id: str, token: str) -> Result[dict[str, Any], ConfirmRefusal]:
+    """What a usable link would create, for its holder to check before confirming.
 
     Someone else can submit any address, so the confirmer sees the submitted details first.
+    Refused as `invalid_link`, or `terms_unavailable` while no Terms of Service are in force.
     """
     row = PendingRegistration.objects.filter(pk=registration_id).first()
     if row is None or not row.token_matches(token) or not row.is_usable():
-        return None
-    return {
-        "email": row.email,
-        "first_name": str(row.user_data.get("first_name", "")),
-        "last_name": str(row.user_data.get("last_name", "")),
-        "company_name": str(row.customer_data.get("company_name", "")),
-        "vat_number": str(row.customer_data.get("vat_number", "")),
-        "cui": str(row.customer_data.get("cui", "")),
-        "registration_number": str(row.customer_data.get("registration_number", "")),
-        # Never the CNP, not even masked: the portal keeps these details in its session.
-        # The terms the confirmer accepts; confirming with another version is refused.
-        "terms_version": TERMS_OF_SERVICE_VERSION,
-    }
+        return Err(ConfirmRefusal("invalid_link"))
+    terms = _terms_in_force(row)
+    if isinstance(terms, Err):
+        return terms
+    privacy = current_legal_document(LegalDocument.Kind.PRIVACY, row.language)
+    return Ok(
+        {
+            "email": row.email,
+            "first_name": str(row.user_data.get("first_name", "")),
+            "last_name": str(row.user_data.get("last_name", "")),
+            "company_name": str(row.customer_data.get("company_name", "")),
+            "vat_number": str(row.customer_data.get("vat_number", "")),
+            "cui": str(row.customer_data.get("cui", "")),
+            "registration_number": str(row.customer_data.get("registration_number", "")),
+            # What the visitor came to buy, resumed after the account is confirmed (apps.common.intent).
+            "intent": dict(row.intent),
+            # The terms release to accept, in the registration's language; confirming another is refused.
+            "terms_document": terms.unwrap().reference(),
+            # The privacy notice the page links, if one is published.
+            "privacy_document": privacy.reference() if privacy else None,
+        }
+    )
 
 
-def _refusal_before_creating(
-    row: PendingRegistration, user_data: dict[str, Any], *, data_processing_consent: bool
-) -> ConfirmRefusal | None:
+def _refusal_before_creating(row: PendingRegistration, user_data: dict[str, Any]) -> ConfirmRefusal | None:
     """Why a valid link still cannot become an account now, or None."""
     from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app model at call time
 
-    if not data_processing_consent:
-        return ConfirmRefusal("consent_required")
     candidate = User(
         email=row.email, first_name=user_data.get("first_name", ""), last_name=user_data.get("last_name", "")
     )
@@ -195,66 +202,53 @@ def _refusal_before_creating(
     return None
 
 
-@sensitive_variables("password", "user_data", "cnp", "customer_data")
+@sensitive_variables("password", "user_data", "customer_data")
 def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder supplies
     registration_id: str,
     token: str,
     password: str,
     *,
     accepts_marketing: bool,
-    data_processing_consent: bool,
     terms_accepted: bool = False,
-    terms_version: str = "",
+    terms_document_id: str = "",
     request_ip: str | None = None,
     user_agent: str | None = None,
 ) -> Result[tuple[User, Customer], ConfirmRefusal]:
     """Create the account a pending registration describes, with the password its confirmer chose.
 
     The row is locked, so two confirmations of one link create one account. A refusal before the
-    account is created leaves the row usable, except that a used or expired link stays refused,
-    and a row whose CNP cannot be read is spent: that refusal commits on purpose.
+    account is created leaves the row usable, except that a used or expired link stays refused.
 
-    Accepting the terms records the version the confirmer saw (from preview()) and when. A version
-    that is no longer current is refused as `terms_changed`, before anything is written, so the
-    confirmer can read the new terms and use the same link. The acceptance is audited in the same
+    Accepting the terms records the release the confirmer saw (from preview()) and when. A release
+    that is no longer the one in force is refused as `terms_changed`, before anything is written, so
+    the confirmer can read the new terms and use the same link. The acceptance is audited in the same
     transaction as the account: if the audit write fails, no account is created.
     """
     with transaction.atomic():
         row = PendingRegistration.objects.select_for_update().filter(pk=registration_id).first()
         if row is None or not row.token_matches(token) or not row.is_usable():
             return Err(ConfirmRefusal("invalid_link"))
-        terms_refusal = _terms_refusal(terms_accepted, terms_version)
-        if terms_refusal is not None:
-            return Err(terms_refusal)
-
-        try:
-            cnp = row.cnp()
-        except DecryptionError:
-            # Ciphertext that is not this row's, or a key no longer in the keyring. The account
-            # would lack the CNP it was registered with, so none is created, and the link is spent
-            # rather than left to fail until it expires. Committing this Err is intended.
-            _spend(row)
-            log_security_event("pending_registration_cnp_unreadable", {"registration_id": str(row.pk)}, request_ip)
-            return Err(ConfirmRefusal("details_unavailable"))
+        terms = _accepted_terms(row, terms_accepted, terms_document_id)
+        if isinstance(terms, Err):
+            return terms
 
         user_data = {
             **row.user_data,
             "email": row.email,
             "password": password,
             "accepts_marketing": accepts_marketing,
+            # When the confirmer was shown the privacy notice (GDPR Art. 13). It is information,
+            # not a consent: the account's data is processed to perform the contract.
             "gdpr_consent_date": timezone.now(),
         }
-        if terms_accepted:
-            user_data.update(terms_accepted_at=timezone.now(), terms_version=terms_version)
-        refusal = _refusal_before_creating(row, user_data, data_processing_consent=data_processing_consent)
+        accepted_at = timezone.now()
+        user_data.update(terms_accepted_at=accepted_at, terms_document=terms.unwrap())
+        refusal = _refusal_before_creating(row, user_data)
         if refusal is not None:
             return Err(refusal)
 
-        customer_data = {**row.customer_data, "data_processing_consent": True}
-        if cnp:
-            customer_data["cnp"] = cnp
         result = SecureUserRegistrationService.create_customer_owner_unchecked(
-            user_data, customer_data, request_ip, user_agent
+            user_data, dict(row.customer_data), request_ip, user_agent
         )
         if isinstance(result, Err):
             # The core rolled its own savepoint back, so no user or customer exists. Only its
@@ -262,8 +256,7 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
             return Err(ConfirmRefusal("unavailable"))
 
         user, customer = result.unwrap()
-        if terms_accepted:
-            _audit_terms_acceptance(user, row, request_ip)
+        _audit_terms_acceptance(user, row, terms.unwrap(), accepted_at, request_ip)
         _spend(row)
         log_security_event(
             "pending_registration_confirmed",
@@ -273,27 +266,41 @@ def confirm(  # noqa: PLR0913  # One argument per value the mailbox holder suppl
         return Ok((user, customer))
 
 
-def _terms_refusal(terms_accepted: bool, terms_version: str) -> ConfirmRefusal | None:
-    """Why the terms acceptance cannot be recorded, or None: none given, or not the current version."""
+def _terms_in_force(row: PendingRegistration) -> Result[LegalDocument, ConfirmRefusal]:
+    """The Terms of Service release a registration accepts, in its language; refused while none is in force."""
+    terms = current_legal_document(LegalDocument.Kind.TERMS, row.language)
+    return Ok(terms) if terms is not None else Err(ConfirmRefusal("terms_unavailable"))
+
+
+def _accepted_terms(
+    row: PendingRegistration, terms_accepted: bool, terms_document_id: str
+) -> Result[LegalDocument, ConfirmRefusal]:
+    """The release accepted, or why no acceptance can be recorded: none given, none in force, or another."""
     if not terms_accepted:
-        return ConfirmRefusal("terms_required")
-    if terms_version != TERMS_OF_SERVICE_VERSION:
-        return ConfirmRefusal("terms_changed")
-    return None
+        return Err(ConfirmRefusal("terms_required"))
+    terms = _terms_in_force(row)
+    if isinstance(terms, Ok) and str(terms.unwrap().pk) != terms_document_id:
+        return Err(ConfirmRefusal("terms_changed"))
+    return terms
 
 
-def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: str | None) -> None:
+def _audit_terms_acceptance(
+    user: User, row: PendingRegistration, terms: LegalDocument, accepted_at: datetime, request_ip: str | None
+) -> None:
     """Record the acceptance; raises on failure, which rolls the account back with it."""
     from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
 
+    privacy = current_legal_document(LegalDocument.Kind.PRIVACY, row.language)
     AuditService.log_simple_event(
         "terms_of_service_accepted",
         user=user,
         content_object=user,
         description="Terms of Service accepted at registration",
         metadata={
-            "terms_version": user.terms_version,
-            "accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
+            "terms_document": terms.reference(),
+            # The privacy notice shown with them: acknowledged, not consented to.
+            "privacy_notice": privacy.reference() if privacy else None,
+            "accepted_at": accepted_at.isoformat(),
             "registration_id": str(row.pk),
         },
         ip_address=request_ip,
@@ -301,10 +308,9 @@ def _audit_terms_acceptance(user: User, row: PendingRegistration, request_ip: st
 
 
 def _spend(row: PendingRegistration) -> None:
-    """Mark the link used, and drop the CNP it carried: the customer now holds it, or never will."""
+    """Mark the link used."""
     row.consumed_at = timezone.now()
-    row.cnp_encrypted = ""
-    row.save(update_fields=["consumed_at", "cnp_encrypted", "updated_at"])
+    row.save(update_fields=["consumed_at", "updated_at"])
 
 
 def cleanup(now: datetime | None = None) -> int:

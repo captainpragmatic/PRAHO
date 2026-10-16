@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import tarfile
 from pathlib import Path
+from typing import cast
 
 import jinja2
 import pytest
@@ -54,7 +55,13 @@ def test_the_platform_containers_write_media_into_the_volume(name: str) -> None:
     services = yaml.safe_load((PROJECT_ROOT / "deploy" / name).read_text())["services"]
     for service in ("platform", "qcluster"):
         environment = dict(item.split("=", 1) for item in services[service]["environment"])
-        mounts = {volume.split(":")[1]: volume.split(":")[0] for volume in services[service]["volumes"]}
+        volumes = cast(list[str | dict[str, str | bool]], services[service]["volumes"])
+        mounts = {
+            volume.split(":")[1] if isinstance(volume, str) else str(volume["target"]): (
+                volume.split(":")[0] if isinstance(volume, str) else str(volume["source"])
+            )
+            for volume in volumes
+        }
         assert mounts.get(environment.get("MEDIA_ROOT")) == "media_files", (service, environment.get("MEDIA_ROOT"))
 
 

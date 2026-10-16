@@ -255,6 +255,7 @@ class AuditEvent(models.Model):
         ("cookie_consent_updated", "Cookie Consent Updated"),
         ("privacy_policy_accepted", "Privacy Policy Accepted"),
         ("terms_of_service_accepted", "Terms of Service Accepted"),
+        ("legal_document_published", "Legal Document Published"),
         # ======================================================================
         # NOTIFICATION PREFERENCES
         # ======================================================================
@@ -328,7 +329,11 @@ class AuditEvent(models.Model):
         ("payment_method_removed", "Payment Method Removed"),
         ("billing_address_updated", "Billing Address Updated"),
         ("tax_information_updated", "Tax Information Updated"),
+        ("anaf_lookup_completed", "ANAF Lookup Completed"),
+        ("anaf_lookup_deferred", "ANAF Lookup Deferred"),
         ("order_placed", "Order Placed"),
+        ("order_terms_accepted", "Order Terms Accepted"),
+        ("early_performance_requested", "Early Performance Requested"),
         ("order_cancelled", "Order Cancelled"),
         ("service_activated", "Service Activated"),
         ("service_suspended", "Service Suspended"),
@@ -1421,8 +1426,12 @@ class CookieConsent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Consent version (for tracking policy updates)
-    consent_version = models.CharField(max_length=20, default="1.0")
+    # The Cookie Policy release in force when the choice was made (ADR-0061), and its number;
+    # empty while none is published.
+    cookie_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    consent_version = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
         db_table = "audit_cookie_consents"

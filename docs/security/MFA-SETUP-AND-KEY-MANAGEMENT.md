@@ -239,11 +239,6 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    # Monitor logs for encryption errors
    ```
 
-5. **Keep the previous key for at least 25 hours**
-   - Leave it second in `ENCRYPTION_KEYS`. Pending registrations hold their CNP encrypted under the key that was current when they were submitted, and re-encryption does not reach them.
-   - A key retired sooner turns those links into "register again".
-   - See the 2026-10-11 addendum to ADR-0040.
-
 ### Emergency Key Recovery
 
 **Scenario**: Production encryption key is lost/corrupted

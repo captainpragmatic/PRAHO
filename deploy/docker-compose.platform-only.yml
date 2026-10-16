@@ -88,6 +88,7 @@ services:
       - STATIC_ROOT=/app/staticfiles
       # The media_files volume: uploads and generated documents outlive the container, and backups read it.
       - MEDIA_ROOT=/app/media
+      - BRAND_DIR=/app/brand
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
@@ -108,6 +109,11 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]

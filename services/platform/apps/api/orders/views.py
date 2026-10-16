@@ -12,7 +12,7 @@ from typing import Any
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
@@ -33,14 +33,17 @@ from apps.billing.currency_policy import (
     require_current_selling_policy,
 )
 from apps.billing.models import Currency
+from apps.common.intent import ATTRIBUTION_KEYS, clean_intent
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
 )
-from apps.common.types import CurrencyCode, Err, Ok
+from apps.common.types import CurrencyCode, Err, Ok, Result
 from apps.customers.models import Customer
+from apps.orders.checkout_consents import ORDERING_UNAVAILABLE, accepted_checkout_consents, checkout_requirements
 from apps.orders.models import Order
 from apps.orders.preflight import OrderPreflightValidationService
 from apps.orders.price_sealing import PriceSealingService
@@ -134,6 +137,15 @@ class ProductCatalogThrottle(EndpointRateThrottle):
     # intended ceiling on these two views for both traffic shapes.
 
 
+def _catalog_products(currency_code: str) -> QuerySet[Product]:
+    """Domains use TLD prices; other public products need an active catalog price."""
+    return (
+        Product.objects.filter(is_active=True, is_public=True)
+        .filter(Q(product_type="domain") | Q(prices__is_active=True, prices__currency_id=currency_code))
+        .distinct()
+    )
+
+
 @public_api_endpoint
 @api_view(["GET"])
 @authentication_classes([])  # public: consumes no credential, so a stray or invalid
@@ -156,9 +168,7 @@ def product_list(request: Request) -> Response:
 
     # Build queryset
     policy = get_selling_currency_policy()
-    queryset = Product.objects.filter(
-        is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
-    )
+    queryset = _catalog_products(policy.currency_code)
 
     if product_type:
         queryset = queryset.filter(product_type=product_type)
@@ -193,10 +203,14 @@ def product_detail(request: Request, slug: str) -> Response:
 
     policy = get_selling_currency_policy()
     try:
-        product = Product.objects.prefetch_related(
-            Prefetch("prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code))
-        ).get(
-            slug=slug, is_active=True, is_public=True, prices__is_active=True, prices__currency_id=policy.currency_code
+        product = (
+            _catalog_products(policy.currency_code)
+            .prefetch_related(
+                Prefetch(
+                    "prices", queryset=ProductPrice.objects.filter(is_active=True, currency_id=policy.currency_code)
+                )
+            )
+            .get(slug=slug)
         )
     except Product.DoesNotExist:
         return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -205,13 +219,45 @@ def product_detail(request: Request, slug: str) -> Response:
     return Response({**serializer.data, **policy.as_dict()})
 
 
+def _domain_line(product: Product, item: dict[str, Any], currency_code: str) -> Result[dict[str, Any], str]:
+    """A domain line priced from the TLD price list: the one quote cart, preflight and order use.
+
+    The generic domain product has no ProductPrice. The line is a one-off purchase of the
+    registration period (renewals follow the domain's own auto-renew, not a subscription).
+    """
+    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007: cross-app at call time
+
+    config = item.get("config")
+    mode = str(config.get("domain_mode") or "register") if isinstance(config, dict) else "register"
+    quoted = DomainOrderService.quote_order_line(str(item.get("domain_name") or ""), mode, currency_code)
+    if quoted.is_err():
+        return Err(quoted.unwrap_err())
+    quote = quoted.unwrap()
+    return Ok(
+        {
+            "product_id": product.id,
+            "product_slug": product.slug,
+            "product_type": product.product_type,
+            "product_name": product.name,
+            "description": f"{product.name}: {quote.domain_name}",
+            "billing_period": "once",
+            "quantity": 1,
+            "unit_price_cents": quote.total_cents,
+            "setup_cents": 0,
+            "meta": {"domain_mode": quote.action},
+            "domain_name": quote.domain_name,
+            "service_id": None,
+        }
+    )
+
+
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 @transaction.atomic
-def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business logic
+def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -294,6 +340,16 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
                 warnings.append({"type": "product_not_found", "message": f"Product not found: {identifier}"})
                 continue
 
+            if product.product_type == "domain":
+                line = _domain_line(product, item_data, currency_code)
+                if line.is_err():
+                    warnings.append(
+                        {"type": "domain_unavailable", "product_name": product.name, "message": line.unwrap_err()}
+                    )
+                else:
+                    order_items.append(line.unwrap())
+                continue
+
             # Get current pricing (server-authoritative)
             product_price = prices_by_product_id.get(product.id)
             if not product_price:
@@ -327,7 +383,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
 
         # Use the same current billing address and tax profile as order creation.
         billing_address = OrderService.build_billing_address_from_customer(customer)
-        customer_country = normalize_country_code(billing_address.get("country")) or "RO"
+        customer_country = normalize_country_code(billing_address.get("country")) or operator_country()
         vat_number = str(billing_address.get("vat_number") or "")
         is_business = bool(billing_address.get("company_name")) or bool(vat_number)
 
@@ -453,7 +509,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 @transaction.atomic
-def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -531,6 +587,17 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                     )
                 logger.info(f"🔎 [API] Found product: {product.name} (id={product.id})")
 
+                if product.product_type == "domain":
+                    line = _domain_line(product, cart_item, currency.code)
+                    if line.is_err():
+                        return Response(
+                            {"success": False, "errors": [line.unwrap_err()], "warnings": []},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    preview_items.append(line.unwrap())
+                    subtotal_cents += line.unwrap()["unit_price_cents"]
+                    continue
+
                 price = product.get_price_for_period(currency.code, cart_item["billing_period"])
                 logger.info(f"🔎 [API] Price lookup: {price} for {currency.code}/{cart_item['billing_period']}")
                 if not price:
@@ -582,7 +649,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         # Calculate VAT using the VAT calculator
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
-        country = normalize_country_code(billing_address.get("country")) or "RO"
+        country = normalize_country_code(billing_address.get("country")) or operator_country()
         is_business = bool(company_name) or bool(vat_number)
 
         logger.info(
@@ -629,6 +696,25 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         # Convert errors to strings
         error_messages = [str(error) for error in errors]
         warning_messages = [str(warning) for warning in warnings]
+        # What the checkout page shows and sends back with the order (apps.orders.checkout_consents).
+        checkout, checkout_errors = checkout_requirements(customer, request.data.get("language"))
+        error_messages += checkout_errors
+        if any(item.get("product_type") == "domain" for item in preview_items):
+            from apps.domains.registrants import missing_registrant_fields, registrant_identity_error  # noqa: PLC0415
+            from apps.domains.services import DomainOrderService  # noqa: PLC0415
+
+            missing_fields: set[str] = set()
+            for item in preview_items:
+                if item.get("product_type") == "domain":
+                    quoted = DomainOrderService.quote_order_line(
+                        item["domain_name"], item["meta"]["domain_mode"], currency.code
+                    )
+                    if quoted.is_ok():
+                        quote = quoted.unwrap()
+                        missing_fields.update(missing_registrant_fields(quote.registrar, customer, quote.action))
+            checkout["registrant_requires"] = sorted(missing_fields)
+            if missing_fields:
+                error_messages.append(registrant_identity_error())
 
         success = len(error_messages) == 0
 
@@ -654,6 +740,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                 "success": success,
                 "errors": error_messages,
                 "warnings": warning_messages,
+                "checkout": checkout,
                 "preview": {
                     "currency": currency.code,
                     "subtotal_cents": subtotal_cents,
@@ -677,6 +764,21 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# Status and message for each reason an order request's consents are refused.
+_CHECKOUT_REFUSALS = {
+    "terms_required": (status.HTTP_400_BAD_REQUEST, _("Accept the Terms of Service to place the order.")),
+    "terms_changed": (
+        status.HTTP_409_CONFLICT,
+        _("The Terms of Service have changed. Please read them again before ordering."),
+    ),
+    "terms_unavailable": (status.HTTP_409_CONFLICT, ORDERING_UNAVAILABLE),
+    "early_start_required": (
+        status.HTTP_400_BAD_REQUEST,
+        _("Ask for your services to start now, within the 14-day withdrawal period, to place the order."),
+    ),
+}
 
 
 @api_view(["POST"])
@@ -770,6 +872,15 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
     if accepted_order is not None:
         return Response({"success": True, "order": OrderDetailSerializer(accepted_order).data, "duplicate": True})
 
+    # Before anything is written: an early answer here must not commit a partial order.
+    consents = accepted_checkout_consents(
+        customer, validated_data["terms_document_id"], validated_data["early_start_requested"]
+    )
+    if isinstance(consents, Err):
+        code = consents.unwrap_err()
+        answer_status, message = _CHECKOUT_REFUSALS[code]
+        return Response({"error": str(message), "code": code}, status=answer_status)
+
     try:
         require_current_selling_policy(validated_data["currency"], validated_data.get("currency_revision"))
     except SellingCurrencyChangedError as exc:
@@ -805,6 +916,15 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     {"error": f"Product not found: {identifier}", "code": "INVALID_ORDER"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            if product.product_type == "domain":
+                line = _domain_line(product, item_data, currency_code)
+                if line.is_err():
+                    return Response(
+                        {"error": line.unwrap_err(), "code": "INVALID_ORDER"}, status=status.HTTP_400_BAD_REQUEST
+                    )
+                order_items.append(line.unwrap())
+                continue
 
             billing_period = item_data["billing_period"]
             price = product.get_price_for_period(currency_code, billing_period)
@@ -895,6 +1015,8 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             coupon_codes=validated_data.get("coupon_codes", []),
             promotion_quote=validated_data.get("promotion_quote", ""),
             gift_code=validated_data.get("gift_code", ""),
+            consents=consents.unwrap(),
+            attribution=clean_intent(validated_data.get("attribution", {}), ATTRIBUTION_KEYS),
         )
 
         # Create order using platform service (idempotency_key set atomically in create_order)

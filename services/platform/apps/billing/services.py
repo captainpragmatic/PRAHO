@@ -31,7 +31,6 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone as tz
 
-from apps.billing.currency_models import Currency as CurrencyModel
 from apps.billing.fiscal_identity import (
     billing_country_code,
     get_customer_fiscal_identity,
@@ -356,11 +355,6 @@ class ProformaConversionService:
             with transaction.atomic():
                 # Get invoice sequence
                 currency = proforma.currency
-
-                if not currency:
-                    currency, _ = CurrencyModel.objects.get_or_create(
-                        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
-                    )
 
                 # C1 fix: Copy proforma totals verbatim — never recalculate.
                 # The proforma IS the agreed quote. Recalculating would cause

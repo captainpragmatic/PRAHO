@@ -15,17 +15,21 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
 from apps.products.models import Product
 from apps.provisioning.service_models import Service, ServicePlan
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apps.billing.models import Invoice
     from apps.customers.models import Customer
+    from apps.orders.checkout_consents import CheckoutConsents
     from apps.users.models import User
 
-    from .models import Order
+    from .models import Order, OrderItem
 
 """
 Order Management Services for PRAHO Platform
@@ -62,6 +66,33 @@ def _order_item_billing_period(item: Any) -> str:
     if period not in _ORDER_PERIOD_TO_SERVICE_CYCLE:
         raise ValueError(f"Unsupported order item billing period: {period}")
     return period
+
+
+def _attach_domain_order_item(order: Order, line: OrderItem) -> None:
+    """Record the registration or transfer a domain line sells, or refuse the whole order.
+
+    Raises inside the order's transaction, so a line that cannot be recorded leaves no order.
+    """
+    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007: cross-app at call time
+
+    if not line.is_domain_line:
+        return
+    quoted = DomainOrderService.quote_order_item(line, order.currency_id)
+    if quoted.is_err():
+        raise ValueError(quoted.unwrap_err())
+    quote = quoted.unwrap()
+    if line.unit_price_cents * line.quantity != quote.total_cents:
+        raise ValueError(f"{quote.domain_name} costs {quote.total_cents}, not {line.unit_price_cents * line.quantity}")
+    created, result = DomainOrderService.create_domain_order_item(
+        order, quote.domain_name, quote.action, years=quote.years, order_item=line, registrar=quote.registrar
+    )
+    if not created:
+        raise ValueError(str(result))
+
+
+def _service_lines(items: Iterable[OrderItem]) -> list[OrderItem]:
+    """The lines a hosting service fulfils: domain lines are fulfilled by their registrar."""
+    return [item for item in items if not item.is_domain_line]
 
 
 def _enqueue_domain_item_processing(order: Order) -> None:
@@ -247,6 +278,10 @@ class OrderCreateData:
     promotion_quote: str = ""
     gift_code: str = ""
     currency_revision: int | None = None
+    # What the customer accepted at checkout; staff-created orders carry none.
+    consents: CheckoutConsents | None = None
+    # First-touch UTM tags and referring site, cleaned (apps.common.intent).
+    attribution: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -311,16 +346,16 @@ class OrderCalculationService:
 
         # Determine customer context for VAT calculation
         if billing_address:
-            country = normalize_country_code(billing_address.get("country")) or "RO"
+            country = normalize_country_code(billing_address.get("country")) or operator_country()
             vat_number = billing_address.get("vat_number") or billing_address.get("vat_id")
             is_business = bool(billing_address.get("company_name")) or bool(vat_number)
         elif customer:
-            country = normalize_country_code(getattr(customer, "country", "RO")) or "RO"
+            country = normalize_country_code(getattr(customer, "country", "")) or operator_country()
             is_business = bool(getattr(customer, "company_name", ""))
             vat_number = getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else ""
         else:
-            # Default to Romanian business for consistency
-            country = "RO"
+            # Default to a business in the operator's country
+            country = operator_country()
             is_business = True
             vat_number = ""
 
@@ -486,11 +521,32 @@ class OrderService:
             city=address.city if address else "",
             county=address.county if address else "",
             postal_code=address.postal_code if address else "",
-            country=(normalize_country_code(address.country) or address.country) if address else "RO",
+            country=(normalize_country_code(address.country) or address.country) if address else operator_country(),
             fiscal_code=getattr(customer.tax_profile, "cui", "") if hasattr(customer, "tax_profile") else "",
             registration_number=getattr(customer, "registration_number", ""),
             vat_number=getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else "",
         )
+
+    @staticmethod
+    def _audit_checkout_consents(order: Order, user: User | None) -> None:
+        """Record what the customer accepted, in the order's transaction: no order without its record."""
+        from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app service at call time
+
+        if order.terms_document is not None:
+            AuditService.log_simple_event(
+                "order_terms_accepted",
+                user=user,
+                content_object=order,
+                description=f"Terms of Service accepted with order {order.order_number}",
+                metadata={"terms_document": order.terms_document.reference()},
+            )
+        if order.early_start_requested:
+            AuditService.log_simple_event(
+                "early_performance_requested",
+                user=user,
+                content_object=order,
+                description=f"Services asked to start within the withdrawal period for order {order.order_number}",
+            )
 
     @staticmethod
     @transaction.atomic
@@ -551,9 +607,16 @@ class OrderService:
                 else "",
                 # Billing address as JSON
                 billing_address=dict(data.billing_address),
+                terms_document=data.consents.terms if data.consents else None,
+                early_start_requested=bool(data.consents and data.consents.early_start_requested),
+                utm_source=data.attribution.get("utm_source", ""),
+                utm_medium=data.attribution.get("utm_medium", ""),
+                utm_campaign=data.attribution.get("utm_campaign", ""),
+                referrer=data.attribution.get("referrer", ""),
                 # Financial totals
                 **totals,
             )
+            OrderService._audit_checkout_consents(order, created_by)
 
             # Resolve product snapshots once for the whole cart, including repeated products.
             products = Product.objects.only("id", "name", "slug", "product_type").in_bulk(
@@ -574,7 +637,7 @@ class OrderService:
                     )
 
                     # Extract customer VAT context from billing address snapshot
-                    customer_country = normalize_country_code(data.billing_address.get("country")) or "RO"
+                    customer_country = normalize_country_code(data.billing_address.get("country")) or operator_country()
                     vat_number = str(data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or "")
                     is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
 
@@ -622,7 +685,7 @@ class OrderService:
 
                     fallback_vat_result = TaxService.calculate_vat(
                         amount_cents=subtotal_cents,
-                        country_code="RO",  # Conservative Romanian default
+                        country_code=operator_country(),  # The operator's own rate, the conservative default
                     )
                     tax_rate_decimal = (fallback_vat_result["vat_rate_percent"] / Decimal("100")).quantize(
                         Decimal("0.0001")
@@ -652,7 +715,7 @@ class OrderService:
                 product = products.get(uuid.UUID(str(product_id)))
                 if product is None:
                     raise ValueError(f"Order item references an unknown product: {product_id}")
-                OrderItem.objects.create(
+                line = OrderItem.objects.create(
                     order=order,
                     product=product,
                     service_id=str(service_id) if service_id else None,
@@ -667,6 +730,7 @@ class OrderService:
                     domain_name=item_data.get("domain_name", ""),
                     config=item_config,
                 )
+                _attach_domain_order_item(order, line)
 
             # After creating items, ensure order totals are consistent with item data (includes setup fees)
             try:
@@ -914,7 +978,7 @@ class OrderServiceCreationService:
             logger.info(f"🔧 [ServiceCreation] Creating pending services for order {order.order_number}")
 
             items = order.items.select_for_update(of=("self",)).select_related("product")
-            for item in items:
+            for item in _service_lines(items):
                 # Skip if service already exists for this item
                 if item.service_id:
                     logger.info(f"🔧 [ServiceCreation] Service already exists for item {item.id}, skipping")
@@ -1084,7 +1148,7 @@ class OrderServiceCreationService:
                 updated_services = []
 
                 items_query = order.items.select_for_update(of=("self",)).select_related("product")
-                items = list(items_query)
+                items = _service_lines(items_query)
                 if any(item.service_id is None for item in items):
                     creation_result = OrderServiceCreationService.create_pending_services(order)
                     if creation_result.is_err():
@@ -1093,7 +1157,7 @@ class OrderServiceCreationService:
                         )
                     # QuerySet evaluation above cached the pre-creation rows. Clone it so
                     # the newly linked services are read back under the same row locks.
-                    items = list(items_query.all())
+                    items = _service_lines(items_query.all())
 
                 # #294: lock every service in ONE statement ordered by pk. Locking per item
                 # in iteration order can deadlock against paths that lock the same rows in
@@ -1342,22 +1406,28 @@ class OrderPaymentConfirmationService:
             return Err(f"Failed to confirm order: {e}")
 
     @staticmethod
-    def _get_review_threshold(currency_code: str = "RON") -> int:
-        """Use a limit in the order's currency; unconfigured foreign orders need review."""
-        _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
-        _MAX_THRESHOLD = 100_000_000  # 1,000,000 RON — upper bound guard  # noqa: N806
-        _MIN_SAFE_THRESHOLD = 1000  # 10 RON — below this is likely misconfiguration  # noqa: N806
+    def _get_review_threshold(currency_code: str | None = None) -> int:
+        """Use a limit in the order's currency; unconfigured foreign orders need review.
+
+        The single legacy limit (orders.review_threshold_cents) is in the default selling currency.
+        """
+        from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
+        from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415  # ADR-0007
+
+        _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 in the default currency  # noqa: N806
+        _MAX_THRESHOLD = 100_000_000  # 1,000,000 — upper bound guard  # noqa: N806
+        _MIN_SAFE_THRESHOLD = 1000  # 10 — below this is likely misconfiguration  # noqa: N806
+        currency_code = currency_code or default_selling_currency()
         try:
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
-            configured = SettingsService.get_setting("orders.review_thresholds_cents", {})
-            threshold = configured.get(currency_code) if isinstance(configured, dict) else None
-            if type(threshold) is not int:
-                threshold = (
-                    SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
-                    if currency_code == "RON"
-                    else 0
-                )
+            threshold = get_currency_threshold_cents(
+                "orders.review_thresholds_cents",
+                currency_code,
+                legacy_threshold=SettingsService.get_integer_setting(
+                    "orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD
+                ),
+            )
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
             clamped = max(0, min(threshold, _MAX_THRESHOLD))
             # M1 fix: Warn when threshold is suspiciously low — likely misconfiguration.
@@ -1374,7 +1444,7 @@ class OrderPaymentConfirmationService:
                 _DEFAULT_REVIEW_THRESHOLD,
                 e,
             )
-            return _DEFAULT_REVIEW_THRESHOLD if currency_code == "RON" else 0
+            return _DEFAULT_REVIEW_THRESHOLD if currency_code == default_selling_currency() else 0
 
 
 # ===============================================================================

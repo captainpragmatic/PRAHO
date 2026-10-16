@@ -30,6 +30,7 @@ class Command(BaseCommand):
                 "country_code": "RO",
                 "tax_type": "vat",
                 "rate": Decimal("0.19"),  # Historical standard VAT (until 2025-07-31)
+                "reduced_rate": Decimal("0.09"),
                 "valid_from": date(2020, 1, 1),
                 "valid_to": date(2025, 7, 31),
                 "applies_to_b2b": True,
@@ -47,6 +48,7 @@ class Command(BaseCommand):
                 "country_code": "RO",
                 "tax_type": "vat",
                 "rate": Decimal("0.21"),  # Current standard VAT
+                "reduced_rate": Decimal("0.11"),  # The 9% and 5% rates merged on 2025-08-01
                 "valid_from": date(2025, 8, 1),
                 "applies_to_b2b": True,
                 "applies_to_b2c": True,

@@ -52,7 +52,7 @@ class Command(BaseCommand):
                 "key": "invoice_issued",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Factură nouă #{invoice_number} - PragmaticHost",
+                "subject": "Factură nouă #{{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>Factură nouă disponibilă</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -64,9 +64,11 @@ class Command(BaseCommand):
                     <li><strong>Termen de plată:</strong> {{due_date}}</li>
                 </ul>
                 <p>Puteți vizualiza și descărca factura din contul dumneavoastră client sau folosind linkul de mai jos:</p>
+                {% if invoice_url %}
                 <p><a href="{{invoice_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Factura</a></p>
+                {% endif %}
                 <p>Mulțumim pentru încrederea acordată!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare pentru factură nouă emisă",
                 "variables": {
@@ -83,7 +85,7 @@ class Command(BaseCommand):
                 "key": "invoice_issued",
                 "locale": "en",
                 "category": "billing",
-                "subject": "New Invoice #{invoice_number} - PragmaticHost",
+                "subject": "New Invoice #{{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>New Invoice Available</h2>
                 <p>Hello {{customer_name}},</p>
@@ -95,9 +97,11 @@ class Command(BaseCommand):
                     <li><strong>Due Date:</strong> {{due_date}}</li>
                 </ul>
                 <p>You can view and download the invoice from your client area or using the link below:</p>
+                {% if invoice_url %}
                 <p><a href="{{invoice_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Invoice</a></p>
+                {% endif %}
                 <p>Thank you for your business!</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Notification for new invoice issued",
                 "variables": {
@@ -116,7 +120,7 @@ class Command(BaseCommand):
                 "key": "credit_note_issued",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Factură storno {{credit_note_number}} - PragmaticHost",
+                "subject": "Factură storno {{credit_note_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>Factură storno emisă</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -127,7 +131,7 @@ class Command(BaseCommand):
                     <li><strong>Total creditat:</strong> {{total_credited}} {{currency}}</li>
                 </ul>
                 <p>Nu este necesară nicio acțiune din partea dumneavoastră.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Factură storno trimisă clientului după o rambursare",
                 "variables": {
@@ -144,7 +148,7 @@ class Command(BaseCommand):
                 "key": "credit_note_issued",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Credit note {{credit_note_number}} - PragmaticHost",
+                "subject": "Credit note {{credit_note_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>Credit note issued</h2>
                 <p>Hello {{customer_name}},</p>
@@ -155,7 +159,7 @@ class Command(BaseCommand):
                     <li><strong>Total credited:</strong> {{total_credited}} {{currency}}</li>
                 </ul>
                 <p>No action is needed on your part.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Credit note sent to the customer after a refund",
                 "variables": {
@@ -175,15 +179,17 @@ class Command(BaseCommand):
                 "key": "payment_reminder",
                 "locale": "ro",
                 "category": "dunning",
-                "subject": "Memento: Factură #{invoice_number} cu scadența apropiată",
+                "subject": "Memento: Factură #{{invoice_number}} cu scadența apropiată",
                 "body_html": """
                 <h2>Memento de plată</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Vă aducem aminte că factura #{invoice_number} în valoare de {{total_amount}} {{currency}} va ajunge la scadență pe {{due_date}}.</p>
+                <p>Vă aducem aminte că factura #{{invoice_number}} în valoare de {{total_amount}} {{currency}} va ajunge la scadență pe {{due_date}}.</p>
                 <p>Pentru a evita întreruperea serviciilor, vă rugăm să efectuați plata cât mai curând posibil.</p>
+                {% if payment_url %}
                 <p><a href="{{payment_url}}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Plătește Acum</a></p>
+                {% endif %}
                 <p>Dacă aveți întrebări, nu ezitați să ne contactați!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Memento pentru factură cu scadența apropiată",
                 "variables": {
@@ -199,15 +205,17 @@ class Command(BaseCommand):
                 "key": "payment_reminder",
                 "locale": "en",
                 "category": "dunning",
-                "subject": "Reminder: Invoice #{invoice_number} due soon",
+                "subject": "Reminder: Invoice #{{invoice_number}} due soon",
                 "body_html": """
                 <h2>Payment Reminder</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>This is a friendly reminder that invoice #{invoice_number} for {{total_amount}} {{currency}} is due on {{due_date}}.</p>
+                <p>This is a friendly reminder that invoice #{{invoice_number}} for {{total_amount}} {{currency}} is due on {{due_date}}.</p>
                 <p>To avoid any service interruption, please make your payment as soon as possible.</p>
+                {% if payment_url %}
                 <p><a href="{{payment_url}}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Pay Now</a></p>
+                {% endif %}
                 <p>If you have any questions, please don't hesitate to contact us!</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Reminder for invoice due soon",
                 "variables": {
@@ -223,18 +231,20 @@ class Command(BaseCommand):
                 "key": "payment_overdue",
                 "locale": "ro",
                 "category": "dunning",
-                "subject": "URGENT: Factură #{invoice_number} restantă - Risc suspendare servicii",
+                "subject": "URGENT: Factură #{{invoice_number}} restantă - Risc suspendare servicii",
                 "body_html": """
                 <h2 style="color: #dc3545;">Factură Restantă - Acțiune Urgentă Necesară</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p><strong>Factura #{invoice_number}</strong> în valoare de <strong>{{total_amount}} {{currency}}</strong> este restantă de {{days_overdue}} zile.</p>
+                <p><strong>Factura #{{invoice_number}}</strong> în valoare de <strong>{{total_amount}} {{currency}}</strong> este restantă de {{days_overdue}} zile.</p>
                 <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
                     <p><strong>⚠️ ATENȚIE:</strong> Serviciile dumneavoastră de hosting vor fi suspendate în {{suspension_days}} zile dacă plata nu este efectuată.</p>
                 </div>
                 <p>Pentru a evita suspendarea serviciilor, vă rugăm să efectuați plata imediat:</p>
+                {% if payment_url %}
                 <p><a href="{{payment_url}}" style="background-color: #dc3545; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">PLĂTEȘTE URGENT</a></p>
-                <p>Dacă aveți probleme cu plata, contactați-ne imediat la support@pragmatichost.com</p>
-                <p>Echipa PragmaticHost</p>
+                {% endif %}
+                <p>Dacă aveți probleme cu plata, contactați-ne imediat la {{support_email}}</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare pentru factură restantă cu risc de suspendare",
                 "variables": {
@@ -251,18 +261,20 @@ class Command(BaseCommand):
                 "key": "payment_overdue",
                 "locale": "en",
                 "category": "dunning",
-                "subject": "URGENT: Invoice #{invoice_number} overdue - Service suspension risk",
+                "subject": "URGENT: Invoice #{{invoice_number}} overdue - Service suspension risk",
                 "body_html": """
                 <h2 style="color: #dc3545;">Overdue Invoice - Urgent Action Required</h2>
                 <p>Hello {{customer_name}},</p>
-                <p><strong>Invoice #{invoice_number}</strong> for <strong>{{total_amount}} {{currency}}</strong> is {{days_overdue}} days overdue.</p>
+                <p><strong>Invoice #{{invoice_number}}</strong> for <strong>{{total_amount}} {{currency}}</strong> is {{days_overdue}} days overdue.</p>
                 <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
                     <p><strong>⚠️ WARNING:</strong> Your hosting services will be suspended in {{suspension_days}} days if payment is not made.</p>
                 </div>
                 <p>To avoid service suspension, please make payment immediately:</p>
+                {% if payment_url %}
                 <p><a href="{{payment_url}}" style="background-color: #dc3545; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">PAY URGENTLY</a></p>
-                <p>If you have payment issues, contact us immediately at support@pragmatichost.com</p>
-                <p>PragmaticHost Team</p>
+                {% endif %}
+                <p>If you have payment issues, contact us immediately at {{support_email}}</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Notification for overdue invoice with suspension risk",
                 "variables": {
@@ -298,9 +310,9 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>Datele de autentificare au fost trimise separat pentru securitate.</p>
-                <p>Pentru suport tehnic, contactați-ne la support@pragmatichost.com</p>
-                <p>Bun venit în familia PragmaticHost!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Pentru suport tehnic, contactați-ne la {{support_email}}</p>
+                <p>Bun venit în familia {{brand_name}}!</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare pentru serviciu nou activat",
                 "variables": {
@@ -332,9 +344,9 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>Login credentials have been sent separately for security.</p>
-                <p>For technical support, contact us at support@pragmatichost.com</p>
-                <p>Welcome to the PragmaticHost family!</p>
-                <p>PragmaticHost Team</p>
+                <p>For technical support, contact us at {{support_email}}</p>
+                <p>Welcome to the {{brand_name}} family!</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Notification for newly activated service",
                 "variables": {
@@ -353,7 +365,7 @@ class Command(BaseCommand):
                 "key": "ticket_created",
                 "locale": "ro",
                 "category": "support",
-                "subject": "Ticket nou #{ticket_number}: {{ticket_subject}}",
+                "subject": "Ticket nou #{{ticket_number}}: {{ticket_subject}}",
                 "body_html": """
                 <h2>Ticket de suport creat</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -366,7 +378,7 @@ class Command(BaseCommand):
                 </ul>
                 <p>Echipa noastră de suport va răspunde în maximum {{sla_response}} ore.</p>
                 <p><a href="{{ticket_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Ticket</a></p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare pentru ticket nou creat",
                 "variables": {
@@ -383,7 +395,7 @@ class Command(BaseCommand):
                 "key": "ticket_created",
                 "locale": "en",
                 "category": "support",
-                "subject": "New ticket #{ticket_number}: {{ticket_subject}}",
+                "subject": "New ticket #{{ticket_number}}: {{ticket_subject}}",
                 "body_html": """
                 <h2>Support Ticket Created</h2>
                 <p>Hello {{customer_name}},</p>
@@ -396,7 +408,7 @@ class Command(BaseCommand):
                 </ul>
                 <p>Our support team will respond within {{sla_response}} hours.</p>
                 <p><a href="{{ticket_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Ticket</a></p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Confirmation for new ticket created",
                 "variables": {
@@ -420,7 +432,7 @@ class Command(BaseCommand):
                 <p>Ticketul #{{ticket_number}} — <strong>{{ticket_subject}}</strong> a fost închis automat
                 după {{inactive_hours}} ore fără un răspuns nou.</p>
                 <p>Dacă mai aveți nevoie de ajutor, vă rugăm să deschideți un ticket nou din zona client.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare de închidere automată a unui ticket inactiv",
                 "variables": {
@@ -441,7 +453,7 @@ class Command(BaseCommand):
                 <p>Ticket #{{ticket_number}} — <strong>{{ticket_subject}}</strong> was automatically closed
                 after {{inactive_hours}} hours without a new reply.</p>
                 <p>If you still need help, please open a new ticket from the customer portal.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Notification when an inactive support ticket is automatically closed",
                 "variables": {
@@ -464,7 +476,7 @@ class Command(BaseCommand):
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Domeniul <strong>{{domain_name}}</strong> expiră în {{days_until_expiry}} zile.</p>
                 <p>Pentru a evita întreruperea serviciilor, vă rugăm să reînnoiți domeniul din zona client.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare de reînnoire pentru un domeniu care expiră",
                 "variables": {
@@ -483,7 +495,7 @@ class Command(BaseCommand):
                 <p>Hello {{customer_name}},</p>
                 <p>Your domain <strong>{{domain_name}}</strong> expires in {{days_until_expiry}} days.</p>
                 <p>To avoid any service interruption, please renew the domain from the customer portal.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Renewal notice for an expiring domain",
                 "variables": {
@@ -499,7 +511,7 @@ class Command(BaseCommand):
                 "key": "order_placed",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Comandă nouă #{order_number} confirmată - PragmaticHost",
+                "subject": "Comandă nouă #{{order_number}} confirmată - {{brand_name}}",
                 "body_html": """
                 <h2>🛒 Comanda dumneavoastră a fost confirmată!</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -523,10 +535,12 @@ class Command(BaseCommand):
                         <li>Veți primi detaliile de acces pe email</li>
                     </ol>
                 </div>
-                <p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Comanda</a></p>
-                <p>Pentru întrebări, contactați-ne la comenzi@pragmatichost.com</p>
-                <p>Mulțumim că ați ales PragmaticHost!</p>
-                <p>Echipa PragmaticHost</p>
+                {% if early_start_requested %}<p>Ați cerut să începem furnizarea serviciilor acum, în perioada de retragere de 14 zile. Dacă vă retrageți, plătiți ce a fost furnizat până atunci.</p>{% endif %}
+                {% if terms_release %}<p>Termenii și condițiile pe care le-ați acceptat (versiunea {{terms_release}}) sunt atașați acestui email.</p>{% endif %}
+                {% if order_url %}<p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Vezi Comanda</a></p>{% endif %}
+                <p>Pentru întrebări, contactați-ne la {{support_email}}</p>
+                <p>Mulțumim că ați ales {{brand_name}}!</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare pentru comandă nouă plasată",
                 "variables": {
@@ -544,7 +558,7 @@ class Command(BaseCommand):
                 "key": "order_placed",
                 "locale": "en",
                 "category": "billing",
-                "subject": "New order #{order_number} confirmed - PragmaticHost",
+                "subject": "New order #{{order_number}} confirmed - {{brand_name}}",
                 "body_html": """
                 <h2>🛒 Your order has been confirmed!</h2>
                 <p>Hello {{customer_name}},</p>
@@ -568,10 +582,12 @@ class Command(BaseCommand):
                         <li>You will receive access details via email</li>
                     </ol>
                 </div>
-                <p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Order</a></p>
-                <p>For questions, contact us at orders@pragmatichost.com</p>
-                <p>Thank you for choosing PragmaticHost!</p>
-                <p>PragmaticHost Team</p>
+                {% if early_start_requested %}<p>You asked us to start your services now, within the 14-day withdrawal period. If you withdraw, you pay for what was provided until then.</p>{% endif %}
+                {% if terms_release %}<p>The Terms of Service you accepted (release {{terms_release}}) are attached to this email.</p>{% endif %}
+                {% if order_url %}<p><a href="{{order_url}}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Order</a></p>{% endif %}
+                <p>For questions, contact us at {{support_email}}</p>
+                <p>Thank you for choosing {{brand_name}}!</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Confirmation for new order placed",
                 "variables": {
@@ -592,11 +608,11 @@ class Command(BaseCommand):
                 "key": "customer_welcome",
                 "locale": "ro",
                 "category": "welcome",
-                "subject": "Bun venit la PragmaticHost! Contul dumneavoastră a fost creat",
+                "subject": "Bun venit la {{brand_name}}! Contul dumneavoastră a fost creat",
                 "body_html": """
-                <h2>🎉 Bun venit în familia PragmaticHost!</h2>
+                <h2>🎉 Bun venit în familia {{brand_name}}!</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Mulțumim că ați ales PragmaticHost pentru nevoile dumneavoastră de hosting!</p>
+                <p>Mulțumim că ați ales {{brand_name}} pentru nevoile dumneavoastră de hosting!</p>
                 <p>Contul dumneavoastră client a fost creat cu succes. Iată ce urmează:</p>
                 <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
                     <h3>🚀 Pașii următori:</h3>
@@ -609,12 +625,12 @@ class Command(BaseCommand):
                 </div>
                 <p>Pentru întrebări sau asistență, contactați-ne:</p>
                 <ul>
-                    <li>📧 Email: support@pragmatichost.com</li>
+                    <li>📧 Email: {{support_email}}</li>
                     <li>📞 Telefon: {{support_phone}}</li>
                     <li>💬 Chat live din zona client</li>
                 </ul>
-                <p>Bun venit în familia PragmaticHost!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Bun venit în familia {{brand_name}}!</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Email de bun venit pentru clienți noi",
                 "variables": {
@@ -627,11 +643,11 @@ class Command(BaseCommand):
                 "key": "customer_welcome",
                 "locale": "en",
                 "category": "welcome",
-                "subject": "Welcome to PragmaticHost! Your account has been created",
+                "subject": "Welcome to {{brand_name}}! Your account has been created",
                 "body_html": """
-                <h2>🎉 Welcome to the PragmaticHost family!</h2>
+                <h2>🎉 Welcome to the {{brand_name}} family!</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>Thank you for choosing PragmaticHost for your hosting needs!</p>
+                <p>Thank you for choosing {{brand_name}} for your hosting needs!</p>
                 <p>Your client account has been successfully created. Here's what's next:</p>
                 <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
                     <h3>🚀 Next Steps:</h3>
@@ -644,12 +660,12 @@ class Command(BaseCommand):
                 </div>
                 <p>For questions or assistance, contact us:</p>
                 <ul>
-                    <li>📧 Email: support@pragmatichost.com</li>
+                    <li>📧 Email: {{support_email}}</li>
                     <li>📞 Phone: {{support_phone}}</li>
                     <li>💬 Live chat from client area</li>
                 </ul>
-                <p>Welcome to the PragmaticHost family!</p>
-                <p>PragmaticHost Team</p>
+                <p>Welcome to the {{brand_name}} family!</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Welcome email for new customers",
                 "variables": {
@@ -665,7 +681,7 @@ class Command(BaseCommand):
                 "key": "payment_success",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Plata a fost procesată cu succes - PragmaticHost",
+                "subject": "Plata a fost procesată cu succes - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Plata dumneavoastră a fost procesată!</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -679,7 +695,7 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>Mulțumim pentru plată!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare plată procesată cu succes",
                 "variables": {
@@ -694,7 +710,7 @@ class Command(BaseCommand):
                 "key": "payment_success",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Payment processed successfully - PragmaticHost",
+                "subject": "Payment processed successfully - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Your payment has been processed!</h2>
                 <p>Hello {{customer_name}},</p>
@@ -708,7 +724,7 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>Thank you for your payment!</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Payment processed successfully confirmation",
                 "variables": {
@@ -723,7 +739,7 @@ class Command(BaseCommand):
                 "key": "payment_failed",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "⚠️ Plata nu a putut fi procesată - PragmaticHost",
+                "subject": "⚠️ Plata nu a putut fi procesată - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Plata nu a putut fi procesată</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -736,8 +752,8 @@ class Command(BaseCommand):
                         <li>Încercați din nou din zona client</li>
                     </ol>
                 </div>
-                <p>Dacă problema persistă, contactați-ne la billing@pragmatichost.com</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Dacă problema persistă, contactați-ne la {{support_email}}</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare plată eșuată",
                 "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
@@ -746,7 +762,7 @@ class Command(BaseCommand):
                 "key": "payment_failed",
                 "locale": "en",
                 "category": "billing",
-                "subject": "⚠️ Payment could not be processed - PragmaticHost",
+                "subject": "⚠️ Payment could not be processed - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Payment could not be processed</h2>
                 <p>Hello {{customer_name}},</p>
@@ -759,8 +775,8 @@ class Command(BaseCommand):
                         <li>Try again from your client area</li>
                     </ol>
                 </div>
-                <p>If the issue persists, contact us at billing@pragmatichost.com</p>
-                <p>PragmaticHost Team</p>
+                <p>If the issue persists, contact us at {{support_email}}</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Payment failed notification",
                 "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
@@ -769,7 +785,7 @@ class Command(BaseCommand):
                 "key": "payment_refund",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Rambursare procesată - PragmaticHost",
+                "subject": "Rambursare procesată - {{brand_name}}",
                 "body_html": """
                 <h2>💰 Rambursarea a fost procesată</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -778,7 +794,7 @@ class Command(BaseCommand):
                     <p><strong>Sumă rambursată:</strong> {{refund_amount}} {{currency}}</p>
                 </div>
                 <p>Suma va fi returnată în contul dumneavoastră în 5-10 zile lucrătoare.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare rambursare plată",
                 "variables": {
@@ -792,7 +808,7 @@ class Command(BaseCommand):
                 "key": "payment_refund",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Refund processed - PragmaticHost",
+                "subject": "Refund processed - {{brand_name}}",
                 "body_html": """
                 <h2>💰 Your refund has been processed</h2>
                 <p>Hello {{customer_name}},</p>
@@ -801,7 +817,7 @@ class Command(BaseCommand):
                     <p><strong>Refund amount:</strong> {{refund_amount}} {{currency}}</p>
                 </div>
                 <p>The amount will be returned to your account within 5-10 business days.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Payment refund confirmation",
                 "variables": {
@@ -815,7 +831,7 @@ class Command(BaseCommand):
                 "key": "invoice_refund_confirmation",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Factura {{invoice_number}} - rambursare confirmată - PragmaticHost",
+                "subject": "Factura {{invoice_number}} - rambursare confirmată - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Rambursarea facturii a fost confirmată</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -823,7 +839,7 @@ class Command(BaseCommand):
                 <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
                     <p><strong>Sumă rambursată:</strong> {{refund_amount}} {{currency}}</p>
                 </div>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare rambursare factură",
                 "variables": {
@@ -837,7 +853,7 @@ class Command(BaseCommand):
                 "key": "invoice_refund_confirmation",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Invoice {{invoice_number}} - refund confirmed - PragmaticHost",
+                "subject": "Invoice {{invoice_number}} - refund confirmed - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Invoice refund confirmed</h2>
                 <p>Hello {{customer_name}},</p>
@@ -845,7 +861,7 @@ class Command(BaseCommand):
                 <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
                     <p><strong>Refund amount:</strong> {{refund_amount}} {{currency}}</p>
                 </div>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Invoice refund confirmation",
                 "variables": {
@@ -859,13 +875,13 @@ class Command(BaseCommand):
                 "key": "payment_retry_success",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "✅ Plata a fost procesată la a doua încercare - PragmaticHost",
+                "subject": "✅ Plata a fost procesată la a doua încercare - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Plata a fost procesată cu succes!</h2>
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Vă informăm că plata dumneavoastră a fost procesată cu succes la reîncercare.</p>
                 <p>Serviciile asociate sunt acum active.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare plată reușită la reîncercare",
                 "variables": {"customer_name": "Numele clientului"},
@@ -874,13 +890,13 @@ class Command(BaseCommand):
                 "key": "payment_retry_success",
                 "locale": "en",
                 "category": "billing",
-                "subject": "✅ Payment processed on retry - PragmaticHost",
+                "subject": "✅ Payment processed on retry - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Payment processed successfully!</h2>
                 <p>Hello {{customer_name}},</p>
                 <p>We're happy to let you know that your payment was successfully processed on retry.</p>
                 <p>Your associated services are now active.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Payment retry success confirmation",
                 "variables": {"customer_name": "Customer name"},
@@ -947,7 +963,7 @@ class Command(BaseCommand):
                 "key": "grandfathering_expiring",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Prețul special pentru {{product_name}} expiră curând - PragmaticHost",
+                "subject": "Prețul special pentru {{product_name}} expiră curând - {{brand_name}}",
                 "body_html": """
                 <h2>⏰ Prețul dumneavoastră special expiră curând</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -957,7 +973,7 @@ class Command(BaseCommand):
                     <p>Economisiți <strong>{{savings_percent}}%</strong> față de prețul standard.
                        Reînnoiți înainte de expirare pentru a păstra acest preț!</p>
                 </div>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare expirare preț grandfathered",
                 "variables": {
@@ -973,7 +989,7 @@ class Command(BaseCommand):
                 "key": "grandfathering_expiring",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Your special price for {{product_name}} expires soon - PragmaticHost",
+                "subject": "Your special price for {{product_name}} expires soon - {{brand_name}}",
                 "body_html": """
                 <h2>⏰ Your special price expires soon</h2>
                 <p>Hello {{customer_name}},</p>
@@ -983,7 +999,7 @@ class Command(BaseCommand):
                     <p>You're saving <strong>{{savings_percent}}%</strong> compared to the standard price.
                        Renew before expiry to keep this rate!</p>
                 </div>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Grandfathered price expiring notification",
                 "variables": {
@@ -1002,7 +1018,7 @@ class Command(BaseCommand):
                 "key": "invoice_created",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Factură nouă {{invoice_number}} - PragmaticHost",
+                "subject": "Factură nouă {{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>📋 Factură nouă creată</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -1014,7 +1030,7 @@ class Command(BaseCommand):
                         <li><strong>Scadență:</strong> {{due_date}}</li>
                     </ul>
                 </div>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare factură creată",
                 "variables": {
@@ -1029,7 +1045,7 @@ class Command(BaseCommand):
                 "key": "invoice_created",
                 "locale": "en",
                 "category": "billing",
-                "subject": "New invoice {{invoice_number}} - PragmaticHost",
+                "subject": "New invoice {{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>📋 New invoice created</h2>
                 <p>Hello {{customer_name}},</p>
@@ -1041,7 +1057,7 @@ class Command(BaseCommand):
                         <li><strong>Due date:</strong> {{due_date}}</li>
                     </ul>
                 </div>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Invoice created notification",
                 "variables": {
@@ -1056,12 +1072,12 @@ class Command(BaseCommand):
                 "key": "payment_received",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Plată primită pentru factura {{invoice_number}} - PragmaticHost",
+                "subject": "Plată primită pentru factura {{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Plata a fost primită</h2>
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Am primit plata pentru factura <strong>{{invoice_number}}</strong>. Mulțumim!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare plată primită pentru factură",
                 "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
@@ -1070,12 +1086,12 @@ class Command(BaseCommand):
                 "key": "payment_received",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Payment received for invoice {{invoice_number}} - PragmaticHost",
+                "subject": "Payment received for invoice {{invoice_number}} - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Payment received</h2>
                 <p>Hello {{customer_name}},</p>
                 <p>We've received your payment for invoice <strong>{{invoice_number}}</strong>. Thank you!</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Payment received for invoice confirmation",
                 "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
@@ -1084,7 +1100,7 @@ class Command(BaseCommand):
                 "key": "invoice_overdue",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "⚠️ Factura {{invoice_number}} este restantă - PragmaticHost",
+                "subject": "⚠️ Factura {{invoice_number}} este restantă - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Factură restantă</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -1092,7 +1108,7 @@ class Command(BaseCommand):
                 <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
                     <p>Vă rugăm să efectuați plata cât mai curând posibil pentru a evita suspendarea serviciilor.</p>
                 </div>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare factură restantă",
                 "variables": {
@@ -1105,7 +1121,7 @@ class Command(BaseCommand):
                 "key": "invoice_overdue",
                 "locale": "en",
                 "category": "billing",
-                "subject": "⚠️ Invoice {{invoice_number}} is overdue - PragmaticHost",
+                "subject": "⚠️ Invoice {{invoice_number}} is overdue - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Invoice overdue</h2>
                 <p>Hello {{customer_name}},</p>
@@ -1113,7 +1129,7 @@ class Command(BaseCommand):
                 <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
                     <p>Please make payment as soon as possible to avoid service suspension.</p>
                 </div>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Invoice overdue notification",
                 "variables": {
@@ -1126,13 +1142,13 @@ class Command(BaseCommand):
                 "key": "invoice_voided",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Factura {{invoice_number}} a fost anulată - PragmaticHost",
+                "subject": "Factura {{invoice_number}} a fost anulată - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Factură anulată</h2>
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Factura <strong>{{invoice_number}}</strong> a fost anulată.</p>
-                <p>Dacă aveți întrebări, contactați-ne la billing@pragmatichost.com</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Dacă aveți întrebări, contactați-ne la {{support_email}}</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare factură anulată",
                 "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
@@ -1141,13 +1157,13 @@ class Command(BaseCommand):
                 "key": "invoice_voided",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Invoice {{invoice_number}} has been voided - PragmaticHost",
+                "subject": "Invoice {{invoice_number}} has been voided - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Invoice voided</h2>
                 <p>Hello {{customer_name}},</p>
                 <p>Invoice <strong>{{invoice_number}}</strong> has been voided.</p>
-                <p>If you have questions, contact us at billing@pragmatichost.com</p>
-                <p>PragmaticHost Team</p>
+                <p>If you have questions, contact us at {{support_email}}</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Invoice voided notification",
                 "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
@@ -1159,13 +1175,13 @@ class Command(BaseCommand):
                 "key": "order_cancelled",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Comanda #{{order_number}} a fost anulată - PragmaticHost",
+                "subject": "Comanda #{{order_number}} a fost anulată - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Comandă anulată</h2>
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Comanda dumneavoastră <strong>#{{order_number}}</strong> a fost anulată.</p>
                 <p>Dacă nu ați solicitat această anulare, contactați-ne imediat.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare comandă anulată",
                 "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
@@ -1174,13 +1190,13 @@ class Command(BaseCommand):
                 "key": "order_cancelled",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Order #{{order_number}} has been cancelled - PragmaticHost",
+                "subject": "Order #{{order_number}} has been cancelled - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Order cancelled</h2>
                 <p>Hello {{customer_name}},</p>
                 <p>Your order <strong>#{{order_number}}</strong> has been cancelled.</p>
                 <p>If you did not request this cancellation, please contact us immediately.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Order cancelled notification",
                 "variables": {"customer_name": "Customer name", "order_number": "Order number"},
@@ -1192,7 +1208,7 @@ class Command(BaseCommand):
                 "key": "service_ready",
                 "locale": "ro",
                 "category": "provisioning",
-                "subject": "🚀 Serviciul dumneavoastră este activ! - PragmaticHost",
+                "subject": "🚀 Serviciul dumneavoastră este activ! - {{brand_name}}",
                 "body_html": """
                 <h2>🚀 Serviciul este gata de utilizare!</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -1204,7 +1220,7 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>Puteți gestiona serviciul din zona client.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare serviciu activat și gata de utilizare",
                 "variables": {
@@ -1217,7 +1233,7 @@ class Command(BaseCommand):
                 "key": "service_ready",
                 "locale": "en",
                 "category": "provisioning",
-                "subject": "🚀 Your service is active! - PragmaticHost",
+                "subject": "🚀 Your service is active! - {{brand_name}}",
                 "body_html": """
                 <h2>🚀 Your service is ready to use!</h2>
                 <p>Hello {{customer_name}},</p>
@@ -1229,7 +1245,7 @@ class Command(BaseCommand):
                     </ul>
                 </div>
                 <p>You can manage your service from the client area.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Service activated and ready notification",
                 "variables": {
@@ -1242,7 +1258,7 @@ class Command(BaseCommand):
                 "key": "provisioning_failed",
                 "locale": "ro",
                 "category": "provisioning",
-                "subject": "⚠️ Activarea serviciului a eșuat - PragmaticHost",
+                "subject": "⚠️ Activarea serviciului a eșuat - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Activarea serviciului a eșuat</h2>
                 <p>Bună ziua {{customer_name}},</p>
@@ -1251,7 +1267,7 @@ class Command(BaseCommand):
                     <p>Echipa noastră tehnică a fost notificată și lucrează la rezolvarea problemei.
                        Veți fi contactat(ă) în cel mai scurt timp.</p>
                 </div>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare eșec activare serviciu",
                 "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
@@ -1260,7 +1276,7 @@ class Command(BaseCommand):
                 "key": "provisioning_failed",
                 "locale": "en",
                 "category": "provisioning",
-                "subject": "⚠️ Service activation failed - PragmaticHost",
+                "subject": "⚠️ Service activation failed - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Service activation failed</h2>
                 <p>Hello {{customer_name}},</p>
@@ -1269,7 +1285,7 @@ class Command(BaseCommand):
                     <p>Our technical team has been notified and is working on resolving the issue.
                        You will be contacted shortly.</p>
                 </div>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Service provisioning failed notification",
                 "variables": {"customer_name": "Customer name", "order_number": "Order number"},
@@ -1278,14 +1294,14 @@ class Command(BaseCommand):
                 "key": "order_completed",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Comanda #{{order_number}} a fost finalizată - PragmaticHost",
+                "subject": "Comanda #{{order_number}} a fost finalizată - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Comanda dumneavoastră a fost finalizată!</h2>
                 <p>Bună ziua {{customer_name}},</p>
                 <p>Comanda <strong>#{{order_number}}</strong> a fost procesată complet.
                    Toate serviciile comandate sunt acum active.</p>
                 <p>Puteți gestiona serviciile din zona client.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare comandă finalizată",
                 "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
@@ -1294,14 +1310,14 @@ class Command(BaseCommand):
                 "key": "order_completed",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Order #{{order_number}} completed - PragmaticHost",
+                "subject": "Order #{{order_number}} completed - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Your order has been completed!</h2>
                 <p>Hello {{customer_name}},</p>
                 <p>Order <strong>#{{order_number}}</strong> has been fully processed.
                    All ordered services are now active.</p>
                 <p>You can manage your services from the client area.</p>
-                <p>PragmaticHost Team</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Order completed notification",
                 "variables": {"customer_name": "Customer name", "order_number": "Order number"},
@@ -1348,12 +1364,12 @@ class Command(BaseCommand):
                 "key": "customer_activated",
                 "locale": "ro",
                 "category": "welcome",
-                "subject": "Contul dumneavoastră a fost activat - PragmaticHost",
+                "subject": "Contul dumneavoastră a fost activat - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Cont activat</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Contul dumneavoastră PragmaticHost a fost activat cu succes. Puteți comanda servicii de hosting!</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Contul dumneavoastră {{brand_name}} a fost activat cu succes. Puteți comanda servicii de hosting!</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare activare cont client",
                 "variables": {"customer_name": "Numele clientului"},
@@ -1362,12 +1378,12 @@ class Command(BaseCommand):
                 "key": "customer_activated",
                 "locale": "en",
                 "category": "welcome",
-                "subject": "Your account has been activated - PragmaticHost",
+                "subject": "Your account has been activated - {{brand_name}}",
                 "body_html": """
                 <h2>✅ Account activated</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>Your PragmaticHost account has been successfully activated. You can now order hosting services!</p>
-                <p>PragmaticHost Team</p>
+                <p>Your {{brand_name}} account has been successfully activated. You can now order hosting services!</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Customer account activation confirmation",
                 "variables": {"customer_name": "Customer name"},
@@ -1376,13 +1392,13 @@ class Command(BaseCommand):
                 "key": "customer_suspended",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "⚠️ Contul dumneavoastră a fost suspendat - PragmaticHost",
+                "subject": "⚠️ Contul dumneavoastră a fost suspendat - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Cont suspendat</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Contul dumneavoastră PragmaticHost a fost suspendat.</p>
-                <p>Contactați-ne la billing@pragmatichost.com pentru detalii și reactivare.</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Contul dumneavoastră {{brand_name}} a fost suspendat.</p>
+                <p>Contactați-ne la {{support_email}} pentru detalii și reactivare.</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare suspendare cont client",
                 "variables": {"customer_name": "Numele clientului"},
@@ -1391,13 +1407,13 @@ class Command(BaseCommand):
                 "key": "customer_suspended",
                 "locale": "en",
                 "category": "billing",
-                "subject": "⚠️ Your account has been suspended - PragmaticHost",
+                "subject": "⚠️ Your account has been suspended - {{brand_name}}",
                 "body_html": """
                 <h2>⚠️ Account suspended</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>Your PragmaticHost account has been suspended.</p>
-                <p>Contact us at billing@pragmatichost.com for details and reactivation.</p>
-                <p>PragmaticHost Team</p>
+                <p>Your {{brand_name}} account has been suspended.</p>
+                <p>Contact us at {{support_email}} for details and reactivation.</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Customer account suspension notification",
                 "variables": {"customer_name": "Customer name"},
@@ -1406,13 +1422,13 @@ class Command(BaseCommand):
                 "key": "customer_deactivated",
                 "locale": "ro",
                 "category": "billing",
-                "subject": "Contul dumneavoastră a fost dezactivat - PragmaticHost",
+                "subject": "Contul dumneavoastră a fost dezactivat - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Cont dezactivat</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Contul dumneavoastră PragmaticHost a fost dezactivat.</p>
-                <p>Dacă doriți reactivarea, contactați-ne la support@pragmatichost.com</p>
-                <p>Echipa PragmaticHost</p>
+                <p>Contul dumneavoastră {{brand_name}} a fost dezactivat.</p>
+                <p>Dacă doriți reactivarea, contactați-ne la {{support_email}}</p>
+                <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Notificare dezactivare cont client",
                 "variables": {"customer_name": "Numele clientului"},
@@ -1421,13 +1437,13 @@ class Command(BaseCommand):
                 "key": "customer_deactivated",
                 "locale": "en",
                 "category": "billing",
-                "subject": "Your account has been deactivated - PragmaticHost",
+                "subject": "Your account has been deactivated - {{brand_name}}",
                 "body_html": """
                 <h2>🚫 Account deactivated</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>Your PragmaticHost account has been deactivated.</p>
-                <p>If you wish to reactivate, contact us at support@pragmatichost.com</p>
-                <p>PragmaticHost Team</p>
+                <p>Your {{brand_name}} account has been deactivated.</p>
+                <p>If you wish to reactivate, contact us at {{support_email}}</p>
+                <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Customer account deactivation notification",
                 "variables": {"customer_name": "Customer name"},
@@ -1437,18 +1453,18 @@ class Command(BaseCommand):
                 "key": "customer_reactivation",
                 "locale": "ro",
                 "category": "engagement",
-                "subject": "Ne este dor de dumneavoastră! - PragmaticHost",
+                "subject": "Ne este dor de dumneavoastră! - {{brand_name}}",
                 "body_html": """
                 <h2>Bună ziua {{customer_name}},</h2>
-                <p>Am observat că nu v-ați conectat la contul PragmaticHost de ceva timp.</p>
+                <p>Am observat că nu v-ați conectat la contul {{brand_name}} de ceva timp.</p>
                 <p>Dorim să ne asigurăm că totul este în regulă cu contul dumneavoastră
                 și că nu aveți nevoie de ajutor.</p>
                 <p>Dacă aveți întrebări sau aveți nevoie de asistență, nu ezitați să ne contactați:</p>
                 <ul>
-                    <li>Email: support@pragmatichost.com</li>
+                    <li>Email: {{support_email}}</li>
                     <li>Telefon: {{support_phone}}</li>
                 </ul>
-                <p>Cu stimă,<br/>Echipa PragmaticHost</p>
+                <p>Cu stimă,<br/>Echipa {{brand_name}}</p>
                 """,
                 "description": "Email de reactivare pentru clienți inactivi",
                 "variables": {"customer_name": "Numele clientului", "support_phone": "Număr telefon suport"},
@@ -1457,18 +1473,18 @@ class Command(BaseCommand):
                 "key": "customer_reactivation",
                 "locale": "en",
                 "category": "engagement",
-                "subject": "We miss you! - PragmaticHost",
+                "subject": "We miss you! - {{brand_name}}",
                 "body_html": """
                 <h2>Hello {{customer_name}},</h2>
-                <p>We noticed you haven't logged into your PragmaticHost account in a while.</p>
+                <p>We noticed you haven't logged into your {{brand_name}} account in a while.</p>
                 <p>We wanted to check in and make sure everything is OK with your account
                 and that you don't need any assistance.</p>
                 <p>If you have any questions or need help, please don't hesitate to reach out:</p>
                 <ul>
-                    <li>Email: support@pragmatichost.com</li>
+                    <li>Email: {{support_email}}</li>
                     <li>Phone: {{support_phone}}</li>
                 </ul>
-                <p>Best regards,<br/>The PragmaticHost Team</p>
+                <p>Best regards,<br/>The {{brand_name}} Team</p>
                 """,
                 "description": "Reactivation check-in email for inactive customers",
                 "variables": {"customer_name": "Customer name", "support_phone": "Support phone number"},

@@ -201,22 +201,18 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             self.assertEqual(company_info['cui'], 'RO87654321')
             self.assertEqual(company_info['email'], 'custom@example.com')
 
-    def test_base_generator_get_company_info_defaults(self) -> None:
-        """Test _get_company_info with default values (Line 52-61)."""
+    def test_base_generator_get_company_info_never_invents_an_address(self) -> None:
+        """An unconfigured seller address stays blank: no placeholder street, city or country."""
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
         company_info = generator._get_company_info()
 
-        # Should use values from settings (which may come from environment or defaults)
-        expected_name = getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')
-        expected_email = getattr(settings, 'COMPANY_EMAIL', 'contact@praho.ro')
-
-        self.assertEqual(company_info['name'], expected_name)
-        self.assertEqual(company_info['address'], 'Str. Exemplu Nr. 1')
-        self.assertEqual(company_info['city'], 'București')
-        self.assertEqual(company_info['country'], 'România')
-        self.assertEqual(company_info['cui'], 'RO12345678')
-        self.assertEqual(company_info['email'], expected_email)
+        self.assertEqual(company_info['name'], settings.COMPANY_NAME)
+        self.assertEqual(company_info['address'], '')
+        self.assertEqual(company_info['city'], '')
+        self.assertEqual(company_info['country'], '')
+        self.assertEqual(company_info['cui'], settings.COMPANY_CUI)
+        self.assertEqual(company_info['email'], settings.COMPANY_EMAIL)
 
     def test_base_generator_setup_document_header(self) -> None:
         """Test _setup_document_header method (Line 63-76)."""

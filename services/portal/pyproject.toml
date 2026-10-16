@@ -15,7 +15,7 @@ version = "0.30.0"
 description = "PRAHO Portal Service - Customer-facing API (no database access)"
 requires-python = ">=3.13"
 authors = [
-    {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
+    {name = "PRAHO contributors"}
 ]
 
 # Portal has minimal dependencies - NO database drivers!

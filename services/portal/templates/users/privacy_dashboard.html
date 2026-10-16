@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans 'Privacy Dashboard' %} - PragmaticHost{% endblock %}
+{% block title %}{% trans 'Privacy Dashboard' %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
@@ -18,7 +18,7 @@
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Settings' %}</h4>
 
           <div class="space-y-3">
-            <!-- Data Processing Consent -->
+            <!-- Data Processing: needed for the service, described by the privacy policy rather than consented to -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
                 <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span> {# tmpl-allow TMPL005: needs badge unboxed_icon #}
@@ -27,11 +27,7 @@
                   <div class="text-xs text-slate-400">{% trans 'Required for service operation' %}</div>
                 </div>
               </div>
-              {% if profile.gdpr_consent_date %}
-                {% badge "Active" variant="success" icon="check" size="xs" rounded="full" %}
-              {% else %}
-                {% badge "Inactive" variant="danger" icon="x" size="xs" rounded="full" %}
-              {% endif %}
+              <a href="{% url 'privacy_policy' %}" class="text-sm text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
             </div>
 
             <!-- Marketing Consent -->

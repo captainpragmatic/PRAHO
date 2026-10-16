@@ -21,7 +21,7 @@ from apps.billing.models import Currency
 from apps.billing.services import InvoiceService, _build_customer_vat_info
 from apps.billing.tasks import reverify_expired_vat_validations, validate_vat_number
 from apps.billing.tax_models import VATValidation
-from apps.billing.vies_evidence import normalize_vat_number, vat_number_matches_country, vies_refusal_reason
+from apps.billing.vies_evidence import compact_vat_number, vat_number_matches_country, vies_refusal_reason
 from apps.common.tax_service import CustomerVATInfo, TaxService, VATScenario
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
@@ -65,7 +65,7 @@ class VIESEvidenceTests(TestCase):
         for separator in ("/", "\t", "\n", "_"):
             with self.subTest(separator=repr(separator)):
                 number = f"DE123{separator}456789"
-                self.assertEqual(normalize_vat_number(number), number)
+                self.assertEqual(compact_vat_number(number), number)
                 profile = self._profile(vat_number=number, vies_verification_status="valid")
                 self.assertFalse(self._verified(profile, "DE123456789"))
 
@@ -91,7 +91,7 @@ class VIESEvidenceTests(TestCase):
         profile = self._profile(vat_number="---", vies_verification_status="valid")
         self.assertFalse(self._verified(profile, ""))
         for value in (None, False, 0, ""):
-            self.assertEqual(normalize_vat_number(value), "")
+            self.assertEqual(compact_vat_number(value), "")
 
 
 @override_settings(COMPANY_COUNTRY_CODE="RO", COMPANY_CUI="RO16397040")

@@ -1,4 +1,4 @@
-# PRAHO Platform - PRAHO Really Automates Hosting Operations
+# <picture><source media="(prefers-color-scheme: dark)" srcset="shared/ui/static/brand/logo.svg"><img src="shared/ui/static/brand/logo-light.svg" alt="" width="32" height="32"></picture> PRAHO Platform - PRAHO Really Automates Hosting Operations
 
 > **Pre-release software (v0.30.0-alpha)** - Under active development. Not yet recommended for production use.
 
@@ -115,7 +115,7 @@ Visit:
 - **Platform**: http://localhost:8700 (staff interface)
 - **Portal**: http://localhost:8701 (customer API)
 
-**Test credentials**: `admin@pragmatichost.com` / `admin123`
+**Test credentials**: `admin@praho.test` / `admin123`
 
 > **Using PostgreSQL instead of SQLite?** Run `make docker-dev` to start Platform + Portal + PostgreSQL in Docker containers with hot reload.
 > Its database starts empty; for the sample data and the test credentials above, run

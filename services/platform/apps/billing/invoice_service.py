@@ -607,7 +607,7 @@ def send_invoice_email(invoice: Invoice, recipient_email: str | None = None) -> 
         pdf_content = generate_invoice_pdf(invoice)
 
         # Build email
-        subject = f"Invoice {invoice.number} from {getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')}"
+        subject = f"Invoice {invoice.number} from {settings.COMPANY_NAME}"
 
         body = f"""Dear {invoice.customer.get_display_name() if invoice.customer else "Customer"},
 
@@ -621,7 +621,7 @@ Invoice Details:
 Thank you for your business.
 
 Best regards,
-{getattr(settings, "COMPANY_NAME", "PRAHO Platform")}
+{settings.COMPANY_NAME}
 """
 
         email_message = EmailMessage(

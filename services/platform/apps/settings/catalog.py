@@ -17,10 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_name
+from apps.common.operator import operator_serves
 
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
@@ -44,6 +47,7 @@ class GroupDef:
     label: LazyLabel
     description: LazyLabel = ""
     section_order: tuple[str, ...] = ()
+    jurisdiction: str = ""  # Shown only to operators established there (ADR-0047 addendum)
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,7 @@ class SettingDef:
     advanced: bool = False
     deployment_fallback: bool = False  # No row preserves deployment configuration; never seed the catalog default.
     django_setting: str = ""
+    jurisdiction: str = ""  # Shown only to operators established there (ADR-0047 addendum)
     validation: dict[str, Any] | None = field(default=None, hash=False)
     choice_labels: dict[str, LazyLabel] = field(default_factory=dict, hash=False)
 
@@ -113,6 +118,7 @@ GROUPS: tuple[GroupDef, ...] = (
         "SmartBill",
         _("External invoice issuer: credentials, series, and the VAT-name mapping"),
         section_order=("Issuer", "Credentials", "Document defaults"),
+        jurisdiction="RO",
     ),
     GroupDef(
         "virtualmin",
@@ -126,6 +132,7 @@ GROUPS: tuple[GroupDef, ...] = (
         ZONE_INTEGRATIONS,
         "e-Factura (ANAF)",
         "Romanian e-invoicing: OAuth, company profile, submission policy",
+        jurisdiction="RO",
     ),
     GroupDef(
         "node-deployment", ZONE_INTEGRATIONS, _("Node Deployment"), _("Terraform, DNS, and node backup configuration")
@@ -158,26 +165,32 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="system.default_country",
+        deployment_fallback=True,
+        django_setting="COMPANY_COUNTRY_CODE",
         data_type="string",
         default="RO",
         group="localisation",
         section=_("Defaults"),
         label=_("Default country"),
         input_kind="select",
-        help_text=_("Initial country for new customer addresses. Existing addresses and tax rules are preserved."),
+        help_text=_(
+            "Initial country for new customer addresses. Leave unset to use the operator's own country. "
+            "Existing addresses and tax rules are preserved."
+        ),
         validation={"choices": sorted(COUNTRIES)},
         choice_labels={code: lazy(country_name, str)(code) for code in sorted(COUNTRIES)},
     ),
     SettingDef(
         key="system.timezone",
         data_type="string",
-        default="Europe/Bucharest",
+        default=settings.TIME_ZONE,  # Fixed per deployment, like the operator's country
         group="localisation",
         section=_("Defaults"),
         label=_("Display timezone"),
         input_kind="select",
         help_text=_(
-            "Timezone for web timestamps when a user follows the system default. Accounting dates keep their existing rules."
+            "Timezone for web timestamps when a user follows the system default. Document and accounting dates "
+            "follow the operator's TIME_ZONE."
         ),
         validation={"choices": sorted(TIMEZONES)},
     ),
@@ -363,7 +376,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="billing.default_currency",
         data_type="string",
-        default="RON",
+        default=default_selling_currency(),  # Fixed per deployment: COMPANY_COUNTRY_CODE does not change at runtime
         group="billing",
         section=_("Invoicing"),
         label=_("Selling currency"),
@@ -389,6 +402,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.fx.bnr_fetch_enabled",
+        jurisdiction="RO",
         data_type="boolean",
         default=False,
         group="advanced",
@@ -408,7 +422,10 @@ CATALOG: tuple[SettingDef, ...] = (
         group="advanced",
         section=_("Billing"),
         label=_("Fetched currency pairs"),
-        help_text=_("Foreign currency codes to fetch daily against RON."),
+        help_text=_(
+            "Foreign currencies PRAHO keeps rates for: fetched daily from BNR for a Romanian operator, "
+            "and checked for a current rate to the home currency."
+        ),
         input_kind="chips",
         advanced=True,
     ),
@@ -449,6 +466,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_api_max_retries",
+        jurisdiction="RO",
         data_type="integer",
         default=3,
         group="advanced",
@@ -461,6 +479,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_api_timeout_seconds",
+        jurisdiction="RO",
         data_type="integer",
         default=30,
         group="advanced",
@@ -474,6 +493,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_batch_size",
+        jurisdiction="RO",
         data_type="integer",
         default=100,
         group="advanced",
@@ -486,6 +506,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_deadline_warning_hours",
+        jurisdiction="RO",
         data_type="integer",
         default=24,
         group="billing",
@@ -498,6 +519,7 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="billing.efactura_submission_deadline_days",
+        jurisdiction="RO",
         data_type="integer",
         default=5,
         group="billing",
@@ -527,9 +549,9 @@ CATALOG: tuple[SettingDef, ...] = (
         default=50000,
         group="advanced",
         section=_("Billing"),
-        label=_("Legacy RON refund notification threshold"),
-        help_text=_("RON refunds use this floor when no explicit RON threshold is configured."),
-        unit="RON cents",
+        label=_("Legacy refund notification threshold"),
+        help_text=_("Refunds in the default currency use this floor when it has no explicit threshold."),
+        unit="cents",
         input_kind="number",
         advanced=True,
         validation={"min": 0},
@@ -716,6 +738,20 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="billing.anaf_lookup_enabled",
+        jurisdiction="RO",
+        data_type="boolean",
+        default=True,
+        group="billing",
+        section=_("VAT"),
+        label=_("Look up Romanian companies at ANAF"),
+        help_text=_(
+            "When a customer's CUI is saved, check it in ANAF's public register and record the "
+            "company's registered name, VAT registration and status. The public registration "
+            "page also offers to fill in a company's details from it."
+        ),
+    ),
+    SettingDef(
         key="billing.reverse_charge_requires_consultation_reference",
         data_type="boolean",
         default=True,
@@ -858,7 +894,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_contact",
         data_type="string",
-        default="contact@pragmatichost.com",
+        default="contact@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Contact email"),
@@ -867,7 +903,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_dpo",
         data_type="string",
-        default="dpo@pragmatichost.com",
+        default="dpo@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("DPO email"),
@@ -878,7 +914,7 @@ CATALOG: tuple[SettingDef, ...] = (
         deployment_fallback=True,
         django_setting="DEFAULT_FROM_EMAIL",
         data_type="string",
-        default="noreply@pragmatichost.com",
+        default="noreply@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("No-reply email"),
@@ -887,7 +923,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_privacy",
         data_type="string",
-        default="privacy@pragmatichost.com",
+        default="privacy@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Privacy email"),
@@ -896,7 +932,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="company.email_support",
         data_type="string",
-        default="support@pragmatichost.com",
+        default="support@example.com",
         group="company",
         section=_("Email addresses"),
         label=_("Support email"),
@@ -912,13 +948,25 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("Receives large-refund alerts. Alerts are suppressed while this is empty."),
     ),
     SettingDef(
-        key="company.legal_name",
+        key="company.brand_name",
         data_type="string",
-        default="PragmaticHost SRL",
+        default="PRAHO",
+        group="company",
+        section=_("Identity"),
+        label=_("Brand name"),
+        help_text=_("The name customers see in the portal, in emails and in their authenticator app."),
+        validation={"pattern": r"\S(?:[^\r\n]{0,62}\S)?"},
+    ),
+    SettingDef(
+        key="company.legal_name",
+        deployment_fallback=True,
+        django_setting="COMPANY_NAME",
+        data_type="string",
+        default="",
         group="company",
         section=_("Identity"),
         label=_("Legal name"),
-        help_text=_("Appears on invoices, contracts, and legal pages."),
+        help_text=_("Shown on legal pages and in the customer portal. Leave unset to use the seller name on invoices."),
     ),
     SettingDef(
         key="company.phone",
@@ -2144,7 +2192,7 @@ CATALOG: tuple[SettingDef, ...] = (
         default=500000,
         group="orders",
         section=_("Review policy"),
-        label=_("Legacy RON review threshold"),
+        label=_("Legacy review threshold"),
         unit="cents",
         input_kind="number",
         validation={"min": 0},
@@ -2465,9 +2513,9 @@ CATALOG: tuple[SettingDef, ...] = (
         default=50000,
         group="advanced",
         section=_("Provisioning"),
-        label=_("Legacy RON high value service threshold"),
-        help_text=_("RON service and plan audit records use this floor when no explicit RON threshold is configured."),
-        unit="RON cents",
+        label=_("Legacy high value service threshold"),
+        help_text=_("Services and plans in the default currency use this floor when it has no explicit threshold."),
+        unit="cents",
         input_kind="number",
         advanced=True,
         validation={"min": 0},
@@ -2695,6 +2743,8 @@ CATALOG: tuple[SettingDef, ...] = (
     ),
     SettingDef(
         key="portal.public_base_url",
+        deployment_fallback=True,
+        django_setting="PORTAL_DOMAIN",
         data_type="string",
         default="",
         group="platform",
@@ -2702,7 +2752,8 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("Customer portal URL"),
         help_text=_(
             "Public base URL of the customer portal, e.g. https://portal.example.com. "
-            "Used in customer-facing links such as password reset emails."
+            "Used in customer-facing links such as password reset emails. "
+            "Leave unset to use https:// and the deployment's PORTAL_DOMAIN."
         ),
         critical=True,
     ),
@@ -2908,13 +2959,22 @@ CRITICAL_KEYS: frozenset[str] = frozenset(d.key for d in CATALOG if d.critical)
 
 
 def defs_for_group(slug: str) -> list[SettingDef]:
-    """Catalog entries for one group, in stable key order"""
-    return [d for d in CATALOG if d.group == slug]
+    """Catalog entries for one group that apply to this operator, in stable key order"""
+    return [d for d in CATALOG if d.group == slug and is_visible(d)]
+
+
+def is_visible(definition: GroupDef | SettingDef) -> bool:
+    """Whether a group or setting applies to this operator; a setting also needs its group.
+
+    Presentation only: each feature enforces its jurisdiction at its own chokepoint.
+    """
+    group = GROUPS_BY_SLUG[definition.group] if isinstance(definition, SettingDef) else definition
+    return operator_serves(group.jurisdiction) and operator_serves(definition.jurisdiction)
 
 
 def groups_in_zone(zone: str) -> list[GroupDef]:
-    """Groups belonging to one UI zone, in declaration order"""
-    return [g for g in GROUPS if g.zone == zone]
+    """Visible groups belonging to one UI zone, in declaration order"""
+    return [g for g in GROUPS if g.zone == zone and is_visible(g)]
 
 
 def is_sensitive_key(key: str) -> bool:

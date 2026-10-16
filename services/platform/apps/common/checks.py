@@ -656,3 +656,55 @@ def check_counter_table(app_configs: Any, **kwargs: Any) -> list[Any]:
             )
         ]
     return []
+
+
+@register(Tags.compatibility)
+def check_operator_jurisdiction(app_configs: Any = None, **kwargs: Any) -> list[Any]:
+    """Refuse an operator country PRAHO cannot tax for (ADR-0047): unknown, or outside the EU.
+
+    The tax engine assumes an EU supplier, so outside the EU it would charge the wrong VAT. Development
+    is spared so a local checkout can model any jurisdiction while the jurisdiction pack is built.
+    """
+    from apps.common.localisation import normalize_country_code  # noqa: PLC0415
+    from apps.common.operator import operator_in_eu  # noqa: PLC0415
+
+    if settings.DEBUG:
+        return []
+    configured = str(getattr(settings, "COMPANY_COUNTRY_CODE", "") or "").strip()
+    if configured and not normalize_country_code(configured):
+        problem = f"COMPANY_COUNTRY_CODE={configured!r} is not an ISO 3166-1 country code."
+    elif not operator_in_eu():
+        problem = "PRAHO's VAT handling supports operators established in the EU only."
+    else:
+        return []
+    return [
+        Error(
+            problem,
+            hint="Set COMPANY_COUNTRY_CODE to the operator's country of establishment (ADR-0047).",
+            id="common.E003",
+        )
+    ]
+
+
+@register(Tags.compatibility)
+def check_operator_clock(app_configs: Any = None, **kwargs: Any) -> list[Any]:
+    """TIME_ZONE must be a real zone, and Bucharest for an operator in Romania (ADR-0041 addendum).
+
+    Production settings refuse a wrong zone when they load; this check also covers staging, and it
+    catches an unknown zone in an image without the system zoneinfo that Django's own test reads.
+    """
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: PLC0415
+
+    from apps.common.operator import operator_is_romanian  # noqa: PLC0415
+
+    try:
+        ZoneInfo(settings.TIME_ZONE)
+    except (ZoneInfoNotFoundError, ValueError):
+        problem = f"TIME_ZONE={settings.TIME_ZONE!r} is not an IANA time zone."
+    else:
+        if settings.DEBUG or not operator_is_romanian() or settings.TIME_ZONE == "Europe/Bucharest":
+            return []
+        problem = (
+            "An operator in Romania runs on Europe/Bucharest: e-Factura dates and the VAT tax point are Romanian days."
+        )
+    return [Error(problem, hint="Set TIME_ZONE to the operator's IANA zone, e.g. Europe/Berlin.", id="common.E004")]

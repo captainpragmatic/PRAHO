@@ -7,22 +7,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}PRAHO Portal{% endblock %}</title>
+    <title>{% block title %}{{ company.brand_name }}{% endblock %}</title>
 
     <!-- Security Headers -->
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
 
     <!-- Portal Branding -->
-    <meta name="description" content="{% trans 'PRAHO Customer Portal - Manage your hosting services' %}">
-    <meta name="author" content="PragmaticHost">
-
-    <!-- Favicon -->
-    {# nosemgrep: missing-integrity — inline data: URL, not external resource #}
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3e%3crect width='100' height='100' fill='%233b82f6'/%3e%3ctext y='75' font-size='80' fill='white'%3eP%3c/text%3e%3c/svg%3e">
+    <meta name="description" content="{% blocktrans with brand=company.brand_name %}{{ brand }} customer portal - manage your hosting services{% endblocktrans %}">
 
     <!-- Scripts & Styles - Local Assets -->
     {% load static %}
+    <link rel="icon" href="{% static 'brand/favicon.ico' %}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{% static 'brand/favicon.svg' %}">
+    <link rel="apple-touch-icon" href="{% static 'brand/apple-touch-icon.png' %}">
     <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
+    <link rel="stylesheet" href="{% static 'brand/brand.css' %}">
     <script src="{% static 'js/htmx.min.js' %}"></script>
     <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
     <script defer src="{% static 'js/alpine-components.js' %}"></script>
@@ -57,11 +56,9 @@
                 <!-- Logo -->
                 <div class="w-52 flex-shrink-0">
                   <a href="/dashboard/" class="flex items-center hover:opacity-80 transition-opacity">
-                    <div class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-lg font-bold mr-3"> {# tmpl-allow TMPL005: needs badge branding variant #}
-                      P
-                    </div>
+                    {% include "components/brand_logo.html" with css_class="h-8 w-8 mr-3" %}
                     <span class="text-xl font-bold text-blue-400 whitespace-nowrap"> {# tmpl-allow TMPL005: needs badge branding variant #}
-                      PRAHO Portal
+                      {{ company.brand_name }}
                     </span>
                   </a>
                 </div>
@@ -133,14 +130,7 @@
           <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div class="text-center text-slate-400 text-sm">
               <p>
-                © {% now "Y" %} PRAHO Portal - {% trans 'PRAHO Really Automates Hosting Operations' %}
-              </p>
-              <p class="mt-2 text-xs">
-                <span class="text-blue-400">Django 5.2</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
-                <span class="text-green-400">Python 3.13</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
-                <span class="text-purple-400">PostgreSQL 16+</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
-                <span class="text-yellow-400">HTMX</span> | {# tmpl-allow TMPL005: needs badge unframed variant #}
-                <span class="text-cyan-400">{% trans 'Version' %} 0.30.0</span>
+                © {% now "Y" %} {{ company.brand_name }}{% if company.legal_name != company.brand_name %} · {{ company.legal_name }}{% endif %}
               </p>
               <p class="mt-2 text-xs space-x-3">
                 <a href="{% url 'terms_of_service' %}" class="text-slate-500 hover:text-slate-300 transition-colors">{% trans 'Terms of Service' %}</a>

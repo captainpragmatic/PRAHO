@@ -33,7 +33,7 @@ _allowed_hosts_raw = os.environ.get("ALLOWED_HOSTS", "").strip()
 if not _allowed_hosts_raw:
     raise ValueError(
         "SECURITY ERROR: ALLOWED_HOSTS must be set in production. "
-        "Set it to your portal FQDN, e.g.: portal.pragmatichost.com,localhost,127.0.0.1"
+        "Set it to your portal FQDN, e.g.: portal.example.com,localhost,127.0.0.1"
     )
 
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
@@ -52,7 +52,7 @@ if not PORTAL_DOMAIN:
     raise ValueError(
         "SECURITY ERROR: PORTAL_DOMAIN must be set in production. "
         "This is used for absolute URL construction in emails and links. "
-        "Example: PORTAL_DOMAIN=portal.pragmatichost.com"
+        "Example: PORTAL_DOMAIN=portal.example.com"
     )
 
 # Platform API configuration

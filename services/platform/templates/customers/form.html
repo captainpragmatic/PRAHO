@@ -140,10 +140,10 @@
           </div>
         </div>
 
-        <!-- Step 3: Romanian Tax Information -->
+        <!-- Step 3: Tax Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            {% icon "building" %} {% trans 'Romanian Tax Information' %}
+            {% icon "building" %} {% trans 'Tax Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -261,31 +261,6 @@
     });
   }
 
-  // Real-time VAT number validation
-  const vatField = document.getElementById('id_vat_number');
-  if (vatField) {
-    vatField.addEventListener('blur', function () {
-      const vat = this.value;
-      if (vat && vat.length > 3) {
-        const isValid = /^RO\d{6,10}$/.test(vat);
-        this.className = this.className.replace(/(border-red-500|border-green-500)/g, '');
-        this.className += isValid ? ' border-green-500' : ' border-red-500';
-      }
-    });
-  }
 
-  // Auto-format phone number
-  const phoneField = document.getElementById('id_phone');
-  if (phoneField) {
-    phoneField.addEventListener('input', function () {
-      let value = this.value.replace(/\D/g, '');
-      if (value.startsWith('40')) {
-        value = '+40 ' + value.substring(2);
-      } else if (value.startsWith('0')) {
-        // Keep Romanian local format
-      }
-      // Additional formatting could be added here
-    });
-  }
 </script>
 {% endblock %}

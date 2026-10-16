@@ -17,6 +17,7 @@ from apps.orders.models import Order
 from apps.orders.services import OrderCreateData, OrderService
 from apps.products.models import Product, ProductPrice
 from apps.settings.services import SettingsService
+from tests.helpers.checkout import checkout_consents
 
 
 class CurrencyPolicyCheckoutTests(TestCase):
@@ -38,7 +39,7 @@ class CurrencyPolicyCheckoutTests(TestCase):
         self.item = {"product_id": str(self.product.pk), "quantity": 1, "billing_period": "monthly"}
 
     def post(self, view, *, code="RON", revision=None, key=None):
-        payload = {"currency": code, "items": [self.item]}
+        payload = {"currency": code, "items": [self.item], **checkout_consents()}
         if revision is not None:
             payload["currency_revision"] = revision
         request = self.factory.post(

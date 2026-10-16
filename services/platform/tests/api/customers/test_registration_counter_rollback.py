@@ -14,11 +14,16 @@ from apps.audit.models import AuditEvent
 from apps.common import counters
 from apps.settings.services import SettingsService
 from apps.users.pending_registration import PendingRegistration
+from tests.helpers.legal import publish_release
 
 COUNTER_KEY = "rate_limit:registration:198.51.100.18"
 
 
 class RegistrationCounterRollbackTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
@@ -70,7 +75,7 @@ class RegistrationCounterRollbackTests(TestCase):
 
     def test_a_storage_failure_keeps_the_counter_and_its_record(self) -> None:
         with (
-            # The row is stored with one INSERT once its CNP is encrypted under the row's id.
+            # The row is stored with one INSERT.
             patch("apps.users.services.PendingRegistration.save", side_effect=RuntimeError("Store unavailable")),
             self.assertRaises(ValidationError),
         ):

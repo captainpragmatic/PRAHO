@@ -1350,8 +1350,7 @@ def reaches_reader(start: str, readers: set[str], graph: dict[str, set[str]], de
 def template_consumed_keys(template_files: list[Path]) -> set[str]:
     """Keys a template reads via `{% setting %}` and its typed siblings.
 
-    Nine keys have no Python reader at all - the `company.*` identity values are consumed only by
-    `templates/legal/`. For those the only possible observation is a rendered page.
+    A key read only by a template can be observed only on a rendered page.
     """
     keys: set[str] = set()
     for path in template_files:
@@ -1362,9 +1361,9 @@ def template_consumed_keys(template_files: list[Path]) -> set[str]:
 def _module_key_collections(tree: ast.Module, catalog_keys: set[str]) -> dict[str, set[str]]:
     """Module-level `NAME = {"app.key": ...}` collections, so a class that uses NAME counts as writing them.
 
-    Without this, `tests/settings/test_company_identity_effects.py` loses seven of its ten keys: they
-    live in module-level `PRIVACY_KEYS`/`TERMS_KEYS` dicts that the test class iterates. Scoping the
-    write to the class is right; pretending the class cannot see its own module is not.
+    Without this, `tests/settings/test_company_identity_effects.py` loses most of its keys: they live
+    in a module-level `IDENTITY_KEYS` dict that the test class iterates. Scoping the write to the
+    class is right; pretending the class cannot see its own module is not.
     """
     collections: dict[str, set[str]] = {}
     for node in tree.body:

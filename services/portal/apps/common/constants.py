@@ -19,7 +19,6 @@ from typing import Final
 # ===============================================================================
 
 # Romanian VAT (TVA) regulations - used in billing, orders, customers
-ROMANIAN_VAT_RATE: Final[Decimal] = Decimal("0.21")  # 21% standard VAT rate
 
 # Romanian CUI (Unique Registration Code) validation rules
 CUI_MIN_LENGTH: Final[int] = 2  # Minimum CUI length
@@ -238,12 +237,6 @@ EMAIL_PARTS_COUNT: Final[int] = 2  # Expected parts when splitting email on '@'
 
 # Domain name limits (RFC 1035)
 DOMAIN_NAME_MAX_LENGTH: Final[int] = 253  # RFC 1035 max domain name length
-
-# Romanian phone number formatting
-PHONE_MOBILE_LENGTH: Final[int] = 9  # Mobile number length (without country code)
-PHONE_LANDLINE_LENGTH: Final[int] = 10  # Landline number length (with area code)
-PHONE_FULL_INTERNATIONAL_LENGTH: Final[int] = 11  # Full international format (+40XXXXXXXXX)
-PHONE_MIN_VALID_LENGTH: Final[int] = 7  # Minimum valid phone number length
 
 # Romanian postal codes
 ROMANIAN_POSTAL_CODE_LENGTH: Final[int] = 6  # Romanian postal codes are 6 digits

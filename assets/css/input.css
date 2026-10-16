@@ -68,11 +68,6 @@
   background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
 }
 
-.romanian-flag::before {
-  content: "🇷🇴";
-  margin-right: 0.5rem;
-}
-
 /* ===============================================================================
    TYPOGRAPHY UTILITY CLASSES 🔤
    ===============================================================================
@@ -100,24 +95,21 @@
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-body);
   line-height: var(--line-height-body);
-  color: #94a3b8;
-  /* slate-400 */
+  color: var(--color-slate-400);
 }
 
 .text-meta {
   font-size: var(--font-size-meta);
   font-weight: var(--font-weight-body);
   line-height: 1rem;
-  color: #64748b;
-  /* slate-500 */
+  color: var(--color-slate-500);
 }
 
 .text-caption {
   font-size: var(--font-size-caption);
   font-weight: var(--font-weight-body);
   line-height: 0.875rem;
-  color: #64748b;
-  /* slate-500 */
+  color: var(--color-slate-500);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -249,16 +241,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: var(--color-slate-800);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: var(--color-slate-600);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: var(--color-slate-500);
 }
 
 /* ===============================================================================
@@ -313,17 +305,17 @@
 }
 
 .max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
+  background: color-mix(in oklab, var(--color-slate-900) 50%, transparent);
   border-radius: 3px;
 }
 
 .max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.5);
+  background: color-mix(in oklab, var(--color-slate-600) 50%, transparent);
   border-radius: 3px;
 }
 
 .max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 0.7);
+  background: color-mix(in oklab, var(--color-slate-600) 70%, transparent);
 }
 
 /* iOS safe area support */

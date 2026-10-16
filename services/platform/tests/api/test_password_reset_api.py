@@ -11,9 +11,9 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from apps.settings.models import SystemSetting
 from apps.users.models import User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal import set_portal_origin
 from tests.helpers.task_queue import queued, run_queued
 
 
@@ -37,26 +37,11 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
-        SystemSetting.objects.filter(key="portal.public_base_url").delete()
         self.user = User.objects.create_user(
             email="reset@example.com", password="Original-Cedar-283!Stone", first_name="Alex"
         )
         self.uid = urlsafe_base64_encode(force_bytes(self.user.pk))
         mail.outbox.clear()
-
-    def configure_portal_url(self, value: str = "https://portal.example.com") -> None:
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Customer portal URL",
-                "description": "Public customer portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": value,
-                "default_value": "",
-            },
-        )
-        cache.clear()
 
     def confirm_body(self, token: str | None = None, password: str | None = None) -> dict[str, str]:
         replacement = self.new_password if password is None else password
@@ -68,7 +53,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         }
 
     def test_request_sends_one_email_with_the_portal_confirm_link(self) -> None:
-        self.configure_portal_url("  https://portal.example.com///  ")
+        set_portal_origin("  https://portal.example.com///  ")
         response = self.portal_post(self.request_path, {"email": self.user.email})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIs(response.json()["success"], True)
@@ -89,7 +74,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         self.assertIn(f'href="{reset_url}"', str(message.alternatives[0][0]))
 
     def test_unknown_email_is_neutral_and_sends_nothing(self) -> None:
-        self.configure_portal_url()
+        set_portal_origin("https://portal.example.com")
         response = self.portal_post(self.request_path, {"email": "unknown@example.com"})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(
@@ -99,6 +84,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
         )
         self.assertEqual(len(mail.outbox), 0)
 
+    @override_settings(PORTAL_DOMAIN="")  # Neither a stored portal URL nor the deployment's domain
     def test_unconfigured_portal_url_is_private_and_account_independent(self) -> None:
         with self.assertLogs("apps.api.users.views", level="ERROR") as diagnostics:
             known = self.portal_post(self.request_path, {"email": self.user.email})
@@ -112,7 +98,7 @@ class PasswordResetAPITests(HMACTestMixin, TestCase):
     def test_invalid_portal_url_is_private_and_never_sends(self) -> None:
         for base in ("portal.example.com", "ftp://portal.example.com", "https://", "https://[invalid"):
             with self.subTest(base=base):
-                self.configure_portal_url(base)
+                set_portal_origin(base)
                 response = self.portal_post(self.request_path, {"email": self.user.email})
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertIn("email delivery is available", response.json()["message"])

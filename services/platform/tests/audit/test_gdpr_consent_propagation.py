@@ -9,13 +9,11 @@ two, so withdrawing marketing consent was a functional no-op — the customer ke
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
 
 from django.test import TestCase
 
 from apps.audit.models import ComplianceLog
 from apps.audit.services import GDPRConsentService, GDPRDeletionService
-from apps.common.types import Err as ErrResult
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
@@ -195,16 +193,17 @@ class PropagationHardeningTestCase(TestCase):
         customer.refresh_from_db()
         self.assertTrue(customer.marketing_consent, "an inactive member's withdrawal must not block the grant")
 
-    def test_data_processing_withdrawal_also_suppresses_marketing(self) -> None:
+    def test_anonymization_also_suppresses_marketing(self) -> None:
         """Sibling of #226: anonymization sets User.accepts_marketing=False, so it
         must propagate the suppression too — an erased user whose address is the
         customer contact must not keep receiving marketing."""
         user = _make_user()
         customer = _make_customer(user)
 
-        result = GDPRConsentService.withdraw_consent(user, ["data_processing"])
+        request = GDPRDeletionService.create_deletion_request(user, "anonymize", None, "Erase my account").unwrap()
+        result = GDPRDeletionService.process_deletion_request(request)
 
-        self.assertTrue(result.is_ok(), f"withdrawal failed: {result}")
+        self.assertTrue(result.is_ok(), f"anonymization failed: {result}")
         customer.refresh_from_db()
         self.assertFalse(customer.marketing_consent)
 
@@ -222,20 +221,17 @@ class PropagationHardeningTestCase(TestCase):
         ).first()
         self.assertIsNotNone(record, "the customer's consent trail must record the GDPR-initiated flip")
 
-    def test_failed_anonymization_rolls_back_marketing_propagation(self) -> None:
-        """withdraw_consent returns Err inside its transaction; the customer
-        suppression written before the failure must roll back with it, never
-        half-commit (user flag unsaved, customer flag flipped)."""
+    def test_a_refused_withdrawal_changes_nothing(self) -> None:
+        """A withdrawal naming data processing, which is not a consent, is refused whole:
+        the marketing withdrawal beside it neither half-commits nor anonymizes anything."""
         user = _make_user()
         customer = _make_customer(user)
 
-        with patch.object(
-            GDPRDeletionService, "process_deletion_request", return_value=ErrResult("anonymization backend down")
-        ):
-            result = GDPRConsentService.withdraw_consent(user, ["marketing", "data_processing"])
+        result = GDPRConsentService.withdraw_consent(user, ["marketing", "data_processing"])
 
         self.assertTrue(result.is_err())
         user.refresh_from_db()
         customer.refresh_from_db()
-        self.assertTrue(user.accepts_marketing, "user flag must not persist on a failed withdrawal")
-        self.assertTrue(customer.marketing_consent, "customer suppression must roll back with the failed withdrawal")
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.accepts_marketing, "user flag must not change on a refused withdrawal")
+        self.assertTrue(customer.marketing_consent, "customer suppression must not happen on a refused withdrawal")

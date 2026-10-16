@@ -7,7 +7,7 @@ Tests for GDPR compliance implementation covering:
 - Data export (Article 20 - Right to data portability)
 - Data deletion/anonymization (Article 17 - Right to erasure)
 - Consent management (Articles 6, 7 - Lawful basis and consent)
-- Romanian Law 190/2018 compliance
+- GDPR Articles 15 and 20 as the export's legal basis
 - Security and access controls
 """
 
@@ -239,25 +239,20 @@ class GDPRConsentServiceTest(TestCase):
         self.assertIsNotNone(log_entry)
         self.assertEqual(log_entry.status, "success")
 
-    def test_withdraw_consent_data_processing(self):
-        """Test withdrawing data processing consent (triggers anonymization)"""
+    def test_data_processing_is_not_a_consent_to_withdraw(self):
+        """Processing the account's data performs its contract, so it is not withdrawn here (ADR-0061).
+
+        Withdrawing it anonymized the account at once, beside the deletion request a user makes
+        for that. Erasure goes through the deletion request alone.
+        """
         result = gdpr_consent_service.withdraw_consent(
             user=self.user, consent_types=["data_processing"], request_ip="192.168.1.100"
         )
 
-        self.assertTrue(result.is_ok())
-
-        # Verify user account was deactivated
+        self.assertTrue(result.is_err())
         self.user.refresh_from_db()
-        self.assertFalse(self.user.is_active)
-        self.assertIsNone(self.user.gdpr_consent_date)
-
-        # Should have compliance logs for both consent withdrawal and anonymization
-        consent_log = ComplianceLog.objects.filter(compliance_type="gdpr_consent", user=self.user).first()
-        self.assertIsNotNone(consent_log)
-
-        deletion_log = ComplianceLog.objects.filter(compliance_type="gdpr_deletion", user=self.user).first()
-        self.assertIsNotNone(deletion_log)
+        self.assertTrue(self.user.is_active)
+        self.assertFalse(ComplianceLog.objects.filter(compliance_type="gdpr_deletion", user=self.user).exists())
 
     def test_get_consent_history(self):
         """Test retrieving user consent history"""
@@ -340,7 +335,7 @@ class GDPRSecurityTest(TestCase):
 
         # Should contain proper legal basis
         self.assertIn("legal_basis", export_data["metadata"])
-        self.assertIn("Romanian Law 190/2018", export_data["metadata"]["legal_basis"])
+        self.assertEqual(export_data["metadata"]["legal_basis"], "GDPR Articles 15 and 20")  # No jurisdiction claim
 
 
 class DataExportOrphanedRequesterTestCase(TestCase):

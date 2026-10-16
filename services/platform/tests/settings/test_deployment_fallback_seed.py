@@ -23,12 +23,32 @@ from apps.settings.catalog import CATALOG_BY_KEY, SettingDef
 from apps.settings.key_scan import iter_scannable_python_files
 from apps.settings.management.commands import setup_default_settings as sync
 from apps.settings.models import SettingActivation, SystemSetting
-from apps.settings.services import get_default_from_email
+from apps.settings.services import (
+    get_company_legal_name,
+    get_default_country,
+    get_default_from_email,
+    get_portal_public_base_url,
+)
 from tests.factories.core_factories import create_admin_user, create_staff_user
 
 QUOTA_KEYS = frozenset({"virtualmin.domain_quota_default_mb", "virtualmin.bandwidth_quota_default_mb"})
-REQUIRED_KEYS = frozenset(EFACTURA_DEFAULTS) | QUOTA_KEYS | {"company.email_noreply"}
+REQUIRED_KEYS = frozenset(EFACTURA_DEFAULTS) | QUOTA_KEYS | {
+    "company.email_noreply",
+    "company.legal_name",
+    "portal.public_base_url",
+    "system.default_country",
+}
 APPS_ROOT = Path(__file__).resolve().parents[2] / "apps"
+
+
+# Deployment/override values that differ from the catalog default; other strings use "deployment-value".
+DISTINCT_STRINGS = {
+    "efactura.environment": "production",
+    "company.legal_name": "Deployment Seller SRL",
+    "company.email_noreply": "deployment@example.test",
+    "portal.public_base_url": "https://portal.deployment.test",
+    "system.default_country": "DE",
+}
 
 
 def distinct_value(definition: SettingDef) -> str | int | bool:
@@ -38,9 +58,7 @@ def distinct_value(definition: SettingDef) -> str | int | bool:
         return not default
     if isinstance(default, int):
         return default + 7
-    if definition.key == "efactura.environment":
-        return "production"
-    return "deployment@example.test" if definition.key == "company.email_noreply" else "deployment-value"
+    return DISTINCT_STRINGS.get(definition.key, "deployment-value")
 
 
 def run_sync(*, force: bool = False, category: str | None = None) -> str:
@@ -139,15 +157,20 @@ class DeploymentFallbackSeedTests(TestCase):
             key.replace(".", "_").upper(): value for key, value in values.items() if key.startswith("efactura.")
         }
         django_values["DEFAULT_FROM_EMAIL"] = values["company.email_noreply"]
+        django_values["COMPANY_NAME"] = values["company.legal_name"]
+        django_values["COMPANY_COUNTRY_CODE"] = values["system.default_country"]
+        django_values["PORTAL_DOMAIN"] = str(values["portal.public_base_url"]).removeprefix("https://")
+        resolvers = {
+            "company.email_noreply": get_default_from_email,
+            "company.legal_name": get_company_legal_name,
+            "portal.public_base_url": get_portal_public_base_url,
+            "system.default_country": get_default_country,
+        }
         with override_settings(**django_values):
             run_sync()
             for key, expected in sorted(values.items()):
                 with self.subTest(key=key):
-                    resolved = (
-                        get_default_from_email()
-                        if key == "company.email_noreply"
-                        else EFacturaSettings()._get_setting(key)
-                    )
+                    resolved = resolvers[key]() if key in resolvers else EFacturaSettings()._get_setting(key)
                     self.assertEqual(resolved, expected)
                     self.assertFalse(SystemSetting.objects.filter(key=key).exists())
 

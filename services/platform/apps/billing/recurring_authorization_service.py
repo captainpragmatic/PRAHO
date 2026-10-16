@@ -24,10 +24,11 @@ _REVOCATION_STAFF_ROLES = frozenset({"admin", "billing"})
 class RecurringPaymentAuthorizationService:
     """Grant, withdraw, and revoke recurring-payment mandates with explicit authority."""
 
-    TERMS_VERSION = "2026-07-17"
+    TERMS_VERSION = "2026-10-14"
     TERMS_TEXT = (
-        "I authorize PRAHO to charge this saved card when recurring services on my account become due. "
-        "PRAHO may combine compatible services due in the same billing run into one variable-amount charge, "
+        "I authorize the seller named on my invoices to charge this saved card when recurring services on my "
+        "account become due. The seller may combine compatible services due in the same billing run into one "
+        "variable-amount charge, "
         "after creating the corresponding proforma. I can disable automatic payment for individual services or "
         "withdraw this card authorization at any time. Withdrawal stops future automatic collection but does not "
         "cancel services, erase issued documents, or remove amounts already owed."

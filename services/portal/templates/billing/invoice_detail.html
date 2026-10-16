@@ -3,14 +3,14 @@
 {% load formatting %}
 {% load ui_components %}
 
-{% block title %}{% trans "Invoice" %} {{ invoice.number }} - PRAHO Portal{% endblock %}
+{% block title %}{% trans "Invoice" %} {{ invoice.number }} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8">
   <!-- Header -->
   <div class="sm:flex sm:items-center">
     <div class="sm:flex-auto">
-      <h1 class="text-xl sm:text-2xl font-semibold text-white romanian-flag">
+      <h1 class="text-xl sm:text-2xl font-semibold text-white">
         {% trans "Invoice" %} <span class="block sm:inline mt-1 sm:mt-0">{{ invoice.number }}</span>
       </h1>
       <p class="mt-2 text-sm text-slate-400">

@@ -13,8 +13,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.billing.efactura.settings import ro_local_date
 from apps.common.types import Err, Ok, Result
+from apps.common.utils import operator_local_date
 from apps.settings.services import SettingsService
 
 from .config import FIXED_RENEWAL_COLLECTION_LEAD_DAYS, get_invoice_generation_lead_days
@@ -502,16 +502,16 @@ class RecurringBillingOrchestrator:
                                     billing_cycle=cycle,
                                     description=(
                                         f"{subscription.product.name} - {subscription.billing_cycle.replace('_', ' ').title()} "
-                                        f"({ro_local_date(cycle.period_start)} to {ro_local_date(cycle.period_end)})"
+                                        f"({operator_local_date(cycle.period_start)} to {operator_local_date(cycle.period_end)})"
                                     ),
                                     quantity=Decimal(terms.quantity),
                                     unit_price_cents=terms.unit_price_cents,
                                     tax_rate=vat_rate,
                                     domain_name=getattr(subscription.service, "domain", "") or "",
-                                    # Romanian calendar days: these are DateFields emitted verbatim into
-                                    # the e-Factura InvoicePeriod (#220/#286); raw .date() is the UTC day.
-                                    period_start=ro_local_date(cycle.period_start),
-                                    period_end=ro_local_date(cycle.period_end),
+                                    # The operator's calendar days (Romanian for e-Factura's InvoicePeriod,
+                                    # #220/#286); raw .date() is the UTC day.
+                                    period_start=operator_local_date(cycle.period_start),
+                                    period_end=operator_local_date(cycle.period_end),
                                     unit_code="C62",
                                     tax_category_code=tax_category,
                                     seller_item_id=subscription.product.slug,

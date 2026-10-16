@@ -129,7 +129,7 @@ class StripeGateway(BasePaymentGateway):
         self,
         order_id: str,
         amount_cents: int,
-        currency: str = "RON",
+        currency: str,
         customer_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         *,
@@ -164,8 +164,6 @@ class StripeGateway(BasePaymentGateway):
                     "praho_order_id": order_id,
                     "platform": "PRAHO",
                 },
-                # Romanian business compliance
-                "statement_descriptor_suffix": "PRAHO",
                 "receipt_email": None,  # Will be set from customer data
             }
 
@@ -354,7 +352,6 @@ class StripeGateway(BasePaymentGateway):
                     f"praho_{document_type}_id": document_id,
                     "platform": "PRAHO",
                 },
-                statement_descriptor_suffix="PRAHO",
                 idempotency_key=idempotency_key,
             )
             self.logger.info(

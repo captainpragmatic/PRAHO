@@ -20,7 +20,6 @@ from apps.customers.models import (
 from apps.orders.models import Order
 from apps.promotions.gift_cards import cash_due
 
-from .currency_models import Currency
 from .gateways import PaymentGatewayFactory
 from .gateways.base import GATEWAY_PAYMENT_METHODS, PaymentConfirmResult, PaymentIntentResult
 from .models import Invoice, Payment
@@ -410,7 +409,7 @@ class PaymentService:
     def create_payment_intent_direct(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Security guards
         order_id: str,
         amount_cents: int | None = None,
-        currency: str = "RON",
+        currency: str | None = None,  # Ignored: the proforma's recorded currency is authoritative
         customer_id: str | int | None = None,
         order_number: str | None = None,
         gateway: str = "stripe",
@@ -422,7 +421,7 @@ class PaymentService:
         Args:
             order_id: Portal order UUID
             amount_cents: Amount in cents
-            currency: ISO currency code (default: RON)
+            currency: Ignored; the proforma's recorded currency is authoritative
             customer_id: Customer ID for the payment
             order_number: Human-readable order number
             gateway: Payment gateway to use ('stripe', 'bank', etc.)
@@ -549,14 +548,7 @@ class PaymentService:
                 "platform": "PRAHO",
                 "source": "portal_api",
             }
-            currency_obj, _ = Currency.objects.get_or_create(
-                code=resolved_currency.upper(),
-                defaults={
-                    "name": resolved_currency.upper(),
-                    "symbol": "RON" if resolved_currency.upper() == "RON" else resolved_currency.upper(),
-                    "decimals": 2,
-                },
-            )
+            currency_obj = proforma.currency
 
             # H19: Reuse an exact existing order attempt. A local row with no
             # gateway ID represents an interrupted/uncertain create call and must

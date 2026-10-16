@@ -239,6 +239,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     Shows normalized data from separate profile models
     """
     from apps.billing.models import Invoice  # noqa: PLC0415 - ADR-0007 cross-app model import
+    from apps.customers.anaf_verification import lookups_enabled as anaf_lookups_enabled  # noqa: PLC0415
     from apps.provisioning.models import Service  # noqa: PLC0415 - ADR-0007 cross-app model import
     from apps.tickets.models import Ticket  # noqa: PLC0415 - ADR-0007 cross-app model import
 
@@ -307,6 +308,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
+        "anaf_lookups_enabled": anaf_lookups_enabled(),
         "billing_profile": customer.get_billing_profile(),
         "primary_address": customer.get_primary_address(),
         "billing_address": customer.get_billing_address(),

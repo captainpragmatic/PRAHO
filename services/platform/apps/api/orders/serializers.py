@@ -140,6 +140,21 @@ class OrderItemSerializer(serializers.ModelSerializer):
     tax_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     line_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    can_submit_transfer_code = serializers.SerializerMethodField()
+
+    def get_can_submit_transfer_code(self, obj: OrderItem) -> bool:
+        from apps.domains.models import DomainOrderItem  # noqa: PLC0415  # Customer-safe transfer state (ADR-0007).
+        from apps.domains.transfer_codes import TRANSFER_CODE_ORDER_STATUSES  # noqa: PLC0415
+
+        if (
+            not obj.is_domain_line
+            or obj.provisioning_status not in ("pending", "failed")
+            or obj.order.status not in TRANSFER_CODE_ORDER_STATUSES
+        ):
+            return False
+        return DomainOrderItem.objects.filter(
+            order_item=obj, order_id=obj.order_id, action="transfer", domain__isnull=True
+        ).exists()
 
     class Meta:
         model = OrderItem
@@ -158,6 +173,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "billing_period",
             "config",
             "provisioning_status",
+            "can_submit_transfer_code",
         )
 
 
@@ -321,6 +337,11 @@ class OrderCreateInputSerializer(PromotionInputSerializer):
     items = CartItemInputSerializer(many=True)
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True)
     meta = serializers.JSONField(default=dict, required=False)
+    # What the customer accepted at checkout (apps.orders.checkout_consents).
+    terms_document_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    early_start_requested = serializers.BooleanField(default=False)
+    # First-touch UTM tags and referring site (apps.common.intent); only valid keys are kept.
+    attribution = serializers.DictField(child=serializers.CharField(allow_blank=True, max_length=300), default=dict)
 
     def validate_meta(self, value: dict[str, Any]) -> dict[str, Any]:
         """Limit metadata payload size to reduce abuse and parser pressure."""

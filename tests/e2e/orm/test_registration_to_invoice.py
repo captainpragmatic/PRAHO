@@ -1,8 +1,8 @@
 """A customer's fiscal identity, given at registration, reaches their e-Factura invoice.
 
-Before, Platform dropped the CNP the portal sent, and every individual registered through the
-portal was invoiced with the placeholder CNP. A company without VAT registration could give no
-CUI, and a bare tax ID was stated as a VAT identifier.
+A company without VAT registration could give no CUI, and a bare tax ID was stated as a VAT
+identifier. Registration collects no CNP, so an individual is invoiced with the statutory
+identifier e-Factura accepts when the buyer gives none.
 """
 
 import pytest
@@ -16,9 +16,8 @@ from tests.e2e.orm.workflow import WorkflowCase
 
 pytestmark = pytest.mark.e2e
 
-CNP = "1900101123457"
 CUI = "14399840"
-PLACEHOLDER_CNP = "0000000000000"
+NO_FISCAL_IDENTIFIER = "0000000000000"
 NS = {
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
@@ -51,14 +50,13 @@ class RegistrationToInvoiceTests(RegistrationCase, WorkflowCase):
         root = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         return root.find("./cac:AccountingCustomerParty/cac:Party", NS)
 
-    def test_a_romanian_individual_is_invoiced_with_their_cnp(self):
+    def test_a_romanian_individual_is_invoiced_with_the_statutory_identifier(self):
         _user, customer = self.register(individual=True)
         invoice = self.invoice_for(customer)
-        self.assertEqual(invoice.bill_to_cnp, CNP)
+        self.assertFalse(invoice.bill_to_cnp)
         party = self.buyer(invoice)
         legal_id = party.findtext("./cac:PartyLegalEntity/cbc:CompanyID", namespaces=NS)
-        self.assertEqual(legal_id, CNP)
-        self.assertNotIn(PLACEHOLDER_CNP, etree.tostring(party).decode())
+        self.assertEqual(legal_id, NO_FISCAL_IDENTIFIER)
 
     def test_a_company_with_only_a_cui_states_no_vat_identifier(self):
         payload = self.payload()

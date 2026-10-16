@@ -538,6 +538,7 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
     Internal helper function for handling new service plan creation.
     Separated for testability and modularity.
     """
+    from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415
     from apps.billing.currency_thresholds import get_currency_threshold_cents  # noqa: PLC0415
 
     # create() keeps values as given until the row is reloaded, so they may still be strings.
@@ -545,7 +546,8 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
     price_monthly = ServicePlan._meta.get_field("price_monthly").to_python(instance.price_monthly)
     disk_space_gb = ServicePlan._meta.get_field("disk_space_gb").to_python(instance.disk_space_gb)
 
-    # Legacy plan fields record RON; explicit retail rows have their own price audit.
+    # Legacy plan fields are in the default selling currency; explicit retail rows have their own price audit.
+    legacy_currency = default_selling_currency()
     # Savepoint: a failed audit INSERT must not poison the caller's transaction.
     with transaction.atomic():
         AuditService.log_event(
@@ -562,7 +564,9 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                     "is_active": instance.is_active,
                     "is_public": instance.is_public,
                 },
-                description=f"Service plan '{instance.name}' created with monthly price {instance.price_monthly} RON",
+                description=(
+                    f"Service plan '{instance.name}' created with monthly price {instance.price_monthly} {legacy_currency}"
+                ),
             ),
             context=AuditContext(
                 actor_type="system",
@@ -570,12 +574,12 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                     "source_app": "provisioning",
                     "compliance_event": True,
                     "pricing_event": True,
-                    "currency": "RON",
+                    "currency": legacy_currency,
                     "high_value_plan": price_monthly * 100
                     >= get_currency_threshold_cents(
                         "provisioning.high_value_thresholds_cents",
-                        "RON",
-                        legacy_ron_threshold=SettingsService.get_integer_setting(
+                        legacy_currency,
+                        legacy_threshold=SettingsService.get_integer_setting(
                             "provisioning.high_value_plan_threshold_cents",
                             _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
                         ),
@@ -663,13 +667,9 @@ def _handle_new_service_creation(instance: Service) -> None:
                     >= get_currency_threshold_cents(
                         "provisioning.high_value_thresholds_cents",
                         instance.currency.code,
-                        legacy_ron_threshold=(
-                            SettingsService.get_integer_setting(
-                                "provisioning.high_value_plan_threshold_cents",
-                                _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
-                            )
-                            if instance.currency.code == "RON"
-                            else 0
+                        legacy_threshold=SettingsService.get_integer_setting(
+                            "provisioning.high_value_plan_threshold_cents",
+                            _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS,
                         ),
                     ),
                 },

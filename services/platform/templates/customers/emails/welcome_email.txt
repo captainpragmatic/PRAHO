@@ -1,6 +1,6 @@
 {% load i18n %}
-{% blocktrans trimmed with customer_name=display_name %}
-You have been invited to {{ customer_name }} on PRAHO.
+{% blocktrans trimmed with customer_name=display_name brand=brand_name %}
+You have been invited to {{ customer_name }} on {{ brand }}.
 {% endblocktrans %}
 
 {% trans "To get started, please set your password by clicking the link below:" %}
@@ -19,4 +19,4 @@ If you did not expect this invitation, please contact us at {{ support }}.
 {% endblocktrans %}
 
 {% trans "Best regards," %}
-{% trans "The PRAHO Team" %}
+{% blocktrans with brand=brand_name %}The {{ brand }} Team{% endblocktrans %}

@@ -131,6 +131,7 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3
+      - TIME_ZONE=${TIME_ZONE:-}  # the operator's clock, as on the platform; empty means Europe/Bucharest
       # Server settings (services/portal/gunicorn.conf.py); empty means its default.
       - PORTAL_GUNICORN_WORKER_CLASS=${PORTAL_GUNICORN_WORKER_CLASS:-}
       - PORTAL_GUNICORN_WORKERS=${PORTAL_GUNICORN_WORKERS:-}

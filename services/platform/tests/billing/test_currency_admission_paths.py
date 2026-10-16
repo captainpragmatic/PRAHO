@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 from django.conf import settings
 from django.core.checks import run_checks
 from django.db import OperationalError
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from django.utils.translation import override
 
@@ -345,22 +345,19 @@ class RONWithoutRateTests(_CurrencyAdmissionCases, _SubscriptionInvoicePaymentFi
 
 class DefaultCurrencyConfigurationTests(TestCase):
     def test_single_default_currency_source_of_truth(self) -> None:
-        """The stored policy owns sales; the compatibility environment option is ignored."""
-        self.assertTrue(hasattr(settings, "BILLING_DEFAULT_CURRENCY"))
-        self.assertFalse(hasattr(settings, "DEFAULT_CURRENCY"))
-        self.assertFalse(hasattr(settings, "SUPPORTED_CURRENCIES"))
+        """The stored policy owns sales; no environment option competes with it."""
+        for name in ("BILLING_DEFAULT_CURRENCY", "DEFAULT_CURRENCY", "SUPPORTED_CURRENCIES"):
+            with self.subTest(setting=name):
+                self.assertFalse(hasattr(settings, name))
         self.assertFalse(hasattr(billing_config, "DEFAULT_CURRENCY_CODE"))
-        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"):
-            self.assertEqual(get_selling_currency_policy().currency_code, "RON")
+        self.assertEqual(get_selling_currency_policy().currency_code, "RON")
 
     def test_offline_check_does_not_query_the_database(self) -> None:
-        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"), self.assertNumQueries(0):
+        with self.assertNumQueries(0):
             self.assertEqual(run_checks(tags=["billing_currency"]), [])
 
-    def test_invalid_or_noncanonical_deprecated_environment_is_ignored(self) -> None:
-        for value in (None, "", " ", 123, "XXX", "eur", " EUR "):
-            with self.subTest(value=value), override_settings(BILLING_DEFAULT_CURRENCY=value):
-                self.assertEqual(run_checks(tags=["billing_currency"], databases=["default"]), [])
+    def test_the_seeded_policy_is_ready_without_any_environment_option(self) -> None:
+        self.assertEqual(run_checks(tags=["billing_currency"], databases=["default"]), [])
 
     def test_unavailable_fx_database_is_an_error(self) -> None:
         get_selling_currency_policy(lock=True)

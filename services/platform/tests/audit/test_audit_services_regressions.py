@@ -548,10 +548,11 @@ class TestGDPRConsentService(TestCase):
         result = GDPRConsentService.withdraw_consent(user, ["invalid_type"], "1.2.3.4")
         self.assertTrue(result.is_err())
 
-    def test_withdraw_data_processing_consent(self):
+    def test_withdraw_data_processing_is_refused(self):
+        """Data processing performs the account's contract; erasure is a deletion request."""
         user = _make_user()
         result = GDPRConsentService.withdraw_consent(user, ["data_processing"], "1.2.3.4")
-        self.assertTrue(result.is_ok())
+        self.assertTrue(result.is_err())
 
     def test_withdraw_no_changes(self):
         """Marketing not enabled, so no changes made."""
@@ -1538,11 +1539,11 @@ class TestDomainsAuditService(TestCase):
         order_item.id = uuid.uuid4()
         order_item.order = Mock(id=uuid.uuid4(), customer=Mock(id=uuid.uuid4()))
         order_item.domain_name = "test.ro"
-        order_item.operation_type = "register"
+        order_item.action = "register"
         order_item.registrar = Mock(name="ROTLD")
         order_item.registrar.name = "ROTLD"
         order_item.tld = Mock(extension="ro")
-        order_item.price_cents = 5000
+        order_item.total_price_cents = 5000
         event = DomainsAuditService.log_domain_order_event("domain_order_created", order_item)
         self.assertEqual(event.action, "domain_order_created")
 

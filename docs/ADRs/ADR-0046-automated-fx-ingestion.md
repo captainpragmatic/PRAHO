@@ -44,10 +44,11 @@ in **one transaction**: a mid-batch failure (a conflict, or a rate that clears t
 but trips the model's precision validators) rolls back every currency and alerts — the feed
 is never half-applied, and no write failure escapes silently.
 
-**Admission (fail-closed).** A non-RON billable document may only be created when a
-provenanced rate resolves for it (`assert_currency_issuable`), enforced at every
-money-taking path (staff/order proforma, subscription, recurring, pre-collection, order
-checkout). `BILLING_DEFAULT_CURRENCY` is validated by a system check.
+**Admission (fail-closed).** A billable document in a currency other than the home currency
+(ADR-0041 addendum) may only be created when a provenanced rate to the home currency resolves
+for it (`assert_currency_issuable`), enforced at every money-taking path (staff/order proforma,
+subscription, recurring, pre-collection, order checkout). The stored selling policy is
+validated by the `billing_currency` system check.
 
 **Snapshot-carry.** FX is frozen once at the reversible conversion moment and *consumed*
 by `invoice.issue()` (which no longer re-resolves when a snapshot is present), so a later
@@ -98,11 +99,11 @@ the manual command stays authoritative until an operator enables it.
   `ExchangeRateService.resolve` docstring. `FXRate.as_of`'s model `help_text` still reads
   "next banking day"; it is knowingly left stale to avoid a no-op schema migration and is
   not authoritative.
-- **`BILLING_DEFAULT_CURRENCY` is a validated forward-hook, not yet wired to defaulting.** The
-  `billing_currency` system check rejects an unsupported/unresolvable value at startup, but every
-  document-creation path still defaults to literal RON; making a non-RON default active touches
-  many money paths and is deliberate future work. Setting it to EUR/USD therefore validates but
-  does not (yet) change new documents' currency.
+- **`BILLING_DEFAULT_CURRENCY` was removed (2026-10-14).** Nothing read it. The selling currency
+  is the stored `billing.default_currency` policy, seeded from the operator's home currency.
+- **BNR quotes RON only.** The daily fetch runs only for a Romanian operator (ADR-0047 addendum).
+  Any other operator records its rates to its home currency with `record_exchange_rate`
+  (ECB or BANK source).
 - **Usage invoicing** (`usage_invoice_service`) is not given an explicit `assert_currency_issuable`
   admission guard here: it calls `issue()` directly, and issuance precedes collection, so an
   unresolvable rate fails the invoice loud *before* any money is taken (unbilled usage,

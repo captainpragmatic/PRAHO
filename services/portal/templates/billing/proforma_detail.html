@@ -3,7 +3,7 @@
 {% load ui_components %}
 {% load formatting %}
 
-{% block title %}{% trans "Proforma" %} {{ proforma.number }} - PRAHO Portal{% endblock %}
+{% block title %}{% trans "Proforma" %} {{ proforma.number }} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
@@ -291,7 +291,7 @@
         </div>
       </div>
 
-      <!-- Romanian Business Info -->
+      <!-- Business Info -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
           {% icon "flag" size="md" css_class="inline text-blue-400" %} {% trans 'About This Quote' %} {# tmpl-allow TMPL005: needs badge unframed variant #}
@@ -305,10 +305,6 @@
           <div class="flex items-center space-x-2">
             {% icon "check" size="sm" css_class="text-green-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
             <span class="text-slate-300">{% trans 'Becomes invoice when accepted' %}</span>
-          </div>
-          <div class="flex items-center space-x-2">
-            {% icon "clipboard" size="sm" css_class="text-yellow-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}
-            <span class="text-slate-300">{% trans 'Romanian business compliant' %}</span>
           </div>
           <div class="flex items-center space-x-2">
             {% icon "phone" size="sm" css_class="text-purple-400" %} {# tmpl-allow TMPL005: needs badge unframed variant #}

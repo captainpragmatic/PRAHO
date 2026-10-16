@@ -1,8 +1,8 @@
-"""The confirmation page asks for the Terms of Service, and sends the version it showed.
+"""The confirmation page asks for the Terms of Service, and sends the release it linked.
 
-Platform records the version the confirmer accepted and refuses one that is no longer current
-(`terms_changed`). The page takes the version from the details it fetched for the link, and on
-`terms_changed` forgets those details, so the next submit sends the current version.
+Platform names the release in force in the preview, records the one the confirmer accepted, and
+refuses one that is no longer in force (`terms_changed`). The page links that exact release and, on
+`terms_changed`, forgets the details, so the next page names the release now in force (ADR-0061).
 """
 
 import re
@@ -13,12 +13,14 @@ from django.test import TestCase, override_settings
 
 from apps.api_client.services import PlatformAPIError
 from tests.users.test_registration_confirm import CHOSEN, LINK, PAGE, REGISTRATION_ID, form
+from tests.users.test_registration_confirm import TERMS_DOCUMENT_ID as TERMS_ID
 
-VERSION = "2024-12-27"
-NEW_VERSION = "2026-10-01"
+NEW_TERMS_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+TERMS_UNAVAILABLE = PlatformAPIError("no terms", status_code=409, response_data={"code": "terms_unavailable"})
 
 
-def details(version: str = VERSION) -> dict[str, object]:
+def details(document_id: str = TERMS_ID) -> dict[str, object]:
+    terms = {"document_id": document_id, "kind": "terms", "language": "en", "release": "2024-12-27.1", "sha256": "0" * 64}
     return {
         "registration": {
             "email": "new@example.test",
@@ -28,7 +30,7 @@ def details(version: str = VERSION) -> dict[str, object]:
             "vat_number": "",
             "cui": "14399840",
             "registration_number": "J40/1234/2020",
-            "terms_version": version,
+            "terms_document": terms,
         }
     }
 
@@ -45,10 +47,10 @@ class ConfirmTermsTests(TestCase):
         self.api.get_pending_registration.return_value = details()
         self.client.get(LINK)
 
-    def test_the_page_shows_the_company_identifiers_and_links_the_terms(self) -> None:
+    def test_the_page_shows_the_company_identifiers_and_links_the_release_to_accept(self) -> None:
         page = self.client.get(PAGE)
-        # The footer links the terms too; the page's own link opens beside the form.
-        for shown in ("14399840", "J40/1234/2020", 'name="terms_accepted"', 'href="/terms/" target="_blank"'):
+        # The footer links the terms in force; the page's own link opens the exact release beside the form.
+        for shown in ("14399840", "J40/1234/2020", 'name="terms_accepted"', f'href="/legal/{TERMS_ID}/" target="_blank"'):
             self.assertContains(page, shown)
 
     def test_the_terms_must_be_accepted_before_calling_platform(self) -> None:
@@ -57,7 +59,7 @@ class ConfirmTermsTests(TestCase):
         self.assertIn("terms_accepted", response.context["form"].errors)
         self.api.confirm_registration.assert_not_called()
 
-    def test_acceptance_is_sent_with_the_version_the_page_showed(self) -> None:
+    def test_acceptance_is_sent_with_the_release_the_page_linked(self) -> None:
         self.client.get(PAGE)
         self.api.confirm_registration.return_value = {"success": True}
         self.client.post(PAGE, form(terms_accepted="on"))
@@ -66,28 +68,37 @@ class ConfirmTermsTests(TestCase):
             "correct-token",
             CHOSEN,
             CHOSEN,
-            data_processing_consent=True,
             marketing_consent=False,
             terms_accepted=True,
-            terms_version=VERSION,
+            terms_document_id=TERMS_ID,
             client_ip="127.0.0.1",
         )
 
-    def test_changed_terms_are_fetched_again_and_the_next_submit_sends_them(self) -> None:
+    def test_changed_terms_redraw_the_page_with_the_new_release_which_the_next_submit_sends(self) -> None:
         self.client.get(PAGE)
         self.api.confirm_registration.side_effect = PlatformAPIError(
             "changed", status_code=409, response_data={"code": "terms_changed"}
         )
+        self.api.get_pending_registration.return_value = details(NEW_TERMS_ID)
         response = self.client.post(PAGE, form(terms_accepted="on"))
+        # The page now links the release in force and carries it, never the one it replaced.
         self.assertContains(response, "have changed", status_code=409)
+        self.assertContains(response, f'href="/legal/{NEW_TERMS_ID}/"', status_code=409)
+        self.assertContains(response, f'value="{NEW_TERMS_ID}"', status_code=409)
+        self.assertNotContains(response, TERMS_ID, status_code=409)
 
-        self.api.get_pending_registration.return_value = details(NEW_VERSION)
         self.api.confirm_registration.side_effect = None
         self.api.confirm_registration.return_value = {"success": True}
-        with patch("apps.users.views.TERMS_OF_SERVICE_VERSION", NEW_VERSION):  # Both services updated
-            self.client.post(PAGE, form(terms_accepted="on"))
+        self.client.post(PAGE, form(terms_accepted="on", terms_document_id=NEW_TERMS_ID))
         self.assertEqual(self.api.get_pending_registration.call_count, 2)
-        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], NEW_VERSION)
+        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_document_id"], NEW_TERMS_ID)
+
+    def test_the_release_the_page_showed_is_sent_whatever_the_session_holds_now(self) -> None:
+        # Another tab drew the page again with a newer release; this tab still shows the old one.
+        self.client.get(PAGE)
+        self.api.confirm_registration.return_value = {"success": True}
+        self.client.post(PAGE, form(terms_accepted="on", terms_document_id=NEW_TERMS_ID))
+        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_document_id"], NEW_TERMS_ID)
 
     def test_after_changed_terms_the_box_must_be_ticked_again(self) -> None:
         self.client.get(PAGE)
@@ -98,21 +109,23 @@ class ConfirmTermsTests(TestCase):
         [checkbox] = re.findall(r"<input[^>]*name=\"terms_accepted\"[^>]*>", html, re.S)
         self.assertNotIn("checked", checkbox)
 
-    def test_details_without_a_version_are_fetched_again_before_submitting(self) -> None:
-        # Details a Platform without terms acceptance returned: they name no version to accept.
-        stale = details()
-        del stale["registration"]["terms_version"]
-        self.api.get_pending_registration.return_value = stale
-        self.client.get(PAGE)
-        self.api.get_pending_registration.return_value = details()
+    def test_while_no_terms_are_in_force_there_is_no_form_and_the_details_are_fetched_again(self) -> None:
+        self.api.get_pending_registration.side_effect = TERMS_UNAVAILABLE
+        self.client.get(LINK)
+        response = self.client.post(PAGE, form(terms_accepted="on"))
+        self.assertContains(response, "once the Terms of Service are published", status_code=409)
+        self.assertNotContains(response, 'name="terms_accepted"', status_code=409)
+        self.api.confirm_registration.assert_not_called()
+
+        self.api.get_pending_registration.side_effect = None
         self.api.confirm_registration.return_value = {"success": True}
         self.client.post(PAGE, form(terms_accepted="on"))
-        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_version"], VERSION)
+        self.assertEqual(self.api.confirm_registration.call_args.kwargs["terms_document_id"], TERMS_ID)
 
-    def test_nothing_is_confirmed_while_the_two_services_name_different_terms(self) -> None:
-        # Mid-deploy: /terms/ shows the portal's version, Platform would record its own.
-        self.api.get_pending_registration.return_value = details(NEW_VERSION)
+    def test_terms_no_longer_in_force_meanwhile_end_on_the_same_notice(self) -> None:
         self.client.get(PAGE)
+        self.api.confirm_registration.side_effect = TERMS_UNAVAILABLE
+        self.api.get_pending_registration.side_effect = TERMS_UNAVAILABLE
         response = self.client.post(PAGE, form(terms_accepted="on"))
-        self.assertContains(response, "being updated", status_code=503)
-        self.api.confirm_registration.assert_not_called()
+        self.assertContains(response, "once the Terms of Service are published", status_code=409)
+        self.assertNotContains(response, 'name="terms_accepted"', status_code=409)

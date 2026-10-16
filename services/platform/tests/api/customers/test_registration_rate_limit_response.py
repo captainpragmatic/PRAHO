@@ -11,6 +11,7 @@ from apps.common import counters
 from apps.settings.services import SettingsService
 from apps.users.pending_registration import PendingRegistration
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
 
 MESSAGE = "Too many registration attempts. Please try again later."
 COUNTER_KEY = "rate_limit:registration:198.51.100.29"
@@ -22,6 +23,10 @@ COUNTER_KEY = "rate_limit:registration:198.51.100.29"
     HMAC_ALLOW_LEGACY_SECRET=True,
 )
 class RegistrationRateLimitResponseTests(HMACTestMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)

@@ -43,12 +43,9 @@ def _entries(path: Path) -> dict[MessageKey, polib.POEntry]:
 class SharedCatalogTests(SimpleTestCase):
     def test_catalog_covers_every_shared_template_msgid(self) -> None:
         messages = _shared_msgids()
-        self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 27)
-        # badge "Close" shares the modal msgid; the Terms of Service and Privacy Policy texts, shared
-        # since the portal publishes them too, bring 101 and 154.
-        self.assertEqual(len(messages), 289)
-        self.assertIn((None, "Acceptance of Terms"), messages)
-        self.assertIn((None, "Data Controller Information"), messages)
+        self.assertEqual(len(list((ROOT / "shared/ui/templates").rglob("*.html"))), 26)
+        # badge "Close" shares the modal msgid. PRAHO ships no legal prose (ADR-0061).
+        self.assertEqual(len(messages), 34)
         self.assertTrue(SHARED_PO.is_file(), "Shared Romanian catalog is missing")
         self.assertIn((None, _BLOCK_MESSAGE), messages)
         self.assertIn(("form action", "Save"), messages)
@@ -59,6 +56,12 @@ class SharedCatalogTests(SimpleTestCase):
                 self.assertIn(message, entries)
                 self.assertTrue(entries[message].msgstr.strip(), "Romanian translation is empty")
                 self.assertNotIn("fuzzy", entries[message].flags)
+
+    def test_catalog_holds_nothing_the_shared_templates_do_not_use(self) -> None:
+        # The shared catalog comes first in LOCALE_PATHS, so a stale entry would silently override a
+        # service's own translation of the same msgid. A string a template drops leaves with it.
+        stale = sorted(set(_entries(SHARED_PO)) - _shared_msgids() - {(None, "")}, key=lambda key: key[1])
+        self.assertEqual(stale, [])
 
     def test_service_duplicates_match_the_shared_translation(self) -> None:
         messages = _shared_msgids()

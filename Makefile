@@ -608,7 +608,7 @@ test-e2e-csp:
 	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
 	@echo "🔒 [CSP E2E] Verifying the $(CSP_PROFILE) browser violation oracle..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" $(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py
+	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" $(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py tests/e2e/portal/csp_altcha_widget_gate.py tests/e2e/portal/test_domain_checkout_flow.py
 	@echo "✅ Strict-CSP violation oracle verified!"
 
 test-e2e-orm:

@@ -674,7 +674,7 @@ def validate_translation(msgid: str, msgstr: str) -> list[str]:
 # Claude AI engine
 # ---------------------------------------------------------------------------
 
-CLAUDE_SYSTEM_PROMPT = """You are a professional Romanian translator specializing in software localization for a hosting provider platform called PRAHO (PragmaticHost).
+CLAUDE_SYSTEM_PROMPT = """You are a professional Romanian translator specializing in software localization for a hosting provider platform called PRAHO.
 
 Key glossary — use these exact Romanian terms:
 - CUI = Cod Unic de Înregistrare (Romanian company tax ID)

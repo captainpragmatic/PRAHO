@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.currency_service import default_selling_currency
 from apps.common.cnp_validator import validate_cnp
 from apps.common.cui_validator import CUIValidator, validate_cui
 from apps.common.fields import EncryptedTextField
@@ -114,6 +115,21 @@ class CustomerTaxProfile(SoftDeleteModel):
         verbose_name=_("VIES status"),
     )
 
+    class AnafStatus(models.TextChoices):
+        NOT_CHECKED = "", _("Not checked")
+        PENDING = "pending", _("Pending")
+        ACTIVE = "active", _("Registered, active")
+        INACTIVE = "inactive", _("Registered, inactive or deregistered")
+        NOT_FOUND = "not_found", _("Not found at ANAF")
+
+    # ANAF register evidence for a Romanian CUI (apps.customers.anaf_verification)
+    anaf_status = models.CharField(
+        max_length=20, choices=AnafStatus.choices, blank=True, default="", verbose_name=_("ANAF status")
+    )
+    anaf_verified_name = models.CharField(max_length=255, blank=True, verbose_name=_("ANAF company name"))
+    anaf_verified_at = models.DateTimeField(null=True, blank=True, verbose_name=_("ANAF checked at"))
+    anaf_vat_registered = models.BooleanField(null=True, blank=True, verbose_name=_("VAT-registered at ANAF"))
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -135,6 +151,15 @@ class CustomerTaxProfile(SoftDeleteModel):
 
         return reverse_charge_requires_name_match() and not vies_name_matches(
             self.vies_verified_name, self.customer.get_billing_name()
+        )
+
+    @property
+    def anaf_name_mismatch(self) -> bool:
+        """ANAF's registered name lacks a word the invoices carry (the VIES name rule)."""
+        from apps.billing.vies_evidence import vies_name_matches  # noqa: PLC0415
+
+        return bool(self.anaf_verified_name) and not vies_name_matches(
+            self.anaf_verified_name, self.customer.get_billing_name()
         )
 
     @property
@@ -181,12 +206,15 @@ class CustomerBillingProfile(SoftDeleteModel):
 
     # Credit Management
     credit_limit = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Limită credit (RON)")
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Limită credit")
     )
 
     # Currency Preferences
     preferred_currency = models.CharField(
-        max_length=3, choices=CurrencyCode.choices(), default="RON", verbose_name=_("Monedă preferată")
+        max_length=3,
+        choices=CurrencyCode.choices(),
+        default=default_selling_currency,
+        verbose_name=_("Monedă preferată"),
     )
 
     # Audit

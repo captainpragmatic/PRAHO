@@ -41,7 +41,7 @@ _allowed_hosts_raw = os.environ.get("ALLOWED_HOSTS", "").strip()
 if not _allowed_hosts_raw:
     raise ValueError(
         "SECURITY ERROR: ALLOWED_HOSTS must be set in staging. "
-        "Set it to your portal FQDN, e.g.: portal-staging.pragmatichost.com,localhost,127.0.0.1"
+        "Set it to your portal FQDN, e.g.: portal-staging.example.com,localhost,127.0.0.1"
     )
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
 if "*" in ALLOWED_HOSTS:
@@ -52,7 +52,7 @@ CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not 
 PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
 if not PORTAL_DOMAIN:
     raise ValueError(
-        "SECURITY ERROR: PORTAL_DOMAIN must be set in staging. Example: PORTAL_DOMAIN=portal-staging.pragmatichost.com"
+        "SECURITY ERROR: PORTAL_DOMAIN must be set in staging. Example: PORTAL_DOMAIN=portal-staging.example.com"
     )
 
 # Platform API configuration for staging

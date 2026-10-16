@@ -131,6 +131,10 @@ application encryption key.
 
 ## Addendum (2026-10-11): the CNP of a pending registration
 
+**Superseded 2026-10-15.** Registration no longer collects a CNP: nothing needs it there, so
+`PendingRegistration.cnp_encrypted` and its accessors are removed (users migration 0007), and with
+them the 25-hour key-retirement constraint below. Kept as the record of what was.
+
 `PendingRegistration.cnp_encrypted` holds the CNP a registration was submitted with until its
 link is confirmed. It is a plain `TextField` with hand-written accessors (`set_cnp()`, `cnp()`),
 not an `EncryptedJSONField`, and binds each value to its row the same way:
@@ -223,6 +227,12 @@ and is the only code that reads or writes those bytes.
 - **Key rotation.** `reencrypt_with_aad` does not find these files. A retired key must stay in the
   keyring until every export file encrypted under it has been deleted: 7 days plus a day of
   cleanup, provided the cleanup task has reported no failures.
+
+## Addendum (2026-10-15): registrar CNP and fiscal identity
+
+A CNP required by a .ro registrar is collected at checkout through the owner/billing-only, write-only tax-profile API and stored in the existing row-bound encrypted `CustomerTaxProfile.cnp` field. It is validated before creating a profile. Responses and audit metadata never carry the value. A CNP-only save does not refresh ANAF evidence.
+
+The deployment decision explicitly accepts the fiscal use of this same field: the CNP is also the buyer identifier on subsequent proformas, invoices and e-Factura. Registration and checkout notices disclose both uses, and `docs/deployment/LEGAL_DOCUMENTS.md` tells deployers to cover them in their published Privacy Policy. CNP is not collected at account registration.
 
 ## Related
 
