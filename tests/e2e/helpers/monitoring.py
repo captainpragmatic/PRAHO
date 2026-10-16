@@ -15,11 +15,15 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 from tests.e2e.helpers.constants import DJANGO_Q_LOG_FILE, PLATFORM_LOG_FILE, PORTAL_LOG_FILE
+from tests.e2e.helpers.csp import ensure_csp_capture, read_csp_violations
 from tests.e2e.helpers.server_logs import ServerLogScanner
 
 # ===============================================================================
 # CONSOLE ERROR MONITORING
 # ===============================================================================
+
+# An ignore pattern containing one of these would hide an access-control failure.
+_AUTH_ERROR_TOKENS = ("401", "403", "404", "forbidden", "unauthorized")
 
 class _ConsoleCollector:
     """Console errors, warnings and uncaught page errors, with a listener that can be removed.
@@ -159,6 +163,19 @@ class _ResponseCollector:
         if self._page is not None:
             self._page.remove_listener("response", self._on_response)
             self._page = None
+
+
+def _validate_ignore_patterns(patterns: list[str], *, allow_auth: bool) -> list[str]:
+    """Refuse a pattern that would also hide an auth or not-found error, unless opted in."""
+    if not allow_auth:
+        for pattern in patterns:
+            lowered = pattern.lower()
+            if any(token in lowered for token in _AUTH_ERROR_TOKENS):
+                raise ValueError(
+                    f"Ignore pattern {pattern!r} would also hide auth or not-found errors; "
+                    "pass allow_auth_error_ignores=True if that is the point of the test."
+                )
+    return list(patterns)
 
 
 def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patterns: list[str] | None = None,
@@ -375,8 +392,9 @@ def check_accessibility_basics(page: Page) -> list[str]:
                         return;
                     }
 
-                    // Skip common search inputs that have placeholder text (acceptable UX pattern)
-                    if (input.type === 'search' || input.name === 'search' || input.placeholder) {
+                    // Search inputs are exempt (acceptable UX pattern). A placeholder is not a label:
+                    // it disappears on input and is not a reliable accessible name.
+                    if (input.type === 'search' || input.name === 'search') {
                         return;
                     }
 
@@ -384,8 +402,13 @@ def check_accessibility_basics(page: Page) -> list[str]:
                     const hasLabelFor = id && document.querySelector('label[for="' + id + '"]');
                     const hasLabelParent = input.closest('label') !== null;
                     if (!hasLabelFor && !hasLabelParent) {
-                        const ariaLabel = input.getAttribute('aria-label');
-                        if (!ariaLabel) {
+                        const ariaLabel = (input.getAttribute('aria-label') || '').trim();
+                        const labelledBy = (input.getAttribute('aria-labelledby') || '').trim();
+                        const labelElements = labelledBy.split(' ').filter(Boolean).map(ref => document.getElementById(ref));
+                        const labelledByText = labelElements.length && labelElements.every(Boolean)
+                            ? labelElements.map(el => el.textContent).join(' ').trim()
+                            : '';
+                        if (!ariaLabel && !labelledByText) {
                             issues.push('Input missing label: ' + (input.name || input.type || 'unknown'));
                         }
                     }
@@ -490,6 +513,7 @@ class PageQualityConfig:
     check_accessibility: bool = False  # Can be slow
     check_performance: bool = False    # Can be slow
     check_server_logs: bool = True     # Check platform/portal server logs for errors
+    check_csp: bool = True             # Fail on CSP violations, enforced or report-only
     ignore_patterns: list[str] = field(default_factory=list)
 
 
@@ -532,18 +556,18 @@ class ComprehensivePageMonitor:
         self.check_css = config.check_css
         self.check_accessibility = config.check_accessibility
         self.check_performance = config.check_performance
-        self.ignore_patterns = list(config.ignore_patterns)
         self.check_server_logs = config.check_server_logs
+        self.check_csp = config.check_csp
+        # Security hardening: never suppress auth/access-denied/not-found errors by default.
+        self.ignore_patterns = _validate_ignore_patterns(
+            list(config.ignore_patterns), allow_auth=allow_auth_error_ignores
+        )
         self._log_scanner: ServerLogScanner | None = None
         self._expected_error_patterns: list[str] = []
         self._http_expectations: list[HttpExpectation] = []
         self._console = _ConsoleCollector()
         self._responses = _ResponseCollector(self._http_expectations)
-
-        # Security hardening: never suppress auth/access-denied/not-found errors by default.
-        if not allow_auth_error_ignores and self.ignore_patterns:
-            blocked_patterns = {"401", "403", "404", "forbidden", "unauthorized"}
-            self.ignore_patterns = [p for p in self.ignore_patterns if p.lower() not in blocked_patterns]
+        self._csp_seen = 0
 
         # Quality hardening: keep accessibility checks enabled unless explicitly opted out.
         if not self.check_accessibility and self.check_html and self.check_css and not allow_accessibility_skip:
@@ -567,6 +591,9 @@ class ComprehensivePageMonitor:
 
             if self.check_network or self.check_server_logs:
                 self._responses.attach(self.page)
+
+            if self.check_csp:
+                self._csp_seen = len(ensure_csp_capture(self.page).violations)
         except BaseException:
             self._detach()
             raise
@@ -635,6 +662,16 @@ class ComprehensivePageMonitor:
             # Without the network check, a server error still fails the test, as it always has.
             return [f"HTTP: {record.describe()}" for record in unexcused if record.status >= 500]
         return []
+
+    def _check_csp_issues(self) -> list[str]:
+        """Every violation since the monitor started, from this document and the earlier ones."""
+        if not self.check_csp:
+            return []
+
+        return [
+            f"CSP {v['disposition']}: {v['violatedDirective']} blocked {v['blockedURI']}"
+            for v in read_csp_violations(self.page)[self._csp_seen:]
+        ]
 
     def _check_html_issues(self) -> list[str]:
         """Check for HTML validation issues and return them."""
@@ -730,6 +767,8 @@ class ComprehensivePageMonitor:
             checks_performed.append("performance")
         if self.check_server_logs:
             checks_performed.append("server-logs")
+        if self.check_csp:
+            checks_performed.append("CSP")
         return checks_performed
 
     def _print_success_message(self) -> None:
@@ -752,6 +791,7 @@ class ComprehensivePageMonitor:
         # page raises meanwhile is caught; the listeners go before the verdict, never after it.
         try:
             page_issues = [
+                *self._check_csp_issues(),
                 *self._check_html_issues(),
                 *self._check_css_issues(),
                 *self._check_accessibility_issues(),
@@ -786,10 +826,11 @@ class ConsoleMonitor:
             # Console errors are automatically checked when exiting context
     """
 
-    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] | None = None):
+    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] | None = None,
+                 *, allow_auth_error_ignores: bool = False):
         self.page = page
         self.context = context
-        self.ignore_patterns = ignore_patterns or []
+        self.ignore_patterns = _validate_ignore_patterns(ignore_patterns or [], allow_auth=allow_auth_error_ignores)
         self._console = _ConsoleCollector()
 
     @property
