@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 # The actions an order line sells; a renewal follows its own intent (DomainOperationService.renew).
 ORDERABLE_DOMAIN_ACTIONS = ("register", "transfer")
+# The order statuses that hold a domain name: once an order can be paid, its name may be fulfilled.
+# Drafts hold nothing (two drafts may name the same domain; the second refuses at submission), and a
+# failed or cancelled order has let go of it (a failed order rechecks when it is retried).
+PAYABLE_ORDER_STATUSES = ("awaiting_payment", "paid", "in_review", "provisioning")
 # A claimed line with no domain after this long was never sent: the domain row exists before the
 # registrar is asked.
 STALLED_AFTER = timedelta(hours=1)

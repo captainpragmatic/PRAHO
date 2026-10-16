@@ -90,6 +90,26 @@ def _attach_domain_order_item(order: Order, line: OrderItem) -> None:
         raise ValueError(str(result))
 
 
+def _domain_admission_refusal(order: Order) -> str | None:
+    """Why the order's recorded domains cannot become payable now, or None.
+
+    Run under the selling-currency lock, so another submission naming the same domain has either
+    committed its hold or not started.
+    """
+    from apps.domains.order_fulfilment import ORDERABLE_DOMAIN_ACTIONS  # noqa: PLC0415  # ADR-0007
+    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007
+
+    seen: set[str] = set()
+    for item in order.domain_items.filter(action__in=ORDERABLE_DOMAIN_ACTIONS).order_by("created_at", "pk"):
+        if item.domain_name in seen:
+            return f"{item.domain_name}: {_('This domain is on the order twice.')}"
+        seen.add(item.domain_name)
+        refusal = DomainOrderService.admission_refusal(item.domain_name, item.action, exclude_order_id=order.pk)
+        if refusal is not None:
+            return f"{item.domain_name}: {refusal}"
+    return None
+
+
 def _service_lines(items: Iterable[OrderItem]) -> list[OrderItem]:
     """The lines a hosting service fulfils: domain lines are fulfilled by their registrar."""
     return [item for item in items if not item.is_domain_line]
@@ -775,13 +795,19 @@ class OrderService:
 
     @staticmethod
     @transaction.atomic
-    def update_order_status(  # noqa: C901, PLR0911, PLR0912  # Explicit FSM, billing, and provisioning guards
+    def update_order_status(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Explicit FSM, billing, domain and provisioning guards
         order: Order, status_data: StatusChangeData
     ) -> Result[Order, str]:
         """Update order status via FSM transition with validation and audit trail."""
         try:
             from .models import Order as OrderModel  # noqa: PLC0415
 
+            if status_data.new_status == "awaiting_payment" and order.domain_items.exists():
+                # Policy before Order, the order create_domain_order_item takes them in: two submissions
+                # naming one domain then run one after the other, and the second sees the first's hold.
+                from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415
+
+                get_selling_currency_policy(lock=True)
             cancellation_order = _lock_cancellation_documents(order) if status_data.new_status == "cancelled" else None
             order = OrderModel.objects.select_for_update(of=("self",)).get(pk=order.pk)
             if cancellation_order is not None and (
@@ -803,6 +829,13 @@ class OrderService:
                     status="pending",
                 ).exists():
                     return Err("Order has an unresolved card payment and cannot be cancelled")
+
+            # Every way into awaiting_payment, a failed order's retry included, makes its domains payable.
+            if status_data.new_status == "awaiting_payment":
+                refusal = _domain_admission_refusal(order)
+                if refusal is not None:
+                    logger.warning("⛔ [Orders] %s cannot become payable: %s", order.order_number, refusal)
+                    return Err(refusal)
 
             # Enforce preflight validation on draft → awaiting_payment
             if old_status == "draft" and status_data.new_status == "awaiting_payment":
@@ -920,6 +953,9 @@ class OrderService:
 
         except Exception as e:
             logger.exception(f"Failed to update order status: {e}")
+            # The transition may already be saved, with its proforma: returning Err from inside this
+            # atomic block would commit them.
+            transaction.set_rollback(True)
             return Err(f"Failed to update order status: {e!s}")
 
     @staticmethod

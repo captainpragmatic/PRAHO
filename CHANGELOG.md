@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Checkout refuses a domain that cannot be fulfilled, before payment.** A register or transfer line is refused when the name is already managed here, when another order that can still be paid holds it, or when it appears twice in one order. A registration the registrar last reported as taken is refused too, while a transfer never is, since a transfer needs the name to be taken. The check runs in the cart, at checkout, when the order is placed, and again whenever an order becomes payable, including the retry of a failed order. Two orders submitted at once for one name cannot both become payable. The registrar's answer is the one the availability lookup recorded in the last 15 minutes, so checkout makes no registrar request. A registration no registrar answer confirmed is still accepted, as before, and is marked "Availability not confirmed by registrar" on the staff order page, with an audit event. Until now each of these was paid for first, then failed with a staff alert and a manual refund.
+
 - **A deployment brands PRAHO without forking it** (ADR-0062).
   - **Name.** `company.brand_name` (default "PRAHO") names the portal's header, page titles and footer, customer emails and authenticator-app entries.
   - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicons and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.
