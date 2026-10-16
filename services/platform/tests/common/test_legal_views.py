@@ -1,4 +1,4 @@
-"""The legal pages are the portal's: Platform's legal addresses redirect there (ADR-0061)."""
+"""The legal pages are the portal's: Platform's legal addresses redirect there (ADR-0062)."""
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings

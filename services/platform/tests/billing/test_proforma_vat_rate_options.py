@@ -1,4 +1,4 @@
-"""The proforma form offers the operator's VAT rates and keeps each line's own (ADR-0061).
+"""The proforma form offers the operator's VAT rates and keeps each line's own (ADR-0062).
 
 The form offered literal 21% and 11% options and chose a line's option by comparing a
 localised rate, which never matched in Romanian: opening a proforma there re-rated every line

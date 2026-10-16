@@ -22,7 +22,7 @@ DETAILS = {
         "last_name": "Marlowe",
         "company_name": "Quill Lantern SRL",
         "vat_number": "RO12345678",
-        # Platform names the terms release to accept (ADR-0061).
+        # Platform names the terms release to accept (ADR-0062).
         "terms_document": {
             "document_id": TERMS_DOCUMENT_ID,
             "kind": "terms",

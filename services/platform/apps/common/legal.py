@@ -1,4 +1,4 @@
-"""Legal documents the operator publishes: Terms of Service, Privacy Policy and Cookie Policy (ADR-0061).
+"""Legal documents the operator publishes: Terms of Service, Privacy Policy and Cookie Policy (ADR-0062).
 
 PRAHO ships no legal text. Staff publish each document as a release that takes effect on a date and
 is never edited or removed afterwards; a correction is another release. The portal shows the release
