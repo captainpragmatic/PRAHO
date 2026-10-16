@@ -17,6 +17,7 @@ from tests.e2e.helpers import (
     PLATFORM_BASE_URL,
     ComprehensivePageMonitor,
     apply_storage_state,
+    apply_test_markers,
     ensure_fresh_platform_session,
     login_platform_user,
 )
@@ -66,9 +67,7 @@ def monitored_staff_page(page: Page, request: pytest.FixtureRequest, _staff_stor
                                   check_css=True,
                                   check_accessibility=False,
                                   allow_accessibility_skip=True) as monitor:
-        markers = request.node.iter_markers("expect_server_errors")
-        for marker in markers:
-            monitor.add_expected_error_patterns(list(marker.args))
+        apply_test_markers(monitor, request)
         if not apply_storage_state(page, _staff_storage_state,
                                    f"{PLATFORM_BASE_URL}/dashboard/",
                                    "/auth/login/"):

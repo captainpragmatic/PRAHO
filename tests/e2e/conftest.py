@@ -21,7 +21,12 @@ import pytest  # noqa: E402
 from playwright.sync_api import Browser  # noqa: E402
 
 from scripts.e2e_stack import environment  # noqa: E402
-from tests.e2e.helpers import ComprehensivePageMonitor, ensure_fresh_session, login_user  # noqa: E402
+from tests.e2e.helpers import (  # noqa: E402
+    ComprehensivePageMonitor,
+    apply_test_markers,
+    ensure_fresh_session,
+    login_user,
+)
 from tests.e2e.helpers.constants import (  # noqa: E402
     BASE_URL,
     CUSTOMER_EMAIL,
@@ -94,6 +99,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "expect_server_errors(pattern): Mark test as expecting specific server error patterns",
+    )
+    config.addinivalue_line(
+        "markers",
+        "expect_http_errors(*statuses, url, query=None): Mark test as provoking these HTTP statuses at a URL path glob",
     )
 
 
@@ -169,8 +178,7 @@ def account_page(page, e2e_scenario, request):
     ensure_fresh_session(page)
     assert login_user(page, account["email"], account["password"]), "Owned account login failed"
     with ComprehensivePageMonitor(page, request.node.name) as monitor:
-        for marker in request.node.iter_markers("expect_server_errors"):
-            monitor.add_expected_error_patterns(list(marker.args))
+        apply_test_markers(monitor, request)
         yield page, account
 
 

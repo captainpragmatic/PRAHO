@@ -338,6 +338,7 @@ def test_customer_can_view_product_catalog(monitored_customer_page: Page) -> Non
 
 
 @pytest.mark.expect_server_errors("API request failed: Order not found")
+@pytest.mark.expect_http_errors(403, 404, url="/order/confirmation/*/")
 def test_customer_order_confirmation_is_private(account_page, e2e_baseline) -> None:
 
     page, _ = account_page
