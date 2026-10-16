@@ -143,6 +143,52 @@ def test_a_failing_enter_leaves_no_listener(page: Page, local_site: LocalSite, m
     assert monitor.console_messages == []
 
 
+def test_console_monitor_collects_a_page_error_that_arrives_as_it_exits(
+    page: Page, local_site: LocalSite, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = monitoring._sync_with_page
+
+    def late_page_error_then_sync(target: Page) -> None:
+        target.evaluate(
+            "async () => { setTimeout(() => { throw new Error('late page error'); }, 0);"
+            " await new Promise((resolve) => setTimeout(resolve, 20)); }"
+        )
+        original(target)
+
+    monkeypatch.setattr(monitoring, "_sync_with_page", late_page_error_then_sync)
+    local_site.route("/", "<p>hi</p>")
+
+    with pytest.raises(AssertionError, match="late page error"), monitoring.ConsoleMonitor(page, "selftest"):
+        page.goto(local_site.url("/"))
+
+
+def test_a_reused_page_monitor_does_not_report_an_earlier_blocks_response(
+    page: Page, local_site: LocalSite
+) -> None:
+    local_site.route("/missing.css", "", status=404)
+    local_site.route("/broken", '<link rel="stylesheet" href="/missing.css">')
+    local_site.route("/", "<p>hi</p>")
+    monitor = _monitor(page)
+
+    with pytest.raises(AssertionError, match=r"missing\.css"), monitor:
+        page.goto(local_site.url("/broken"))
+    with monitor:
+        page.goto(local_site.url("/"))
+
+
+def test_a_reused_console_monitor_starts_each_block_clean(page: Page, local_site: LocalSite) -> None:
+    local_site.route("/boom", "<script>undefinedFn()</script>")
+    local_site.route("/", "<p>hi</p>")
+    monitor = monitoring.ConsoleMonitor(page, "selftest")
+
+    with pytest.raises(AssertionError, match="undefinedFn"), monitor:
+        page.goto(local_site.url("/boom"))
+    with monitor:
+        page.goto(local_site.url("/"))
+
+    assert monitor.console_messages == []
+
+
 def test_events_the_final_check_triggers_are_still_collected(
     page: Page, local_site: LocalSite, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -235,4 +281,9 @@ def test_an_expected_htmx_4xx_does_not_fail_the_console_check(page: Page, local_
 
     assert "boom" in str(raised.value)
     assert "HTMX Error" not in str(raised.value)
+
+    # An unrelated error is not excused just because it names the excused path.
+    with pytest.raises(AssertionError, match="parser crashed for /validate/"), _monitor(page) as monitor:
+        submit_invalid_form(monitor)
+        page.evaluate("() => console.error('parser crashed for /validate/')")
     assert "Response Status Error Code" not in str(raised.value)
