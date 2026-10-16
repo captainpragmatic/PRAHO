@@ -58,6 +58,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
+    from apps.orders.models import Order
     from apps.provisioning.models import Service
 
 logger = logging.getLogger(__name__)
@@ -1155,7 +1156,9 @@ def _activate_payment_services(payment: Payment) -> None:
                     item.service
                     for order in invoice.orders.all()
                     for item in order.items.filter(service__isnull=False)
-                    if item.service and item.service.status in ["pending", "suspended"]
+                    if item.service
+                    and item.service.status in ["pending", "suspended"]
+                    and _payment_may_activate(order, item.service)
                 ]
         if invoice is None:
             return
@@ -1924,6 +1927,16 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
         logger.info(f"📊 [Customer] Updated invoice history for {invoice.customer.id}")
 
 
+def _payment_may_activate(order: "Order", service: "Service") -> bool:
+    """A new order's pending Service waits for its order, not for the money.
+
+    Confirmation, or a reviewer's approval, moves the order to provisioning and hands the Service to
+    apps.orders.hosting_fulfilment. Activating it at payment put a service live before its order was
+    confirmed or reviewed, and the confirmation then refused the already active Service and rolled back.
+    """
+    return service.status != "pending" or order.status in ("provisioning", "completed")
+
+
 def _activate_pending_services(invoice: Invoice) -> None:
     """Activate services that were pending payment"""
     with swallow_application_errors(logger=logger, scope="Invoice", message="Failed to activate pending services"):
@@ -1936,7 +1949,7 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 item.service
                 for order in invoice.orders.all()
                 for item in order.items.filter(service__isnull=False)
-                if item.service and item.service.status == "pending"
+                if item.service and item.service.status == "pending" and _payment_may_activate(order, item.service)
             ]
         for service in services:
             with best_effort_atomic(logger=logger, scope="Invoice Services", message="Failed to activate service"):

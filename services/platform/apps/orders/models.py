@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections.abc import Iterable
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
+from typing import Any, ClassVar, cast
 
 from django.core.validators import MinValueValidator
 from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
@@ -17,9 +17,6 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
-
-if TYPE_CHECKING:
-    from apps.provisioning.models import Service
 
 # ===============================================================================
 # ORDER MANAGEMENT MODELS
@@ -885,25 +882,6 @@ class OrderItem(models.Model):
     @transition(field=provisioning_status, source="failed", target="pending")
     def retry_provisioning(self) -> None:
         """Retry failed provisioning."""
-
-    def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
-        """Mark this item as successfully provisioned and activate the service.
-
-        The item's ``provisioning_status`` must be ``"in_progress"`` before
-        calling this method (``complete_provisioning()`` requires that source).
-        Callers are responsible for calling ``start_provisioning()`` first when
-        the item is still in ``"pending"`` state.
-        """
-        self.complete_provisioning()  # FSM transition sets provisioned_at
-        if service:
-            self.service = service
-
-        # Update the linked service status to active when provisioning completes
-        if self.service and self.service.status == "provisioning":
-            self.service.complete_provisioning()
-            self.service.save(update_fields=["status", "activated_at"])
-
-        self.save(update_fields=["provisioning_status", "provisioned_at", "service", "updated_at"])
 
 
 class OrderStatusHistory(models.Model):

@@ -750,13 +750,12 @@ class OrderServiceCreationTestCase(TestCase):
             ).exists()
         )
 
-        # Step 4: Complete provisioning (should activate services)
-        # Refresh order item to get latest service link
-        order_item.refresh_from_db()
+        # Step 4: Fulfil the line, as the queued provisioning task does (activates the service)
+        from apps.orders.hosting_fulfilment import fulfil_hosting_line  # noqa: PLC0415
 
-        # FSM: provisioning_status must be in_progress before complete_provisioning() can fire
-        force_status(order_item, "in_progress", field_name="provisioning_status")
-        order_item.mark_as_provisioned()
+        # A hosting service PRAHO delivers itself has a domain; one without stays with staff.
+        Service.objects.filter(pk=service.pk).update(domain="flow.example.test")
+        self.assertEqual(fulfil_hosting_line(order_item.pk).unwrap(), "in_progress")
 
         # Verify service status updated to active
         service.refresh_from_db()

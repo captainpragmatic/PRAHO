@@ -330,6 +330,8 @@ class PaymentSettlementTests(TestCase):
         plan = ServicePlan.objects.create(name="WP13", plan_type="shared_hosting", price_monthly=Decimal("10"))
         product = Product.objects.create(name="WP13", slug="wp13-services", product_type="shared_hosting")
         order = Order.objects.create(customer=self.customer, currency=self.currency, invoice=self.invoice)
+        # A new order's pending services wait for its confirmation; this one is confirmed.
+        Order.objects.filter(pk=order.pk).update(status="provisioning")
         services = [
             Service.objects.create(
                 customer=self.customer,

@@ -19,7 +19,7 @@ from django_q.signing import SignedPackage
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
-from apps.orders.signals import _trigger_service_provisioning
+from apps.orders.services import _enqueue_service_line_fulfilment
 from apps.orders.tasks import apply_scheduled_order_task_budget, setup_order_scheduled_tasks
 from apps.products.models import Product
 from apps.settings.services import SettingsService
@@ -146,8 +146,8 @@ class OrderTaskBudgetCloseoutTests(TestCase):
         original_packages = list(OrmQ.objects.values_list("pk", flat=True))
         for timeout in (17, 19):
             self.set_budget(timeout)
-            with CaptureQueriesContext(connection) as queries:
-                _trigger_service_provisioning(order)
+            with CaptureQueriesContext(connection) as queries, self.captureOnCommitCallbacks(execute=True):
+                _enqueue_service_line_fulfilment(order)
             packages = [
                 cast("dict[str, object]", SignedPackage.loads(row.payload))
                 for row in OrmQ.objects.exclude(pk__in=original_packages)

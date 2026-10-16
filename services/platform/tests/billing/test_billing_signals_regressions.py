@@ -1140,6 +1140,7 @@ class TestActivatePaymentServices(TestCase):
         item = MagicMock()
         item.service = service
         order = MagicMock()
+        order.status = "provisioning"  # A new order's pending service waits for its confirmation.
         order.items.filter.return_value = [item]
         payment.invoice.orders.all.return_value = [order]
         mock_result = MagicMock()
@@ -2024,6 +2025,7 @@ class TestActivatePendingServices(TestCase):
         item = MagicMock()
         item.service = service
         order = MagicMock()
+        order.status = "provisioning"  # A new order's pending service waits for its confirmation.
         order.items.filter.return_value = [item]
         invoice.orders.all.return_value = [order]
         _activate_pending_services(invoice)

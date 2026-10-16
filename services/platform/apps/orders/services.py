@@ -16,6 +16,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country
+from apps.common.transactions import best_effort_atomic
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
 from apps.products.models import Product
@@ -123,6 +124,34 @@ def _enqueue_domain_item_processing(order: Order) -> None:
                 domain_order_id,
                 exc_info=True,
             )
+
+    transaction.on_commit(_enqueue)
+
+
+def _enqueue_service_line_fulfilment(order: Order, *, task_time_limit: int | None = None) -> None:
+    """Queue one fulfilment task per pending service line, on commit (apps.orders.hosting_fulfilment).
+
+    BOTH provisioning entry points call this, beside _enqueue_domain_item_processing. A lost enqueue is
+    healed by recover_hosting_order_lines; a duplicate is harmless, because fulfilment is idempotent. A
+    sweep confirming many orders passes the budget it resolved once, instead of one lookup per order.
+    """
+    item_ids = [str(item.pk) for item in _service_lines(order.items.filter(provisioning_status="pending"))]
+    if not item_ids:
+        return
+
+    def _enqueue() -> None:
+        from django_q.tasks import async_task  # noqa: PLC0415  # Deferred
+
+        from .tasks import get_task_time_limit  # noqa: PLC0415  # tasks imports this module
+
+        budget = task_time_limit if task_time_limit is not None else get_task_time_limit()
+        for item_id in item_ids:
+            # One savepoint per job: a failed insert keeps the jobs before it and lets the next one run.
+            # The recovery sweep (recover_hosting_order_lines) picks up a line whose job was lost.
+            with best_effort_atomic(
+                logger=logger, scope="Orders", message=f"Failed to enqueue fulfilment for line {item_id}"
+            ):
+                async_task("apps.orders.tasks.provision_order_item", item_id, timeout=budget)
 
     transaction.on_commit(_enqueue)
 
@@ -859,6 +888,7 @@ class OrderService:
                     )
 
                 _enqueue_domain_item_processing(order)
+                _enqueue_service_line_fulfilment(order)
 
             # Phase B: Create proforma when order transitions to awaiting_payment.
             # Per F3: MUST be inside the same transaction, NOT in on_commit callback.
@@ -1258,7 +1288,7 @@ class OrderPaymentConfirmationService:
     @staticmethod
     @transaction.atomic
     def confirm_order(  # noqa: PLR0911  # Each lifecycle rejection must remain explicit and fail closed
-        order: Order, invoice: Invoice | None = None
+        order: Order, invoice: Invoice | None = None, *, task_time_limit: int | None = None
     ) -> Result[Order, str]:
         """Confirm an order after payment. Atomic double-transition (F5).
 
@@ -1340,6 +1370,7 @@ class OrderPaymentConfirmationService:
                 # The automatic payment path is the NORMAL customer flow — it must
                 # enqueue domain item processing exactly like update_order_status.
                 _enqueue_domain_item_processing(order)
+                _enqueue_service_line_fulfilment(order, task_time_limit=task_time_limit)
                 OrderService._create_status_history(
                     order, "paid", "provisioning", "Auto-provisioning (below review threshold)", None
                 )
