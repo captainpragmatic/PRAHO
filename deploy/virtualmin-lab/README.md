@@ -15,7 +15,7 @@ make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.y
 make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
 make test-virtualmin-e2e    # Playwright smoke tests of the staff pages against the lab (own server on :8710; not part of make test-e2e)
 make test-virtualmin-lab-full # nightly: test-virtualmin-lab + node-deploy + faults + the browser tests; every leg runs, failed legs are named
-make test-virtualmin-drift  # builds the lab from the LATEST Virtualmin (replaces a running lab) and runs the contract suite, recording nothing
+make test-virtualmin-drift  # builds the lab from the LATEST Virtualmin, fresh every time (replaces a running lab), and runs the contract suite, recording nothing
 VIRTUALMIN_LAB=1 make dev   # Platform on :8700 against the lab: starts and registers it if needed, then runs the lab server
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data

@@ -1322,12 +1322,19 @@ test-virtualmin-lab-full:
 	echo "✅ [Virtualmin lab] Every leg passed"
 
 # Replaces a running lab: the latest Virtualmin uses the same container names, ports and state as the pinned one.
-# Afterwards `make virtualmin-lab-down virtualmin-lab-up` brings the pinned lab back.
+# The image is always built fresh (--no-cache): a rerun must test what Virtualmin ships today, not the packages of the
+# last build. The drift tag lives in this recipe's environment only; lab.sh never writes it to .state/lab.env, so a
+# later ordinary `make virtualmin-lab-up` starts the pinned lab. The lab is left running for diagnostics; bring the
+# pinned one back with `make virtualmin-lab-down virtualmin-lab-up`.
 test-virtualmin-drift:
-	@echo "🧪 [Virtualmin lab] Drift: the contract suite against the LATEST Virtualmin (builds the image unpinned; replaces a running lab)..."
+	@echo "🧪 [Virtualmin lab] Drift: the contract suite against the LATEST Virtualmin (builds the image unpinned and fresh; replaces a running lab)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@export VIRTUALMIN_LAB_TAG=latest VIRTUALMIN_LAB_UNPINNED=1; \
-	$(VIRTUALMIN_LAB_SH) down && $(MAKE) --no-print-directory virtualmin-lab-up && RECORD=none $(MAKE) --no-print-directory test-virtualmin-contract
+	@set -e; \
+	export VIRTUALMIN_LAB_TAG=latest VIRTUALMIN_LAB_UNPINNED=1; \
+	$(VIRTUALMIN_LAB_SH) down; \
+	VIRTUALMIN_LAB_NO_CACHE=1 $(VIRTUALMIN_LAB_SH) build; \
+	$(MAKE) --no-print-directory virtualmin-lab-up; \
+	RECORD=none $(MAKE) --no-print-directory test-virtualmin-contract
 
 test-virtualmin-e2e:
 	@echo "🧪 [Virtualmin lab] Browser smoke tests: staff pages against the lab, then the nodes (needs make virtualmin-lab-up; separate from make test-e2e)..."
