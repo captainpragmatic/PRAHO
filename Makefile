@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e test-virtualmin-lab-full test-virtualmin-drift virtualmin-lab-ensure dev-platform-lab virtualmin-probe
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e test-virtualmin-lab-full test-virtualmin-drift virtualmin-lab-ensure dev-platform-lab virtualmin-probe ansible-collections
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -1256,6 +1256,10 @@ virtualmin-lab-up:
 	@echo "✅ [Virtualmin lab] Ready. Gate: make test-virtualmin-lab | Probe: make virtualmin-probe"
 
 # Start and register the lab only when it is not already usable: registering rotates every node credential.
+ansible-collections:
+	@echo "📦 [Ansible] Installing the collections the node playbooks load..."
+	@$(PWD)/$(VENV_DIR)/bin/ansible-galaxy collection install -r services/platform/infrastructure/ansible/requirements.yml
+
 virtualmin-lab-ensure:
 	@if $(VIRTUALMIN_LAB_SH) healthy >/dev/null 2>&1 \
 		&& [ -f deploy/virtualmin-lab/.state/staff.env ] \

@@ -99,3 +99,16 @@ def test_the_image_workflow_can_still_read_the_pinned_version() -> None:
 )
 def test_every_pinned_package_installs_unpinned_when_its_version_argument_is_empty(package: str) -> None:
     assert re.search(rf'"{re.escape(package)}\$\{{[A-Z_]+:\+=\$\{{[A-Z_]+\}}\}}"', DOCKERFILE), package
+
+
+def test_the_runner_installs_the_ansible_collections_the_playbooks_load() -> None:
+    """The node playbooks load community.general and ansible.posix, which ansible-core does not ship.
+
+    A runner without them failed the node-deploy check with "No module named ansible_collections"; the
+    Platform image installs them from the same requirements file (deploy/platform/Dockerfile).
+    """
+    assert "ansible-galaxy collection install -r services/platform/infrastructure/ansible/requirements.yml" in (
+        recipe("ansible-collections")
+    )
+    setup = (REPO / ".github/actions/virtualmin-lab-setup/action.yml").read_text()
+    assert "make ansible-collections" in setup

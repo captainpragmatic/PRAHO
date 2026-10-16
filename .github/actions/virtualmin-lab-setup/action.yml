@@ -46,6 +46,10 @@ runs:
         # The platform finds ansible-playbook on PATH (AnsibleService._find_ansible_playbook).
         echo "${UV_PROJECT_ENVIRONMENT}/bin" >> "${GITHUB_PATH}"
 
+    - name: Install the Ansible collections the node playbooks load
+      shell: bash
+      run: make ansible-collections
+
     - name: Install the browser Playwright drives
       if: inputs.browser == 'true'
       shell: bash
