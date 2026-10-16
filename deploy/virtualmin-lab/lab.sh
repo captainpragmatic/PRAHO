@@ -93,8 +93,9 @@ cmd_build() {
   if [ "${VIRTUALMIN_LAB_UNPINNED:-0}" = "1" ]; then
     [ "${VIRTUALMIN_TAG}" != "8.3.0" ] || die "an unpinned build needs its own tag: set VIRTUALMIN_LAB_TAG=latest"
     # The repository carries a GPL and a Pro build of webmin-virtual-server under one name, and the Pro one is the
-    # highest version but answers 401 without a licence: apt's version glob picks the GPL build.
-    unpinned=(--build-arg WEBMIN_VERSION= --build-arg 'VIRTUAL_SERVER_VERSION=*-gpl' --build-arg VIRTUALMIN_CORE_VERSION=
+    # highest version but answers 401 without a licence: with an empty version the Dockerfile resolves the highest
+    # -gpl version itself, before apt runs.
+    unpinned=(--build-arg WEBMIN_VERSION= --build-arg VIRTUAL_SERVER_VERSION= --build-arg VIRTUALMIN_CORE_VERSION=
       --build-arg VIRTUALMIN_CONFIG_VERSION= --build-arg VIRTUALMIN_STACK_VERSION=)
   fi
   # bash 3.2 treats an empty array as unset under set -u, hence the ${arr[@]+...} form.

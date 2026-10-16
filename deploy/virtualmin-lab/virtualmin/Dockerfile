@@ -70,8 +70,11 @@ RUN keydir="$(mktemp -d)" \
       > /etc/apt/sources.list.d/virtualmin-stable.list
 
 # An empty version argument installs the repository's latest package of that name: the nightly drift check
-# (`VIRTUALMIN_LAB_UNPINNED=1 lab.sh build`) builds that way. webmin-virtual-server is the exception: its version
-# argument is the glob `*-gpl`, because the repository also carries a licensed `-pro` build with a higher version. The pinned build expands to exactly `name=version`.
+# (`VIRTUALMIN_LAB_UNPINNED=1 lab.sh build`) builds that way. webmin-virtual-server is the exception: the
+# repository carries a GPL and a licensed `-pro` build under that name, and the `-pro` one has the higher version
+# but answers 401 without a licence. An empty VIRTUAL_SERVER_VERSION is therefore resolved here, before apt runs,
+# to the highest `-gpl` version `apt-cache madison` lists (highest first), and the build stops if there is none.
+# The pinned build installs exactly `name=version`, as before.
 #
 # Installer phase 3, exactly as virtualmin-install.sh runs it for
 # `--minimal --bundle LAMP`: webmin first, then virtualmin-core plus the
@@ -80,9 +83,16 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
       "webmin${WEBMIN_VERSION:+=${WEBMIN_VERSION}}" \
+ && virtual_server_version="${VIRTUAL_SERVER_VERSION}" \
+ && if [ -z "${virtual_server_version}" ]; then \
+      virtual_server_version="$(apt-cache madison webmin-virtual-server \
+        | awk -F' *[|] *' '$2 ~ /-gpl$/ && !found { found = $2 } END { print found }')"; \
+      [ -n "${virtual_server_version}" ] || { echo "no -gpl build of webmin-virtual-server in the repository" >&2; exit 1; }; \
+    fi \
+ && echo "webmin-virtual-server ${virtual_server_version}" \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-      "webmin-virtual-server${VIRTUAL_SERVER_VERSION:+=${VIRTUAL_SERVER_VERSION}}" \
+      "webmin-virtual-server=${virtual_server_version}" \
       "virtualmin-core${VIRTUALMIN_CORE_VERSION:+=${VIRTUALMIN_CORE_VERSION}}" \
       "virtualmin-config${VIRTUALMIN_CONFIG_VERSION:+=${VIRTUALMIN_CONFIG_VERSION}}" \
       "virtualmin-lamp-stack-minimal${VIRTUALMIN_STACK_VERSION:+=${VIRTUALMIN_STACK_VERSION}}" \

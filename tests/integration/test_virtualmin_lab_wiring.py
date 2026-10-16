@@ -90,9 +90,11 @@ def test_the_image_workflow_can_still_read_the_pinned_version() -> None:
     assert re.search(r"^ARG VIRTUAL_SERVER_VERSION=[0-9][0-9.]*", DOCKERFILE, re.MULTILINE)
 
 
+# webmin-virtual-server is not here: it is resolved to the highest -gpl version before apt runs
+# (tests/integration/test_virtualmin_lab_drift_build.py), because the repository also carries a -pro build.
 @pytest.mark.parametrize(
     "package",
-    ["webmin", "webmin-virtual-server", "virtualmin-core", "virtualmin-config", "virtualmin-lamp-stack-minimal"],
+    ["webmin", "virtualmin-core", "virtualmin-config", "virtualmin-lamp-stack-minimal"],
 )
 def test_every_pinned_package_installs_unpinned_when_its_version_argument_is_empty(package: str) -> None:
     assert re.search(rf'"{re.escape(package)}\$\{{[A-Z_]+:\+=\$\{{[A-Z_]+\}}\}}"', DOCKERFILE), package
