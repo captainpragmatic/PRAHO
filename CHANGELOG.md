@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Staff can mark an order's service line fulfilled.** Admin and manager staff see "Mark line fulfilled" on a line in progress on an order being provisioned, with an option to activate its service first. This finishes the lines PRAHO does not provision itself (SSL, email, backup, maintenance, cloud) and a hosting line set up by hand. It asks for confirmation, is audited, and completes the order when its last line is done.
+
 - **A deployment brands PRAHO without forking it** (ADR-0062).
   - **Name.** `company.brand_name` (default "PRAHO") names the portal's header, page titles and footer, customer emails and authenticator-app entries.
   - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicons and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.

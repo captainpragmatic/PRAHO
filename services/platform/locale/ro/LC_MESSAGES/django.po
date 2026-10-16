@@ -24214,6 +24214,27 @@ msgstr "Mergeți la pagina următoare"
 msgid "We could not set up this service automatically. Our team will finish it."
 msgstr "Nu am putut configura automat acest serviciu. Echipa noastră îl va finaliza."
 
+msgid "This order line no longer exists."
+msgstr "Această linie de comandă nu mai există."
+
+msgid "Only an open service line of an order being provisioned can be marked fulfilled."
+msgstr "Doar o linie de serviciu deschisă a unei comenzi în curs de provizionare poate fi marcată ca livrată."
+
+msgid "Only admin or manager staff can mark a line fulfilled."
+msgstr "Doar administratorii sau managerii pot marca o linie ca livrată."
+
+msgid "The line is marked fulfilled."
+msgstr "Linia este marcată ca livrată."
+
+msgid "Activate the service"
+msgstr "Activează serviciul"
+
+msgid "Mark line fulfilled"
+msgstr "Marchează linia ca livrată"
+
+msgid "Mark this line fulfilled? The customer is told it is ready."
+msgstr "Marcați această linie ca livrată? Clientul este anunțat că serviciul este gata."
+
 #~ msgid "A user with this email already exists."
 #~ msgstr "Un utilizator cu această adresă de e-mail există deja."
 

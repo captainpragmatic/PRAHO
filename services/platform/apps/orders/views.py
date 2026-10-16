@@ -69,6 +69,12 @@ _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 _REVIEW_APPROVE_ROLES = frozenset({"admin", "billing"})
 
 
+def _can_fulfil_lines(user: object) -> bool:
+    from .line_views import can_fulfil_lines  # noqa: PLC0415  # line_views imports this module's models
+
+    return can_fulfil_lines(user)
+
+
 def get_max_search_query_length() -> int:
     """Get max search query length from SettingsService (runtime)."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -645,6 +651,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         "order": order,
         "is_staff": is_staff,
         "can_record_domains": can_record_domains,
+        "can_fulfil_lines": _can_fulfil_lines(request.user),
         "domain_resolution_items": domain_resolution_items,
         "refund_request_key": str(uuid.uuid4()),
         "unfinished_refund": order.invoice.tender_refund_commands.exclude(status="completed").first()
@@ -1469,6 +1476,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         # The edit page refetches this list after an add or edit and asks to keep its controls.
         # It only chooses which buttons render; every item endpoint checks access itself.
         "edit_mode": request.GET.get("mode") == "edit",
+        "can_fulfil_lines": _can_fulfil_lines(request.user),
     }
 
     # Return partial template for HTMX requests
