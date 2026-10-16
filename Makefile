@@ -626,6 +626,17 @@ ci-postgres-start:
 ci-postgres-stop:
 	@./scripts/start_ci_postgres.sh --stop
 
+# Every platform test module that only means something on PostgreSQL, found by scanning the
+# tests. Needs a running PostgreSQL (`make ci-postgres-start`, or DB_* pointing at one).
+# POSIX sh on purpose: the Makefile sets no SHELL, and /bin/sh is dash on Ubuntu runners.
+.PHONY: test-platform-postgres-gated
+test-platform-postgres-gated:
+	@echo "🐘 [Platform] PostgreSQL-gated tests (derived from the tests themselves)..."
+	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py) || exit 1; \
+	if [ -z "$$modules" ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; exit 1; fi; \
+	cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test $$modules \
+		--settings=config.settings.ci --verbosity=2 --noinput
+
 
 test:
 	@echo "🔄 [All Tests] Running comprehensive test suite (post Redis removal)..."

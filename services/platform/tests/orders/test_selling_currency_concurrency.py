@@ -23,6 +23,7 @@ from apps.orders.models import Order
 from apps.products.models import Product, ProductPrice
 from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
+from tests.helpers.checkout import checkout_consents
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
@@ -50,6 +51,8 @@ class SellingCurrencyConcurrencyTests(HMACTestMixin, TransactionTestCase):
             source=FXRate.Source.BNR, source_reference="currency-lock-test", fetched_at=timezone.now(),
         )
         self.initial_policy = get_selling_currency_policy()
+        # Published here, before any worker starts, so competitors never race to publish it.
+        self.consents = checkout_consents()
 
     def _create_order(self, key: str | None = None):
         return self.portal_post(
@@ -60,6 +63,7 @@ class SellingCurrencyConcurrencyTests(HMACTestMixin, TransactionTestCase):
                 "currency": self.initial_policy.currency_code,
                 "currency_revision": self.initial_policy.revision,
                 "items": [{"product_id": str(self.product.pk), "quantity": 1, "billing_period": "monthly"}],
+                **self.consents,
             },
             HTTP_IDEMPOTENCY_KEY=key or uuid4().hex,
         )
