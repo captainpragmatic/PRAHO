@@ -11,6 +11,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import ProductsAuditService
+from apps.common.operator import operator_country
 from apps.common.transactions import best_effort_atomic
 
 from .models import Product, ProductPrice
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 # NOTE: VAT rates are NOT constants — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 PRICING_THRESHOLDS: dict[str, Any] = {
     "significant_change_percent": 15,  # Alert when price changes by more than 15%
-    "high_value_product_ron": 500,  # Products over 500 RON need approval tracking
+    "high_value_product_ron": 500,  # Products over 500 (any currency) need approval tracking
     "promotional_discount_limit": 50,  # Maximum promotional discount percentage
     "vat_compliance_check": True,  # Always verify VAT calculations
 }
@@ -93,7 +94,7 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
             )
 
             romanian_context = {
-                "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
+                "vat_rate_applied": float(TaxService.get_vat_rate(operator_country(), as_decimal=False)),
                 "includes_vat": instance.includes_vat,
                 "product_category": instance.product_type,
                 "requires_rotld_compliance": instance.product_type == "domain",
@@ -188,7 +189,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                 "currency": instance.currency.code,
                 "billing_model": "simplified_monthly",  # New simplified model
                 "includes_vat": instance.product.includes_vat,
-                "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
+                "vat_rate_applied": float(TaxService.get_vat_rate(operator_country(), as_decimal=False)),
                 "high_value_product": instance.monthly_price_cents
                 > (PRICING_THRESHOLDS["high_value_product_ron"] * 100),
                 "semiannual_discount": float(instance.semiannual_discount_percent),

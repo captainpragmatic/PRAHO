@@ -84,12 +84,14 @@ class ConsentWithdrawalTests(TestCase):
         self.assertFalse(fresh.two_factor_enabled)
         self.assertTrue(AuditEvent.objects.filter(user=user, action="marketing_consent_withdrawn").exists())
 
-    def test_withdrawing_data_processing_still_anonymises(self) -> None:
+    def test_data_processing_is_not_a_consent_to_withdraw(self) -> None:
+        # Processing the account's data performs the contract, so it is a notice, not a consent;
+        # erasure goes through the deletion request (AnonymisationTests below).
         user = _enrolled("erase-me@example.com")
-        self.assertTrue(GDPRConsentService.withdraw_consent(user, ["data_processing"]).is_ok())
+        self.assertTrue(GDPRConsentService.withdraw_consent(user, ["data_processing"]).is_err())
         fresh = User.objects.get(pk=user.pk)
-        self.assertNotEqual(fresh.email, "erase-me@example.com")
-        self.assertFalse(fresh.is_active)
+        self.assertEqual(fresh.email, "erase-me@example.com")
+        self.assertTrue(fresh.is_active)
 
 
 class AnonymisationTests(TestCase):

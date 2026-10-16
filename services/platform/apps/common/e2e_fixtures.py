@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 OWNER = "praho-e2e-v1"
 PASSWORD = "test123"
 CLOSED_TICKET_SEQUENCE = 2
-CUSTOMER_EMAILS = ("e2e-customer@test.local", "customer2@pragmatichost.com")
+CUSTOMER_EMAILS = ("e2e-customer@test.local", "customer2@praho.test")
 
 
 def require_e2e_database() -> None:
@@ -193,7 +193,8 @@ def seed_baseline() -> dict[str, Any]:
     for command in ("setup_default_settings", "setup_tax_rules", "setup_email_templates"):
         call_command(command, stdout=StringIO())
     SystemSetting.objects.filter(key="node_deployment.dns_default_zone").update(value="nodes.e2e.example")
-    SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://localhost:8701")
+    # Deployment fallbacks have no row on a fresh database; create the local override explicitly.
+    SettingsService.update_setting("portal.public_base_url", "http://localhost:8701").unwrap()
     # Browser signups share localhost; keep enforcement active with a finite suite-sized allowance.
     registration_limit = SettingsService.update_setting("security.registration_rate_limit_per_ip", 10000)
     if registration_limit.is_err():
@@ -215,6 +216,7 @@ def seed_baseline() -> dict[str, Any]:
     demo.create_products_from_service_plans()
     demo.create_servers()
     demo.create_domain_foundation()
+    demo.create_sample_legal_documents()
     plan, _ = ServicePlan.objects.get_or_create(
         name="E2E Hosting",
         defaults={
@@ -243,7 +245,7 @@ def seed_baseline() -> dict[str, Any]:
         defaults={"monthly_price_cents": 10000, "annual_discount_percent": Decimal("20.00")},
     )
     admin = _user("e2e-admin@test.local", staff=True)
-    _user("admin@pragmatichost.com", staff=True, password="admin123")
+    _user("admin@praho.test", staff=True, password="admin123")
     category = (
         SupportCategory.objects.get(name="Suport Tehnic")
         if SupportCategory.objects.filter(name="Suport Tehnic").exists()
@@ -254,7 +256,7 @@ def seed_baseline() -> dict[str, Any]:
         user = _user(email, password=PASSWORD if index == 1 else "admin123")
         members = [user, admin] if index == 1 else [user]
         if index == 1:
-            members.append(_user("customer@pragmatichost.com", password="admin123"))
+            members.append(_user("customer@praho.test", password="admin123"))
         for member in members:
             CustomerMembership.objects.update_or_create(
                 user=member, customer=customer, defaults={"role": "owner", "is_primary": True, "is_active": True}
@@ -436,6 +438,39 @@ def _order_edit_scenario(key: str) -> dict[str, Any]:
     }
 
 
+def _domain_checkout_scenario(key: str) -> dict[str, str | int]:
+    """An owned consumer with no fiscal identifier; the browser places the order itself."""
+    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+    from apps.products.models import Product  # noqa: PLC0415
+    from apps.users.models import CustomerMembership, UserProfile  # noqa: PLC0415
+
+    customer = _customer(f"domain-{key}", name=f"E2E Domain {key}")
+    customer.customer_type = "individual"
+    customer.company_name = ""
+    customer.save(update_fields=["customer_type", "company_name", "updated_at"])
+    profile = CustomerTaxProfile.objects.get(customer=customer)
+    profile.cui = ""
+    profile.vat_number = ""
+    profile.is_vat_payer = False
+    profile.save(update_fields=["cui", "vat_number", "is_vat_payer", "updated_at"])
+    user = _user(f"domain-{key}@e2e.test")
+    UserProfile.objects.update_or_create(user=user, defaults={"preferred_language": "en"})
+    CustomerMembership.objects.create(user=user, customer=customer, role="owner", is_primary=True)
+    call_command("ensure_domain_product", stdout=StringIO())
+    product = Product.objects.filter(product_type="domain").order_by("created_at").first()
+    if product is None:
+        raise CommandError("No domain product was created")
+    return {
+        "customer_id": customer.pk,
+        "user_id": user.pk,
+        "email": user.email,
+        "password": PASSWORD,
+        "product_slug": product.slug,
+        "registration_domain": f"register-{key}.ro",
+        "transfer_domain": f"transfer-{key}.ro",
+    }
+
+
 @transaction.atomic
 def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
     from apps.customers.models import CustomerAddress  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -452,6 +487,8 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             meta={"fixture_owner": OWNER, "fixture_name": key},
         )
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
+    if scenario == "domain_checkout":
+        return _domain_checkout_scenario(key)
     if scenario == "order_edit":
         return _order_edit_scenario(key)
     if scenario == "staff_mfa":

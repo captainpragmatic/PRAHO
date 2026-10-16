@@ -58,7 +58,7 @@ if not _allowed_hosts_raw:
     raise _ImproperlyConfigured(
         "ALLOWED_HOSTS must be set in staging. "
         "Set it to your portal and platform FQDNs, e.g.: "
-        "portal-staging.pragmatichost.com,platform-staging.pragmatichost.com,localhost,127.0.0.1"
+        "portal-staging.example.com,platform-staging.example.com,localhost,127.0.0.1"
     )
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
 if "*" in ALLOWED_HOSTS:
@@ -163,7 +163,7 @@ SECURE_BROWSER_XSS_FILTER = True
 # Relaxed session settings for staging testing
 SESSION_COOKIE_AGE = 7200  # 2 hours for staging (longer for testing)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Allow persistent sessions in staging
-SESSION_COOKIE_NAME = "pragmatichost_staging_sessionid"
+SESSION_COOKIE_NAME = "praho_staging_sessionid"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_PATH = "/"
 SESSION_SAVE_EVERY_REQUEST = True
@@ -187,7 +187,7 @@ DATABASES["default"].update(
     {
         "CONN_MAX_AGE": 300,  # Shorter than production
         "OPTIONS": {
-            "application_name": "pragmatichost_staging",
+            "application_name": "praho_platform_staging",
             "sslmode": "prefer",  # Less strict than production
         },
     }
@@ -323,7 +323,7 @@ LOGGING = place_log_files(LOGGING, platform_log_dir())
 # Alternative: django.core.mail.backends.filebased.EmailBackend with EMAIL_FILE_PATH setting
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-DEFAULT_FROM_EMAIL = "staging-noreply@pragmatichost.com"
+DEFAULT_FROM_EMAIL = _os.environ.get("DEFAULT_FROM_EMAIL", "staging-noreply@example.com")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # ===============================================================================

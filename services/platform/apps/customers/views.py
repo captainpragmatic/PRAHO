@@ -25,6 +25,7 @@ from .customer_views import (
 
 # Profile management views
 from .profile_views import (
+    customer_anaf_verify,
     customer_billing_profile,
     customer_tax_profile,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "customer_add_user",
     # Contact views
     "customer_address_add",
+    "customer_anaf_verify",
     "customer_assign_user",
     # Profile views
     "customer_billing_profile",

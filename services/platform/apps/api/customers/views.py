@@ -30,6 +30,8 @@ from apps.api.secure_auth import (
     require_customer_role_in,
     require_portal_authentication,
 )
+from apps.common.cnp_validator import CNPValidator
+from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.performance.rate_limiting import (
@@ -38,7 +40,9 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACCreateUserThrottle,
     PortalHMACRateThrottle,
+    PublicLookupClientIPThrottle,
     RegistrationClientIPThrottle,
+    fixed_window_limited,
 )
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import SecureInputValidator
@@ -73,16 +77,12 @@ def _checked_vat_number(value: str, country: str | None) -> tuple[str, str | Non
     Stored with its prefix as the staff forms store it: a document without VAT evidence states a
     buyer VAT identifier only when its tax ID carries a country prefix, since a bare one is a CUI.
     """
-    from apps.billing.tax_evidence import vat_country  # noqa: PLC0415
-    from apps.common.eu_vat_validator import is_eu_country, parse_vat_number, validate_vat_format  # noqa: PLC0415
+    from apps.settings.services import get_default_country  # noqa: PLC0415  # ADR-0007
 
-    country_code, digits = parse_vat_number(value, default_country=vat_country(country) if country else "RO")
-    if is_eu_country(country_code):
-        result = validate_vat_format(country_code, digits)
-        if not result.is_valid:
-            return value, result.error_message
-        return result.full_vat_number, None
-    return value, None
+    try:
+        return normalize_vat_number(value, country or get_default_country()), None
+    except ValidationError as error:
+        return value, error.messages[0]
 
 
 def _customer_payload_for_role(customer_data: dict[str, object], role: str | None) -> dict[str, object]:
@@ -550,6 +550,78 @@ class CustomerProfileAPIView(APIView):
                 {"success": False, "error": "Validation failed", "errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+
+# All public lookups together, whatever their source: ANAF answers one request per second.
+COMPANY_LOOKUP_GLOBAL_RATE = "20/m"
+
+
+@api_view(["POST"])
+@authentication_classes([])  # HMAC authentication is handled by middleware and the decorator.
+@permission_classes([AllowAny])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        PublicLookupClientIPThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
+@require_portal_authentication
+def company_lookup_api(request: HttpRequest) -> Response:
+    """
+    🏛️ A Romanian company as ANAF's public register states it, for the registration page.
+
+    POST /api/customers/company-lookup/  {"cui": "14399840", "client_ip": "<end user's IP, signed>"}
+
+    The answer comes from ANAF only: nothing here reads PRAHO's customers, so it says nothing about
+    who is registered with this operator (ADR-0021). `available` is false while the lookup is off
+    (another operator country, the setting, or no connection to ANAF) or ANAF did not answer.
+    """
+    from apps.billing.gateways.anaf_gateway import AnafGateway  # noqa: PLC0415  # Deferred: loaded on use
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+    from apps.customers.anaf_verification import lookups_enabled  # noqa: PLC0415
+
+    if not lookups_enabled():
+        return Response({"success": True, "available": False})
+    data = request.data if isinstance(request.data, dict) else {}
+    checked = CUIValidator.validate_strict(str(data.get("cui", "")))
+    if not checked.is_valid:
+        return Response({"success": False, "error": "invalid_cui"}, status=status.HTTP_400_BAD_REQUEST)
+    limited, retry_after = fixed_window_limited("anaf:public", COMPANY_LOOKUP_GLOBAL_RATE)
+    if limited:
+        return Response(
+            {"success": False, "error": "rate_limited"},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    answer = AnafGateway.lookup([checked.digits])
+    if not answer.api_available:
+        return Response({"success": True, "available": False})
+    company = answer.companies.get(checked.digits)
+    if company is None:
+        return Response({"success": True, "available": True, "found": False})
+    return Response(
+        {
+            "success": True,
+            "available": True,
+            "found": True,
+            "company": {
+                "cui": company.cui,
+                "name": company.name,
+                "registration_number": company.registration_number,
+                # A VAT-registered Romanian company's VAT number is its CUI with the RO prefix.
+                "vat_number": f"RO{company.cui}" if company.vat_registered else "",
+                "street": company.street,
+                "city": company.city,
+                "county": company.county,
+                "postal_code": company.postal_code,
+                "active": company.active,
+            },
+        }
+    )
 
 
 # ===============================================================================
@@ -1326,6 +1398,12 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
                     {"success": False, "error": f"Field '{field}' must be a string."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if field == "primary_phone" and value.strip():
+                address = customer.get_billing_address()
+                try:
+                    value = normalize_phone(value, address.country if address else "")
+                except ValidationError as error:
+                    return Response({"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
             setattr(customer, field, value.strip())
             update_fields.append(field)
 
@@ -1341,7 +1419,8 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitted field before saving the profile
+@transaction.atomic
+def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate each permitted field before saving the profile
     request: HttpRequest, customer: Customer
 ) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
@@ -1355,6 +1434,13 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
         return _uniform_error_response()
+
+    cnp: str | None = None
+    if "cnp" in data:
+        raw_cnp = data["cnp"]
+        cnp = raw_cnp.strip().replace(" ", "") if isinstance(raw_cnp, str) else ""
+        if not cnp.isascii() or not CNPValidator.validate(cnp).is_valid:
+            return Response({"success": False, "error": _("Enter a valid CNP.")}, status=status.HTTP_400_BAD_REQUEST)
 
     tax_bool_fields = {"is_vat_payer"}
     tax_string_fields = {"cui", "vat_number", "registration_number"}
@@ -1400,6 +1486,10 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
 
             update_fields.append(field)
 
+    if cnp is not None:
+        tax_profile.cnp = cnp
+        update_fields.append("cnp")
+
     if tax_profile.vat_number and "vat_number" in update_fields and "is_vat_payer" not in data:
         # Giving a VAT number states VAT registration, also for a profile that began CUI-only.
         tax_profile.is_vat_payer = True
@@ -1410,7 +1500,23 @@ def customer_tax_profile_update(  # noqa: C901, PLR0912  # Validate each permitt
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
-    return Response({"success": True, "message": "Tax profile updated."})
+    if cnp is not None:
+        from apps.audit.services import (  # noqa: PLC0415  # Cross-app audit (ADR-0007).
+            AuditContext,
+            AuditEventData,
+            AuditService,
+        )
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type="tax_profile_cnp_set",
+                content_object=tax_profile,
+                description=_("A CNP was set on the tax profile."),
+            ),
+            AuditContext(user=membership.user),
+        )
+
+    return Response({"success": True, "message": "Tax profile updated."}, headers={"Cache-Control": "no-store"})
 
 
 @api_view(["POST"])

@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% if error %}{% trans 'Invoice Unavailable' %}{% else %}{% trans 'Invoice Not Found' %}{% endif %} - PRAHO Portal{% endblock %}
+{% block title %}{% if error %}{% trans 'Invoice Unavailable' %}{% else %}{% trans 'Invoice Not Found' %}{% endif %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">

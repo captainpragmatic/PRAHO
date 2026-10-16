@@ -18,9 +18,11 @@ from typing import Any, cast
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Model
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django_fsm.signals import post_transition
 
 from apps.audit.services import (
     AuditContext,
@@ -40,8 +42,27 @@ from .models import (
     TLDRegistrarAssignment,
     TLDRetailPrice,
 )
+from .order_fulfilment import fulfil_order_item_for_domain
+from .transfer_codes import clear_terminal_transfer_code
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_transition)
+def clear_transfer_code_on_terminal_line(
+    sender: type[Model],
+    instance: Model,
+    target: str,
+    **kwargs: object,
+) -> None:
+    """FSM transitions fire before save; clear only the terminal line state that commits."""
+    if target not in ("completed", "cancelled"):
+        return
+    from apps.orders.models import OrderItem  # noqa: PLC0415  # Cross-app models are deferred (ADR-0007).
+
+    if isinstance(instance, OrderItem):
+        line_id = instance.pk
+        transaction.on_commit(lambda: clear_terminal_transfer_code(line_id), robust=True)
 
 
 @receiver(post_save, sender=DomainCurrencyTransition)
@@ -217,6 +238,19 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
     except Exception as e:
         logger.exception(f"🔥 [Domain Signal] Failed to store original values: {e}")
         raise
+
+
+@receiver(post_transition, sender=Domain)
+def complete_order_lines_on_activation(sender: type[Domain], instance: Domain, target: str, **kwargs: Any) -> None:
+    """Complete the paid lines waiting on a domain once its activation commits.
+
+    post_transition fires before the domain is saved, so the work waits for the commit and
+    re-reads the domain; a rolled-back activation completes nothing. Every activate() call site
+    runs inside atomic(): in autocommit, on_commit would run before the save.
+    """
+    if target == "active":
+        domain_id = instance.pk
+        transaction.on_commit(lambda: fulfil_order_item_for_domain(domain_id), robust=True)
 
 
 @receiver(post_delete, sender=Domain)
@@ -837,7 +871,7 @@ def _send_domain_order_confirmation(domain_order_item: DomainOrderItem) -> None:
 
 
 def _handle_domain_activation(domain: Domain) -> None:
-    """Handle domain activation"""
+    """Handle domain activation (paid order lines complete in complete_order_lines_on_activation)"""
     try:
         logger.info(f"✅ [Domain] Activated {domain.name}")
 

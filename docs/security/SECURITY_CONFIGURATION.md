@@ -306,7 +306,7 @@ Source: `config/settings/prod.py`
 |---------|-------|
 | `SESSION_COOKIE_AGE` | `3600` (1 hour) |
 | `SESSION_EXPIRE_AT_BROWSER_CLOSE` | `True` |
-| `SESSION_COOKIE_NAME` | `pragmatichost_sessionid` |
+| `SESSION_COOKIE_NAME` | `praho_sessionid` |
 | `SESSION_SAVE_EVERY_REQUEST` | `True` |
 | `SECURE_PROXY_SSL_HEADER` | `("HTTP_X_FORWARDED_PROTO", "https")` |
 
@@ -452,6 +452,7 @@ defaults below are `DEFAULT_THROTTLE_RATES`; three can be overridden from the en
 | `ResetClientIPThrottle` | `auth_reset_ip` | `5/minute` | End-user IP in the Portal's signed body | Both password-reset endpoints |
 | `RegistrationClientIPThrottle` | `auth_register_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/customers/register/` |
 | `RegistrationConfirmClientIPThrottle` | `auth_register_confirm_ip` | `5/minute` | End-user IP in the Portal's signed body | `/api/users/register/pending/`, `/api/users/register/confirm/` |
+| `PublicLookupClientIPThrottle` | `public_lookup_ip` | `10/minute` | End-user IP in the Portal's signed body | `/api/customers/company-lookup/` (ANAF register; also a global `20/m` cap on calls to ANAF), `/api/users/register/prefill/` |
 | `MFACredentialThrottle` | `mfa_credential` | `15/hour` | The person the HMAC middleware read from the signed body, in the database counter store; not applied to other traffic | 2FA enrolment verify, disable and backup-code regeneration, and password change |
 | `OrderCreateThrottle` | `order_create` | `20/min` | Portal for HMAC traffic, else user, else client IP | Order creation |
 | `OrderCalculateThrottle` | `order_calculate` | `60/min` | Portal for HMAC traffic, else user, else client IP | Cart totals and preflight |

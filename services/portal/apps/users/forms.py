@@ -13,6 +13,8 @@ from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.altcha import AltchaFormMixin
+from apps.common.identity_fields import clean_with_country, normalize_phone, normalize_vat_number
 from apps.common.localisation import (
     DATE_FORMAT_CHOICES,
     INHERIT_LABEL,
@@ -26,26 +28,11 @@ from apps.common.localisation_services import get_localisation_defaults
 
 logger = logging.getLogger(__name__)
 
-# Romanian validation constants
-MIN_VAT_DIGITS = 6
-CNP_LENGTH = 13  # Romanian Personal Numeric Code length
-_CNP_CHECK_WEIGHTS = "279146358279"
-
-
-def _cnp_check_digit_matches(cnp: str) -> bool:
-    """The 13th digit is the weighted sum of the first 12, mod 11 (10 counts as 1), as Platform checks it."""
-    remainder = sum(int(digit) * int(weight) for digit, weight in zip(cnp[:12], _CNP_CHECK_WEIGHTS, strict=True)) % 11
-    return int(cnp[12]) == (1 if remainder == 10 else remainder)  # noqa: PLR2004  # CNP check-digit rule
-
 
 # Password validation constants
 REGISTRATION_PASSWORD_MIN_LENGTH = 12
 
 MIN_NAME_LENGTH = 3
-MIN_NAME_PARTS = 2
-MAX_NAME_PARTS = 10
-MAX_PHONE_PREFIX_DIGITS = 9
-MIN_PHONE_DIGITS = 6
 
 
 class OneTimeCodeInput(forms.TextInput):
@@ -104,7 +91,7 @@ class CustomerLoginForm(forms.Form):
     )
 
 
-class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
+class CustomerRegistrationForm(AltchaFormMixin, CountryDefaultsMixin, forms.Form):
     """
     Customer registration form with Romanian business context.
     Sends registration data to Platform API for processing.
@@ -150,7 +137,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     phone = forms.CharField(
         label=_("Phone Number"),
         required=False,
-        help_text=_("Romanian phone number (+40.XX.XXX.XXXX)"),
+        help_text=_("With its country code, e.g. +40 721 123 456. A Romanian number may start with 0."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -198,26 +185,12 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         label=_("VAT Number"),
         max_length=20,
         required=False,
-        help_text=_("Romanian VAT number (RO12345678) - required for VAT registered companies."),
+        help_text=_("The company's VAT number, with or without the country prefix, if it is VAT-registered."),
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
                 "placeholder": "RO12345678",
                 "id": "id_vat_number",
-            }
-        ),
-    )
-
-    cnp = forms.CharField(
-        label=_("CNP (Cod Numeric Personal)"),
-        max_length=13,
-        required=False,
-        help_text=_("Romanian Personal Identification Number - required for individuals in Romania."),
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": "1234567890123",
-                "id": "id_cnp",
             }
         ),
     )
@@ -280,6 +253,7 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     county = forms.CharField(
         label=_("County"),
         max_length=100,
+        required=False,
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -304,17 +278,21 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     def clean_country(self) -> str:
         return self.cleaned_data.get("country") or country_name(get_localisation_defaults().default_country)
 
+    def default_country_is_romania(self) -> bool:
+        return get_localisation_defaults().default_country == "RO"
+
+    def asks_romanian_company_ids(self) -> bool:
+        """Whether the page opens with the CUI and trade registry number: Romanian identifiers.
+
+        The billing country decides, or the default country when none was given, as clean() does.
+        register-toggle.js follows the country field from then on.
+        """
+        country = self.data.get("country") if self.is_bound else self.initial.get("country")
+        return normalize_country_code(country) == "RO" if country else self.default_country_is_romania()
+
     # ===============================================================================
     # GDPR COMPLIANCE
     # ===============================================================================
-
-    data_processing_consent = forms.BooleanField(
-        label=_("I agree to data processing according to GDPR"),
-        help_text=_("Required: Agreement to process personal data according to GDPR."),
-        widget=forms.CheckboxInput(
-            attrs={"class": "h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-600 rounded bg-slate-800"}
-        ),
-    )
 
     terms_accepted = forms.BooleanField(
         label=_("I accept the terms and conditions"),
@@ -327,45 +305,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     def clean_email(self) -> str:
         email = str(self.cleaned_data.get("email", "")).lower().strip()
         return email
-
-    def clean_phone(self) -> str:
-        """Validate Romanian phone number format"""
-        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("phone", "")))
-        # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
-        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
-            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return phone
-
-    def clean_vat_number(self) -> str:
-        """Validate VAT number format"""
-        vat_number = str(self.cleaned_data.get("vat_number", "")).strip()
-        if vat_number:
-            if not vat_number.startswith("RO"):
-                if vat_number.isdigit() and len(vat_number) >= MIN_VAT_DIGITS:
-                    vat_number = f"RO{vat_number}"
-                else:
-                    raise ValidationError(_("VAT number must start with RO followed by digits (e.g., RO12345678)"))
-            else:
-                vat_digits = vat_number[2:]
-                if not vat_digits.isdigit() or len(vat_digits) < MIN_VAT_DIGITS:
-                    raise ValidationError(_("VAT number must start with RO followed by digits (e.g., RO12345678)"))
-        return vat_number
-
-    def clean_cnp(self) -> str:
-        """Validate Romanian CNP (Cod Numeric Personal) format"""
-        cnp = str(self.cleaned_data.get("cnp", "")).strip()
-        if cnp:
-            # CNP must be exactly 13 digits
-            # isascii(): isdigit() also accepts digits such as "²", which int() cannot read.
-            if not (cnp.isascii() and cnp.isdigit()) or len(cnp) != CNP_LENGTH:
-                raise ValidationError(_("CNP must be exactly 13 digits."))
-
-            # Century marker and check digit. Platform validates the CNP in full, and refuses
-            # one with a wrong check digit; checking it here puts the error on the field.
-            if cnp[0] not in "123456789" or not _cnp_check_digit_matches(cnp):
-                raise ValidationError(_("Invalid CNP format."))
-
-        return cnp
 
     def clean_cui(self) -> str:
         """The CUI's digits; Platform verifies the check digit and shows its answer on this field."""
@@ -381,26 +320,22 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
         return number
 
     def clean(self) -> dict[str, Any]:
-        """Ask each customer for the fiscal identity it has: a CNP in Romania, else VAT number or CUI.
+        """Ask a company for its VAT number or CUI in Romania; an individual gives no fiscal identifier.
 
         "Romania" is the billing country, or the default country when none was given, as Platform
         decides it. Platform checks the identifiers in full.
         """
         cleaned_data = super().clean() or {}
+        # The phone and VAT number follow the billing country's rules; it is cleaned after them.
+        for name, normalize in (("phone", normalize_phone), ("vat_number", normalize_vat_number)):
+            clean_with_country(self, name, normalize, cleaned_data.get("country"))
         in_romania = normalize_country_code(cleaned_data.get("country")) == "RO"
 
         if cleaned_data.get("customer_type") == "individual":
             cleaned_data.update(vat_number="", cui="", trade_registry_number="")
             self._drop_errors("vat_number", "cui", "trade_registry_number")
-            if not in_romania:
-                cleaned_data["cnp"] = ""
-                self._drop_errors("cnp")
-            elif not cleaned_data.get("cnp") and "cnp" not in self.errors:
-                self.add_error("cnp", _("CNP is required for individuals."))
             return cleaned_data
 
-        cleaned_data["cnp"] = ""
-        self._drop_errors("cnp")
         if (
             in_romania
             and not cleaned_data.get("vat_number")
@@ -417,7 +352,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     # Platform's field names for the registration, mapped onto this form's fields.
     _PLATFORM_FIELDS = dict(  # noqa: C408  # identifier kwargs, as below
-        cnp="cnp",
         cui="cui",
         registration_number="trade_registry_number",
         vat_number="vat_number",
@@ -446,10 +380,11 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     # inventory guardrail does not mistake the non-profit key for an on*= event handler.
     _CUSTOMER_TYPE_TO_PLATFORM = dict(srl="company", sa="company", ong="ngo")  # noqa: C408
 
-    def register_customer(self, client_ip: str = "") -> dict[str, Any] | None:
+    def register_customer(self, client_ip: str = "", intent: dict[str, str] | None = None) -> dict[str, Any] | None:
         """
         Send the registration to Platform, which stores it and mails the address.
         Returns Platform's answer, the same for every address, or None on a refusal.
+        intent is what the visitor came to buy and where from (apps.users.intent_capture).
         """
         try:
             form_customer_type = self.cleaned_data["customer_type"]
@@ -464,7 +399,6 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "customer_type": self._CUSTOMER_TYPE_TO_PLATFORM.get(form_customer_type, form_customer_type),
                     "company_name": self.cleaned_data["company_name"],
                     "vat_number": self.cleaned_data.get("vat_number", ""),
-                    "cnp": self.cleaned_data.get("cnp", ""),
                     "cui": self.cleaned_data.get("cui", ""),
                     "registration_number": self.cleaned_data.get("trade_registry_number", ""),
                     "address_line1": self.cleaned_data["address_line1"],
@@ -472,10 +406,10 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
                     "county": self.cleaned_data["county"],
                     "postal_code": self.cleaned_data["postal_code"],
                     "country": self.cleaned_data["country"],
-                    "data_processing_consent": self.cleaned_data["data_processing_consent"],
                     "terms_accepted": self.cleaned_data.get("terms_accepted", False),
                 },
                 "language": "ro" if (get_language() or "").startswith("ro") else "en",
+                "intent": intent or {},
             }
             return api_client.register_customer(registration_data, client_ip=client_ip)
 
@@ -571,11 +505,8 @@ class CustomerProfileForm(forms.Form):
     )
 
     def clean_phone(self) -> str:
-        """Validate Romanian phone number format"""
-        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("phone", "")))
-        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
-            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return phone
+        """The number in international form: a person's country is not known here."""
+        return normalize_phone(self.cleaned_data.get("phone"))
 
 
 class TwoFactorSetupForm(forms.Form):
@@ -631,7 +562,7 @@ class TwoFactorVerifyForm(forms.Form):
         return token
 
 
-class PasswordResetRequestForm(forms.Form):
+class PasswordResetRequestForm(AltchaFormMixin, forms.Form):
     """Password reset request form with dark theme"""
 
     email = forms.EmailField(
@@ -684,19 +615,17 @@ class RegistrationConfirmForm(PasswordResetConfirmForm):
     # Which registration the page showed. Compared with the session's link, never sent on.
     registration_id = forms.CharField(widget=forms.HiddenInput, required=False)
 
-    data_processing_consent = forms.BooleanField(
-        label=_("I agree to the processing of my personal data for this account."),
-        required=True,
-    )
     marketing_consent = forms.BooleanField(
         label=_("Send me news and offers by email."),
         required=False,
     )
-    # The page links the terms; Platform records the version the page showed.
+    # The page links one terms release, and sends that one on: Platform records it, or refuses it
+    # once another is in force.
     terms_accepted = forms.BooleanField(
         label=_("I have read and accept the Terms of Service."),
         required=True,
     )
+    terms_document_id = forms.UUIDField(widget=forms.HiddenInput, required=False)
 
 
 class ChangePasswordForm(forms.Form):
@@ -835,32 +764,9 @@ class CompanyProfileForm(forms.Form):
         help_text=_("Business industry (optional)"),
     )
 
-    def clean_vat_number(self) -> str:
-        """Validate Romanian VAT number format"""
-        vat_number = str(self.cleaned_data.get("vat_number", "")).strip().upper()
-
-        if not vat_number:
-            raise ValidationError(_("VAT number / CUI is required"))
-
-        # Remove RO prefix for validation
-        clean_vat = vat_number.replace("RO", "").strip()
-
-        # Check if it's numeric and has appropriate length
-        if not clean_vat.isdigit():
-            raise ValidationError(_("VAT number must contain only digits (optionally prefixed with RO)"))
-
-        if len(clean_vat) < MIN_VAT_DIGITS:
-            raise ValidationError(_("VAT number must have at least 6 digits"))
-
-        # Return with RO prefix
-        return f"RO{clean_vat}"
-
     def clean_primary_phone(self) -> str:
-        """Validate Romanian phone number format"""
-        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("primary_phone", "")))
-        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
-            raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
-        return phone
+        """The number in international form: this form does not know the company's country."""
+        return normalize_phone(self.cleaned_data.get("primary_phone"))
 
 
 class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
@@ -892,7 +798,7 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
                 "placeholder": _("e.g. RO12345678"),
             }
         ),
-        help_text=_("Romanian VAT number (CUI) - required for invoicing"),
+        help_text=_("The company's VAT number, with or without the country prefix, if it is VAT-registered."),
     )
 
     trade_registry_number = forms.CharField(
@@ -969,12 +875,11 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
                 "placeholder": _("e.g. 010001"),
             }
         ),
-        help_text=_("Romanian postal code"),
+        help_text=_("Six digits in Romania"),
     )
 
     country = forms.CharField(
         label=_("Country"),
-        initial="România",
         widget=forms.TextInput(
             attrs={
                 "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
@@ -1050,63 +955,12 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
 
         return company_name
 
-    def clean_vat_number(self) -> str:
-        """Validate Romanian VAT number (CUI)"""
-        vat_number = str(self.cleaned_data.get("vat_number", "")).strip()
-
-        if not vat_number:
-            return vat_number
-
-        # Remove spaces and common prefixes
-        vat_number = vat_number.replace(" ", "").upper()
-        if vat_number.startswith("RO"):
-            vat_number = vat_number[2:]
-
-        # Check if it's numeric and has valid length
-        if not vat_number.isdigit():
-            raise forms.ValidationError(_("VAT number must contain only numbers (after RO prefix)"))
-
-        if len(vat_number) < MIN_NAME_PARTS or len(vat_number) > MAX_NAME_PARTS:
-            raise forms.ValidationError(_("Romanian VAT number must be between 2-10 digits"))
-
-        return f"RO{vat_number}"
-
-    def clean_primary_phone(self) -> str:
-        """Validate Romanian phone number"""
-        phone = str(self.cleaned_data.get("primary_phone", "")).strip()
-
-        if not phone:
-            return phone
-
-        # Remove common separators
-        phone_clean = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-
-        # Romanian phone number patterns
-        if phone_clean.startswith("+40"):
-            phone_clean = phone_clean[3:]
-        elif phone_clean.startswith("0040"):
-            phone_clean = phone_clean[4:]
-        elif phone_clean.startswith("40"):
-            phone_clean = phone_clean[2:]
-
-        # Remove leading 0 if present
-        if phone_clean.startswith("0"):
-            phone_clean = phone_clean[1:]
-
-        # Check if it's a valid Romanian mobile/landline
-        if not phone_clean.isdigit() or len(phone_clean) != MAX_PHONE_PREFIX_DIGITS:
-            raise forms.ValidationError(_("Please enter a valid Romanian phone number"))
-
-        # Check if it starts with valid prefixes
-        valid_prefixes = ["2", "3", "7"]  # landline, landline, mobile
-        if not any(phone_clean.startswith(prefix) for prefix in valid_prefixes):
-            raise forms.ValidationError(_("Phone number must start with a valid Romanian prefix"))
-
-        return f"+40{phone_clean}"
-
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
         cleaned_data = super().clean() or {}
+        # The phone and VAT number follow the company's country; it is cleaned after them.
+        for name, normalize in (("primary_phone", normalize_phone), ("vat_number", normalize_vat_number)):
+            clean_with_country(self, name, normalize, cleaned_data.get("country"))
 
         # If VAT number is provided, trade registry should also be provided
         vat_number = cleaned_data.get("vat_number")

@@ -56,7 +56,7 @@ class OrderInputValidator:
             "storage_type",
             "network_speed",
         },
-        "domain": {"privacy_protection", "auto_renew", "transfer_lock"},
+        "domain": {"privacy_protection", "auto_renew", "transfer_lock", "domain_mode"},
         "ssl": {"validation_type", "wildcard", "extended_validation"},
     }
 
@@ -138,6 +138,8 @@ class OrderInputValidator:
         validated_config = {}
         for key, value in config.items():
             if key in allowed_keys:
+                if key == "domain_mode" and value not in ("register", "transfer"):
+                    raise ValidationError(_("Choose to register or transfer the domain."))
                 # Additional validation for specific config types
                 if key.endswith("_version") and isinstance(value, str):
                     # Validate version strings (PHP, MySQL, etc.)

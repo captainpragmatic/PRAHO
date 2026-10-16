@@ -30,6 +30,7 @@ from django.utils import timezone
 if TYPE_CHECKING:
     pass
 
+from apps.common.operator import operator_is_romanian
 from apps.settings.services import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -773,8 +774,8 @@ efactura_settings = EFacturaSettings()
 
 
 def efactura_enabled() -> bool:
-    """Stored efactura.enabled first, then Django EFACTURA_ENABLED; read on every use."""
-    return efactura_settings.enabled
+    """Only for an operator established in Romania; then stored efactura.enabled, then EFACTURA_ENABLED."""
+    return operator_is_romanian() and efactura_settings.enabled
 
 
 def efactura_environment() -> EFacturaEnvironment:

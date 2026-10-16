@@ -987,6 +987,9 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
 
         item = OrderItem.objects.get(id=item_id)
 
+        if item.is_domain_line:
+            # Fulfilled by its registrar (apps.domains.order_fulfilment), not by hosting provisioning.
+            return {"success": True, "item_id": str(item.id), "message": "Domain line is fulfilled by its registrar"}
         if item.provisioning_status != "pending":
             logger.info(f"⚡ [OrderProvisioning] Item {item_id} status is {item.provisioning_status}, skipping")
             return {"success": True, "item_id": str(item.id), "message": f"Item already {item.provisioning_status}"}

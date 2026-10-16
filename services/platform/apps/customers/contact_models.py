@@ -18,6 +18,14 @@ from apps.common.fields import EncryptedJSONField
 from .customer_models import SoftDeleteModel, validate_bank_details
 
 
+def default_address_country() -> str:
+    """A new address's country: the deployment's default country (the operator's own unless staff chose)."""
+    from apps.common.localisation import country_name  # noqa: PLC0415
+    from apps.common.localisation_services import get_localisation_defaults  # noqa: PLC0415
+
+    return country_name(get_localisation_defaults().default_country)
+
+
 class CustomerAddress(SoftDeleteModel):
     """
     Customer addresses with versioning support.
@@ -47,9 +55,9 @@ class CustomerAddress(SoftDeleteModel):
     address_line1 = models.CharField(max_length=200, verbose_name=_("Adresa 1"))
     address_line2 = models.CharField(max_length=200, blank=True, verbose_name=_("Adresa 2"))
     city = models.CharField(max_length=100, verbose_name=_("Oraș"))
-    county = models.CharField(max_length=100, verbose_name=_("Județ"))
+    county = models.CharField(max_length=100, blank=True, verbose_name=_("Județ"))  # Required for RO (form rule)
     postal_code = models.CharField(max_length=10, verbose_name=_("Cod poștal"))
-    country = models.CharField(max_length=100, default="România", verbose_name=_("Țara"))
+    country = models.CharField(max_length=100, default=default_address_country, verbose_name=_("Țara"))
 
     # Versioning
     is_current = models.BooleanField(default=True, verbose_name=_("Adresa curentă"))
@@ -113,7 +121,13 @@ class CustomerAddress(SoftDeleteModel):
 
     def get_full_address(self) -> str:
         """Get formatted address"""
-        parts = [self.address_line1, self.address_line2, f"{self.city}, {self.county}", self.postal_code, self.country]
+        parts = [
+            self.address_line1,
+            self.address_line2,
+            ", ".join(part for part in (self.city, self.county) if part),
+            self.postal_code,
+            self.country,
+        ]
         return ", ".join(part for part in parts if part)
 
 

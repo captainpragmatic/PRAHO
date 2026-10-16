@@ -2,7 +2,7 @@
 {% load localisation_tags i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans 'Account Settings' %} - PragmaticHost{% endblock %}
+{% block title %}{% trans 'Account Settings' %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
@@ -201,7 +201,7 @@
         {% button create_btn variant="secondary" size="sm" href="/company/create/" icon="plus" %}
       </div>
 
-      <!-- Romanian Compliance Notice -->
+      <!-- Compliance Notice -->
       <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
         <div class="flex items-start space-x-3">
           {% icon "flag" size="sm" css_class="text-blue-400 mt-0.5 flex-shrink-0" %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
@@ -291,7 +291,7 @@
           <!-- Legal compliance note -->
           <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
             <p class="text-xs text-slate-400">
-              {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
+              {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'GDPR compliant according to EU Regulation 2016/679' %} {# tmpl-allow TMPL005: needs badge unboxed_icon #}
             </p>
           </div>
         </div>

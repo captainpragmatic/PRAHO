@@ -8,6 +8,7 @@ from typing import Any
 from django_q.models import Schedule
 from django_q.tasks import schedule
 
+from apps.domains.order_fulfilment import sweep_domain_order_lines
 from apps.domains.services import (
     DomainNotificationService,
     DomainOrderService,
@@ -98,8 +99,10 @@ def process_domain_renewal_notices() -> dict[str, Any]:
 
 
 def reconcile_pending_domain_operations() -> DomainReconciliationSummary:
-    """Run one durable domain reconciliation batch (#258)."""
-    return DomainReconciliationService.reconcile()
+    """Run one durable domain reconciliation batch (#258), then sweep the paid domain lines."""
+    summary = DomainReconciliationService.reconcile()
+    sweep_domain_order_lines()
+    return summary
 
 
 def setup_domain_scheduled_tasks() -> dict[str, str]:

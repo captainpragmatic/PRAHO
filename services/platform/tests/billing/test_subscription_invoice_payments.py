@@ -2949,7 +2949,6 @@ class StripeOffSessionPaymentContractTestCase(TestCase):
                 "praho_invoice_id": "42",
                 "platform": "PRAHO",
             },
-            statement_descriptor_suffix="PRAHO",
             idempotency_key="invoice:42:stripe:1",
         )
 

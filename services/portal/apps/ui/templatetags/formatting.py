@@ -16,9 +16,6 @@ from django.utils.html import escape  # For XSS prevention
 from django.utils.safestring import SafeString, mark_safe
 
 from apps.common.constants import (
-    PHONE_LANDLINE_LENGTH,
-    PHONE_MIN_VALID_LENGTH,
-    PHONE_MOBILE_LENGTH,
     ROMANIAN_IBAN_LENGTH,
     ROMANIAN_PLURAL_FEW_MAX,
     ROMANIAN_PLURAL_FEW_MIN,
@@ -26,7 +23,6 @@ from apps.common.constants import (
     ROMANIAN_POSTAL_CODE_LENGTH,
     ROMANIAN_TIME_HOUR_PLURAL_THRESHOLD,
     ROMANIAN_TIME_MINUTE_PLURAL_THRESHOLD,
-    ROMANIAN_VAT_RATE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
@@ -77,34 +73,6 @@ def romanian_currency(value: TemplateNumeric, currency: str | None = "RON") -> s
         return f"{romanian_formatted} {currency}"
     except (ValueError, TypeError, decimal.InvalidOperation):
         return unavailable
-
-
-@register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float | None = None) -> str:
-    """
-    Calculate and format VAT amount in Romanian style
-
-    Usage:
-        {{ subtotal|romanian_vat }}        -> "105,00 RON TVA" (21% rate)
-        {{ amount|romanian_vat:0.05 }}     -> "25,00 RON TVA" (custom rate)
-
-    Args:
-        value: Base amount for VAT calculation
-        vat_rate: VAT rate (defaults to Romanian standard rate from constants)
-    """
-    if value is None:
-        return "0,00 RON TVA"
-
-    try:
-        # Use Romanian VAT rate from constants if not specified
-        effective_vat_rate = vat_rate if vat_rate is not None else float(ROMANIAN_VAT_RATE)
-
-        decimal_value = Decimal(str(value))
-        vat_amount = decimal_value * Decimal(str(effective_vat_rate))
-        formatted_vat = romanian_currency(vat_amount).replace(" RON", "")
-        return f"{formatted_vat} RON TVA"
-    except (ValueError, TypeError):
-        return "0,00 RON TVA"
 
 
 # Romanian date formatting constants
@@ -345,47 +313,6 @@ def iban_format(value: str) -> str:
 
 
 @register.filter
-def phone_format(value: str, country_code: str = "+40") -> str:
-    """
-    Format Romanian phone numbers
-
-    Usage:
-        {{ contact.phone|phone_format }}      -> "+40 721 123 456"
-        {{ mobile|phone_format:"+49" }}       -> "+49 721 123 456"
-
-    Args:
-        value: Phone number string
-        country_code: Country code prefix
-    """
-    if not value:
-        return ""
-
-    # Remove all non-digit characters
-    digits = re.sub(r"\D", "", str(value))
-
-    # Handle Romanian numbers
-    if country_code == "+40":
-        if digits.startswith("40"):
-            digits = digits[2:]  # Remove country code
-        elif digits.startswith("0"):
-            digits = digits[1:]  # Remove leading 0
-
-        # Format based on length
-        if len(digits) == PHONE_MOBILE_LENGTH:
-            # Mobile: 721123456 -> +40 721 123 456
-            return f"+40 {digits[:3]} {digits[3:6]} {digits[6:]}"
-        elif len(digits) == PHONE_LANDLINE_LENGTH:
-            # Landline: 0213123456 -> +40 21 312 34 56
-            return f"+40 {digits[:2]} {digits[2:5]} {digits[5:7]} {digits[7:]}"
-
-    # For other countries or invalid Romanian numbers, return formatted
-    if len(digits) >= PHONE_MIN_VALID_LENGTH:
-        return f"{country_code} {digits}"
-
-    return value
-
-
-@register.filter
 def postal_code_format(value: str) -> str:
     """
     Format Romanian postal codes
@@ -431,31 +358,6 @@ def contract_number_format(value: str) -> str:
         return f"CRM-{year}-{contract_num.zfill(6)}"
 
     return contract_num
-
-
-@register.simple_tag
-def romanian_business_hours() -> str:
-    """
-    Display Romanian business hours
-
-    Usage:
-        {% romanian_business_hours %}  -> "Luni-Vineri: 09:00-18:00"
-    """
-    return "Luni-Vineri: 09:00-18:00"
-
-
-@register.simple_tag
-def romanian_legal_notice() -> str:
-    """
-    Standard Romanian legal notice for business documents
-
-    Usage:
-        {% romanian_legal_notice %}
-    """
-    return mark_safe(  # nosec B308 B703 - Static legal text, no user input
-        "Această factură este emisă în conformitate cu Legea 227/2015 "
-        "privind Codul fiscal și HG 1/2016 pentru aplicarea Codului fiscal."
-    )
 
 
 @register.filter

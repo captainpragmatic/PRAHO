@@ -11,7 +11,6 @@ try:
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
-    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     HAS_SENTRY = True
 except ImportError:
@@ -106,7 +105,7 @@ if not _allowed_hosts_raw:
     raise ImproperlyConfigured(
         "ALLOWED_HOSTS must be set in production. "
         "Set it to your portal and platform FQDNs, e.g.: "
-        "portal.pragmatichost.com,platform.pragmatichost.com,localhost,127.0.0.1"
+        "portal.example.com,platform.example.com,localhost,127.0.0.1"
     )
 
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
@@ -131,6 +130,52 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
         f"PORTAL_DOMAIN and PLATFORM_DOMAIN must both be set in production. "
         f"Got PORTAL_DOMAIN={PORTAL_DOMAIN!r}, PLATFORM_DOMAIN={PLATFORM_DOMAIN!r}. "
         f"These are used for absolute URL construction in emails and links."
+    )
+
+# Fiscal identity on invoices, PDFs and VIES requests. Read from the environment here, not from base,
+# so the value checked is the value used; a blank one would put no seller, or a placeholder, on documents.
+# The country code decides which jurisdiction's features apply; blank would silently mean Romania.
+# Its value is validated by the common.E003 system check, which runs at migrate.
+COMPANY_NAME = os.environ.get("COMPANY_NAME", "").strip()
+COMPANY_CUI = os.environ.get("COMPANY_CUI", "").strip()
+COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "").strip()
+_missing_fiscal_identity = [
+    name
+    for name, value in (
+        ("COMPANY_NAME", COMPANY_NAME),
+        ("COMPANY_CUI", COMPANY_CUI),
+        ("COMPANY_COUNTRY_CODE", COMPANY_COUNTRY_CODE),
+    )
+    if not value
+]
+if _missing_fiscal_identity:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        f"{', '.join(_missing_fiscal_identity)} must be set in production: invoices are issued under this "
+        "seller identity. Set the legal name, the tax ID (CUI in Romania, VAT number elsewhere) and the "
+        "ISO country code the seller is established in."
+    )
+
+# The operator's clock, read here like the fiscal identity. A Romanian operator keeps Bucharest time:
+# e-Factura dates and the VAT tax point are Romanian calendar days. Any other operator names its own
+# zone, because a country does not determine one (Portugal and Spain each span two).
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip()
+if COMPANY_COUNTRY_CODE.upper() == "RO":
+    if TIME_ZONE not in ("", "Europe/Bucharest"):
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            f"TIME_ZONE={TIME_ZONE!r} is not allowed for an operator in Romania: keep Europe/Bucharest, "
+            "because e-Factura dates and the VAT tax point are Romanian calendar days."
+        )
+    TIME_ZONE = "Europe/Bucharest"
+elif not TIME_ZONE:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "TIME_ZONE must be set in production for an operator outside Romania, e.g. Europe/Berlin: "
+        "billing periods, document dates and reports follow it."
     )
 
 # Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),
@@ -220,7 +265,7 @@ CORS_ALLOW_CREDENTIALS = True
 # Enhanced session security for production
 SESSION_COOKIE_AGE = 3600  # 1 hour for production security
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-SESSION_COOKIE_NAME = "pragmatichost_sessionid"
+SESSION_COOKIE_NAME = "praho_sessionid"
 SESSION_COOKIE_HTTPONLY = True  # Prevent XSS access to session cookie
 SESSION_COOKIE_PATH = "/"
 SESSION_SAVE_EVERY_REQUEST = True  # Update session on every request
@@ -233,7 +278,7 @@ DATABASES["default"].update(
     {
         "CONN_MAX_AGE": 600,
         "OPTIONS": {
-            "application_name": "pragmatichost_crm_prod",
+            "application_name": "praho_platform_prod",
             "sslmode": os.environ.get("DB_SSLMODE", "require"),
         },
     }
@@ -247,18 +292,11 @@ SENTRY_DSN = os.environ.get("SENTRY_DSN")
 if SENTRY_DSN and HAS_SENTRY:
     sentry_logging = LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)
 
+    from .sentry import sentry_options  # Needs sentry_sdk, present only here
+
     sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            DjangoIntegration(),
-            sentry_logging,
-        ],
-        traces_sample_rate=0.1,
-        send_default_pii=False,
-        # Frame variables are captured whatever send_default_pii says: never send a CNP.
-        event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "cnp", "cnp_encrypted"]),
-        environment="production",
-        release=os.environ.get("APP_VERSION", "unknown"),
+        integrations=[DjangoIntegration(), sentry_logging],
+        **sentry_options(SENTRY_DSN, release=os.environ.get("APP_VERSION", "unknown")),
     )
 
 # ===============================================================================
@@ -281,7 +319,7 @@ EMAIL_BACKEND = _email_backends.get(
 EMAIL_USE_TLS = True
 
 # Default from email for production
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@example.com>")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 # ===============================================================================

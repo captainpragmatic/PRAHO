@@ -12,25 +12,27 @@ from uuid import UUID
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
+from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common import altcha
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
     require_authentication,
     require_billing_access,
 )
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.localisation_middleware import sync_language_selection
-from apps.common.localisation_services import store_localisation_preferences
+from apps.common.localisation_services import company_lookup_available, store_localisation_preferences
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -43,7 +45,12 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
-from apps.users.constants import PASSWORD_RESET_SESSION_KEY, REGISTRATION_CONFIRM_SESSION_KEY
+from apps.users.constants import (
+    PASSWORD_RESET_SESSION_KEY,
+    REGISTRATION_CONFIRM_SESSION_KEY,
+    REGISTRATION_INTENT_SESSION_KEY,
+    REGISTRATION_PREFILL_SESSION_KEY,
+)
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -56,6 +63,12 @@ from apps.users.forms import (
     PasswordResetRequestForm,
     RegistrationConfirmForm,
     TOTPSetupForm,
+)
+from apps.users.intent_capture import (
+    capture_first_touch,
+    capture_intent,
+    registration_intent,
+    resume_after_confirmation,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,7 +185,6 @@ def _handle_totp_setup_get(
             "customer_email": customer_email,
             "customer_id": customer_id,
             "page_title": _("Set Up Authenticator App"),
-            "brand_name": "PRAHO Portal",
         }
         return render(request, "users/mfa_setup_totp.html", context)
 
@@ -298,6 +310,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     degraded_context: dict[str, object] = {}
 
     if request.method == "GET":
+        capture_first_touch(request)
         form = CustomerLoginForm()
     else:  # POST
         form = CustomerLoginForm(request.POST)
@@ -446,7 +459,6 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     context = {
         "form": form,
         "page_title": _("Customer Login"),
-        "brand_name": "PRAHO Portal",
         **degraded_context,
     }
 
@@ -522,16 +534,23 @@ def register_view(request: HttpRequest) -> HttpResponse:
         return redirect("/dashboard/")
 
     if request.method == "GET":
-        form = CustomerRegistrationForm()
+        capture_first_touch(request)
+        if "p" in request.GET:
+            return _take_registration_prefill(request, request.GET["p"])
+        capture_intent(request)
+        form = CustomerRegistrationForm(initial=request.session.get(REGISTRATION_PREFILL_SESSION_KEY))
     else:  # POST
         form = CustomerRegistrationForm(request.POST)
 
         if form.is_valid():
             try:
                 # Register customer via Platform API
-                registration_result = form.register_customer(client_ip=get_safe_client_ip(request))
+                registration_result = form.register_customer(
+                    client_ip=get_safe_client_ip(request), intent=registration_intent(request)
+                )
 
                 if registration_result:
+                    request.session.pop(REGISTRATION_PREFILL_SESSION_KEY, None)
                     # The same message whatever the address: Platform mails either a confirmation
                     # link or a note that the address already has an account.
                     messages.success(request, _("Thank you. Check your email for a message with the next step."))
@@ -553,10 +572,63 @@ def register_view(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "page_title": _("Customer Registration"),
-        "brand_name": "PRAHO Portal",
+        "company_lookup_available": company_lookup_available(),
     }
 
     return render(request, "users/register.html", context)
+
+
+def _take_registration_prefill(request: HttpRequest, token: str) -> HttpResponse:
+    """Keep what a staff-minted link fills in, then show the form without the token in its URL.
+
+    The link proves nothing about who opens it: the details only fill in the form, and stay editable.
+    A token Platform does not accept fills in nothing.
+    """
+    try:
+        prefill = api_client.read_registration_prefill(token, client_ip=get_safe_client_ip(request)).get("prefill")
+    except PlatformAPIError:
+        logger.warning("⚠️ [Portal Registration] Prefill link could not be read")
+        prefill = None
+    if isinstance(prefill, dict):
+        if isinstance(prefill.get("fields"), dict) and prefill["fields"]:
+            request.session[REGISTRATION_PREFILL_SESSION_KEY] = prefill["fields"]
+        if isinstance(prefill.get("intent"), dict) and prefill["intent"]:
+            request.session[REGISTRATION_INTENT_SESSION_KEY] = prefill["intent"]
+    response = redirect("users:register")
+    response["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@never_cache
+@csrf_protect
+@require_POST
+def company_lookup_view(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # one answer per refusal
+    """A Romanian company's details from ANAF's register, to fill in the registration form.
+
+    Platform answers from ANAF only, so this says nothing about who is registered here. Like the
+    registration itself, it needs a solved proof-of-work while ALTCHA is on.
+    """
+    if not company_lookup_available():
+        raise Http404
+    if altcha.enabled() and not altcha.accept_solution(request.POST.get(altcha.FIELD_NAME, "")):
+        return JsonResponse({"error": str(altcha.VERIFICATION_FAILED)}, status=400)
+    cui = "".join(request.POST.get("cui", "").split()).upper().removeprefix("RO")
+    if not (cui.isascii() and cui.isdigit() and 2 <= len(cui) <= 10):  # noqa: PLR2004  # CUI length
+        return JsonResponse({"error": _("Enter a valid CUI.")}, status=400)
+    unavailable = _("The company lookup is not available right now. Fill in the details yourself.")
+    try:
+        result = api_client.company_lookup(cui, client_ip=get_safe_client_ip(request))
+    except PlatformAPIError as exc:
+        if exc.is_rate_limited:
+            return JsonResponse({"error": get_rate_limit_message(exc.retry_after)}, status=429)
+        if exc.status_code == 400:  # noqa: PLR2004  # Platform refused the CUI
+            return JsonResponse({"error": _("Enter a valid CUI.")}, status=400)
+        return JsonResponse({"error": unavailable}, status=503)
+    if not result.get("available"):
+        return JsonResponse({"error": unavailable}, status=503)
+    if not result.get("found"):
+        return JsonResponse({"error": _("ANAF has no company with this CUI.")}, status=404)
+    return JsonResponse({"company": result.get("company", {})})
 
 
 def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfileForm:
@@ -715,7 +787,6 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         "customer_email": customer_email,
         "customer_id": customer_id,
         "page_title": _("Account Settings"),
-        "brand_name": "PRAHO Portal",
         "user_memberships": request.session.get("user_memberships", []),
         "selected_customer_id": request.session.get("selected_customer_id", customer_id),
         "selected_customer_name": request.session.get("selected_customer_name", ""),
@@ -853,6 +924,7 @@ def password_reset_confirm_view(
 
 
 _CONFIRM_FIELD_NAMES = {"password": "new_password", "password_confirm": "confirm_password"}
+TERMS_UNAVAILABLE = gettext_lazy("Registration opens once the Terms of Service are published.")
 
 
 def _refusal_notice(exc: PlatformAPIError) -> tuple[str, int, int | None]:
@@ -870,17 +942,20 @@ def _load_registration(
     Fetched once per link and kept with it in the session, so revisiting the page or a rejected
     password does not ask Platform again. None with no notice means the link is gone.
     """
-    if isinstance(link.get("details"), dict) and "terms_version" in link["details"]:
-        # Details without the terms version to accept are fetched again (Platform before #670).
+    if isinstance(link.get("details"), dict) and "terms_document" in link["details"]:
+        # Details from before the terms release they name are fetched again.
         return link["details"], "", 200, None
     try:
         details = api_client.get_pending_registration(
             link["registration_id"], link["token"], client_ip=get_safe_client_ip(request)
         ).get("registration")
     except PlatformAPIError as exc:
-        if (exc.response_data or {}).get("code") == "invalid_link":
+        code = (exc.response_data or {}).get("code")
+        if code == "invalid_link":
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, "", 400, None
+        if code == "terms_unavailable":
+            return None, str(TERMS_UNAVAILABLE), 409, None
         return (None, *_refusal_notice(exc))
     if not isinstance(details, dict):
         return (None, *_refusal_notice(PlatformAPIError("Pending registration answer without details")))
@@ -888,26 +963,30 @@ def _load_registration(
     return details, "", 200, None
 
 
+def _terms_id(registration: dict[str, Any] | None) -> str:
+    """The terms release a registration's details name, for the page to link and send back."""
+    terms = (registration or {}).get("terms_document")
+    return str(terms.get("document_id", "")) if isinstance(terms, dict) else ""
+
+
 def _confirm_registration(
-    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], details: dict[str, Any]
+    request: HttpRequest, form: RegistrationConfirmForm, link: dict[str, Any], registration: dict[str, Any]
 ) -> tuple[HttpResponse | None, int, int | None, str]:
-    """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice."""
-    terms_version = str(details.get("terms_version", ""))
-    if terms_version != TERMS_OF_SERVICE_VERSION:
-        # Mid-deploy of new terms: /terms/ shows this portal's version, and Platform would record
-        # its own. Accept only when both name the same document.
-        form.add_error(None, _("The Terms of Service are being updated. Please try again in a few minutes."))
-        return None, 503, None, ""
+    """Submit the confirmation. Return a redirect on success, else a status, Retry-After and a notice.
+
+    On success the sign-in page leads on to the product the registration came for, if any.
+
+    The notice `terms_changed` means the terms release the page showed is no longer the one to accept.
+    """
     try:
         result = api_client.confirm_registration(
             link["registration_id"],
             link["token"],
             form.cleaned_data["new_password"],
             form.cleaned_data["confirm_password"],
-            data_processing_consent=form.cleaned_data["data_processing_consent"],
             marketing_consent=form.cleaned_data["marketing_consent"],
             terms_accepted=form.cleaned_data["terms_accepted"],
-            terms_version=terms_version,
+            terms_document_id=str(form.cleaned_data["terms_document_id"] or ""),
             client_ip=get_safe_client_ip(request),
         )
         if not result.get("success"):
@@ -918,16 +997,16 @@ def _confirm_registration(
         if code in {"invalid_link", "details_unavailable"}:
             request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
             return None, (409 if code == "details_unavailable" else 400), None, code
-        if code == "terms_changed":
-            # Forget the details fetched for the link, so the next submit sends the current version.
+        if code in {"terms_changed", "terms_unavailable"}:
+            # Forget the details fetched for the link: the page is drawn again with the release in force.
             request.session[REGISTRATION_CONFIRM_SESSION_KEY] = {
                 key: value for key, value in link.items() if key != "details"
             }
             form.add_error(None, _("The Terms of Service have changed. Please read them again before confirming."))
-            # The tick was for the previous version: ask for it again.
+            # The tick was for the previous release: ask for it again.
             form.data = form.data.copy()
             form.data.pop("terms_accepted", None)
-            return None, 409, None, ""
+            return None, 409, None, "terms_changed"
         if exc.status_code == HTTPStatus.BAD_REQUEST:
             errors = payload.get("errors")
             for field, field_errors in (errors if isinstance(errors, dict) else {}).items():
@@ -941,7 +1020,9 @@ def _confirm_registration(
         return None, status, retry_after, ""
     request.session.pop(REGISTRATION_CONFIRM_SESSION_KEY, None)
     messages.success(request, _("Your account is confirmed. You can sign in now."))
-    response = redirect("users:login")
+    resume = resume_after_confirmation(request, registration.get("intent"))
+    login = reverse("users:login")
+    response = redirect(f"{login}?{urlencode({'next': resume})}" if resume else login)
     response["Referrer-Policy"] = "no-referrer"
     return response, 302, None, ""
 
@@ -970,7 +1051,11 @@ def register_confirm_view(
     link = request.session.get(REGISTRATION_CONFIRM_SESSION_KEY)
     registration, notice, status, retry_after = (None, "", 400, None) if not link else _load_registration(request, link)
     gone = "" if registration is not None or notice else "invalid_link"
-    form = RegistrationConfirmForm(initial={"registration_id": link["registration_id"]} if link else None)
+    form = RegistrationConfirmForm(
+        initial={"registration_id": link["registration_id"], "terms_document_id": _terms_id(registration)}
+        if link
+        else None
+    )
 
     if link and registration is not None and request.method == "POST":
         posted = RegistrationConfirmForm(request.POST)
@@ -981,6 +1066,13 @@ def register_confirm_view(
             if done is not None:
                 return done
             form = posted
+            if gone == "terms_changed":
+                # Show the release now in force, and send that one with the next submit.
+                registration, notice, _status, retry_after = _load_registration(
+                    request, request.session[REGISTRATION_CONFIRM_SESSION_KEY]
+                )
+                form.data = {**form.data, "terms_document_id": _terms_id(registration)}
+                status, gone = 409, "" if registration is not None or notice else "invalid_link"
         else:
             status, form = 400, posted
     if not link and request.method == "GET":
@@ -1070,7 +1162,6 @@ def privacy_dashboard_view(request: HttpRequest) -> HttpResponse:
         "customer_email": customer_email,
         "customer_id": customer_id,
         "page_title": _("Privacy Dashboard"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/privacy_dashboard.html", context)
@@ -1136,7 +1227,6 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
         "customer_id": customer_id,
         "exports": exports,
         "page_title": _("Export My Data"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/data_export.html", context)
@@ -1215,7 +1305,6 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
         "consent_history": consent_history,
         "cookie_consent_history": cookie_consent_history,
         "page_title": _("Consent History"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/consent_history.html", context)
@@ -1252,7 +1341,6 @@ def mfa_management_view(request: HttpRequest) -> HttpResponse:
         "customer_id": customer_id,
         "mfa_enabled": mfa_enabled,
         "page_title": _("Multi-Factor Authentication"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/mfa_management.html", context)
@@ -1468,7 +1556,6 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
         "company_data": company_data,
         "customer_email": request.session.get("email"),
         "page_title": _("Company Profile"),
-        "brand_name": "PRAHO Portal",
         "selected_customer_id": customer_id,
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
@@ -1614,7 +1701,6 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: C9
         "form": form,
         "customer_email": request.session.get("email"),
         "page_title": _("Edit Company Profile"),
-        "brand_name": "PRAHO Portal",
         "selected_customer_id": customer_id,
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
@@ -1845,7 +1931,6 @@ def create_company_view(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "page_title": _("Create Company"),
-        "brand_name": "PRAHO Portal",
     }
 
     return render(request, "users/create_company.html", context)

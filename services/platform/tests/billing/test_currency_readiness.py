@@ -10,7 +10,7 @@ from django.core.management import call_command
 from django.core.management.base import SystemCheckError
 from django.db import OperationalError, connection, transaction
 from django.db.models import JSONField, Value
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.currency_policy import get_selling_currency_policy
@@ -37,25 +37,21 @@ class SellingCurrencyReadinessTests(TestCase):
     def readiness(**overrides):
         return run_checks(tags=["billing_currency"], databases=overrides.get("databases", ["default"]))
 
-    def test_stored_foreign_currency_requires_fx_even_when_environment_says_ron(self):
+    def test_stored_foreign_currency_requires_fx(self):
         self.assertIsInstance(SettingsService.update_setting("billing.default_currency", "EUR"), Ok)
         FXRate.objects.filter(base_code_id="EUR").delete()
-        with override_settings(BILLING_DEFAULT_CURRENCY="RON"):
-            errors = self.readiness()
+        errors = self.readiness()
         self.assertEqual([error.id for error in errors], ["billing.E001"])
         self.assertIn("EUR", errors[0].msg)
         self.assertIn("billing.default_currency", errors[0].msg)
 
-    def test_provenanced_stored_currency_ignores_a_conflicting_or_invalid_environment(self):
+    def test_provenanced_stored_currency_is_ready(self):
         self.assertIsInstance(SettingsService.update_setting("billing.default_currency", "USD"), Ok)
-        for value in ("EUR", "XXX", None, 123):
-            with self.subTest(environment=value), override_settings(BILLING_DEFAULT_CURRENCY=value):
-                self.assertEqual(self.readiness(), [])
+        self.assertEqual(self.readiness(), [])
 
     def test_stored_ron_does_not_require_foreign_fx(self):
         FXRate.objects.all().delete()
-        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"):
-            self.assertEqual(self.readiness(), [])
+        self.assertEqual(self.readiness(), [])
 
     def test_latest_unprovenanced_rate_blocks_readiness(self):
         self.assertIsInstance(SettingsService.update_setting("billing.default_currency", "EUR"), Ok)
@@ -73,7 +69,7 @@ class SellingCurrencyReadinessTests(TestCase):
 
     def test_ordinary_checks_and_unrelated_databases_do_not_query(self):
         for databases in (None, [], ["unrelated"]):
-            with self.subTest(databases=databases), override_settings(BILLING_DEFAULT_CURRENCY="EUR"), self.assertNumQueries(0):
+            with self.subTest(databases=databases), self.assertNumQueries(0):
                 self.assertEqual(self.readiness(databases=databases), [])
 
     def test_unreachable_database_is_an_error_when_readiness_was_requested(self):
@@ -88,11 +84,10 @@ class SellingCurrencyReadinessTests(TestCase):
         with self.assertRaisesMessage(SystemCheckError, "billing.E001"):
             call_command("check", "--tag", "billing_currency", "--database", "default", stdout=StringIO())
 
-    def test_missing_policy_row_keeps_upgrade_ron_baseline_without_creating_data(self):
+    def test_missing_policy_row_keeps_the_ron_baseline_without_creating_data(self):
         SystemSetting.objects.filter(key="billing.default_currency").delete()
         FXRate.objects.all().delete()
-        with override_settings(BILLING_DEFAULT_CURRENCY="EUR"):
-            self.assertEqual(self.readiness(), [])
+        self.assertEqual(self.readiness(), [])
         self.assertFalse(SystemSetting.objects.filter(key="billing.default_currency").exists())
 
     def _check_legacy_schema(self, ddl):
@@ -102,8 +97,7 @@ class SellingCurrencyReadinessTests(TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(ddl)
             try:
-                with override_settings(BILLING_DEFAULT_CURRENCY="EUR"):
-                    errors = self.readiness()
+                errors = self.readiness()
             finally:
                 transaction.set_rollback(True)
         self.assertEqual(errors, [])

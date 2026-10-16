@@ -47,6 +47,7 @@ class MapperTestBase(TestCase):
             "currency": self.currency,
             "number": f"INV-MAP-{self._counter:04d}",
             "status": "issued",
+            "home_currency_code": "RON",
             "issued_at": timezone.now(),
             "subtotal_cents": 10000,
             "tax_cents": 2100,
@@ -280,7 +281,7 @@ class ForeignCurrencyTests(MapperTestBase):
         """Romanian law wants the BNR rate of the day before the tax point, and
         PRAHO froze it. Per-line rates are omitted: they can disagree."""
         eur = _currency("EUR")
-        invoice = self._invoice(currency=eur, exchange_to_ron=Decimal("4.9772"))
+        invoice = self._invoice(currency=eur, exchange_rate_to_home=Decimal("4.9772"))
         self._line(invoice)
 
         payload = build_invoice_payload(invoice, CONFIG).unwrap().payload
@@ -291,7 +292,7 @@ class ForeignCurrencyTests(MapperTestBase):
 
     def test_a_foreign_invoice_without_a_frozen_rate_is_refused(self) -> None:
         eur = _currency("EUR")
-        invoice = self._invoice(currency=eur, exchange_to_ron=None)
+        invoice = self._invoice(currency=eur, exchange_rate_to_home=None)
         self._line(invoice)
 
         result = build_invoice_payload(invoice, CONFIG)
@@ -370,7 +371,7 @@ class CurrencyDenominationTests(MapperTestBase):
         """`products[].currency` defaults to RON INDEPENDENTLY of the document
         currency, so omitting it prices a EUR invoice in RON."""
         eur = _currency("EUR")
-        invoice = self._invoice(currency=eur, exchange_to_ron=Decimal("4.9772"))
+        invoice = self._invoice(currency=eur, exchange_rate_to_home=Decimal("4.9772"))
         self._line(invoice)
 
         payload = build_invoice_payload(invoice, CONFIG).unwrap().payload
@@ -382,7 +383,7 @@ class CurrencyDenominationTests(MapperTestBase):
         eur = _currency("EUR")
         invoice = self._invoice(
             currency=eur,
-            exchange_to_ron=Decimal("4.9772"),
+            exchange_rate_to_home=Decimal("4.9772"),
             discount_cents=1000,
             subtotal_cents=9000,
             tax_cents=1890,

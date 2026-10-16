@@ -57,7 +57,7 @@ class ForeignCurrencyConversionE2ETests(TestCase):
         self.assertEqual(invoice.status, "issued")
         self.assertIsNotNone(invoice.tax_point_date)
         # FX frozen at the reversible conversion moment (consumed by issue()).
-        self.assertEqual(invoice.exchange_to_ron, Decimal("5.01230000"))
+        self.assertEqual(invoice.exchange_rate_to_home, Decimal("5.01230000"))
         self.assertEqual(invoice.exchange_rate_source, FXRate.Source.BNR)
         self.assertIsNotNone(invoice.locked_at)
 
@@ -68,7 +68,7 @@ class ForeignCurrencyConversionFailClosedTests(TestCase):
     so an operator can retry once a rate is ingested (#103, stuck-money prevention).
 
     Deliberately seeds NO FXRate. Discriminating: with the FX safety removed, issue() would
-    create an EUR invoice with exchange_to_ron=None and return Ok — both asserts below flip.
+    create an EUR invoice with exchange_rate_to_home=None and return Ok — both asserts below flip.
     """
 
     def setUp(self) -> None:

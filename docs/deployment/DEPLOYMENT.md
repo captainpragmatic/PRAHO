@@ -269,8 +269,8 @@ PRAHO requires **two separate FQDNs** — one for Portal (customer-facing) and o
 
 | Component | Domain | Access |
 |-----------|--------|--------|
-| **Portal** (customer-facing) | `portal.pragmatichost.com` | Public |
-| **Platform** (staff/admin) | `platform.pragmatichost.com` | IP-restricted (optional) |
+| **Portal** (customer-facing) | `portal.example.com` | Public |
+| **Platform** (staff/admin) | `platform.example.com` | IP-restricted (optional) |
 | **Bare IP** | Server's public IP | 301 redirect to portal domain |
 
 **Security layers (all deployment modes):**
@@ -394,9 +394,9 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP address | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
-| `ACME_EMAIL` | Let's Encrypt notification email | `admin@pragmatichost.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN; customer email links point at `https://` and this domain unless staff set Settings → Customer portal URL | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
+| `ACME_EMAIL` | Let's Encrypt notification email | `admin@example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
 | `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
@@ -432,7 +432,7 @@ ssh root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
   source /opt/praho/.venv-linux/bin/activate && \
-  python services/platform/manage.py createsuperuser --email admin@pragmatichost.com'
+  python services/platform/manage.py createsuperuser --email admin@example.com'
 ```
 
 You will be prompted for a password. This is the only time credentials need to be entered manually — they are **not** stored in `.env` files or Ansible logs.
@@ -1007,15 +1007,19 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PRAHO_SERVER_IP` | Server public IP | `203.0.113.10` |
-| `PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
+| `PORTAL_DOMAIN` | Customer-facing FQDN; customer email links point at `https://` and this domain unless staff set Settings → Customer portal URL | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.example.com` |
 | `DJANGO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DJANGO_ENCRYPTION_KEY` | AES-256-GCM key for 2FA secrets and sensitive fields; production refuses to start without it | `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
 | `CREDENTIAL_VAULT_MASTER_KEY` | Credential vault key; production refuses to start without it | same command, a different key |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
+| `COMPANY_NAME`, `COMPANY_CUI` | The seller on every invoice; production refuses to start without them | `Example Hosting SRL`, `RO12345674` |
+| `COMPANY_COUNTRY_CODE` | ISO code of the EU country the seller is established in. It decides which Romanian features apply (ADR-0047) and the home currency (ADR-0041); production refuses to start without it | `RO`, `DE` |
+| `TIME_ZONE` | The operator's clock for billing periods, document dates and reports. Empty means `Europe/Bucharest`, the only zone allowed in Romania; any other operator must set it | `Europe/Berlin` |
+| `BRAND_DIR` | Optional folder with `logo.svg`, `favicon.svg`, `brand.css` replacing PRAHO's marks (ADR-0061) | `/opt/praho/brand` |
+| `ACME_EMAIL` | Let's Encrypt email | `admin@example.com` |
 
 ### Docker Deployment (Compose)
 
@@ -1023,16 +1027,26 @@ The same `.env.prod` / `.env.staging` file, passed by `deploy/scripts/deploy.sh`
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.pragmatichost.com` |
-| `PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.pragmatichost.com` |
+| `PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.example.com` |
+| `PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.example.com` |
 | `DB_PASSWORD` | Yes | PostgreSQL password | `openssl rand -base64 32` |
 | `DJANGO_SECRET_KEY` | Yes | Django secret key | `openssl rand -base64 50` |
 | `PLATFORM_API_SECRET` | Yes | Portal ↔ Platform HMAC (same value as `HMAC_SECRET`) | `openssl rand -base64 32` |
 | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Yes | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `PORTAL_DJANGO_SECRET_KEY` | portal-only | The portal's own Django key (single-server uses it when set, else `DJANGO_SECRET_KEY`) | `openssl rand -base64 50` |
-| `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
+| `DJANGO_ENCRYPTION_KEY`, `CREDENTIAL_VAULT_MASTER_KEY`, `COMPANY_NAME`, `COMPANY_CUI`, `COMPANY_COUNTRY_CODE` | Production | Checked by `deploy.sh` before Compose runs | see the native table |
+| `TIME_ZONE` | Outside Romania | Passed to both services; production settings enforce it | see the native table |
+| `BRAND_DIR` | No | Host folder mounted read-only at `/app/brand` for the platform and portal (`deploy/brand/`, empty, when unset) | `/srv/praho-brand` |
 | `ACME_EMAIL` | Yes | Let's Encrypt email | `admin@example.com` |
 | `VERSION` | No | Image tag (default `latest`) | `v1.2.3` |
+
+### Brand folder
+
+`BRAND_DIR` names a folder holding any of `logo.svg` (drawn for PRAHO's dark screens), `favicon.svg`, `favicon.ico`, `apple-touch-icon.png` and `brand.css`; each file present replaces PRAHO's own (ADR-0061). In `brand.css`, `--color-primary-50` to `--color-primary-950` recolour the portal's accent and `--color-slate-*` its neutrals. Native installs read it from the env file. The Compose stacks mount it read-only at `/app/brand` (an empty `deploy/brand/` when unset). On a container platform without bind mounts, build a derived image: `COPY brand /app/brand` and `ENV BRAND_DIR=/app/brand`; collectstatic runs in the entrypoint, so the files are published at start.
+
+### Legal documents
+
+PRAHO ships no legal text. After the first deploy, an administrator publishes the Terms of Service, Privacy Policy and Cookie Policy under Settings → Legal documents; until Terms of Service are in force, nobody can register. See [LEGAL_DOCUMENTS.md](LEGAL_DOCUMENTS.md).
 
 ### Security Variables
 
@@ -1176,8 +1190,8 @@ docker logs praho_caddy
 journalctl -u caddy -f
 
 # Verify domain DNS is correct
-dig portal.pragmatichost.com
-dig platform.pragmatichost.com
+dig portal.example.com
+dig platform.example.com
 
 # Check if ports 80/443 are open
 sudo ufw status

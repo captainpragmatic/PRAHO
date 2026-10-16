@@ -330,10 +330,11 @@ def _document_problems(invoice: Invoice, lines: list[InvoiceLine], decision: VAT
         line.kind not in SUPPORTED_KINDS or line.tax_category_code != "AE" or line.tax_rate != 0 for line in lines
     ):
         problems.append("mixed_discount: Document discount allocation across categories is unsupported.")
+    ron_rate = invoice.ron_exchange_rate()
     if invoice.currency_id != "RON" and (
-        invoice.exchange_to_ron is None
-        or not invoice.exchange_to_ron.is_finite()
-        or invoice.exchange_to_ron <= 0
+        ron_rate is None
+        or not ron_rate.is_finite()
+        or ron_rate <= 0
         or not invoice.exchange_rate_as_of
         or not invoice.exchange_rate_source
         or not invoice.exchange_rate_source_reference
@@ -691,7 +692,7 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:  # noqa: PL
                 exceptions.append(_exception(invoice, line, line_problems))
                 continue
             country, body = vat_identity(invoice.bill_to_tax_id, invoice.bill_to_country)
-            rate = Decimal(1) if invoice.currency_id == "RON" else invoice.exchange_to_ron
+            rate = Decimal(1) if invoice.currency_id == "RON" else invoice.ron_exchange_rate()
             assert rate is not None and placed_on is not None
             invoice_number = _require_legal_number(invoice)
             discount = allocations[line.pk]

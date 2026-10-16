@@ -21,13 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_localisation_defaults() -> LocalisationDefaults:
-    from apps.settings.services import SettingsService  # noqa: PLC0415  # ADR-0007: runtime cross-app dependency
+    from apps.settings.services import (  # noqa: PLC0415  # ADR-0007: runtime cross-app dependency
+        SettingsService,
+        get_default_country,
+    )
 
     try:
         return LocalisationDefaults.from_mapping(
             {
                 "default_language": SettingsService.get_setting("system.default_language"),
-                "default_country": SettingsService.get_setting("system.default_country"),
+                "default_country": get_default_country(),
                 "timezone": SettingsService.get_setting("system.timezone"),
                 "staff_date_format": SettingsService.get_setting("system.staff_date_format"),
                 "customer_date_format": SettingsService.get_setting("system.customer_date_format"),

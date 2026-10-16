@@ -9,12 +9,15 @@ product state, currency and totals consistency.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.financial_arithmetic import calculate_document_totals
+from apps.common.identity_fields import requires_county
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 
 from .models import Order
 from .vat_rules import CustomerVATInfo, OrderVATCalculator
@@ -24,6 +27,27 @@ logger = logging.getLogger(__name__)
 
 class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
+
+    @staticmethod
+    def _missing_billing_fields(billing: dict[str, Any]) -> list[str]:
+        """What the billing snapshot lacks; only a Romanian address needs its county."""
+        required_fields = [
+            ("contact_name", _("Please provide a contact name for your order")),
+            ("email", _("Please provide a contact email address")),
+            ("address_line1", _("Please provide your street address")),
+            ("city", _("Please provide your city")),
+            ("county", _("Please provide your county/state")),
+            ("postal_code", _("Please provide your postal/ZIP code")),
+            ("country", _("Please provide your country")),
+        ]
+        missing: list[str] = []
+        for field, message in required_fields:
+            if field == "county" and not requires_county(billing.get("country")):
+                continue
+            if not str(billing.get(field, "")).strip():
+                logger.warning(f"🔎 [Validation] Missing field '{field}' from billing data: {list(billing.keys())}")
+                missing.append(str(message))
+        return missing
 
     @staticmethod
     def validate(  # noqa: C901, PLR0912, PLR0915  # Cohesive validation pipeline; steps share accumulated findings
@@ -36,29 +60,14 @@ class OrderPreflightValidationService:
 
         # 1) Customer and billing snapshot completeness
         billing = order.billing_address or {}
-        required_fields = [
-            ("contact_name", _("Please provide a contact name for your order")),
-            ("email", _("Please provide a contact email address")),  # Fixed: was "contact_email"
-            ("address_line1", _("Please provide your street address")),  # Fixed: was "line1"
-            ("city", _("Please provide your city")),
-            ("county", _("Please provide your county/state")),
-            ("postal_code", _("Please provide your postal/ZIP code")),
-            ("country", _("Please provide your country")),
-        ]
-        for field, message in required_fields:
-            field_value = str(billing.get(field, "")).strip()
-            if not field_value:
-                logger.warning(
-                    f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}"
-                )
-                errors.append(str(message))
+        errors.extend(OrderPreflightValidationService._missing_billing_fields(billing))
 
         # Basic email presence - format validation is assumed upstream
         # VAT number presence for businesses (company name given)
         company_name = str(billing.get("company_name", "")).strip()
         vat_number = str(billing.get("vat_number", billing.get("vat_id", ""))).strip()
         is_business = bool(company_name)
-        country = normalize_country_code(billing.get("country")) or "RO"
+        country = normalize_country_code(billing.get("country")) or operator_country()
 
         if is_business and country == "RO" and not vat_number:
             warnings.append(str(_("Romanian business without VAT number - verify tax profile")))
@@ -85,10 +94,29 @@ class OrderPreflightValidationService:
                 if not product.is_active:
                     warnings.append(str(_("Item '{}': product is inactive").format(item.product_name)))
 
-                # Price availability in catalog for the order currency
-                price = product.get_price_for_currency(order.currency.code)
                 if product.requires_domain and product.domain_required_at_signup and not item.domain_name.strip():
                     items_missing_domain.append(str(item.product_name))
+
+                if item.is_domain_line:
+                    # Priced from the TLD price list (apps.domains), not the catalog: it must still be offered.
+                    from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007
+
+                    quoted = DomainOrderService.quote_order_item(item, order.currency.code)
+                    if quoted.is_err():
+                        errors.append(str(_("Item '{}': {}").format(item.product_name, quoted.unwrap_err())))
+                    else:
+                        from apps.domains.registrants import (  # noqa: PLC0415
+                            missing_registrant_fields,
+                            registrant_identity_error,
+                        )
+
+                        quote = quoted.unwrap()
+                        if missing_registrant_fields(quote.registrar, order.customer, quote.action):
+                            errors.append(registrant_identity_error())
+                    continue
+
+                # Price availability in catalog for the order currency
+                price = product.get_price_for_currency(order.currency.code)
                 if price is None:
                     errors.append(
                         str(_("Item '{}': no current price for {}").format(item.product_name, order.currency.code))

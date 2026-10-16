@@ -1,5 +1,5 @@
 """
-Tests for Portal cookie consent proxy and cookie policy page.
+Tests for the Portal cookie consent proxy. The cookie policy page: test_legal_pages.py.
 No database access — enforced by Portal's pytest plugin.
 """
 
@@ -53,6 +53,8 @@ class CookieConsentProxyTests(SimpleTestCase):
         self.assertIn('cookie_id', call_args)
         self.assertIn('ip_address', call_args)
         self.assertIn('user_agent', call_args)
+        # Platform records the Cookie Policy release in force in the visitor's language.
+        self.assertEqual(call_args['language'], 'en')
 
     @patch('apps.common.views.api_client')
     def test_consent_endpoint_includes_user_id_from_session(self, mock_client: MagicMock) -> None:
@@ -106,24 +108,6 @@ class CookieConsentProxyTests(SimpleTestCase):
         data = json.loads(response.content)
         # success=False because Platform was unreachable
         self.assertFalse(data['success'])
-
-
-class CookiePolicyPageTests(SimpleTestCase):
-    """Tests for /cookie-policy/ page."""
-
-    def setUp(self) -> None:
-        self.client = Client()
-
-    def test_cookie_policy_page_renders(self) -> None:
-        """200 response with correct template."""
-        response = self.client.get('/cookie-policy/')
-        self.assertEqual(response.status_code, 200)
-
-    def test_cookie_policy_no_auth_required(self) -> None:
-        """Accessible without session / authentication."""
-        client = Client()  # Fresh client, no session
-        response = client.get('/cookie-policy/')
-        self.assertEqual(response.status_code, 200)
 
 
 @override_settings(

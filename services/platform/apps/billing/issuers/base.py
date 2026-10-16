@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
+from apps.common.operator import operator_serves
 from apps.common.types import Err, Result
 
 if TYPE_CHECKING:
@@ -105,6 +106,8 @@ class InvoiceIssuerGateway(ABC):
     """Turns a prepared PRAHO invoice into a legally numbered document."""
 
     provider: str
+    # The only jurisdiction whose operators may use this issuer; "" for any (ADR-0047 addendum).
+    jurisdiction: ClassVar[str] = ""
 
     @abstractmethod
     def validate_configuration(self) -> Result[ConfigurationReport, str]:
@@ -214,3 +217,9 @@ def get_invoice_issuer(provider: str) -> InvoiceIssuerGateway:
 
 def get_registered_issuers() -> list[str]:
     return sorted(_ISSUER_REGISTRY)
+
+
+def issuer_serves_operator(provider: str) -> bool:
+    """Whether a registered issuer may be chosen for this operator's new documents."""
+    gateway_cls = _ISSUER_REGISTRY.get(provider)
+    return gateway_cls is not None and operator_serves(gateway_cls.jurisdiction)

@@ -58,6 +58,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "auth_reset_ip": "5/minute",
                 "auth_register_ip": "5/minute",
                 "auth_register_confirm_ip": "5/minute",
+                "public_lookup_ip": "10/minute",
                 "mfa_credential": "15/hour",
             },
         }
@@ -116,6 +117,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "auth_reset_ip": "5/minute",
                 "auth_register_ip": "5/minute",
                 "auth_register_confirm_ip": "5/minute",
+                "public_lookup_ip": "10/minute",
                 "mfa_credential": "15/hour",
             },
         }

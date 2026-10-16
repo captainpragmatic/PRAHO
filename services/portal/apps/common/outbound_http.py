@@ -42,7 +42,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 PORTAL_DEFAULT_TIMEOUT: float = 30.0
-DEFAULT_USER_AGENT = "PRAHO-Portal/1.0 (+https://pragmatichost.com)"
+DEFAULT_USER_AGENT = "PRAHO-Portal/1.0"
 
 # One Session per thread, created on first use; see the module docstring.
 _sessions = threading.local()

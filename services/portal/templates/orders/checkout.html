@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load i18n static ui_components formatting %}
 
-{% block title %}{% trans "Checkout" %}{% endblock %}
+{% block title %}{% trans "Checkout" %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -22,6 +22,17 @@
 
     <!-- Order Form -->
     <div class="lg:col-span-2">
+      {% if "cnp" in checkout.registrant_requires %}
+      <div class="mb-6 rounded-lg border border-slate-700 bg-slate-800 p-6">
+        <h2 class="text-lg font-medium text-white mb-3">{% trans "Registrant identity" %}</h2>
+        <p class="text-sm text-slate-300 mb-4">{% trans "When a .ro registrar requires your CNP, we store it on your tax profile. It is also used as your buyer identifier on proformas, invoices and e-Factura." %}</p>
+        <form method="post" action="{% url 'orders:registrant_identity' %}" class="space-y-4">
+          {% csrf_token %}
+          {% input_field "cnp" input_type="password" label=_("CNP") required=True autocomplete="off" maxlength=13 %}
+          {% button _("Save registrant identity") type="submit" variant="primary" %}
+        </form>
+      </div>
+      {% endif %}
       <div class="bg-slate-800 rounded-lg border border-slate-700">
 
         <!-- Form Header -->
@@ -168,32 +179,40 @@
           </div>
           {% endif %}
 
-          <!-- Terms and Conditions -->
+          <!-- Terms of Service: the release this page links is the one sent with the order -->
           <div class="mb-6">
+            {% if checkout.terms_document %}<input type="hidden" name="terms_document_id" value="{{ checkout.terms_document.document_id }}">{% endif %}
             <div class="flex items-start">
               {% trans "I agree to the terms and conditions of use" as agree_terms_label %}
               {% checkbox_field "agree_terms" label=agree_terms_label required=True %}
             </div>
             <p class="text-xs text-slate-400 mt-2 ml-8">
               {% trans "By continuing, you confirm that you accept our" %}
-              <a href="{% url 'terms_of_service' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "terms and conditions" %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
+              {% if checkout.terms_document %}{% url 'legal_document' checkout.terms_document.document_id as terms_url %}{% else %}{% url 'terms_of_service' as terms_url %}{% endif %}
+              <a href="{{ terms_url }}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">{% trans "terms and conditions" %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
               {% trans "and" %}
               <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a> {# tmpl-allow TMPL005: needs button inline_link #}
               {% trans "for hosting services." %}
             </p>
           </div>
 
-          <!-- EU Consumer Rights — withdrawal notice (Directive 2011/83/EU, OUG 34/2014) -->
+          {% if checkout.early_start_required %}
+          <!-- An EU consumer: services start within the 14-day withdrawal period only on request (Directive 2011/83/EU, arts. 7(3), 8(8), 16) -->
           <div class="mb-6 p-3 bg-slate-700/20 rounded-lg border border-slate-600/50">
-            <p class="text-xs text-slate-400 leading-relaxed">
-              {% trans "By requesting immediate service activation, you acknowledge and agree to waive the 14-day right of withdrawal once your service is provisioned, in accordance with EU Directive 2011/83/EU." %}
+            <div class="flex items-start">
+              {% trans "Start my services now. If I withdraw within 14 days, I pay for what was provided until then." as early_start_label %}
+              {% checkbox_field "early_start_requested" label=early_start_label required=True %}
+            </div>
+            <p class="text-xs text-slate-400 mt-2 ml-8">
+              {% trans "You may withdraw from this contract within 14 days. Your services start as soon as the order is paid, so we need your request to begin within that period." %}
             </p>
           </div>
+          {% endif %}
 
           <!-- GDPR data retention notice (Art. 13) -->
           <div class="mb-6">
             <p class="text-xs text-slate-500">
-              {% trans "Your order data will be retained for the period required by Romanian accounting law (5 years from 1 July of the year after the financial year). For details, see our" %}
+              {% trans "Your order data is kept for the period accounting law requires. For details, see our" %}
               <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>. {# tmpl-allow TMPL005: needs button inline_link #}
             </p>
           </div>

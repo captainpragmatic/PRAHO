@@ -12,6 +12,13 @@ from .base import *
 DEBUG = False
 TEMPLATE_DEBUG = False
 
+# Tests never reach ANAF; gateway tests turn this on and stub the request.
+ANAF_TRANSPORT_ENABLED = False
+
+# A configured seller, as production requires; tests of the unconfigured case override these.
+COMPANY_NAME = "Test Hosting SRL"
+COMPANY_CUI = "RO12345674"
+
 # ===============================================================================
 # DISABLE DEBUG TOOLBAR IN TESTS
 # ===============================================================================
@@ -240,6 +247,10 @@ DISABLE_AUDIT_SIGNALS = False
 
 # Enable account lockout in tests to ensure security features work properly
 DISABLE_ACCOUNT_LOCKOUT = False
+
+# The portal's domain, as production requires it: customer links point at https://portal.example.test
+# unless a test stores its own portal URL.
+PORTAL_DOMAIN = "portal.example.test"
 
 # ===============================================================================
 # TEST DATABASE CONFIGURATION

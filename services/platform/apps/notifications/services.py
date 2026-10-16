@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ from apps.notifications.models import (
     validate_email_subject,
     validate_template_content,
 )
-from apps.settings.services import SettingsService, get_default_from_email
+from apps.settings.services import SettingsService, get_brand_name, get_default_from_email, get_support_email
 
 if TYPE_CHECKING:
     from apps.billing.models import Invoice
@@ -58,6 +59,13 @@ TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"
 RATE_LIMIT_CACHE_PREFIX = "email_rate:"
+
+
+def _portal_invoice_url(invoice: Invoice) -> str:
+    """The customer's invoice page on the Portal, or "" (with a warning) when the Portal URL is unset."""
+    from apps.users.services import portal_link  # noqa: PLC0415  # ADR-0007 cross-app import
+
+    return portal_link(f"/billing/invoices/{invoice.number}/")
 
 
 # ===============================================================================
@@ -127,8 +135,8 @@ def validate_template_context(context: dict[str, Any]) -> dict[str, Any]:
     return sanitized_context
 
 
-def render_template_safely(template_content: str, context: dict[str, Any]) -> str:
-    """Render template with security validation."""
+def render_template_safely(template_content: str, context: dict[str, Any], *, autoescape: bool = True) -> str:
+    """Render template with security validation; plain-text parts (subjects, text bodies) pass autoescape=False."""
     # Validate template content first
     validate_template_content(template_content)
 
@@ -144,7 +152,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
     rendered: str
     try:
         template = Template(template_content)
-        rendered = template.render(Context(sanitized_context))
+        rendered = template.render(Context(sanitized_context, autoescape=autoescape))
     except Exception as e:
         logger.error(f"Template rendering error: {e}")
         # Fallback to simple string replacement
@@ -958,19 +966,25 @@ class EmailService:
             # Add default context variables
             safe_context.update(
                 {
-                    "company_name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
-                    "company_email": getattr(settings, "COMPANY_EMAIL", "contact@pragmatichost.com"),
-                    "company_website": getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com"),
+                    "company_name": settings.COMPANY_NAME,
+                    "company_email": settings.COMPANY_EMAIL,
+                    "company_website": settings.COMPANY_WEBSITE,
+                    "brand_name": get_brand_name(),
+                    "support_email": get_support_email(),
                     "current_year": timezone.now().year,
                     "unsubscribe_url": cls._generate_unsubscribe_url(recipient, template_key),
                 }
             )
 
             # Render subject and body
-            subject = render_template_safely(template.subject, safe_context)
+            subject = render_template_safely(template.subject, safe_context, autoescape=False)
             body_html = render_template_safely(template.body_html, safe_context)
             body_text = template.body_text
-            body_text = render_template_safely(body_text, safe_context) if body_text else strip_tags(body_html)
+            body_text = (
+                render_template_safely(body_text, safe_context, autoescape=False)
+                if body_text
+                else html.unescape(strip_tags(body_html))
+            )
 
             # Send the email
             return cls.send_email(
@@ -1041,8 +1055,10 @@ class EmailService:
 
         token = UnsubscribeToken.objects.create(email=email, template_key=template_key)
         url_path = reverse("notifications:unsubscribe", kwargs={"token_id": token.id})
-        base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
-        return f"{base_url}{url_path}"
+        from apps.users.services import platform_public_origin  # noqa: PLC0415  # ADR-0007 cross-app import
+
+        # The reverse proxy publishes /notifications/unsubscribe/ on the Platform host.
+        return f"{platform_public_origin()}{url_path}"
 
     @staticmethod
     def get_safe_email_preview(template_content: str, context: dict[str, Any]) -> str:
@@ -1075,9 +1091,9 @@ class EmailService:
             # instant and can be an earlier day; it only stands in when never formally issued.
             "invoice_date": timezone.localtime(invoice.issued_at or invoice.created_at).strftime("%Y-%m-%d"),
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
-            "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
+            "invoice_url": _portal_invoice_url(invoice),
         }
 
         return cls.send_template_email(
@@ -1102,11 +1118,11 @@ class EmailService:
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "paid_date": timezone.localtime(invoice.paid_at).strftime("%Y-%m-%d")
             if invoice.paid_at
             else timezone.localtime(timezone.now()).strftime("%Y-%m-%d"),
-            "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
+            "invoice_url": _portal_invoice_url(invoice),
         }
 
         return cls.send_template_email(
@@ -1135,10 +1151,10 @@ class EmailService:
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
-            "currency": invoice.currency.code if invoice.currency else "RON",
+            "currency": invoice.currency_id,
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "days_until_due": max(0, days_until_due),
-            "payment_url": f"{settings.COMPANY_WEBSITE}/billing/pay/{invoice.id}/",
+            "payment_url": _portal_invoice_url(invoice),  # The Portal invoice page carries the payment options
         }
 
         template_key = "payment_reminder" if days_until_due >= 0 else "payment_overdue"

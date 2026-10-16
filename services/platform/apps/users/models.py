@@ -18,6 +18,7 @@ from django.utils import timezone
 from django.utils.crypto import salted_hmac
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.identity_fields import validate_international_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
 
 if TYPE_CHECKING:
@@ -89,7 +90,12 @@ class User(AbstractUser):
     # Basic information
     username = None  # Remove username field, using email instead
     email = models.EmailField(_("email address"), unique=True)
-    phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        validators=[validate_international_phone],
+        help_text=_("With its country code, e.g. +40 721 123 456"),
+    )
 
     # Staff role for internal staff users (empty for customer users)
     staff_role = models.CharField(
@@ -118,10 +124,12 @@ class User(AbstractUser):
     accepts_marketing = models.BooleanField(default=False)
     gdpr_consent_date = models.DateTimeField(null=True, blank=True)
     last_privacy_policy_accepted = models.DateTimeField(null=True, blank=True)
-    # The Terms of Service accepted when the account was confirmed: when, and which version
-    # (apps.common.legal.TERMS_OF_SERVICE_VERSION). Empty for accounts that accepted none.
+    # The Terms of Service accepted when the account was confirmed: when, and the exact release
+    # (apps.common.legal). Empty for accounts that accepted none.
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
-    terms_version = models.CharField(max_length=20, blank=True, default="")
+    terms_document = models.ForeignKey(
+        "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
 
     # Login tracking
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)

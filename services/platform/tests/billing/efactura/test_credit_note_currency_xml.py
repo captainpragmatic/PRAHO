@@ -53,7 +53,8 @@ class CreditNoteCurrencyXMLTests(TestCase):
             bill_to_address1="Customer Street 456",
             bill_to_city="Cluj-Napoca",
             bill_to_postal="400001",
-            exchange_to_ron=None if code == "RON" else Decimal("5.01234567"),
+            exchange_rate_to_home=None if code == "RON" else Decimal("5.01234567"),
+            home_currency_code="RON",
             exchange_rate_as_of=None if code == "RON" else date(2026, 7, 17),
             exchange_rate_source="" if code == "RON" else "bnr",
             exchange_rate_source_reference="" if code == "RON" else "bnr:2026-07-17",
@@ -124,7 +125,7 @@ class CreditNoteCurrencyXMLTests(TestCase):
                 self.assertEqual(stored.currency_id, code)
                 self.assertEqual(stored.total_cents, -original.total_cents)
                 self.assertEqual(stored.tax_cents, -original.tax_cents)
-                self.assertEqual(stored.exchange_to_ron, original.exchange_to_ron)
+                self.assertEqual(stored.exchange_rate_to_home, original.exchange_rate_to_home)
 
     def test_zero_tax_still_emits_ron_accounting_total_for_foreign_currency(self) -> None:
         for code in ("RON", "EUR", "USD"):
@@ -153,10 +154,7 @@ class CreditNoteCurrencyXMLTests(TestCase):
                 self.assertTrue(switched.is_ok(), switched)
                 self.assertEqual(get_selling_currency_policy().currency_code, new_default)
 
-                with (
-                    override_settings(BILLING_DEFAULT_CURRENCY="RON"),
-                    patch("apps.billing.exchange_rate_service.ExchangeRateService.resolve") as resolve,
-                ):
+                with patch("apps.billing.exchange_rate_service.ExchangeRateService.resolve") as resolve:
                     self._assert_accounting_xml(credit_note)
 
                 resolve.assert_not_called()
@@ -172,7 +170,7 @@ class CreditNoteCurrencyXMLTests(TestCase):
 
     def test_credit_note_must_match_all_four_original_exchange_fields(self) -> None:
         changes = {
-            "exchange_to_ron": Decimal("9.0"),
+            "exchange_rate_to_home": Decimal("9.0"),
             "exchange_rate_as_of": date(2026, 7, 16),
             "exchange_rate_source": "ecb",
             "exchange_rate_source_reference": "different-reference",
@@ -187,14 +185,15 @@ class CreditNoteCurrencyXMLTests(TestCase):
 
     def test_invalid_original_exchange_evidence_is_refused_without_a_live_rate_lookup(self) -> None:
         cases = (
-            ("exchange_to_ron", None, "complete provenanced"),
+            ("exchange_rate_to_home", None, "complete provenanced"),
+            ("home_currency_code", "EUR", "complete provenanced"),  # a rate to EUR is no rate to RON
             ("exchange_rate_as_of", None, "complete provenanced"),
             ("exchange_rate_source", "", "complete provenanced"),
             ("exchange_rate_source_reference", "", "complete provenanced"),
-            ("exchange_to_ron", Decimal("0"), "positive"),
-            ("exchange_to_ron", Decimal("-1"), "positive"),
-            ("exchange_to_ron", Decimal("NaN"), "finite"),
-            ("exchange_to_ron", Decimal("Infinity"), "finite"),
+            ("exchange_rate_to_home", Decimal("0"), "positive"),
+            ("exchange_rate_to_home", Decimal("-1"), "positive"),
+            ("exchange_rate_to_home", Decimal("NaN"), "finite"),
+            ("exchange_rate_to_home", Decimal("Infinity"), "finite"),
             ("exchange_rate_source", "manual", "approved"),
             ("exchange_rate_as_of", date(2026, 7, 21), "after the invoice tax point"),
             ("tax_point_date", None, "complete provenanced"),

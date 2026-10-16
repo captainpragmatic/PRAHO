@@ -15,9 +15,14 @@ from rest_framework import serializers
 
 from apps.api.customers.serializers import CustomerRegistrationSerializer
 from apps.common.types import Err
+from tests.helpers.legal import publish_release
 
 
 class RegistrationSerializerErrorPathTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        publish_release()  # Registration needs Terms of Service in force
+
     def test_service_error_message_is_surfaced(self) -> None:
         data = {
             "user_data": {

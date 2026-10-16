@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{{ product.name }} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+  {% step_progress order_steps current_step=current_step separator="arrow" %}
+  <div id="cart-widget" class="hidden"></div>
+  <div id="cart-notifications"></div>
+  <div class="rounded-lg border border-slate-700 bg-slate-800 p-6 space-y-5">
+    <h1 class="text-2xl font-bold text-white">{{ product.name }}</h1>
+    <p class="text-slate-300">{{ product.short_description|default:product.description }}</p>
+    <form hx-post="{% url 'orders:add_to_cart' %}" hx-target="#cart-widget" hx-swap="outerHTML" data-htmx-after="cart-updated" class="space-y-4">
+      {% csrf_token %}
+      <input type="hidden" name="product_slug" value="{{ product.slug }}">
+      <input type="hidden" name="billing_period" value="annual">
+      <input type="hidden" name="quantity" value="1">
+      {% input_field "domain_name" label=_("Domain name (required)") placeholder="example.ro" required=True icon_left="globe" value=requested_domain %}
+      {% trans "Domain action" as action_label %}
+      {% input_field "domain_mode" input_type="select" label=action_label options=domain_modes value="register" %}
+      <div id="domain-availability" aria-live="polite"></div>
+      {% url 'orders:domain_availability' as lookup_url %}
+      {% button _("Check availability") type="button" variant="secondary" hx_post=lookup_url hx_target="#domain-availability" hx_swap="innerHTML" hx_include="closest form" %}
+      {% button _("Add to Cart") type="submit" variant="success" %}
+    </form>
+  </div>
+  {% url 'orders:catalog' as catalog_url %}
+  {% button _("Back to catalog") href=catalog_url variant="secondary" %}
+</div>
+{% endblock %}

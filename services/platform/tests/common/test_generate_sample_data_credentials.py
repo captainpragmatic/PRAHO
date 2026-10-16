@@ -32,14 +32,14 @@ class EnsureCredentialPasswordsTests(TestCase):
         User.objects.create_superuser(
             first_name="Admin",
             last_name="PRAHO",
-            email="admin@pragmatichost.com",
+            email="admin@praho.test",
             password="stale-wrong-password",
         )
 
         command = Command(stdout=StringIO())
         command._ensure_credential_passwords()
 
-        admin = User.objects.get(email="admin@pragmatichost.com")
+        admin = User.objects.get(email="admin@praho.test")
         self.assertTrue(admin.check_password("admin123"))
         self.assertFalse(admin.check_password("stale-wrong-password"))
 

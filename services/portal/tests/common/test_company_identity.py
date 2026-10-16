@@ -20,18 +20,9 @@ from apps.api_client.services import PlatformAPIError, api_client
 from apps.common.localisation import LocalisationDefaults
 from apps.common.localisation_services import get_localisation_defaults
 
-CATALOG_COMPANY = {
-    "legal_name": "PragmaticHost SRL",
-    "email_support": "support@pragmatichost.com",
-    "email_privacy": "privacy@pragmatichost.com",
-    "email_finance": "",
-    "phone": "",
-    # Published for the privacy policy (GDPR Art. 13(1)(b)).
-    "email_dpo": "dpo@pragmatichost.com",
-    "email_contact": "contact@pragmatichost.com",
-    "address": "",
-    "registration_number": "",
-}
+# The portal's cold-outage copy of the platform catalog (pinned to it by tests/integration parity).
+CATALOG_COMPANY = dict(settings.COMPANY_IDENTITY_DEFAULTS)
+CATALOG_ADDRESSES = frozenset(value for value in CATALOG_COMPANY.values() if "@" in value)
 CONFIGURED_COMPANY = {
     "legal_name": "Portal Identity SRL",
     "email_support": "support-identity@example.test",
@@ -44,7 +35,6 @@ CONTACT_TEMPLATES = {
     "404.html": ("email_support",),
     "500.html": ("email_support",),
     "billing/proforma_detail.html": ("email_support",),
-    "legal/cookie_policy.html": ("email_privacy",),
     "orders/order_confirmation.html": ("email_support",),
     "services/service_detail.html": ("email_support", "email_finance"),
     "services/service_request_action.html": ("email_support",),
@@ -89,7 +79,6 @@ class PortalCompanyIdentityTests(SimpleTestCase):
                 get_localisation_defaults().customer_payload(),
                 LocalisationDefaults().customer_payload(),
             )
-        self.assertEqual(settings.COMPANY_IDENTITY_DEFAULTS, CATALOG_COMPANY)
 
     def test_success_and_warm_cache_share_both_blocks_until_sixty_seconds(self) -> None:
         now = time.time()
@@ -157,7 +146,7 @@ class PortalCompanyIdentityTests(SimpleTestCase):
                         self.assert_identity(CONFIGURED_COMPANY)
 
     def test_each_contact_template_renders_configured_identity_in_en_and_ro(self) -> None:
-        self.assertEqual(len(CONTACT_TEMPLATES), 10)
+        self.assertEqual(len(CONTACT_TEMPLATES), 9)
         self.assertIn("users/privacy_dashboard.html", CONTACT_TEMPLATES)
         context: dict[str, object] = {
             "service_id": 42,
@@ -183,14 +172,38 @@ class PortalCompanyIdentityTests(SimpleTestCase):
                         html = render_to_string(template_name, context, request=request)
                         for field in fields:
                             self.assertIn(CONFIGURED_COMPANY[field], html)
-                        self.assertNotIn("@pragmatichost.com", html)
+                        for address in CATALOG_ADDRESSES:
+                            self.assertNotIn(address, html)
+
+    def test_platform_brand_names_the_public_pages(self) -> None:
+        branded = {**CONFIGURED_COMPANY, "brand_name": "Acme Hosting"}
+        with patch.object(api_client, "get_localisation_defaults", return_value=self.payload(company=branded)):
+            html = self.client.get("/login/").content.decode()
+        self.assertIn("<title>", html)
+        self.assertIn("Acme Hosting", html.split("<title>", 1)[1].split("</title>", 1)[0])
+        self.assertIn("Sign in to Acme Hosting", html)
+        self.assertIn("brand/logo.svg", html)
+        self.assertNotIn("PRAHO Portal", html)
 
     def test_no_portal_template_contains_a_hardcoded_contact_address(self) -> None:
+        # Contact addresses come from the company identity context, never from template text.
         root = Path(settings.BASE_DIR) / "templates"
         offenders = sorted(
             str(path.relative_to(root))
             for path in root.rglob("*.html")
-            if "@pragmatichost.com" in path.read_text(encoding="utf-8")
+            if any(address in path.read_text(encoding="utf-8") for address in CATALOG_ADDRESSES)
+        )
+        self.assertEqual(offenders, [])
+
+    def test_every_page_title_ends_with_the_brand(self) -> None:
+        root = Path(settings.BASE_DIR) / "templates"
+        title = re.compile(r"\{% block title %\}(.*?)\{% endblock %\}")
+        offenders = sorted(
+            str(path.relative_to(root))
+            for path in root.rglob("*.html")
+            if path.name != "base.html"
+            and (match := title.search(path.read_text(encoding="utf-8")))
+            and not match.group(1).endswith(" - {{ company.brand_name }}")
         )
         self.assertEqual(offenders, [])
 

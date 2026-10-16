@@ -90,7 +90,6 @@ class CheckoutSessionContentionTests(TestCase):
             cart_version="v1",
             notes="",
             idempotency_key="contended-checkout",
-            agree_terms=True,
         )
         with (
             patch("apps.orders.views._validate_checkout_request", return_value=checkout),

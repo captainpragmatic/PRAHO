@@ -4,7 +4,6 @@ import json
 import time
 from io import StringIO
 
-from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
@@ -45,12 +44,6 @@ class E2EFixtureTests(TestCase):
         self.assertFalse(Customer.objects.exists())
 
     def test_queued_task_runner_runs_only_the_named_task(self):
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
-                      "value": "https://customers.example.test", "default_value": ""},
-        )
-        cache.clear()
         async_task(RESET_TASK, "nobody@example.test", time.time())
         async_task("apps.users.tasks.reconcile_session_index")
         output = StringIO()
@@ -72,6 +65,16 @@ class E2EFixtureTests(TestCase):
         for customer in (one, two):
             memberships = CustomerMembership.objects.filter(user__email=customer["email"])
             self.assertEqual(list(memberships.values_list("customer_id", flat=True)), [customer["id"]])
+
+    def test_baseline_creates_the_local_portal_origin_without_an_existing_override(self) -> None:
+        from apps.users.services import portal_public_origin  # noqa: PLC0415
+
+        self.assertFalse(SystemSetting.objects.filter(key="portal.public_base_url").exists())
+
+        seed_baseline()
+
+        self.assertEqual(portal_public_origin(), "http://localhost:8701")
+        self.assertEqual(SystemSetting.objects.get(key="portal.public_base_url").value, "http://localhost:8701")
 
     def test_validation_reports_missing_prerequisite_without_repair(self):
         baseline = seed_baseline()

@@ -130,7 +130,7 @@ class BasePaymentGateway(ABC):
         self,
         order_id: str,
         amount_cents: int,
-        currency: str = "RON",
+        currency: str,
         customer_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         *,

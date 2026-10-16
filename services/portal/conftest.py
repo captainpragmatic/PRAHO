@@ -80,9 +80,9 @@ def mock_middleware_api_calls() -> Generator[None]:
                     "customer_date_format": "%d.%m.%Y",
                 },
                 "company": {
-                    "legal_name": "PragmaticHost SRL",
-                    "email_support": "support@pragmatichost.com",
-                    "email_privacy": "privacy@pragmatichost.com",
+                    "legal_name": "Example Company",
+                    "email_support": "support@example.com",
+                    "email_privacy": "privacy@example.com",
                     "email_finance": "",
                     "phone": "",
                 },
@@ -199,7 +199,7 @@ def assert_no_database_queries(test_func: Callable) -> Callable:
 # Common API response templates for testing
 MOCK_CUSTOMER_RESPONSE = {
     "id": 1,
-    "email": "test@pragmatichost.com",
+    "email": "test@example.com",
     "name": "Test Customer",
     "status": "active",
     "created_at": "2025-01-01T00:00:00Z",

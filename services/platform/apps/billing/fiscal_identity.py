@@ -9,15 +9,16 @@ from django.core.exceptions import ObjectDoesNotExist
 
 from apps.common.cnp_validator import CNPValidator
 from apps.common.localisation import normalize_country_code
+from apps.common.operator import operator_country
 
 __all__ = ["normalize_country_code"]
 
 
-def billing_country_code(value: object, *, default: str = "RO") -> str:
-    """Resolve a billing snapshot country without disguising invalid input as Romania."""
+def billing_country_code(value: object, *, default: str = "") -> str:
+    """Resolve a billing snapshot country; a blank one is the operator's, an unknown one is refused."""
     source = str(value or "").strip()
     if not source:
-        return default
+        return default or operator_country()
     country_code = normalize_country_code(source)
     if not country_code:
         raise ValueError(f"Unknown billing country: {source}")

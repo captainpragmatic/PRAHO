@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from django.urls import path
 
-from . import currency_prices, views
+from . import currency_prices, legal_documents, views
 
 app_name = "settings"
 
@@ -31,6 +31,7 @@ urlpatterns = [
     ),
     path("", views.settings_home, name="home"),
     path("api-tokens/", views.api_tokens, name="api_tokens"),
+    path("legal-documents/", legal_documents.legal_documents, name="legal_documents"),
     path("api-tokens/<int:token_id>/revoke/", views.api_token_revoke, name="api_token_revoke"),
     path("save/", views.save_change_set, name="save_change_set"),
     path("search/", views.settings_search, name="search"),

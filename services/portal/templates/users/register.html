@@ -3,7 +3,7 @@
 {% load static %}
 {% load ui_components %}
 
-{% block title %}{% trans 'Create Account' %} - PragmaticHost{% endblock %}
+{% block title %}{% trans 'Create Account' %} - {{ company.brand_name }}{% endblock %}
 {% block body_class %}auth-page{% endblock %}
 
 {% block content %}
@@ -12,13 +12,13 @@
     {# ── Header ── #}
     <div class="text-center">
       <div class="mx-auto h-16 w-16 mb-4">
-        <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-full w-full">
+        {% include "components/brand_logo.html" with css_class="h-full w-full" %}
       </div>
       <h1 class="mt-6 text-3xl font-extrabold text-white">
-        {% icon "lightning" size="lg" css_class="text-white" %} {% trans 'Create Your PragmaticHost Account' %}
+        {% icon "lightning" size="lg" css_class="text-white" %} {% blocktrans with brand=company.brand_name %}Create your {{ brand }} account{% endblocktrans %}
       </h1>
       <p class="mt-2 text-sm text-slate-400">
-        {% trans 'Start your hosting journey with Romanian compliance built-in' %}
+        {% trans 'Start your hosting journey' %}
       </p>
     </div>
 
@@ -56,12 +56,20 @@
 
           <div id="vat-field">
             {% form_field form.vat_number icon_left="document" %}
-            {% form_field form.cui icon_left="document" %}
-            {% form_field form.trade_registry_number icon_left="document" %}
-          </div>
-
-          <div id="cnp-field" style="display: none;">
-            {% form_field form.cnp icon_left="user" %}
+            {# Romanian company identifiers: register-toggle.js shows them while the country is Romania #}
+            <div id="romanian-company-fields" data-default-romania="{% if form.default_country_is_romania %}true{% else %}false{% endif %}"{% if not form.asks_romanian_company_ids %} hidden{% endif %}>
+              {% form_field form.cui icon_left="document" %}
+              {% if company_lookup_available %}
+                {# company-lookup.js: fills the company fields from ANAF's register #}
+                <div id="company-lookup" class="space-y-1" data-url="{% url 'users:company_lookup' %}" data-filled="{% trans 'The details from ANAF are filled in. Check them before you continue.' %}" data-failed="{% trans 'The company lookup is not available right now. Fill in the details yourself.' %}">
+                  {% trans "Fill in from ANAF" as company_lookup_label %}
+                  {% button company_lookup_label type="button" variant="secondary" size="sm" icon="search" button_id="company-lookup-button" %}
+                  <p id="company-lookup-message" class="text-sm text-slate-400" aria-live="polite"></p>
+                </div>
+                <script type="module" src="{% static 'js/company-lookup.js' %}"></script>
+              {% endif %}
+              {% form_field form.trade_registry_number icon_left="document" %}
+            </div>
           </div>
         </div>
 
@@ -90,9 +98,15 @@
             {% icon "shield-check" size="md" css_class="text-white" %} {% trans 'Privacy & Consent' %}
           </h3>
 
-          {% form_checkbox form.data_processing_consent %}
           {% form_checkbox form.terms_accepted %}
+          <p class="text-sm text-slate-400">
+            {% trans "By creating an account you acknowledge the" %}
+            <a href="{% url 'privacy_policy' %}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>. {# tmpl-allow TMPL005: needs button inline_link #}
+          </p>
+          <p class="text-sm text-slate-400">{% trans "When a .ro registrar requires your CNP, we store it on your tax profile. It is also used as your buyer identifier on proformas, invoices and e-Factura." %}</p>
         </div>
+
+        {% include "components/altcha_widget.html" %}
 
         {# ── Submit ── #}
         <div class="pt-6">

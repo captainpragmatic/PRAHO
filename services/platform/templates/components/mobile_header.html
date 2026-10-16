@@ -1,5 +1,4 @@
 {% load i18n %}
-{% load static %}
 {% load ui_components %}
 
 <!-- ===============================================================================
@@ -15,7 +14,7 @@
     <div class="flex items-center justify-between px-4 py-3">
         <!-- Logo/Brand -->
         <a href="{% url 'dashboard' %}" class="flex items-center space-x-2">
-            <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-8 w-8">
+            {% include "components/brand_logo.html" %}
             <div class="flex flex-col">
                 <span class="text-lg font-bold text-blue-400">PRAHO</span>
                 <span class="text-xs text-slate-400 -mt-1">Platform</span>

@@ -134,9 +134,10 @@ class SystemSetting(models.Model):
 
         super().save(*args, **kwargs)
         if sync_whois_price:
+            from apps.billing.currency_service import default_selling_currency  # noqa: PLC0415  # ADR-0007
             from apps.domains.models import TLDRetailPrice  # noqa: PLC0415  # ADR-0007
 
-            for price in TLDRetailPrice.objects.filter(currency_id="RON"):
+            for price in TLDRetailPrice.objects.filter(currency_id=default_selling_currency()):
                 price.whois_privacy_price_cents = int(self.value)
                 price.save(update_fields=["whois_privacy_price_cents", "updated_at"])
 

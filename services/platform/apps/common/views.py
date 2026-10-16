@@ -108,7 +108,6 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "system_status": system_status,
         "current_time": timezone.now(),
         "app_version": "0.30.0",
-        "current_year": timezone.now().year,
     }
 
     return render(request, "dashboard.html", context)

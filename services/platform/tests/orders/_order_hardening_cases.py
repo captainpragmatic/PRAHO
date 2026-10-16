@@ -14,6 +14,7 @@ Verifies:
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import MagicMock, patch
 
 from django.db import IntegrityError, transaction
@@ -25,6 +26,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderStatusHistory
 from apps.orders.services import OrderNumberingService, StatusChangeData
 from apps.users.models import User
+from tests.helpers.checkout import checkout_consents
 from tests.helpers.fsm_helpers import force_status
 
 # ===============================================================================
@@ -536,11 +538,12 @@ class IdempotencyKeyContentValidationTest(TestCase):
             "currency": "RON",
             "currency_revision": 1,
             "items": [],
+            **checkout_consents(),
         }
         request = self.factory.post(
             "/api/orders/create/",
             data=data,
-            content_type="application/json",
+            format="json",  # A real JSON body: the view reads the order's consents from it
             HTTP_IDEMPOTENCY_KEY=idempotency_key,
         )
         request._portal_authenticated = True
@@ -648,8 +651,8 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
     def _make_create_request(self, idempotency_key: str) -> object:
         request = self.factory.post(
             "/api/orders/create/",
-            data={"currency": "RON", "currency_revision": 1, "items": []},
-            content_type="application/json",
+            data={"currency": "RON", "currency_revision": 1, "items": [], **checkout_consents()},
+            format="json",  # A real JSON body: the view reads the order's consents from it
             HTTP_IDEMPOTENCY_KEY=idempotency_key,
         )
         request._portal_authenticated = True
@@ -694,6 +697,7 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
         )
 
         request = self._make_create_request(idempotency_key)
+        accepted = {"terms_document_id": uuid.UUID(str(checkout_consents()["terms_document_id"])), "early_start_requested": True}
 
         # Patch serializer validation to pass and billing address to avoid DB call,
         # so we can reach the OrderService.create_order mock.
@@ -710,7 +714,9 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
                 OrderCreateInputSerializer,
                 "validated_data",
                 new_callable=lambda: property(
-                    lambda self: {"currency": "RON", "currency_revision": 1, "items": [], "notes": "", "meta": {}}
+                    lambda self: {
+                        "currency": "RON", "currency_revision": 1, "items": [], "notes": "", "meta": {}, **accepted
+                    }
                 ),
                 create=True,
             ),

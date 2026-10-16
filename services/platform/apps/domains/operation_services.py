@@ -19,9 +19,11 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .gateways import RegistrarAPIError, RegistrarGatewayFactory
 from .gateways.contracts import parse_date
-from .models import Domain, DomainOperation
+from .models import Domain, DomainOperation, DomainOrderItem
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from .gateways import BaseRegistrarGateway
     from .services import DomainRegistrationConfig
 
@@ -67,13 +69,41 @@ class DomainOperationService:
         operation.save(update_fields=["review_required_at", "error_message", "result", "updated_at"])
 
     @staticmethod
-    def dispatch(operation: DomainOperation) -> bool:
+    def _lock_paid_item(order_item: DomainOrderItem) -> DomainOrderItem | None:
+        """Caller holds atomic; lock Order → OrderItem → DomainOrderItem before its domain."""
+        from .order_fulfilment import _lock_line  # noqa: PLC0415  # Shared paid-line lock order.
+
+        line = _lock_line(order_item)
+        if line is None or line.provisioning_status != "in_progress":
+            return None
+        return DomainOrderItem.objects.select_for_update().get(
+            pk=order_item.pk, order_item=line, order_id=line.order_id
+        )
+
+    @classmethod
+    def _can_create_domain(cls, order_item: DomainOrderItem | None) -> bool:
+        """Legacy callers have no line; paid callers must still own an unlinked claim."""
+        if order_item is None or order_item.order_item_id is None:
+            return True
+        paid_item = cls._lock_paid_item(order_item)
+        return paid_item is not None and paid_item.domain_id is None
+
+    @classmethod
+    def dispatch(cls, operation: DomainOperation, *, order_item: DomainOrderItem | None = None) -> bool:
         """Claim dispatch once, including when multiple workers resume preflight."""
         with transaction.atomic():
+            paid_item = None
+            if order_item is not None and order_item.order_item_id is not None:
+                paid_item = cls._lock_paid_item(order_item)
+                if paid_item is None or paid_item.domain_id != operation.domain_id:
+                    return False
             Domain.objects.select_for_update().get(pk=operation.domain_id)
             current = DomainOperation.objects.select_for_update().get(pk=operation.pk)
             if current.state != "pending":
                 return False
+            if paid_item is not None and operation.operation_type == "transfer_in":
+                paid_item.epp_code = ""
+                paid_item.save(update_fields=["epp_code", "updated_at"])
             operation.mark_submitted()
             operation.next_retry_at = timezone.now() + timedelta(minutes=15)
             operation.save()
@@ -120,6 +150,8 @@ class DomainOperationService:
             return Err(str(exc))
 
         with transaction.atomic():
+            if not cls._can_create_domain(config.order_item):
+                return Err(str(REGISTRATION_PENDING_MESSAGE))
             domain = Domain.objects.create(
                 name=config.domain_name,
                 tld=config.tld,
@@ -129,6 +161,7 @@ class DomainOperationService:
                 auto_renew=config.auto_renew,
                 **terms,
             )
+            cls._link_order_item(config.order_item, domain)
             operation = DomainOperation.objects.create(
                 domain=domain,
                 registrar=config.registrar,
@@ -153,7 +186,7 @@ class DomainOperationService:
         data = {**config.registrant_data}
         if contact_result.unwrap():
             data["registrar_contact_id"] = contact_result.unwrap()
-        if not cls.dispatch(operation):
+        if not cls.dispatch(operation, order_item=config.order_item):
             return Err(str(REGISTRATION_PENDING_MESSAGE))
         try:
             success, payload = DomainRegistrarGateway.register_domain(config.registrar, domain.name, config.years, data)
@@ -165,10 +198,7 @@ class DomainOperationService:
             operation.refresh_from_db()
             if operation.state == "failed":
                 # Only explicit rejection, never a not-found read, frees the name.
-                with transaction.atomic():
-                    locked = Domain.objects.select_for_update().get(pk=domain.pk)
-                    if locked.status == "pending":
-                        locked.delete()
+                cls.discard_unconfirmed(domain.pk)
             return Err(str(payload.get("error", "Registration unconfirmed — do not resubmit.")))
         if payload.get("pending") or not payload.get("expires_at"):
             return Err(str(REGISTRATION_PENDING_MESSAGE))
@@ -176,6 +206,23 @@ class DomainOperationService:
         cls.resume_registration_nameservers(domain)
         domain.refresh_from_db()
         return Ok(domain)
+
+    @staticmethod
+    def discard_unconfirmed(domain_id: UUID) -> bool:
+        """Delete a refused domain row, unless a webhook or staff confirmed it meanwhile."""
+        with transaction.atomic():
+            locked = Domain.objects.select_for_update().filter(pk=domain_id).first()
+            if locked is None or locked.status not in ("pending", "transfer_in"):
+                return False
+            locked.delete()
+        return True
+
+    @staticmethod
+    def _link_order_item(order_item: DomainOrderItem | None, domain: Domain) -> None:
+        """Link the bought item with the row, so whichever path activates the domain finds its line."""
+        if order_item is not None:
+            order_item.domain = domain
+            order_item.save(update_fields=["domain", "updated_at"])
 
     @staticmethod
     def _prepare_contact(
@@ -188,7 +235,7 @@ class DomainOperationService:
             if availability.is_err() or not availability.unwrap().available:
                 operation.mark_failed("Domain availability could not be confirmed")
                 operation.save()
-                operation.domain.delete()
+                DomainOperationService.discard_unconfirmed(operation.domain_id)
                 return Err("Domain availability could not be confirmed")
             operation.parameters = {**operation.parameters, "contact_dispatched": True}
             operation.save(update_fields=["parameters", "updated_at"])
@@ -196,7 +243,7 @@ class DomainOperationService:
         if result.is_err():
             operation.error_message = str(result.unwrap_err())
             if retriability_of(result) != Retriability.UNKNOWN:
-                operation.domain.delete()
+                DomainOperationService.discard_unconfirmed(operation.domain_id)
                 return Err(operation.error_message)
             DomainOperationService.request_review(operation, "Contact creation unconfirmed")
             return Err("Contact creation unconfirmed; review the registration before retrying.")

@@ -1,15 +1,17 @@
-"""Service catalogs use explicit prices; persisted service money keeps its currency."""
+"""Service catalogs use explicit prices; persisted service money keeps its currency and the operator's VAT."""
 
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
 from apps.api.services.serializers import ServiceDetailSerializer, ServiceListSerializer
 from apps.api.services.views import available_service_plans_api, customer_services_summary_api
 from apps.billing.currency_models import Currency, FXRate
+from apps.billing.tax_models import TaxRule
 from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan, ServicePlanPrice
@@ -86,3 +88,18 @@ class ServiceCurrencyAPITests(TestCase):
         self.assertIsNone(summary["total_monthly_cost_with_vat"])
         amounts = {row["currency_code"]: Decimal(row["total_monthly_cost"]) for row in summary["monthly_costs_by_currency"]}
         self.assertEqual(amounts, {"EUR": Decimal("7.00"), "RON": Decimal("19.00")})
+
+    @override_settings(COMPANY_COUNTRY_CODE="DE")
+    def test_costs_with_vat_use_the_operators_rate(self) -> None:
+        # They added Romanian VAT whatever the operator's country.
+        TaxRule.objects.create(country_code="DE", rate=Decimal("0.19"), valid_from=date(2020, 1, 1))
+        service = self.service("EUR", price="84.00", period="annual")
+
+        detail = ServiceDetailSerializer(service).data
+        self.assertEqual(Decimal(detail["vat_amount"]), Decimal("1.33"))
+        self.assertEqual(Decimal(detail["total_monthly_cost"]), Decimal("8.33"))
+
+        request = self.factory.post("/api/services/summary/", {}, format="json")
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            summary = customer_services_summary_api(request).data["data"]["summary"]
+        self.assertEqual(Decimal(summary["total_monthly_cost_with_vat"]), Decimal("8.33"))

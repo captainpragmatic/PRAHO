@@ -2,6 +2,7 @@
 # COMPREHENSIVE BILLING PDF GENERATORS TESTS
 # ===============================================================================
 
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -1125,6 +1126,32 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(calls)
         self.assertIn('J40/555/2023', text)
 
+    def _german_buyer_invoice(self, number):
+        return Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur, number=number,
+            subtotal_cents=10000, tax_cents=0, total_cents=10000, status='issued',
+            bill_to_name='Kunde GmbH', bill_to_tax_id='DE123456789',
+            bill_to_registration_number='HRB 98765', bill_to_country='DE',
+        )
+
+    @override_settings(COMPANY_COUNTRY_CODE='DE', COMPANY_CUI='DE811115368', COMPANY_REGISTRATION_NUMBER='HRB 12345')
+    def test_german_operator_and_buyer_get_generic_labels_and_no_romanian_fiscal_mention(self):
+        """Tax-ID labels follow each party's country; art. 319 binds only a Romanian operator."""
+        text = ' '.join(self._get_canvas_calls(self._german_buyer_invoice('INV-DE-001')))
+        self.assertIn('VAT ID: DE811115368', text)
+        self.assertIn('Company reg. no.: HRB 12345', text)
+        self.assertIn('VAT ID: DE123456789', text)
+        self.assertIn('Company reg. no.: HRB 98765', text)
+        self.assertNotIn('CUI/CIF', text)
+        self.assertNotIn('Nr. Reg. Com.', text)
+        self.assertNotIn('art. 319', text)
+
+    def test_romanian_operator_labels_a_foreign_buyer_by_its_own_country(self):
+        text = ' '.join(self._get_canvas_calls(self._german_buyer_invoice('INV-DE-002')))
+        self.assertIn(f'CUI/CIF: {settings.COMPANY_CUI}', text)
+        self.assertIn('VAT ID: DE123456789', text)
+        self.assertIn('art. 319', text)
+
     def test_client_tax_id_rendered(self):
         """Client section must show CUI/CIF."""
         calls = self._get_canvas_calls()
@@ -1153,8 +1180,8 @@ class EN16931PDFComplianceTests(TestCase):
         )
         calls = self._get_canvas_calls(invoice=multi)
         text = ' '.join(calls)
-        self.assertIn('TVA 21%', text)
-        self.assertIn('TVA 9%', text)
+        self.assertIn('VAT 21%', text)
+        self.assertIn('VAT 9%', text)
 
     def test_fractional_vat_rate_not_truncated(self):
         """A fractional VAT rate (9.5%) must render as 9.5%, not be truncated to 9%."""
@@ -1167,7 +1194,7 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(calls)
         # The breakdown must show the exact rate, and 9.5% must be a distinct bucket
         # from any 9% line (int(0.095*100) would have collapsed both to "9").
-        self.assertIn('TVA 9.5%', text)
+        self.assertIn('VAT 9.5%', text)
 
     def test_reverse_charge_notation(self):
         """Reverse charge notice must appear when any line has tax_category_code=AE."""
@@ -1200,12 +1227,12 @@ class EN16931PDFComplianceTests(TestCase):
         self.assertIn('EUR', text)
 
     def test_exchange_rate_shown_for_non_ron(self):
-        """Exchange rate must be shown when invoice currency is not RON."""
+        """A foreign-currency invoice shows the rate frozen at issue, into the home currency it recorded."""
         eur_invoice = Invoice.objects.create(
             customer=self.customer, currency=self.currency_eur,
             number='INV-EUR-002', subtotal_cents=10000, tax_cents=2100,
             total_cents=12100, status='issued', bill_to_name='EUR Client',
-            meta={'exchange_rate': '4.9750'},
+            exchange_rate_to_home=Decimal('10.00000000'), home_currency_code='RON',
         )
         InvoiceLine.objects.create(
             invoice=eur_invoice, kind='service', description='EUR service',
@@ -1214,8 +1241,8 @@ class EN16931PDFComplianceTests(TestCase):
         )
         calls = self._get_canvas_calls(invoice=eur_invoice)
         text = ' '.join(calls)
-        self.assertIn('4.9750', text)
-        self.assertIn('Curs valutar', text)
+        self.assertIn('Exchange rate: 1 EUR = 10 RON', text)
+        self.assertNotIn('Exchange rate', ' '.join(self._get_canvas_calls()))  # a RON invoice has none
 
     def test_line_level_en16931_fields(self):
         """EN16931 line-level fields (domain, period, SKU) must be rendered."""
@@ -1341,7 +1368,7 @@ class EN16931PDFComplianceTests(TestCase):
         text = ' '.join(self._get_canvas_calls(invoice=discounted))
         self.assertIn('100.00', text)                   # gross subtotal (sum of line nets)
         self.assertRegex(text, r'[Dd]iscount.*10\.00')  # the document discount line
-        self.assertRegex(text, r'baza:\s*90\.00')       # VAT base re-based to NET (gross - discount)
+        self.assertRegex(text, r'base:\s*90\.00')       # VAT base re-based to NET (gross - discount)
         self.assertIn('17.10', text)                    # VAT == invoice.tax_amount (single TaxSubtotal)
         self.assertIn('107.10', text)                   # grand total
 
@@ -1366,9 +1393,9 @@ class EN16931PDFComplianceTests(TestCase):
         )
         with self.assertLogs('apps.billing.pdf_generators', level='WARNING'):
             text = ' '.join(self._get_canvas_calls(invoice=multi))
-        self.assertEqual(text.count('TVA '), 1, 'discounted invoice collapses to one VAT line')
-        self.assertIn('TVA 19%', text)                  # dominant (largest-base) rate, deterministic
-        self.assertRegex(text, r'baza:\s*135\.00')      # net = gross(150) - discount(15)
+        self.assertEqual(len(re.findall(r'VAT \d', text)), 1, 'discounted invoice collapses to one VAT line')
+        self.assertIn('VAT 19%', text)                  # dominant (largest-base) rate, deterministic
+        self.assertRegex(text, r'base:\s*135\.00')      # net = gross(150) - discount(15)
         self.assertIn('20.00', text)                    # invoice tax
         self.assertIn('155.00', text)                   # grand total reconciles
         self.assertRegex(text, r'[Dd]iscount.*15\.00')

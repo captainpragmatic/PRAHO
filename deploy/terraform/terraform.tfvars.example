@@ -18,7 +18,7 @@ environment = "dev"
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
 # Base domain for reverse DNS
-domain = "pragmatichost.com"
+domain = "example.com"
 
 # Datacenter location (fsn1 = Falkenstein, Germany — closest to Romania)
 location = "fsn1"

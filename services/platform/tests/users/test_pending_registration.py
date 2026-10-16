@@ -11,10 +11,8 @@ from django_q.models import Schedule
 
 from apps.audit.models import AuditEvent
 from apps.common import counters
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.common.types import Err
 from apps.customers.models import Customer
-from apps.settings.models import SystemSetting
 from apps.users import registration_confirmation
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
@@ -24,11 +22,11 @@ from apps.users.tasks import (
     setup_user_security_scheduled_tasks,
 )
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.legal import publish_release
+from tests.helpers.portal import set_portal_origin
 
-PORTAL = "https://customers.example.test"
+PORTAL = "https://portal.example.test"  # From the test settings' PORTAL_DOMAIN
 PASSWORD = " Chosen-at-confirm-2026! "
-
-TERMS = {"terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION}
 
 
 def pending_customer_data() -> dict[str, str]:
@@ -53,22 +51,14 @@ def pending(email: str = "new@example.test", **overrides: object) -> PendingRegi
     return PendingRegistration.objects.create(**fields)
 
 
-class PortalOriginMixin:
+class PublishedTermsMixin:
     def setUp(self) -> None:
         cache.clear()
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={
-                "name": "Portal URL",
-                "category": "platform",
-                "data_type": "string",
-                "value": PORTAL,
-                "default_value": "",
-            },
-        )
+        self.terms = publish_release()
+        self.accepted_terms = {"terms_accepted": True, "terms_document_id": str(self.terms.pk)}
 
 
-class DeliverRegistrationTests(PortalOriginMixin, TestCase):
+class DeliverRegistrationTests(PublishedTermsMixin, TestCase):
     def test_a_new_address_gets_its_confirmation_link_and_no_submitted_text(self) -> None:
         row = pending()
         self.assertEqual(deliver_registration(str(row.pk)), {"sent": True, "kind": "confirm"})
@@ -164,15 +154,14 @@ class DeliverRegistrationTests(PortalOriginMixin, TestCase):
         self.assertEqual(len(mail.outbox), registration_confirmation.RECIPIENT_DAILY_LIMIT)
 
     def test_a_broken_portal_origin_sends_nothing(self) -> None:
-        SystemSetting.objects.filter(key="portal.public_base_url").update(value="http://customers.example.test")
-        cache.clear()
+        set_portal_origin("http://customers.example.test")
         row = pending()
         with self.assertLogs("apps.users.registration_confirmation", level="ERROR"):
             self.assertEqual(deliver_registration(str(row.pk)), {"sent": False, "reason": "configuration"})
         self.assertEqual(len(mail.outbox), 0)
 
 
-class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
+class ConfirmRegistrationTests(PublishedTermsMixin, TestCase):
     def sent(self, email: str = "new@example.test", **overrides: object) -> PendingRegistration:
         return pending(email, **{"sent_at": timezone.now(), **overrides})
 
@@ -182,9 +171,7 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             row.token() if token is None else token,
             password,
             accepts_marketing=True,
-            data_processing_consent=True,
-            terms_accepted=True,
-            terms_version=TERMS_OF_SERVICE_VERSION,
+            **self.accepted_terms,
         )
 
     def test_the_confirmer_chooses_the_password_and_the_link_works_once(self) -> None:
@@ -243,22 +230,25 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
         self.assertFalse(User.objects.filter(email="other@example.test").exists())
         self.assertFalse(Customer.objects.filter(company_name="Unrelated Ferry SRL").exists())
 
-    def test_consent_is_required_and_recorded_as_given(self) -> None:
+    def test_the_privacy_notice_replaces_a_forced_consent_and_is_recorded_with_the_terms(self) -> None:
+        """No box asks for consent to process the account's data: that processing performs the contract.
+
+        The confirmer is shown the Privacy Policy release in force; the record names it.
+        """
+        privacy = publish_release(kind="privacy", body_markdown="Sample privacy notice, not legal text.")
         row = self.sent()
-        refused = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=True, data_processing_consent=False, **TERMS
-        )
-        self.assertEqual(refused.unwrap_err().code, "consent_required")
-        row.refresh_from_db()
-        self.assertTrue(row.is_usable())
+        preview = registration_confirmation.preview(str(row.pk), row.token()).unwrap()
+        self.assertEqual(preview["privacy_document"], privacy.reference())
         user, customer = registration_confirmation.confirm(
-            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, data_processing_consent=True, **TERMS
+            str(row.pk), row.token(), PASSWORD, accepts_marketing=False, **self.accepted_terms
         ).unwrap()
         user.refresh_from_db()
         customer.refresh_from_db()
         self.assertFalse(user.accepts_marketing)
         self.assertFalse(customer.marketing_consent)
-        self.assertTrue(customer.data_processing_consent)
+        self.assertIsNotNone(user.gdpr_consent_date)  # When the notice was acknowledged
+        [event] = AuditEvent.objects.filter(action="terms_of_service_accepted", user=user)
+        self.assertEqual(event.metadata["privacy_notice"], privacy.reference())
 
     def test_an_account_that_cannot_be_created_now_keeps_the_link(self) -> None:
         row = self.sent()
@@ -293,9 +283,8 @@ class ConfirmRegistrationTests(PortalOriginMixin, TestCase):
             row.token(),
             PASSWORD,
             accepts_marketing=False,
-            data_processing_consent=True,
             request_ip="203.0.113.7",
-            **TERMS,
+            **self.accepted_terms,
         )
         self.assertTrue(result.is_ok(), result)
         after = counters.peek("rate_limit:registration:203.0.113.7"), counters.peek("rate_limit:registration:")
@@ -347,6 +336,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
 
     def setUp(self) -> None:
         cache.clear()
+        self.terms = publish_release()
         self.row = pending(sent_at=timezone.now())
 
     def body(self, **overrides: object) -> dict[str, object]:
@@ -355,10 +345,9 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
             "token": self.row.token(),
             "password": PASSWORD,
             "password_confirm": PASSWORD,
-            "data_processing_consent": True,
             "marketing_consent": False,
             "terms_accepted": True,
-            "terms_version": TERMS_OF_SERVICE_VERSION,
+            "terms_document_id": str(self.terms.pk),
             **overrides,
         }
 
@@ -389,7 +378,6 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         cases = [
             ({"token": "0" * 64}, 400, "invalid_link"),
             ({"password_confirm": "Something-else-2026!"}, 400, "validation_failed"),
-            ({"data_processing_consent": False}, 400, "validation_failed"),
             ({"password": "new@example.test12", "password_confirm": "new@example.test12"}, 400, "validation_failed"),
         ]
         for overrides, status, code in cases:
@@ -401,6 +389,7 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
         self.assertEqual((response.status_code, response.json()["code"]), (409, "details_unavailable"))
 
     def test_a_valid_link_shows_what_it_would_create(self) -> None:
+        PendingRegistration.objects.filter(pk=self.row.pk).update(intent={"product": "web-hosting", "period": "annual"})
         response = self.portal_post(
             "/api/users/register/pending/", {"registration_id": str(self.row.pk), "token": self.row.token()}
         )
@@ -413,11 +402,14 @@ class RegistrationConfirmAPITests(HMACTestMixin, TestCase):
                 "last_name": "Marlowe",
                 "company_name": "Quill Lantern SRL",
                 "vat_number": "",
-                # The company identifiers the confirmer checks; never the CNP.
+                # The company identifiers the confirmer checks.
                 "cui": "",
                 "registration_number": "",
-                # The terms version the confirmer accepts.
-                "terms_version": TERMS_OF_SERVICE_VERSION,
+                # What the visitor came to buy, resumed once the account is confirmed.
+                "intent": {"product": "web-hosting", "period": "annual"},
+                # The terms release the confirmer accepts, and the privacy notice (none published here).
+                "terms_document": self.terms.reference(),
+                "privacy_document": None,
             },
         )
         self.assertIsNone(PendingRegistration.objects.get(pk=self.row.pk).consumed_at)

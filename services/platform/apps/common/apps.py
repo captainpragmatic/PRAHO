@@ -142,6 +142,7 @@ def _validate_throttle_rates_at_startup() -> None:
         "apps.common.performance.rate_limiting.ResetClientIPThrottle",
         "apps.common.performance.rate_limiting.RegistrationClientIPThrottle",
         "apps.common.performance.rate_limiting.RegistrationConfirmClientIPThrottle",
+        "apps.common.performance.rate_limiting.PublicLookupClientIPThrottle",
         "apps.common.performance.rate_limiting.MFACredentialThrottle",
     ]
     validate_throttle_class_scopes(scoped_class_paths, throttle_rates)

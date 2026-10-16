@@ -44,7 +44,6 @@ services/platform/config/settings/base.py:I18N005
 services/platform/templates/billing/invoice_detail.html:I18N009
 services/platform/templates/billing/proforma_detail.html:I18N009
 services/platform/templates/customers/delete_confirm.html:I18N009
-services/platform/templates/legal/cookie_policy.html:I18N009
 services/platform/templates/orders/order_detail.html:I18N009
 services/platform/templates/orders/order_item_form.html:I18N009
 services/platform/templates/orders/partials/order_items_list.html:I18N009
@@ -59,7 +58,6 @@ services/portal/templates/tickets/ticket_create.html:I18N009
 services/portal/templates/users/mfa_backup_codes.html:I18N009
 
 # I18N010: Company proper nouns in data processors page — should not be translated
-services/platform/templates/legal/data_processors.html:I18N010
 
 # Living styleguide: developer-only tool (DEBUG=True), not user-facing
 services/portal/apps/ui/views.py:I18N005

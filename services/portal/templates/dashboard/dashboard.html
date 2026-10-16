@@ -2,7 +2,7 @@
 {% load localisation_tags i18n %}
 {% load ui_components formatting %}
 
-{% block title %}{% trans 'Dashboard' %} - PRAHO Portal{% endblock %}
+{% block title %}{% trans 'Dashboard' %} - {{ company.brand_name }}{% endblock %}
 
 {% block content %}
 <!-- Dashboard content with stable dimensions to prevent layout shift -->
@@ -213,7 +213,7 @@
 
           {% if primary_customer.tax_profile.vat_number %}
           <div class="flex items-center justify-between">
-            <span class="text-slate-300">{% trans 'VAT Number (CNP if Individual)' %}</span>
+            <span class="text-slate-300">{% trans 'VAT Number' %}</span>
             <span class="text-white">{{ primary_customer.tax_profile.vat_number }}</span>
           </div>
           {% endif %}

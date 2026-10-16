@@ -90,6 +90,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0058](ADR-0058-pending-totp-enrolment.md) | A TOTP Secret Waiting for Its First Code Lives in Its Own Row | Accepted | 2026-10-13 |
 | [ADR-0059](ADR-0059-differential-virtualmin-backups.md) | Differential Virtualmin Backups Are a Chain PRAHO Tracks and Fences | Accepted | 2026-10-15 |
 | [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) | The Virtualmin API User Is a Master Administrator, Locked Down | Accepted | 2026-10-14 |
+| [ADR-0061](ADR-0061-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
 
 ### 🟡 Partially Superseded
 
@@ -206,6 +207,7 @@ Billing Ownership
 - [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) — portal session saves merge concurrent writes by compare-and-swap; key groups, record maps, revocation preserved
 - [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) — gunicorn gthread, 2 processes × 4 threads, so one customer waiting on Platform does not make the others wait; sync is the rollback
 - [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) — `MEDIA_STORAGE=s3` puts media in a private bucket for container platforms; filesystem stays the default; reads only through Django, fails closed
+- [ADR-0061](ADR-0061-deployment-branding-layer.md) — a deployment is env + settings + a brand folder: brand (`company.brand_name`, `BRAND_DIR`), public company identity, the env-only fiscal seller that production requires, and legal documents staff publish as immutable releases
 
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
@@ -223,8 +225,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 60 (ADR-0001 through ADR-0060)
-- **Active**: 54 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 61 (ADR-0001 through ADR-0061)
+- **Active**: 55 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0061
+- **Next available**: ADR-0062

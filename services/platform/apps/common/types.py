@@ -21,8 +21,6 @@ from django.http import HttpRequest, HttpResponse
 from django.http import JsonResponse as DjangoJsonResponse
 
 from apps.common.constants import (
-    CUI_MAX_LENGTH,
-    CUI_MIN_LENGTH,
     DOMAIN_NAME_MAX_LENGTH,
     EMAIL_PARTS_COUNT,
 )
@@ -285,28 +283,6 @@ CacheTTL = int  # Time to live in seconds
 # ===============================================================================
 # ROMANIAN BUSINESS SPECIFIC TYPES
 # ===============================================================================
-
-
-@dataclass(frozen=True)
-class RomanianVATNumber:
-    """Romanian VAT number validation"""
-
-    value: VATString
-
-    def __post_init__(self) -> None:
-        if not self.is_valid():
-            raise ValueError(f"Invalid Romanian VAT number: {self.value}")
-
-    def is_valid(self) -> bool:
-        """Validate Romanian VAT number format"""
-        if not self.value.startswith("RO"):
-            return False
-
-        digits = self.value[2:]
-        if not digits.isdigit():
-            return False
-
-        return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
 
 
 class CurrencyCode(StrEnum):

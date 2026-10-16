@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load l10n %}
 {% load ui_components %}
 
 {% block title %}
@@ -33,20 +34,20 @@
         {% if proforma %}
         {% trans "Edit the existing proforma invoice details and line items" %}
         {% else %}
-        {% trans "Create a new proforma invoice (Romanian business practice - invoices are generated automatically when paid)" %}
+        {% trans "Create a new proforma invoice (an invoice is issued automatically when it is paid)" %}
         {% endif %}
       </p>
     </div>
   </div>
 
-  <!-- Romanian Business Notice -->
+  <!-- Business Notice -->
   <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
         <span class="text-blue-300 text-xl">{% icon "flag" size="sm" %}</span>
       </div>
       <div class="ml-3">
-        <h3 class="text-sm font-medium text-blue-200">{% trans 'Romanian Business Practice' %}</h3>
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'How billing works' %}</h3>
         <div class="mt-1 text-sm text-blue-300">
           <p>{% trans 'Only proformas can be created manually. Invoices are automatically generated when payment is recorded on a proforma.' %}</p>
         </div>
@@ -199,12 +200,12 @@
                   <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Qty' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
-                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_quantity" aria-label="{% trans 'Quantity' %}" value="{{ line.quantity|unlocalize }}" class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Unit Price' %}</label>
                     {# tmpl-allow TMPL001: line-item row markup is mirrored in the addLineItem() script template below, which cannot call the tag; kept raw so server-rendered and script-added rows stay identical #}
-                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
+                    <input type="number" name="line_{{ forloop.counter0 }}_unit_price" aria-label="{% trans 'Unit Price' %}" step="0.01" value="{{ line.unit_price|unlocalize }}" class="line-price w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
                   </div>
                   <div class="col-span-1 min-w-0">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'VAT Rate' %}</label>
@@ -319,7 +320,7 @@
           </div>
         </div>
 
-        <!-- Romanian Compliance Info -->
+        <!-- Compliance Info -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
             {% icon "flag" size="sm" %} {% trans 'Proforma Benefits' %}
@@ -337,10 +338,6 @@
             <div class="flex items-center space-x-2">
               <span class="text-green-400">{% icon "check" %}</span>
               <span class="text-slate-300">{% trans 'Sequential numbering (PRO-XXXXXX)' %}</span>
-            </div>
-            <div class="flex items-center space-x-2">
-              <span class="text-green-400">{% icon "check" %}</span>
-              <span class="text-slate-300">{% trans 'Romanian VAT compliance' %}</span>
             </div>
           </div>
         </div>

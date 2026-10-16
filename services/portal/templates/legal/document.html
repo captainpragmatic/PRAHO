@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% load i18n localisation_tags %}
+
+{% block title %}{{ title }} - {{ company.brand_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <h1 class="text-3xl font-bold text-white mb-2">{{ title }}</h1>
+  {% if document %}
+    <p class="text-sm text-slate-400 mb-8">
+      {% trans "In effect from" %} {% localised_date document.effective_on "date" %} · {% trans "Release" %} {{ document.release }}
+    </p>
+    {# Sanitised to the legal allowlist in apps.common.legal_documents #}
+    <article class="prose prose-invert max-w-none">{{ document.html }}</article>
+    {# Who publishes this text, from the operator's settings: the details left empty are left out. #}
+    <section class="mt-10 border-t border-slate-700 pt-6 text-sm text-slate-400 space-y-1" aria-label="{% trans 'Operator' %}">
+      <p class="text-slate-300">{{ company.legal_name }}{% if company.registration_number %} · {{ company.registration_number }}{% endif %}{% if company.address %} · {{ company.address }}{% endif %}</p>
+      <p>{% firstof company.email_contact company.email_support %}{% if company.phone %} · {{ company.phone }}{% endif %}</p>
+      {% if kind == "privacy" %}
+        <p>{% trans "Privacy questions" %}: {{ company.email_privacy }}{% if company.email_dpo %} · {% trans "Data Protection Officer" %}: {{ company.email_dpo }}{% endif %}</p>
+      {% endif %}
+    </section>
+  {% elif notice %}
+    <p class="text-slate-300" role="alert">{{ notice }}</p>
+  {% else %}
+    <p class="text-slate-300">{% trans "This document has not been published yet." %}</p>
+  {% endif %}
+  {% if kind == "privacy" %}
+    <p class="mt-6 text-sm text-slate-300">
+      <a href="{% url 'users:privacy_dashboard' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "Your privacy dashboard" %}</a>: {% trans "see your data and consents, download a copy, or ask for your account to be erased." %} {# tmpl-allow TMPL005: needs button inline_link #}
+    </p>
+  {% elif kind == "cookies" %}
+    {% include "legal/_praho_cookies.html" %}
+  {% endif %}
+</div>
+{% endblock %}

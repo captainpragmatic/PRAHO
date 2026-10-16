@@ -93,7 +93,8 @@ class UBLInvoiceBuilderTestCase(TestCase):
             "subtotal_cents": 10000,
             "tax_total_cents": 2100,
             "total_cents": 12100,
-            "exchange_to_ron": Decimal("5.01234567"),
+            "exchange_rate_to_home": Decimal("5.01234567"),
+            "home_currency_code": "RON",
             "exchange_rate_as_of": date(2026, 7, 17),
             "exchange_rate_source": "bnr",
             "exchange_rate_source_reference": "https://www.bnr.ro/nbrfxrates.xml",
@@ -144,7 +145,7 @@ class UBLInvoiceBuilderTestCase(TestCase):
         with self.assertRaisesRegex(XMLBuilderError, "complete provenanced EUR/RON"):
             UBLInvoiceBuilder(incomplete).build()
 
-        non_positive = self._foreign_invoice(number="INV-2026-EUR-002", exchange_to_ron=Decimal("0"))
+        non_positive = self._foreign_invoice(number="INV-2026-EUR-002", exchange_rate_to_home=Decimal("0"))
         with self.assertRaisesRegex(XMLBuilderError, "positive EUR/RON"):
             UBLInvoiceBuilder(non_positive).build()
 

@@ -17,6 +17,7 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.billing.currency_service import default_selling_currency
 from apps.billing.models import Currency
 from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.mixins import get_search_context
@@ -428,8 +429,10 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
         product = get_object_or_404(Product, slug=slug)
         prices = product.prices.filter(is_active=True).select_related("currency").order_by("currency__code")
 
-        # Get available currencies (with RON first for Romanian business)
-        currencies = Currency.objects.order_by(models.Case(models.When(code="RON", then=0), default=1), "code")
+        # The default selling currency first
+        currencies = Currency.objects.order_by(
+            models.Case(models.When(code=default_selling_currency(), then=0), default=1), "code"
+        )
 
         # Log pricing access
         log_security_event(

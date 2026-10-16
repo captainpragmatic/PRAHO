@@ -54,7 +54,7 @@ from apps.settings.services import SettingsService
 from apps.users.models import User
 
 BASE = "http://localhost:8700"
-ADMIN_EMAIL = "admin@pragmatichost.com"
+ADMIN_EMAIL = "admin@praho.test"
 ADMIN_PASSWORD = "admin123"  # noqa: S105  # the dev fixture's documented admin password
 REASON = "QA settings sweep"
 SETTING_CT = ContentType.objects.get_for_model(SystemSetting)
@@ -177,7 +177,7 @@ def audit_ok(  # noqa: PLR0913  # One return per distinct audit defect
         return "no audit event"
     if event.timestamp.timestamp() <= anchor:
         return "no NEW audit event since write (a stale event would have passed)"
-    if event.user is None or event.user.email != "admin@pragmatichost.com":
+    if event.user is None or event.user.email != "admin@praho.test":
         return f"actor={getattr(event.user, 'email', None)}"
     if event.metadata.get("reason") != reason:
         return f"reason={event.metadata.get('reason')}"

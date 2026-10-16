@@ -28,7 +28,7 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Coalesce, Greatest
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 from faker import Faker
 
@@ -45,6 +45,8 @@ from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription, SubscriptionItem
 from apps.common.cnp_validator import CNPValidator
 from apps.common.financial_arithmetic import calculate_line_totals
+from apps.common.legal import LegalDocument, publish_legal_document
+from apps.common.utils import operator_local_date
 from apps.customers.models import (
     Customer,
     CustomerAddress,
@@ -103,15 +105,15 @@ _ROMANIAN_CITIES: list[tuple[str, str]] = [
 # Single source of truth for advertised dev credentials: (label, email, password).
 # Both _print_credentials() and _ensure_credential_passwords() read from this list, so the
 # printed credentials table can never advertise a password that isn't actually set on the row.
-# NOTE: inactive-staff@pragmatichost.com and the bulk user{i}@example.com accounts are
+# NOTE: inactive-staff@praho.test and the bulk user{i}@example.com accounts are
 # intentionally NOT advertised here, so they are left untouched by the credential reset.
 DEV_USER_CREDENTIALS: list[tuple[str, str, str]] = [
-    ("Admin", "admin@pragmatichost.com", "admin123"),
-    ("Support", "john@pragmatichost.com", "support123"),
-    ("Support", "jane@pragmatichost.com", "support123"),
-    ("Support", "mike@pragmatichost.com", "support123"),
-    ("Manager", "manager@pragmatichost.com", "manager123"),
-    ("Customer", "customer@pragmatichost.com", "testpass123"),
+    ("Admin", "admin@praho.test", "admin123"),
+    ("Support", "john@praho.test", "support123"),
+    ("Support", "jane@praho.test", "support123"),
+    ("Support", "mike@praho.test", "support123"),
+    ("Manager", "manager@praho.test", "manager123"),
+    ("Customer", "customer@praho.test", "testpass123"),
     ("Multi-company", "multi-company@example.com", "testpass123"),
     ("Suspended", "suspended@example.com", "testpass123"),
     ("E2E Admin", "e2e-admin@test.local", "test123"),
@@ -124,6 +126,20 @@ def _cycle(items: list[Any], index: int) -> Any:
     if not items:
         raise ValueError("_cycle() requires a non-empty list")
     return items[index % len(items)]
+
+
+def _cnp(body: str) -> str:
+    """A sample CNP: its 12-digit body and the check digit CNPValidator expects."""
+    return f"{body}{CNPValidator._calculate_check_digit(body)}"
+
+
+def _random_cnp(fake: Faker, index: int) -> str:
+    """A valid sample CNP: sex/century digit, birth date in 1960-1999, a county code, a serial number."""
+    century = 1 if index % 2 == 0 else 2
+    birth = (
+        f"{fake.random_int(min=60, max=99):02d}{fake.random_int(min=1, max=12):02d}{fake.random_int(min=1, max=28):02d}"
+    )
+    return _cnp(f"{century}{birth}{fake.random_int(min=1, max=46):02d}{fake.random_int(min=1, max=999):03d}")
 
 
 def _purge_promotion_ledger(redemptions: Any, gift_card_transactions: Any) -> None:
@@ -391,7 +407,7 @@ class Command(BaseCommand):
         fake = Faker("ro_RO")  # Romanian locale
         Faker.seed(42)  # Consistent data
 
-        self.stdout.write("�� Generating comprehensive test data for PragmaticHost...")
+        self.stdout.write("�� Generating comprehensive test data for PRAHO...")
 
         # Create foundation data first
         self.create_admin_users(fake)
@@ -400,6 +416,7 @@ class Command(BaseCommand):
         self.create_support_categories()
         self.create_billing_foundation()
         self.create_domain_foundation()
+        self.create_sample_legal_documents()
 
         # Create customers and all their related data
         num_customers = options["customers"]
@@ -525,20 +542,20 @@ class Command(BaseCommand):
 
         # Create superuser with consistent credentials for E2E testing
         # Note: These are development/test credentials only - DEBUG mode enforced above
-        if not User.objects.filter(email="admin@pragmatichost.com").exists():
+        if not User.objects.filter(email="admin@praho.test").exists():
             admin_user = User.objects.create_superuser(
                 first_name="Admin",
                 last_name="PRAHO",
-                email="admin@pragmatichost.com",
+                email="admin@praho.test",
                 password="admin123",  # Dev/test only - protected by DEBUG check
             )
             self.stdout.write(f"  ✓ Admin: {admin_user.email}")
 
         # Create support users
         support_users = [
-            ("John", "Doe", "john@pragmatichost.com"),
-            ("Jane", "Smith", "jane@pragmatichost.com"),
-            ("Mike", "Johnson", "mike@pragmatichost.com"),
+            ("John", "Doe", "john@praho.test"),
+            ("Jane", "Smith", "jane@praho.test"),
+            ("Mike", "Johnson", "mike@praho.test"),
         ]
 
         for first, last, email in support_users:
@@ -705,7 +722,7 @@ class Command(BaseCommand):
         servers = [
             {
                 "name": "WEB01",
-                "hostname": "web01.pragmatichost.com",
+                "hostname": "web01.example.com",
                 "server_type": "shared",
                 "primary_ip": "185.123.45.67",
                 "location": "București",
@@ -720,7 +737,7 @@ class Command(BaseCommand):
             },
             {
                 "name": "VPS01",
-                "hostname": "vps01.pragmatichost.com",
+                "hostname": "vps01.example.com",
                 "server_type": "vps_host",
                 "primary_ip": "185.123.45.68",
                 "location": "București",
@@ -743,6 +760,27 @@ class Command(BaseCommand):
                 self.stdout.write(f"  ✓ Server: {server.name}")
 
         return created_servers
+
+    def create_sample_legal_documents(self) -> None:
+        """A SAMPLE release of each legal document in each language that has none: registration needs terms."""
+        bodies = {
+            "en": "# Sample {title}\n\nSample text for development and testing. It is not legal text.",
+            "ro": "# {title} (exemplu)\n\nText de exemplu pentru dezvoltare și testare. Nu este un text juridic.",
+        }
+        for kind, title in LegalDocument.Kind.choices:
+            for language, body in bodies.items():
+                if LegalDocument.objects.filter(kind=kind, language=language).exists():
+                    continue
+                with translation.override(language):
+                    body_markdown = body.format(title=title)
+                publish_legal_document(
+                    kind=kind,
+                    language=language,
+                    effective_on=operator_local_date(timezone.now()),
+                    body_markdown=body_markdown,
+                    published_by=None,
+                ).unwrap()
+        self.stdout.write("  ✓ Sample legal documents published (Settings → Legal documents)")
 
     def create_support_categories(self) -> list[SupportCategory]:
         self.stdout.write("Creating support categories...")
@@ -984,7 +1022,7 @@ class Command(BaseCommand):
             customer = None
 
         # Create the specific test user first if it doesn't exist
-        test_user_email = "customer@pragmatichost.com"
+        test_user_email = "customer@praho.test"
         test_user = None
         try:
             test_user = User.objects.get(email=test_user_email)
@@ -1263,19 +1301,7 @@ class Command(BaseCommand):
             )
         elif customer_type == "individual":
             # All individuals get a CNP for invoice/tax purposes
-            # Romanian CNP: S(1) + YY(2) + MM(2) + DD(2) + CC(2) + NNN(3) + C(1) = 13 digits
-            century = 1 if index % 2 == 0 else 2
-            yy = fake.random_int(min=60, max=99)
-            mm = fake.random_int(min=1, max=12)
-            dd = fake.random_int(min=1, max=28)
-            cc = fake.random_int(min=1, max=52)
-            nnn = fake.random_int(min=1, max=999)
-            check = index % 10
-            CustomerTaxProfile.objects.create(
-                customer=customer,
-                cnp=f"{century}{yy:02d}{mm:02d}{dd:02d}{cc:02d}{nnn:03d}{check}",
-                is_vat_payer=False,
-            )
+            CustomerTaxProfile.objects.create(customer=customer, cnp=_random_cnp(fake, index), is_vat_payer=False)
 
         # --- Billing profile with variety ---
         currencies = ["RON", "EUR"]
@@ -1420,7 +1446,7 @@ class Command(BaseCommand):
 
         # ── Inactive staff user: staff_role but disabled ──
         inactive_staff, _ = User.objects.get_or_create(
-            email="inactive-staff@pragmatichost.com",
+            email="inactive-staff@praho.test",
             defaults={
                 "first_name": "Elena",
                 "last_name": "Vasile",
@@ -1436,7 +1462,7 @@ class Command(BaseCommand):
 
         # ── Manager user: assigned as account manager to some customers ──
         manager_user, _ = User.objects.get_or_create(
-            email="manager@pragmatichost.com",
+            email="manager@praho.test",
             defaults={
                 "first_name": "Dragoș",
                 "last_name": "Marin",
@@ -1688,7 +1714,7 @@ class Command(BaseCommand):
             cnp_body = f"{century_digit}{birth_year % 100:02d}0101{40 + idx:02d}{idx:03d}"
             CustomerTaxProfile.objects.create(
                 customer=customer,
-                cnp=f"{cnp_body}{CNPValidator._calculate_check_digit(cnp_body)}",
+                cnp=_cnp(cnp_body),
                 is_vat_payer=False,
             )
 
@@ -2655,7 +2681,7 @@ class Command(BaseCommand):
 
         tld_data = [
             {
-                "extension": ".com",
+                "extension": "com",
                 "description": "Commercial domain",
                 "registration_price_cents": 4999,
                 "renewal_price_cents": 5999,
@@ -2665,7 +2691,7 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
             {
-                "extension": ".ro",
+                "extension": "ro",
                 "description": "Romania country-code domain",
                 "registration_price_cents": 2999,
                 "renewal_price_cents": 2999,
@@ -2676,7 +2702,7 @@ class Command(BaseCommand):
                 "is_featured": True,
             },
             {
-                "extension": ".eu",
+                "extension": "eu",
                 "description": "European Union domain",
                 "registration_price_cents": 3499,
                 "renewal_price_cents": 3999,
@@ -2685,7 +2711,7 @@ class Command(BaseCommand):
                 "grace_period_days": 40,
             },
             {
-                "extension": ".net",
+                "extension": "net",
                 "description": "Network infrastructure domain",
                 "registration_price_cents": 5499,
                 "renewal_price_cents": 5999,
@@ -2694,7 +2720,7 @@ class Command(BaseCommand):
                 "grace_period_days": 45,
             },
             {
-                "extension": ".org",
+                "extension": "org",
                 "description": "Organization domain",
                 "registration_price_cents": 4999,
                 "renewal_price_cents": 5499,
@@ -2703,7 +2729,7 @@ class Command(BaseCommand):
                 "grace_period_days": 45,
             },
             {
-                "extension": ".tech",
+                "extension": "tech",
                 "description": "Technology domain",
                 "registration_price_cents": 1999,
                 "renewal_price_cents": 4999,
@@ -2727,7 +2753,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.namecheap.com",
                 "api_endpoint": "https://api.namecheap.com/xml.response",
                 "status": "active",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "USD",
             },
             {
@@ -2736,7 +2762,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.rotld.ro",
                 "api_endpoint": "https://rest.rotld.ro",
                 "status": "active",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "RON",
             },
             {
@@ -2745,7 +2771,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.godaddy.com",
                 "api_endpoint": "https://api.godaddy.com/v1",
                 "status": "suspended",
-                "default_nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                "default_nameservers": ["ns1.example.com", "ns2.example.com"],
                 "currency": "USD",
             },
         ]
@@ -2759,13 +2785,13 @@ class Command(BaseCommand):
 
         # TLD → Registrar assignments
         assignments = [
-            (".com", "namecheap", True, 1),
-            (".com", "godaddy", False, 2),
-            (".ro", "rotld", True, 1),
-            (".eu", "namecheap", True, 1),
-            (".net", "namecheap", True, 1),
-            (".org", "namecheap", True, 1),
-            (".tech", "namecheap", True, 1),
+            ("com", "namecheap", True, 1),
+            ("com", "godaddy", False, 2),
+            ("ro", "rotld", True, 1),
+            ("eu", "namecheap", True, 1),
+            ("net", "namecheap", True, 1),
+            ("org", "namecheap", True, 1),
+            ("tech", "namecheap", True, 1),
         ]
 
         for ext, reg_name, is_primary, priority in assignments:
@@ -2796,7 +2822,7 @@ class Command(BaseCommand):
             tld = _cycle(tlds, i)
             registrar = _cycle(registrars, i)
             status = _cycle(domain_statuses, i)
-            domain_name = f"{fake.domain_word()}-{customer.id}-{i}{tld.extension}"
+            domain_name = f"{fake.domain_word()}-{customer.id}-{i}.{tld.extension.lstrip('.')}"
 
             domain_kwargs: dict[str, Any] = {
                 "name": domain_name,
@@ -2814,7 +2840,7 @@ class Command(BaseCommand):
                         "expires_at": registered + timedelta(days=365),
                         "auto_renew": True,
                         "locked": True,
-                        "nameservers": ["ns1.pragmatichost.com", "ns2.pragmatichost.com"],
+                        "nameservers": ["ns1.example.com", "ns2.example.com"],
                         "last_paid_amount_cents": tld.renewal_price_cents,
                     }
                 )
@@ -2837,7 +2863,7 @@ class Command(BaseCommand):
                     }
                 )
             elif status == "pending":
-                domain_kwargs["nameservers"] = ["ns1.pragmatichost.com", "ns2.pragmatichost.com"]
+                domain_kwargs["nameservers"] = ["ns1.example.com", "ns2.example.com"]
 
             domain = Domain.objects.create(**domain_kwargs)
             domains.append(domain)
@@ -3231,14 +3257,14 @@ class Command(BaseCommand):
                 "event_id": "vm-hook-domain-created-001",
                 "event_type": "domain.created",
                 "status": "processed",
-                "payload": {"action": "domain.created", "domain": "test.pragmatichost.com"},
+                "payload": {"action": "domain.created", "domain": "test.example.com"},
             },
             {
                 "source": "virtualmin",
                 "event_id": "vm-hook-backup-completed-001",
                 "event_type": "backup.completed",
                 "status": "pending",
-                "payload": {"action": "backup.completed", "domain": "test.pragmatichost.com", "size_mb": 250},
+                "payload": {"action": "backup.completed", "domain": "test.example.com", "size_mb": 250},
             },
             {
                 "source": "efactura",

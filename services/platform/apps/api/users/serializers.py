@@ -4,11 +4,9 @@
 
 import io
 import logging
-import re
 import time
 from typing import TYPE_CHECKING, Any, cast
 
-import pyotp
 import qrcode
 import qrcode.image.svg
 from django.contrib.auth import get_user_model
@@ -22,10 +20,12 @@ from django.utils.translation import gettext_lazy as _
 from django_q.tasks import async_task
 from rest_framework import serializers
 
+from apps.common.identity_fields import normalize_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
-from apps.users.mfa import MFAService
+from apps.settings.services import get_brand_name
+from apps.users.mfa import MFAService, TOTPService
 from apps.users.pending_totp import discard as discard_pending_totp
 from apps.users.pending_totp import get_or_create_pending
 from apps.users.security_notices import notify_credential_change
@@ -97,9 +97,8 @@ class MFASetupSerializer(serializers.Serializer):
         user = self.context["user"]
         secret = get_or_create_pending(user)
 
-        # Generate QR code
-        totp = pyotp.TOTP(secret)
-        provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="PRAHO Platform")
+        # Generate QR code: customers see the brand in their authenticator app; staff see "PRAHO Platform"
+        provisioning_uri = TOTPService.generate_qr_code_url(user.email, secret, issuer=get_brand_name())
 
         # Create QR code as SVG
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -229,23 +228,17 @@ class RegistrationConfirmSerializer(serializers.Serializer):
     token = serializers.CharField(max_length=128, write_only=True)
     password = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(min_length=12, write_only=True, trim_whitespace=False)
-    data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
-    # The Terms of Service accepted, and the version the confirmer was shown (from the preview).
+    # The Terms of Service accepted, and the release the confirmer was shown (from the preview).
     terms_accepted = serializers.BooleanField(default=False)
-    terms_version = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
-
-    def validate_data_processing_consent(self, value: bool) -> bool:
-        if not value:
-            raise serializers.ValidationError(_("Data processing consent is required."))
-        return value
+    terms_document_id = serializers.UUIDField(required=False, allow_null=True, default=None)
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         if data["password"] != data["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": _("Passwords do not match.")})
-        if data.get("terms_accepted") and not data.get("terms_version", "").strip():
-            # Without the version shown, every attempt would be refused as "terms changed".
-            raise serializers.ValidationError({"terms_version": _("Send the Terms of Service version accepted.")})
+        if data.get("terms_accepted") and data.get("terms_document_id") is None:
+            # Without the release shown, every attempt would be refused as "terms changed".
+            raise serializers.ValidationError({"terms_document_id": _("Send the Terms of Service release accepted.")})
         return data
 
 
@@ -341,11 +334,8 @@ class ProfileUpdateSerializer(serializers.Serializer):
     marketing_emails = serializers.BooleanField(required=False)
 
     def validate_phone(self, value: str) -> str:
-        """Keep the same phone contract across both profile endpoints."""
-        normalized = re.sub(r"[\s.]", "", value)
-        if normalized and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", normalized):
-            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return normalized
+        """The number in international form: the portal sends it so, having known the person's country."""
+        return normalize_phone(value)
 
     def validate_timezone(self, value: str) -> str:
         from apps.common.localisation import validate_timezone  # noqa: PLC0415

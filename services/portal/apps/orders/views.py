@@ -25,19 +25,22 @@ from django.core.exceptions import ValidationError
 from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.translation import gettext, gettext_lazy
 from django.utils.translation import gettext as _
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common import counters
 from apps.common.decorators import require_billing_access
+from apps.common.intent import INTENT_KEYS, clean_intent
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import store_unavailable_json, store_unavailable_response
+from apps.users.intent_capture import order_attribution
 
 from .security import OrderSecurityHardening
 from .services import (
@@ -45,6 +48,7 @@ from .services import (
     GDPRCompliantCartSession,
     HMACPriceSealer,
     OrderCreationService,
+    cart_item_key,
     platform_user_id,
     read_selling_policy,
 )
@@ -176,8 +180,10 @@ class CheckoutContext:
     cart_version: str
     notes: str
     idempotency_key: str
-    agree_terms: bool
     retry_pending: bool = False
+    # The terms release the page showed, and an EU consumer's early-start request.
+    terms_document_id: str = ""
+    early_start_requested: bool = False
 
 
 def _checkout_conflict(request: HttpRequest, message: str, status: int) -> HttpResponse:
@@ -207,7 +213,6 @@ def _pending_checkout_context(
         cart_version=attempt["cart_version"],
         notes=payload["notes"],
         idempotency_key=payload["idempotency_key"],
-        agree_terms=True,
         retry_pending=True,
     )
 
@@ -277,8 +282,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         return redirect("orders:checkout")
 
     # Validate EU compliance terms acceptance
-    agree_terms = request.POST.get("agree_terms", "") == "on"
-    if not agree_terms:
+    if request.POST.get("agree_terms", "") != "on":
         messages.error(request, _("You must agree to the terms and conditions."))
         return redirect("orders:checkout")
 
@@ -290,7 +294,8 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         cart_version=cart_version,
         notes=request.POST.get("notes", "").strip(),
         idempotency_key=request.POST.get("idempotency_key", "").strip(),
-        agree_terms=agree_terms,
+        terms_document_id=request.POST.get("terms_document_id", "").strip(),
+        early_start_requested=request.POST.get("early_start_requested", "") == "on",
     )
 
 
@@ -428,6 +433,9 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 promotion_quote=request.POST.get("promotion_quote", ""),
                 payment_method=ctx.payment_method,
                 api_client_factory=PlatformAPIClient,
+                terms_document_id=ctx.terms_document_id,
+                early_start_requested=ctx.early_start_requested,
+                attribution=order_attribution(request),
             )
 
             if result.get("error"):
@@ -559,6 +567,10 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
     except SessionSaveContended:
         raise  # The session middleware answers 503 with Retry-After (ADR-0055).
+    except ValidationError as exc:
+        # The order service words each refusal for the customer: a changed currency, offer or terms.
+        messages.error(request, exc.messages[0])
+        return redirect("orders:checkout")
     except Exception:
         # With the traceback: a session save failing here (UpdateError) has no message of its own.
         logger.exception("🔥 [Orders] Unexpected error creating order")
@@ -606,7 +618,7 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
 
         currency, _revision = read_selling_policy(products_response)
         products = [_selling_product(product, currency) for product in products_response["results"]]
-        products = [product for product in products if product["prices"]]
+        products = [product for product in products if product["prices"] or product.get("product_type") == "domain"]
 
         # Get cart for item count
         cart = GDPRCompliantCartSession(request.session)
@@ -676,10 +688,10 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
         cart = GDPRCompliantCartSession(request.session)
         currency, _revision = read_selling_policy(product)
         product = _selling_product(product, currency)
-        if not product["prices"]:
+        if not product["prices"] and product.get("product_type") != "domain":
             raise ValidationError(_("Current prices are unavailable. Please try again later."))
         cart.apply_selling_policy(product)
-        price = product["prices"][0]
+        price = product["prices"][0] if product["prices"] else {}
         billing_periods = [
             {"value": period, "label": label, "amount": price[field]}
             for period, label, field in (
@@ -697,9 +709,19 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
                 existing_item = item
                 break
 
+        # A link from the operator's site, or the sign-in after registration, preselects these.
+        requested = clean_intent(
+            {key: request.GET[key] for key in ("period", "domain") if key in request.GET}, INTENT_KEYS
+        )
         context = {
             "product": product,
             "billing_periods": billing_periods,
+            "domain_modes": [
+                {"value": "register", "label": _("Register a domain"), "selected": True},
+                {"value": "transfer", "label": _("Transfer a domain")},
+            ],
+            "selected_period": requested.get("period", ""),
+            "requested_domain": requested.get("domain", ""),
             "existing_item": existing_item,
             "cart_count": cart.get_item_count(),
             "order_steps": ORDER_STEPS,
@@ -717,7 +739,26 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
             messages.error(request, _("Product not found."))
         return redirect("orders:catalog")
 
-    return render(request, "orders/product_detail.html", context)
+    return render(
+        request,
+        "orders/domain_product_detail.html"
+        if product.get("product_type") == "domain"
+        else "orders/product_detail.html",
+        context,
+    )
+
+
+def _cart_configuration(request: HttpRequest) -> dict[str, object]:
+    config: dict[str, object] = {}
+    try:
+        parsed: object = json.loads(request.POST.get("config") or "{}")
+        if isinstance(parsed, dict):
+            config = {str(key): value for key, value in parsed.items()}
+    except json.JSONDecodeError:
+        pass
+    if "domain_mode" in request.POST:
+        config["domain_mode"] = request.POST["domain_mode"]
+    return config
 
 
 @require_customer_authentication
@@ -773,12 +814,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             OrderSecurityHardening.uniform_response_delay()
             return JsonResponse({"error": str(e.message)}, status=400)
 
-        # Parse configuration from JSON if provided
-        config_json = request.POST.get("config", "{}")
-        try:
-            config = json.loads(config_json) if config_json else {}
-        except json.JSONDecodeError:
-            config = {}
+        config = _cart_configuration(request)
 
         # Add to cart
         cart = GDPRCompliantCartSession(request.session)
@@ -874,7 +910,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         quantity = OrderInputValidator.validate_quantity(request.POST.get("quantity", 1))
 
         cart = GDPRCompliantCartSession(request.session)
-        cart.update_item_quantity(product_slug, billing_period, quantity)
+        cart.update_item_quantity(product_slug, billing_period, quantity, request.POST.get("domain_name", ""))
         customer_id, user_id = _get_customer_context(request)
         calculation_result = CartCalculationService.calculate_cart_totals(
             cart, str(customer_id or ""), int(user_id or 0)
@@ -928,7 +964,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         billing_period = request.POST.get("billing_period", "monthly")
 
         cart = GDPRCompliantCartSession(request.session)
-        cart.remove_item(product_slug, billing_period)
+        cart.remove_item(product_slug, billing_period, request.POST.get("domain_name", ""))
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
@@ -1119,11 +1155,9 @@ def checkout(request: HttpRequest) -> HttpResponse:
     # Pre-join cart items with per-item calculation data using slug-based lookup (B2)
     cart_items = cart.get_items()
     if calculation_result and calculation_result.get("items"):
-        calc_lookup = {
-            (ci.get("product_slug", ""), ci.get("billing_period", "")): ci for ci in calculation_result["items"]
-        }
+        calc_lookup = {cart_item_key(ci): ci for ci in calculation_result["items"]}
         for item in cart_items:
-            key = (item.get("product_slug", ""), item.get("billing_period", ""))
+            key = cart_item_key(item)
             calc = calc_lookup.get(key)
             if calc:
                 item["line_total_cents"] = calc.get("line_total_cents", 0)
@@ -1134,6 +1168,8 @@ def checkout(request: HttpRequest) -> HttpResponse:
         "calculation": calculation_result,
         "warnings": cart.get_warnings(),
         "preflight": preflight_result,
+        # The terms release to link and send back, and whether to ask for an early start.
+        "checkout": (preflight_result or {}).get("checkout") or {},
         "can_submit": preflight_result.get("valid", False) if preflight_result else False,
         "order_steps": ORDER_STEPS,
         "current_step": 3,
@@ -1612,3 +1648,72 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
     except Exception as e:
         logger.error(f"🔥 Error confirming payment: {e}")
         return JsonResponse({"success": False, "error": "An unexpected error occurred"}, status=500)
+
+
+@require_http_methods(["POST"])
+def domain_availability(request: HttpRequest) -> HttpResponse:
+    """Proxy an availability lookup with the end-user IP in the signed body."""
+    customer_id, user_id = _get_customer_context(request)
+    payload: dict[str, object] = {
+        "domain_name": request.POST.get("domain_name", ""),
+        "domain_mode": request.POST.get("domain_mode", "register"),
+        "client_ip": get_safe_client_ip(request),
+    }
+    if customer_id is not None and user_id is not None:
+        payload["customer_id"] = customer_id
+    try:
+        result = PlatformAPIClient().post(
+            "orders/domains/availability/", payload, user_id=int(user_id) if user_id else None
+        )
+    except PlatformAPIError:
+        result = {"success": False, "error": _("Could not verify domain availability. Please try again.")}
+    response = render(request, "orders/partials/domain_availability.html", {"availability": result})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def _submit_domain_secret(request: HttpRequest, endpoint: str, field: str, destination: str) -> HttpResponse:
+    """Send a secret once; messages and sessions contain only fixed notices."""
+    customer_id, user_id = _get_customer_context(request)
+    succeeded = False
+    try:
+        result = PlatformAPIClient().post(
+            endpoint, {"customer_id": customer_id, field: request.POST.get(field, "")}, user_id=int(user_id or 0)
+        )
+        succeeded = result.get("success") is True
+    except PlatformAPIError:
+        logger.warning("⚠️ [Domains] Secret submission refused for customer %s", customer_id)
+    if succeeded:
+        messages.success(request, _("Registrant identity saved.") if field == "cnp" else _("Transfer code received."))
+        logger.info("✅ [Domains] Secret submitted for customer %s", customer_id)
+    else:
+        messages.error(
+            request,
+            _("Could not save registrant identity. Enter a valid CNP and try again.")
+            if field == "cnp"
+            else _("Could not save the transfer code. Check the code and the order status."),
+        )
+    response = redirect(destination)
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@sensitive_post_parameters("cnp", "transfer_code")
+@require_customer_authentication
+@require_billing_access()
+@require_http_methods(["POST"])
+def registrant_identity(request: HttpRequest) -> HttpResponse:
+    return _submit_domain_secret(request, "customers/tax-profile/", "cnp", reverse("orders:checkout"))
+
+
+@sensitive_post_parameters("cnp", "transfer_code")
+@require_customer_authentication
+@require_billing_access()
+@require_http_methods(["POST"])
+def transfer_code(request: HttpRequest, order_id: uuid.UUID, item_id: uuid.UUID) -> HttpResponse:
+    return _submit_domain_secret(
+        request,
+        f"orders/{order_id}/items/{item_id}/transfer-code/",
+        "transfer_code",
+        reverse("orders:confirmation", args=[order_id]),
+    )

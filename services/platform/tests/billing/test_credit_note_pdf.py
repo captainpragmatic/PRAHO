@@ -100,7 +100,7 @@ class CreditNoteTotalsBlockTests(TestCase):
         """
         rows = self._totals_rows(self._issued_reversal(self._discounted_original("FCT-000802")))
 
-        vat = next(row for row in rows if "baza" in row)
+        vat = next(row for row in rows if "base:" in row)
 
         self.assertIn("-90.00", vat, f"got {vat}")
 
@@ -144,7 +144,7 @@ class CreditNoteTotalsBlockTests(TestCase):
 
         subtotal = next(row for row in rows if "Subtotal" in row)
         discount = next(row for row in rows if "Discount" in row)
-        vat = next(row for row in rows if "baza" in row)
+        vat = next(row for row in rows if "base:" in row)
 
         self.assertIn("100.00", subtotal)
         self.assertIn("-10.00", discount, f"a deduction still reads as negative; got {discount}")

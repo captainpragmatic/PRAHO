@@ -11,6 +11,7 @@ from apps.products.models import Product, ProductPrice
 from apps.promotions.models import Coupon, GiftCard
 from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
+from tests.helpers.checkout import checkout_consents
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
@@ -95,6 +96,7 @@ class GiftTenderAPITests(HMACTestMixin, TestCase):
             "user_id": self.owner.pk,
             "currency": "RON",
             "currency_revision": 1,
+            **checkout_consents(),
             "items": [
                 {
                     "product_id": str(product.pk),

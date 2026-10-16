@@ -6,6 +6,7 @@ from typing import Any
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.identity_fields import requires_county
 from apps.common.localisation import country_name, normalize_country_code
 from apps.common.localisation_services import get_localisation_defaults
 
@@ -18,11 +19,15 @@ class CountryDefaultsMixin(forms.BaseForm):
         for prefix in ("", "billing_"):
             if prefix and cleaned.get("billing_same_as_primary"):
                 continue
-            postal_field = prefix + "postal_code"
+            postal_field, county_field = prefix + "postal_code", prefix + "county"
             country = cleaned.get(prefix + "country")
+            in_romania = normalize_country_code(country) == "RO"
             postal_code = cleaned.get(postal_field)
-            if normalize_country_code(country) == "RO" and postal_code and not re.fullmatch(r"[0-9]{6}", postal_code):
+            if in_romania and postal_code and not re.fullmatch(r"[0-9]{6}", postal_code):
                 self.add_error(postal_field, _("Romanian postal codes must be 6 digits"))
+            needs_county = requires_county(country) and county_field in self.fields and county_field not in self.errors
+            if needs_county and not cleaned.get(county_field):
+                self.add_error(county_field, _("A Romanian address needs its county."))
         return cleaned
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

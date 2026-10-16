@@ -8,14 +8,14 @@ from django.conf import settings
 from django.core import mail
 from django.test import TestCase
 
-from apps.common.legal import TERMS_OF_SERVICE_VERSION
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer
 from apps.orders.services import OrderService
-from apps.settings.models import SystemSetting
 from apps.users.models import CustomerMembership, User
 from apps.users.pending_registration import PendingRegistration
 from services.platform.tests.helpers.hmac import hmac_headers
+from services.platform.tests.helpers.legal import publish_release
+from services.platform.tests.helpers.portal import set_portal_origin
 from services.platform.tests.helpers.task_queue import run_queued
 
 CHOSEN = "Registration-pass123!"
@@ -25,11 +25,8 @@ pytestmark = pytest.mark.e2e
 
 class RegistrationCase(TestCase):
     def setUp(self):
-        SystemSetting.objects.update_or_create(
-            key="portal.public_base_url",
-            defaults={"name": "Portal URL", "category": "platform", "data_type": "string",
-                      "value": "https://customers.e2e.test", "default_value": ""},
-        )
+        self.terms = publish_release()
+        set_portal_origin("https://customers.e2e.test")
 
     def signed_post(self, path, payload):
         body = json.dumps(payload).encode()
@@ -52,14 +49,11 @@ class RegistrationCase(TestCase):
                 "customer_type": "individual" if individual else "company",
                 "company_name": "Ana Pop" if individual else "E2E Registration SRL",
                 "vat_number": "" if individual else "RO14399840",
-                # The portal requires a CNP from individuals in Romania, and Platform does too.
-                **({"cnp": "1900101123457"} if individual else {}),
                 "address_line1": "Str. Victoriei nr. 10",
                 "city": "București",
                 "county": "București",
                 "postal_code": "010061",
                 "country": "România",
-                "data_processing_consent": True,
             },
         }
 
@@ -75,8 +69,8 @@ class RegistrationCase(TestCase):
         ).groups()
         confirmed = self.signed_post("/api/users/register/confirm/", {
             "registration_id": registration_id, "token": token,
-            "password": CHOSEN, "password_confirm": CHOSEN, "data_processing_consent": True,
-            "terms_accepted": True, "terms_version": TERMS_OF_SERVICE_VERSION,
+            "password": CHOSEN, "password_confirm": CHOSEN,
+            "terms_accepted": True, "terms_document_id": str(self.terms.pk),
         })
         self.assertEqual(confirmed.status_code, 201, confirmed.content)
         user = User.objects.get(email="owner@e2e.test")
@@ -103,19 +97,15 @@ class TestSignupWorkflow(RegistrationCase):
     def test_complete_individual_signup_flow(self):
         _, customer = self.register(individual=True)
         self.assertEqual(customer.customer_type, "individual")
-        self.assertEqual(customer.tax_profile.cnp, "1900101123457")
+        # Registration collects no CNP: an individual has no fiscal identifier on file.
+        self.assertFalse(getattr(getattr(customer, "tax_profile", None), "cnp", None))
         self.assertEqual(customer.billing_profile.preferred_currency, "RON")
         self.assertTrue(customer.addresses.get().is_billing)
 
-    def test_signup_requires_gdpr_consent(self):
-        payload = self.payload()
-        payload["customer_data"]["data_processing_consent"] = False
-        response = self.post_registration(payload)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("data_processing_consent", response.content.decode())
-        self.assertFalse(PendingRegistration.objects.exists())
-        self.assertFalse(User.objects.exists())
-        self.assertFalse(Customer.objects.exists())
+    def test_signup_asks_for_no_data_processing_consent(self):
+        # Processing the account's data performs the contract; the privacy notice informs, nobody ticks a box.
+        _, customer = self.register()
+        self.assertTrue(customer.data_processing_consent)  # Derived from when the notice was acknowledged
 
     def test_signup_with_multiple_addresses(self):
         user, customer = self.register()

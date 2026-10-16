@@ -1178,8 +1178,8 @@ class PromotionsDashboardView(StaffRequiredMixin, TemplateView):
             valid_until__gte=now,
         ).count()
 
-        # Today's redemptions
-        today = now.date()
+        # Today's redemptions: the operator's day, which applied_at__date resolves in too
+        today = timezone.localdate(now)
         context["todays_redemptions"] = CouponRedemption.objects.filter(
             applied_at__date=today,
             status="applied",

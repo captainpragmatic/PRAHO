@@ -24,7 +24,7 @@ from django_q.tasks import async_task, schedule
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_brand_name
 from apps.users.mfa import WebAuthnCredential
 from apps.users.models import APIToken, User, UserLoginLog, UserSession
 
@@ -90,7 +90,7 @@ def _send_password_reset_email(email: str) -> dict[str, Any]:
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = default_token_generator.make_token(user)
     context = {"user": user, "uid": uid, "token": token, "reset_url": f"{base}/password-reset/confirm/{uid}/{token}/"}
-    subject = gettext("Password Reset Request - PRAHO Platform")
+    subject = gettext("Password Reset Request - %(brand)s") % {"brand": get_brand_name()}
     text_message = render_to_string("users/emails/password_reset.txt", context)
     html_message = render_to_string("users/emails/password_reset.html", context)
     from_email = get_default_from_email()

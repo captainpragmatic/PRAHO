@@ -1,69 +1,40 @@
 """
 Test Suite for Common App - Utilities and Helper Functions
-Tests Romanian date formatting, security utilities, and business logic helpers.
+Tests document date formatting, security utilities, and business logic helpers.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
 
-import pytz
 from django.http import JsonResponse
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.common.tax_service import calculate_romanian_vat
 from apps.common.utils import (
     calculate_due_date,
-    format_romanian_date,
-    format_romanian_datetime,
+    format_document_date,
     generate_secure_token,
-    get_romanian_now,
     hash_sensitive_data,
     json_error,
     json_success,
     mask_sensitive_data,
+    operator_local_date,
 )
 
 
-class TestRomanianDateFormatting(TestCase):
-    """Test Romanian date and time formatting utilities"""
+class TestDocumentDateFormatting(TestCase):
+    """Document dates are the operator's calendar day (TIME_ZONE), formatted dd.mm.yyyy."""
 
-    def test_format_romanian_date(self):
-        """Test Romanian date formatting (dd.mm.yyyy)"""
-        test_date = datetime(2023, 12, 25, 15, 30, 45)
-        result = format_romanian_date(test_date)
-        self.assertEqual(result, '25.12.2023')
-
-    def test_format_romanian_datetime(self):
-        """Test Romanian datetime formatting (dd.mm.yyyy HH:MM)"""
-        test_datetime = datetime(2023, 12, 25, 15, 30, 45)
-        result = format_romanian_datetime(test_datetime)
-        self.assertEqual(result, '25.12.2023 15:30')
-
-    def test_get_romanian_now(self):
-        """Test getting current time in Romanian timezone"""
-        with patch('django.utils.timezone.now') as mock_now:
-            mock_now.return_value = datetime(2023, 6, 15, 12, 0, 0, tzinfo=pytz.UTC)
-
-            result = get_romanian_now()
-
-            # Should be a datetime object
-            self.assertIsInstance(result, datetime)
-            # Should have timezone info
-            self.assertIsNotNone(result.tzinfo)
+    def test_format_document_date(self):
+        self.assertEqual(format_document_date(datetime(2023, 12, 25, 15, 30, 45)), '25.12.2023')
 
     def test_date_formatting_edge_cases(self):
-        """Test date formatting with edge cases"""
-        # Test single digit day/month
-        test_date = datetime(2023, 1, 5, 9, 5, 30)
-        date_result = format_romanian_date(test_date)
-        datetime_result = format_romanian_datetime(test_date)
+        """Single-digit days and months are zero-padded."""
+        self.assertEqual(format_document_date(datetime(2023, 1, 5, 9, 5, 30)), '05.01.2023')
 
-        self.assertEqual(date_result, '05.01.2023')
-        self.assertEqual(datetime_result, '05.01.2023 09:05')
-
-    def test_format_romanian_date_converts_aware_datetime_to_ro_local(self):
-        """#286: an aware datetime must be rendered in the Romanian calendar, not UTC.
+    def test_format_document_date_converts_aware_datetime_to_the_operator_day(self):
+        """#286: an aware datetime is rendered in the operator's calendar, not UTC.
 
         2025-12-31 22:30 UTC is already 2026-01-01 00:30 in Romania. Formatting the UTC wall
         clock would print 31.12.2025 — the wrong day, and the wrong YEAR — on the invoice PDF
@@ -71,18 +42,9 @@ class TestRomanianDateFormatting(TestCase):
         """
         aware = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
 
-        self.assertEqual(format_romanian_date(aware), '01.01.2026')
+        self.assertEqual(format_document_date(aware), '01.01.2026')
 
-    def test_format_romanian_datetime_converts_aware_datetime_to_ro_local(self):
-        """#286: the same conversion applies to the datetime variant, including the clock time.
-
-        22:30 UTC is 00:30 the next day in Romania (EET, UTC+2).
-        """
-        aware = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
-
-        self.assertEqual(format_romanian_datetime(aware), '01.01.2026 00:30')
-
-    def test_format_romanian_date_handles_summer_time_offset(self):
+    def test_format_document_date_handles_summer_time_offset(self):
         """#286: Romania is EEST (UTC+3) in summer, not a hardcoded +2.
 
         2026-06-15 21:30 UTC is 2026-06-16 00:30 EEST — a fix that assumed a fixed +2 offset
@@ -90,15 +52,25 @@ class TestRomanianDateFormatting(TestCase):
         """
         aware = datetime(2026, 6, 15, 21, 30, tzinfo=UTC)
 
-        self.assertEqual(format_romanian_date(aware), '16.06.2026')
+        self.assertEqual(format_document_date(aware), '16.06.2026')
 
-    def test_format_romanian_date_passes_naive_datetime_through(self):
+    def test_format_document_date_passes_naive_datetime_through(self):
         """#286 non-regression: naive datetimes carry no timezone, so they are formatted as
         given rather than assumed to be UTC. Callers that already hold a local wall clock keep
         working unchanged."""
         naive = datetime(2025, 12, 31, 22, 30)
 
-        self.assertEqual(format_romanian_date(naive), '31.12.2025')
+        self.assertEqual(format_document_date(naive), '31.12.2025')
+
+    @override_settings(TIME_ZONE="Europe/Berlin")
+    def test_document_dates_follow_the_operator_clock_not_an_activated_zone(self):
+        """22:30 UTC on 31 December is still 31 December in Berlin, already 1 January in Bucharest
+        and Auckland. A German operator's documents carry the Berlin day, even while a user's
+        own timezone is active."""
+        aware = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+        with timezone.override("Pacific/Auckland"):
+            self.assertEqual(format_document_date(aware), '31.12.2025')
+            self.assertEqual(operator_local_date(aware), date(2025, 12, 31))
 
 
 class TestDueDateCalculation(TestCase):

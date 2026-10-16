@@ -216,3 +216,23 @@ class EFacturaIdentitySettingsEffectsTests(TestCase):
     def test_street_changes_supplier_postal_address(self) -> None:
         self._write("efactura.company.street", "Identity Street 27")
         self._assert_supplier_text("cac:PostalAddress/cbc:StreetName", "Identity Street 27")
+
+
+class SupplierTaxIdFallbackTests(TestCase):
+    """The statutory XML names the same seller as the PDF unless e-Factura is given its own ID."""
+
+    @override_settings(COMPANY_CUI="RO12345674")
+    def test_supplier_tax_id_falls_back_to_the_seller_cui(self) -> None:
+        from django.conf import settings  # noqa: PLC0415
+
+        from apps.billing.efactura.xml_builder import get_supplier_info  # noqa: PLC0415
+
+        if hasattr(settings, "EFACTURA_COMPANY_CUI"):
+            del settings.EFACTURA_COMPANY_CUI  # Unset for this test only; override_settings restores it
+        self.assertEqual(get_supplier_info().tax_id, "RO12345674")
+
+    @override_settings(COMPANY_CUI="RO12345674", EFACTURA_COMPANY_CUI="RO99999992")
+    def test_an_explicit_efactura_tax_id_still_wins(self) -> None:
+        from apps.billing.efactura.xml_builder import get_supplier_info  # noqa: PLC0415
+
+        self.assertEqual(get_supplier_info().tax_id, "RO99999992")

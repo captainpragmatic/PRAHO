@@ -10,9 +10,7 @@
     <!-- Header -->
     <div class="text-center">
       <div class="mx-auto h-16 w-16 mb-4">
-        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
-          P
-        </div>
+        {% include "components/brand_logo.html" with css_class="h-full w-full" %}
       </div>
       <h2 class="mt-6 text-3xl font-extrabold text-white">
         {% trans 'PRAHO Platform Login' %}
@@ -56,8 +54,8 @@
           {% endif %}
         </div>
 
-        <!-- Remember Me -->
-        <div class="flex items-center justify-between">
+        <!-- Remember Me: the support note drops to its own line on a narrow screen -->
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div class="flex items-center">
             {{ form.remember_me }}
             <label for="id_remember_me" class="ml-2 block text-sm text-slate-300">
@@ -109,7 +107,7 @@
 
     if (emailField) {
       emailField.className = 'w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
-      emailField.placeholder = 'staff@pragmatichost.com';
+      emailField.placeholder = 'staff@example.com';
     }
 
     if (passwordField) {

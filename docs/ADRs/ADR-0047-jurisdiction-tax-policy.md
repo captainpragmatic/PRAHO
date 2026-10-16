@@ -217,3 +217,37 @@ The reference jurisdiction pack implements Romanian rules and is maintained on a
 basis; legislative change is frequent and the pack may lag it. A deployer's own advice governs
 its configuration. Nothing in this repository, including the reference pack, constitutes advice
 or a representation of fitness for any operator's compliance obligations.
+
+## Addendum (2026-10-14): Romanian features follow the operator's country
+
+Until a jurisdiction pack exists, one fact switches the Romanian reference behaviour on: the
+country the operator is established in (`COMPANY_COUNTRY_CODE`, read through
+`operator_country()` in `apps/common/operator.py`).
+
+- **Romanian operator only.** e-Factura, the D390 report, the SmartBill issuer, BNR rates and
+  the ROTLD registrar apply only to an operator established in Romania. Issuer and registrar
+  classes, settings groups and settings keys carry a `jurisdiction` marker, read through
+  `operator_serves()`. Each feature enforces it where it acts:
+  - e-Factura through `efactura_enabled()`, BNR in its daily fetch, D390 in its view;
+  - SmartBill in the issuer setting, which refuses it, while the default falls back to the
+    built-in issuer and documents already issued by SmartBill still resolve their issuer;
+  - ROTLD at registrar selection, which skips it for the next registrar, with the gateway
+    factory as a backstop.
+
+  The settings catalog hides what does not apply (`is_visible()`), so a German operator never
+  sees an e-Factura page it cannot use. Hiding is presentation only, never the enforcement.
+- **Fiscal documents.** The invoice PDF prints the art. 319 Cod fiscal mention only for a
+  Romanian operator. Each party's tax ID is labelled by that party's own country: CUI/CIF and
+  Nr. Reg. Com. for a Romanian party, VAT ID and company registration number for anyone else.
+- **Customer country fallback.** A customer with no billing country is placed in the operator's
+  country, not in Romania (`billing_country_code()`, the order VAT context, the VIES identity).
+  New customers start in the operator's country too, until staff choose another default
+  (`system.default_country`, resolved by `get_default_country()`).
+- **Fail closed outside the EU.** `TaxService` still assumes an EU supplier. Outside DEBUG the
+  `common.E003` system check refuses an operator country that is not the ISO code of an EU
+  member state. It runs at `migrate`, so a deploy stops before it serves anything. Production
+  also refuses to start with a blank `COMPANY_COUNTRY_CODE`, which would otherwise mean Romania
+  without anyone choosing it. `operator_in_eu()` works on ISO codes, so Greece is GR; EL is used
+  only where a VAT prefix is parsed.
+- **Not gated.** VIES stays available to every operator, because only EU operators can start.
+  The generic compliance audit events are unchanged.

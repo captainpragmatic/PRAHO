@@ -23,6 +23,15 @@ wheels = [
 ]
 
 [[package]]
+name = "altcha"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/01/843864be3ceb5f8e93f065a657d17b3f3d7a023f31ad903e30bc682f10e5/altcha-2.3.0.tar.gz", hash = "sha256:26fd7a08fa56eb36c286d4da7da9af0b9a81cd17280d596d8ee613c22b48ddd0", size = 36394, upload-time = "2026-10-04T01:23:26.024Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/94/8f1b57a34d434dd9e5dda8989659c81f024ec79abd251ffb310cf01c59dd/altcha-2.3.0-py3-none-any.whl", hash = "sha256:92d118164866e1e80e3f1f1b1561c49ff4a0e8ae932e8b6cf560a2729c661cd1", size = 23972, upload-time = "2026-10-04T01:23:24.415Z" },
+]
+
+[[package]]
 name = "ansible-core"
 version = "2.20.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1877,6 +1886,7 @@ dev = [
     { name = "sphinx-rtd-theme" },
     { name = "tblib" },
     { name = "types-bleach" },
+    { name = "types-markdown" },
     { name = "types-paramiko" },
     { name = "types-psutil" },
     { name = "types-python-dateutil" },
@@ -1923,6 +1933,7 @@ platform = [
     { name = "xmltodict" },
 ]
 portal = [
+    { name = "altcha" },
     { name = "bleach" },
     { name = "django-ipware" },
     { name = "gunicorn" },
@@ -1990,6 +2001,7 @@ dev = [
     { name = "sphinx-rtd-theme", specifier = ">=1.3.0" },
     { name = "tblib", specifier = ">=3.1.0" },
     { name = "types-bleach", specifier = ">=6.0.0" },
+    { name = "types-markdown", specifier = ">=3.5.0" },
     { name = "types-paramiko", specifier = ">=3.4.0" },
     { name = "types-psutil", specifier = ">=5.9.0" },
     { name = "types-python-dateutil", specifier = ">=2.8.0" },
@@ -2036,6 +2048,7 @@ platform = [
     { name = "xmltodict", specifier = ">=0.13.0" },
 ]
 portal = [
+    { name = "altcha", specifier = "==2.3.0" },
     { name = "bleach", specifier = ">=6.0.0" },
     { name = "django-ipware", specifier = ">=7.0.0" },
     { name = "gunicorn", specifier = ">=26.2.0" },
@@ -2974,6 +2987,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c8/f3/d9a1bbba7b42b5558a3f9fe017d967f5338cf8108d35991d9b15fdea3e0d/types_html5lib-1.1.11.20251117.tar.gz", hash = "sha256:1a6a3ac5394aa12bf547fae5d5eff91dceec46b6d07c4367d9b39a37f42f201a", size = 18100, upload-time = "2025-11-17T03:08:00.78Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/ab/f5606db367c1f57f7400d3cb3bead6665ee2509621439af1b29c35ef6f9e/types_html5lib-1.1.11.20251117-py3-none-any.whl", hash = "sha256:2a3fc935de788a4d2659f4535002a421e05bea5e172b649d33232e99d4272d08", size = 24302, upload-time = "2025-11-17T03:07:59.996Z" },
+]
+
+[[package]]
+name = "types-markdown"
+version = "3.10.2.20261007"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/53/74c0baab10afb715c6c206f56fe16b9e50656d68abcab2df84cc449f8359/types_markdown-3.10.2.20261007.tar.gz", hash = "sha256:0259c70643291f4a1841d795dfabcd86380625db6854e5dea639fdaae9e4a623", size = 20393, upload-time = "2026-10-07T07:49:28.758Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/90/2235ec76f463899971086b90c362d993c2c1792ea34b86bc2a622d15dadc/types_markdown-3.10.2.20261007-py3-none-any.whl", hash = "sha256:d1d5faa7b06045d783ad99a27fd909b5d0c5d67c02dc4e4d44052adb2aace169", size = 25914, upload-time = "2026-10-07T07:49:27.661Z" },
 ]
 
 [[package]]

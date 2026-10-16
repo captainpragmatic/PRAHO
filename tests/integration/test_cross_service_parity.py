@@ -52,7 +52,14 @@ class TestLocalisationParity(TestCase):
     """Pure display policy must behave identically across isolated services."""
 
     def test_localisation_helpers_match(self) -> None:
-        for name in ("localisation.py", "localisation_forms.py", "localisation_middleware.py"):
+        for name in (
+            "localisation.py",
+            "localisation_forms.py",
+            "localisation_middleware.py",
+            "identity_fields.py",
+            "legal_html.py",
+            "intent.py",
+        ):
             with self.subTest(name=name):
                 self.assertEqual((PLATFORM_COMMON / name).read_text(), (PORTAL_COMMON / name).read_text())
 
@@ -214,3 +221,37 @@ class TestSignatureRejectionParity(TestCase):
         expression = self._portal_constant("PLATFORM_MAX_BODY_BYTES")
         self.assertRegex(expression, r"^[0-9 *]+$")
         self.assertEqual(eval(expression, {"__builtins__": {}}), HMAC_MAX_BODY_BYTES)  # noqa: S307 - digits and "*" only
+
+
+class TestCompanyIdentityDefaultsParity(TestCase):
+    """The portal's cold-outage identity is a copy of the platform catalog's company defaults.
+
+    The portal cannot import the catalog, so it keeps its own copy for when Platform is unreachable.
+    The one intended difference is the legal name: the catalog leaves it unset so it inherits the
+    seller name production requires, while the portal needs a non-empty stand-in.
+    """
+
+    @staticmethod
+    def _catalog_company_defaults() -> dict[str, object]:
+        from apps.settings.catalog import CATALOG  # noqa: PLC0415 - Django is configured by pytest-django
+
+        return {d.key.removeprefix("company."): d.default for d in CATALOG if d.key.startswith("company.")}
+
+    @staticmethod
+    def _portal_mirror() -> dict[str, object]:
+        import ast  # noqa: PLC0415
+
+        tree = ast.parse((REPO_ROOT / "services/portal/config/settings/base.py").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "COMPANY_IDENTITY_DEFAULTS":
+                assert node.value is not None
+                return dict(ast.literal_eval(node.value))
+        raise AssertionError("COMPANY_IDENTITY_DEFAULTS not found")
+
+    def test_portal_mirror_equals_catalog_defaults(self) -> None:
+        catalog = self._catalog_company_defaults()
+        mirror = self._portal_mirror()
+        self.assertEqual(catalog["legal_name"], "")
+        self.assertTrue(str(mirror["legal_name"]).strip())
+        shared = {field: catalog[field] for field in mirror if field != "legal_name"}
+        self.assertEqual({field: mirror[field] for field in shared}, shared)

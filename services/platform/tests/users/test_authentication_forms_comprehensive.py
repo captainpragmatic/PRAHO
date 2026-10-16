@@ -266,7 +266,7 @@ class UserRegistrationFormTest(BaseFormTestCase):
         self.assertEqual(user.email, 'newuser@example.com')
         self.assertEqual(user.first_name, 'New')
         self.assertEqual(user.last_name, 'User')
-        self.assertEqual(user.phone, '+40.21.123.4567')
+        self.assertEqual(user.phone, '+40211234567')  # stored in international form
         self.assertTrue(user.accepts_marketing)
         self.assertIsNotNone(user.gdpr_consent_date)
 
@@ -347,7 +347,7 @@ class UserProfileFormTest(BaseFormTestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.first_name, 'Updated')
         self.assertEqual(self.user.last_name, 'Name')
-        self.assertEqual(self.user.phone, '+40.21.987.6543')
+        self.assertEqual(self.user.phone, '+40219876543')  # stored in international form
 
     def test_save_without_commit(self) -> None:
         """Test save method without commit"""
@@ -674,7 +674,7 @@ class FieldValidationTest(BaseFormTestCase):
         test_phones = [
             ('+40.21.123.4567', True),
             ('+40 721 123 456', True),
-            ('0721123456', True),
+            ('0721123456', False),  # the country code is needed: a staff user's country is unknown
             ('invalid-phone', False),
             ('', True)  # Optional field
         ]

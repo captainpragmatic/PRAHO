@@ -14,7 +14,7 @@
         {% icon "lock" %} {% trans 'Privacy & Data Protection' %}
       </h1>
       <p class="text-slate-300 text-lg">
-        {% trans 'Manage your personal data and exercise your GDPR rights as a Romanian hosting customer.' %}
+        {% trans 'Manage your personal data and exercise your GDPR rights.' %}
       </p>
     </div>
 
@@ -32,19 +32,13 @@
         </div>
         <div class="p-6">
           <div class="space-y-4">
-            <!-- Data Processing Consent -->
+            <!-- Data Processing: needed for the service, described by the privacy policy rather than consented to -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div>
                 <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                 <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
               </div>
-              <div class="flex items-center">
-                {% if consent_status.data_processing %}
-                  {% trans "Given" as bt2 %}{% badge bt2 variant="success" icon="check" %}
-                {% else %}
-                  {% trans "Not Given" as bt3 %}{% badge bt3 variant="danger" icon="x" %}
-                {% endif %}
-              </div>
+              <a href="{% url 'privacy_policy' %}" class="text-sm text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
             </div>
 
             <!-- Marketing Consent -->
@@ -61,12 +55,6 @@
                 {% endif %}
               </div>
             </div>
-
-            {% if consent_status.last_updated %}
-            <div class="text-xs text-slate-400 mt-3">
-              {% trans 'Last updated:' %} {% localised_date consent_status.last_updated "date" %}
-            </div>
-            {% endif %}
           </div>
         </div>
       </div>
@@ -231,7 +219,7 @@
     <div class="mt-8 p-4 bg-slate-800 border border-slate-700 rounded-lg">
       <h3 class="text-lg font-medium text-white mb-2">{% icon "document" %} {% trans 'Legal Information' %}</h3>
       <p class="text-slate-300 text-sm mb-2">
-        {% trans 'Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements.' %}
+        {% trans 'Your personal data is processed according to the GDPR (EU 2016/679).' %}
       </p>
       <div class="flex flex-wrap gap-4 text-xs">
         <a href="{% url 'privacy_policy' %}" class="text-blue-400 hover:text-blue-300">{% trans 'Privacy Policy' %}</a>
@@ -290,16 +278,8 @@
       <form hx-post="{% url 'audit:withdraw_consent' %}" hx-target="body">
         {% csrf_token %}
         <div class="space-y-4">
-          {% alert "Warning: Withdrawing consent may affect your service." variant="warning" %}
-
           {% trans 'Marketing Communications' as withdraw_marketing_label %}
           {% checkbox_field "consent_types" value="marketing" html_id="consent-types-marketing" label=withdraw_marketing_label %}
-
-          <label class="flex items-center">
-            {# tmpl-allow TMPL001: its label holds a red "(will anonymize account)" warning span; checkbox_field renders one plain-text label #}
-            <input type="checkbox" name="consent_types" value="data_processing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
-            <span class="ml-2 text-sm text-white">{% trans 'Data Processing' %} <span class="text-red-400">({% trans 'will anonymize account' %})</span></span>
-          </label>
         </div>
 
         <div class="mt-6 flex space-x-3">
@@ -318,7 +298,7 @@
       <form hx-post="{% url 'audit:request_data_deletion' %}" hx-target="body">
         {% csrf_token %}
         <div class="space-y-4">
-          {% alert "This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
+          {% trans "This action cannot be undone. Your account will be anonymized; records the law requires us to keep, such as invoices, are retained." as erasure_warning %}{% alert erasure_warning variant="danger" %}
 
           <div>
             <label for="deletion-type" class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
@@ -358,17 +338,6 @@
           <p class="text-slate-300 text-sm">
             {% trans 'Manage your consent preferences below:' %}
           </p>
-
-          <!-- Data Processing Consent -->
-          <div class="p-3 bg-slate-700 rounded-lg">
-            {% trans 'Data Processing' as gdpr_consent_label %}
-            {% if consent_status.data_processing %}
-              {% trans 'Already given. Use "Withdraw Consent" for changes.' as gdpr_consent_help %}
-            {% else %}
-              {% trans 'Required for account operation and service delivery.' as gdpr_consent_help %}
-            {% endif %}
-            {% checkbox_field "gdpr_consent" label=gdpr_consent_label help_text=gdpr_consent_help checked=consent_status.data_processing disabled=consent_status.data_processing %}
-          </div>
 
           <!-- Marketing Consent -->
           <div class="p-3 bg-slate-700 rounded-lg">

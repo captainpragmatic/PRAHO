@@ -226,21 +226,17 @@ def login_floor_seconds(raw: str | None, default: float) -> float:
 
 # Cold-outage defaults mirror Platform's public company catalog entries.
 COMPANY_IDENTITY_DEFAULTS: dict[str, str] = {
-    "legal_name": "PragmaticHost SRL",
-    "email_support": "support@pragmatichost.com",
-    "email_privacy": "privacy@pragmatichost.com",
+    "legal_name": "Example Company",
+    "email_support": "support@example.com",
+    "email_privacy": "privacy@example.com",
     "email_finance": "",
     "phone": "",
-    "email_dpo": "dpo@pragmatichost.com",
-    "email_contact": "contact@pragmatichost.com",
+    "email_dpo": "dpo@example.com",
+    "email_contact": "contact@example.com",
     "address": "",
     "registration_number": "",
+    "brand_name": "PRAHO",
 }
-
-# Company bank details for bank transfer payment instructions
-COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")
-COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
-COMPANY_BANK_BENEFICIARY = os.environ.get("COMPANY_BANK_BENEFICIARY", "PragmaticHost SRL")
 
 
 # ===============================================================================
@@ -248,7 +244,8 @@ COMPANY_BANK_BENEFICIARY = os.environ.get("COMPANY_BANK_BENEFICIARY", "Pragmatic
 # ===============================================================================
 
 LANGUAGE_CODE = "en"
-TIME_ZONE = "Europe/Bucharest"  # Romanian timezone
+# The operator's clock; set the same TIME_ZONE as the platform.
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip() or "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True
 
@@ -267,10 +264,14 @@ LOCALE_PATHS = [
 # ===============================================================================
 
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [
+STATICFILES_DIRS: list[Path | tuple[str, Path]] = [
     BASE_DIR / "static",  # Service-specific static files (highest priority)
-    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components and the default brand pack
 ]
+# A deployment's brand folder (logo.svg, favicon.svg, brand.css) is served as static/brand/ ahead of
+# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0061).
+if BRAND_DIR := os.environ.get("BRAND_DIR", "").strip():
+    STATICFILES_DIRS.insert(0, ("brand", Path(BRAND_DIR)))
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Plain names locally; prod and staging switch staticfiles to the manifest storage, which
 # content-hashes names so the year-long immutable cache on /static/ never serves stale files.
@@ -289,7 +290,7 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "portal.pragmatichost.com"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]  # Production and staging set it from the environment
 
 # ===============================================================================
 # SESSION CONFIGURATION 🔐
@@ -312,11 +313,8 @@ CSRF_COOKIE_SECURE = not DEBUG  # HTTPS for CSRF cookies
 CSRF_COOKIE_HTTPONLY = False  # ✅ Allow JS access for AJAX
 CSRF_COOKIE_SAMESITE = "Lax"  # CSRF protection
 
-# CSRF trusted origins (must include scheme + host)
-CSRF_TRUSTED_ORIGINS = [
-    "https://portal.pragmatichost.com",
-    "https://www.pragmatichost.com",
-]
+# CSRF trusted origins (must include scheme + host); production and staging derive them from ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS: list[str] = []
 
 # Security headers
 SECURE_BROWSER_XSS_FILTER = True
@@ -333,6 +331,14 @@ X_FRAME_OPTIONS = "DENY"
 DEFAULT_CSP_PROFILE = "phase3-target"
 CSP_PROFILE = os.environ.get("CSP_PROFILE", DEFAULT_CSP_PROFILE)
 CSP_REPORT_ONLY = os.environ.get("CSP_REPORT_ONLY", "false").lower() in ("1", "true", "yes")
+
+# Proof-of-work bot protection on the public registration and password-reset forms
+# (apps.common.altcha). Development and the unit tests turn it off; the E2E settings turn it back
+# on, so the CSP gates run with the widget and its worker.
+ALTCHA_ENABLED = True
+# PBKDF2 iterations per attempt; a challenge needs about 256 attempts, well under a second in a browser.
+ALTCHA_COST = 5000
+ALTCHA_EXPIRY_SECONDS = 10 * 60
 
 # Test-only URL surface (CSP violation positive-control). The E2E settings
 # module is the sole enabler; base/dev/staging/prod keep this False so the

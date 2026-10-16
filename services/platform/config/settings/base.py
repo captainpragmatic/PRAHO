@@ -103,6 +103,7 @@ TEMPLATES = [
                 "apps.common.context_processors.current_customer",
                 "apps.common.context_processors.navigation_dropdowns",
                 "apps.common.context_processors.csp_nonce",
+                "apps.common.context_processors.default_currency",
                 # Staff maintenance banner (base.html) needs system_status on every
                 # page, not only inside the settings module. Cache-first read: the
                 # warm path costs zero queries (#377 review).
@@ -122,14 +123,14 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "pragmatichost"),
-        "USER": os.environ.get("DB_USER", "pragmatichost"),
+        "NAME": os.environ.get("DB_NAME", "praho"),
+        "USER": os.environ.get("DB_USER", "praho"),
         "PASSWORD": os.environ.get("DB_PASSWORD", "development_password"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,  # Database connection pooling
         "OPTIONS": {
-            "application_name": "pragmatichost_crm",
+            "application_name": "praho_platform",
         },
     }
 }
@@ -192,7 +193,9 @@ ACCOUNT_LOCKOUT_THRESHOLD = 5
 # ===============================================================================
 
 LANGUAGE_CODE = "en"  # English default, with Romanian support
-TIME_ZONE = "Europe/Bucharest"
+# The operator's clock: billing periods, document dates and reports follow it. A Romanian operator
+# keeps Europe/Bucharest, which e-Factura dates and the VAT tax point need (prod.py enforces it).
+TIME_ZONE = os.environ.get("TIME_ZONE", "").strip() or "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True
 
@@ -213,10 +216,14 @@ LOCALE_PATHS = [
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [
+STATICFILES_DIRS: list[Path | tuple[str, Path]] = [
     BASE_DIR / "static",  # Service-specific static files (highest priority)
-    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components and the default brand pack
 ]
+# A deployment's brand folder (logo.svg, favicon.svg, brand.css) is served as static/brand/ ahead of
+# PRAHO's own defaults in shared/ui/static/brand/, so any file it holds wins (ADR-0061).
+if BRAND_DIR := os.environ.get("BRAND_DIR", "").strip():
+    STATICFILES_DIRS.insert(0, ("brand", Path(BRAND_DIR)))
 
 # Plain names locally; prod and staging switch staticfiles to the manifest storage, which
 # content-hashes names so the year-long immutable cache on /static/ never serves stale files.
@@ -236,7 +243,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "django_cache_table",
-        "KEY_PREFIX": "pragmatichost",
+        "KEY_PREFIX": "praho",
         "OPTIONS": {
             "MAX_ENTRIES": 10000,
             "CULL_FREQUENCY": 3,  # Delete 1/3 of cache when MAX_ENTRIES reached
@@ -340,8 +347,8 @@ AUDIT_CHAIN_REQUIRE = os.environ.get("AUDIT_CHAIN_REQUIRE", "false").strip().low
 AUDIT_ANCHOR_SINK = os.environ.get("AUDIT_ANCHOR_SINK", "logfile").strip().lower()
 AUDIT_ANCHOR_LOG_PATH = os.environ.get("AUDIT_ANCHOR_LOG_PATH", str(BASE_DIR / "logs" / "audit_chain_anchors.jsonl"))
 
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@example.com>")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@example.com")
 
 # Email provider configuration
 # Supported: 'smtp', 'amazon_ses', 'sendgrid', 'mailgun', 'console', 'locmem'
@@ -462,23 +469,11 @@ REGISTRAR_ADAPTERS_VERIFIED = os.environ.get("REGISTRAR_ADAPTERS_VERIFIED", "fal
 
 # NOTE: VAT rates removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
 
-# Romanian company information
-ROMANIAN_BUSINESS_CONTEXT = {
-    "company_name": os.environ.get("COMPANY_NAME", "PragmaticHost SRL"),
-    "company_cui": os.environ.get("COMPANY_CUI", "RO12345678"),
-    "email": os.environ.get("COMPANY_EMAIL", "contact@pragmatichost.com"),
-    "phone": os.environ.get("COMPANY_PHONE", "+40.21.123.4567"),
-    "address": os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1, Bucuresti, Romania"),
-    "currency": "RON",
-}
-
 # Currency settings
-# Deprecated compatibility knob: this environment value does not select the selling currency.
-# New sales use the stored billing.default_currency policy; historical records keep their currency.
-# Upgrades retain RON until an explicit validated settings change. Run `make check-currency`
-# after migrations, with DJANGO_SETTINGS_MODULE pointing at the intended deployment database.
+# The selling currency is the stored billing.default_currency policy, seeded from the operator's
+# home currency; historical records keep their currency. Run `make check-currency` after
+# migrations, with DJANGO_SETTINGS_MODULE pointing at the intended deployment database.
 # Ordinary offline system checks do not prove database-backed currency readiness.
-BILLING_DEFAULT_CURRENCY = os.environ.get("BILLING_DEFAULT_CURRENCY", "RON")
 
 # ===============================================================================
 # EXTERNAL INTEGRATIONS
@@ -566,10 +561,13 @@ def validate_production_secret_key(secret_key: str | None) -> None:
 # ===============================================================================
 
 # Company information - override these in environment or local settings
-COMPANY_NAME = os.environ.get("COMPANY_NAME", "PRAHO Platform")
-COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1")
-COMPANY_CITY = os.environ.get("COMPANY_CITY", "București")
-COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name — see COMPANY_COUNTRY_CODE for the code
+# Fiscal identity printed on invoices and sent to VIES. Empty defaults on purpose: an unconfigured
+# deployment must never issue documents under a real-looking placeholder, and production refuses
+# to start without COMPANY_NAME and COMPANY_CUI (config/settings/prod.py).
+COMPANY_NAME = os.environ.get("COMPANY_NAME", "")
+COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "")
+COMPANY_CITY = os.environ.get("COMPANY_CITY", "")
+COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "")  # Display name — see COMPANY_COUNTRY_CODE for the code
 # The operator's jurisdiction as an ISO-3166-1 alpha-2 code. Read by
 # apps.common.localisation.operator_country and by the e-Factura supplier block.
 # Romania is the reference jurisdiction, not a claim that it fits any deployment (ADR-0047).
@@ -577,16 +575,20 @@ COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name 
 # COMPANY_COUNTRY display name must still resolve to its own country rather
 # than being silently treated as Romanian. operator_country() falls back.
 COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "")
-COMPANY_CUI = os.environ.get("COMPANY_CUI", "RO12345678")  # Romanian tax ID
-COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@praho.ro")
-COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
-COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
+COMPANY_CUI = os.environ.get("COMPANY_CUI", "")  # Tax ID (CUI in Romania)
+COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@example.com")
+COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "")
+COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://example.com")
 # These default to empty so an unconfigured deployment never prints a real-looking
 # placeholder IBAN / registration number on a legal fiscal document (the PDF omits
 # each line when its value is blank). Set them via environment to render them.
 COMPANY_REGISTRATION_NUMBER = os.environ.get("COMPANY_REGISTRATION_NUMBER", "")  # Nr. Reg. Com.
 COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
 COMPANY_BANK_ACCOUNT = os.environ.get("COMPANY_BANK_ACCOUNT", "")  # IBAN
+
+# Whether the ANAF company lookup (apps.billing.gateways.anaf_gateway) may connect to ANAF. On
+# unless the environment turns it off; development and the tests never connect.
+ANAF_TRANSPORT_ENABLED = os.environ.get("ANAF_TRANSPORT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 
 # VAT settings for Romanian compliance
 # NOTE: VAT_RATE removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
@@ -745,6 +747,7 @@ DEFAULT_THROTTLE_RATES = {
     "auth_reset_ip": "5/minute",
     "auth_register_ip": "5/minute",
     "auth_register_confirm_ip": "5/minute",
+    "public_lookup_ip": "10/minute",
     # Per person: password and second-factor checks through the Portal (MFACredentialThrottle).
     "mfa_credential": "15/hour",
     "sustained": "2000/hour",

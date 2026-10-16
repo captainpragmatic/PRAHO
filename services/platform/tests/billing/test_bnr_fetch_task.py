@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django_q.models import Schedule
 
@@ -28,6 +28,15 @@ class FetchBnrExchangeRatesTaskTests(TestCase):
     def test_disabled_is_noop(self, _flag: object) -> None:
         result = fetch_bnr_exchange_rates()
         self.assertEqual(result["skipped"], "disabled")
+        self.assertFalse(FXRate.objects.exists())
+
+    @override_settings(COMPANY_COUNTRY_CODE="DE")
+    @patch(_FETCH)
+    @patch(_FLAG, return_value=True)
+    def test_a_non_romanian_operator_never_asks_bnr_even_when_enabled(self, _flag: object, mock_fetch: object) -> None:
+        result = fetch_bnr_exchange_rates()
+        self.assertEqual(result["skipped"], "not_applicable")
+        mock_fetch.assert_not_called()
         self.assertFalse(FXRate.objects.exists())
 
     @patch(_FETCH)

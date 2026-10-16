@@ -256,7 +256,7 @@ class BuiltinStornoIssuanceTests(StornoTestCase):
 
         note = self.process(self.refund(original, payment, 1000)).credit_note
 
-        snapshot = ("exchange_to_ron", "exchange_rate_as_of", "exchange_rate_source", "exchange_rate_source_reference")
+        snapshot = Invoice.FX_SNAPSHOT_FIELDS
         self.assertEqual([getattr(note, f) for f in snapshot], [getattr(original, f) for f in snapshot])
         for field in sorted(Invoice._BILLING_SNAPSHOT_FIELDS):
             self.assertEqual(getattr(note, field), getattr(original, field), field)

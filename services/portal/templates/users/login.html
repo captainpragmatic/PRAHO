@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans 'Login' %} - PRAHO Portal{% endblock %}
+{% block title %}{% trans 'Login' %} - {{ company.brand_name }}{% endblock %}
 {% block body_class %}auth-page{% endblock %}
 
 {% block content %}
@@ -11,12 +11,10 @@
     <!-- Header -->
     <div class="text-center">
       <div class="mx-auto h-16 w-16 mb-4">
-        <div class="h-full w-full bg-blue-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold"> {# tmpl-allow TMPL005: needs badge brand_mark #}
-          P
-        </div>
+        {% include "components/brand_logo.html" with css_class="h-full w-full" %}
       </div>
       <h2 class="mt-6 text-3xl font-extrabold text-white">
-        {% trans 'PRAHO Portal Login' %}
+        {% blocktrans with brand=company.brand_name %}Sign in to {{ brand }}{% endblocktrans %}
       </h2>
       <p class="mt-2 text-sm text-slate-400">
         {% trans 'Customer Portal Access' %}
@@ -53,8 +51,8 @@
 
         {% form_field form.mfa_token icon_left="lock" %}
 
-        <!-- Remember Me & Forgot Password -->
-        <div class="flex items-center justify-between">
+        <!-- Remember Me & Forgot Password: the link drops to its own line on a narrow screen -->
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           {% form_checkbox form.remember_me %}
 
           <div class="text-sm">

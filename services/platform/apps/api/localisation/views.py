@@ -13,7 +13,11 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
 )
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, get_brand_name, get_company_legal_name
+
+
+def _text(value: object) -> str:
+    return str(value or "")
 
 
 @api_view(["POST"])
@@ -22,26 +26,28 @@ from apps.settings.services import SettingsService
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
 @require_portal_service_authentication
 def localisation_defaults(request: HttpRequest, request_data: dict[str, object]) -> Response:
-    # What the portal shows customers. The privacy policy states the controller's identity and the
-    # DPO's contact (GDPR Art. 13(1)(b)), so those are public too; the no-reply sender is not.
+    # What the portal shows customers. The legal pages state the operator's identity, the privacy
+    # contact and the DPO's (GDPR Art. 13(1)(b)), so these are public; the no-reply sender is not.
     company = {
-        field: str(SettingsService.get_setting(f"company.{field}") or "")
-        for field in (
-            "legal_name",
-            "email_support",
-            "email_privacy",
-            "email_finance",
-            "phone",
-            "email_dpo",
-            "email_contact",
-            "address",
-            "registration_number",
-        )
+        "legal_name": get_company_legal_name(),
+        "brand_name": get_brand_name(),
+        "email_support": _text(SettingsService.get_setting("company.email_support")),
+        "email_privacy": _text(SettingsService.get_setting("company.email_privacy")),
+        "email_finance": _text(SettingsService.get_setting("company.email_finance")),
+        "phone": _text(SettingsService.get_setting("company.phone")),
+        "email_dpo": _text(SettingsService.get_setting("company.email_dpo")),
+        "email_contact": _text(SettingsService.get_setting("company.email_contact")),
+        "address": _text(SettingsService.get_setting("company.address")),
+        "registration_number": _text(SettingsService.get_setting("company.registration_number")),
     }
+    from apps.customers.anaf_verification import lookups_enabled  # noqa: PLC0415  # Deferred: loaded on use
+
     return Response(
         {
             "success": True,
             "localisation": get_localisation_defaults().customer_payload(),
             "company": company,
+            # Features the portal shows only when Platform offers them; it never learns why.
+            "features": {"company_lookup": lookups_enabled()},
         }
     )

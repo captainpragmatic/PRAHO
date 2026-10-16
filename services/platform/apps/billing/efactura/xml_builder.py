@@ -154,7 +154,7 @@ def get_supplier_info() -> CompanyInfo:
     """Return deployment-only supplier identity shared with statutory exports such as D390."""
     return CompanyInfo(
         name=getattr(settings, "COMPANY_NAME", ""),
-        tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
+        tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", "") or settings.COMPANY_CUI,
         registration_number=getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
         street=getattr(settings, "COMPANY_STREET", ""),
         city=getattr(settings, "COMPANY_CITY", ""),
@@ -415,7 +415,9 @@ class BaseUBLBuilder:
         if currency_code == "RON":
             return
 
-        rate = Decimal(str(invoice.exchange_to_ron)) if invoice.exchange_to_ron is not None else None
+        # CIUS-RO accounts in RON; a rate frozen against any other currency is no evidence here.
+        ron_rate = invoice.ron_exchange_rate()
+        rate = Decimal(str(ron_rate)) if ron_rate is not None else None
         rate_as_of = invoice.exchange_rate_as_of
         source = invoice.exchange_rate_source
         reference = invoice.exchange_rate_source_reference
@@ -435,7 +437,7 @@ class BaseUBLBuilder:
             return
 
         accounting_tax_total = self._add_cac(self.root, "TaxTotal")
-        rate = Decimal(str(self.invoice.exchange_to_ron))
+        rate = Decimal(str(self.invoice.ron_exchange_rate()))
         accounting_tax_cents = ExchangeRateService.convert_cents(self.invoice.tax_cents, rate)
         accounting_amount_elem = self._add_cbc(
             accounting_tax_total,
@@ -845,9 +847,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         from apps.billing.bank_transfer import bank_transfer_instructions  # noqa: PLC0415  # ADR-0007
 
         code = self._get_payment_means_code()
-        ron_fallback = None
+        legacy_fallback = None
         if self.invoice.currency_id == "RON":
-            ron_fallback = {
+            legacy_fallback = {
                 "iban": _supplier_setting(
                     "efactura.company.bank_account", getattr(settings, "COMPANY_BANK_ACCOUNT", "")
                 ),
@@ -856,7 +858,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
                 ),
                 "beneficiary": self._get_supplier_info().name,
             }
-        bank = bank_transfer_instructions(self.invoice.currency_id, ron_fallback=ron_fallback)
+        bank = bank_transfer_instructions(self.invoice.currency_id, legacy_fallback=legacy_fallback)
         if code in {"30", "58"} and bank is None:
             raise XMLBuilderError(
                 f"{self.invoice.currency_id} bank account is required for credit-transfer payment instructions (BR-61)"
@@ -1200,13 +1202,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         self._validate_foreign_currency_snapshot(original, errors)
         self._validate_foreign_currency_snapshot(self.invoice, errors)
-        snapshot_fields = (
-            "exchange_to_ron",
-            "exchange_rate_as_of",
-            "exchange_rate_source",
-            "exchange_rate_source_reference",
-        )
-        if any(getattr(self.invoice, field) != getattr(original, field) for field in snapshot_fields):
+        if any(getattr(self.invoice, field) != getattr(original, field) for field in self.invoice.FX_SNAPSHOT_FIELDS):
             errors.append("Credit note exchange-rate snapshot must match the original invoice")
 
     def _create_root(self) -> None:

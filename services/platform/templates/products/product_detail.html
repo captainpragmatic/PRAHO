@@ -220,7 +220,7 @@
             {% if membership.override_price %}
             <div class="text-right">
               <div class="text-sm text-slate-400">{% trans 'Bundle Price' %}</div>
-              <div class="font-medium text-white">{{ membership.override_price|floatformat:0 }} RON</div>
+              <div class="font-medium text-white">{{ membership.override_price|floatformat:0 }} {{ default_currency }}</div>
             </div>
             {% endif %}
           </div>

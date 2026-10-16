@@ -82,6 +82,7 @@ services:
       - STATIC_ROOT=/app/staticfiles
       # The media_files volume: uploads and generated documents outlive the container, and backups read it.
       - MEDIA_ROOT=/app/media
+      - BRAND_DIR=/app/brand
       - PLATFORM_DOMAIN=${PLATFORM_DOMAIN:-platform.localhost}
       - PORTAL_DOMAIN=${PORTAL_DOMAIN:-${DOMAIN:-localhost}}
       - ALLOWED_HOSTS=${PLATFORM_DOMAIN:-platform.localhost},localhost,platform
@@ -92,6 +93,11 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
       - logs:/app/logs
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     depends_on:
       db:
         condition: service_healthy
@@ -171,6 +177,8 @@ services:
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
       - SESSION_DB_PATH=/app/data/portal.sqlite3
+      - BRAND_DIR=/app/brand
+      - TIME_ZONE=${TIME_ZONE:-}  # the operator's clock, as on the platform; empty means Europe/Bucharest
       # Server settings (services/portal/gunicorn.conf.py); empty means its default.
       - PORTAL_GUNICORN_WORKER_CLASS=${PORTAL_GUNICORN_WORKER_CLASS:-}
       - PORTAL_GUNICORN_WORKERS=${PORTAL_GUNICORN_WORKERS:-}
@@ -179,6 +187,11 @@ services:
       - portal_static:/app/staticfiles
       - portal_logs:/app/logs
       - portal_sessions:/app/data
+      # Long syntax also supports Compose v2's uninterpolated variable inspection.
+      - type: bind
+        source: ${BRAND_DIR:-./brand}
+        target: /app/brand
+        read_only: true
     depends_on:
       platform:
         condition: service_healthy

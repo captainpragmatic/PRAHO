@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 from django.contrib.sessions.backends.cache import SessionStore
 from django.test import Client, TestCase, override_settings
 
+SEAL_FIXTURE = "test-secret-key-for-hmac-seal"  # Public signing input used only by these tests.
+
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
     "CACHES": {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
@@ -430,7 +432,7 @@ class TestProductTypeInCartItem(TestCase):
         mock_cls.return_value = self._make_api_mock("domain")
 
         cart = GDPRCompliantCartSession(self.session)
-        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="annual")
+        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="annual", domain_name="example.ro")
 
         items = cart.get_items()
         self.assertIn("product_type", items[0])
@@ -797,9 +799,6 @@ class TestParseOrderTimestamp(TestCase):
 
 @override_settings(
     **_CACHE_SETTINGS,
-    COMPANY_BANK_IBAN="RO49AAAA1B31007593840000",
-    COMPANY_BANK_NAME="Test Bank",
-    COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
 class TestBankTransferSkipsStripeIntent(TestCase):
     """order_confirmation must NOT fetch Stripe config when payment_method=bank_transfer."""
@@ -841,9 +840,6 @@ class TestBankTransferSkipsStripeIntent(TestCase):
 
 @override_settings(
     **_CACHE_SETTINGS,
-    COMPANY_BANK_IBAN="RO49AAAA1B31007593840000",
-    COMPANY_BANK_NAME="Test Bank",
-    COMPANY_BANK_BENEFICIARY="PragmaticHost SRL",
 )
 class TestStripeFailureRedirectsToConfirmation(TestCase):
     """When Stripe config fetch raises, order_confirmation must still render (no 500)."""
@@ -886,7 +882,7 @@ class TestStripeFailureRedirectsToConfirmation(TestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(**_CACHE_SETTINGS, SECRET_KEY="test-secret-key-for-hmac-seal")
+@override_settings(**_CACHE_SETTINGS, SECRET_KEY=SEAL_FIXTURE)
 class TestPriceSealingRequiredKeys(TestCase):
     """seal_price_data must return all required fields and produce deterministic signatures."""
 
@@ -917,7 +913,7 @@ class TestPriceSealingRequiredKeys(TestCase):
 
         price_data = {"price_cents": 2999, "currency": "RON"}
         client_ip = "10.0.0.1"
-        secret_key = "test-secret-key-for-hmac-seal"
+        secret_key = SEAL_FIXTURE
         timestamp = 1700000000
         nonce = "abc123"
 
@@ -1120,9 +1116,6 @@ class TestNoFloatformatOnMonetaryValues(TestCase):
 
 _BANK_SETTINGS = {
     **_CACHE_SETTINGS,
-    "COMPANY_BANK_IBAN": "RO49AAAA1B31007593840000",
-    "COMPANY_BANK_NAME": "Banca Transilvania",
-    "COMPANY_BANK_BENEFICIARY": "PragmaticHost SRL",
 }
 
 # A fixed UUID used as the order ID in confirmation URL tests.

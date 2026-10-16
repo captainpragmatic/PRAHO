@@ -33,9 +33,9 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.common.types import Err
+from apps.common.utils import operator_local_date
 from apps.common.validators import log_security_event
 
-from .efactura.settings import ro_local_date
 from .fiscal_correction_allocation import AllocationRefusedError, Components, allocate, owed_reduction
 from .fiscal_correction_models import (
     EFACTURA_FAILED,
@@ -516,11 +516,8 @@ def draft_credit_note(
             total_cents=correction.total_cents,
             calculated_at=evidence_at,
         ),
-        # The original's rate, all four fields, so `issue()` consumes it rather than today's rate.
-        exchange_to_ron=original.exchange_to_ron,
-        exchange_rate_as_of=original.exchange_rate_as_of,
-        exchange_rate_source=original.exchange_rate_source,
-        exchange_rate_source_reference=original.exchange_rate_source_reference,
+        # The original's rate, every field, so `issue()` consumes it rather than today's rate.
+        **{field: getattr(original, field) for field in Invoice.FX_SNAPSHOT_FIELDS},
         # A correction inherits the fiscal identity of the document it corrects.
         **{field: getattr(original, field) for field in sorted(Invoice._BILLING_SNAPSHOT_FIELDS)},
         meta={"fiscal_correction_id": str(correction.pk)},
@@ -615,9 +612,9 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
     context = {
         "customer_name": customer.get_display_name(),
         "credit_note_number": note.number,
-        "credit_note_date": ro_local_date(note.issued_at).isoformat(),
+        "credit_note_date": operator_local_date(note.issued_at).isoformat(),
         "original_number": original.number,
-        "original_date": ro_local_date(original.issued_at).isoformat() if original.issued_at else "",
+        "original_date": operator_local_date(original.issued_at).isoformat() if original.issued_at else "",
         "total_credited": f"{abs(note.total):.2f}",
         "currency": note.currency.code,
     }
@@ -680,7 +677,7 @@ def _advance_communication(correction_id: str) -> str:
             return "already_communicated"
         if sent:
             sent_at = timezone.now()
-            locked.record_communicated(at=sent_at, fiscal_date=ro_local_date(sent_at))
+            locked.record_communicated(at=sent_at, fiscal_date=operator_local_date(sent_at))
         else:
             locked.record_communication_failure(error or "The email was not sent")
         locked.save()

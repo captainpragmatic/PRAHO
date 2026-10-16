@@ -21,9 +21,6 @@ class PasswordResetSenderTests(TestCase):
         cache.clear()
         self.addCleanup(cache.clear)
         self.user = User.objects.create_user(email="reset@example.test", password="Test-password-2099!")
-        with self.captureOnCommitCallbacks(execute=True):
-            result = SettingsService.update_setting("portal.public_base_url", "https://portal.example.test")
-        self.assertTrue(result.is_ok(), result)
 
     def test_password_reset_sender_uses_row_then_deployment_default(self) -> None:
         for stored, expected in (

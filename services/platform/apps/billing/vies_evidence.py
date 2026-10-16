@@ -13,6 +13,8 @@ from django.db.models.functions import Replace, Upper
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.operator import operator_country
+
 logger = logging.getLogger(__name__)
 
 # Legal forms, connectors and generic trade words carry no identity. Tokens shorter than
@@ -80,7 +82,7 @@ if TYPE_CHECKING:
     from apps.customers.models import CustomerTaxProfile
 
 
-def normalize_vat_number(raw: object) -> str:
+def compact_vat_number(raw: object) -> str:
     """Uppercase and remove spaces, dots and hyphens, or return empty for a falsy value."""
     # Keep these separators aligned with the revalidation sweep's SQL.
     return re.sub(r"[ .-]", "", str(raw).upper()) if raw else ""
@@ -95,7 +97,7 @@ def profile_vat_identity(tax_profile: CustomerTaxProfile) -> tuple[str, str]:
     from apps.billing.tax_evidence import vat_identity  # noqa: PLC0415
 
     billing_address = tax_profile.customer.get_billing_address()
-    country = (billing_address.country if billing_address else "") or "RO"
+    country = (billing_address.country if billing_address else "") or operator_country()
     return vat_identity(str(tax_profile.vat_number or ""), country)
 
 
@@ -144,7 +146,7 @@ def vies_refusal_reason(  # noqa: PLR0911  # one return per refusal reason, in p
         return "missing_profile"
     if tax_profile.vies_verification_status != tax_profile.VIESVerificationStatus.VALID:
         return "status_not_valid"
-    if normalize_vat_number(tax_profile.vat_number) != normalize_vat_number(vat_number) or not normalize_vat_number(
+    if compact_vat_number(tax_profile.vat_number) != compact_vat_number(vat_number) or not compact_vat_number(
         vat_number
     ):
         return "number_mismatch"

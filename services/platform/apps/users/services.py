@@ -26,6 +26,8 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 
 from apps.common import counters
+from apps.common.intent import clean_intent
+from apps.common.legal import TERMS_UNAVAILABLE, LegalDocument, current_legal_document
 from apps.common.localisation import country_name
 from apps.common.localisation_services import get_localisation_defaults
 from apps.common.request_ip import get_safe_client_ip
@@ -48,7 +50,13 @@ from apps.common.validators import (
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-from apps.settings.services import SettingsService, get_default_from_email
+from apps.settings.services import (
+    SettingsService,
+    get_brand_name,
+    get_default_from_email,
+    get_portal_public_base_url,
+    get_support_email,
+)
 
 from .models import APIToken, CustomerMembership, UserSession
 from .pending_registration import PendingRegistration
@@ -72,9 +80,10 @@ def portal_public_origin() -> str:
     """The Portal origin that customer email links point at, or ImproperlyConfigured.
 
     Only an HTTPS origin qualifies (HTTP only for loopback): no credentials, path, query or fragment,
-    so a link can never carry a token to another host. Read on every use, because staff can change it.
+    so a link can never carry a token to another host. Staff can set it; unset, it is https:// and the
+    deployment's PORTAL_DOMAIN. Read on every use, because staff can change it.
     """
-    base = str(SettingsService.get_setting("portal.public_base_url", "") or "").strip().rstrip("/")
+    base = get_portal_public_base_url().strip().rstrip("/")
     try:
         parsed = urlsplit(base)
     except ValueError as exc:
@@ -91,6 +100,25 @@ def portal_public_origin() -> str:
     ):
         raise ImproperlyConfigured("portal.public_base_url must be an HTTPS origin (HTTP is allowed for loopback).")
     return base
+
+
+def portal_link(path: str) -> str:
+    """A link to a portal page for a customer email, or "" (with a warning) while the portal URL is unset."""
+    try:
+        return f"{portal_public_origin()}{path}"
+    except ImproperlyConfigured:
+        logger.warning("⚠️ [Email] The portal URL is not configured; %s has no link", path)
+        return ""
+
+
+def platform_public_origin() -> str:
+    """The Platform's public HTTPS origin from PLATFORM_DOMAIN, or "" where it is unset (development).
+
+    Production and staging refuse to start without PLATFORM_DOMAIN, and the reverse proxy publishes the
+    customer-facing Platform pages (such as unsubscribe) on that host.
+    """
+    domain = getattr(settings, "PLATFORM_DOMAIN", "")
+    return f"https://{domain}" if domain else ""
 
 
 # ===============================================================================
@@ -215,10 +243,13 @@ def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: s
             "uid": uid,
             "token": token,
             "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-            "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
+            "support_email": get_support_email(),
+            "brand_name": get_brand_name(),
         }
 
-        subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=display_name)
+        subject = _("Welcome to {brand} - Account Created for {customer_name}").format(
+            brand=context["brand_name"], customer_name=display_name
+        )
         text_message = render_to_string("customers/emails/welcome_email.txt", context)
         html_message = render_to_string("customers/emails/welcome_email.html", context)
 
@@ -323,7 +354,6 @@ class SecureUserRegistrationService:
         company_name: str
         customer_type: str
         vat_number: VATString | None
-        cnp: str | None
         cui: CUIString | None
         registration_number: str | None  # Trade registry (ONRC), e.g. J40/1234/2020
         billing_address: str | None
@@ -332,7 +362,7 @@ class SecureUserRegistrationService:
 
     @classmethod
     @secure_user_registration()
-    def submit_pending_registration(  # noqa: PLR0913  # The CNP travels apart from customer_data
+    def submit_pending_registration(  # noqa: PLR0913  # The intent travels apart from the user and customer data
         cls,
         user_data: dict[str, Any],
         customer_data: dict[str, Any],
@@ -340,7 +370,7 @@ class SecureUserRegistrationService:
         user_agent: str | None = None,
         *,
         language: str = "en",
-        cnp: str = "",
+        intent: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Result[PendingRegistration, str]:
         """Store a registration for its mailbox holder to confirm, and queue the mail.
@@ -349,15 +379,12 @@ class SecureUserRegistrationService:
         VAT number, so neither the answer nor its timing says whether they exist. The decorator
         charges the per-IP registration budget and validates the user data. No password is
         taken: whoever confirms the link chooses it (apps.users.pending_registration).
-
-        A CNP is stored encrypted in its own column, never in customer_data, including one a caller
-        left inside customer_data.
         """
         from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: keeps the queue out of import time
 
-        customer_data = dict(customer_data)
-        cnp = cnp or str(customer_data.pop("cnp", "") or "")
-        customer_data.pop("cnp", None)
+        if current_legal_document(LegalDocument.Kind.TERMS, language) is None:
+            # Nobody could confirm the account: there are no terms to accept yet.
+            return Err(str(TERMS_UNAVAILABLE))
         row = PendingRegistration(
             email=str(user_data["email"]).strip().lower(),
             user_data={
@@ -365,10 +392,11 @@ class SecureUserRegistrationService:
                 "last_name": user_data["last_name"],
                 "phone": user_data.get("phone", ""),
             },
-            customer_data=customer_data,
+            # Registration collects no CNP; one a caller passes anyway is never stored.
+            customer_data={key: value for key, value in customer_data.items() if key != "cnp"},
             language=language,
+            intent=clean_intent(intent or {}),
         )
-        row.set_cnp(cnp)
         row.save(force_insert=True)
         registration_id = str(row.pk)
         # ack_failure: a failed delivery is never redelivered hours later (see the task).
@@ -408,7 +436,7 @@ class SecureUserRegistrationService:
                     gdpr_consent_date=consent_date,
                     # Set at creation: a later save would audit as a profile update.
                     terms_accepted_at=user_data.get("terms_accepted_at"),
-                    terms_version=user_data.get("terms_version", ""),
+                    terms_document=user_data.get("terms_document"),
                     # Security: No admin fields can be injected due to validation
                 )
 
@@ -427,16 +455,14 @@ class SecureUserRegistrationService:
 
                 # Step 3: Create tax profile with Romanian compliance
                 vat_number = (customer_data.get("vat_number", "") or "").strip()
-                cnp = (customer_data.get("cnp", "") or "").strip()
                 cui = (customer_data.get("cui", "") or "").strip()
                 registration_number = (customer_data.get("registration_number", "") or "").strip()
 
-                if vat_number or cui or registration_number or cnp:
+                if vat_number or cui or registration_number:
                     CustomerTaxProfile.objects.update_or_create(
                         customer=customer,
                         defaults={
                             "vat_number": vat_number,  # RO prefix validated
-                            "cnp": cnp,  # Checksum validated, Romanian individuals only
                             "cui": cui,  # Digits, check digit validated
                             "registration_number": registration_number,  # Trade registry number
                             "is_vat_payer": bool(vat_number),
@@ -451,7 +477,6 @@ class SecureUserRegistrationService:
                             "has_vat": bool(vat_number),
                             "has_cui": bool(cui),
                             "has_registration_number": bool(registration_number),
-                            "has_cnp": bool(cnp),
                         },
                         request_ip,
                     )
@@ -459,10 +484,7 @@ class SecureUserRegistrationService:
                 # Step 4: Create billing profile (secure defaults)
                 CustomerBillingProfile.objects.update_or_create(
                     customer=customer,
-                    defaults={
-                        "payment_terms": 30,  # Default 30 days
-                        "preferred_currency": "RON",  # Romanian Lei
-                    },
+                    defaults={"payment_terms": 30},  # The preferred currency takes the model's default
                 )
 
                 # Step 5: Create billing address with validated data
@@ -864,11 +886,12 @@ class SecureCustomerUserService:
                 timeout=7 * 24 * 3600,
             )  # 7 days expiration
 
+            brand = get_brand_name()
             send_mail(
-                subject=_("[PRAHO] Invitation to join {company}").format(company=customer.company_name),
+                subject=_("[{brand}] Invitation to join {company}").format(brand=brand, company=customer.company_name),
                 message=_(
-                    "You have been invited to join an organization on PRAHO. Please check your dashboard to accept."
-                ),
+                    "You have been invited to join an organization on {brand}. Please check your dashboard to accept."
+                ).format(brand=brand),
                 from_email=get_default_from_email(),
                 recipient_list=[user.email],
                 fail_silently=True,

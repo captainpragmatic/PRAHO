@@ -28,6 +28,7 @@ urlpatterns = [
     path("password/reset/", views.password_reset_request_api, name="password_reset_request"),
     path("password/reset/confirm/", views.password_reset_confirm_api, name="password_reset_confirm"),
     path("register/pending/", views.registration_pending_api, name="registration_pending"),
+    path("register/prefill/", views.registration_prefill_api, name="registration_prefill"),
     path("register/confirm/", views.registration_confirm_api, name="registration_confirm"),
     # Customer profile management
     path("profile/", views.customer_profile_api, name="customer_profile"),

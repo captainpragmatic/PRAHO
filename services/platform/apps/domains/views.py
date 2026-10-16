@@ -27,14 +27,13 @@ from apps.customers.models import Customer
 from apps.settings.services import SettingsService
 from apps.users.models import User
 
+from .availability import DomainAvailabilityService
 from .forms import RegistrarForm, TLDForm
 from .models import TLD, Domain, DomainOrderItem, Registrar
 from .services import (
     REGISTRATION_PENDING_MESSAGE,
     DomainLifecycleService,
-    DomainRegistrarGateway,
     DomainRepository,
-    DomainValidationService,
     RegistrarService,
     TLDService,
 )
@@ -431,81 +430,10 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
 
 @login_required
 @require_http_methods(["POST"])
-def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # sequential input/availability guards
-    """🔍 AJAX endpoint to check domain availability"""
-    domain_name = request.POST.get("domain_name", "").strip().lower()
-
-    # Validate domain name format
-    is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
-    if not is_valid:
-        return JsonResponse({"success": False, "error": str(error_msg)})
-
-    # Extract TLD and check if supported
-    tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
-    tld = TLDService.get_tld_pricing(tld_extension)
-    if not tld:
-        return JsonResponse({"success": False, "error": _(f"TLD '.{tld_extension}' is not supported")})
-
-    # Check if domain already exists in our system
-    domain_exists = Domain.objects.filter(name=domain_name).exists()
-
-    if domain_exists:
-        return JsonResponse(
-            {
-                "success": True,
-                "available": False,
-                "message": _("Domain is already registered"),
-                "domain_name": domain_name,
-            }
-        )
-
-    # Get registrar and check availability at the registrar.
-    registrar = RegistrarService.select_best_registrar_for_tld(tld)
-    if not registrar:
-        return JsonResponse({"success": False, "error": _("No available registrar for this TLD")})
-
-    # Ask the registrar. Fail closed: if we cannot confirm availability, never claim
-    # the domain is available — a domain registered elsewhere but absent locally would
-    # otherwise be reported free (W1).
-    check_ok, is_available = DomainRegistrarGateway.check_domain_availability(registrar, domain_name)
-    if not check_ok:
-        return JsonResponse({"success": False, "error": _("Could not verify domain availability. Please try again.")})
-    if not is_available:
-        return JsonResponse(
-            {"success": True, "available": False, "message": _("Domain is not available"), "domain_name": domain_name}
-        )
-
-    # Return only periods allowed by the resolved TLD. The registration form
-    # consumes this policy-authoritative list instead of advertising global
-    # 1-10 year choices that the server may later reject.
-    registration_periods: list[dict[str, int | str]] = []
-    pricing: dict[str, dict[str, Any]] = {}
-    for years in range(tld.min_registration_period, tld.max_registration_period + 1):
-        period_pricing = TLDService.calculate_domain_cost(tld, years, False)
-        privacy_pricing = TLDService.calculate_domain_cost(tld, years, True, currency_code=period_pricing["currency"])
-        registration_periods.append(
-            {
-                "years": years,
-                "total_cost_cents": period_pricing["total_cost_cents"],
-                "currency": period_pricing["currency"],
-                "whois_cost_cents": privacy_pricing["whois_cost_cents"],
-            }
-        )
-        period_key = f"{years}_year" if years == _SINGLE_YEAR else f"{years}_years"
-        pricing[period_key] = period_pricing
-
-    return JsonResponse(
-        {
-            "success": True,
-            "available": True,
-            "domain_name": domain_name,
-            "tld_extension": tld_extension,
-            "pricing": pricing,
-            "registration_periods": registration_periods,
-            "whois_privacy_available": tld.whois_privacy_available,
-            "registrar": registrar.display_name,
-        }
-    )
+def check_availability(request: HttpRequest) -> JsonResponse:
+    """The staff form uses the same availability and pricing service as the portal."""
+    result = DomainAvailabilityService.check(request.POST.get("domain_name", ""))
+    return JsonResponse(result.unwrap() if result.is_ok() else {"success": False, "error": result.unwrap_err()})
 
 
 @login_required

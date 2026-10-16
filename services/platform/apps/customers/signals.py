@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 # Default business thresholds for Romanian compliance — authoritative source is SettingsService
-_DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 RON threshold for credit limit alerts
+_DEFAULT_LARGE_CREDIT_LIMIT_THRESHOLD = 10000  # 10,000 in the default selling currency
 _DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD = 60  # 60 days - Romanian law threshold
 
 # ===============================================================================
@@ -263,6 +263,10 @@ def handle_tax_profile_changes(
         # Romanian compliance validation (only when the CUI itself is new or changed)
         if instance.cui and (created or old_values.get("cui") != instance.cui):
             _validate_romanian_cui(instance)
+
+        # A new or changed CUI cannot keep the previous one's ANAF evidence: look it up again.
+        if (created and instance.cui) or (not created and old_values.get("cui") != instance.cui):
+            _refresh_anaf_evidence(instance, created=created)
 
         # A changed number cannot inherit the previous number's evidence.
         if created or old_values.get("vat_number") != instance.vat_number:
@@ -759,20 +763,20 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
 
 
 def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
-    """Handle GDPR consent changes.
+    """Record a change to whether the customer was given the privacy notice.
 
-    GDPR Art. 7(3) requires consent withdrawal to always succeed. Audit call
-    is wrapped in a savepoint so a DatabaseError during log_compliance_event
-    cannot leave the connection in InFailedSqlTransaction state and force
-    rollback of the outer transaction (the consent change itself).
+    data_processing_consent records the notice, not a consent: the processing performs the
+    customer's contract (ADR-0061). The audit call is wrapped in a savepoint so a DatabaseError
+    during log_compliance_event cannot leave the connection in InFailedSqlTransaction state and
+    force rollback of the outer transaction (the change itself).
     """
     try:
-        consent_action = "granted" if new_consent else "withdrawn"
+        consent_action = "recorded" if new_consent else "cleared"
 
         compliance_request = ComplianceEventRequest(
             compliance_type="gdpr_consent",
             reference_id=f"customer_{customer.id}",
-            description=f"GDPR data processing consent {consent_action}",
+            description=f"Privacy notice {consent_action}",
             status="success",
             evidence={
                 "customer_id": str(customer.id),
@@ -784,13 +788,12 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
         with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
             AuditService.log_compliance_event(compliance_request)
 
-        # Update consent timestamp (must run regardless of audit outcome —
-        # GDPR Art. 7(1) requires the controller to record when consent was given).
+        # Date the notice (must run regardless of audit outcome: it is the record of when it was given).
         if new_consent and not customer.gdpr_consent_date:
             Customer.objects.filter(pk=customer.pk).update(gdpr_consent_date=timezone.now())
 
         with best_effort_atomic(logger=logger, scope="Customers", message="GDPR consent display logging failed"):
-            logger.info(f"🛡️ [Customer] GDPR consent {consent_action}: {customer.get_display_name()}")
+            logger.info(f"🛡️ [Customer] Privacy notice {consent_action}: {customer.get_display_name()}")
 
     except Exception:
         raise
@@ -890,6 +893,24 @@ def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
                 AuditService.log_compliance_event(compliance_request)
 
 
+def _refresh_anaf_evidence(tax_profile: CustomerTaxProfile, *, created: bool) -> None:
+    """Clear the ANAF evidence of the previous CUI and queue a lookup of a Romanian one."""
+    from apps.customers.anaf_verification import lookups_enabled, schedule_lookup
+
+    will_look_up = is_romanian_cui(tax_profile.cui) and lookups_enabled()
+    status = CustomerTaxProfile.AnafStatus.PENDING if will_look_up else CustomerTaxProfile.AnafStatus.NOT_CHECKED
+    if not created or will_look_up:
+        CustomerTaxProfile.objects.filter(pk=tax_profile.pk).update(  # fsm-bypass: plain fields, not FSMField
+            anaf_status=status, anaf_verified_name="", anaf_verified_at=None, anaf_vat_registered=None
+        )
+        tax_profile.anaf_status = status
+        tax_profile.anaf_verified_name = ""
+        tax_profile.anaf_verified_at = None
+        tax_profile.anaf_vat_registered = None
+    if will_look_up:
+        transaction.on_commit(lambda tax_profile_id=str(tax_profile.pk): schedule_lookup(tax_profile_id))
+
+
 def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:
     """Queue VAT number validation via VIES after transaction commits."""
     try:
@@ -912,7 +933,7 @@ def _handle_credit_limit_change(billing_profile: CustomerBillingProfile, old_lim
         change_amount = abs(new_limit - old_limit)
 
         logger.info(
-            f"💰 [Customer] Credit limit {change_type} by {change_amount:.2f} RON: {billing_profile.customer.get_display_name()}"
+            f"💰 [Customer] Credit limit {change_type} by {change_amount:.2f}: {billing_profile.customer.get_display_name()}"
         )
 
         # Alert for significant credit limit increases

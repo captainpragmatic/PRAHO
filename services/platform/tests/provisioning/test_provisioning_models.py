@@ -18,6 +18,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
+from apps.common.utils import operator_local_date
 from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
 from apps.provisioning.models import (
     ProvisioningTask,
@@ -291,7 +292,7 @@ class ServiceModelTestCase(TestCase):
         self.service.billing_cycle = "monthly"
         self.service.save()
 
-        expected = activation_date.date() + relativedelta(months=1)
+        expected = operator_local_date(activation_date) + relativedelta(months=1)
         result = self.service.get_next_billing_date()
         self.assertEqual(result, expected)
 
@@ -302,7 +303,7 @@ class ServiceModelTestCase(TestCase):
         self.service.billing_cycle = "quarterly"
         self.service.save()
 
-        expected = activation_date.date() + relativedelta(months=3)
+        expected = operator_local_date(activation_date) + relativedelta(months=3)
         result = self.service.get_next_billing_date()
         self.assertEqual(result, expected)
 
@@ -313,7 +314,7 @@ class ServiceModelTestCase(TestCase):
         self.service.billing_cycle = "semi_annual"
         self.service.save()
 
-        expected = activation_date.date() + relativedelta(months=6)
+        expected = operator_local_date(activation_date) + relativedelta(months=6)
         result = self.service.get_next_billing_date()
         self.assertEqual(result, expected)
 
@@ -324,7 +325,7 @@ class ServiceModelTestCase(TestCase):
         self.service.billing_cycle = "annual"
         self.service.save()
 
-        expected = activation_date.date() + relativedelta(years=1)
+        expected = operator_local_date(activation_date) + relativedelta(years=1)
         result = self.service.get_next_billing_date()
         self.assertEqual(result, expected)
 
