@@ -1,4 +1,4 @@
-# Implementation plan: account hostnames, customer DNS and mail (ADR-0061)
+# Implementation plan: account hostnames, customer DNS and mail (ADR-0062)
 
 Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Each phase is its own PR series.
 
