@@ -25,6 +25,7 @@ on:
       - 'services/platform/apps/provisioning/**'
       - 'services/platform/infrastructure/ansible/**'
       - 'deploy/virtualmin-lab/**'
+      - 'Makefile'
       - 'tests/virtualmin_lab/**'
       - '.github/workflows/virtualmin-lab.yml'
       - '.github/actions/virtualmin-lab-setup/**'

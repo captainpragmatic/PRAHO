@@ -242,7 +242,7 @@ The tests wait with retrying expects and polls, never a fixed sleep, and never d
 
 | Run | When | What |
 |---|---|---|
-| pull request | a change under `services/platform/apps/provisioning/`, `services/platform/infrastructure/ansible/`, `deploy/virtualmin-lab/` or `tests/virtualmin_lab/` | `make test-virtualmin-lab` on the pinned version |
+| pull request | a change under `services/platform/apps/provisioning/`, `services/platform/infrastructure/ansible/`, `deploy/virtualmin-lab/`, `tests/virtualmin_lab/` or the `Makefile` | `make test-virtualmin-lab` on the pinned version |
 | nightly full | 03:30 UTC, skipped without activity in the last 24 hours | `make test-virtualmin-lab-full` on the pinned version |
 | nightly drift | 05:30 UTC, always, on amd64 and arm64 | `make test-virtualmin-drift`: the image is built from the latest packages and the contract suite runs without recording; the tested versions go to the job summary |
 

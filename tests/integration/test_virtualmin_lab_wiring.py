@@ -69,6 +69,7 @@ def test_pull_requests_run_on_the_paths_that_can_break_the_lab() -> None:
         "services/platform/infrastructure/ansible/**",
         "deploy/virtualmin-lab/**",
         "tests/virtualmin_lab/**",
+        "Makefile",  # the targets the job runs live there
     ):
         assert needed in paths, needed
 
