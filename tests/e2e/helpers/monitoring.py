@@ -18,6 +18,14 @@ from tests.e2e.helpers.server_logs import ServerLogScanner
 # CONSOLE ERROR MONITORING
 # ===============================================================================
 
+def _sync_with_page(page: Page) -> None:
+    """One round trip, so every event the browser has already emitted reaches the collectors."""
+    # A closed or navigating page has nothing left to deliver; the checks that need the page
+    # report their own failure.
+    with contextlib.suppress(PlaywrightError):
+        page.evaluate("() => null")
+
+
 class _ConsoleCollector:
     """Console errors, warnings and uncaught page errors, with a listener that can be removed.
 
@@ -533,11 +541,7 @@ class ComprehensivePageMonitor:
         return self
 
     def _sync_point(self) -> None:
-        """One round trip, so every event the browser has already emitted reaches the collectors."""
-        # A closed or navigating page has nothing left to deliver; the checks that need the page
-        # report their own failure.
-        with contextlib.suppress(PlaywrightError):
-            self.page.evaluate("() => null")
+        _sync_with_page(self.page)
 
     def _detach(self) -> None:
         self._console.detach()
@@ -749,7 +753,12 @@ class ConsoleMonitor:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._console.detach()
+        # Deliver what the browser already emitted before the listeners go, as the full monitor does.
+        try:
+            if exc_type is None:
+                _sync_with_page(self.page)
+        finally:
+            self._console.detach()
         # Only check console errors if the test didn't already fail
         if exc_type is None:
             assert_no_console_errors(
