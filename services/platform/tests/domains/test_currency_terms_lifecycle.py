@@ -353,7 +353,7 @@ class DomainCurrencyGatewayTests(DomainCurrencyFixture, TransactionTestCase):
                 ok, item = DomainOrderService.create_domain_order_item(order, self.domain.name, "renew")
                 return ok, item.unit_price_cents if ok else item
             finally:
-                close_old_connections()
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(prepare, [order.pk for order in orders]))

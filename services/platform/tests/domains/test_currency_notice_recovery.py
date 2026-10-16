@@ -151,7 +151,7 @@ class DomainCurrencyNoticeConcurrencyTests(DomainCurrencyFixture, TransactionTes
             try:
                 return reconcile_domain_currency_notices()
             finally:
-                close_old_connections()
+                connection.close()
 
         with (
             patch("apps.notifications.services.EmailService.send_email", side_effect=sender) as send,
