@@ -9,7 +9,7 @@ from tests.e2e.helpers import BASE_URL, ComprehensivePageMonitor, ensure_fresh_s
 
 def verify_isolation(page: Page, baseline: dict, resource: str) -> None:
     customers = baseline["customers"]
-    with ComprehensivePageMonitor(page, f"{resource} ownership", check_console=False, check_network=False) as monitor:
+    with ComprehensivePageMonitor(page, f"{resource} ownership") as monitor:
         monitor.add_expected_error_patterns(
             [
                 "not found or access denied",
@@ -20,6 +20,9 @@ def verify_isolation(page: Page, baseline: dict, resource: str) -> None:
         )
         for index, owner in enumerate(customers):
             other = customers[1 - index]
+            # Only this owner's attempts on the other's resources may be refused; the other owner
+            # opening the same pages later is judged afresh.
+            monitor.clear_http_expectations()
             ensure_fresh_session(page)
             assert login_user(page, owner["email"], "test123" if index == 0 else "admin123")
             if resource in ("invoice", "proforma"):
@@ -37,6 +40,9 @@ def verify_isolation(page: Page, baseline: dict, resource: str) -> None:
                     f"E2E Hosting {2 - index}-01" if resource == "service" else f"E2E hosting help {2 - index}-01"
                 )
             own_url = f"{BASE_URL}{prefix}{owner[key]}/"
+            monitor.expect_http({403, 404}, f"{prefix}{other[key]}/")
+            if resource == "service":
+                monitor.expect_http({403, 404}, f"{prefix}{other[key]}/request-action/")
             response = page.goto(own_url)
             assert response.status == 200
             expect(page).to_have_url(own_url)

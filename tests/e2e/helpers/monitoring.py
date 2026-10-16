@@ -5,8 +5,11 @@ Contains ComprehensivePageMonitor, ConsoleMonitor, and all quality check functio
 """
 
 import contextlib
+import fnmatch
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -88,6 +91,90 @@ def setup_console_monitoring_standalone(page: Page) -> list[dict[str, Any]]:
     return collector.messages
 
 
+# ===============================================================================
+# HTTP RESPONSE MONITORING
+# ===============================================================================
+
+
+@dataclass(frozen=True)
+class HttpExpectation:
+    """A response a test deliberately provokes: one of ``statuses`` at a path glob."""
+
+    statuses: frozenset[int]
+    path: str
+    query: str | None = None
+
+    def matches(self, status: int, url: str) -> bool:
+        parts = urlsplit(url)
+        return (
+            status in self.statuses
+            and fnmatch.fnmatchcase(parts.path, self.path)
+            and (self.query is None or parts.query == self.query)
+        )
+
+
+@dataclass(frozen=True)
+class HttpRecord:
+    """A 4xx or 5xx response, judged against the expectations active when it arrived."""
+
+    status: int
+    method: str
+    url: str
+    resource_type: str
+    excused: bool
+
+    @property
+    def requested_path(self) -> str:
+        parts = urlsplit(self.url)
+        return parts.path + (f"?{parts.query}" if parts.query else "")
+
+    def describe(self) -> str:
+        return f"HTTP {self.status} {self.method} {self.requested_path} ({self.resource_type})"
+
+
+class _ResponseCollector:
+    """Every response's request id, and every response of 400 or above."""
+
+    def __init__(self, expectations: list[HttpExpectation]) -> None:
+        self.records: list[HttpRecord] = []
+        self.request_ids: set[str] = set()
+        self._expectations = expectations
+        self._page: Page | None = None
+
+        def on_response(response: Any) -> None:
+            self.handle_response(response)
+
+        self._on_response = on_response
+
+    def handle_response(self, response: Any) -> None:
+        req_id = response.headers.get("x-request-id")
+        if req_id:
+            self.request_ids.add(req_id)
+        if response.status >= 400:
+            request = response.request
+            self.records.append(
+                HttpRecord(
+                    status=response.status,
+                    method=request.method,
+                    url=response.url,
+                    resource_type=request.resource_type,
+                    excused=any(e.matches(response.status, response.url) for e in self._expectations),
+                )
+            )
+
+    def attach(self, page: Page) -> None:
+        # Each monitored block starts clean, as the console collector does.
+        self.records.clear()
+        self.request_ids.clear()
+        page.on("response", self._on_response)
+        self._page = page
+
+    def detach(self) -> None:
+        if self._page is not None:
+            self._page.remove_listener("response", self._on_response)
+            self._page = None
+
+
 def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patterns: list[str] | None = None,
                            context: str = "") -> None:
     """
@@ -108,8 +195,8 @@ def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patt
     """
     # Default patterns to ignore (common development noise)
     # NOTE: Browser-level "Failed to load resource" messages (e.g., favicon.ico 404)
-    # are NOT application console.error() calls. They're covered by check_network
-    # instead. Application JS errors use specific messages, not generic resource loads.
+    # are NOT application console.error() calls. The monitor's response collector reports the
+    # failed response itself. Application JS errors use specific messages, not generic resource loads.
     default_ignore = [
         "favicon",           # Favicon not found errors
         "Failed to load resource",  # Browser resource loading (404s, CORS) — not app errors
@@ -142,41 +229,6 @@ def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patt
         print(f"  ✅ No console errors {context}")
     else:
         print("  ✅ No console errors detected")
-
-
-def check_network_errors(page: Page) -> list[str]:
-    """
-    Check for HTTP network errors (4xx, 5xx responses).
-
-    Args:
-        page: Playwright page object
-
-    Returns:
-        list[str]: List of network error messages
-    """
-    network_errors: list[str] = []
-
-    try:
-        # Check for typical error indicators in the page
-        error_indicators = [
-            "500 Internal Server Error",
-            "404 Not Found",
-            "403 Forbidden",
-            "502 Bad Gateway",
-            "503 Service Unavailable"
-        ]
-
-        page_content = page.content()
-        network_errors.extend(
-            f"HTTP Error detected: {indicator}"
-            for indicator in error_indicators
-            if indicator in page_content
-        )
-
-    except Exception:  # noqa: S110
-        pass
-
-    return network_errors
 
 
 def check_html_validation(page: Page) -> list[str]:
@@ -496,12 +548,11 @@ class ComprehensivePageMonitor:
         self.check_performance = config.check_performance
         self.ignore_patterns = list(config.ignore_patterns)
         self.check_server_logs = config.check_server_logs
-        self._request_ids: set[str] = set()
-        self._http_500s: list[str] = []
         self._log_scanner: ServerLogScanner | None = None
         self._expected_error_patterns: list[str] = []
-        self._response_listener: Any | None = None
+        self._http_expectations: list[HttpExpectation] = []
         self._console = _ConsoleCollector()
+        self._responses = _ResponseCollector(self._http_expectations)
 
         # Security hardening: never suppress auth/access-denied/not-found errors by default.
         if not allow_auth_error_ignores and self.ignore_patterns:
@@ -528,42 +579,54 @@ class ComprehensivePageMonitor:
                 else:
                     print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
 
-                def _collect_response(response: Any) -> None:
-                    req_id = response.headers.get("x-request-id")
-                    if req_id:
-                        self._request_ids.add(req_id)
-                    if response.status >= 500:
-                        self._http_500s.append(f"{response.status} {response.url}")
-
-                self._response_listener = _collect_response
-                self.page.on("response", _collect_response)
+            if self.check_network or self.check_server_logs:
+                self._responses.attach(self.page)
         except BaseException:
             self._detach()
             raise
 
         return self
 
+    def expect_http(self, statuses: Collection[int], path: str, *, query: str | None = None) -> None:
+        """Excuse responses with one of ``statuses`` whose URL path matches the ``path`` glob.
+
+        Only responses that arrive after this call are excused. ``query``, when given, must equal
+        the query string exactly; a ``?`` in ``path`` is refused because fnmatch reads it as a
+        wildcard.
+        """
+        if "?" in path or "#" in path:
+            raise ValueError(f"expect_http path {path!r} must not contain a query or fragment; pass query=")
+        self._http_expectations.append(HttpExpectation(frozenset(statuses), path, query))
+
+    def clear_http_expectations(self) -> None:
+        """Stop excusing responses from now on; responses already judged keep their verdict."""
+        self._http_expectations.clear()
+
     def _sync_point(self) -> None:
         _sync_with_page(self.page)
 
     def _detach(self) -> None:
         self._console.detach()
-        # Unregister the response listener to prevent callback accumulation
-        # when the monitor is reused on the same page object.
-        if self._response_listener is not None:
-            self.page.remove_listener("response", self._response_listener)
-            self._response_listener = None
+        self._responses.detach()
 
     def _check_console_issues(self) -> list[str]:
-        """Console errors and uncaught page errors."""
+        """Console errors and uncaught page errors, minus the ones an excused response explains."""
         if not self.check_console:
             return []
 
+        # A response a test provoked on purpose also makes HTMX log "Response Status Error Code
+        # <status> from <path>", directly and inside the base templates' "HTMX Error:" detail. Only
+        # that diagnostic is excused: another error that merely names the path still fails.
+        excused_diagnostics = [
+            f"Response Status Error Code {record.status} from {record.requested_path}"
+            for record in self._responses.records
+            if record.excused
+        ]
         issues: list[str] = []
         try:
             assert_no_console_errors(
                 self._console.messages,
-                ignore_patterns=self.ignore_patterns,
+                ignore_patterns=self.ignore_patterns + excused_diagnostics,
                 context=self.context
             )
         except AssertionError as e:
@@ -576,12 +639,14 @@ class ComprehensivePageMonitor:
         return issues
 
     def _check_network_issues(self) -> list[str]:
-        """Check for network errors and return issues."""
-        if not self.check_network:
-            return []
-
-        network_issues = check_network_errors(self.page)
-        return [f"Network: {issue}" for issue in network_issues] if network_issues else []
+        """Every 4xx and 5xx response no expectation excused."""
+        unexcused = [record for record in self._responses.records if not record.excused]
+        if self.check_network:
+            return [f"Network: {record.describe()}" for record in unexcused]
+        if self.check_server_logs:
+            # Without the network check, a server error still fails the test, as it always has.
+            return [f"HTTP: {record.describe()}" for record in unexcused if record.status >= 500]
+        return []
 
     def _check_html_issues(self) -> list[str]:
         """Check for HTML validation issues and return them."""
@@ -616,7 +681,7 @@ class ComprehensivePageMonitor:
         return [f"PERF: {issue}" for issue in perf_issues] if perf_issues else []
 
     def add_expected_error_patterns(self, patterns: list[str]) -> None:
-        """Add patterns for expected server errors (matched case-insensitively).
+        """Add patterns for expected server log errors, matched case-insensitively in the message.
 
         Accumulates across multiple calls so that multiple
         ``@pytest.mark.expect_server_errors`` markers on a single test
@@ -628,44 +693,36 @@ class ComprehensivePageMonitor:
     # Keep old name as alias so any external callers still work.
     set_expected_error_patterns = add_expected_error_patterns
 
+    def _is_expected(self, entry: Any) -> bool:
+        message = entry.message.lower()
+        return any(pattern.lower() in message for pattern in self._expected_error_patterns)
+
     def _check_server_log_issues(self) -> list[str]:
         """Check for server-side errors in platform/portal logs."""
-        if not self.check_server_logs:
+        if not self.check_server_logs or not (self._log_scanner and self._log_scanner.available):
             return []
 
-        # Layer 1: HTTP 500+ responses
-        issues: list[str] = [f"HTTP: {error}" for error in self._http_500s]
+        issues: list[str] = []
+        request_ids = self._responses.request_ids
+        entries = self._log_scanner.get_new_entries()
 
-        # Layer 2: Server log scanning
-        if self._log_scanner and self._log_scanner.available:
-            entries = self._log_scanner.get_new_entries()
-
-            # Errors correlated to this test's requests
-            if self._request_ids:
-                correlated = self._log_scanner.filter_by_request_ids(entries, self._request_ids)
-                correlated_errors = self._log_scanner.filter_errors(correlated)
-                issues.extend(
-                    f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
-                    f'"{entry.message}" [req-id: {entry.request_id[:8]}...]'
-                    for entry in correlated_errors
-                )
-
-            # Uncorrelated errors from other requests during this test's window
-            uncorrelated = self._log_scanner.filter_uncorrelated_errors(entries, self._request_ids)
+        # Errors correlated to this test's requests
+        if request_ids:
+            correlated = self._log_scanner.filter_by_request_ids(entries, request_ids)
             issues.extend(
                 f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
-                f'"{entry.message}" [uncorrelated]'
-                for entry in uncorrelated
+                f'"{entry.message}" [req-id: {entry.request_id[:8]}...]'
+                for entry in self._log_scanner.filter_errors(correlated)
+                if not self._is_expected(entry)
             )
 
-        # Filter out expected error patterns
-        if issues and self._expected_error_patterns:
-            issues = [
-                issue
-                for issue in issues
-                if not any(pat.lower() in issue.lower() for pat in self._expected_error_patterns)
-            ]
-
+        # Uncorrelated errors from other requests during this test's window
+        issues.extend(
+            f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
+            f'"{entry.message}" [uncorrelated]'
+            for entry in self._log_scanner.filter_uncorrelated_errors(entries, request_ids)
+            if not self._is_expected(entry)
+        )
         return issues
 
     def _get_checks_performed(self) -> list[str]:
@@ -707,7 +764,6 @@ class ComprehensivePageMonitor:
         # page raises meanwhile is caught; the listeners go before the verdict, never after it.
         try:
             page_issues = [
-                *self._check_network_issues(),
                 *self._check_html_issues(),
                 *self._check_css_issues(),
                 *self._check_accessibility_issues(),
@@ -719,6 +775,7 @@ class ComprehensivePageMonitor:
 
         all_issues = [
             *self._check_console_issues(),
+            *self._check_network_issues(),
             *page_issues,
             *self._check_server_log_issues(),
         ]
@@ -775,3 +832,11 @@ class ConsoleMonitor:
             ]
             if page_errors:
                 raise AssertionError("Uncaught page errors:\n" + "\n".join(f"  - {e}" for e in page_errors))
+
+
+def apply_test_markers(monitor: ComprehensivePageMonitor, request: Any) -> None:
+    """Apply a test's ``expect_server_errors`` and ``expect_http_errors`` markers to its monitor."""
+    for marker in request.node.iter_markers("expect_server_errors"):
+        monitor.add_expected_error_patterns(list(marker.args))
+    for marker in request.node.iter_markers("expect_http_errors"):
+        monitor.expect_http(marker.args, marker.kwargs["url"], query=marker.kwargs.get("query"))
