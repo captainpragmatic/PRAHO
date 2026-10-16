@@ -163,6 +163,9 @@ class _ResponseCollector:
             )
 
     def attach(self, page: Page) -> None:
+        # Each monitored block starts clean, as the console collector does.
+        self.records.clear()
+        self.request_ids.clear()
         page.on("response", self._on_response)
         self._page = page
 

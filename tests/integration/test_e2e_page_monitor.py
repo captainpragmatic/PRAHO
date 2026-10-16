@@ -162,6 +162,20 @@ def test_console_monitor_collects_a_page_error_that_arrives_as_it_exits(
         page.goto(local_site.url("/"))
 
 
+def test_a_reused_page_monitor_does_not_report_an_earlier_blocks_response(
+    page: Page, local_site: LocalSite
+) -> None:
+    local_site.route("/missing.css", "", status=404)
+    local_site.route("/broken", '<link rel="stylesheet" href="/missing.css">')
+    local_site.route("/", "<p>hi</p>")
+    monitor = _monitor(page)
+
+    with pytest.raises(AssertionError, match=r"missing\.css"), monitor:
+        page.goto(local_site.url("/broken"))
+    with monitor:
+        page.goto(local_site.url("/"))
+
+
 def test_a_reused_console_monitor_starts_each_block_clean(page: Page, local_site: LocalSite) -> None:
     local_site.route("/boom", "<script>undefinedFn()</script>")
     local_site.route("/", "<p>hi</p>")
