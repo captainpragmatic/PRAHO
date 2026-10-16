@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A deployment brands PRAHO without forking it** (ADR-0061).
+- **A deployment brands PRAHO without forking it** (ADR-0062).
   - **Name.** `company.brand_name` (default "PRAHO") names the portal's header, page titles and footer, customer emails and authenticator-app entries.
   - **Marks.** A brand folder named by `BRAND_DIR` replaces PRAHO's logo, favicons and an optional `brand.css` (for example the Tailwind colour variables). Compose mounts it read-only; PRAHO's own mark ships in `shared/ui/static/brand/`.
   - **PRAHO has a mark of its own**, a P with a signal dot, in the favicon (SVG, ICO and Apple touch icon), the staff and portal headers and the README. `scripts/brand/build_praho_mark.py` regenerates the SVGs.
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The portal footer shows the brand and the legal name instead of the tech stack and a stale version number.
   - **Card payments.** Customers' card statements show the Stripe account's own descriptor instead of a hardcoded "PRAHO". The automatic-payment authorization names "the seller named on my invoices"; its terms version is now `2026-10-14`, so new authorizations record the new wording.
 
-- **Each deployment publishes its own legal documents** (ADR-0061). PRAHO no longer ships Terms of Service, a Privacy Policy, a Cookie Policy or a data-processors page.
+- **Each deployment publishes its own legal documents** (ADR-0062). PRAHO no longer ships Terms of Service, a Privacy Policy, a Cookie Policy or a data-processors page.
   - **Publishing.** Administrators publish them under Settings → Legal documents, in Markdown and per language, with a preview. Each is a release that takes effect on its date and is never edited or removed; a correction is another release. Publishing is audited. See `docs/deployment/LEGAL_DOCUMENTS.md`.
   - **The portal shows the release in force** in the visitor's language at `/terms/`, `/privacy-policy/` and `/cookie-policy/`, and any release at `/legal/<id>/`. The staff platform's legal addresses redirect there. The cookie page adds what the portal itself stores in the browser, and the privacy page links the customer's privacy dashboard.
   - **Registration records the exact release accepted**: the account names it, and the audit event gives its id, language, number and hash. The confirmation page links that release. If a newer one takes effect meanwhile, the customer is asked to read it, and the same link still works. Until Terms of Service are in force, registration is refused.

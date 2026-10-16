@@ -713,7 +713,7 @@ def _order_email_context(order: Order) -> dict[str, Any]:
 
 
 def _send_order_confirmation_email(order: Order) -> None:
-    """Send the order confirmation, the customer's durable copy of what they accepted (ADR-0061).
+    """Send the order confirmation, the customer's durable copy of what they accepted (ADR-0062).
 
     It attaches the Terms of Service release the order names and states an early-start request.
     """

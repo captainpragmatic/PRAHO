@@ -1,4 +1,4 @@
-"""Published legal documents for the HMAC-authenticated customer portal (ADR-0061).
+"""Published legal documents for the HMAC-authenticated customer portal (ADR-0062).
 
 A release is public text, so any portal request may read one: the release in force for a kind and
 language, or a given release by id, as an acceptance names it.

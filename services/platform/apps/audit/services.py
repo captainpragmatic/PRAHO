@@ -1853,7 +1853,7 @@ class GDPRConsentService:
         """Withdraw specific types of consent"""
 
         try:
-            # Not "data_processing": it performs the account's contract and is no consent (ADR-0061).
+            # Not "data_processing": it performs the account's contract and is no consent (ADR-0062).
             # Erasing the account is a deletion request (GDPRDeletionService).
             valid_types = ["marketing", "analytics", "cookies"]
             invalid_types = [ct for ct in consent_types if ct not in valid_types]

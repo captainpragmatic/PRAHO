@@ -2,7 +2,7 @@
 
 Platform names the release in force in the preview, records the one the confirmer accepted, and
 refuses one that is no longer in force (`terms_changed`). The page links that exact release and, on
-`terms_changed`, forgets the details, so the next page names the release now in force (ADR-0061).
+`terms_changed`, forgets the details, so the next page names the release now in force (ADR-0062).
 """
 
 import re

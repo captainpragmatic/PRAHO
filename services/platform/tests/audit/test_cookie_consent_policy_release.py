@@ -1,4 +1,4 @@
-"""A cookie choice records the Cookie Policy release it was made under (ADR-0061).
+"""A cookie choice records the Cookie Policy release it was made under (ADR-0062).
 
 It recorded the constant "1.0" whatever the policy said. It now names the release in force in the
 visitor's language, falling back to the default language's, and none before one is published.

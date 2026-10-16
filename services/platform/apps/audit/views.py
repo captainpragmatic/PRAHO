@@ -112,7 +112,7 @@ def gdpr_dashboard(request: HttpRequest) -> HttpResponse:
         :5
     ]
 
-    # Marketing is the one consent: data processing performs the account's contract (ADR-0061).
+    # Marketing is the one consent: data processing performs the account's contract (ADR-0062).
     consent_status = {"marketing": user.accepts_marketing}
 
     context = {

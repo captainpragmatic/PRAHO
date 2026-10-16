@@ -16,7 +16,7 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  /* PRAHO's default customer palette (ADR-0061). The accent is one scale, primary: links
+  /* PRAHO's default customer palette (ADR-0062). The accent is one scale, primary: links
      are 400, buttons 600 with white text, rings and borders 500. The templates' blue-*
      utilities resolve to it, so a deployment's brand.css recolours the portal by overriding
      --color-primary-* alone. */
