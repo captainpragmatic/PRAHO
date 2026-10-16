@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 REDACTED = "<redacted>"
@@ -191,14 +192,66 @@ def sanitise_recording(recording: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def sanitise_body(raw: str) -> Any:
-    """A response body as sanitised data: parsed JSON when it is JSON, sanitised text otherwise."""
+# What PRAHO reads from `info` (the gateway's `_available_disk_mb` takes `disk_free`; the lab checks read the
+# Virtualmin version) is a handful of lines. The rest of the answer is an inventory of the machine, which differs
+# by host (kernel, CPU model, filesystem) and over time (load, pending package updates, installed versions).
+_INFO_TOP_KEY = re.compile(r"^([A-Za-z_][\w ]*):")
+_INFO_KEPT_BLOCKS = frozenset({"disk_free", "disk_total", "disk_used", "fcount", "ftypes"})
+# Listed only while the package manager has updates pending: the key itself comes and goes with the day.
+_INFO_UPDATE_KEYS = frozenset({"poss", "vposs"})
+_INFO_HOST_LABELS = frozenset({"os", "virtualmin edition", "virtualmin version"})
+_INFO_DROPPED = "<host>"
+
+
+def _normalise_info_output(output: str) -> str:
+    """`info` text reduced to its stable lines; the name of every other block stays, its content goes."""
+    blocks: list[tuple[str, list[str]]] = []
+    for line in output.splitlines():
+        top = _INFO_TOP_KEY.match(line)
+        if top is not None:
+            blocks.append((top.group(1), [line]))
+        elif blocks:
+            blocks[-1][1].append(line)
+    kept: list[str] = []
+    for key, lines in blocks:
+        if key in _INFO_UPDATE_KEYS:
+            continue
+        if key in _INFO_KEPT_BLOCKS:
+            kept.extend(lines)
+        elif key == "host":
+            kept.append("host: ")
+            kept.extend(line for line in lines[1:] if line.strip().partition(":")[0] in _INFO_HOST_LABELS)
+        else:
+            kept.append(f"{key}: {_INFO_DROPPED}")
+    return "\n".join(kept) + "\n"
+
+
+def _normalise_info(body: Any) -> Any:
+    if not isinstance(body, dict) or not isinstance(body.get("output"), str):
+        return body
+    return {**body, "output": _normalise_info_output(body["output"])}
+
+
+# Per-program reducers, applied to a sanitised JSON body: a program whose answer is a machine inventory keeps
+# only the part that is stable and meaningful to PRAHO.
+_NORMALISERS: dict[str, Callable[[Any], Any]] = {"info": _normalise_info}
+
+
+def sanitise_body(raw: str, *, program: str | None = None) -> Any:
+    """A response body as sanitised data: parsed JSON when it is JSON, sanitised text otherwise.
+
+    `program` names the Virtualmin program that answered; the programs in `_NORMALISERS` then have the
+    host-dependent part of their answer reduced to what is stable.
+    """
     text = (raw or "").strip()
     if text.startswith(("{", "[")):
         try:
-            return sanitise_value(json.loads(text))
+            body = sanitise_value(json.loads(text))
         except ValueError:
             pass
+        else:
+            normaliser = _NORMALISERS.get(program or "")
+            return normaliser(body) if normaliser is not None else body
     return sanitise_text(text)
 
 
