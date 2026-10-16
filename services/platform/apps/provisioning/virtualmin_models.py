@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any, ClassVar
 
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -832,6 +832,7 @@ class VirtualminProvisioningJob(models.Model):
             self.execution_time_seconds = Decimal(str(duration.total_seconds()))
 
         self.save(update_fields=["status", "completed_at", "result", "execution_time_seconds", "updated_at"])
+        self._queue_line_fulfilment()
 
     def mark_attention(self, error_message: str, result: dict[str, Any] | None = None) -> None:
         """Park an uncertain mutation for an operator instead of failing it.
@@ -858,6 +859,7 @@ class VirtualminProvisioningJob(models.Model):
                 "updated_at",
             ]
         )
+        self._queue_line_fulfilment()
 
     def settle_failure(
         self, error_message: str, result: dict[str, Any] | None = None, *, retriability: Retriability
@@ -931,6 +933,40 @@ class VirtualminProvisioningJob(models.Model):
                 "updated_at",
             ]
         )
+        self._queue_line_fulfilment()
+
+    def _queue_line_fulfilment(self) -> None:
+        """A settled create job lets the order line that bought the account move on.
+
+        It only enqueues, after commit. No order bookkeeping runs in the account's own transaction, so
+        nothing here can raise into the create's remote-rollback handling.
+        """
+        if self.operation == "create_domain" and self.account_id is not None:
+            account_id = self.account_id
+            transaction.on_commit(lambda: _enqueue_line_fulfilment(account_id), robust=True)
+
+
+def _enqueue_line_fulfilment(account_id: uuid.UUID) -> None:
+    """Queue apps.orders' line fulfilment for the open lines of the account's Service."""
+    try:
+        from django_q.tasks import async_task  # noqa: PLC0415
+
+        from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007: cross-app at call time
+        from apps.orders.tasks import get_task_time_limit  # noqa: PLC0415
+
+        service_id = VirtualminAccount.objects.filter(pk=account_id).values_list("service_id", flat=True).first()
+        if service_id is None:
+            return
+        open_lines = (
+            OrderItem.objects.filter(service_id=service_id, provisioning_status__in=("pending", "in_progress"))
+            .exclude(product_type="domain")
+            .values_list("pk", flat=True)
+        )
+        for item_id in open_lines:
+            async_task("apps.orders.tasks.provision_order_item", str(item_id), timeout=get_task_time_limit())
+    except Exception:
+        # The order-line recovery sweep finishes the line; the account and its job are already settled.
+        logger.exception("🔥 [Virtualmin] Could not queue line fulfilment for account %s", account_id)
 
 
 class VirtualminDriftRecord(models.Model):

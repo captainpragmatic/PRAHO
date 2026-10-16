@@ -28,6 +28,7 @@ BUDGET_KEY = "orders.task_time_limit"
 SCHEDULES = {
     "order-process-pending": ("apps.orders.tasks.process_pending_orders", 5),
     "order-sync-payment-status": ("apps.orders.tasks.sync_order_payment_status", 15),
+    "order-recover-hosting-lines": ("apps.orders.tasks.recover_hosting_order_lines", 15),
 }
 
 
@@ -70,7 +71,9 @@ class OrderTaskBudgetCloseoutTests(TestCase):
 
     def test_new_schedules_persist_and_enqueue_the_current_timeout(self) -> None:
         result = setup_order_scheduled_tasks()
-        self.assertEqual(result, {"process_pending": "created", "sync_payments": "created"})
+        self.assertEqual(
+            result, {"process_pending": "created", "sync_payments": "created", "recover_hosting_lines": "created"}
+        )
         self.scheduled_payloads(17)
 
     def test_a_budget_change_reaches_the_next_scheduled_run_without_rerunning_setup(self) -> None:
@@ -96,8 +99,15 @@ class OrderTaskBudgetCloseoutTests(TestCase):
             )
             original_ids[name] = row.pk
         result = setup_order_scheduled_tasks()
-        self.assertEqual(result, {"process_pending": "already_exists", "sync_payments": "already_exists"})
-        self.assertEqual(Schedule.objects.filter(name__in=SCHEDULES).count(), 2)
+        self.assertEqual(
+            result,
+            {
+                "process_pending": "already_exists",
+                "sync_payments": "already_exists",
+                "recover_hosting_lines": "already_exists",
+            },
+        )
+        self.assertEqual(Schedule.objects.filter(name__in=SCHEDULES).count(), len(SCHEDULES))
         for name in SCHEDULES:
             row = Schedule.objects.get(name=name)
             self.assertEqual(

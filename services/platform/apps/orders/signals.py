@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
@@ -630,8 +631,9 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 
         if new_status == "completed":
             # A hosting item is ready to use; a domain line completes when its registrar confirms it.
+            # After commit: a completion that rolls back must not tell the customer it is ready.
             if item.service:
-                _send_service_ready_email(item)
+                transaction.on_commit(partial(_send_service_ready_email, item), robust=True)
 
             # Check if all items in order are provisioned. The order is locked first, so two lines
             # completing together cannot each read the other as unfinished.
@@ -652,12 +654,19 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
                 )
 
                 status_change = StatusChangeData(new_status="completed", notes="All items successfully provisioned")
-                OrderService.update_order_status(order, status_change)
+                completed = OrderService.update_order_status(order, status_change)
+                if completed.is_err():
+                    # The hosting-line recovery sweep completes the order on its next run.
+                    logger.error(
+                        "🔥 [Order] Order %s has every item provisioned but did not complete: %s",
+                        order.order_number,
+                        completed.unwrap_err(),
+                    )
 
         elif new_status == "failed":
             # Provisioning failed - may need manual intervention
             logger.error(f"🔥 [Order] Item {item.id} provisioning failed: {item.provisioning_notes}")
-            _send_provisioning_failed_email(item)
+            transaction.on_commit(partial(_send_provisioning_failed_email, item), robust=True)
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Item provisioning status change failed: {e}")

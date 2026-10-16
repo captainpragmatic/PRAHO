@@ -24210,6 +24210,10 @@ msgstr "Pagini utilizator"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: apps/orders/hosting_fulfilment.py
+msgid "We could not set up this service automatically. Our team will finish it."
+msgstr "Nu am putut configura automat acest serviciu. Echipa noastră îl va finaliza."
+
 #~ msgid "A user with this email already exists."
 #~ msgstr "Un utilizator cu această adresă de e-mail există deja."
 
