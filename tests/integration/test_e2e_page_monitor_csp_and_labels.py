@@ -111,6 +111,25 @@ def test_a_monitor_entered_after_navigation_captures_later_violations(page: Page
         _wait_for_violations(page, 1)
 
 
+def test_a_violation_delivered_during_the_final_sync_is_reported(
+    page: Page, local_site: LocalSite, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_site.route("/", "<p>no images yet</p>", headers={"Content-Security-Policy": "img-src 'none'"})
+    original = ComprehensivePageMonitor._sync_point
+
+    def violation_then_sync(self: ComprehensivePageMonitor) -> None:
+        self.page.evaluate(
+            "() => { const img = new Image(); img.alt = 'x'; img.src = '/late.png'; document.body.append(img); }"
+        )
+        _wait_for_violations(self.page, 1)
+        original(self)
+
+    monkeypatch.setattr(ComprehensivePageMonitor, "_sync_point", violation_then_sync)
+
+    with pytest.raises(AssertionError, match="CSP enforce: img-src blocked"), _monitor(page):
+        page.goto(local_site.url("/"))
+
+
 def test_violation_payload_keeps_the_gate_contract(page: Page, local_site: LocalSite) -> None:
     local_site.route("/", "<script>window.ran = true</script>", headers=ENFORCE_SELF)
     install_csp_violation_capture(page)

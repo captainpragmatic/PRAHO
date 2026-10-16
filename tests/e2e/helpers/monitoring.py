@@ -804,7 +804,6 @@ class ComprehensivePageMonitor:
         # page raises meanwhile is caught; the listeners go before the verdict, never after it.
         try:
             page_issues = [
-                *self._check_csp_issues(),
                 *self._check_html_issues(),
                 *self._check_css_issues(),
                 *self._check_accessibility_issues(),
@@ -814,9 +813,12 @@ class ComprehensivePageMonitor:
         finally:
             self._detach()
 
+        # Read after the final sync, like the collectors: a violation delivered while the checks
+        # above drove the page, or during the sync itself, is in the registry by now.
         all_issues = [
             *self._check_console_issues(),
             *self._check_network_issues(),
+            *self._check_csp_issues(),
             *page_issues,
             *self._check_server_log_issues(),
         ]
