@@ -55,6 +55,13 @@ def _docx(rng: random.Random | None = None, extra: dict[str, bytes] | None = Non
 
 
 class IdentificationTests(TestCase):
+    def test_a_docx_whose_comment_holds_the_end_signature_is_accepted(self) -> None:
+        buffer = io.BytesIO(_docx())
+        with zipfile.ZipFile(buffer, "a") as archive:
+            archive.comment = b"exported by tool PK\x05\x06 v2"
+
+        self.assertEqual(_scan("report.docx", buffer.getvalue()), (True, "File security scan passed"))
+
     def test_an_arbitrary_zip_named_docx_is_refused(self) -> None:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:

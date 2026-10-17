@@ -107,8 +107,15 @@ def _zip_directory(uploaded_file: UploadedFile, size: int) -> Result[tuple[int, 
     """(entries, directory size, directory offset) from the end records, ZIP64 honoured."""
     tail_length = min(size, ZIP_MAX_COMMENT + ZIP_EOCD_SIZE)
     tail = _read_at(uploaded_file, size - tail_length, tail_length)
+    # The comment may itself hold the signature: the real record is the one whose declared comment
+    # length reaches exactly the end of the file.
     position = tail.rfind(ZIP_EOCD)
-    if position < 0 or len(tail) - position < ZIP_EOCD_SIZE:
+    while position >= 0 and (
+        len(tail) - position < ZIP_EOCD_SIZE
+        or position + ZIP_EOCD_SIZE + struct.unpack_from("<H", tail, position + 20)[0] != len(tail)
+    ):
+        position = tail.rfind(ZIP_EOCD, 0, position)
+    if position < 0:
         return Err("The file is not a Word document.")
     entries, directory_size, directory_offset = struct.unpack_from("<HII", tail, position + 10)
     if entries == ZIP_MAX_16 or ZIP_MAX_32 in (directory_size, directory_offset):
