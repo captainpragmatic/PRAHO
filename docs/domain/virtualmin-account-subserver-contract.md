@@ -182,6 +182,16 @@ Deleting the sub-server removes its own home and does not follow the symlink.
 `Home directory` and `HTML directory`, and `Features: dir web ssl logrotate`. Every listing PRAHO reads must
 tell these rows from customer domains (the plan's P1.6).
 
+The 8.x JSON listing (`list-domains --multiline --json`) carries the same marker as `values.type =
+["Sub-server"]` and `values.parent_domain = ["<customer>"]`; a customer domain has `type = ["Top-level server"]`.
+
+## S9: an in-place restore of the customer's own backup
+
+A backup of the customer domain alone (no `parent`), restored over the live customer domain while the
+sub-server exists, kept the sub-server, its symlink and its site (`h7k3p2q9...` still listed, link
+`../../public_html` intact, HTTP 200). So an ordinary customer restore does not need to know about the
+account name; only a restore that recreates the customer domain from nothing does.
+
 ## Side finding
 
 With several vhosts on a node, a request whose `Host` matches no vhost is answered by the first loaded one.
