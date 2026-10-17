@@ -109,7 +109,7 @@ class GDPRDashboardTests(AuditViewsBaseTestCase):
     @patch("apps.audit.views.gdpr_consent_service")
     def test_gdpr_dashboard_offers_no_data_processing_consent(self, mock_consent):
         """Data processing performs the account's contract, so the dashboard offers marketing
-        as the only consent to grant or withdraw, and no shortcut to anonymize (ADR-0061)."""
+        as the only consent to grant or withdraw, and no shortcut to anonymize (ADR-0062)."""
         mock_consent.get_consent_history.return_value = []
         self.regular_user.gdpr_consent_date = timezone.now()
         self.regular_user.save(update_fields=["gdpr_consent_date"])

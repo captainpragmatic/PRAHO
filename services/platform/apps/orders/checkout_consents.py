@@ -1,4 +1,4 @@
-"""What a customer accepts when placing an order (ADR-0061).
+"""What a customer accepts when placing an order (ADR-0062).
 
 Every order names the Terms of Service release its customer accepted: the one the checkout page
 showed, refused once another is in force. An EU consumer (an individual, not a business) must also

@@ -1,4 +1,4 @@
-"""Staff publish the operator's legal documents (ADR-0061).
+"""Staff publish the operator's legal documents (ADR-0062).
 
 A release is never edited or removed: a correction is another release, taking effect on its date.
 """

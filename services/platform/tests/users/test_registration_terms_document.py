@@ -2,7 +2,7 @@
 
 Acceptance belongs to whoever confirms the emailed link, the person choosing the password, so it is
 recorded at confirmation. The preview names the release in force in the registration's language;
-confirming refuses any other, so the record always names text the confirmer could read (ADR-0061).
+confirming refuses any other, so the record always names text the confirmer could read (ADR-0062).
 """
 
 from __future__ import annotations

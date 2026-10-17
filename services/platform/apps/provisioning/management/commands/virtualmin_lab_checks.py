@@ -695,6 +695,8 @@ class Command(BaseCommand):
         def reload() -> Any:
             return VirtualminAccount.objects.get(pk=account.pk)
 
+        # The flag is the lab database's to set (the lab server switches it on for a developer): state it.
+        SettingsService.update_setting(flag, False)
         refused = management.take_base_backup(account)
         self._ok(
             "with the flag off a base is refused", refused.is_err() and "disabled" in refused.unwrap_err(), refused

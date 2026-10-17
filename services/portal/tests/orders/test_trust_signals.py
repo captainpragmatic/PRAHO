@@ -1,4 +1,4 @@
-"""The checkout trust signals state facts about the service, never a jurisdiction (ADR-0061)."""
+"""The checkout trust signals state facts about the service, never a jurisdiction (ADR-0062)."""
 
 from __future__ import annotations
 

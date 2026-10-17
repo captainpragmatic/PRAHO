@@ -58,6 +58,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
+    from apps.orders.models import Order
     from apps.provisioning.models import Service
 
 logger = logging.getLogger(__name__)
@@ -1155,7 +1156,9 @@ def _activate_payment_services(payment: Payment) -> None:
                     item.service
                     for order in invoice.orders.all()
                     for item in order.items.filter(service__isnull=False)
-                    if item.service and item.service.status in ["pending", "suspended"]
+                    if item.service
+                    and item.service.status in ["pending", "suspended"]
+                    and _payment_may_activate(order, item.service)
                 ]
         if invoice is None:
             return
@@ -1493,7 +1496,8 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
         with best_effort_atomic(logger=logger, scope="Invoice History", message="Failed to update payment history"):
             _update_customer_payment_history(invoice.customer, "positive")
         _activate_pending_services(invoice)
-        transaction.on_commit(lambda inv=invoice: _trigger_virtualmin_provisioning_on_payment(inv))
+        # No Virtualmin create from here: a paid line's account follows its order's confirmation
+        # (apps.orders.hosting_fulfilment), so payment and confirmation can never race two creates.
 
         logger.info(f"✅ [Invoice] Payment completed for {invoice.number}")
 
@@ -1924,6 +1928,16 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
         logger.info(f"📊 [Customer] Updated invoice history for {invoice.customer.id}")
 
 
+def _payment_may_activate(order: "Order", service: "Service") -> bool:
+    """A new order's pending Service waits for its order, not for the money.
+
+    Confirmation, or a reviewer's approval, moves the order to provisioning and hands the Service to
+    apps.orders.hosting_fulfilment. Activating it at payment put a service live before its order was
+    confirmed or reviewed, and the confirmation then refused the already active Service and rolled back.
+    """
+    return service.status != "pending" or order.status in ("provisioning", "completed")
+
+
 def _activate_pending_services(invoice: Invoice) -> None:
     """Activate services that were pending payment"""
     with swallow_application_errors(logger=logger, scope="Invoice", message="Failed to activate pending services"):
@@ -1936,7 +1950,7 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 item.service
                 for order in invoice.orders.all()
                 for item in order.items.filter(service__isnull=False)
-                if item.service and item.service.status == "pending"
+                if item.service and item.service.status == "pending" and _payment_may_activate(order, item.service)
             ]
         for service in services:
             with best_effort_atomic(logger=logger, scope="Invoice Services", message="Failed to activate service"):
@@ -2171,69 +2185,6 @@ def _revert_customer_credit_score(
             event_date=timezone.now(),
             applied_adjustment=applied_adjustment,
         )
-
-
-# ===============================================================================
-# CROSS-APP INTEGRATION: VIRTUALMIN PROVISIONING
-# ===============================================================================
-
-
-def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
-    """
-    Trigger Virtualmin provisioning when invoice is fully paid.
-
-    Cross-app integration point: billing → provisioning
-    """
-    hosting_services: list[Service] | None = None
-    with best_effort_atomic(logger=logger, scope="CrossApp", message="Failed to load Virtualmin provisioning services"):
-        # Import here to avoid circular imports.
-        from django_q.tasks import async_task
-
-        from apps.orders.models import OrderItem
-        from apps.provisioning.virtualmin_tasks import get_task_time_limit
-        from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
-
-        task_budget = get_task_time_limit()
-        order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")
-        hosting_services = [
-            item.service for item in order_items if item.service and item.service.requires_hosting_account()
-        ]
-    if hosting_services is None:
-        return
-
-    if not hosting_services:
-        logger.debug(
-            f"📋 [CrossApp] No hosting services found in invoice {invoice.number}, skipping Virtualmin provisioning"
-        )
-        return
-
-    logger.info(
-        f"🚀 [CrossApp] Triggering Virtualmin provisioning for {len(hosting_services)} services "
-        f"on invoice {invoice.number}"
-    )
-    for service in hosting_services:
-        with best_effort_atomic(
-            logger=logger,
-            scope="CrossApp",
-            message=f"Failed to queue Virtualmin provisioning for service {service.id}",
-        ):
-            primary_domain = service.get_primary_domain()
-            if primary_domain:
-                params = {
-                    "service_id": str(service.id),
-                    "domain": primary_domain,
-                    "template": DEFAULT_VIRTUALMIN_TEMPLATE,
-                }
-                async_task(
-                    "apps.provisioning.virtualmin_tasks.provision_virtualmin_account", params, timeout=task_budget
-                )
-                logger.info(
-                    f"🔄 [CrossApp] Queued Virtualmin provisioning for {primary_domain} (service: {service.id})"
-                )
-            else:
-                logger.warning(
-                    f"⚠️ [CrossApp] No primary domain found for service {service.id}, skipping Virtualmin provisioning"
-                )
 
 
 # ===============================================================================

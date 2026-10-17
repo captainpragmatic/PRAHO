@@ -19,7 +19,7 @@ from django_q.signing import SignedPackage
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
-from apps.orders.signals import _trigger_service_provisioning
+from apps.orders.services import _enqueue_service_line_fulfilment
 from apps.orders.tasks import apply_scheduled_order_task_budget, setup_order_scheduled_tasks
 from apps.products.models import Product
 from apps.settings.services import SettingsService
@@ -28,6 +28,7 @@ BUDGET_KEY = "orders.task_time_limit"
 SCHEDULES = {
     "order-process-pending": ("apps.orders.tasks.process_pending_orders", 5),
     "order-sync-payment-status": ("apps.orders.tasks.sync_order_payment_status", 15),
+    "order-recover-hosting-lines": ("apps.orders.tasks.recover_hosting_order_lines", 15),
 }
 
 
@@ -70,7 +71,9 @@ class OrderTaskBudgetCloseoutTests(TestCase):
 
     def test_new_schedules_persist_and_enqueue_the_current_timeout(self) -> None:
         result = setup_order_scheduled_tasks()
-        self.assertEqual(result, {"process_pending": "created", "sync_payments": "created"})
+        self.assertEqual(
+            result, {"process_pending": "created", "sync_payments": "created", "recover_hosting_lines": "created"}
+        )
         self.scheduled_payloads(17)
 
     def test_a_budget_change_reaches_the_next_scheduled_run_without_rerunning_setup(self) -> None:
@@ -96,8 +99,15 @@ class OrderTaskBudgetCloseoutTests(TestCase):
             )
             original_ids[name] = row.pk
         result = setup_order_scheduled_tasks()
-        self.assertEqual(result, {"process_pending": "already_exists", "sync_payments": "already_exists"})
-        self.assertEqual(Schedule.objects.filter(name__in=SCHEDULES).count(), 2)
+        self.assertEqual(
+            result,
+            {
+                "process_pending": "already_exists",
+                "sync_payments": "already_exists",
+                "recover_hosting_lines": "already_exists",
+            },
+        )
+        self.assertEqual(Schedule.objects.filter(name__in=SCHEDULES).count(), len(SCHEDULES))
         for name in SCHEDULES:
             row = Schedule.objects.get(name=name)
             self.assertEqual(
@@ -136,8 +146,8 @@ class OrderTaskBudgetCloseoutTests(TestCase):
         original_packages = list(OrmQ.objects.values_list("pk", flat=True))
         for timeout in (17, 19):
             self.set_budget(timeout)
-            with CaptureQueriesContext(connection) as queries:
-                _trigger_service_provisioning(order)
+            with CaptureQueriesContext(connection) as queries, self.captureOnCommitCallbacks(execute=True):
+                _enqueue_service_line_fulfilment(order)
             packages = [
                 cast("dict[str, object]", SignedPackage.loads(row.payload))
                 for row in OrmQ.objects.exclude(pk__in=original_packages)

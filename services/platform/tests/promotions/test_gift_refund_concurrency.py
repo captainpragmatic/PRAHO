@@ -46,7 +46,7 @@ class GiftRefundConcurrencyTests(TransactionTestCase):
                     return "rejected"
                 return str(refund.pk)
             finally:
-                close_old_connections()
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(reserve, keys))
@@ -85,7 +85,7 @@ class GiftRefundConcurrencyTests(TransactionTestCase):
             try:
                 return start_funding(purchase)
             finally:
-                close_old_connections()
+                connection.close()
 
         with patch("apps.billing.gateways.PaymentGatewayFactory.create_gateway") as factory:
             factory.return_value.create_payment_intent.side_effect = remote_create
@@ -104,7 +104,7 @@ class GiftRefundConcurrencyTests(TransactionTestCase):
                 settle_barrier.wait(timeout=5)
                 return converge_gift_funding("pi_race", facts).is_ok()
             finally:
-                close_old_connections()
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             self.assertEqual(list(pool.map(settle, [1, 2])), [True, True])

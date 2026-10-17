@@ -1,4 +1,4 @@
-"""What a customer accepts at checkout, recorded with the order and sent to them (ADR-0061).
+"""What a customer accepts at checkout, recorded with the order and sent to them (ADR-0062).
 
 The portal asked for the terms and sent nothing: the order recorded no acceptance. An order now
 names the Terms of Service release its customer accepted, and an EU consumer must ask for the

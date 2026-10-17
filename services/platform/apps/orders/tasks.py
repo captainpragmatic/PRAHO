@@ -519,21 +519,9 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
     return True
 
 
-def _trigger_item_provisioning(
-    order: Order, results: MutableMapping[str, object], *, task_time_limit: int | None = None
-) -> int:
-    """Trigger provisioning with one budget for the item batch."""
-    if task_time_limit is None:
-        task_time_limit = get_task_time_limit()
-    provisioned_items = 0
-    for item in order.items.filter(provisioning_status="pending"):
-        try:
-            async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
-            provisioned_items += 1
-        except Exception as e:
-            logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for item {item.id}: {e}")
-            cast("list[str]", results["errors"]).append(f"Provisioning trigger failed for item {item.id}: {e}")
-    return provisioned_items
+def _queued_service_lines(order: Order) -> int:
+    """How many service lines the order's confirmation queued for fulfilment (confirm_order queues them)."""
+    return order.items.filter(provisioning_status="pending").exclude(product_type="domain").count()
 
 
 def _process_paid_order(
@@ -551,7 +539,7 @@ def _process_paid_order(
     """
     from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice, task_time_limit=task_time_limit)
     if result.is_err():
         error = result.unwrap_err()
         persisted_error = error[:1_000]
@@ -616,11 +604,11 @@ def _process_paid_order(
     order_result["status"] = order.status
     results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
-    # If order went to provisioning (not in_review), trigger item provisioning
+    # Confirmation queued the lines' fulfilment itself (OrderPaymentConfirmationService.confirm_order).
     if order.status == "provisioning":
-        provisioned_items = _trigger_item_provisioning(order, results, task_time_limit=task_time_limit)
-        if provisioned_items > 0:
-            results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + provisioned_items
+        results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + _queued_service_lines(
+            order
+        )
 
     # Log order confirmation
     AuditService.log_simple_event(
@@ -779,7 +767,7 @@ def _process_free_order(
     """
     from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-    result = OrderPaymentConfirmationService.confirm_order(order)
+    result = OrderPaymentConfirmationService.confirm_order(order, task_time_limit=task_time_limit)
     if result.is_err():
         logger.warning("⚠️ [OrderProcessor] Cannot confirm free order %s: %s", order.order_number, result.unwrap_err())
         return
@@ -789,17 +777,11 @@ def _process_free_order(
     order_result["status"] = order.status
     results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
-    # If order went to provisioning, trigger item provisioning
+    # Confirmation queued the lines' fulfilment itself (OrderPaymentConfirmationService.confirm_order).
     if order.status == "provisioning":
-        if task_time_limit is None:
-            task_time_limit = get_task_time_limit()
-        for item in order.items.filter(provisioning_status="pending"):
-            try:
-                async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
-                results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + 1
-            except Exception as e:
-                logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
-                cast("list[str]", results["errors"]).append(f"Free order provisioning trigger failed: {e}")
+        results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + _queued_service_lines(
+            order
+        )
 
 
 def sync_order_payment_status() -> dict[str, Any]:
@@ -922,7 +904,11 @@ class _OrderSchedule(NamedTuple):
 
 
 _SCHEDULED_ORDER_TASKS = frozenset(
-    {"apps.orders.tasks.process_pending_orders", "apps.orders.tasks.sync_order_payment_status"}
+    {
+        "apps.orders.tasks.process_pending_orders",
+        "apps.orders.tasks.sync_order_payment_status",
+        "apps.orders.tasks.recover_hosting_order_lines",
+    }
 )
 
 
@@ -947,6 +933,9 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
     definitions = (
         _OrderSchedule("process_pending", "order-process-pending", "apps.orders.tasks.process_pending_orders", 5),
         _OrderSchedule("sync_payments", "order-sync-payment-status", "apps.orders.tasks.sync_order_payment_status", 15),
+        _OrderSchedule(
+            "recover_hosting_lines", "order-recover-hosting-lines", "apps.orders.tasks.recover_hosting_order_lines", 15
+        ),
     )
     for key, name, function, minutes in definitions:
         _scheduled, created = ScheduleModel.objects.update_or_create(
@@ -965,76 +954,34 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
 
 
 def provision_order_item(item_id: str) -> dict[str, Any]:
-    """
-    Provision an individual order item asynchronously.
+    """Move one paid service line forward (apps.orders.hosting_fulfilment); safe to run again."""
+    from apps.orders.hosting_fulfilment import fulfil_hosting_line  # noqa: PLC0415  # Deferred: django-q task
+    from apps.orders.models import OrderItem  # noqa: PLC0415  # Deferred: django-q task
 
-    Args:
-        item_id: OrderItem UUID to provision
-
-    Returns:
-        Dictionary with provisioning result
-    """
     logger.info(f"⚡ [OrderProvisioning] Provisioning order item {item_id}")
+    item = OrderItem.objects.filter(id=item_id).first()
+    if item is None:
+        return {"success": False, "item_id": str(item_id), "error": "Order item not found"}
+    if item.is_domain_line:
+        # Fulfilled by its registrar (apps.domains.order_fulfilment), not by hosting provisioning.
+        return {"success": True, "item_id": str(item.id), "message": "Domain line is fulfilled by its registrar"}
+    result = fulfil_hosting_line(item.pk)
+    if result.is_err():
+        logger.error(f"🔥 [OrderProvisioning] Could not fulfil item {item_id}: {result.unwrap_err()}")
+        return {"success": False, "item_id": str(item.id), "error": result.unwrap_err()}
+    return {"success": True, "item_id": str(item.id), "outcome": result.unwrap()}
 
-    try:
-        # Import at function level to avoid circular imports
-        from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            OrderItem,  # Deferred: django-q task  # Deferred: avoids circular import
+
+def recover_hosting_order_lines() -> dict[str, int]:
+    """Scheduled: finish the service lines and orders a lost dispatch or completion left behind."""
+    from apps.orders.hosting_fulfilment import recover_hosting_lines  # noqa: PLC0415  # Deferred: django-q task
+
+    recovered = recover_hosting_lines()
+    if recovered["lines"] or recovered["orders"]:
+        logger.info(
+            "🔄 [OrderProvisioning] Recovered %s line(s) and %s order(s)", recovered["lines"], recovered["orders"]
         )
-        from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            ProvisioningService,  # Deferred: django-q task  # Deferred: avoids circular import
-        )
-
-        item = OrderItem.objects.get(id=item_id)
-
-        if item.is_domain_line:
-            # Fulfilled by its registrar (apps.domains.order_fulfilment), not by hosting provisioning.
-            return {"success": True, "item_id": str(item.id), "message": "Domain line is fulfilled by its registrar"}
-        if item.provisioning_status != "pending":
-            logger.info(f"⚡ [OrderProvisioning] Item {item_id} status is {item.provisioning_status}, skipping")
-            return {"success": True, "item_id": str(item.id), "message": f"Item already {item.provisioning_status}"}
-
-        # Provision the item using ProvisioningService
-        provisioning_service = ProvisioningService()
-        result = provisioning_service.provision_order_item(item)
-
-        if result.is_ok():
-            provisioning_data = result.unwrap()
-            logger.info(f"⚡ [OrderProvisioning] Provisioned item {item_id} successfully")
-
-            # Log the provisioning
-            AuditService.log_simple_event(
-                event_type="order_item_provisioned",
-                user=None,
-                content_object=item,
-                description=f"Order item {item.name} provisioned successfully",
-                actor_type="system",
-                metadata={
-                    "item_id": str(item.id),
-                    "item_name": item.name,
-                    "order_id": str(item.order.id),
-                    "order_number": item.order.order_number,
-                    "customer_id": str(item.order.customer.id),
-                    "provisioning_data": provisioning_data,
-                    "source_app": "orders",
-                },
-            )
-
-            return {
-                "success": True,
-                "item_id": str(item.id),
-                "item_name": item.name,
-                "provisioning_data": provisioning_data,
-                "message": "Item provisioned successfully",
-            }
-        else:
-            error_msg = result.unwrap_err()
-            logger.error(f"❌ [OrderProvisioning] Failed to provision item {item_id}: {error_msg}")
-            return {"success": False, "error": error_msg}
-
-    except Exception as e:
-        logger.exception(f"💥 [OrderProvisioning] Error provisioning item {item_id}: {e}")
-        return {"success": False, "error": str(e)}
+    return recovered
 
 
 # ===============================================================================

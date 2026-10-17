@@ -240,7 +240,7 @@ class GDPRConsentServiceTest(TestCase):
         self.assertEqual(log_entry.status, "success")
 
     def test_data_processing_is_not_a_consent_to_withdraw(self):
-        """Processing the account's data performs its contract, so it is not withdrawn here (ADR-0061).
+        """Processing the account's data performs its contract, so it is not withdrawn here (ADR-0062).
 
         Withdrawing it anonymized the account at once, beside the deletion request a user makes
         for that. Erasure goes through the deletion request alone.

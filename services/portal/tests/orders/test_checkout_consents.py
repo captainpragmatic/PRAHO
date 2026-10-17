@@ -1,4 +1,4 @@
-"""The checkout page carries the consents Platform records with the order (ADR-0061).
+"""The checkout page carries the consents Platform records with the order (ADR-0062).
 
 Platform's preflight names the Terms of Service release in force and whether this customer must ask
 for an early start; the page links and sends back exactly that release, and asks the question only

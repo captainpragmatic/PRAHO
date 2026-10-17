@@ -4,19 +4,81 @@ E2E Page Quality Monitoring — console, network, HTML, CSS, accessibility, perf
 Contains ComprehensivePageMonitor, ConsoleMonitor, and all quality check functions.
 """
 
+import contextlib
+import fnmatch
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 from tests.e2e.helpers.constants import DJANGO_Q_LOG_FILE, PLATFORM_LOG_FILE, PORTAL_LOG_FILE
+from tests.e2e.helpers.csp import ensure_csp_capture, read_csp_violations
 from tests.e2e.helpers.server_logs import ServerLogScanner
 
 # ===============================================================================
 # CONSOLE ERROR MONITORING
 # ===============================================================================
 
-def setup_console_monitoring_standalone(page: Page) -> list:
+# An ignore pattern containing one of these would hide an access-control failure.
+_AUTH_ERROR_TOKENS = ("401", "403", "404", "forbidden", "unauthorized")
+
+
+def _sync_with_page(page: Page) -> None:
+    """One round trip, so every event the browser has already emitted reaches the collectors."""
+    # A closed or navigating page has nothing left to deliver; the checks that need the page
+    # report their own failure.
+    with contextlib.suppress(PlaywrightError):
+        page.evaluate("() => null")
+
+
+class _ConsoleCollector:
+    """Console errors, warnings and uncaught page errors, with a listener that can be removed.
+
+    An uncaught exception is not a console message in Playwright: it only fires ``pageerror``.
+    """
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+        self.page_errors: list[str] = []
+        self._page: Page | None = None
+
+        # One stable callable per event, so ``remove_listener`` finds what ``on`` registered. They
+        # look the handler up on each call, so a test can observe delivery by patching the class.
+        def on_console(msg: Any) -> None:
+            self.handle_console(msg)
+
+        def on_page_error(error: Any) -> None:
+            self.handle_page_error(error)
+
+        self._on_console = on_console
+        self._on_page_error = on_page_error
+
+    def handle_console(self, msg: Any) -> None:
+        if msg.type in ("error", "warning"):
+            self.messages.append({"type": msg.type, "text": msg.text, "location": msg.location})
+
+    def handle_page_error(self, error: Any) -> None:
+        self.page_errors.append(getattr(error, "message", None) or str(error))
+
+    def attach(self, page: Page) -> None:
+        # Each monitored block starts clean, so a reused monitor never fails on an earlier block.
+        self.messages.clear()
+        self.page_errors.clear()
+        page.on("console", self._on_console)
+        page.on("pageerror", self._on_page_error)
+        self._page = page
+
+    def detach(self) -> None:
+        if self._page is not None:
+            self._page.remove_listener("console", self._on_console)
+            self._page.remove_listener("pageerror", self._on_page_error)
+            self._page = None
+
+
+def setup_console_monitoring_standalone(page: Page) -> list[dict[str, Any]]:
     """
     Set up console message monitoring for the page (standalone utility function).
 
@@ -29,29 +91,115 @@ def setup_console_monitoring_standalone(page: Page) -> list:
     Example:
         console_messages = setup_console_monitoring_standalone(page)
     """
-    console_messages = []
-
-    def handle_console_message(msg):
-        if msg.type in ['error', 'warning']:
-            message_text = msg.text
-            console_messages.append({
-                'type': msg.type,
-                'text': message_text,
-                'location': msg.location
-            })
-
-    # Set up listener to capture console messages
-    page.on("console", handle_console_message)
-    return console_messages
+    collector = _ConsoleCollector()
+    collector.attach(page)
+    return collector.messages
 
 
-def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] | None = None,
+# ===============================================================================
+# HTTP RESPONSE MONITORING
+# ===============================================================================
+
+
+@dataclass(frozen=True)
+class HttpExpectation:
+    """A response a test deliberately provokes: one of ``statuses`` at a path glob."""
+
+    statuses: frozenset[int]
+    path: str
+    query: str | None = None
+
+    def matches(self, status: int, url: str) -> bool:
+        parts = urlsplit(url)
+        return (
+            status in self.statuses
+            and fnmatch.fnmatchcase(parts.path, self.path)
+            and (self.query is None or parts.query == self.query)
+        )
+
+
+@dataclass(frozen=True)
+class HttpRecord:
+    """A 4xx or 5xx response, judged against the expectations active when it arrived."""
+
+    status: int
+    method: str
+    url: str
+    resource_type: str
+    excused: bool
+
+    @property
+    def requested_path(self) -> str:
+        parts = urlsplit(self.url)
+        return parts.path + (f"?{parts.query}" if parts.query else "")
+
+    def describe(self) -> str:
+        return f"HTTP {self.status} {self.method} {self.requested_path} ({self.resource_type})"
+
+
+class _ResponseCollector:
+    """Every response's request id, and every response of 400 or above."""
+
+    def __init__(self, expectations: list[HttpExpectation]) -> None:
+        self.records: list[HttpRecord] = []
+        self.request_ids: set[str] = set()
+        self._expectations = expectations
+        self._page: Page | None = None
+
+        def on_response(response: Any) -> None:
+            self.handle_response(response)
+
+        self._on_response = on_response
+
+    def handle_response(self, response: Any) -> None:
+        req_id = response.headers.get("x-request-id")
+        if req_id:
+            self.request_ids.add(req_id)
+        if response.status >= 400:
+            request = response.request
+            self.records.append(
+                HttpRecord(
+                    status=response.status,
+                    method=request.method,
+                    url=response.url,
+                    resource_type=request.resource_type,
+                    excused=any(e.matches(response.status, response.url) for e in self._expectations),
+                )
+            )
+
+    def attach(self, page: Page) -> None:
+        # Each monitored block starts clean, as the console collector does.
+        self.records.clear()
+        self.request_ids.clear()
+        page.on("response", self._on_response)
+        self._page = page
+
+    def detach(self) -> None:
+        if self._page is not None:
+            self._page.remove_listener("response", self._on_response)
+            self._page = None
+
+
+def _validate_ignore_patterns(patterns: list[str], *, allow_auth: bool) -> list[str]:
+    """Refuse a pattern that would also hide an auth or not-found error, unless opted in."""
+    if not allow_auth:
+        for pattern in patterns:
+            lowered = pattern.lower()
+            if any(token in lowered for token in _AUTH_ERROR_TOKENS):
+                raise ValueError(
+                    f"Ignore pattern {pattern!r} would also hide auth or not-found errors; "
+                    "pass allow_auth_error_ignores=True if that is the point of the test."
+                )
+    return list(patterns)
+
+
+def assert_no_console_errors(console_messages: list[dict[str, Any]], ignore_patterns: list[str] | None = None,
                            context: str = "") -> None:
     """
     Assert that there are no JavaScript console errors.
 
     Args:
-        console_messages: List of console messages from setup_console_monitoring
+        console_messages: List of console messages from setup_console_monitoring_standalone
         ignore_patterns: List of error message patterns to ignore
         context: Context description for better error messages
 
@@ -59,14 +207,14 @@ def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] 
         AssertionError: If console errors are found
 
     Example:
-        console_messages = setup_console_monitoring(page)
+        console_messages = setup_console_monitoring_standalone(page)
         # ... perform actions ...
         assert_no_console_errors(console_messages, context="after login")
     """
     # Default patterns to ignore (common development noise)
     # NOTE: Browser-level "Failed to load resource" messages (e.g., favicon.ico 404)
-    # are NOT application console.error() calls. They're covered by check_network
-    # instead. Application JS errors use specific messages, not generic resource loads.
+    # are NOT application console.error() calls. The monitor's response collector reports the
+    # failed response itself. Application JS errors use specific messages, not generic resource loads.
     default_ignore = [
         "favicon",           # Favicon not found errors
         "Failed to load resource",  # Browser resource loading (404s, CORS) — not app errors
@@ -99,41 +247,6 @@ def assert_no_console_errors(console_messages: list, ignore_patterns: list[str] 
         print(f"  ✅ No console errors {context}")
     else:
         print("  ✅ No console errors detected")
-
-
-def check_network_errors(page: Page) -> list[str]:
-    """
-    Check for HTTP network errors (4xx, 5xx responses).
-
-    Args:
-        page: Playwright page object
-
-    Returns:
-        list[str]: List of network error messages
-    """
-    network_errors: list[str] = []
-
-    try:
-        # Check for typical error indicators in the page
-        error_indicators = [
-            "500 Internal Server Error",
-            "404 Not Found",
-            "403 Forbidden",
-            "502 Bad Gateway",
-            "503 Service Unavailable"
-        ]
-
-        page_content = page.content()
-        network_errors.extend(
-            f"HTTP Error detected: {indicator}"
-            for indicator in error_indicators
-            if indicator in page_content
-        )
-
-    except Exception:  # noqa: S110
-        pass
-
-    return network_errors
 
 
 def check_html_validation(page: Page) -> list[str]:
@@ -294,8 +407,9 @@ def check_accessibility_basics(page: Page) -> list[str]:
                         return;
                     }
 
-                    // Skip common search inputs that have placeholder text (acceptable UX pattern)
-                    if (input.type === 'search' || input.name === 'search' || input.placeholder) {
+                    // Search inputs are exempt (acceptable UX pattern). A placeholder is not a label:
+                    // it disappears on input and is not a reliable accessible name.
+                    if (input.type === 'search' || input.name === 'search') {
                         return;
                     }
 
@@ -303,8 +417,13 @@ def check_accessibility_basics(page: Page) -> list[str]:
                     const hasLabelFor = id && document.querySelector('label[for="' + id + '"]');
                     const hasLabelParent = input.closest('label') !== null;
                     if (!hasLabelFor && !hasLabelParent) {
-                        const ariaLabel = input.getAttribute('aria-label');
-                        if (!ariaLabel) {
+                        const ariaLabel = (input.getAttribute('aria-label') || '').trim();
+                        const labelledBy = (input.getAttribute('aria-labelledby') || '').trim();
+                        const labelElements = labelledBy.split(' ').filter(Boolean).map(ref => document.getElementById(ref));
+                        const labelledByText = labelElements.length && labelElements.every(Boolean)
+                            ? labelElements.map(el => el.textContent).join(' ').trim()
+                            : '';
+                        if (!ariaLabel && !labelledByText) {
                             issues.push('Input missing label: ' + (input.name || input.type || 'unknown'));
                         }
                     }
@@ -409,12 +528,17 @@ class PageQualityConfig:
     check_accessibility: bool = False  # Can be slow
     check_performance: bool = False    # Can be slow
     check_server_logs: bool = True     # Check platform/portal server logs for errors
+    check_csp: bool = True             # Fail on CSP violations, enforced or report-only
     ignore_patterns: list[str] = field(default_factory=list)
 
 
 class ComprehensivePageMonitor:
     """
     Comprehensive monitoring for all aspects of page quality during test execution.
+
+    Events count when the browser delivered them before the monitor's final sync point in
+    ``__exit__``; a test that starts background work it cares about must await it before
+    leaving the block.
 
     Example:
         with ComprehensivePageMonitor(page, "login process") as monitor:
@@ -447,69 +571,120 @@ class ComprehensivePageMonitor:
         self.check_css = config.check_css
         self.check_accessibility = config.check_accessibility
         self.check_performance = config.check_performance
-        self.ignore_patterns = list(config.ignore_patterns)
-        self.console_messages: list[str] = []
         self.check_server_logs = config.check_server_logs
-        self._request_ids: set[str] = set()
-        self._http_500s: list[str] = []
+        self.check_csp = config.check_csp
+        # Security hardening: never suppress auth/access-denied/not-found errors by default.
+        self.ignore_patterns = _validate_ignore_patterns(
+            list(config.ignore_patterns), allow_auth=allow_auth_error_ignores
+        )
         self._log_scanner: ServerLogScanner | None = None
         self._expected_error_patterns: list[str] = []
-        self._response_listener: Any | None = None
-
-        # Security hardening: never suppress auth/access-denied/not-found errors by default.
-        if not allow_auth_error_ignores and self.ignore_patterns:
-            blocked_patterns = {"401", "403", "404", "forbidden", "unauthorized"}
-            self.ignore_patterns = [p for p in self.ignore_patterns if p.lower() not in blocked_patterns]
+        self._http_expectations: list[HttpExpectation] = []
+        self._console = _ConsoleCollector()
+        self._responses = _ResponseCollector(self._http_expectations)
+        self._csp_seen = 0
 
         # Quality hardening: keep accessibility checks enabled unless explicitly opted out.
         if not self.check_accessibility and self.check_html and self.check_css and not allow_accessibility_skip:
             self.check_accessibility = True
 
+    @property
+    def console_messages(self) -> list[dict[str, Any]]:
+        return self._console.messages
+
     def __enter__(self):
-        if self.check_console:
-            self.console_messages = setup_console_monitoring_standalone(self.page)
+        try:
+            if self.check_console:
+                self._console.attach(self.page)
 
-        if self.check_server_logs:
-            self._log_scanner = ServerLogScanner([PLATFORM_LOG_FILE, PORTAL_LOG_FILE, DJANGO_Q_LOG_FILE])
-            if self._log_scanner.available:
-                self._log_scanner.mark_position()
-            else:
-                print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
+            if self.check_server_logs:
+                self._log_scanner = ServerLogScanner([PLATFORM_LOG_FILE, PORTAL_LOG_FILE, DJANGO_Q_LOG_FILE])
+                if self._log_scanner.available:
+                    self._log_scanner.mark_position()
+                else:
+                    print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
 
-            def _collect_response(response: Any) -> None:
-                req_id = response.headers.get("x-request-id")
-                if req_id:
-                    self._request_ids.add(req_id)
-                if response.status >= 500:
-                    self._http_500s.append(f"{response.status} {response.url}")
+            if self.check_network or self.check_server_logs:
+                self._responses.attach(self.page)
 
-            self._response_listener = _collect_response
-            self.page.on("response", _collect_response)
+            if self.check_csp:
+                self._csp_seen = len(ensure_csp_capture(self.page).violations)
+        except BaseException:
+            self._detach()
+            raise
 
         return self
 
+    def expect_http(self, statuses: Collection[int], path: str, *, query: str | None = None) -> None:
+        """Excuse responses with one of ``statuses`` whose URL path matches the ``path`` glob.
+
+        Only responses that arrive after this call are excused. ``query``, when given, must equal
+        the query string exactly; a ``?`` in ``path`` is refused because fnmatch reads it as a
+        wildcard.
+        """
+        if "?" in path or "#" in path:
+            raise ValueError(f"expect_http path {path!r} must not contain a query or fragment; pass query=")
+        self._http_expectations.append(HttpExpectation(frozenset(statuses), path, query))
+
+    def clear_http_expectations(self) -> None:
+        """Stop excusing responses from now on; responses already judged keep their verdict."""
+        self._http_expectations.clear()
+
+    def _sync_point(self) -> None:
+        _sync_with_page(self.page)
+
+    def _detach(self) -> None:
+        self._console.detach()
+        self._responses.detach()
+
     def _check_console_issues(self) -> list[str]:
-        """Check for console errors and return issues."""
+        """Console errors and uncaught page errors, minus the ones an excused response explains."""
         if not self.check_console:
             return []
 
+        # A response a test provoked on purpose also makes HTMX log "Response Status Error Code
+        # <status> from <path>", directly and inside the base templates' "HTMX Error:" detail. Only
+        # that diagnostic is excused: another error that merely names the path still fails.
+        excused_diagnostics = [
+            f"Response Status Error Code {record.status} from {record.requested_path}"
+            for record in self._responses.records
+            if record.excused
+        ]
+        issues: list[str] = []
         try:
             assert_no_console_errors(
-                self.console_messages,
-                ignore_patterns=self.ignore_patterns,
+                self._console.messages,
+                ignore_patterns=self.ignore_patterns + excused_diagnostics,
                 context=self.context
             )
-            return []
         except AssertionError as e:
-            return [f"Console: {e!s}"]
+            issues.append(f"Console: {e!s}")
+        issues.extend(
+            f"PageError: {error}"
+            for error in self._console.page_errors
+            if not any(pattern.lower() in error.lower() for pattern in self.ignore_patterns)
+        )
+        return issues
 
     def _check_network_issues(self) -> list[str]:
-        """Check for network errors and return issues."""
-        if not self.check_network:
+        """Every 4xx and 5xx response no expectation excused."""
+        unexcused = [record for record in self._responses.records if not record.excused]
+        if self.check_network:
+            return [f"Network: {record.describe()}" for record in unexcused]
+        if self.check_server_logs:
+            # Without the network check, a server error still fails the test, as it always has.
+            return [f"HTTP: {record.describe()}" for record in unexcused if record.status >= 500]
+        return []
+
+    def _check_csp_issues(self) -> list[str]:
+        """Every violation since the monitor started, from this document and the earlier ones."""
+        if not self.check_csp:
             return []
 
-        network_issues = check_network_errors(self.page)
-        return [f"Network: {issue}" for issue in network_issues] if network_issues else []
+        return [
+            f"CSP {v['disposition']}: {v['violatedDirective']} blocked {v['blockedURI']}"
+            for v in read_csp_violations(self.page)[self._csp_seen:]
+        ]
 
     def _check_html_issues(self) -> list[str]:
         """Check for HTML validation issues and return them."""
@@ -544,7 +719,7 @@ class ComprehensivePageMonitor:
         return [f"PERF: {issue}" for issue in perf_issues] if perf_issues else []
 
     def add_expected_error_patterns(self, patterns: list[str]) -> None:
-        """Add patterns for expected server errors (matched case-insensitively).
+        """Add patterns for expected server log errors, matched case-insensitively in the message.
 
         Accumulates across multiple calls so that multiple
         ``@pytest.mark.expect_server_errors`` markers on a single test
@@ -556,57 +731,37 @@ class ComprehensivePageMonitor:
     # Keep old name as alias so any external callers still work.
     set_expected_error_patterns = add_expected_error_patterns
 
+    def _is_expected(self, entry: Any) -> bool:
+        message = entry.message.lower()
+        return any(pattern.lower() in message for pattern in self._expected_error_patterns)
+
     def _check_server_log_issues(self) -> list[str]:
         """Check for server-side errors in platform/portal logs."""
-        if not self.check_server_logs:
+        if not self.check_server_logs or not (self._log_scanner and self._log_scanner.available):
             return []
 
-        # Layer 1: HTTP 500+ responses
-        issues: list[str] = [f"HTTP: {error}" for error in self._http_500s]
+        issues: list[str] = []
+        request_ids = self._responses.request_ids
+        entries = self._log_scanner.get_new_entries()
 
-        # Layer 2: Server log scanning
-        if self._log_scanner and self._log_scanner.available:
-            entries = self._log_scanner.get_new_entries()
-
-            # Errors correlated to this test's requests
-            if self._request_ids:
-                correlated = self._log_scanner.filter_by_request_ids(entries, self._request_ids)
-                correlated_errors = self._log_scanner.filter_errors(correlated)
-                issues.extend(
-                    f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
-                    f'"{entry.message}" [req-id: {entry.request_id[:8]}...]'
-                    for entry in correlated_errors
-                )
-
-            # Uncorrelated errors from other requests during this test's window
-            uncorrelated = self._log_scanner.filter_uncorrelated_errors(entries, self._request_ids)
+        # Errors correlated to this test's requests
+        if request_ids:
+            correlated = self._log_scanner.filter_by_request_ids(entries, request_ids)
             issues.extend(
                 f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
-                f'"{entry.message}" [uncorrelated]'
-                for entry in uncorrelated
+                f'"{entry.message}" [req-id: {entry.request_id[:8]}...]'
+                for entry in self._log_scanner.filter_errors(correlated)
+                if not self._is_expected(entry)
             )
 
-        # Filter out expected error patterns
-        if issues and self._expected_error_patterns:
-            issues = [
-                issue
-                for issue in issues
-                if not any(pat.lower() in issue.lower() for pat in self._expected_error_patterns)
-            ]
-
+        # Uncorrelated errors from other requests during this test's window
+        issues.extend(
+            f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
+            f'"{entry.message}" [uncorrelated]'
+            for entry in self._log_scanner.filter_uncorrelated_errors(entries, request_ids)
+            if not self._is_expected(entry)
+        )
         return issues
-
-    def _get_all_quality_issues(self) -> list[str]:
-        """Collect all quality issues from different checks."""
-        all_issues = []
-        all_issues.extend(self._check_console_issues())
-        all_issues.extend(self._check_network_issues())
-        all_issues.extend(self._check_html_issues())
-        all_issues.extend(self._check_css_issues())
-        all_issues.extend(self._check_accessibility_issues())
-        all_issues.extend(self._check_performance_issues())
-        all_issues.extend(self._check_server_log_issues())
-        return all_issues
 
     def _get_checks_performed(self) -> list[str]:
         """Get list of checks that were performed."""
@@ -625,6 +780,8 @@ class ComprehensivePageMonitor:
             checks_performed.append("performance")
         if self.check_server_logs:
             checks_performed.append("server-logs")
+        if self.check_csp:
+            checks_performed.append("CSP")
         return checks_performed
 
     def _print_success_message(self) -> None:
@@ -638,17 +795,33 @@ class ComprehensivePageMonitor:
             print(f"  ✅ Page quality verified ({checks_str})")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Unregister the response listener to prevent callback accumulation
-        # when the monitor is reused on the same page object.
-        if self._response_listener is not None:
-            self.page.remove_listener("response", self._response_listener)
-            self._response_listener = None
-
         # Only check quality issues if the test didn't already fail
         if exc_type is not None:
+            self._detach()
             return
 
-        all_issues = self._get_all_quality_issues()
+        # The checks that drive the page run while the collectors still listen, so an error the
+        # page raises meanwhile is caught; the listeners go before the verdict, never after it.
+        try:
+            page_issues = [
+                *self._check_html_issues(),
+                *self._check_css_issues(),
+                *self._check_accessibility_issues(),
+                *self._check_performance_issues(),
+            ]
+            self._sync_point()
+        finally:
+            self._detach()
+
+        # Read after the final sync, like the collectors: a violation delivered while the checks
+        # above drove the page, or during the sync itself, is in the registry by now.
+        all_issues = [
+            *self._check_console_issues(),
+            *self._check_network_issues(),
+            *self._check_csp_issues(),
+            *page_issues,
+            *self._check_server_log_issues(),
+        ]
 
         if all_issues:
             context_msg = f" {self.context}" if self.context else ""
@@ -668,17 +841,28 @@ class ConsoleMonitor:
             # Console errors are automatically checked when exiting context
     """
 
-    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] | None = None):
+    def __init__(self, page: Page, context: str = "", ignore_patterns: list[str] | None = None,
+                 *, allow_auth_error_ignores: bool = False):
         self.page = page
         self.context = context
-        self.ignore_patterns = ignore_patterns or []
-        self.console_messages: list[str] = []
+        self.ignore_patterns = _validate_ignore_patterns(ignore_patterns or [], allow_auth=allow_auth_error_ignores)
+        self._console = _ConsoleCollector()
+
+    @property
+    def console_messages(self) -> list[dict[str, Any]]:
+        return self._console.messages
 
     def __enter__(self):
-        self.console_messages = setup_console_monitoring_standalone(self.page)
+        self._console.attach(self.page)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # Deliver what the browser already emitted before the listeners go, as the full monitor does.
+        try:
+            if exc_type is None:
+                _sync_with_page(self.page)
+        finally:
+            self._console.detach()
         # Only check console errors if the test didn't already fail
         if exc_type is None:
             assert_no_console_errors(
@@ -686,3 +870,17 @@ class ConsoleMonitor:
                 ignore_patterns=self.ignore_patterns,
                 context=self.context
             )
+            page_errors = [
+                error for error in self._console.page_errors
+                if not any(pattern.lower() in error.lower() for pattern in self.ignore_patterns)
+            ]
+            if page_errors:
+                raise AssertionError("Uncaught page errors:\n" + "\n".join(f"  - {e}" for e in page_errors))
+
+
+def apply_test_markers(monitor: ComprehensivePageMonitor, request: Any) -> None:
+    """Apply a test's ``expect_server_errors`` and ``expect_http_errors`` markers to its monitor."""
+    for marker in request.node.iter_markers("expect_server_errors"):
+        monitor.add_expected_error_patterns(list(marker.args))
+    for marker in request.node.iter_markers("expect_http_errors"):
+        monitor.expect_http(marker.args, marker.kwargs["url"], query=marker.kwargs.get("query"))

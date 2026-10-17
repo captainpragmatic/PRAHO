@@ -1426,7 +1426,7 @@ class CookieConsent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # The Cookie Policy release in force when the choice was made (ADR-0061), and its number;
+    # The Cookie Policy release in force when the choice was made (ADR-0062), and its number;
     # empty while none is published.
     cookie_document = models.ForeignKey(
         "common.LegalDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="+"

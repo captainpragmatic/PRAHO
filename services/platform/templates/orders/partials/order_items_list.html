@@ -69,6 +69,11 @@
                   <div class="text-blue-400 text-xs mt-1">
                     {% icon "globe" %} {{ item.domain_name }}
                   </div>
+                  {% if item.config.availability_unconfirmed %}
+                    <div class="mt-1">
+                      {% trans "Availability not confirmed by registrar" as unconfirmed_badge %}{% badge unconfirmed_badge icon="warning" variant="warning" size="sm" %}
+                    </div>
+                  {% endif %}
                 {% endif %}
               </div>
             </td>
@@ -98,6 +103,13 @@
                 {% trans "Pending" as bt1 %}{% badge bt1 icon="clock" variant="warning" size="sm" %}
               {% elif item.provisioning_status == "in_progress" %}
                 {% trans "Provisioning" as bt2 %}{% badge bt2 icon="settings" variant="primary" size="sm" %}
+                {% if can_fulfil_lines and order.status == "provisioning" and not item.is_domain_line %}
+                  <form method="post" action="{% url 'orders:order_item_fulfil' pk=order.pk item_pk=item.pk %}" class="mt-2 space-y-1">
+                    {% csrf_token %}
+                    {% trans "Activate the service" as activate_label %}{% checkbox_field "activate_service" label=activate_label html_id=item.pk|stringformat:"s"|add:"-activate" %}
+                    {% trans "Mark line fulfilled" as fulfil_label %}{% trans "Mark this line fulfilled? The customer is told it is ready." as fulfil_confirm %}{% url 'orders:order_item_fulfil' pk=order.pk item_pk=item.pk as fulfil_url %}{% button fulfil_label type="submit" variant="secondary" size="sm" hx_post=fulfil_url hx_confirm=fulfil_confirm %}
+                  </form>
+                {% endif %}
               {% elif item.provisioning_status == "completed" %}
                 {% trans "Active" as bt3 %}{% badge bt3 icon="check" variant="success" size="sm" %}
               {% elif item.provisioning_status == "failed" %}

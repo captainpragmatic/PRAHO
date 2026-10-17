@@ -13,6 +13,10 @@ make test-virtualmin-contract # every allowlisted Virtualmin program against the
 make test-virtualmin-faults # nightly: Webmin stopped, network cut and calls timed out while PRAHO backs up and restores
 make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.yml on the bare node, then the contract smoke checks
 make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
+make test-virtualmin-e2e    # Playwright smoke tests of the staff pages against the lab (own server on :8710; not part of make test-e2e)
+make test-virtualmin-lab-full # nightly: test-virtualmin-lab + node-deploy + faults + the browser tests; every leg runs, failed legs are named
+make test-virtualmin-drift  # builds the lab from the LATEST Virtualmin, fresh every time (replaces a running lab), and runs the contract suite, recording nothing
+VIRTUALMIN_LAB=1 make dev   # Platform on :8700 against the lab: starts and registers it if needed, then runs the lab server
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
 make virtualmin-lab-down    # stop and remove containers and MinIO data
 make virtualmin-lab-build   # rebuild both images
@@ -212,6 +216,37 @@ Both nodes publish on 127.0.0.1, which breaks four assumptions in PRAHO's produc
 2. **Ansible always uses port 22.** The generated inventory has no port. Each lab deployment gets its published port as `ansible_port`.
 3. **`_wait_for_ssh` probes port 22.** On a Mac that is the host's own sshd. The lab version probes the lab ports instead.
 4. **The known_hosts lookup is keyed by bare IP.** It never matches port-keyed entries, so it would fall back to `ssh-keyscan` on port 22 and pin the host's key. The lab known_hosts is used instead, with `StrictHostKeyChecking=yes` kept.
+
+### Platform against the lab (`VIRTUALMIN_LAB=1 make dev`)
+
+`manage.py virtualmin_lab_runserver` runs Django's `runserver` inside `lab_transport()` in the same process, so every request that calls a node (a health check, a backup, a suspension) works. A bare `runserver --settings=config.settings.lab` cannot: the SSRF guard refuses the loopback API hosts. Django-Q's workers are spawned processes that would lose the same adaptations, so the command also runs a worker thread that takes the hosting tasks the server queues from the ORM broker (`run_queued_once`, the same pass the workflow bench uses). `--features` switches on migration, drain and differential backups in the lab database.
+
+- `VIRTUALMIN_LAB=1 make dev` runs `make virtualmin-lab-ensure` (it only starts and registers the lab when it is not already healthy and pinned, because registering rotates every credential) and then Platform alone on `127.0.0.1:8700`. The portal is not started: its HMAC keys come from your `.env`, which the lab settings do not read. Plain `make dev` is unchanged.
+- The bootstrap creates the staff login `lab-staff@praho.test`; its random password is in `.state/staff.env`.
+
+### Browser smoke tests (`make test-virtualmin-e2e`)
+
+`tests/e2e/platform/test_virtualmin_lab_*.py` drive the staff pages in Chromium against a real lab account and then ask the node (`list-domains`, through the lab helper), so each check has a page half and a node half:
+
+| File | Covers |
+|---|---|
+| `test_virtualmin_lab_account.py` | the server page's health check (the click that fails without the lab transport), the account page against the node, Suspend then Activate through their confirm dialogs |
+| `test_virtualmin_lab_backups.py` | a full backup from the form to a completed job, the base and differential buttons, the restore-pair page's plain-language warning and a confirmed pair restore |
+| `test_virtualmin_lab_jobs.py` | the migrate form and the account page's migration progress; a failed job's Retry (Webmin stopped, then started) |
+
+`tests/virtualmin_lab/run_e2e.sh` is the runner. It copies the lab database (the lab database itself is never touched), starts the lab server on `${VIRTUALMIN_E2E_PORT:-8710}` with `--features`, runs pytest with the lab settings and stops the server in an EXIT trap. It compares the source tree before and after, like `scripts/e2e_stack.py`: a tree that changed mid-run makes the result diagnostic only. It is not the `make dev-e2e` stack (`config.settings.e2e`, portal, seeded e2e database), and the tests are never collected by `make test-e2e`: the platform conftest ignores them unless the runner set `VIRTUALMIN_E2E=1`, and a guard test (`tests/integration/test_virtualmin_e2e_excluded.py`) pins that.
+
+The tests wait with retrying expects and polls, never a fixed sleep, and never drain the queue themselves (the server's worker does, and the test process would race it). An `hx-post` that redirects swaps the next page in without moving the address bar, so the tests read the job id from the swapped page.
+
+### CI (`.github/workflows/virtualmin-lab.yml`)
+
+| Run | When | What |
+|---|---|---|
+| pull request | a change under `services/platform/apps/provisioning/`, `services/platform/infrastructure/ansible/`, `deploy/virtualmin-lab/`, `tests/virtualmin_lab/` or the `Makefile` | `make test-virtualmin-lab` on the pinned version |
+| nightly full | 03:30 UTC, skipped without activity in the last 24 hours | `make test-virtualmin-lab-full` on the pinned version |
+| nightly drift | 05:30 UTC, always, on amd64 and arm64 | `make test-virtualmin-drift`: the image is built from the latest packages and the contract suite runs without recording; the tested versions go to the job summary |
+
+A failed scheduled run opens or updates the `virtualmin-lab-failure` issue. The setup action checks cgroup v2 and a privileged systemd container before anything starts. Every step is a make target, so it runs locally the same way. `RECORD=none` (run_contract.sh) is the no-recording mode the drift run uses; the unpinned build is `VIRTUALMIN_LAB_UNPINNED=1 VIRTUALMIN_LAB_TAG=latest lab.sh build`.
 
 ## Limits
 

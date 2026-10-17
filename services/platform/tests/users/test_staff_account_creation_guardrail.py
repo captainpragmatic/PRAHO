@@ -33,6 +33,7 @@ EXPECTED_CREATION_SITES = frozenset(
         "apps/common/management/commands/generate_sample_data.py:_create_customer_permutations:inactive_staff",
         "apps/common/management/commands/generate_sample_data.py:_create_customer_permutations:manager_user",
         "apps/common/management/commands/setup_test_users.py:_create_test_admin:_create_test_admin",
+        "apps/provisioning/management/commands/_virtualmin_lab.py:ensure_lab_staff:user",
         "scripts/setup_test_data.py:create_test_data:superuser",
         "scripts/setup_test_data.py:create_test_data:e2e_admin",
     }
@@ -46,9 +47,7 @@ EXPECTED_IS_STAFF_MUTATIONS = frozenset(
     }
 )
 
-NEWEST_KNOWN_CREATION_SITE = (
-    "apps/common/management/commands/generate_sample_data.py:_create_customer_permutations:manager_user"
-)
+NEWEST_KNOWN_CREATION_SITE = "apps/provisioning/management/commands/_virtualmin_lab.py:ensure_lab_staff:user"
 
 
 @dataclass(frozen=True)
@@ -205,7 +204,7 @@ class BareIsStaffCreationGuardrailTests(SimpleTestCase):
         identifiers = {site.identifier for site in sites}
 
         # Structural-Helper Integrity: exact count plus newest-site canary.
-        self.assertEqual(len(sites), 6)
+        self.assertEqual(len(sites), 7)
         self.assertEqual(identifiers, EXPECTED_CREATION_SITES)
         self.assertIn(NEWEST_KNOWN_CREATION_SITE, identifiers)
 

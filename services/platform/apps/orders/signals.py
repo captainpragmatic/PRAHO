@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
@@ -171,7 +172,6 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 
         elif new_status == "completed" and old_status == "provisioning":
             # Order completed — all items provisioned
-            _trigger_service_provisioning(order)
             _send_order_completed_email(order)
 
         elif new_status == "cancelled":
@@ -221,39 +221,6 @@ def _update_services_to_provisioning(order: Order) -> None:
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Service status update failed: {e}")
-
-
-def _trigger_service_provisioning(order: Order) -> None:
-    """Trigger service provisioning for completed orders."""
-    items: list[OrderItem] | None = None
-    with best_effort_atomic(logger=logger, scope="Order Signal", message="Failed to load provisioning items"):
-        from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-            ProvisioningService,
-        )
-
-        from .tasks import get_task_time_limit  # noqa: PLC0415  # Resolve the budget once per dispatch.
-
-        task_time_limit = get_task_time_limit()
-        items = list(order.items.all())
-    if items is None:
-        return
-
-    for item in items:
-        if item.provisioning_status != "pending":
-            continue
-        with best_effort_atomic(logger=logger, scope="Order Signal", message=f"Failed to provision item {item.id}"):
-            try:
-                from django_q.tasks import async_task  # noqa: PLC0415
-
-                async_task("apps.orders.tasks.provision_order_item", str(item.id), timeout=task_time_limit)
-                logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
-            except ImportError:
-                # Fallback to synchronous provisioning.
-                result = ProvisioningService.provision_order_item(item)
-                if result.is_ok():
-                    logger.info(f"⚡ [Order] Item {item.id} provisioned successfully")
-                else:
-                    logger.error(f"🔥 [Order] Provisioning failed: {result.error}")
 
 
 def _cancel_linked_subscription_for_order(*, service_id: object, feedback: str) -> None:
@@ -630,8 +597,9 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 
         if new_status == "completed":
             # A hosting item is ready to use; a domain line completes when its registrar confirms it.
+            # After commit: a completion that rolls back must not tell the customer it is ready.
             if item.service:
-                _send_service_ready_email(item)
+                transaction.on_commit(partial(_send_service_ready_email, item), robust=True)
 
             # Check if all items in order are provisioned. The order is locked first, so two lines
             # completing together cannot each read the other as unfinished.
@@ -652,12 +620,19 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
                 )
 
                 status_change = StatusChangeData(new_status="completed", notes="All items successfully provisioned")
-                OrderService.update_order_status(order, status_change)
+                completed = OrderService.update_order_status(order, status_change)
+                if completed.is_err():
+                    # The hosting-line recovery sweep completes the order on its next run.
+                    logger.error(
+                        "🔥 [Order] Order %s has every item provisioned but did not complete: %s",
+                        order.order_number,
+                        completed.unwrap_err(),
+                    )
 
         elif new_status == "failed":
             # Provisioning failed - may need manual intervention
             logger.error(f"🔥 [Order] Item {item.id} provisioning failed: {item.provisioning_notes}")
-            _send_provisioning_failed_email(item)
+            transaction.on_commit(partial(_send_provisioning_failed_email, item), robust=True)
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Item provisioning status change failed: {e}")
@@ -713,7 +688,7 @@ def _order_email_context(order: Order) -> dict[str, Any]:
 
 
 def _send_order_confirmation_email(order: Order) -> None:
-    """Send the order confirmation, the customer's durable copy of what they accepted (ADR-0061).
+    """Send the order confirmation, the customer's durable copy of what they accepted (ADR-0062).
 
     It attaches the Terms of Service release the order names and states an early-start request.
     """

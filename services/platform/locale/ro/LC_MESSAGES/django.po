@@ -24210,6 +24210,55 @@ msgstr "Pagini utilizator"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: apps/orders/hosting_fulfilment.py
+msgid "We could not set up this service automatically. Our team will finish it."
+msgstr "Nu am putut configura automat acest serviciu. Echipa noastră îl va finaliza."
+
+#: apps/domains/services.py
+msgid "This domain is already managed here. Contact support if it is yours."
+msgstr "Acest domeniu este deja administrat aici. Contactați asistența dacă este al dumneavoastră."
+
+#: apps/domains/services.py
+msgid "This domain is already on another open order."
+msgstr "Acest domeniu se află deja pe o altă comandă deschisă."
+
+#: apps/domains/services.py
+msgid "This domain is already registered. You can transfer it instead."
+msgstr "Acest domeniu este deja înregistrat. Îl puteți transfera în schimb."
+
+#: apps/domains/services.py apps/orders/services.py
+msgid "This domain is on the order twice."
+msgstr "Acest domeniu apare de două ori în comandă."
+
+#: apps/api/orders/views.py
+msgid "This domain is in your cart twice."
+msgstr "Acest domeniu apare de două ori în coș."
+
+#: templates/orders/partials/order_items_list.html
+msgid "Availability not confirmed by registrar"
+msgstr "Disponibilitate neconfirmată de registrator"
+
+msgid "This order line no longer exists."
+msgstr "Această linie de comandă nu mai există."
+
+msgid "Only an open service line of an order being provisioned can be marked fulfilled."
+msgstr "Doar o linie de serviciu deschisă a unei comenzi în curs de provizionare poate fi marcată ca livrată."
+
+msgid "Only admin or manager staff can mark a line fulfilled."
+msgstr "Doar administratorii sau managerii pot marca o linie ca livrată."
+
+msgid "The line is marked fulfilled."
+msgstr "Linia este marcată ca livrată."
+
+msgid "Activate the service"
+msgstr "Activează serviciul"
+
+msgid "Mark line fulfilled"
+msgstr "Marchează linia ca livrată"
+
+msgid "Mark this line fulfilled? The customer is told it is ready."
+msgstr "Marcați această linie ca livrată? Clientul este anunțat că serviciul este gata."
+
 #~ msgid "A user with this email already exists."
 #~ msgstr "Un utilizator cu această adresă de e-mail există deja."
 

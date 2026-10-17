@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import domain_views, views
+from . import domain_views, line_views, views
 
 app_name = "orders"
 
@@ -36,6 +36,7 @@ urlpatterns = [
     path("<uuid:pk>/items/<uuid:item_pk>/edit/", views.order_item_edit, name="order_item_edit"),
     path("<uuid:pk>/items/<uuid:item_pk>/edit/", views.order_item_edit, name="update_item"),
     path("<uuid:pk>/items/<uuid:item_pk>/delete/", views.order_item_delete, name="order_item_delete"),
+    path("<uuid:pk>/items/<uuid:item_pk>/fulfil/", line_views.order_item_fulfil, name="order_item_fulfil"),
     path("<uuid:pk>/items/<uuid:item_pk>/domain/record/", domain_views.domain_record, name="domain_record"),
     path("<uuid:pk>/items/<uuid:item_pk>/domain/refuse/", domain_views.domain_refuse, name="domain_refuse"),
     path(

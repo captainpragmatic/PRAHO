@@ -1,9 +1,9 @@
-# ADR-0062: Account Hostnames, Customer DNS and Mail Follow the Account Across Nodes
+# ADR-0061: Account Hostnames, Customer DNS and Mail Follow the Account Across Nodes
 
 - Status: Proposed
 - Date: 2026-10-14
 - Authors: PRAHO maintainers
-- Related: ADR-0044 (placement policy), ADR-0051 (enabled-state ownership), ADR-0058 to ADR-0060 (#689/#498), ADR-0059 (differential backups), ADR-0061 (deployment branding)
+- Related: ADR-0044 (placement policy), ADR-0051 (enabled-state ownership), ADR-0058 to ADR-0060 (#689/#498), ADR-0059 (differential backups), ADR-0062 (deployment branding)
 
 ## Context
 

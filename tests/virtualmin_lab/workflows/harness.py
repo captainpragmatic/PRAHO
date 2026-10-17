@@ -13,9 +13,7 @@ Nothing here skips. A workflow that cannot reach the lab fails with the reason.
 
 from __future__ import annotations
 
-import importlib
 import logging
-import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -29,7 +27,13 @@ from django_q.models import OrmQ
 from apps.audit.models import AuditEvent
 from apps.billing.models import Currency
 from apps.customers.models import Customer
-from apps.provisioning.management.commands._virtualmin_lab import LabNode, LabState
+from apps.provisioning.management.commands._virtualmin_lab import (
+    LAB_WORKER_MODULES,
+    LabNode,
+    LabState,
+    QueuedRun,
+    run_queued_once,
+)
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_backup_service import REMOTE_ARCHIVE_DIR, BackupConfig, RestoreConfig
 from apps.provisioning.virtualmin_gateway import VirtualminConfig
@@ -44,8 +48,6 @@ logger = logging.getLogger(__name__)
 WORKFLOW_DOMAIN_PREFIX = "wf"
 # The provisioning pipeline refuses a domain with a "test" label (security_utils), so workflow domains live here.
 WORKFLOW_SUFFIX = ".example.com"
-# Only these task modules do work for the workflows; the rest of the queue (e-mail, notifications) is discarded.
-WORKER_MODULES = ("apps.provisioning.virtualmin_tasks", "apps.provisioning.tasks")
 QUEUE_PASSES = 20
 
 
@@ -53,18 +55,8 @@ def is_workflow_domain(name: str) -> bool:
     return name.startswith(WORKFLOW_DOMAIN_PREFIX) and name.endswith(WORKFLOW_SUFFIX)
 
 
-@dataclass
-class TaskRun:
-    """One task a worker would have run."""
-
-    func: str
-    args: tuple[Any, ...]
-    result: Any = None
-    error: str = ""
-
-    @property
-    def name(self) -> str:
-        return self.func.rsplit(".", 1)[-1]
+# What the bench's worker ran: the lab worker's own record (apps...._virtualmin_lab.run_queued_once).
+TaskRun = QueuedRun
 
 
 @dataclass
@@ -153,25 +145,9 @@ class Bench:
         """
         ran: list[TaskRun] = []
         for _ in range(passes):
-            rows = list(OrmQ.objects.order_by("id"))
-            if not rows:
+            if not OrmQ.objects.exists():
                 return ran
-            for row in rows:
-                task = row.task
-                OrmQ.objects.filter(pk=row.pk).delete()
-                func = str(task.get("func", ""))
-                module, _, name = func.rpartition(".")
-                if module not in WORKER_MODULES:
-                    continue  # e-mail, notifications: not part of any hosting workflow
-                run = TaskRun(func=func, args=tuple(task.get("args", ())))
-                try:
-                    run.result = getattr(importlib.import_module(module), name)(
-                        *run.args, **dict(task.get("kwargs", {}))
-                    )
-                except Exception:  # A worker records a failed task and carries on
-                    run.error = traceback.format_exc()
-                    logger.warning("⚠️ [Workflows] task %s raised:\n%s", name, run.error)
-                ran.append(run)
+            ran.extend(run_queued_once(LAB_WORKER_MODULES))
         raise AssertionError(f"the queue was still busy after {passes} passes: {self.queued()}")
 
     # ------------------------------------------------------------- accounts

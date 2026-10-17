@@ -200,7 +200,8 @@ class OrdersSettingsEffectTests(TestCase):
                 paid_item = self.item(settled)
                 force_status(settled, "awaiting_payment")
 
-                with CaptureQueriesContext(connection) as queries:
+                # Confirmation queues each line's fulfilment on commit (confirm_order).
+                with CaptureQueriesContext(connection) as queries, self.captureOnCommitCallbacks(execute=True):
                     outcome = process_pending_orders()
                 self.assertTrue(outcome["success"], outcome)
                 free.refresh_from_db()
@@ -221,7 +222,7 @@ class OrdersSettingsEffectTests(TestCase):
                     item_tasks = [
                         task
                         for task in tasks.values()
-                        if task["func"] == "apps.orders.tasks.provision_order_item" and task["args"] == (item.pk,)
+                        if task["func"] == "apps.orders.tasks.provision_order_item" and task["args"] == (str(item.pk),)
                     ]
                     self.assertEqual(len(item_tasks), 1)
                     self.assertEqual(item_tasks[0]["timeout"], timeout)
