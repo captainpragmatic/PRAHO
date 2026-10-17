@@ -30,6 +30,7 @@ from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
     from apps.provisioning.models import Service
+    from apps.users.models import User
 
     from .models import OrderItem
 
@@ -179,3 +180,51 @@ def recover_hosting_lines(limit: int = RECOVERY_BATCH) -> dict[str, int]:
         else:
             logger.warning("⚠️ [Orders] Recovery could not complete order %s: %s", order.pk, completed.unwrap_err())
     return {"lines": lines, "orders": orders}
+
+
+def complete_line_for_staff(item_id: UUID | str, *, actor: User, activate_service: bool) -> Result[str, str]:
+    """Staff mark an open service line fulfilled, optionally activating its Service first.
+
+    For lines PRAHO does not deliver itself (SSL, email, backup, maintenance, cloud), and for a hosting line
+    finished by hand. The caller checks the staff role; this checks the state, under the same locks.
+    """
+    from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007
+    from apps.provisioning.services import ProvisioningService  # noqa: PLC0415  # ADR-0007
+
+    with transaction.atomic():
+        locked = _lock(item_id)
+        if locked is None:
+            return Err(_("This order line no longer exists."))
+        line, service = locked
+        if (
+            line.order.status != "provisioning"
+            or line.is_domain_line
+            or line.provisioning_status not in ("pending", "in_progress")
+        ):
+            return Err(_("Only an open service line of an order being provisioned can be marked fulfilled."))
+        if activate_service and service is not None and service.status == "provisioning":
+            activated = ProvisioningService.activate_service(
+                service, f"Activated by staff on {line.order.order_number}"
+            )
+            if activated.is_err():
+                transaction.set_rollback(True)
+                return Err(activated.unwrap_err())
+        if line.provisioning_status == "pending":
+            line.start_provisioning()
+        line.complete_provisioning()
+        line.save(update_fields=["provisioning_status", "provisioned_at", "updated_at"])
+        AuditService.log_simple_event(
+            event_type="order_item_fulfilled_by_staff",
+            user=actor,
+            content_object=line,
+            description=f"Order line marked fulfilled by staff: {line.product_name}",
+            actor_type="user",
+            metadata={
+                "order_id": str(line.order_id),
+                "order_number": line.order.order_number,
+                "service_id": str(service.pk) if service is not None else None,
+                "service_activated": bool(activate_service and service is not None and service.status == "active"),
+            },
+        )
+        logger.info("✅ [Orders] Staff marked line %s fulfilled", line.pk)
+        return Ok("completed")
