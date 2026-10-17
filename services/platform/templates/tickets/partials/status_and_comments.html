@@ -125,7 +125,7 @@
                         <div class="flex flex-wrap items-center gap-3">
                             <!-- File Upload -->
                             {% trans 'Attach files' as attach_files_label %}
-                            {% input_field "attachments" input_type="file" html_id="file-input" multiple=True accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.zip,.rar" aria_label=attach_files_label container_class="hidden" css_class="hidden" %}
+                            {% input_field "attachments" input_type="file" html_id="file-input" multiple=True accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" aria_label=attach_files_label container_class="hidden" css_class="hidden" %}
                             {# tmpl-allow TMPL002: text-only ghost styling (no background or border) beside the reply form; every button variant renders a filled background #}
                             <button type="button" id="attach-btn" class="inline-flex items-center px-3 py-1 text-sm text-slate-400 hover:text-slate-300" title="{% trans 'Attach file' %}">
                                 <span class="mr-1">{% icon "paperclip" size="sm" %}</span>

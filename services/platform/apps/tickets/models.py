@@ -427,10 +427,6 @@ class TicketAttachment(models.Model):
     file_size = models.PositiveIntegerField(verbose_name=_("File Size"))
     content_type = models.CharField(max_length=100, verbose_name=_("Content Type"))
 
-    # Security
-    is_safe = models.BooleanField(default=True, verbose_name=_("Safe"))
-    virus_scan_result = models.CharField(max_length=50, blank=True)
-
     uploaded_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, verbose_name=_("Uploaded By"))
     uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Uploaded At"))
 
@@ -458,9 +454,9 @@ class TicketAttachment(models.Model):
         three-valued logic), which made them invisible in counts/lists while both
         download endpoints still served them — use this Q, never an inline filter.
 
-        Scope note: this expresses COMMENT visibility only. ``is_safe`` (malware
-        quarantine) is a separate, download-only gate enforced by both download
-        endpoints — a quarantined attachment may still appear in counts/lists.
+        Scope note: this expresses COMMENT visibility only. There is no malware
+        quarantine: attachments are type-checked on upload and only ever served as
+        downloads (ADR-0063).
         """
         return models.Q(**{f"{prefix}comment__isnull": True}) | models.Q(**{f"{prefix}comment__is_public": True})
 

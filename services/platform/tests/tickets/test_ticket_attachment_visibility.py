@@ -45,7 +45,6 @@ def _attachment(ticket: Ticket, comment: TicketComment | None, marker: bytes) ->
         filename="evidence.txt",
         file_size=len(marker),
         content_type="text/plain",
-        is_safe=True,
     )
 
 

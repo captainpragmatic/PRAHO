@@ -250,6 +250,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **No more content blocklist.** Strings such as `<?php`, `<%` or `exec(` no longer refuse a file. The list refused about one random 8 KiB block in nine, and so real images, Word files and support logs. Attachments are only served as downloads, so it protected nothing.
   - Filenames with control characters are refused, as the customer API already did.
 
+- **Staff and customer replies check files the same way, and a reply with a bad file is refused whole.**
+  - **The gap.** A staff reply had its own type list, including ZIP and RAR files that the checks always refused. It stored the type guessed from the name, and kept the comment while dropping a refused file. A customer reply was refused whole.
+  - **Now.** One check serves both. A reply with any file that cannot be attached saves nothing, and says which file and why. The stored type is the one identified from the file.
+  - **Portal.** A refused file now shows the reason instead of "Unable to add reply. Please try again later." The file pickers no longer offer ZIP or RAR.
+  - **Settings.** `tickets.allowed_file_extensions` can narrow the accepted types but no longer lists types PRAHO cannot identify. A new `tickets.max_attachments_per_reply` (default 5) limits staff replies; customer replies stay at 5 files and 1 MiB.
+- **No pretend malware quarantine** (ADR-0063).
+  - Ticket attachments had an `is_safe` flag and a `virus_scan_result` field. Nothing ever scanned a file, so the flag was always true and the download gates and monitoring counts built on it could never fire.
+  - Both fields, the gates and the counts are removed. PRAHO type-checks attachments and only ever serves them as downloads; it does not scan them for malware, and ADR-0063 says so.
+  - The monitoring entry called `attachment_downloads`, which counted uploads, is now `attachment_uploads`.
+
 - **SSH and Webmin on hosting nodes are reachable only from an allowlist.** (#498)
   - **The gap.** The node firewall opened ports 22 and 10000 to the whole internet, so a leaked Webmin password, or the next Webmin bug, could be used from anywhere.
   - **Now.** A new setting, `infrastructure.node_admin_allowed_cidrs`, lists Platform's addresses and the admin networks. The firewall opens 22 and 10000 only to those, and PRAHO's Webmin API user can log in only from them. Web, mail, DNS, FTP and Usermin stay public.

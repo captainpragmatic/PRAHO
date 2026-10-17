@@ -62,7 +62,6 @@ class TicketsAPIErrorHandlingTests(TestCase):
             filename="missing-471.txt",
             file_size=17,
             content_type="text/plain",
-            is_safe=True,
         )
         self.missing_attachment.file.name = self.missing_storage_name
         self.missing_attachment.save()
@@ -97,7 +96,6 @@ class TicketsAPIErrorHandlingTests(TestCase):
             filename="healthy.txt",
             file_size=len(content),
             content_type="text/plain",
-            is_safe=True,
         )
         return attachment, content
 
@@ -272,21 +270,6 @@ class TicketsAPIErrorHandlingTests(TestCase):
 
     def test_missing_attachment_row_returns_404(self) -> None:
         response = self._download(self.missing_attachment.pk + 1_000_000)
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_unsafe_attachment_returns_404(self) -> None:
-        attachment = TicketAttachment(
-            ticket=self.ticket,
-            filename="unsafe.txt",
-            file_size=6,
-            content_type="text/plain",
-            is_safe=False,
-        )
-        attachment.file.name = "tickets/attachments/unsafe-not-written.txt"
-        attachment.save()
-
-        response = self._download(attachment.pk)
 
         self.assertEqual(response.status_code, 404)
 

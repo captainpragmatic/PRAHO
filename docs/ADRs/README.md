@@ -91,6 +91,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0059](ADR-0059-differential-virtualmin-backups.md) | Differential Virtualmin Backups Are a Chain PRAHO Tracks and Fences | Accepted | 2026-10-15 |
 | [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) | The Virtualmin API User Is a Master Administrator, Locked Down | Accepted | 2026-10-14 |
 | [ADR-0062](ADR-0062-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
+| [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
 
 ### 🟡 Partially Superseded
 
@@ -179,6 +180,7 @@ Billing Ownership
 - [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) — Exact row binding and fail-loud encrypted JSON reads
 - [ADR-0058](ADR-0058-pending-totp-enrolment.md) — a TOTP secret waiting for its first code lives encrypted in its own row, reused while fresh; recovery codes are shown once and stored nowhere
 - [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) — the Virtualmin API user must be a master administrator; it is limited to the virtual-server module and locked by a per-user IP allow list and a firewall to the node admin allowlist
+- [ADR-0063](ADR-0063-no-malware-scanning.md) — attachments are type-checked from their bytes and only ever served as downloads; PRAHO does no malware scanning, and the quarantine fields that implied it are gone
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 - [ADR-0031](ADR-0031-api-token-authentication-strategy.md) — Token auth gaps and roadmap
@@ -225,9 +227,9 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 61 (ADR-0001 through ADR-0062, without the reserved ADR-0061)
-- **Active**: 55 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 62 (ADR-0001 through ADR-0063, without the reserved ADR-0061)
+- **Active**: 56 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
 - **Reserved**: ADR-0061, account hostnames, customer DNS and mail. It is written on branch `docs/account-hostnames-dns-mail`, and its Phase 0 code on master already cites it.
-- **Next available**: ADR-0063
+- **Next available**: ADR-0064
