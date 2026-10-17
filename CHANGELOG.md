@@ -240,6 +240,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **GDPR anonymisation removes the person from the audit log, not only their IP.**
+  - **The gap.** Anonymising a person cleared the IP and browser of their own audit rows and nothing else. Their email, name and phone stayed in descriptions and values, events about them that someone else performed were not touched, and a row only marked as anonymised was skipped by retention even when it still held personal data.
+  - **Now.** The person's identifiers are captured first, earlier emails and names included. Their own events that no law requires are fully scrubbed. Every other row that concerns them keeps its content and loses only their identifiers: financial records, contract evidence, a staff member's actions on their account (the staff member stays the actor), and their own actions on other people's data.
+  - **Contract evidence is held.** What a customer agreed to or was given (checkout terms, an early start request, a paid order's lifecycle) is kept for `audit.legal_claims_retention_days` (2190 by default) by both retention policies and erasure.
 - **No audit row, export or SIEM entry holds a usable session key** (ADR-0043). Django changes the key before the login signal fires, so the key recorded at login was the live one, and an exported audit log could resume that session. Audit rows now keep a keyed digest (`s1:…`, keyed by `AUDIT_SESSION_DIGEST_SECRET`, else derived from the secret key): equal for the same session, so search and same-session views still work. `bulk_create` of audit events is now stamped and chained like a single save, and refuses conflict modes.
 - **A ticket attachment's type now follows its bytes, not its name.**
   - **The gap.** The type came from the file extension, because the detection library the checks relied on was never installed. Any ZIP passed as a Word document, and a binary file passed as text.
