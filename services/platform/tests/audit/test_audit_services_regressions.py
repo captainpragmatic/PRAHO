@@ -149,18 +149,22 @@ class TestAuditServiceLogEvent(TestCase):
         self.assertEqual(event.action, "test_event")
 
     def test_log_event_no_content_object_no_user(self):
-        """Cover fallback content_type when no content_object and no user."""
+        """An event with no object and no actor has no object: it is never filed under user 1."""
         event_data = AuditEventData(event_type="system_event", description="system action")
         context = AuditContext()
         event = AuditService.log_event(event_data, context)
-        self.assertEqual(event.object_id, "1")
+        self.assertIsNone(event.content_type_id)
+        self.assertEqual(event.object_id, "")
 
     def test_log_event_no_content_object_with_user(self):
         user = _make_user()
         event_data = AuditEventData(event_type="user_action", description="action")
         context = AuditContext(user=user)
         event = AuditService.log_event(event_data, context)
-        self.assertEqual(event.object_id, str(user.pk))
+        # The actor is the actor, not the object.
+        self.assertEqual(event.user, user)
+        self.assertIsNone(event.content_type_id)
+        self.assertEqual(event.object_id, "")
 
     def test_log_event_category_none_fallback(self):
         """Cover the category is None fallback."""
@@ -1201,7 +1205,8 @@ class TestSecurityAuditService(TestCase):
             "rate_limit_rate": "5/min",
         }
         event = SecurityAuditService.log_rate_limit_event(event_data)
-        self.assertEqual(event.object_id, "anonymous")
+        self.assertIsNone(event.content_type_id)
+        self.assertEqual(event.object_id, "")
         self.assertNotIn("user_info", event.metadata)
 
 

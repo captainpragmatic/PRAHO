@@ -74,6 +74,9 @@ class VirtualminServer(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True, verbose_name=_("Server Name"))
     hostname = models.CharField(max_length=255, unique=True, verbose_name=_("Hostname"))
+    # Where account hostnames point (ADR-0061): the A and AAAA record contents.
+    ipv4_address = models.GenericIPAddressField(protocol="IPv4", null=True, blank=True, verbose_name=_("IPv4 Address"))
+    ipv6_address = models.GenericIPAddressField(protocol="IPv6", null=True, blank=True, verbose_name=_("IPv6 Address"))
 
     # API configuration
     api_port = models.PositiveIntegerField(default=10000, verbose_name=_("API Port"))
@@ -400,6 +403,8 @@ class VirtualminAccount(models.Model):
 
     # Timestamps
     provisioned_at = models.DateTimeField(null=True, blank=True)
+    # Set once, under a row lock, when the account-name activation email is sent (ADR-0061).
+    activation_notified_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
