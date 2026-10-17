@@ -47,7 +47,7 @@ def short_request_timeout(bench: Bench) -> None:
 
 
 def test_a_read_only_program_is_replayed_and_a_mutation_is_sent_once(bench: Bench, chaos: Chaos) -> None:
-    with bench.hosted("wffaulte.example.com") as account:
+    with chaos.hosted("wffaulte.example.com") as account:
         gateway = VirtualminGateway(VirtualminConfig(server=bench.server("vm-a")))
         chaos.pause("vm-a")
         with count_attempts() as attempts:
@@ -69,7 +69,7 @@ def test_a_read_only_program_is_replayed_and_a_mutation_is_sent_once(bench: Benc
 
 
 def test_a_suspend_that_timed_out_is_not_reported_done_and_is_not_replayed(bench: Bench, chaos: Chaos) -> None:
-    with bench.hosted("wffaultf.example.com") as account:
+    with chaos.hosted("wffaultf.example.com") as account:
         chaos.pause("vm-a")
         with count_attempts() as attempts:
             result = VirtualminProvisioningService(account.server).suspend_account(account, "workflow")
@@ -97,7 +97,7 @@ def test_a_suspend_that_timed_out_is_not_reported_done_and_is_not_replayed(bench
 
 
 def test_a_delete_that_timed_out_is_parked_and_never_replayed(bench: Bench, chaos: Chaos) -> None:
-    with bench.hosted("wffaultg.example.com") as account:
+    with chaos.hosted("wffaultg.example.com") as account:
         DomainData(bench.lab_of(account), account).seed(secrets.token_hex(6))
         # The state delete accepts (see test_account_lifecycle): a failed provisioning's account, unprotected.
         VirtualminAccount.objects.filter(pk=account.pk).update(  # fsm-bypass: the state a failed provisioning leaves
@@ -132,8 +132,7 @@ def test_a_delete_that_timed_out_is_parked_and_never_replayed(bench: Bench, chao
 
 def test_a_mutation_the_node_ran_while_the_caller_gave_up_is_not_sent_again(bench: Bench, chaos: Chaos) -> None:
     """The node received the request and ran it; PRAHO's read timeout fired first. It must not run it twice."""
-    del chaos
-    with bench.hosted("wffaulth.example.com") as account:
+    with chaos.hosted("wffaulth.example.com") as account:
         lab = bench.lab_of(account)
         DomainData(lab, account).add_blob(BLOB_MB)
         archive = f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz"

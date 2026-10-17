@@ -31,6 +31,9 @@ PINNED_TAG="8.3.0"
 VIRTUALMIN_TAG="${VIRTUALMIN_LAB_TAG:-${PINNED_TAG}}"
 WAIT_SECONDS="${LAB_WAIT_SECONDS:-900}"
 NODES="vmlab-a vmlab-b"
+# Production nodes get this file from virtualmin_harden.yml; the lab nodes get the same one, so a web root (and an
+# account name's sub-server link) is served exactly as on a production node.
+WEB_ROOT_GUARD="${LAB_DIR}/../../services/platform/infrastructure/ansible/playbooks/files/praho-home-symlinks.conf"
 
 if [ -n "${LAB_DOCKER_CONFIG:-}" ]; then
   export DOCKER_CONFIG="${LAB_DOCKER_CONFIG}"
@@ -115,6 +118,17 @@ cmd_build() {
   info "built praho-virtualmin-lab:${VIRTUALMIN_TAG} and praho-debian-node:12"
 }
 
+install_web_root_guard() {
+  local name conf=/etc/apache2/conf-available/praho-home-symlinks.conf
+  [ -s "${WEB_ROOT_GUARD}" ] || die "missing ${WEB_ROOT_GUARD}"
+  for name in "$@"; do
+    docker cp "${WEB_ROOT_GUARD}" "${name}:${conf}"
+    docker exec "${name}" sh -c "chown root:root ${conf} && chmod 0644 ${conf} && a2enconf -q praho-home-symlinks \
+      && apache2ctl -t && systemctl reload apache2"
+  done
+  info "web root link guard installed on ${*}"
+}
+
 cmd_up() {
   ensure_state
   if ! docker image inspect "praho-virtualmin-lab:${VIRTUALMIN_TAG}" >/dev/null 2>&1; then
@@ -131,6 +145,8 @@ cmd_up() {
   # Word splitting is intended: NODES is a space-separated list.
   # shellcheck disable=SC2086
   wait_healthy ${NODES}
+  # shellcheck disable=SC2086
+  install_web_root_guard ${NODES}
   info "lab up: vm-a https://127.0.0.1:${LAB_A_WEBMIN_PORT:-10101} ssh :${LAB_A_SSH_PORT:-2522}," \
     "vm-b https://127.0.0.1:${LAB_B_WEBMIN_PORT:-10102} ssh :${LAB_B_SSH_PORT:-2622}," \
     "MinIO http://127.0.0.1:${LAB_MINIO_PORT:-19000}"

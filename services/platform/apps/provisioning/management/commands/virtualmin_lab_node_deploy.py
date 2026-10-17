@@ -58,6 +58,94 @@ HTTP_PORT = 80
 WEBMIN_PORT = 10000
 IP_LOCK_FIELD = 4  # miniserv.users: name:password:pass-expiry:module-list:ip-allow-list:...
 
+# Two customers and an account-name sub-server on the deployed node. The first customer points its web root at
+# things; the second holds a secret. Each case prints "<label> <HTTP status> <first line of the body>", fetched on the
+# node itself (the bare image has python3 but no curl). $1 and $2 are random tokens: a 200 must serve the first, and
+# no answer may carry the second. Any failed step stops the probe, so a stale link can never pass as a refusal.
+WEB_ROOT_LINKS_PROBE = r"""
+set -euo pipefail
+OWN=$1 SECRET=$2
+V=/usr/sbin/virtualmin
+A=linkprobe-a.test B=linkprobe-b.test SUB=linkprobe-acct.test
+cleanup() {
+  local name names
+  names=$($V list-domains --name-only) || { echo "cleanup-failed listing -"; return 0; }
+  for name in "$SUB" "$A" "$B"; do
+    if printf '%s\n' "$names" | grep -qx "$name"; then
+      $V delete-domain --domain "$name" >/dev/null 2>&1 || echo "cleanup-failed $name -"
+    fi
+  done
+}
+trap cleanup EXIT
+cleanup
+$V create-domain --domain "$A" --pass "Lp-$RANDOM-a1" --unix --dir --web >/dev/null
+$V create-domain --domain "$B" --pass "Lp-$RANDOM-b1" --unix --dir --web >/dev/null
+$V create-domain --domain "$SUB" --parent "$A" --dir --web >/dev/null
+UA=$($V list-domains --domain "$A" --user-only)
+UB=$($V list-domains --domain "$B" --user-only)
+HA=$(getent passwd "$UA" | cut -d: -f6)
+HB=$(getent passwd "$UB" | cut -d: -f6)
+HS=$($V list-domains --domain "$SUB" --multiline | awk '/Home directory:/ {print $3}')
+for dir in "$HA/public_html" "$HB/public_html" "$HS"; do [ -d "$dir" ] || { echo "setup-failed $dir -"; exit 1; }; done
+echo "$OWN" > "$HA/public_html/own.txt"
+chown "$UA:$UA" "$HA/public_html/own.txt"
+echo "$SECRET" > "$HB/public_html/secret.txt"
+chown "$UB:$UB" "$HB/public_html/secret.txt"
+fetch() {
+  python3 - "$2" "$3" <<'PY'
+import sys, urllib.error, urllib.request
+request = urllib.request.Request("http://127.0.0.1" + sys.argv[2], headers={"Host": sys.argv[1]})
+try:
+    with urllib.request.urlopen(request, timeout=10) as answer:
+        status, body = answer.status, answer.read()
+except urllib.error.HTTPError as error:
+    status, body = error.code, error.read()
+first = body.decode("utf-8", "replace").strip().splitlines()
+print(status, first[0] if first else "-")
+PY
+}
+report() { echo "$1 $(fetch "$1" "$2" "$3")"; }
+as_a() { su -s /bin/sh "$UA" -c "$1"; }
+points_to() { [ "$(readlink "$1")" = "$2" ] || { echo "link-failed $1 -"; exit 1; }; }
+report plain "$A" /own.txt
+as_a 'mv ~/public_html ~/site'
+as_a 'ln -s site ~/public_html'
+points_to "$HA/public_html" site
+report own-link "$A" /own.txt
+as_a 'rm ~/public_html'
+as_a "ln -s $HB/public_html ~/public_html"
+points_to "$HA/public_html" "$HB/public_html"
+report other-customer "$A" /secret.txt
+as_a 'rm ~/public_html'
+as_a 'ln -s /etc ~/public_html'
+points_to "$HA/public_html" /etc
+report system "$A" /hostname
+as_a 'rm ~/public_html'
+as_a 'mv ~/site ~/public_html'
+as_a "ln -s $HB/public_html/secret.txt ~/public_html/peek.txt"
+points_to "$HA/public_html/peek.txt" "$HB/public_html/secret.txt"
+report nested "$A" /peek.txt
+rm -rf "$HS/public_html"
+ln -s ../../public_html "$HS/public_html"
+chown -h "$UA:$UA" "$HS/public_html"
+points_to "$HS/public_html" ../../public_html
+report subserver "$SUB" /own.txt
+chown -h root:root "$HS/public_html"
+report subserver-root-link "$SUB" /own.txt
+"""
+
+
+# label -> (expected HTTP status, whether it serves the customer's own file)
+WEB_ROOT_EXPECTED = {
+    "plain": ("200", True),
+    "own-link": ("200", True),
+    "other-customer": ("403", False),
+    "system": ("403", False),
+    "nested": ("403", False),
+    "subserver": ("200", True),
+    "subserver-root-link": ("403", False),
+}
+
 
 class Command(BaseCommand):
     help = "Prepare and run a from-scratch Virtualmin node deploy on the bare Debian lab node (lab only)"
@@ -123,13 +211,33 @@ class Command(BaseCommand):
                 deployment, "virtualmin.yml", {"praho_api_user": API_USER, "praho_api_password": password}
             )
             self._run_playbook(deployment, "virtualmin_harden.yml", None)
+            self._check_web_root_links()
+            # Someone disables the guard by hand; the next hardening run must put it back in force.
+            node_exec(DEPLOY_NODE.container, "sh", "-c", "a2disconf -q praho-home-symlinks && systemctl reload apache2")
+            self._run_playbook(deployment, "virtualmin_harden.yml", None)
             server = self._register(deployment, password)
             activated = NodeRegistrationService().verify_and_activate(server)
             if activated.is_err():
                 raise CommandError(f"The node's API credential did not activate it: {activated.unwrap_err()}")
             self._ok("verify_and_activate proves the API user over the pinned certificate", server.status == "active")
         self._check_controls()
+        self._check_web_root_links()
         self.stdout.write(self.style.SUCCESS(f"Node deploy OK: {server.hostname} is active"))
+
+    def _check_web_root_links(self) -> None:
+        """virtualmin_harden.yml: a web root can link only to what its customer owns (not another home, not /etc)."""
+        own, secret = f"own-{secrets.token_hex(6)}", f"secret-{secrets.token_hex(6)}"
+        output = node_exec(DEPLOY_NODE.container, "bash", "-c", WEB_ROOT_LINKS_PROBE, "probe", own, secret)
+        seen = {label: rest for label, _, rest in (line.partition(" ") for line in output.splitlines() if line)}
+        self._ok(
+            "the web root probe ran every case and cleaned up",
+            not any(label.endswith("-failed") for label in seen) and len(seen) == len(WEB_ROOT_EXPECTED),
+            output,
+        )
+        for label, (status, serves_own) in WEB_ROOT_EXPECTED.items():
+            answer = seen.get(label, "")
+            good = answer.split(" ", 1)[0] == status and (own in answer if serves_own else own not in answer)
+            self._ok(f"web root case {label} answers {status}", good and secret not in answer, output)
 
     def _ok(self, label: str, condition: bool, detail: object = "") -> None:
         if not condition:
