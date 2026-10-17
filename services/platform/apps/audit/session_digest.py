@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import re
 from typing import Any
 
@@ -58,10 +59,25 @@ def _is_session_name(key: Any) -> bool:
     return isinstance(key, str) and bool(_SESSION_KEY_NAME.search(key))
 
 
+def _normalise(value: Any) -> Any:
+    """The payload as the JSON column will store it: tuples become arrays, mapping keys strings.
+
+    Walking the stored form means one shape per kind of container. A payload the encoder refuses
+    would fail at save anyway; it is walked as given.
+    """
+    try:
+        return json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        return value
+
+
 def _collect_named(value: Any, found: set[str], *, named: bool = False) -> None:
-    # `named`: this value sits under a session-named key, so every string below it is an identifier.
+    # `named`: this value sits under a session-named key, so every string below it is an identifier,
+    # mapping keys included.
     if isinstance(value, dict):
         for key, item in value.items():
+            if named and _is_session_value(key):
+                found.add(key)
             _collect_named(item, found, named=named or _is_session_name(key))
     elif isinstance(value, (list, tuple)):  # a tuple is stored as a JSON array too
         for item in value:
@@ -77,9 +93,18 @@ def _replace_raw(text: str, raw_keys: set[str]) -> str:
     return _LABELLED_KEY_IN_TEXT.sub(lambda match: match.group(1) + session_key_digest(match.group(2)), text)
 
 
+def _scrub_key(key: Any, raw_keys: set[str], *, named: bool) -> Any:
+    if named and _is_session_value(key):
+        return session_key_digest(key)
+    return _replace_raw(key, raw_keys) if isinstance(key, str) else key
+
+
 def _scrub(value: Any, raw_keys: set[str], *, named: bool = False) -> Any:
     if isinstance(value, dict):
-        return {key: _scrub(item, raw_keys, named=named or _is_session_name(key)) for key, item in value.items()}
+        return {
+            _scrub_key(key, raw_keys, named=named): _scrub(item, raw_keys, named=named or _is_session_name(key))
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_scrub(item, raw_keys, named=named) for item in value]
     if named and _is_session_value(value):
@@ -104,6 +129,7 @@ def digest_session_identifiers(
     every occurrence of a raw key found by the first net, or passed as the event's session_key,
     anywhere in the description, metadata or values.
     """
+    metadata, old_values, new_values = _normalise(metadata), _normalise(old_values), _normalise(new_values)
     raw_keys: set[str] = set()
     if _is_session_value(session_key):
         raw_keys.add(session_key)  # type: ignore[arg-type]  # _is_session_value narrowed it to str

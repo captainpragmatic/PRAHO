@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import random
 from typing import Any
 
 from django.contrib.auth import get_user_model
@@ -246,3 +247,50 @@ class SessionNamedCollectionsAreScrubbedTests(TestCase):
         stored = AuditEvent.objects.get(pk=event.pk)
         self.assertNotIn(live, _all_text(stored))
         self.assertEqual(stored.metadata["session_ids"], [session_key_digest(live)])
+
+
+class SessionKeyInvariantTests(SessionKeysNeverStoredTests):
+    """A live key hidden in any supported shape never survives into a row, the SIEM or an export.
+
+    Shapes are drawn with fixed seeds, so a failure reproduces exactly: a value or list item under a
+    session-named key (singular or plural), a tuple, a mapping keyed by the live key, a labelled key
+    in free text, and a key that is known from the event's own session_key and reused as a mapping
+    key elsewhere. Each is wrapped in random neutral dicts and lists to vary the depth.
+    """
+
+    _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    def _shape(self, rng: Any, live: str) -> dict[str, Any]:
+        kind = rng.randrange(7)
+        if kind == 0:
+            payload: Any = {"session_ids": [live]}
+        elif kind == 1:
+            payload = {"session_ids": (live,)}
+        elif kind == 2:
+            payload = {"session_ids": {live: True}}
+        elif kind == 3:
+            payload = {"previous_session_keys": [{"note": live}]}
+        elif kind == 4:
+            payload = {"note": f"resumed session_key={live}"}
+        elif kind == 5:
+            return {"description": f"Session ID: {live}", "metadata": {}}
+        else:
+            return {"session_key": live, "metadata": {"by_session": {live: {"seen": 1}}}}
+        for _ in range(rng.randrange(4)):
+            payload = {rng.choice(["outer", "ctx", "data"]): payload} if rng.random() < 0.5 else {"items": [payload]}
+        return {"metadata": payload}
+
+    def test_a_live_key_in_any_supported_shape_never_survives(self) -> None:
+        for seed in range(42):
+            rng = random.Random(seed)  # noqa: S311  # seeded shapes for a reproducible test, not secrets
+            live = "".join(rng.choice(self._ALPHABET) for _ in range(32))
+            self.seen_keys.add(live)
+            fields = self._shape(rng, live)
+            AuditEvent.objects.create(
+                action="session_rotation",
+                category="authentication",
+                severity="low",
+                description=fields.pop("description", "a session event"),
+                **fields,
+            )
+        self._assert_no_raw_key_anywhere()
