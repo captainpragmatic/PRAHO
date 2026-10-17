@@ -199,6 +199,41 @@ With several vhosts on a node, a request whose `Host` matches no vhost is answer
 the account name's vhost. This is not new (whichever customer domain sorts first gets it today), but account
 names are opaque and many, so a node should serve a neutral default site first. Recorded for the plan.
 
+## S10: creating the child under a disabled customer domain
+
+`create-domain --parent` under a customer domain disabled with `--subservers` created the child **enabled**:
+`list-domains` showed no `Disabled:` line and the account name answered 200 (with the child's own default
+page, since the link was not yet in place). A disabled parent does not disable a new child, so PRAHO must
+disable the child itself whenever the account is suspended or the node copy is a migration target that is
+not yet active, before the link exposes the customer's files.
+
+## S11: a customer replacing the web root
+
+Test accounts `subparent` and `otheracct`; commands run as `subparent` (the customer), not root.
+
+```text
+id www-data: groups=33(www-data),1004(subparent),1005(otheracct)      <- Apache can read every customer's home
+/home/otheracct and its public_html: drwxr-x--- otheracct:otheracct
+PHP-FPM pools: no open_basedir set
+
+account name, link repointed by the customer at /home/otheracct/public_html:  static secret.txt  OTHER-SECRET [200]
+                                                                              PHP o.php          404
+account name, link repointed at /etc:                                          /hostname          vm-b.praho.test [200]
+the customer's OWN site, a nested link to the other account (public_html/peek): refused (Apache error page)
+the customer's OWN site, public_html renamed and replaced by a link to otheracct: secret.txt     OTHER-SECRET [200]
+the customer's OWN site, public_html replaced by a link to /etc:                 /hostname       vm-b.praho.test [200]
+the customer's PHP reading the other account's file directly:                    Permission denied
+```
+
+`SymLinksIfOwnerMatch` guards links below the document root, not the document root itself. So any customer who
+can write their own home can already swap their **own** site's root for another customer's web files or `/etc`
+and read them through Apache, because `www-data` belongs to every customer's group. The account name's link
+adds no capability a customer does not have today; it is one more root of the same kind. The weakness is in
+the node's present setup, independent of this design, and needs its own decision (for example a root-owned,
+customer-immutable web-root path, or Apache no longer in customer groups). PHP is not affected: it runs as
+the customer, who cannot read other homes. The lab node runs no FTP service; customer file access paths were
+not part of this run.
+
 ## Remote API forms
 
 All the programs are on PRAHO's allowlist already. Over `remote.cgi` a bare flag is an empty value, as in the
