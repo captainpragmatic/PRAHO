@@ -424,6 +424,9 @@
       - COMPANY_COUNTRY_CODE
       - TIME_ZONE
       - BRAND_DIR
+      # The services already read it through EnvironmentFile; this keeps the deploy-time
+      # commands from running with its default of true on a host that switched ANAF off.
+      - ANAF_TRANSPORT_ENABLED
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"

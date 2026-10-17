@@ -69,6 +69,11 @@
                   <div class="text-blue-400 text-xs mt-1">
                     {% icon "globe" %} {{ item.domain_name }}
                   </div>
+                  {% if item.config.availability_unconfirmed %}
+                    <div class="mt-1">
+                      {% trans "Availability not confirmed by registrar" as unconfirmed_badge %}{% badge unconfirmed_badge icon="warning" variant="warning" size="sm" %}
+                    </div>
+                  {% endif %}
                 {% endif %}
               </div>
             </td>

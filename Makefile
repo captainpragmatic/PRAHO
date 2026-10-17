@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e test-virtualmin-lab-full test-virtualmin-drift virtualmin-lab-ensure dev-platform-lab virtualmin-probe ansible-collections
+.PHONY: help install lock-upgrade check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-e2e-csp-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-portal-server test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict lint-error-handling lint-assertion-quality virtualmin-lab-build virtualmin-lab-up virtualmin-lab-down test-virtualmin-lab test-virtualmin-contract test-virtualmin-workflows test-virtualmin-node-deploy test-virtualmin-faults test-virtualmin-e2e test-virtualmin-lab-full test-virtualmin-drift virtualmin-lab-ensure dev-platform-lab virtualmin-probe ansible-collections
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -41,6 +41,7 @@ help:
 	@echo "  make dev-e2e         - Run all services with rate limiting disabled (foreground)"
 	@echo "  make dev-e2e-bg      - Same as dev-e2e but backgrounded (waits until ready, returns)"
 	@echo "  make dev-e2e-csp     - Run E2E services with an enforced strict portal CSP (CSP_PROFILE=phase2-target|phase3-target)"
+	@echo "  make dev-e2e-csp-bg  - Same as dev-e2e-csp but backgrounded (for make test-e2e-csp)"
 	@echo "  make dev-platform    - Run platform service only (:8700)"
 	@echo "  make dev-portal      - Run portal service only (:8701)"
 	@echo ""
@@ -70,7 +71,7 @@ help:
 	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
-	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
+	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp-bg)"
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
 	@echo "  make test-security     - Validate service isolation"
 	@echo "  make show-test-deps    - Print the test dependency graph"
@@ -168,6 +169,8 @@ install:
 	fi
 	@echo "📦 Syncing all dependency groups via uv → $(VENV_DIR)/..."
 	uv sync --all-groups
+	@echo "🌐 Installing Chromium for the page-monitor self-tests and the e2e suite (skipped when cached)..."
+	$(VENV_DIR)/bin/playwright install chromium
 	@echo "🔗 Installing pre-commit hooks..."
 	$(VENV_DIR)/bin/pre-commit install
 	@echo "🔧 Patching pre-commit hook for cross-platform dynamic resolution..."
@@ -295,8 +298,16 @@ dev-e2e-csp: check-venv-platform build-css
 	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "Invalid CSP_PROFILE"; exit 2; }
 	@CSP_PROFILE="$(CSP_PROFILE)" CSP_REPORT_ONLY=false $(PYTHON_SHARED) scripts/e2e_stack.py serve
 
+# Serves the portal's default CSP (phase3-target, enforced) unless CSP_PROFILE or CSP_REPORT_ONLY
+# is exported in the calling shell. For the strict-CSP gates, start dev-e2e-csp-bg instead.
 dev-e2e-bg: check-venv-platform build-css
 	@$(PYTHON_SHARED) scripts/e2e_stack.py start
+
+# The background twin of dev-e2e-csp: the profile make test-e2e-csp expects, enforced.
+dev-e2e-csp-bg: CSP_PROFILE ?= phase2-target
+dev-e2e-csp-bg: check-venv-platform build-css
+	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "Invalid CSP_PROFILE"; exit 2; }
+	@CSP_PROFILE="$(CSP_PROFILE)" CSP_REPORT_ONLY=false $(PYTHON_SHARED) scripts/e2e_stack.py start
 
 .PHONY: stop-e2e check-e2e
 stop-e2e:
@@ -608,6 +619,8 @@ test-e2e-csp:
 	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
 	@echo "🔒 [CSP E2E] Verifying the $(CSP_PROFILE) browser violation oracle..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@# Stop before any browser starts when the running stack serves another policy.
+	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" $(PYTHON_SHARED) scripts/e2e_stack.py csp-check
 	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" $(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py tests/e2e/portal/csp_altcha_widget_gate.py tests/e2e/portal/test_domain_checkout_flow.py
 	@echo "✅ Strict-CSP violation oracle verified!"
 

@@ -116,6 +116,9 @@ jobs:
     - name: Lint all services
       run: make lint
 
+    - name: Install the browser the page-monitor self-tests drive
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
     - name: Run full test suite (make test-fast — all 5 phases)
       # Integration tests need a functional cache. Platform unit commands select
       # config.settings.test explicitly, and portal commands select their own settings.

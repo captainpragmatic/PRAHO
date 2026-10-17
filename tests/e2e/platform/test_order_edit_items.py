@@ -115,7 +115,7 @@ def test_the_full_page_item_form_shows_the_domain_field_for_a_domain_product(
     expect(domain_section).to_be_hidden()
 
 
-@pytest.mark.expect_server_errors("status of 500", "/items/add/")
+@pytest.mark.expect_http_errors(500, url="*/items/add/")
 def test_a_failed_save_is_reported_and_a_redirect_is_followed(
     monitored_staff_page: Page, order_edit: OrderEditScenario
 ) -> None:

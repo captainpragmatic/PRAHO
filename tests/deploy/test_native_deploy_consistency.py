@@ -383,3 +383,11 @@ def test_rsync_excludes_controller_state_but_preserves_existing_runtime_state(tm
     assert retained.read_text() == "existing-runtime-state"
     assert (target / "main.tf").is_file() and (target / "terraform.tfvars.example").is_file()
     assert not any((target / name).exists() for name in (*private, ".terraform", ".state"))
+
+
+def test_platform_passthrough_carries_the_anaf_switch() -> None:
+    # The services read the whole .env through EnvironmentFile, but the deploy-time manage.py commands
+    # see only this list, so without it they run with ANAF_TRANSPORT_ENABLED at its default of true.
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
+    assert "ANAF_TRANSPORT_ENABLED" in task["vars"]["praho_passthrough"]
