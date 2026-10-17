@@ -145,6 +145,7 @@ These are live defects today. Each ships with a test that fails without it.
     - Issued on Platform with `acme` and `josepy` through DNS-01 on the account zone (P1.9), so it works before the customer's DNS points anywhere. The ACME account key and each certificate key live in the vault, per hostname.
     - **Let's Encrypt budget, durable.** New names are limited per registered domain over a rolling window that refills continuously; renewals of an existing identifier set do not consume it. Each issuance is an `AccountNameCertificate` row (P1.1) moved `pending → ordering → issued|failed` under a row lock; a reservation is taken atomically on the zone's `AccountNameCertificateBudget` row (rolling seven-day count, setting `dns.account_cert_weekly_budget`, default 40). The issuer honours `Retry-After`, resumes an `ordering` row after a crash from its stored order URL instead of ordering twice, and an ensure or a move never orders for a name that already has valid material (it reinstalls the stored certificate); only the scheduled renewal orders while a valid certificate exists. The issued certificate is kept on its own fields, apart from the attempt state, so a renewal in `ordering` or `failed` leaves the current certificate in force. A staff alert fires at 80% of the budget.
     - **Readiness is valid material installed on the intended node,** not the attempt state: every sync entry point (P1.4, P1.8, "Repair DNS", P1.12's email) publishes and announces a name only when an unexpired certificate for it is installed on `target_server`. A first issuance still `pending`, `ordering` or `failed` keeps the name unpublished and unannounced; a failing renewal does not unpublish a name whose certificate is still valid.
+    - **Public Suffix gate, enforced.** A setting `dns.account_zone_psl_shipped` (default off) is set by staff only once the zone's Public Suffix List entry is confirmed shipped in current browsers. Until it is on, a published account name serves the node's neutral default site (P1.16) and never customer content: P1.15 does not link the web root, and hiding the preview link alone would not stop direct visits or customer CNAMEs setting a zone-wide cookie. Turning it on links the web roots on the next sync.
     - Renewal runs daily for certificates under 30 days left.
     - Distribution by playbook with the existing temporary-vars-file pattern (`no_log`, never argv): write the PEMs to a root-only temporary directory on the node, `install-cert --domain <name> --cert <path> --key <path>`, delete the files in the same play.
     - `ensure_node_account_name` installs the current certificate before the name's records are published.
@@ -218,7 +219,7 @@ These are live defects today. Each ships with a test that fails without it.
 7. **P2.7 Cleanup** (contract steps 8 to 10), retryable, in that order.
 8. **P2.8 Drain finalisation.**
    - Auto-confirm (system actor, audited) only when every migration is past step 10 and no bridge is `pending`, `active` or `failed`.
-   - Hostnames of non-live accounts (error, provisioning) left on the drained node have their records withdrawn, so no address is published and the node's IP being reused later cannot take them over. The names are not retired: only termination retires a name, so a later retry or recovery keeps the same hostname.
+   - Hostnames of non-live accounts (error, provisioning) left on the drained node have their records withdrawn, so no address is published and the node's IP being reused later cannot take them over. The names are not retired: only termination retires a name, so a later retry or recovery keeps the same hostname. Their `target_server` is cleared in the same step (the field is nullable), because it protects the server row and would otherwise block deleting the drained node; a later recovery sets it again.
 9. **P2.9 Recovery onto a new node, with the same contract in "source unavailable" mode.**
    - No barrier and no bridge.
    - Restore from the latest backup, verify, the account name ensured on the target with its certificate (P1.4), the point of no return, DNS convergence; suspension state preserved.
@@ -260,7 +261,11 @@ These are live defects today. Each ships with a test that fails without it.
    - Each record carries `managed_by` (`praho` / `customer` / `imported`).
    - Audit wiring.
    - Test: `tests/domains/test_hosted_zone_fsm.py`.
-3. **P4.3 Import existing records.** Query the current authoritative servers for the apex, `www`, `mail`, `_dmarc`, `autodiscover`, common DKIM selectors and common SRV names. Test with a fixture zone.
+3. **P4.3 Import the complete zone before activation.** Arbitrary subdomains, verification TXT records, uncommon DKIM selectors and custom service records cannot be found by lookups, so querying common names is not an import.
+   - Take the zone from its current provider (a zone-file export or the provider's API), or from a zone file the customer uploads.
+   - Probing common names (apex, `www`, `mail`, `_dmarc`, `autodiscover`, common DKIM selectors and SRV names) only cross-checks the import; a probe answer missing from the import blocks activation.
+   - The customer confirms the imported record inventory before the nameserver switch is offered.
+   - Test with a fixture zone holding records no probe would find.
 4. **P4.4 Copy the account's addresses into customer zones.** `sync_account_hostname` updates the managed apex and `www` records in the customer's zone on every move.
 5. **P4.5 Build the nameserver-switch assistant.**
    - An activation poll.
@@ -289,7 +294,10 @@ These are live defects today. Each ships with a test that fails without it.
    - DKIM published in our zones, or shown as records to add.
    - MX as a managed record.
    - PTR through a new optional `set_reverse_dns` on the cloud gateway (Hetzner API), and a checked manual step elsewhere.
-5. **P5.5 Relay mail during the bridge.** The bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
+5. **P5.5 Relay mail during the bridge.**
+   - Inbound delivery: the bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
+   - Mail clients: during the bridge window, clients that still resolve the account name to the source connect there for IMAP, POP3 and submission. The bridge forwards each advertised client port to B as TCP passthrough, so TLS terminates on B with B's certificate and the client authenticates against B; the source never holds a mailbox copy that accepts writes.
+   - The source is retired only after the client forwards are torn down at the end of the window.
 6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
 7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.
 
