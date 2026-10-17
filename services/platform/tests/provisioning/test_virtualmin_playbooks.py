@@ -216,3 +216,64 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
             names.index("Allow SSH and Webmin from the node admin allowlist"),
             names.index("Remove any-source SSH and Webmin rules"),
         )
+
+
+class NodeWebRootSymlinkTests(SimpleTestCase):
+    """virtualmin_harden.yml: a customer cannot point their web root at another customer's files or the system.
+
+    Observed in deploy/virtualmin-lab on Virtualmin 8.3.0: Debian's apache2.conf gives `<Directory />`
+    `Options FollowSymLinks`, and each vhost's `+SymLinksIfOwnerMatch` covers only what is inside public_html.
+    A customer who replaces their own public_html with a link to another home or to /etc is served through it,
+    because Apache is in every customer's group. Owner-matched links under the home base close that and keep
+    a link the customer owns to their own files (an account name's sub-server) working.
+    """
+
+    CONF = "/etc/apache2/conf-available/praho-home-symlinks.conf"
+
+    def _conf_task(self) -> dict[str, object]:
+        return task_named("virtualmin_harden.yml", "Keep customer web roots from linking outside their owner")
+
+    def test_links_under_the_home_base_must_match_their_owner(self) -> None:
+        spec = self._conf_task()["ansible.builtin.copy"]
+        assert isinstance(spec, dict)
+        self.assertEqual(spec["dest"], self.CONF)
+        self.assertEqual(spec["src"], "files/praho-home-symlinks.conf")
+        lines = [line.strip() for line in (PLAYBOOKS / spec["src"]).read_text().splitlines() if not line.startswith("#")]
+        self.assertEqual(
+            [line for line in lines if line],
+            ["<Directory /home>", "Options -FollowSymLinks +SymLinksIfOwnerMatch", "AllowOverride None", "</Directory>"],
+        )
+
+    def test_the_guard_is_enabled_validated_and_then_loaded(self) -> None:
+        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
+        enable = task_named("virtualmin_harden.yml", "Enable the web root link guard")
+        self.assertIn("a2enconf praho-home-symlinks", command_text(enable))
+        check = task_named("virtualmin_harden.yml", "Validate the Apache configuration")
+        self.assertIn("apache2ctl configtest", command_text(check))
+        order = [
+            "Keep customer web roots from linking outside their owner",
+            "Enable the web root link guard",
+            "Validate the Apache configuration",
+            "Forget which web root link guard Apache loaded, when this run changed it",
+            "Read which web root link guard Apache last loaded",
+            "Load the web root link guard into Apache",
+            "Record which web root link guard Apache loaded",
+        ]
+        self.assertEqual([names.index(name) for name in order], sorted(names.index(name) for name in order))
+
+    def test_a_run_that_failed_after_installing_still_loads_the_guard_next_time(self) -> None:
+        """The reload depends on what Apache last loaded, not on whether this run changed the file."""
+        load = task_named("virtualmin_harden.yml", "Load the web root link guard into Apache")
+        self.assertEqual(load["ansible.builtin.service"], {"name": "apache2", "state": "reloaded"})
+        self.assertIn("web_root_guard.checksum", str(load["when"]))
+        self.assertIn("web_root_guard_loaded", str(load["when"]))
+        self.assertNotIn("notify", self._conf_task())
+        forget = task_named("virtualmin_harden.yml", "Forget which web root link guard Apache loaded, when this run changed it")
+        self.assertEqual(forget["ansible.builtin.file"]["state"], "absent")
+        self.assertIn("web_root_guard.changed", str(forget["when"]))
+        self.assertIn("web_root_guard_enabled.changed", str(forget["when"]))
+        record = task_named("virtualmin_harden.yml", "Record which web root link guard Apache loaded")
+        self.assertIn("web_root_guard.checksum", str(record["ansible.builtin.copy"]["content"]))
+        for task in tasks("virtualmin_harden.yml"):
+            with self.subTest(task=task.get("name")):
+                self.assertFalse(task.get("ignore_errors", False) and "apache" in str(task).lower())
