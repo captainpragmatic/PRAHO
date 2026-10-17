@@ -1,12 +1,11 @@
 """Bounded JSON uploads for the customer ticket API.
 
 One MiB in total leaves room for base64 and JSON under Django's request limit.
-The existing ticket scanner remains authoritative for content and file types.
+The ticket scanner, shared with staff replies, decides which files are accepted and their type.
 """
 
 import base64
 import binascii
-import mimetypes
 from typing import Any
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -41,12 +40,13 @@ def decode_attachments(value: Any) -> list[SimpleUploadedFile]:
         total += len(content)
         if not content or total > MAX_ATTACHMENT_BYTES:
             raise serializers.ValidationError(_("Attachments must be nonempty and total at most 1 MiB."))
-        uploaded = SimpleUploadedFile(
-            name, content, content_type=mimetypes.guess_type(name)[0] or "application/octet-stream"
-        )
-        safe, reason = TicketAttachmentSecurityScanner().scan_uploaded_file(uploaded, original_filename=name)
-        if not safe:
+        uploaded = SimpleUploadedFile(name, content)
+        scanner = TicketAttachmentSecurityScanner()
+        safe, reason = scanner.scan_uploaded_file(uploaded, original_filename=name)
+        if not safe or scanner.identified_type is None:
             raise serializers.ValidationError(reason)
+        # The stored type is the one identified from the bytes, never a guess from the name.
+        uploaded.content_type = scanner.identified_type
         uploaded.seek(0)
         files.append(uploaded)
     return files

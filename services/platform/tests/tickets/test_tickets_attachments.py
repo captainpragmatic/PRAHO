@@ -129,13 +129,9 @@ class TicketAttachmentTest(TestCase):
             }
         )
 
-        # Should still create comment but not attachment
-        comment = TicketComment.objects.filter(ticket=self.ticket).first()
-        self.assertIsNotNone(comment)
-
-        # Should not create attachment
-        attachment_count = TicketAttachment.objects.filter(comment=comment).count()
-        self.assertEqual(attachment_count, 0)
+        # A reply with a file that cannot be attached is refused whole: no comment, no attachment.
+        self.assertFalse(TicketComment.objects.filter(ticket=self.ticket).exists())
+        self.assertFalse(TicketAttachment.objects.filter(ticket=self.ticket).exists())
 
     def test_invalid_file_type(self):
         """Test invalid file type rejection"""
@@ -155,13 +151,9 @@ class TicketAttachmentTest(TestCase):
             }
         )
 
-        # Should create comment but not attachment
-        comment = TicketComment.objects.filter(ticket=self.ticket).first()
-        self.assertIsNotNone(comment)
-
-        # Should not create attachment
-        attachment_count = TicketAttachment.objects.filter(comment=comment).count()
-        self.assertEqual(attachment_count, 0)
+        # A reply with a file that cannot be attached is refused whole: no comment, no attachment.
+        self.assertFalse(TicketComment.objects.filter(ticket=self.ticket).exists())
+        self.assertFalse(TicketAttachment.objects.filter(ticket=self.ticket).exists())
 
     def test_attachment_download_security(self):
         """Test attachment download security"""

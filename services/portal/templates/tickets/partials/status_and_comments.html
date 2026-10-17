@@ -150,7 +150,7 @@
                         <div class="flex items-center space-x-3">
                             <!-- File Upload -->
                             {% trans "Attach files" as attach_files_label %}
-                            {% input_field "attachments" input_type="file" html_id="file-input" container_class="hidden" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.zip,.rar" aria_label=attach_files_label multiple=True %}
+                            {% input_field "attachments" input_type="file" html_id="file-input" container_class="hidden" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" aria_label=attach_files_label multiple=True %}
                             {% trans "Attach" as attach_label %}{% button attach_label type="button" button_id="attach-btn" icon="paperclip" size="sm" variant="secondary" %}
 
                             <!-- File list display -->

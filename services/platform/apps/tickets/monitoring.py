@@ -138,7 +138,6 @@ class SecurityEventTracker:
             "failed_access_attempts": self._count_cache_events("failed_access", cutoff_time),
             "suspicious_uploads": self._count_cache_events("uploads", cutoff_time),
             "rate_limit_violations": self._count_cache_events("rate_limit", cutoff_time),
-            "security_scan_failures": self._get_scan_failure_count(cutoff_time),
             "top_security_events": self._get_top_security_events(cutoff_time),
         }
 
@@ -228,18 +227,13 @@ class SecurityEventTracker:
 
         return count
 
-    def _get_scan_failure_count(self, cutoff_time: datetime) -> int:
-        """Get count of file scan failures from database"""
-        return TicketAttachment.objects.filter(uploaded_at__gte=cutoff_time, is_safe=False).count()
-
     def _get_top_security_events(self, cutoff_time: datetime) -> list[dict[str, Any]]:
         """Get top security events for monitoring"""
         # This would typically query a dedicated security events table
         # For now, return a simplified summary
         return [
-            {"event_type": "file_upload_failures", "count": self._get_scan_failure_count(cutoff_time)},
             {
-                "event_type": "attachment_downloads",
+                "event_type": "attachment_uploads",
                 "count": TicketAttachment.objects.filter(uploaded_at__gte=cutoff_time).count(),
             },
         ]
@@ -269,17 +263,11 @@ def get_ticket_security_summary() -> dict[str, Any]:
             "last_24h": {
                 "tickets_created": Ticket.objects.filter(created_at__gte=last_24h).count(),
                 "files_uploaded": TicketAttachment.objects.filter(uploaded_at__gte=last_24h).count(),
-                "unsafe_files_blocked": TicketAttachment.objects.filter(
-                    uploaded_at__gte=last_24h, is_safe=False
-                ).count(),
                 "comments_posted": TicketComment.objects.filter(created_at__gte=last_24h).count(),
             },
             "last_7d": {
                 "tickets_created": Ticket.objects.filter(created_at__gte=last_7d).count(),
                 "files_uploaded": TicketAttachment.objects.filter(uploaded_at__gte=last_7d).count(),
-                "unsafe_files_blocked": TicketAttachment.objects.filter(
-                    uploaded_at__gte=last_7d, is_safe=False
-                ).count(),
                 "unique_uploaders": TicketAttachment.objects.filter(uploaded_at__gte=last_7d)
                 .values("uploaded_by")
                 .distinct()

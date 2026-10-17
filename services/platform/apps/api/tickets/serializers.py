@@ -221,7 +221,6 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "content_type",
             "file_url",
             "is_image",
-            "is_safe",
             "uploaded_at",
         ]
 

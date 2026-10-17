@@ -384,7 +384,6 @@ class FileAccessControlTest(TestCase):
             file_size=len(b'File 1 content'),
             content_type="text/plain",
             uploaded_by=self.user1,
-            is_safe=True
         )
 
         # Create internal attachment
@@ -404,7 +403,6 @@ class FileAccessControlTest(TestCase):
             file_size=len(b'File 2 content'),
             content_type="text/plain",
             uploaded_by=self.staff_user,
-            is_safe=True
         )
 
     def tearDown(self):
@@ -448,17 +446,6 @@ class FileAccessControlTest(TestCase):
         response = self.client.get(reverse('tickets:download_attachment', args=[self.internal_attachment.id]))
         # Should not be forbidden (might be 404 if file doesn't exist, but not 403)
         self.assertNotEqual(response.status_code, 403)
-
-    def test_unsafe_file_access_blocked(self):
-        """🚨 Access to unsafe files should be blocked"""
-        # Mark attachment as unsafe
-        self.attachment1.is_safe = False
-        self.attachment1.save()
-
-        self.client.login(email="user1@example.com", password="testpass123")
-
-        response = self.client.get(reverse('tickets:download_attachment', args=[self.attachment1.id]))
-        self.assertEqual(response.status_code, 403)
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
@@ -595,7 +582,7 @@ class IntegrationSecurityTest(TestCase):
         # Verify attachment was created with security flags
         attachment = TicketAttachment.objects.filter(ticket=ticket).first()
         if attachment:  # Only test if attachment was created
-            self.assertTrue(attachment.is_safe)
+            self.assertEqual(attachment.content_type, "application/pdf")
 
             # Test secure download
             download_response = self.client.get(
@@ -654,7 +641,6 @@ class IntegrationSecurityTest(TestCase):
                 file_size=len(b'Customer 2 confidential data'),
                 content_type="text/plain",
                 uploaded_by=user2,
-                is_safe=True
             )
 
         # Login as user from customer1 and try to access customer2's attachment
