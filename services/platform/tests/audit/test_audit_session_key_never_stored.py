@@ -151,3 +151,28 @@ class BulkCreateIsAuditedLikeSaveTests(TestCase):
         for conflict_mode in ({"ignore_conflicts": True}, {"update_conflicts": True}):
             with self.assertRaises(AuditImmutabilityError):
                 AuditEvent.objects.bulk_create([self._unsaved("x" * 32)], **conflict_mode)
+
+
+class SessionInfoKeepsItsOtherFieldsTests(TestCase):
+    def test_session_times_survive_beside_the_digested_key(self) -> None:
+        user = User.objects.create_user(email="times@example.com", password="x-pass-123")
+        raw = "r" * 32
+        created_at = "2026-10-17T10:00:00.123456+00:00"
+        event = AuditService.log_event(
+            AuditEventData(event_type="logout", description="signed out"),
+            AuditContext(
+                user=user,
+                session_key=raw,
+                metadata={
+                    "session_info": {
+                        "session_key": raw,
+                        "session_created": created_at,
+                        "duration_human": "0:42:07.000001",
+                    }
+                },
+            ),
+        )
+        info = event.metadata["session_info"]
+        self.assertEqual(info["session_key"], session_key_digest(raw))
+        self.assertEqual(info["session_created"], created_at, "a timestamp is not a session key")
+        self.assertEqual(info["duration_human"], "0:42:07.000001")
