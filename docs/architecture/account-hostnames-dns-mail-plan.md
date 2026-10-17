@@ -11,18 +11,21 @@ Every task: a test that fails first (quote the failure line), the fix, green, `m
   - a PEM never goes through the API; certificates travel by playbook and `install-cert` receives file paths;
   - labels are `[a-z0-9]` only;
   - punycode domains (`xn--`) are rejected today, which is fixed in P0.1.
-- **One vhost serves one certificate,** so the account name cannot be a ServerAlias on the customer's vhost. It is a Virtualmin alias domain with its own web and ssl features, proven in P1.0, with no alternative design planned.
+- **One vhost serves one certificate,** so the account name cannot be a ServerAlias on the customer's vhost. It is a **Virtualmin sub-server of the customer domain** with its own vhost and certificate, its web root a relative symlink to the customer's (`docs/domain/virtualmin-account-subserver-contract.md`). An alias domain was disproved first (`virtualmin-account-alias-contract.md`).
 - **Recovery today recreates empty domains** (`virtualmin_disaster_recovery.py:44`), and restore never changes `account.server`. P2.7 adds a real recover-to-node service.
-- **Alias domains appear in `list-domains`** and would corrupt the account sync (`virtualmin_views.py:~1705`), `update_server_statistics` (`virtualmin_service.py:1569`) and `list_migration_domains` (`virtualmin_migration_service.py:108`). They are filtered in P1.7.
-- **There is no ACME client.** Virtualmin GPL's DNS-01 needs BIND, and nodes run without it. The wildcard is issued on Platform with the Python `acme` and `josepy` libraries, so the Cloudflare token stays off the nodes.
+- **Sub-servers appear in `list-domains`** (`type: Sub-server`, `parent_domain`) and would corrupt the account sync, `update_server_statistics` and `list_migration_domains`. They are filtered in P1.6.
+- **There is no ACME client.** Virtualmin GPL's DNS-01 needs BIND, and nodes run without it. Certificates are issued on Platform with the Python `acme` and `josepy` libraries, so the Cloudflare token stays off the nodes.
 
-## Status (2026-10-15)
+## Status (2026-10-17)
 
-- **Phase 0 is built** (PR #695).
-- **Phase 1 is paused** after its gate task disproved the alias design.
-  - **P1.0 DISPROVEN on Virtualmin 8.3** (`docs/domain/virtualmin-account-alias-contract.md`, commit 6106e628 on `feat/adr61-phase1-account-hostnames`). An alias domain cannot carry SSL and becomes a `ServerAlias` in the customer's vhost. It has no certificate of its own, is not in the parent's backup, and serving the wildcard from the parent would put its key in the customer's backup.
-  - **Before Phase 1 resumes, choose how a node serves the account name.** Candidates: a PRAHO-managed reverse-proxy vhost outside Virtualmin's files, or a Virtualmin sub-server. Either needs its own lab proof.
-- **Tasks that depend on the alias design** and must be rewritten after that choice: P1.4 (`ensure_node_alias` / `remove_node_alias`), P1.5, the alias steps of P1.7, and P1.10's certificate-on-every-alias step.
+- **Phase 0 is built** (PR #695, merged).
+- **P1.0 is done: the sub-server design is proven on Virtualmin 8.3** (`docs/domain/virtualmin-account-subserver-contract.md` on `feat/adr61-phase1-account-hostnames`). The alias attempt before it is recorded in `virtualmin-account-alias-contract.md`. What the lab established, and what every task below relies on:
+  - the sub-server has its own vhost on 80 and 443 and its own certificate by SNI, key root-only;
+  - its `public_html` replaced by the relative symlink `../../public_html` serves the customer's site, with PHP as the customer's user; no Virtualmin program can do this (`modify-web --document-dir` refuses `..`, a `create-redirect` alias answers 403);
+  - `disable-domain` and `enable-domain` reach it only with `subservers`;
+  - a customer backup carries it only with `parent`, and an in-place restore of the customer domain keeps it;
+  - deleting the customer deletes it; deleting it alone never touches the customer's files;
+  - its key is in any archive that carries it, which rules out a wildcard on it unless every such archive is excluded (P1.10).
 
 ## Review record
 
@@ -82,12 +85,7 @@ These are live defects today. Each ships with a test that fails without it.
 
 **Ownership model.** `AccountHostname.target_server` holds the intended node: the place DNS must point. Only provisioning success, cutover and recovery change it. The reconcile sweep and "Repair DNS" converge DNS to `target_server`, never to `account.server`, so nothing can undo a cutover in flight.
 
-1. **P1.0 Prove the alias vhost in the lab.** This gates everything after it; there is no fallback design.
-   - The account name is a Virtualmin alias domain (`create-domain --alias`, web and ssl) with its own vhost.
-   - An SNI handshake for the account name serves the wildcard.
-   - The parent's backup and restore carry the alias, and disabling the parent disables the alias.
-   - No Let's Encrypt is attempted for the alias.
-   - **Key isolation:** the wildcard key is root-owned and unreadable from the customer's files, from alias installation, and from the customer's own backups.
+1. **P1.0 Prove the account-name vhost in the lab. Done** (see Status): a sub-server of the customer domain, web root mapped by a relative symlink.
 2. **P1.1 Add the models (migration 0005).**
    - `VirtualminServer.ipv4_address` and `ipv6_address`.
    - `AccountHostname`: UUID, `label` (`^[a-z0-9]{8}$`, unique, never reused), `account` (OneToOne, SET_NULL), `target_server`, `zone`, `records` (per-record publication progress: intended content, applied content, provider id, applied TTL), `previous_ttl`, `ttl_lowered_at`, `last_reconciled_at`, `retired_at`, timestamps.
@@ -103,29 +101,42 @@ These are live defects today. Each ships with a test that fails without it.
    - Tests: sibling, child and equal names are refused; a different registrable domain is accepted; changes are blocked while names are live.
 5. **P1.4 The hostname service** (`apps/provisioning/account_hostname_service.py`).
    - `sync_account_hostname(hostname)` converges records to `target_server`, persisting the intent before the call and the progress per record after it.
-   - Also: `retire_account_hostname()`, `ensure_node_alias(account, server)` and `remove_node_alias(account, server)`.
+   - `retire_account_hostname(hostname)`.
+   - `ensure_node_account_name(account, server)`: idempotent. Lists the name on `server`; if absent, `create-domain` with `domain=<label>.<zone>`, `parent=<account.domain>`, `dir=`, `web=`, `ssl=`, `desc=`. If present, it must be a `Sub-server` whose `parent_domain` is `account.domain`, else refuse (never adopt another account's row). Then runs the link playbook (P1.15) and installs the current certificate (P1.10). It returns a typed result; an ambiguous gateway answer is not success.
+   - `remove_node_account_name(account, server)`: `delete-domain` of the name only, after the same ownership check. Proven safe: it removes the sub-server's own home and never follows the link.
    - The sync acts only on accounts that are active or suspended with `provisioned_at` set.
-6. **P1.5 Validate the alias parameters.**
-7. **P1.6 Ignore alias rows in every listing.**
-   - Filter inside `list_migration_domains` on the raw values (`virtualmin_migration_service.py` ~99-116), before `SNAPSHOT_ATTRIBUTES` drops the alias marker.
-   - Server statistics stop using the name-only listing that cannot tell aliases apart (`virtualmin_service.py` ~1601).
-   - The account sync skips alias rows.
+   - **Archives never carry the account name.** Customer, chain and migration backups keep calling `backup-domain` without `parent`; PRAHO recreates the name from its own record on the node that ends up serving the account. That keeps the name's key out of every archive PRAHO stores or hands out, keeps the differential chain to one domain, and avoids a second `restore-domain` call per restore.
+   - Tests: absent → created then linked then certified; present and owned → no create, link re-applied; present under another parent or as a top-level server → refused, nothing deleted; ambiguous create → not success; remove refuses a row it does not own.
+6. **P1.5 Cascade suspend and unsuspend to the account name.** Without it the name keeps serving the customer's site while the customer domain shows the disabled page (lab S3).
+   - Every `disable-domain` and `enable-domain` PRAHO sends for a customer domain adds `subservers=`: `virtualmin_service.py` ~887 and ~1024 (suspend, activate), their compensating operations (~896, ~1033), the operation table at ~1384, the queued-operation executor (~751, ~762), the migration's source disable and enable and target enable (`virtualmin_migration_service.py` ~430, ~447, ~558), and the pair restore's disable (`virtualmin_pair_restore.py`).
+   - One helper builds the parameters (`domain_state_params(domain)`), so a new call site cannot forget the flag; a test greps the provisioning package for a literal `"disable-domain"`/`"enable-domain"` call that bypasses it.
+   - Contract suite: record `disable-domain` and `enable-domain` with `subservers=` on a domain with and without a sub-server.
+   - Tests: each call site sends the flag; with the flag removed, the lab workflow test sees the account name still serving after suspend.
+7. **P1.6 Ignore sub-server rows in every listing.**
+   - A row is the customer's domain only when its type is `Top-level server` (text `Type:` or JSON `values.type`). Sub-server and alias rows are skipped. One function decides (`is_account_domain_row(row)`), read from the raw row before `SNAPSHOT_ATTRIBUTES` drops the marker.
+   - Callers: `list_migration_domains` (`virtualmin_migration_service.py` ~114), server statistics (`virtualmin_service.py`, which must stop using the name-only listing that cannot tell rows apart), the account sync in `virtualmin_views.py`, and the gateway helpers that list all domains (`virtualmin_gateway.py` ~1298, ~1410).
+   - Tests from recorded fixtures with a sub-server row: the sync does not import it as an account, statistics do not count it, a migration listing does not offer it.
 8. **P1.7 Lifecycle at one completion boundary.**
-   - A single `on_account_ready(account)` runs on every path that finishes a create: `_handle_successful_provisioning_secure`, `_retry_create_domain` (~1272) and direct creation. It sets `target_server`, ensures the alias and enqueues the sync.
-   - **Retire the name only where an account becomes `terminated`** (the two writers, ~1140 and ~1291) and on row delete.
-   - **Removing a failed migration target, or any rollback delete,** calls `remove_node_alias(target)` and never retires the name (`_rollback` ~415-429, `_execute_rollback` ~688).
-   - Tests: every create path ends ready; a failed migration's cleanup keeps the label and the records; termination retires them.
+   - A single `on_account_ready(account)` runs on every path that finishes a create: `_handle_successful_provisioning_secure` (`virtualmin_tasks.py` ~542), `_retry_create_domain` (`virtualmin_service.py` ~1298) and direct creation. It sets `target_server`, calls `ensure_node_account_name(account, account.server)` and enqueues the sync.
+   - **The same ensure runs wherever a customer domain is recreated from nothing:** a migration's target after `restoring` and before `activating` (`_restore`/`_activate`), a recovery or `rebuild_server_from_praho` restore, and a backup restore that recreated the domain. An in-place restore keeps the name (lab S9), so the ensure is a cheap no-op there.
+   - **A migration target is created disabled.** The ensure runs while the target is still disabled; `_activate`'s cascading enable (P1.5) turns the name on with the account.
+   - **The pair restore's 503 barrier must cover the account name.** It is keyed on the customer vhost's names today; the account name is a separate vhost that serves the same files through the link, so its name joins the barrier's host set, and it is disabled and re-enabled with the customer domain (P1.5).
+   - **Retire the name only where an account becomes `terminated`** and on row delete. Deleting the customer domain on the node removes the sub-server with it.
+   - **Removing a failed migration target, or any rollback delete,** deletes the customer domain on the target, which removes the target's copy of the name; it never retires the name (`_rollback`, `_execute_rollback`).
+   - Tests: every create path ends ready with the name ensured; a migration ends with the name on the target, enabled with the account; a failed migration's cleanup keeps the label and the records; termination retires them; the barrier's host set includes the account name.
 9. **P1.8 Reconcile sweep, every 15 minutes.** It converges to `target_server`, with an atomic skip (a row lock and a re-check) for accounts in a migration or recovery.
 10. **P1.9 DNS-01 support in the gateway.**
     - TXT records with several values per name.
     - Concurrent challenges, each owned by its order (`praho:acme:<order>`).
     - Owned cleanup, including after a crash (sweep stale owned TXT records).
-11. **P1.10 Wildcard certificate.**
-    - The Python `acme` and `josepy` libraries on Platform.
-    - The ACME account key and the certificate key live in the vault separately.
-    - Renewal runs daily, under 30 days left.
-    - Distribution through a playbook using the existing temporary-vars-file pattern (`no_log`, never argv).
-    - Every alias, new or restored, receives the current certificate before its records are published.
+11. **P1.10 A certificate per account name.**
+    - **Per name, not a wildcard.** A sub-server's key sits in its own `/etc/ssl/virtualmin/<id>/` (root-only, lab S4), and any archive that carries the sub-server carries the key (S5). A wildcard there would put one key for every customer's name on every node and into any `parent` backup. A per-name certificate exposes only that customer's own name, which the owner accepted.
+    - Issued on Platform with `acme` and `josepy` through DNS-01 on the account zone (P1.9), so it works before the customer's DNS points anywhere. The ACME account key and each certificate key live in the vault, per hostname.
+    - **Let's Encrypt budget.** Certificates per registered domain are limited per week (renewals are exempt); new names queue against a budget setting (`dns.account_cert_weekly_budget`, default 40), and an exhausted budget leaves the name on its self-signed certificate and retries the next window. A staff alert fires at 80% of the budget.
+    - Renewal runs daily for certificates under 30 days left.
+    - Distribution by playbook with the existing temporary-vars-file pattern (`no_log`, never argv): write the PEMs to a root-only temporary directory on the node, `install-cert --domain <name> --cert <path> --key <path>`, delete the files in the same play.
+    - `ensure_node_account_name` installs the current certificate before the name's records are published.
+    - Tests: issuance through a faked ACME directory and DNS gateway; budget exhaustion leaves the name unpublished-safe; renewal picks only near-expiry names; the playbook leaves no PEM behind (lab).
 12. **P1.11 Show the account name and DNS instructions in the Portal.**
     - Builds on P0.9.
     - `ServiceDetailSerializer` adds `hosting` (account name, path, instruction records), read safely when no account exists.
@@ -136,6 +147,11 @@ These are live defects today. Each ships with a test that fails without it.
     - "Repair DNS" enqueues a sync and returns at once; no DNS lookup inside a request.
     - Server IPs on the server pages.
 15. **P1.14 WordPress preview decision** (owner).
+16. **P1.15 The link playbook** (`infrastructure/ansible/playbooks/virtualmin_account_name_link.yml`, allowlisted in `ansible_service.py`).
+    - Inputs: the sub-server's home (from the node's own listing, never built from user input), the customer's unix user. Validates that the home is `/home/<user>/domains/<label>.<zone>` and that `<user>` owns it.
+    - Replaces `public_html` with the relative symlink `../../public_html`, owned by the customer's user (`chown -h`); idempotent (`ln -sfn` semantics, a real directory is moved aside once as `public_html.own`).
+    - Lab test: the name serves the customer's marker and PHP as the customer's user; a second run changes nothing; `validate-domains --all-features` stays clean.
+17. **P1.16 A neutral default site on every node.** With several vhosts, a request for an unknown name is answered by the first one Apache loads (lab side finding), and opaque account names sort early. `virtualmin.yml` installs a PRAHO default vhost that loads first and answers 404 with no customer content, on 80 and 443. Lab test: an unknown `Host` gets the default site, never a customer's marker.
 
 ## Phase 2: cutover, bridge and recovery
 
@@ -157,7 +173,7 @@ These are live defects today. Each ships with a test that fails without it.
 9. **Remove the retained source content, with the bridge vhost still in place.**
 10. **Tear down the bridge** and restore the TTL.
 
-- **Before step 4, "keep source"** restores the barrier state (step 2) and removes the target copy and its alias, keeping the label.
+- **Before step 4, "keep source"** restores the barrier state (step 2) and removes the target's copy of the customer domain (which removes its account-name sub-server), keeping the label.
 - **After step 4, `needs_review`** offers only "keep target" actions: retry convergence, extend the bridge.
 - **Tests:**
   - a failure right after the bridge is activated replays forward and never offers "keep source";
@@ -188,7 +204,7 @@ These are live defects today. Each ships with a test that fails without it.
    - Hostnames of non-live accounts (error, provisioning) left on the drained node are retired, so its IP being reused later cannot be taken over.
 9. **P2.9 Recovery onto a new node, with the same contract in "source unavailable" mode.**
    - No barrier and no bridge.
-   - Restore from the latest backup, verify, the certificate on the alias, the point of no return, DNS convergence; suspension state preserved.
+   - Restore from the latest backup, verify, the account name ensured on the target with its certificate (P1.4), the point of no return, DNS convergence; suspension state preserved.
    - New `virtualmin_recovery_service.py` and the `virtualmin_recover_node` command (dry-run by default).
    - It replaces the restricted legacy rebuild (P0.7).
 10. **P2.10 Authoritative checks off the request path.**
@@ -270,7 +286,7 @@ These are live defects today. Each ships with a test that fails without it.
   - recovery;
   - server deletion (cascade).
 - **Only termination retires a name:** the two writers of `terminated`, and row delete.
-- **Rollback deletes keep the name.** A migration target removed by "keep source", `_rollback`, or `_execute_rollback`'s delete-domain calls `remove_node_alias` on that node only.
+- **Rollback deletes keep the name.** A migration target removed by "keep source", `_rollback`, or `_execute_rollback`'s delete-domain deletes the customer domain on that node only, which removes that node's account-name sub-server; the label and records stay.
 - **Audit actions,** each with a migration and an entry in `BUSINESS_AUDIT_EVENTS.md`:
   - hostname synced, retired and drift repaired;
   - wildcard issued and distributed;

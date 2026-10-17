@@ -38,7 +38,7 @@ A raw node IP is not offered, so no customer ever holds an address that a move m
 
 ### 3. Certificates
 
-- **Account names and previews.** One wildcard certificate for `*.<zone>`, issued by DNS-01 through our Cloudflare zone and deployed to every node. No per-account issuance and no Let's Encrypt rate limits; mail clients connecting to the account name get a valid certificate too.
+- **Account names and previews.** Each account name is a Virtualmin sub-server of the customer's domain, with its web root linked to the customer's, so it has its own vhost and its own certificate (lab contract: `docs/domain/virtualmin-account-subserver-contract.md`). The certificate is per name, issued by DNS-01 through our Cloudflare zone on Platform. A wildcard is not used: a sub-server's key travels with any archive that carries it, and one key for every customer's name must not. Per-name issuance is bounded by Let's Encrypt's weekly limit per registered domain, which the issuer budgets.
 - **The customer's own domain.** Virtualmin requests it by HTTP-01 once the domain points at the account. No certificate is issued before the switch, so HTTPS starts a few minutes after cutover. That trade-off was accepted.
 - **Moves.** Certificates travel with the account in the backup and are installed on the new node, not reissued (the Let's Encrypt duplicate-certificate limit is 5 per week).
 - **CAA.** The DNS check (section 6) flags a customer CAA record that excludes Let's Encrypt.
