@@ -172,6 +172,7 @@ jobs:
           name: virtualmin-lab-evidence
           path: |
             output/playwright/virtualmin-lab/
+            output/virtualmin-lab/faults/
             logs/virtualmin_e2e_server.log
           if-no-files-found: ignore
           retention-days: 14
