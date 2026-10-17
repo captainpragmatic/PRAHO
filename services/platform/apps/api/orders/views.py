@@ -219,11 +219,14 @@ def product_detail(request: Request, slug: str) -> Response:
     return Response({**serializer.data, **policy.as_dict()})
 
 
-def _domain_line(product: Product, item: dict[str, Any], currency_code: str) -> Result[dict[str, Any], str]:
+def _domain_line(
+    product: Product, item: dict[str, Any], currency_code: str, seen: set[str]
+) -> Result[dict[str, Any], str]:
     """A domain line priced from the TLD price list: the one quote cart, preflight and order use.
 
     The generic domain product has no ProductPrice. The line is a one-off purchase of the
     registration period (renewals follow the domain's own auto-renew, not a subscription).
+    seen holds the request's canonical domain names so far: one name cannot be sold twice.
     """
     from apps.domains.services import DomainOrderService  # noqa: PLC0415  # ADR-0007: cross-app at call time
 
@@ -233,6 +236,9 @@ def _domain_line(product: Product, item: dict[str, Any], currency_code: str) -> 
     if quoted.is_err():
         return Err(quoted.unwrap_err())
     quote = quoted.unwrap()
+    if quote.domain_name in seen:
+        return Err(str(_("This domain is in your cart twice.")))
+    seen.add(quote.domain_name)
     return Ok(
         {
             "product_id": product.id,
@@ -322,6 +328,7 @@ def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-
             else {}
         )
 
+        domain_names: set[str] = set()
         for item_data in cart_items:
             product_id = item_data.get("product_id")
             product_slug = item_data.get("product_slug")
@@ -341,7 +348,7 @@ def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-
                 continue
 
             if product.product_type == "domain":
-                line = _domain_line(product, item_data, currency_code)
+                line = _domain_line(product, item_data, currency_code, domain_names)
                 if line.is_err():
                     warnings.append(
                         {"type": "domain_unavailable", "product_name": product.name, "message": line.unwrap_err()}
@@ -567,6 +574,7 @@ def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: mul
         preview_items = []
         subtotal_cents = 0
 
+        domain_names: set[str] = set()
         for cart_item in cart_items:
             # Get product and pricing — resolve by UUID or slug
             try:
@@ -588,7 +596,7 @@ def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: mul
                 logger.info(f"🔎 [API] Found product: {product.name} (id={product.id})")
 
                 if product.product_type == "domain":
-                    line = _domain_line(product, cart_item, currency.code)
+                    line = _domain_line(product, cart_item, currency.code, domain_names)
                     if line.is_err():
                         return Response(
                             {"success": False, "errors": [line.unwrap_err()], "warnings": []},
@@ -896,6 +904,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
         price_warnings = []
         currency_code = validated_data["currency"]
 
+        domain_names: set[str] = set()
         for item_data in validated_data["items"]:
             # Fetch product and price — resolve by UUID or slug
             try:
@@ -918,7 +927,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 )
 
             if product.product_type == "domain":
-                line = _domain_line(product, item_data, currency_code)
+                line = _domain_line(product, item_data, currency_code, domain_names)
                 if line.is_err():
                     return Response(
                         {"error": line.unwrap_err(), "code": "INVALID_ORDER"}, status=status.HTTP_400_BAD_REQUEST
