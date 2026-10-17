@@ -17,6 +17,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
+from apps.common.http import mark_download
 from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     get_degraded_message,
@@ -541,7 +542,7 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpRespons
 
         # Create HTTP response with PDF
         response = HttpResponse(pdf_data, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="factura_{invoice_number}.pdf"'
+        mark_download(response, f"factura_{invoice_number}.pdf")
 
         logger.info(f"✅ [Portal Billing] PDF export for invoice {invoice_number} by customer {customer_id}")
         return response
@@ -577,7 +578,7 @@ def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpRespo
 
         # Create HTTP response with PDF
         response = HttpResponse(pdf_data, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="proforma_{proforma_number}.pdf"'
+        mark_download(response, f"proforma_{proforma_number}.pdf")
 
         logger.info(f"✅ [Portal Billing] PDF export for proforma {proforma_number} by customer {customer_id}")
         return response

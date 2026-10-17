@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.audit.services import AuditService
 from apps.common.decorators import billing_staff_required
+from apps.common.http import mark_download
 from apps.common.operator import operator_is_romanian
 
 from .d390 import D390ExportError, Declarant, render_d390_xml, render_reconciliation_csv, validate_supplier
@@ -75,10 +76,7 @@ def d390_report(request: HttpRequest) -> HttpResponse:
                     },
                 )
                 response = HttpResponse(content, content_type=content_type)
-                response["Content-Disposition"] = (
-                    f'attachment; filename="d390-services-draft-{report.period.label}.{action}"'
-                )
-                response["Cache-Control"] = "private, no-store"
+                mark_download(response, f"d390-services-draft-{report.period.label}.{action}")
                 return response
             except D390ExportError as exc:
                 export_form.add_error(None, str(exc))

@@ -31,6 +31,7 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.http import mark_download
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import company_lookup_available, store_localisation_preferences
 from apps.common.rate_limit_feedback import (
@@ -1257,7 +1258,7 @@ def data_export_download_view(request: HttpRequest, export_id: UUID) -> HttpResp
         return redirect("users:data_export")
 
     response = HttpResponse(content, content_type="application/json")
-    response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export_id}.json"'
+    mark_download(response, f"gdpr-export-{export_id}.json")
     return response  # @never_cache marks it no-store
 
 

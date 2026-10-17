@@ -28,6 +28,7 @@ from apps.audit.export_files import read_export_file
 from apps.audit.models import DataExport
 from apps.audit.services import AuditService, ComplianceEventRequest, GDPRConsentService, GDPRExportService
 from apps.common.encryption import DecryptionError
+from apps.common.http import mark_download
 from apps.common.performance.rate_limiting import BurstRateThrottle, CustomerRateThrottle
 from apps.users.mfa import staff_must_enrol
 from apps.users.models import User
@@ -229,6 +230,5 @@ def data_export_download_api(request: Request, request_data: dict[str, Any], exp
         )
     )
     response = HttpResponse(content, content_type="application/json")
-    response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export.id}.json"'
-    response["Cache-Control"] = "no-store"
+    mark_download(response, f"gdpr-export-{export.id}.json")
     return response

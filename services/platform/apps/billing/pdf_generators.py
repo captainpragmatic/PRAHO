@@ -25,6 +25,7 @@ from apps.billing.bank_transfer import bank_transfer_instructions
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
+from apps.common.http import mark_download
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country, operator_is_romanian
 from apps.common.utils import format_document_date
@@ -108,7 +109,7 @@ class RomanianDocumentPDFGenerator:
 
         self.buffer.seek(0)
         response = HttpResponse(self.buffer.getvalue(), content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{self._get_filename()}"'
+        mark_download(response, self._get_filename())
 
         return response
 
