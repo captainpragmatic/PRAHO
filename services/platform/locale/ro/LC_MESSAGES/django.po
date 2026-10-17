@@ -24214,6 +24214,30 @@ msgstr "Mergeți la pagina următoare"
 msgid "We could not set up this service automatically. Our team will finish it."
 msgstr "Nu am putut configura automat acest serviciu. Echipa noastră îl va finaliza."
 
+#: apps/domains/services.py
+msgid "This domain is already managed here. Contact support if it is yours."
+msgstr "Acest domeniu este deja administrat aici. Contactați asistența dacă este al dumneavoastră."
+
+#: apps/domains/services.py
+msgid "This domain is already on another open order."
+msgstr "Acest domeniu se află deja pe o altă comandă deschisă."
+
+#: apps/domains/services.py
+msgid "This domain is already registered. You can transfer it instead."
+msgstr "Acest domeniu este deja înregistrat. Îl puteți transfera în schimb."
+
+#: apps/domains/services.py apps/orders/services.py
+msgid "This domain is on the order twice."
+msgstr "Acest domeniu apare de două ori în comandă."
+
+#: apps/api/orders/views.py
+msgid "This domain is in your cart twice."
+msgstr "Acest domeniu apare de două ori în coș."
+
+#: templates/orders/partials/order_items_list.html
+msgid "Availability not confirmed by registrar"
+msgstr "Disponibilitate neconfirmată de registrator"
+
 msgid "This order line no longer exists."
 msgstr "Această linie de comandă nu mai există."
 

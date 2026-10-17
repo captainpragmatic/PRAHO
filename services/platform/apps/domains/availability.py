@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import hashlib
+from typing import TYPE_CHECKING, Literal
 
+from django.core.cache import cache
 from django.utils.translation import gettext as _
 
 from apps.billing.currency_policy import get_selling_currency_policy
@@ -16,6 +18,30 @@ from .services import DomainRegistrarGateway, DomainValidationService, Registrar
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
+
+
+# How long a registrar's answer stands in for a fresh lookup at checkout. Long enough to cover a
+# cart-to-payment session, short enough that a name registered elsewhere meanwhile is the rare case
+# the fulfilment failure path still catches.
+VERDICT_TTL_SECONDS = 900
+Verdict = Literal["available", "taken", "unknown"]
+
+
+def verdict_cache_key(domain_name: str) -> str:
+    """A fixed-length key: a 253-character name would overflow DatabaseCache's varchar(255) key."""
+    digest = hashlib.sha256(canonicalize_domain_name(domain_name).encode()).hexdigest()
+    return f"domain-availability:{digest}"
+
+
+def record_availability(domain_name: str, *, available: bool) -> None:
+    """Record a registrar's confirmed answer. Only DomainAvailabilityService.check calls this."""
+    cache.set(verdict_cache_key(domain_name), "available" if available else "taken", VERDICT_TTL_SECONDS)
+
+
+def recorded_availability(domain_name: str) -> Verdict:
+    """The registrar's last confirmed answer for a name, or "unknown". Never makes a request."""
+    value = cache.get(verdict_cache_key(domain_name))
+    return value if value in ("available", "taken") else "unknown"
 
 
 class DomainAvailabilityService:
@@ -58,6 +84,10 @@ class DomainAvailabilityService:
         local = Domain.objects.filter(name=name).exists()
         if registrar is not None and not local:
             confirmed, available = DomainRegistrarGateway.check_domain_availability(registrar, name)
+            # The verdict comes only from the registrar's answer, never from the request; an
+            # unconfirmed answer leaves whatever was recorded before.
+            if confirmed:
+                record_availability(name, available=available)
         required = (
             registrant_requirements(registrar, customer, action)
             if registrar is not None and customer is not None
