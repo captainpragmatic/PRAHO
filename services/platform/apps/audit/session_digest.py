@@ -26,6 +26,9 @@ _DIGEST_HEX_LENGTH = 32
 # session_key_before_logout... Only such names are digested: session_info also records times and
 # durations, which are evidence, not identifiers.
 _SESSION_KEY_NAME = re.compile(r"(?:^|_)session_(?:key|id)(?:_|$)")
+# A session key named in free text with no structured counterpart, as in "session_key=<key>" or
+# "Session ID: <key>". Django session keys are 32 lowercase letters and digits.
+_LABELLED_KEY_IN_TEXT = re.compile(r"(session[ _-]?(?:key|id)\s*[:=]\s*)([a-z0-9]{32})\b", re.IGNORECASE)
 # Shorter values cannot be a Django session key (32 characters) and are never rewritten by value.
 _MIN_RAW_KEY_LENGTH = 16
 # Stored on purpose as a short, unusable prefix ("abcd1234...").
@@ -70,7 +73,7 @@ def _replace_raw(text: str, raw_keys: set[str]) -> str:
     for raw in raw_keys:
         if raw in text:
             text = text.replace(raw, session_key_digest(raw))
-    return text
+    return _LABELLED_KEY_IN_TEXT.sub(lambda match: match.group(1) + session_key_digest(match.group(2)), text)
 
 
 def _scrub(value: Any, raw_keys: set[str]) -> Any:

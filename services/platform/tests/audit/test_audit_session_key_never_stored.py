@@ -195,3 +195,19 @@ class DirectInsertsAreScrubbedTests(TestCase):
         self.assertEqual(stored.metadata["session_id"], session_key_digest(raw))
         expected = AuditIntegrityService.integrity_stamp_marker(stored)["integrity_hash"]
         self.assertEqual(stored.metadata.get("integrity_hash"), expected, "the MAC covers the digests")
+
+
+class LabelledKeysInTextAreScrubbedTests(TestCase):
+    def test_a_key_named_only_in_free_text_is_digested(self) -> None:
+        raw = "k1" + "a" * 30
+        event = AuditEvent.objects.create(
+            action="login_success",
+            category="authentication",
+            severity="low",
+            description=f"resumed session_key={raw} after a timeout",
+            metadata={"note": f"Session ID: {raw}"},
+        )
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertNotIn(raw, _all_text(stored))
+        self.assertIn(session_key_digest(raw), stored.description)
+        self.assertIn(session_key_digest(raw), stored.metadata["note"])
