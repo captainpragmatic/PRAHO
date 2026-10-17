@@ -37,6 +37,8 @@ API_WAIT_SECONDS = 120
 TRIGGER_WAIT_SECONDS = 180
 # How long settle waits for a command a fault left running to finish by itself before ending it.
 DRAIN_WAIT_SECONDS = 90
+# Started at boot (init.d/lookup-domain, the mail filter's domain lookups) and running for the node's lifetime.
+VIRTUALMIN_DAEMONS = ("/virtual-server/lookup-domain-daemon.pl",)
 # Where settle records what it found on a node; the lab workflow uploads it as an artifact, green or red.
 DIAGNOSTICS_DIR = Path(__file__).resolve().parents[3] / "output" / "virtualmin-lab" / "faults"
 # Webmin's lock files hold the locking process's PID. A failed search fails the listing (set -e), never empties it.
@@ -71,10 +73,15 @@ def docker(*argv: str, check: bool = True) -> str:
 def in_flight_operations(container: str) -> list[str]:
     """The Virtualmin commands running on a node (remote.cgi runs each as virtual-server/<program>.pl).
 
-    A failed listing is a failed test, never an empty node.
+    Virtualmin's own resident daemons live in the same directory but are not operations. A failed listing is a
+    failed test, never an empty node.
     """
     listing = docker("exec", container, "ps", "-eo", "pid=,etime=,wchan:24=,args=")
-    return [line.strip() for line in listing.splitlines() if "/virtual-server/" in line and ".pl" in line]
+    return [
+        line.strip()
+        for line in listing.splitlines()
+        if "/virtual-server/" in line and ".pl" in line and not any(daemon in line for daemon in VIRTUALMIN_DAEMONS)
+    ]
 
 
 def held_locks(container: str) -> list[str]:

@@ -74,6 +74,22 @@ def test_settle_records_nothing_on_a_quiet_node(chaos: Chaos, quick: Path) -> No
     assert list(quick.glob("*.txt")) == []
 
 
+def test_settle_leaves_virtualmins_own_daemon_running(chaos: Chaos, quick: Path) -> None:
+    daemon = "/usr/share/webmin/virtual-server/lookup-domain-daemon.pl"
+    pid_file = "/run/praho-lab-standin-daemon.pid"
+    container = chaos.bench.node("vm-a").container
+    docker("exec", "-d", container, "bash", "-c", f"echo $$ > {pid_file}; exec -a {daemon} sleep 600")
+    pid = docker("exec", container, "sh", "-c", f"sleep 1; cat {pid_file}").strip()
+    assert pid, "the stand-in daemon did not start"
+    try:
+        chaos.settle("vm-a")
+
+        assert pid in docker("exec", container, "ps", "-eo", "pid=").split(), "settle ended Virtualmin's own daemon"
+        assert list(quick.glob("*.txt")) == []
+    finally:
+        docker("exec", container, "kill", "-KILL", pid, check=False)
+
+
 def test_settle_ends_a_live_lock_holder_that_is_not_a_command(chaos: Chaos, quick: Path) -> None:
     container = chaos.bench.node("vm-a").container
     docker("exec", "-d", container, "bash", "-c", f"echo $$ > {LOCK}; exec sleep 600")
