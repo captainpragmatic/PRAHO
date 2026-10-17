@@ -21,11 +21,13 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.http import mark_download
 from apps.common.pagination import pagination_query
 from apps.common.rate_limiting import rate_limit
 from apps.settings.services import SettingsService
 from apps.users.models import User
 
+from .download_audit import audit_attachment_download
 from .models import Ticket, TicketAttachment, TicketComment
 from .security import TicketAttachmentSecurityScanner
 from .services import TicketStatusService
@@ -698,6 +700,7 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
             response = HttpResponse(f.read(), content_type=attachment.content_type)
     except OSError:
         raise Http404("File could not be read") from None
-    response["Content-Disposition"] = f'attachment; filename="{attachment.filename}"'
+    mark_download(response, attachment.filename)
     response["Content-Length"] = attachment.file_size
+    audit_attachment_download(attachment, channel="web", user=user)
     return response

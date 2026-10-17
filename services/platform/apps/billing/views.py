@@ -57,6 +57,7 @@ from apps.common.decorators import (
     staff_rate_limit,
 )
 from apps.common.financial_arithmetic import parse_major_units_to_cents
+from apps.common.http import mark_download
 from apps.common.mixins import get_search_context
 from apps.common.operator import operator_country, operator_is_romanian
 from apps.common.pagination import pagination_query
@@ -1568,7 +1569,7 @@ def invoice_pdf(request: HttpRequest, pk: int) -> HttpResponse:
         return HttpResponse(_("This document is not available yet."), status=HTTPStatus.CONFLICT)
 
     response = HttpResponse(pdf_result.unwrap(), content_type="application/pdf")
-    response["Content-Disposition"] = f'attachment; filename="factura_{invoice.display_number}.pdf"'
+    mark_download(response, f"factura_{invoice.display_number}.pdf")
     return response
 
 
@@ -1644,7 +1645,7 @@ def generate_e_factura(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("billing:invoice_detail", pk=pk)
 
     response = HttpResponse(content_type="application/xml")
-    response["Content-Disposition"] = f'attachment; filename="e_factura_{invoice.number}.xml"'
+    mark_download(response, f"e_factura_{invoice.number}.xml")
     response.write(xml_content.encode("utf-8"))
     return response
 

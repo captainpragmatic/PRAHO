@@ -19,7 +19,9 @@ from apps.api.secure_auth import (
     require_customer_authentication,
     require_customer_role_in,
 )
+from apps.common.http import mark_download
 from apps.customers.models import Customer
+from apps.tickets.download_audit import audit_attachment_download
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.tickets.services import TicketStatusService
 
@@ -735,8 +737,9 @@ def ticket_attachment_download_api(
         response = HttpResponse(file_content, content_type=attachment.content_type or "application/octet-stream")
 
         # Set download headers
-        response["Content-Disposition"] = f'attachment; filename="{attachment.filename}"'
+        mark_download(response, attachment.filename)
         response["Content-Length"] = attachment.file_size
+        audit_attachment_download(attachment, channel="api", customer_id=customer.pk)
 
         logger.info(
             f"✅ [API] Ticket attachment download: {attachment.filename}, ticket={attachment.ticket.ticket_number}"

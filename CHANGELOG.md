@@ -240,6 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Downloads are private and never cached, and staff can fetch the e-Factura files that were sent and received.**
+  - **Headers.** Every download (invoices, proformas, exports, ticket attachments, settings and audit exports) now answers `Cache-Control: private, no-store`, so no shared or browser cache keeps it. Its filename uses an RFC 6266 header, so a name such as `Factură Ștefan.pdf` arrives intact instead of garbled.
+  - **e-Factura files.** The document page links the stored XML and ANAF's response archive. The download is billing staff only, is read through the file store rather than a local path, and is served only when its bytes still match the recorded SHA-256. A file that no longer matches is refused (409), never handed out as the record. Each attempt is audited by document, invoice, file kind and outcome.
+  - **Attachment downloads are audited.** Staff, customer and API downloads each record the attachment and ticket ids, with no filename, because a filename can carry a person's data and the audit log outlives the ticket.
+  - **Removed.** The Portal's unused second attachment proxy, which had no `no-store` and turned a refused download into an error page.
 - **No audit row, export or SIEM entry holds a usable session key** (ADR-0043). Django changes the key before the login signal fires, so the key recorded at login was the live one, and an exported audit log could resume that session. Audit rows now keep a keyed digest (`s1:…`, keyed by `AUDIT_SESSION_DIGEST_SECRET`, else derived from the secret key): equal for the same session, so search and same-session views still work. `bulk_create` of audit events is now stamped and chained like a single save, and refuses conflict modes.
 - **A ticket attachment's type now follows its bytes, not its name.**
   - **The gap.** The type came from the file extension, because the detection library the checks relied on was never installed. Any ZIP passed as a Word document, and a binary file passed as text.

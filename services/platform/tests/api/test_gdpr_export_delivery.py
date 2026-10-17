@@ -122,7 +122,7 @@ class ExportDownloadTests(ExportDeliveryTestCase):
         response = self.download(export.id)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Cache-Control"], "private, no-store")
         self.assertIn(b"exporter@example.test", response.content)
         export.refresh_from_db()
         self.assertEqual(export.download_count, 1)

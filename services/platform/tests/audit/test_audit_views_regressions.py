@@ -291,7 +291,7 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result["Content-Type"], "application/json")
-        self.assertEqual(result["Cache-Control"], "no-store")
+        self.assertEqual(result["Cache-Control"], "private, no-store")
         self.assertEqual(result.content, b'{"test": true}')
         mock_read.assert_called_once_with(export)
 

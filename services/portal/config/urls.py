@@ -76,8 +76,6 @@ urlpatterns = [
     path("robots.txt", robots_txt, name="robots_txt"),
     # API client health check
     path("status/", portal_status, name="portal_status"),
-    # API proxy endpoints
-    path("api/", include("apps.api_client.urls")),
     # Internationalization (language switch)
     path("i18n/", include("django.conf.urls.i18n")),
     # Root redirect using the same session identity as authentication middleware
