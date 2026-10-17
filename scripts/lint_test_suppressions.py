@@ -46,6 +46,16 @@ TEST_DIRS = [
 # File patterns
 TEST_FILE_GLOB = "test_*.py"
 
+# The page monitor's own self-tests must pass ignore_patterns: they prove the monitor refuses a
+# pattern that names an auth or not-found error, and applies an opted-in one. Exempt from TS001
+# only, by exact path, so every other test file stays gated.
+TS001_EXEMPT_FILES = frozenset(
+    {
+        "tests/integration/test_e2e_page_monitor.py",
+        "tests/integration/test_e2e_page_monitor_csp_and_labels.py",
+    }
+)
+
 # Severity levels
 CRITICAL = "critical"
 HIGH = "high"
@@ -168,6 +178,8 @@ def scan_file(filepath: Path) -> list[Finding]:
     lines = content.splitlines()
 
     for rule in RULES:
+        if rule["id"] == "TS001" and relative_path in TS001_EXEMPT_FILES:
+            continue
         if rule.get("multiline"):
             # Multi-line rules match against the full file content
             pattern = re.compile(rule["regex"], re.MULTILINE)

@@ -33,7 +33,7 @@ from apps.settings.services import SettingsService
 from .domain_names import canonicalize_domain_name, longest_matching_tld_suffix
 from .gateways.base import registrant_entity_type
 from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
-from .order_fulfilment import ORDERABLE_DOMAIN_ACTIONS, claim_order_line, fail_order_line
+from .order_fulfilment import ORDERABLE_DOMAIN_ACTIONS, PAYABLE_ORDER_STATUSES, claim_order_line, fail_order_line
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -1385,11 +1385,40 @@ class DomainOrderService:
     """
 
     @staticmethod
-    def quote_order_line(domain_name: str, action: str, currency_code: str) -> Result[DomainLineQuote, str]:
+    def admission_refusal(name: str, action: str, *, exclude_order_id: UUID | None = None) -> str | None:
+        """Why a register or transfer line for a canonical name cannot be sold, or None.
+
+        Fulfilment always creates a Domain and Domain.name is unique, so a name already managed here can
+        never be fulfilled again, whoever owns it. A name on another payable order would be fulfilled
+        twice. A registration the registrar last reported as taken would fail at the registrar; a
+        transfer needs the name to be taken, so that answer never refuses one. The registrar's answer
+        is the one DomainAvailabilityService recorded: nothing here makes a request.
+        """
+        from .availability import recorded_availability  # noqa: PLC0415  # availability imports this module
+
+        if Domain.objects.filter(name=name).exists():
+            return cast(str, _("This domain is already managed here. Contact support if it is yours."))
+        held = DomainOrderItem.objects.filter(
+            domain_name=name, action__in=ORDERABLE_DOMAIN_ACTIONS, order__status__in=PAYABLE_ORDER_STATUSES
+        ).filter(Q(order_item__isnull=True) | Q(order_item__provisioning_status__in=("pending", "in_progress")))
+        if exclude_order_id is not None:
+            held = held.exclude(order_id=exclude_order_id)
+        if held.exists():
+            return cast(str, _("This domain is already on another open order."))
+        if action == "register" and recorded_availability(name) == "taken":
+            return cast(str, _("This domain is already registered. You can transfer it instead."))
+        return None
+
+    @staticmethod
+    def quote_order_line(  # noqa: PLR0911  # One refusal per reason a line cannot be sold
+        domain_name: str, action: str, currency_code: str, *, exclude_order_id: UUID | None = None
+    ) -> Result[DomainLineQuote, str]:
         """What a domain line costs, from the TLD price list: the one quote cart, checkout and order use.
 
         A registration is for the TLD's shortest period, a transfer for one year. A TLD with no
-        active registrar is not orderable.
+        active registrar is not orderable, and neither is a name admission_refusal refuses.
+        exclude_order_id is the order being quoted again, whose own lines do not hold the name
+        against it.
         """
         if action not in ORDERABLE_DOMAIN_ACTIONS:
             return Err(cast(str, _("Choose to register or transfer the domain.")))
@@ -1397,6 +1426,9 @@ class DomainOrderService:
         if not is_valid:
             return Err(error)
         name = canonicalize_domain_name(domain_name)
+        refusal = DomainOrderService.admission_refusal(name, action, exclude_order_id=exclude_order_id)
+        if refusal is not None:
+            return Err(refusal)
         tld = TLDService.get_tld_pricing(DomainValidationService.extract_tld_from_domain(name))
         if tld is None:
             return Err(cast(str, _("This domain extension is not offered.")))
@@ -1412,9 +1444,22 @@ class DomainOrderService:
 
     @staticmethod
     def quote_order_item(line: OrderItem, currency_code: str) -> Result[DomainLineQuote, str]:
-        """Quote an order's domain line again, as it was ordered."""
+        """Quote an order's domain line again, as it was ordered.
+
+        The line's own order does not hold the name against it, but another line of that order
+        recorded for the same name does: both would be fulfilled.
+        """
         mode = str((line.config or {}).get("domain_mode") or "register")
-        return DomainOrderService.quote_order_line(line.domain_name, mode, currency_code)
+        quoted = DomainOrderService.quote_order_line(
+            line.domain_name, mode, currency_code, exclude_order_id=line.order_id
+        )
+        if quoted.is_ok() and (
+            DomainOrderItem.objects.filter(order_id=line.order_id, domain_name=quoted.unwrap().domain_name)
+            .exclude(order_item_id=line.pk)
+            .exists()
+        ):
+            return Err(cast(str, _("This domain is on the order twice.")))
+        return quoted
 
     @staticmethod
     def _price_domain_item(
@@ -1559,6 +1604,9 @@ class DomainOrderService:
                 domain_item.set_encrypted_epp_code(epp_code)
                 domain_item.save(update_fields=["epp_code"])
 
+            if order_item is not None and action == "register":
+                DomainOrderService._flag_unconfirmed_availability(order_item, domain_item)
+
             logger.info(f"🛒 [Domain] Created order item: {action} {domain_name} for {years} years")
             return True, domain_item
 
@@ -1566,6 +1614,31 @@ class DomainOrderService:
             logger.error(f"🔥 [Domain] Failed to create order item: {e}")
             transaction.set_rollback(True)
             return False, cast(str, _("Failed to create domain order item"))
+
+    @staticmethod
+    def _flag_unconfirmed_availability(order_item: OrderItem, domain_item: DomainOrderItem) -> None:
+        """Accept a registration no registrar answer confirmed, and say so to staff.
+
+        Checkout does not wait on a registrar that is down or a TLD without an adapter; the line is
+        sold as before, and fulfilment still fails and alerts if the name turns out to be taken.
+        """
+        from apps.audit.services import AuditContext, DomainsAuditService  # noqa: PLC0415  # ADR-0007
+
+        from .availability import recorded_availability  # noqa: PLC0415  # availability imports this module
+
+        if recorded_availability(domain_item.domain_name) != "unknown":
+            return
+        config = {**(order_item.config or {}), "availability_unconfirmed": True}
+        # update(), not save(): an OrderItem save recalculates the order's totals.
+        type(order_item).objects.filter(pk=order_item.pk).update(config=config)
+        order_item.config = config
+        DomainsAuditService.log_domain_order_event(
+            event_type="domain_availability_unconfirmed",
+            domain_order_item=domain_item,
+            context=AuditContext(actor_type="system"),
+            description=f"Registrar availability not confirmed: {domain_item.domain_name}",
+        )
+        logger.warning("⚠️ [Domain] Accepted %s without a confirmed registrar answer", domain_item.domain_name)
 
     @staticmethod
     def _process_paid_line(order: Order, item: DomainOrderItem) -> Domain | None:

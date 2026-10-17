@@ -16,6 +16,7 @@ from tests.e2e.helpers import (
     ComprehensivePageMonitor,
     _dismiss_cookie_consent,
     apply_storage_state,
+    apply_test_markers,
     ensure_fresh_session,
     login_user,
 )
@@ -98,9 +99,7 @@ def monitored_customer_page(page: Page, request: pytest.FixtureRequest, _custome
                                   check_css=True,
                                   check_accessibility=True,
                                   check_performance=False) as monitor:
-        markers = request.node.iter_markers("expect_server_errors")
-        for marker in markers:
-            monitor.add_expected_error_patterns(list(marker.args))
+        apply_test_markers(monitor, request)
         if not apply_storage_state(page, _customer_storage_state,
                                    f"{BASE_URL}/dashboard/",
                                    "/login/"):
@@ -128,9 +127,7 @@ def monitored_superuser_page(page: Page, request: pytest.FixtureRequest, _superu
                                   check_css=True,
                                   check_accessibility=True,
                                   check_performance=False) as monitor:
-        markers = request.node.iter_markers("expect_server_errors")
-        for marker in markers:
-            monitor.add_expected_error_patterns(list(marker.args))
+        apply_test_markers(monitor, request)
         if not apply_storage_state(page, _superuser_storage_state,
                                    f"{BASE_URL}/dashboard/",
                                    "/login/"):
