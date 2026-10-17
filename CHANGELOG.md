@@ -260,6 +260,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Both fields, the gates and the counts are removed. PRAHO type-checks attachments and only ever serves them as downloads; it does not scan them for malware, and ADR-0063 says so.
   - The monitoring entry called `attachment_downloads`, which counted uploads, is now `attachment_uploads`.
 
+- **An audit event logged with no object is no longer filed under a user.** Security signals, rate-limit hits, system jobs and any other event logged without an object were stored against the actor, or against user 1 when there was no actor, so anything selecting a person's events by object took them as that person's. They now carry no object, and the actor is still recorded as the actor. Logins, failed logins and logouts keep the account as their object, since they are about that account.
 - **SSH and Webmin on hosting nodes are reachable only from an allowlist.** (#498)
   - **The gap.** The node firewall opened ports 22 and 10000 to the whole internet, so a leaked Webmin password, or the next Webmin bug, could be used from anywhere.
   - **Now.** A new setting, `infrastructure.node_admin_allowed_cidrs`, lists Platform's addresses and the admin networks. The firewall opens 22 and 10000 only to those, and PRAHO's Webmin API user can log in only from them. Web, mail, DNS, FTP and Usermin stay public.
