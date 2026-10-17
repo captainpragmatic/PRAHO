@@ -145,6 +145,10 @@ class IdentificationTests(TestCase):
                 self.assertTrue(_scan("photo.jpg", bytes([0xFF, 0xD8, 0xFF, marker]) + bytes(256))[0])
         self.assertFalse(_scan("photo.jpg", b"\xff\xd8\xff\x00" + bytes(256))[0])
 
+    def test_a_jpeg_with_fill_bytes_before_its_first_marker_is_accepted(self) -> None:
+        self.assertTrue(_scan("photo.jpg", b"\xff\xd8\xff\xff\xff\xe0" + bytes(256))[0])
+        self.assertFalse(_scan("photo.jpg", b"\xff\xd8" + b"\xff" * 300)[0], "all fill and no marker is refused")
+
     def test_zip_bomb_central_directory_is_never_decompressed(self) -> None:
         bomb = _docx(extra={"word/media/bomb.bin": bytes(8 * 1024 * 1024)})
         self.assertLess(len(bomb), 64 * 1024)
