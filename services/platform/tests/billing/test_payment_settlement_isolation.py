@@ -218,11 +218,11 @@ class PaymentSettlementTests(TestCase):
         payment.succeed()
         payment.save(update_fields=["status"])
         queued: list[Invoice] = []
-        with patch.object(signals, "_trigger_virtualmin_provisioning_on_payment", side_effect=queued.append):
+        # The paid invoice's service activation runs once, with the converged document.
+        with patch.object(signals, "_activate_pending_services", side_effect=queued.append):
             with self.captureOnCommitCallbacks(execute=True):
                 result = PaymentSuccessService.converge_local_paid_document(payment.pk)
                 self.assertTrue(result.is_ok(), str(result))
-                self.assertEqual(queued, [])
             self.assertEqual([invoice.pk for invoice in queued], [self.invoice.pk])
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.status, "paid")
@@ -330,6 +330,8 @@ class PaymentSettlementTests(TestCase):
         plan = ServicePlan.objects.create(name="WP13", plan_type="shared_hosting", price_monthly=Decimal("10"))
         product = Product.objects.create(name="WP13", slug="wp13-services", product_type="shared_hosting")
         order = Order.objects.create(customer=self.customer, currency=self.currency, invoice=self.invoice)
+        # A new order's pending services wait for its confirmation; this one is confirmed.
+        Order.objects.filter(pk=order.pk).update(status="provisioning")
         services = [
             Service.objects.create(
                 customer=self.customer,

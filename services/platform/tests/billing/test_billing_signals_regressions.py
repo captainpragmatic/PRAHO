@@ -80,7 +80,6 @@ from apps.billing.signals import (
     _sync_orders_on_invoice_status_change,
     _trigger_dunning_process,
     _trigger_efactura_submission,
-    _trigger_virtualmin_provisioning_on_payment,
     _update_billing_analytics,
     _update_billing_refund_metrics,
     _update_customer_billing_stats,
@@ -1140,6 +1139,7 @@ class TestActivatePaymentServices(TestCase):
         item = MagicMock()
         item.service = service
         order = MagicMock()
+        order.status = "provisioning"  # A new order's pending service waits for its confirmation.
         order.items.filter.return_value = [item]
         payment.invoice.orders.all.return_value = [order]
         mock_result = MagicMock()
@@ -1572,22 +1572,17 @@ class TestHandlePaymentSuccess(TestCase):
     @patch("apps.billing.signals._cancel_payment_retries")
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_success_email")
-    @patch("apps.billing.signals._trigger_virtualmin_provisioning_on_payment")
-    def test_invoice_fully_paid(
-        self, mock_vm: MagicMock, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock
-    ) -> None:
+    def test_invoice_fully_paid(self, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock) -> None:
         invoice = InvoiceFactory(bill_to_country="DE")
         payment = _make_payment(invoice.customer, invoice=invoice, amount_cents=invoice.total_cents)
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_success(payment)
-            mock_vm.assert_not_called()
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "paid")
         self.assertIsNotNone(invoice.paid_at)
         mock_email.assert_called_once_with(payment)
         mock_history.assert_called_with(payment.customer, "positive")
         mock_cancel.assert_called_once_with(payment)
-        self.assertEqual(mock_vm.call_args.args[0].pk, invoice.pk)
 
     @patch("apps.billing.signals._cancel_payment_retries")
     @patch("apps.billing.signals._update_customer_payment_history")
@@ -2024,6 +2019,7 @@ class TestActivatePendingServices(TestCase):
         item = MagicMock()
         item.service = service
         order = MagicMock()
+        order.status = "provisioning"  # A new order's pending service waits for its confirmation.
         order.items.filter.return_value = [item]
         invoice.orders.all.return_value = [order]
         _activate_pending_services(invoice)
@@ -2255,53 +2251,6 @@ class TestRevertCustomerCreditScore(TestCase):
         with patch("apps.customers.services.CustomerCreditService") as mock_ccs:
             mock_ccs.revert_credit_change.side_effect = Exception("boom")
             _revert_customer_credit_score(MagicMock(), "test")
-
-
-# ===============================================================================
-# VIRTUALMIN PROVISIONING
-# ===============================================================================
-
-
-class TestTriggerVirtualminProvisioningOnPayment(TestCase):
-    @patch("apps.orders.models.OrderItem")
-    def test_no_hosting_services(self, mock_oi):
-        mock_oi.objects.filter.return_value.select_related.return_value = []
-        invoice = MagicMock()
-        invoice.number = "INV-001"
-        _trigger_virtualmin_provisioning_on_payment(invoice)
-
-    @patch("apps.orders.models.OrderItem")
-    def test_with_hosting_services(self, mock_oi):
-        service = MagicMock()
-        service.requires_hosting_account.return_value = True
-        service.get_primary_domain.return_value = "example.com"
-        item = MagicMock()
-        item.service = service
-        mock_oi.objects.filter.return_value.select_related.return_value = [item]
-        invoice = MagicMock()
-        invoice.number = "INV-001"
-
-        with patch("django_q.tasks.async_task") as mock_async:
-            _trigger_virtualmin_provisioning_on_payment(invoice)
-            mock_async.assert_called_once()
-
-    @patch("apps.orders.models.OrderItem")
-    def test_no_primary_domain(self, mock_oi):
-        service = MagicMock()
-        service.requires_hosting_account.return_value = True
-        service.get_primary_domain.return_value = None
-        item = MagicMock()
-        item.service = service
-        mock_oi.objects.filter.return_value.select_related.return_value = [item]
-        invoice = MagicMock()
-        invoice.number = "INV-001"
-        _trigger_virtualmin_provisioning_on_payment(invoice)
-
-    def test_exception_handling(self):
-        invoice = MagicMock()
-        with patch("apps.orders.models.OrderItem") as mock_oi:
-            mock_oi.objects.filter.side_effect = Exception("boom")
-            _trigger_virtualmin_provisioning_on_payment(invoice)
 
 
 # ===============================================================================

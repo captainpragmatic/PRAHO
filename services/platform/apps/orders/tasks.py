@@ -519,21 +519,9 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
     return True
 
 
-def _trigger_item_provisioning(
-    order: Order, results: MutableMapping[str, object], *, task_time_limit: int | None = None
-) -> int:
-    """Trigger provisioning with one budget for the item batch."""
-    if task_time_limit is None:
-        task_time_limit = get_task_time_limit()
-    provisioned_items = 0
-    for item in order.items.filter(provisioning_status="pending"):
-        try:
-            async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
-            provisioned_items += 1
-        except Exception as e:
-            logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for item {item.id}: {e}")
-            cast("list[str]", results["errors"]).append(f"Provisioning trigger failed for item {item.id}: {e}")
-    return provisioned_items
+def _queued_service_lines(order: Order) -> int:
+    """How many service lines the order's confirmation queued for fulfilment (confirm_order queues them)."""
+    return order.items.filter(provisioning_status="pending").exclude(product_type="domain").count()
 
 
 def _process_paid_order(
@@ -551,7 +539,7 @@ def _process_paid_order(
     """
     from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice, task_time_limit=task_time_limit)
     if result.is_err():
         error = result.unwrap_err()
         persisted_error = error[:1_000]
@@ -616,11 +604,11 @@ def _process_paid_order(
     order_result["status"] = order.status
     results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
-    # If order went to provisioning (not in_review), trigger item provisioning
+    # Confirmation queued the lines' fulfilment itself (OrderPaymentConfirmationService.confirm_order).
     if order.status == "provisioning":
-        provisioned_items = _trigger_item_provisioning(order, results, task_time_limit=task_time_limit)
-        if provisioned_items > 0:
-            results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + provisioned_items
+        results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + _queued_service_lines(
+            order
+        )
 
     # Log order confirmation
     AuditService.log_simple_event(
@@ -779,7 +767,7 @@ def _process_free_order(
     """
     from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-    result = OrderPaymentConfirmationService.confirm_order(order)
+    result = OrderPaymentConfirmationService.confirm_order(order, task_time_limit=task_time_limit)
     if result.is_err():
         logger.warning("⚠️ [OrderProcessor] Cannot confirm free order %s: %s", order.order_number, result.unwrap_err())
         return
@@ -789,17 +777,11 @@ def _process_free_order(
     order_result["status"] = order.status
     results["confirmed_orders"] = cast("int", results["confirmed_orders"]) + 1
 
-    # If order went to provisioning, trigger item provisioning
+    # Confirmation queued the lines' fulfilment itself (OrderPaymentConfirmationService.confirm_order).
     if order.status == "provisioning":
-        if task_time_limit is None:
-            task_time_limit = get_task_time_limit()
-        for item in order.items.filter(provisioning_status="pending"):
-            try:
-                async_task("apps.orders.tasks.provision_order_item", item.id, timeout=task_time_limit)
-                results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + 1
-            except Exception as e:
-                logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
-                cast("list[str]", results["errors"]).append(f"Free order provisioning trigger failed: {e}")
+        results["provisioning_triggered"] = cast("int", results["provisioning_triggered"]) + _queued_service_lines(
+            order
+        )
 
 
 def sync_order_payment_status() -> dict[str, Any]:
