@@ -25,7 +25,7 @@ _DIGEST_HEX_LENGTH = 32
 # A key name that holds a session identifier: session_key, session_id, old_session_key,
 # session_key_before_logout... Only such names are digested: session_info also records times and
 # durations, which are evidence, not identifiers.
-_SESSION_KEY_NAME = re.compile(r"(?:^|_)session_(?:key|id)(?:_|$)")
+_SESSION_KEY_NAME = re.compile(r"(?:^|_)session_(?:key|id)s?(?:_|$)")
 # A session key named in free text with no structured counterpart, as in "session_key=<key>" or
 # "Session ID: <key>". Django session keys are 32 lowercase letters and digits.
 _LABELLED_KEY_IN_TEXT = re.compile(r"(session[ _-]?(?:key|id)\s*[:=]\s*)([a-z0-9]{32})\b", re.IGNORECASE)
@@ -58,15 +58,16 @@ def _is_session_name(key: Any) -> bool:
     return isinstance(key, str) and bool(_SESSION_KEY_NAME.search(key))
 
 
-def _collect_named(value: Any, found: set[str]) -> None:
+def _collect_named(value: Any, found: set[str], *, named: bool = False) -> None:
+    # `named`: this value sits under a session-named key, so every string below it is an identifier.
     if isinstance(value, dict):
         for key, item in value.items():
-            if _is_session_name(key) and _is_session_value(item):
-                found.add(item)
-            _collect_named(item, found)
+            _collect_named(item, found, named=named or _is_session_name(key))
     elif isinstance(value, list):
         for item in value:
-            _collect_named(item, found)
+            _collect_named(item, found, named=named)
+    elif named and _is_session_value(value):
+        found.add(value)
 
 
 def _replace_raw(text: str, raw_keys: set[str]) -> str:
@@ -76,17 +77,13 @@ def _replace_raw(text: str, raw_keys: set[str]) -> str:
     return _LABELLED_KEY_IN_TEXT.sub(lambda match: match.group(1) + session_key_digest(match.group(2)), text)
 
 
-def _scrub(value: Any, raw_keys: set[str]) -> Any:
+def _scrub(value: Any, raw_keys: set[str], *, named: bool = False) -> Any:
     if isinstance(value, dict):
-        scrubbed: dict[Any, Any] = {}
-        for key, item in value.items():
-            if _is_session_name(key) and _is_session_value(item):
-                scrubbed[key] = session_key_digest(item)
-            else:
-                scrubbed[key] = _scrub(item, raw_keys)
-        return scrubbed
+        return {key: _scrub(item, raw_keys, named=named or _is_session_name(key)) for key, item in value.items()}
     if isinstance(value, list):
-        return [_scrub(item, raw_keys) for item in value]
+        return [_scrub(item, raw_keys, named=named) for item in value]
+    if named and _is_session_value(value):
+        return session_key_digest(value)
     if isinstance(value, str):
         return _replace_raw(value, raw_keys)
     return value
@@ -102,9 +99,10 @@ def digest_session_identifiers(
 ) -> tuple[str, str, Any, Any, Any]:
     """Return the event's fields with every session identifier replaced by its digest.
 
-    Two nets: by key name (session_key, session_id, *_session_key, session_key_*, at any depth,
-    session_info's keys included) and by value (every occurrence of a raw key found by the first
-    net, or passed as the event's session_key, anywhere in the description, metadata or values).
+    Two nets. By key name: session_key, session_id and their plurals, *_session_key and session_key_*,
+    at any depth, with every string below such a key included (session_info's keys too). By value:
+    every occurrence of a raw key found by the first net, or passed as the event's session_key,
+    anywhere in the description, metadata or values.
     """
     raw_keys: set[str] = set()
     if _is_session_value(session_key):

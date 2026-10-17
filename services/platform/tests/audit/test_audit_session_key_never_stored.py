@@ -211,3 +211,25 @@ class LabelledKeysInTextAreScrubbedTests(TestCase):
         self.assertNotIn(raw, _all_text(stored))
         self.assertIn(session_key_digest(raw), stored.description)
         self.assertIn(session_key_digest(raw), stored.metadata["note"])
+
+
+class SessionNamedCollectionsAreScrubbedTests(TestCase):
+    def test_every_string_under_a_session_named_key_is_digested(self) -> None:
+        live, rotated = "c1" + "b" * 30, "c2" + "d" * 30
+        event = AuditEvent.objects.create(
+            action="session_rotation",
+            category="authentication",
+            severity="low",
+            description="rotated the session",
+            metadata={
+                "session_id": [live],
+                "rotation": {"previous_session_keys": [rotated]},
+                "elsewhere": f"seen {live} earlier",
+            },
+        )
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertNotIn(live, _all_text(stored))
+        self.assertNotIn(rotated, _all_text(stored))
+        self.assertEqual(stored.metadata["session_id"], [session_key_digest(live)])
+        self.assertEqual(stored.metadata["rotation"]["previous_session_keys"], [session_key_digest(rotated)])
+        self.assertIn(session_key_digest(live), stored.metadata["elsewhere"])
