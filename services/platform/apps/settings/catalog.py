@@ -2790,8 +2790,27 @@ CATALOG: tuple[SettingDef, ...] = (
         group="support",
         section=_("Attachments"),
         label=_("Allowed file extensions"),
-        help_text=_("Permitted upload file extensions, including the dot (e.g. .pdf)."),
+        help_text=_(
+            "Permitted upload file extensions, including the dot (e.g. .pdf). Only types PRAHO can identify "
+            "from the file itself are accepted, so this list can narrow them but not add new ones."
+        ),
         input_kind="chips",
+        # Must match apps.tickets.security.ALLOWED_TYPES; a test checks they agree.
+        validation={"item_type": "string", "item_choices": [".doc", ".docx", ".jpeg", ".jpg", ".pdf", ".png", ".txt"]},
+    ),
+    SettingDef(
+        key="tickets.max_attachments_per_reply",
+        data_type="integer",
+        default=5,
+        group="support",
+        section=_("Attachments"),
+        label=_("Max attachments per staff reply"),
+        help_text=_(
+            "How many files a staff reply may carry. Customer replies through the portal are fixed at 5 files "
+            "and 1 MiB in total."
+        ),
+        input_kind="number",
+        validation={"min": 1, "max": 20},
     ),
     SettingDef(
         key="tickets.auto_close_inactive_hours",

@@ -4,6 +4,7 @@
 
 import base64
 import logging
+from http import HTTPStatus
 
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -124,6 +125,45 @@ def _handle_ticket_error_response(
         return JsonResponse({"error": error_msg}, status=status)
     messages.error(request, error_msg)
     return redirect("tickets:detail", ticket_id=ticket_id)
+
+
+def _refused_attachment_reason(error: PlatformAPIError) -> str:
+    """The Platform's reason for refusing a reply's file, or "" when the failure is something else."""
+    if error.status_code != HTTPStatus.BAD_REQUEST or not isinstance(error.response_data, dict):
+        return ""
+    errors = error.response_data.get("errors")
+    reasons = errors.get("attachments") if isinstance(errors, dict) else None
+    if isinstance(reasons, list):
+        reasons = next((reason for reason in reasons if isinstance(reason, str) and reason), None)
+    return reasons if isinstance(reasons, str) else ""
+
+
+def _reply_failure_response(
+    request: HttpRequest, ticket_id: int, customer_id: object, error: PlatformAPIError
+) -> HttpResponse:
+    """A refused file shows its reason; an outage shows the outage notice; anything else is a failure."""
+    refused_attachment = _refused_attachment_reason(error)
+    if refused_attachment:
+        logger.info(f"⚠️ [Tickets View] Reply to ticket {ticket_id} refused a file: {refused_attachment}")
+        return _handle_ticket_error_response(
+            request,
+            ticket_id,
+            _("A file could not be attached, so the reply was not sent: %(reason)s") % {"reason": refused_attachment},
+        )
+    logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {error}")
+    if is_unavailable_error(error):
+        htmx_form = request.headers.get("HX-Request") == "true"
+        return render_platform_unavailable(
+            request,
+            error,
+            template_name="tickets/partials/status_and_comments.html" if htmx_form else None,
+            extra_context={"ticket": {"id": ticket_id}, "reply_text": request.POST.get("message", "")}
+            if htmx_form
+            else None,
+        )
+    return _handle_ticket_error_response(
+        request, ticket_id, _("Unable to add reply. Please try again later."), status=500
+    )
 
 
 def _handle_ticket_success_response(
@@ -464,22 +504,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             raise
-        logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
-        htmx_form = request.headers.get("HX-Request") == "true"
-        return (
-            render_platform_unavailable(
-                request,
-                e,
-                template_name="tickets/partials/status_and_comments.html" if htmx_form else None,
-                extra_context={"ticket": {"id": ticket_id}, "reply_text": request.POST.get("message", "")}
-                if htmx_form
-                else None,
-            )
-            if is_unavailable_error(e)
-            else _handle_ticket_error_response(
-                request, ticket_id, _("Unable to add reply. Please try again later."), status=500
-            )
-        )
+        return _reply_failure_response(request, ticket_id, customer_id, e)
 
     logger.info(f"✅ [Tickets View] Added reply to ticket {ticket_id} for customer {customer_id}")
 

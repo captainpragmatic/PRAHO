@@ -214,3 +214,4 @@ test-layout-audit.json
 output/playwright/
 output/e2e-media/
 output/screenshot-diff/
+output/virtualmin-lab/

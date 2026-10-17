@@ -445,7 +445,6 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
                 file_size=uploaded.size,
                 content_type=uploaded.content_type,
                 uploaded_by_id=request_data.get("user_id"),
-                is_safe=True,
             )
             attachment.file.save(uploaded.name, uploaded, save=False)
             stored.append(attachment.file)
@@ -714,14 +713,13 @@ def ticket_attachment_download_api(
                     id=attachment_id,
                     ticket__id=ticket_id,
                     ticket__customer=customer,  # Ensure customer owns the ticket
-                    is_safe=True,  # Only allow safe files
                 )
             )
         except TicketAttachment.DoesNotExist:
             raise Http404("Attachment not found or access denied") from None
 
         # Security check
-        if not attachment.file or not attachment.is_safe:
+        if not attachment.file:
             raise Http404("File not available")
 
         # Prepare response with file content

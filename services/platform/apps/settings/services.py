@@ -331,6 +331,12 @@ class SettingsService:
             not isinstance(value, list) or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
         ):
             raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+        item_choices = rules.get("item_choices")
+        if item_choices is not None and isinstance(value, list) and any(item not in item_choices for item in value):
+            raise ValidationError(
+                _("%(key)s: list values must be among %(choices)s")
+                % {"key": key, "choices": ", ".join(map(str, item_choices))}
+            )
         if rules.get("item_format") == "ip_network" and isinstance(value, list):
             for item in value:
                 if not cls._is_specific_ip_network(item):

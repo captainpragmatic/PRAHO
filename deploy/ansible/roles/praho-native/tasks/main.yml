@@ -427,6 +427,8 @@
       # The services already read it through EnvironmentFile; this keeps the deploy-time
       # commands from running with its default of true on a host that switched ANAF off.
       - ANAF_TRANSPORT_ENABLED
+      # Deploy-time commands write audit rows too; their session digests must use the same key.
+      - AUDIT_SESSION_DIGEST_SECRET
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"

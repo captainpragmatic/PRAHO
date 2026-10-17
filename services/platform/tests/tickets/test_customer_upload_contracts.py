@@ -113,9 +113,6 @@ class CustomerUploadContracts(HMACTestMixin, TestCase):
         self.assertEqual(self.download(attachment).status_code, 404)
         attachment.comment.is_public = True
         attachment.comment.save(update_fields=["is_public"])
-        attachment.is_safe = False
-        attachment.save(update_fields=["is_safe"])
-        self.assertIn(self.download(attachment).status_code, (403, 404))
 
         TicketStatusService.close_ticket(self.ticket, "fixed")
         before = self.ticket.comments.count()

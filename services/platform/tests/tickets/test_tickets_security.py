@@ -35,7 +35,6 @@ from apps.tickets.security import (
     generate_secure_filename,
     get_secure_upload_path,
     _DEFAULT_MAX_FILE_SIZE_BYTES,
-    SUSPICIOUS_PATTERNS
 )
 from apps.users.models import User, CustomerMembership
 
@@ -61,19 +60,14 @@ class TicketAttachmentSecurityScannerTest(TestCase):
         self.assertTrue(is_safe)
         self.assertEqual(message, "File security scan passed")
 
-    def test_malicious_script_content_blocked(self):
-        """🚨 Files with malicious script content should be blocked"""
-        malicious_content = b'<script>alert("XSS")</script>'
-        malicious_file = SimpleUploadedFile(
-            "malicious.txt",
-            malicious_content,
-            content_type="text/plain"
-        )
+    def test_script_text_in_a_txt_is_accepted(self):
+        """Markup in a text attachment is a support diagnostic: it is only ever served as a download."""
+        script_file = SimpleUploadedFile("page-source.txt", b'<script>alert("XSS")</script>', content_type="text/plain")
 
-        is_safe, message = self.scanner.scan_uploaded_file(malicious_file, "malicious.txt")
+        is_safe, _message = self.scanner.scan_uploaded_file(script_file, "page-source.txt")
 
-        self.assertFalse(is_safe)
-        self.assertIn("Suspicious content patterns detected", message)
+        self.assertTrue(is_safe)
+        self.assertEqual(self.scanner.identified_type, "text/plain")
 
     def test_oversized_file_blocked(self):
         """🚨 Files exceeding size limit should be blocked"""
@@ -102,7 +96,7 @@ class TicketAttachmentSecurityScannerTest(TestCase):
         is_safe, message = self.scanner.scan_uploaded_file(fake_pdf_file, "fake.pdf")
 
         self.assertFalse(is_safe)
-        self.assertIn("Magic number mismatch", message)
+        self.assertEqual(message, "The file is not a PDF document.")
 
     def test_dangerous_filename_blocked(self):
         """🚨 Files with dangerous filenames should be blocked"""
@@ -390,7 +384,6 @@ class FileAccessControlTest(TestCase):
             file_size=len(b'File 1 content'),
             content_type="text/plain",
             uploaded_by=self.user1,
-            is_safe=True
         )
 
         # Create internal attachment
@@ -410,7 +403,6 @@ class FileAccessControlTest(TestCase):
             file_size=len(b'File 2 content'),
             content_type="text/plain",
             uploaded_by=self.staff_user,
-            is_safe=True
         )
 
     def tearDown(self):
@@ -454,17 +446,6 @@ class FileAccessControlTest(TestCase):
         response = self.client.get(reverse('tickets:download_attachment', args=[self.internal_attachment.id]))
         # Should not be forbidden (might be 404 if file doesn't exist, but not 403)
         self.assertNotEqual(response.status_code, 403)
-
-    def test_unsafe_file_access_blocked(self):
-        """🚨 Access to unsafe files should be blocked"""
-        # Mark attachment as unsafe
-        self.attachment1.is_safe = False
-        self.attachment1.save()
-
-        self.client.login(email="user1@example.com", password="testpass123")
-
-        response = self.client.get(reverse('tickets:download_attachment', args=[self.attachment1.id]))
-        self.assertEqual(response.status_code, 403)
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
@@ -601,7 +582,7 @@ class IntegrationSecurityTest(TestCase):
         # Verify attachment was created with security flags
         attachment = TicketAttachment.objects.filter(ticket=ticket).first()
         if attachment:  # Only test if attachment was created
-            self.assertTrue(attachment.is_safe)
+            self.assertEqual(attachment.content_type, "application/pdf")
 
             # Test secure download
             download_response = self.client.get(
@@ -610,47 +591,25 @@ class IntegrationSecurityTest(TestCase):
             # Should not be forbidden
             self.assertNotEqual(download_response.status_code, 403)
 
-    def test_malicious_file_upload_blocked_end_to_end(self):
-        """🚨 Test that malicious files are blocked through complete workflow"""
+    def test_disguised_file_upload_blocked_end_to_end(self):
+        """🚨 A file whose bytes do not match its name is never stored through the reply flow"""
         self.client.login(email="test@example.com", password="testpass123")
-
-        # Create ticket
         ticket = Ticket.objects.create(
             customer=self.customer,
             title="Test Ticket",
             description="Test Description",
             created_by=self.user
         )
-
-        # Try to upload malicious file
-        malicious_content = b'<script>alert("XSS")</script>'
-        malicious_file = SimpleUploadedFile(
-            "malicious.txt",
-            malicious_content,
-            content_type="text/plain"
+        disguised_file = SimpleUploadedFile(
+            "invoice.pdf", b"\x89PNG\r\n\x1a\n" + bytes(64), content_type="application/pdf"
         )
 
-        response = self.client.post(
+        self.client.post(
             reverse('tickets:reply', args=[ticket.pk]),
-            {
-                'reply': 'Attempting to upload malicious file',
-                'attachments': malicious_file
-            }
+            {'reply': 'Here is my invoice', 'attachments': disguised_file}
         )
 
-        # Request might succeed but file should not be saved
-        # Verify no unsafe attachment was created
-        unsafe_attachments = TicketAttachment.objects.filter(
-            ticket=ticket,
-            is_safe=False
-        )
-        # In our implementation, unsafe files are not saved at all
-        # so we should have no attachments
-        all_attachments = TicketAttachment.objects.filter(ticket=ticket)
-
-        # Either no attachments created, or if any exist, they should be marked safe
-        for attachment in all_attachments:
-            self.assertTrue(attachment.is_safe)
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
 
     def test_cross_customer_access_blocked_end_to_end(self):
         """🚨 Test that cross-customer access is blocked through complete workflow"""
@@ -682,7 +641,6 @@ class IntegrationSecurityTest(TestCase):
                 file_size=len(b'Customer 2 confidential data'),
                 content_type="text/plain",
                 uploaded_by=user2,
-                is_safe=True
             )
 
         # Login as user from customer1 and try to access customer2's attachment

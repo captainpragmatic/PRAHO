@@ -222,6 +222,58 @@
         - /etc/cron.weekly
         - /var/spool/cron
 
+    # Web roots: a customer could point their own public_html at another customer's home or /etc and be served
+    # through it (Apache is in every customer's group). Why and how: files/praho-home-symlinks.conf.
+    - name: Keep customer web roots from linking outside their owner
+      ansible.builtin.copy:
+        src: files/praho-home-symlinks.conf
+        dest: /etc/apache2/conf-available/praho-home-symlinks.conf
+        owner: root
+        group: root
+        mode: '0644'
+      register: web_root_guard
+
+    - name: Enable the web root link guard
+      ansible.builtin.command: a2enconf praho-home-symlinks
+      args:
+        creates: /etc/apache2/conf-enabled/praho-home-symlinks.conf
+      register: web_root_guard_enabled
+
+    - name: Validate the Apache configuration
+      ansible.builtin.command: apache2ctl configtest
+      changed_when: false
+
+    # The marker is written only after a reload succeeds, and dropped whenever the file or its enabling changes,
+    # so a run that failed after either (or a guard someone disabled and this run re-enabled) still reloads,
+    # on this run or the next, instead of leaving the guard on disk but not in force.
+    - name: Forget which web root link guard Apache loaded, when this run changed it
+      ansible.builtin.file:
+        path: /etc/apache2/.praho-web-root-guard-loaded
+        state: absent
+      when: web_root_guard.changed or web_root_guard_enabled.changed
+
+    - name: Read which web root link guard Apache last loaded
+      ansible.builtin.slurp:
+        src: /etc/apache2/.praho-web-root-guard-loaded
+      register: web_root_guard_loaded
+      failed_when: false
+
+    - name: Load the web root link guard into Apache
+      ansible.builtin.service:
+        name: apache2
+        state: reloaded
+      when: >-
+        web_root_guard_loaded.content is not defined or
+        (web_root_guard_loaded.content | b64decode | trim) != web_root_guard.checksum
+
+    - name: Record which web root link guard Apache loaded
+      ansible.builtin.copy:
+        content: "{{ web_root_guard.checksum }}\n"
+        dest: /etc/apache2/.praho-web-root-guard-loaded
+        owner: root
+        group: root
+        mode: '0644'
+
     - name: Create security hardening completion marker
       ansible.builtin.copy:
         content: |

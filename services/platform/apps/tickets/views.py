@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 from dataclasses import dataclass
 from typing import cast
 
@@ -32,9 +31,6 @@ from .security import TicketAttachmentSecurityScanner
 from .services import TicketStatusService
 
 logger = logging.getLogger(__name__)
-
-# Module-level default for file size limit (must match tickets.security)
-_DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB
 
 TICKET_STATUS_TABS = [
     {
@@ -323,76 +319,51 @@ def _determine_comment_type(user: User, is_internal: bool) -> str:
         return "customer"
 
 
-def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
-    """Check if uploaded file size is within limits."""
-    if uploaded_file.size is None:
-        return False
-    max_file_size = SettingsService.get_integer_setting("tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES)
-    return bool(uploaded_file.size <= max_file_size)
+_DEFAULT_MAX_ATTACHMENTS_PER_REPLY = 5
 
 
-def _is_file_type_allowed(content_type: str) -> bool:
-    """Check if file type is in allowed list."""
-    allowed_types = [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain",
-        "image/png",
-        "image/jpeg",
-        "image/jpg",
-        "application/zip",
-        "application/x-rar-compressed",
-    ]
-    return content_type in allowed_types
+@dataclass(frozen=True)
+class _CheckedAttachment:
+    """A file the scanner accepted, with the type it identified from the bytes."""
+
+    uploaded_file: UploadedFile
+    content_type: str
 
 
-def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: TicketComment) -> None:
-    """Process and validate uploaded attachments."""
-    if not request.FILES:
-        return
+def _check_reply_attachments(request: HttpRequest) -> tuple[list[_CheckedAttachment], str | None]:
+    """Check every uploaded file before anything is saved: (accepted files, or the reason the reply is refused)."""
+    uploaded_files = request.FILES.getlist("attachments")
+    limit = SettingsService.get_integer_setting("tickets.max_attachments_per_reply", _DEFAULT_MAX_ATTACHMENTS_PER_REPLY)
+    if len(uploaded_files) > limit:
+        return [], str(_("A reply can carry at most {limit} files.").format(limit=limit))
 
-    user = cast(User, request.user)  # Safe as this is only called from authenticated views
-
-    for uploaded_file in request.FILES.getlist("attachments"):
-        # Skip files without proper attributes
-        if not uploaded_file.name:
-            messages.warning(request, "❌ File has no name.")
-            continue
-
-        # File size check
-        if not _is_file_size_valid(uploaded_file):
-            max_size_mb = SettingsService.get_integer_setting(
-                "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
-            ) // (1024 * 1024)
-            messages.warning(request, f"❌ File {uploaded_file.name} is too large (max {max_size_mb}MB).")
-            continue
-
-        # Content type detection
-        content_type, _unused = mimetypes.guess_type(uploaded_file.name)
-        if not content_type:
-            content_type = "application/octet-stream"
-
-        # File type validation
-        if not _is_file_type_allowed(content_type):
-            messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
-            continue
-
+    checked = []
+    for uploaded_file in uploaded_files:
         scanner = TicketAttachmentSecurityScanner()
-        is_safe, scan_msg = scanner.scan_uploaded_file(uploaded_file)
-        if not is_safe:
-            messages.warning(request, f"❌ {scan_msg}")
-            continue
+        accepted, reason = scanner.scan_uploaded_file(uploaded_file)
+        if not accepted or scanner.identified_type is None:
+            return [], str(
+                _("{filename} cannot be attached: {reason}").format(
+                    filename=uploaded_file.name or _("A file"), reason=reason
+                )
+            )
+        checked.append(_CheckedAttachment(uploaded_file=uploaded_file, content_type=scanner.identified_type))
+    return checked, None
 
-        # Create attachment with proper null handling
-        file_size = uploaded_file.size or 0  # Default to 0 if None
+
+def _save_reply_attachments(
+    user: User, ticket: Ticket, comment: TicketComment, attachments: list[_CheckedAttachment]
+) -> None:
+    """Store the files a reply carries, with the type each was identified as."""
+    for attachment in attachments:
+        uploaded_file = attachment.uploaded_file
         TicketAttachment.objects.create(
             ticket=ticket,
             comment=comment,
             file=uploaded_file,
             filename=uploaded_file.name,
-            file_size=file_size,
-            content_type=content_type,
+            file_size=uploaded_file.size or 0,
+            content_type=attachment.content_type,
             uploaded_by=user,
         )
 
@@ -527,6 +498,13 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     if validation_error:
         return validation_error
 
+    # A reply with any file that cannot be attached is refused whole, before anything is saved.
+    attachments, attachment_error = _check_reply_attachments(request)
+    if attachment_error:
+        return _ticket_reply_error_response(
+            request, ticket, htmx_message=attachment_error, flash_message=f"❌ {attachment_error}"
+        )
+
     # Create comment with reply action
     comment_type = _determine_comment_type(user, reply_data.is_internal)
     is_public = not (reply_data.is_internal and user.is_staff_user)
@@ -547,8 +525,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         sets_waiting_on_customer=(reply_data.reply_action == "reply_and_wait"),
     )
 
-    # Process attachments
-    _process_ticket_attachments(request, ticket, comment)
+    _save_reply_attachments(user, ticket, comment, attachments)
 
     # Handle status transitions
     success_msg, status_error = _handle_ticket_status_update(request, ticket, user, reply_action, resolution_code)
@@ -702,10 +679,6 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     accessible_customer_ids = [customer.id for customer in accessible_customers]
     if attachment.ticket.customer.id not in accessible_customer_ids:
         raise PermissionDenied("You do not have permission to access this attachment.")
-
-    # Check if attachment is safe
-    if hasattr(attachment, "is_safe") and not attachment.is_safe:
-        raise PermissionDenied("Access to this attachment is blocked for security reasons.")
 
     # Attachment visibility follows its parent comment's — the same rule as
     # TicketAttachment.customer_visible_q(), which every API list/count/download surface

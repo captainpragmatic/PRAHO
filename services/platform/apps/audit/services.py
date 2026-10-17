@@ -42,6 +42,7 @@ from .models import (
     DataExport,
     audit_mutation_allowed,
 )
+from .session_digest import digest_session_identifiers, session_key_digest
 
 # Constants for audit operations
 ONE_HOUR_SECONDS = 3600  # 1 hour in seconds for gap detection
@@ -654,17 +655,14 @@ class AuditService:
             context = AuditContext()
 
         try:
-            # Get content type and object ID - both are required by the model
+            # An event about no particular object has none. Filing it under the actor (or user 1
+            # with no actor) made every object-less event look like an event about that person.
+            content_type: ContentType | None = None
+            object_id = ""
             if event_data.content_object:
                 content_type = ContentType.objects.get_for_model(event_data.content_object)
                 # Convert primary key to string to handle both integers and UUIDs
                 object_id = str(event_data.content_object.pk)
-            else:
-                # For events without a specific object, use the User model as a fallback
-                # This ensures we always have valid content_type and object_id
-                content_type = ContentType.objects.get_for_model(User)
-                # Convert to string to handle both integer and UUID user PKs
-                object_id = str(context.user.pk) if context.user else "1"  # Use system user ID=1 as fallback
 
             # Safely serialize metadata before storing
             serialized_metadata = serialize_metadata(context.metadata)
@@ -683,6 +681,19 @@ class AuditService:
             if category is None:
                 category = "business_operation"
 
+            # A usable session key never reaches the row, its exports or the SIEM (ADR-0043): the
+            # column and every identifier in the description, metadata and values become digests.
+            # Before the INSERT, so the integrity MAC stamped in pre_save covers the digests.
+            session_key, description, serialized_metadata, old_values, new_values = digest_session_identifiers(
+                session_key=context.session_key,
+                description=event_data.description,
+                metadata=serialized_metadata,
+                # #385: raw Decimal/datetime/lazy-proxy values must be coerced before the
+                # JSONField INSERT - an unserializable evidence dict would kill the event.
+                old_values=serialize_metadata(event_data.old_values or {}),
+                new_values=serialize_metadata(event_data.new_values or {}),
+            )
+
             # Create audit event with categorization
             audit_event = AuditEvent.objects.create(
                 user=context.user,
@@ -694,15 +705,13 @@ class AuditService:
                 requires_review=requires_review,
                 content_type=content_type,
                 object_id=object_id,
-                # #385: raw Decimal/datetime/lazy-proxy values must be coerced before the
-                # JSONField INSERT - an unserializable evidence dict would kill the event.
-                old_values=serialize_metadata(event_data.old_values or {}),
-                new_values=serialize_metadata(event_data.new_values or {}),
-                description=event_data.description,
+                old_values=old_values,
+                new_values=new_values,
+                description=description,
                 ip_address=context.ip_address,
                 user_agent=context.user_agent or "",
                 request_id=context.request_id or str(uuid.uuid4()),
-                session_key=context.session_key or "",
+                session_key=session_key,
                 metadata=serialized_metadata,
             )
 
@@ -4915,7 +4924,10 @@ class AuditRetentionService:
                 event.user_agent = ""
                 event.request_id = ""
                 event.session_key = ""
-                if (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS:
+                if (
+                    event.content_type is not None
+                    and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
+                ):
                     event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
                 event.description = "Anonymized under retention policy"
                 event.old_values = {"anonymized": True}
@@ -5130,6 +5142,9 @@ class AuditSearchService:
             if filters.get(filter_key):
                 filter_value = filters[filter_key]
                 filter_list = filter_value if isinstance(filter_value, list) else [filter_value]
+                if filter_key == "session_keys":
+                    # Rows hold digests; a pasted raw key or a stored digest both match.
+                    filter_list = [session_key_digest(value) for value in filter_list if value]
                 queryset = queryset.filter(**{django_filter: filter_list})
                 query_info["filters_applied"].append(info_key)
 
@@ -6150,8 +6165,9 @@ class SecurityAuditService:
             metadata=metadata,
             severity="medium",
             description=f"Rate limit exceeded for endpoint: {event_data['endpoint']}",
-            content_type=ContentType.objects.get_for_model(User),
-            object_id=str(user.id) if user else "anonymous",
+            # The limited endpoint is no stored object, and the user, when known, is the actor.
+            content_type=None,
+            object_id="",
         )
 
 

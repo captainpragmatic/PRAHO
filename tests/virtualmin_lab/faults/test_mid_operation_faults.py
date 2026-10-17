@@ -98,7 +98,7 @@ def _assert_restore_parked(
 
 
 def _backup_under_fault(bench: Bench, chaos: Chaos, domain: str, fault: Callable[[], None]) -> None:
-    with bench.hosted(domain) as account:
+    with chaos.hosted(domain) as account:
         lab = bench.lab_of(account)
         data = DomainData(lab, account)
         data.seed(secrets.token_hex(6))
@@ -113,7 +113,7 @@ def _backup_under_fault(bench: Bench, chaos: Chaos, domain: str, fault: Callable
 
 
 def _restore_under_fault(bench: Bench, chaos: Chaos, domain: str, fault: Callable[[], None]) -> None:
-    with bench.hosted(domain) as account:
+    with chaos.hosted(domain) as account:
         lab = bench.lab_of(account)
         DomainData(lab, account).seed(secrets.token_hex(6))
         backup = bench.backup(account)

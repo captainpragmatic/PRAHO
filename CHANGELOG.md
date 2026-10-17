@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PRAHO runs on the operator's clock.** `TIME_ZONE` comes from the environment in both services. Production keeps `Europe/Bucharest` for an operator in Romania, because e-Factura dates and the VAT tax point are Romanian days, and requires any other operator to set its own zone. Billing periods, document dates on PDFs and emails, correction dates and the billing reports follow it, and so does the default display timezone. e-Factura, SmartBill, BNR, ROTLD and EC sales stay on Bucharest time. Outside DEBUG, `common.E004` refuses an unknown zone, or any zone but Bucharest for an operator in Romania, on staging too.
 
 ### Fixed
+- **Security: a customer could serve another customer's files, or system files, through their own web root.** On a Virtualmin node Apache is in every customer's group, and a customer who replaced their own `public_html` with a link to another home or to `/etc` was served through it. `virtualmin_harden.yml` now requires a link under `/home` to belong to the owner of what it points at, so the customer's own links (including an account name's sub-server link, when the customer owns it) still serve and links into anything else answer 403. A marker written after each successful reload makes a half-finished or disabled guard load on the next hardening run. Re-run `virtualmin_harden.yml` on existing nodes. The Virtualmin lab nodes get the same guard.
+- **The Virtualmin lab's fault suite settles each node before cleaning up** (#728). After a network cut during a restore, `info` still answered but every `delete-domain` timed out, so the test's cleanup and every later test failed. That points at a command the fault left running and holding Virtualmin's locks. The suite now waits for in-flight commands and live lock holders after each test's assertions, ends only those it finds, by PID, and records what it found with the lab evidence.
 - Native restores validate staged dump/media inputs and require a safety backup before downtime; SQL or readiness failures keep applications offline for recovery.
 - Fresh deployment recipes use PostgreSQL 16 and reject existing legacy data before attempting an implicit major-version replacement; upgrades require an explicit migration.
 
@@ -237,6 +239,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Upgrade note (native installs).** A `.env` that sets `PLATFORM_API_TIMEOUT` above 45, or to a non-number, now stops the portal from starting. Fix the value before upgrading.
 
 ### Security
+
+- **No audit row, export or SIEM entry holds a usable session key** (ADR-0043). Django changes the key before the login signal fires, so the key recorded at login was the live one, and an exported audit log could resume that session. Audit rows now keep a keyed digest (`s1:…`, keyed by `AUDIT_SESSION_DIGEST_SECRET`, else derived from the secret key): equal for the same session, so search and same-session views still work. `bulk_create` of audit events is now stamped and chained like a single save, and refuses conflict modes.
+- **A ticket attachment's type now follows its bytes, not its name.**
+  - **The gap.** The type came from the file extension, because the detection library the checks relied on was never installed. Any ZIP passed as a Word document, and a binary file passed as text.
+  - **Now.** Each accepted type is identified from the file itself:
+    - a PDF header;
+    - a PNG signature with its first chunk;
+    - a JPEG start marker;
+    - an OLE container for `.doc`;
+    - a Word package for `.docx`, read from the ZIP directory alone, so no member is ever inflated and an oversized directory is refused unread;
+    - text in UTF-8, UTF-16 with a byte-order mark, or 8-bit encodings such as CP1250.
+  - **No more content blocklist.** Strings such as `<?php`, `<%` or `exec(` no longer refuse a file. The list refused about one random 8 KiB block in nine, and so real images, Word files and support logs. Attachments are only served as downloads, so it protected nothing.
+  - Filenames with control characters are refused, as the customer API already did.
+
+- **An audit event logged with no object is no longer filed under a user.** Security signals, rate-limit hits, system jobs and any other event logged without an object were stored against the actor, or against user 1 when there was no actor, so anything selecting a person's events by object took them as that person's. They now carry no object, and the actor is still recorded as the actor. Logins, failed logins and logouts keep the account as their object, since they are about that account.
+- **Staff and customer replies check files the same way, and a reply with a bad file is refused whole.**
+  - **The gap.** A staff reply had its own type list, including ZIP and RAR files that the checks always refused. It stored the type guessed from the name, and kept the comment while dropping a refused file. A customer reply was refused whole.
+  - **Now.** One check serves both. A reply with any file that cannot be attached saves nothing, and says which file and why. The stored type is the one identified from the file.
+  - **Portal.** A refused file now shows the reason instead of "Unable to add reply. Please try again later." The file pickers no longer offer ZIP or RAR.
+  - **Settings.** `tickets.allowed_file_extensions` can narrow the accepted types but no longer lists types PRAHO cannot identify. A new `tickets.max_attachments_per_reply` (default 5) limits staff replies; customer replies stay at 5 files and 1 MiB.
+- **No pretend malware quarantine** (ADR-0063).
+  - Ticket attachments had an `is_safe` flag and a `virus_scan_result` field. Nothing ever scanned a file, so the flag was always true and the download gates and monitoring counts built on it could never fire.
+  - Both fields, the gates and the counts are removed. PRAHO type-checks attachments and only ever serves them as downloads; it does not scan them for malware, and ADR-0063 says so.
+  - The monitoring entry called `attachment_downloads`, which counted uploads, is now `attachment_uploads`.
 
 - **SSH and Webmin on hosting nodes are reachable only from an allowlist.** (#498)
   - **The gap.** The node firewall opened ports 22 and 10000 to the whole internet, so a leaked Webmin password, or the next Webmin bug, could be used from anywhere.
