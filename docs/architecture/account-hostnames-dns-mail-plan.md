@@ -2,7 +2,7 @@
 
 Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Each phase is its own PR series.
 
-**Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf (`0007_legacy_price_labels`), starting at 0008.
+**Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf. That was `0007_legacy_price_labels` when this was written; P1.1 then added `0008_account_hostnames`. Each later task takes the next number after whatever the leaf is when it lands, never a number fixed in this plan.
 
 ## Design corrections found in pre-flight
 
@@ -158,7 +158,7 @@ These are live defects today. Each ships with a test that fails without it.
     - Hostname card on account detail.
     - "Repair DNS" enqueues a sync and returns at once; no DNS lookup inside a request.
     - Server IPs on the server pages.
-15. **P1.14 WordPress preview decision** (owner).
+15. **P1.14 WordPress preview decision** (owner). Whatever is decided, no preview serves customer content on an account name until the zone's Public Suffix List entry is confirmed shipped in current browsers (ADR-0061 section 1). Until then the preview link is not offered, because a customer site could otherwise set a cookie for the whole zone.
 
 **Build order** (dependencies, not numbering): P1.1 → P1.2, P1.3 → P1.6 (which supplies the shared row and ownership predicates P1.4 uses) → P1.5 → P1.9 → P1.10 → P1.15 → P1.4 → P1.7 → P1.8 → P1.11, P1.12, P1.13 → P1.16 (any time).
 
@@ -202,7 +202,7 @@ These are live defects today. Each ships with a test that fails without it.
    - Drains treat a deferred migration as waiting, not failed (`virtualmin_drain_service.py` ~233-237), and resume it.
    - `cancel_drain` handles waiting migrations.
    - Tests: a deferred handler leaves the loop and is re-run later; a drain waits rather than pausing.
-2. **P2.2 Add the cutover states (migration 0006)** for the contract's steps. Add `VirtualminMigration.drain` (FK). `RESUME_POLICY` gets a policy for every new state; replay converges forward after step 5.
+2. **P2.2 Add the cutover states (the next provisioning migration after the current leaf)** for the contract's steps. Add `VirtualminMigration.drain` (FK). `RESUME_POLICY` gets a policy for every new state; replay converges forward after step 5.
 3. **P2.3 TTL lowering and restore** (contract step 1).
 4. **P2.4 Write barrier with persisted state and compensation,** proven in the lab (contract step 2). Tests: a cron write and a database write both fail after the barrier; after a pre-cutover failure, the recorded grants and cron state are back and a database write succeeds.
 5. **P2.5 Bridge.**
@@ -218,7 +218,7 @@ These are live defects today. Each ships with a test that fails without it.
 7. **P2.7 Cleanup** (contract steps 8 to 10), retryable, in that order.
 8. **P2.8 Drain finalisation.**
    - Auto-confirm (system actor, audited) only when every migration is past step 10 and no bridge is `pending`, `active` or `failed`.
-   - Hostnames of non-live accounts (error, provisioning) left on the drained node are retired, so its IP being reused later cannot be taken over.
+   - Hostnames of non-live accounts (error, provisioning) left on the drained node have their records withdrawn, so no address is published and the node's IP being reused later cannot take them over. The names are not retired: only termination retires a name, so a later retry or recovery keeps the same hostname.
 9. **P2.9 Recovery onto a new node, with the same contract in "source unavailable" mode.**
    - No barrier and no bridge.
    - Restore from the latest backup, verify, the account name ensured on the target with its certificate (P1.4), the point of no return, DNS convergence; suspension state preserved.
@@ -234,7 +234,7 @@ These are live defects today. Each ships with a test that fails without it.
 1. **P3.1 Add the status model.** `HostedDomainDnsStatus`, OneToOne on `VirtualminAccount`:
    - `dns_path`, a results JSON;
    - `healthy`, `first_failed_at`, `notified_at`, `checked_at`;
-   - migration 0007.
+   - the next provisioning migration after the current leaf.
 2. **P3.2 Write probes that follow CNAMEs.**
    - New `apps/infrastructure/dns_probes.py`. Checks: `www` reaching the account name, the apex, MX, stray AAAA, CAA allowing Let's Encrypt, and DNSSEC (DS against DNSKEY).
    - Test: `tests/infrastructure/test_dns_probes.py`.

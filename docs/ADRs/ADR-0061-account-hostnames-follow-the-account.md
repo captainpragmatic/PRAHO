@@ -22,7 +22,7 @@ Customers may keep DNS anywhere: our nameservers, Cloudflare, their registrar. A
 ### 1. Every hosting account has a provider-controlled hostname
 
 - **Name.** `<id>.<zone>`, where `<id>` is a short opaque random label (for example `h7k3p2q`), unique and never reused. It is stable through renames, reveals nothing about the customer, and cannot be enumerated.
-- **Zone.** A setting (`dns.account_hostname_zone`), never hard-coded. It must be a separate registered domain from the brand and Portal domains. Customer sites under the brand's registrable domain could set cookies for it and attack Portal sessions. The zone is submitted to the Public Suffix List, as `github.io` and `netlify.app` are.
+- **Zone.** A setting (`dns.account_hostname_zone`), never hard-coded. It must be a separate registered domain from the brand and Portal domains. Customer sites under the brand's registrable domain could set cookies for it and attack Portal sessions. The zone is submitted to the Public Suffix List, as `github.io` and `netlify.app` are. Submission alone protects nothing: until the entry is accepted and shipped in current browsers, a customer site on `<id>.<zone>` could set a cookie for the whole zone and have it sent to other customers' account names. So PRAHO serves no customer content on account names (previews stay off) until that inclusion is confirmed.
 - **Records.** PRAHO owns them: `A`, and `AAAA` when the node has IPv6, pointing at the node that currently hosts the account. They are never a CNAME, because MX and SRV targets must not be aliases (RFC 2181 §10.3) and mail uses this name. The records live in our Cloudflare zone through the existing DNS gateway, with an owner tag `praho:account:<id>` and a 300 s TTL.
 - **Lifecycle.** Created when the account is provisioned; moved by migration, drain and recovery (section 4); deleted at termination. A reconcile sweep compares the records with `VirtualminAccount.server` and repairs drift.
 
@@ -40,15 +40,15 @@ A raw node IP is not offered, so no customer ever holds an address that a move m
 
 - **Account names and previews.** Each account name is a Virtualmin sub-server of the customer's domain, with its web root linked to the customer's, so it has its own vhost and its own certificate (lab contract: `docs/domain/virtualmin-account-subserver-contract.md`). The certificate is per name, issued by DNS-01 through our Cloudflare zone on Platform. A wildcard is not used: a sub-server's key travels with any archive that carries it, and one key for every customer's name must not. Per-name issuance is bounded by Let's Encrypt's weekly limit per registered domain, which the issuer budgets.
 - **The customer's own domain.** Virtualmin requests it by HTTP-01 once the domain points at the account. No certificate is issued before the switch, so HTTPS starts a few minutes after cutover. That trade-off was accepted.
-- **Moves.** Certificates travel with the account in the backup and are installed on the new node, not reissued (the Let's Encrypt duplicate-certificate limit is 5 per week).
+- **Moves.** Nothing is reissued (the Let's Encrypt duplicate-certificate limit is 5 per week). The customer domain's certificate travels with the account in the backup. The account name's sub-server is kept out of that backup, so its certificate and key are fetched from their vault references and installed on the new node.
 - **CAA.** The DNS check (section 6) flags a customer CAA record that excludes Let's Encrypt.
 
 ### 4. Moving an account between nodes
 
 Migration gains a **cutover** phase after restore and verification on the new node:
 1. **Before a planned move,** lower the account records' TTL to 60 s at least one old TTL ahead.
-2. **Repoint** the account name, and the apex and `www` copies for customers on our nameservers, to node B. Verify through the zone's authoritative servers.
-3. **Bridge the tail.** Some resolvers hold old answers past their TTL. Node A keeps serving the domain as a reverse proxy to B for web traffic, and relays the domain's mail to B, until the bridge window ends. There are never two live copies accepting writes.
+2. **Bridge first.** Node A starts serving the domain as a reverse proxy to B for web traffic, and relays the domain's mail to B, and the bridge is verified before any record changes. Resolvers that still hold the old address then reach B through A, never a write-barriered or stale copy. There are never two live copies accepting writes.
+3. **Repoint** the account name, and the apex and `www` copies for customers on our nameservers, to node B. Verify through the zone's authoritative servers. The bridge stays until its window ends, because some resolvers hold old answers past their TTL.
 4. **Then** the retained copy on A is removed (the existing migration step), and the TTL returns to 300 s.
 
 - Drain uses the same cutover, so its manual "routing and DNS confirmed" box goes away for accounts on these paths.
