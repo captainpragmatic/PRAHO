@@ -238,6 +238,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A ticket attachment's type now follows its bytes, not its name.**
+  - **The gap.** The type came from the file extension, because the detection library the checks relied on was never installed. Any ZIP passed as a Word document, and a binary file passed as text.
+  - **Now.** Each accepted type is identified from the file itself:
+    - a PDF header;
+    - a PNG signature with its first chunk;
+    - a JPEG start marker;
+    - an OLE container for `.doc`;
+    - a Word package for `.docx`, read from the ZIP directory alone, so no member is ever inflated and an oversized directory is refused unread;
+    - text in UTF-8, UTF-16 with a byte-order mark, or 8-bit encodings such as CP1250.
+  - **No more content blocklist.** Strings such as `<?php`, `<%` or `exec(` no longer refuse a file. The list refused about one random 8 KiB block in nine, and so real images, Word files and support logs. Attachments are only served as downloads, so it protected nothing.
+  - Filenames with control characters are refused, as the customer API already did.
+
 - **SSH and Webmin on hosting nodes are reachable only from an allowlist.** (#498)
   - **The gap.** The node firewall opened ports 22 and 10000 to the whole internet, so a leaked Webmin password, or the next Webmin bug, could be used from anywhere.
   - **Now.** A new setting, `infrastructure.node_admin_allowed_cidrs`, lists Platform's addresses and the admin networks. The firewall opens 22 and 10000 only to those, and PRAHO's Webmin API user can log in only from them. Web, mail, DNS, FTP and Usermin stay public.
