@@ -9,6 +9,7 @@ import os
 
 from playwright.sync_api import Page
 
+from scripts.e2e_stack import strict_profile_problem
 from tests.e2e.helpers import BASE_URL
 from tests.e2e.helpers.csp import (
     install_csp_violation_capture,
@@ -26,59 +27,15 @@ VIOLATION_FIELDS = {
 }
 
 
-def _parse_csp(csp: str) -> dict[str, list[str]]:
-    directives: dict[str, list[str]] = {}
-
-    for part in csp.split(";"):
-        tokens = part.strip().split()
-        if not tokens:
-            continue
-
-        name, *sources = tokens
-        assert name not in directives, (
-            f"Duplicate CSP directive {name!r} in {csp!r}"
-        )
-        directives[name] = sources
-
-    return directives
-
-
 def _assert_expected_strict_profile(
     csp: str,
     expected_profile: str,
 ) -> None:
-    directives = _parse_csp(csp)
-
-    assert directives.get("script-src-attr") == ["'none'"], (
-        "Portal is not serving a target CSP: expected "
-        '"script-src-attr \'none\'"; '
-        f"received {csp!r}"
-    )
-
-    assert "script-src" in directives, (
-        f"Portal CSP has no script-src directive: {csp!r}"
-    )
-    script_sources = directives["script-src"]
-
-    nonce_sources = [
-        source
-        for source in script_sources
-        if source.startswith("'nonce-") and source.endswith("'")
-    ]
-    assert len(nonce_sources) == 1, (
-        "Expected exactly one request nonce in script-src; "
-        f"received {script_sources!r}"
-    )
-
-    expected_sources = ["'self'", nonce_sources[0]]
-    if expected_profile == "phase2-target":
-        expected_sources.append("'unsafe-eval'")
-    expected_sources.append("https://js.stripe.com")
-
-    assert script_sources == expected_sources, (
-        f"Portal is not serving expected profile {expected_profile!r}. "
-        f"Expected script-src sources {expected_sources!r}; "
-        f"received {script_sources!r}."
+    # One definition shared with `scripts/e2e_stack.py csp-check`, so the pre-run
+    # check can never accept a policy this gate rejects.
+    problem = strict_profile_problem(csp, expected_profile)
+    assert problem is None, (
+        f"Portal is not serving expected profile {expected_profile!r}. {problem}"
     )
 
 

@@ -542,3 +542,87 @@ class SupervisorOutputIsUnbufferedTests(TestCase):
             stack.start()
         command = popen.call_args.args[0]
         self.assertEqual(command[:2], [sys.executable, "-u"])
+
+
+def _csp(profile: str, *, nonces: int = 1, extra: str = "") -> str:
+    sources = ["'self'", *(f"'nonce-n{i}'" for i in range(nonces))]
+    if profile == "phase2-target":
+        sources.append("'unsafe-eval'")
+    sources.append("https://js.stripe.com")
+    if extra:
+        sources.append(extra)
+    return f"default-src 'self'; script-src {' '.join(sources)}; script-src-attr 'none'"
+
+
+class CSPCheckTests(TestCase):
+    """`make test-e2e-csp` must stop before pytest when the running stack serves another policy.
+
+    `make dev-e2e-bg` serves the portal's default (phase3-target, enforced) while `make test-e2e-csp`
+    expects phase2-target unless told otherwise, so the oracle gate failed 1 of 4 against a stack
+    started the ordinary way. The check names both profiles and how to restart.
+    """
+
+    def _check(self, headers: dict[str, str], *, expected: str = "phase2-target", status: int = 200) -> str:
+        response = Mock(status_code=status, headers=requests_headers(headers))
+        with patch.object(stack.requests, "get", return_value=response) as get:
+            served = stack.csp_check(expected)
+        get.assert_called_once_with(stack.CSP_CONTROL_URL, timeout=10, allow_redirects=False)
+        return served
+
+    def test_csp_check_refuses_a_stack_serving_another_profile(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "serves phase3-target; expected phase2-target") as raised:
+            self._check({"Content-Security-Policy": _csp("phase3-target")})
+        self.assertIn("make stop-e2e, then make dev-e2e-csp-bg CSP_PROFILE=phase2-target", str(raised.exception))
+
+    def test_csp_check_refuses_report_only(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "Report-Only"):
+            self._check({"Content-Security-Policy-Report-Only": _csp("phase2-target")})
+
+    def test_csp_check_refuses_a_response_without_an_enforced_policy(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no enforced Content-Security-Policy"):
+            self._check({})
+
+    def test_csp_check_accepts_the_expected_enforced_profile(self) -> None:
+        for profile in ("phase2-target", "phase3-target"):
+            with self.subTest(profile=profile):
+                self.assertEqual(self._check({"Content-Security-Policy": _csp(profile)}, expected=profile), profile)
+
+    def test_csp_check_refuses_a_missing_nonce_or_extra_script_source(self) -> None:
+        for header in (_csp("phase2-target", nonces=0), _csp("phase2-target", nonces=2), _csp("phase2-target", extra="https://cdn.example")):
+            with self.subTest(header=header), self.assertRaisesRegex(RuntimeError, "expected phase2-target"):
+                self._check({"Content-Security-Policy": header})
+
+    def test_csp_check_refuses_a_non_200_control_page(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+            self._check({"Content-Security-Policy": _csp("phase2-target")}, status=404)
+
+    def test_csp_check_reports_a_stack_that_is_not_running(self) -> None:
+        refused = stack.requests.ConnectionError("Connection refused")
+        with patch.object(stack.requests, "get", side_effect=refused), self.assertRaisesRegex(
+            RuntimeError, "No E2E stack answered"
+        ):
+            stack.csp_check("phase2-target")
+
+    def test_csp_check_refuses_an_unknown_expected_profile(self) -> None:
+        with patch.object(stack.requests, "get") as get, self.assertRaisesRegex(RuntimeError, "phase2-target or phase3-target"):
+            stack.csp_check("phase1")
+        get.assert_not_called()
+
+    def test_test_e2e_csp_checks_the_stack_before_running_pytest(self) -> None:
+        dry_run = subprocess.run(  # noqa: S603 -- a fixed make target printed, not executed
+            [shutil.which("make") or "make", "-n", "test-e2e-csp", "CSP_PROFILE=phase3-target"],
+            cwd=ROOT,
+            env={k: v for k, v in os.environ.items() if k not in {"MAKELEVEL", "MAKEFLAGS"}} | {"PWD": str(ROOT)},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        check = next(i for i, line in enumerate(dry_run) if "e2e_stack.py csp-check" in line)
+        run = next(i for i, line in enumerate(dry_run) if "e2e_stack.py test" in line)
+        self.assertLess(check, run)
+        self.assertIn('EXPECTED_CSP_PROFILE="phase3-target"', dry_run[check])
+
+
+def requests_headers(headers: dict[str, str]) -> object:
+    """Headers with the case-insensitive lookup a real `requests` response has."""
+    return stack.requests.structures.CaseInsensitiveDict(headers)
