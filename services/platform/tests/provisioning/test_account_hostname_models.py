@@ -89,6 +89,19 @@ class AccountHostnameLabelTests(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
 
+    def test_a_label_cannot_be_changed_so_the_old_one_is_never_freed(self) -> None:
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
+
+        hostname.label = "a1b2c3d4"
+        with self.assertRaises(ProtectedLabelError):
+            hostname.save()
+        with self.assertRaises(ProtectedLabelError):
+            AccountHostname.objects.filter(pk=hostname.pk).update(label="a1b2c3d4")
+        with self.assertRaises(ProtectedLabelError):
+            AccountHostname.objects.bulk_update([hostname], ["label"])
+
+        self.assertEqual(AccountHostname.objects.get(pk=hostname.pk).label, "h7k3p2q9")
+
     def test_an_account_has_at_most_one_hostname(self) -> None:
         account = _account(self.server)
         AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE, account=account)
@@ -193,6 +206,17 @@ class AccountHostnameAuditTests(TestCase):
 
         retired = AuditEvent.objects.get(action="account_hostname_retired", object_id=str(hostname.pk))
         self.assertEqual(retired.new_values["fqdn"], "h7k3p2q9.acct.praho.test")
+
+    def test_a_partial_save_without_retired_at_records_no_retirement(self) -> None:
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
+        hostname.retired_at = timezone.now()  # changed in memory only
+
+        hostname.save(update_fields=["records", "updated_at"])
+
+        self.assertIsNone(AccountHostname.objects.get(pk=hostname.pk).retired_at)
+        self.assertFalse(
+            AuditEvent.objects.filter(action="account_hostname_retired", object_id=str(hostname.pk)).exists()
+        )
 
     def test_saving_an_already_retired_name_records_no_second_retirement(self) -> None:
         hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)

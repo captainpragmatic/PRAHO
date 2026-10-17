@@ -23,9 +23,22 @@ class ProtectedLabelError(Exception):
     """An account hostname row cannot be deleted: deleting it would free its label for reuse."""
 
 
+_LABEL_IMMUTABLE = "An account hostname's label never changes; a label is never reused."
+
+
 class AccountHostnameQuerySet(models.QuerySet["AccountHostname"]):
     def delete(self) -> tuple[int, dict[str, int]]:
         raise ProtectedLabelError("Account hostnames are retired, never deleted; a label is never reused.")
+
+    def update(self, **kwargs: object) -> int:
+        if "label" in kwargs:
+            raise ProtectedLabelError(_LABEL_IMMUTABLE)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: object, fields: object, *args: object, **kwargs: object) -> int:
+        if "label" in list(fields):  # type: ignore[call-overload]  # fields is any iterable of names
+            raise ProtectedLabelError(_LABEL_IMMUTABLE)
+        return super().bulk_update(objs, fields, *args, **kwargs)  # type: ignore[arg-type]  # forwarded unchanged
 
 
 class AccountHostname(models.Model):
@@ -76,6 +89,13 @@ class AccountHostname(models.Model):
 
     def __str__(self) -> str:
         return self.fqdn
+
+    def save(self, *args: object, **kwargs: object) -> None:
+        if not self._state.adding:
+            stored = type(self).objects.filter(pk=self.pk).values_list("label", flat=True).first()
+            if stored is not None and stored != self.label:
+                raise ProtectedLabelError(_LABEL_IMMUTABLE)
+        super().save(*args, **kwargs)  # type: ignore[arg-type]  # forwarded unchanged
 
     def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
         raise ProtectedLabelError("Account hostnames are retired, never deleted; a label is never reused.")

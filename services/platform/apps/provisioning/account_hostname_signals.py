@@ -46,6 +46,10 @@ def remember_account_hostname_retirement(
     sender: type[AccountHostname], instance: AccountHostname, **kwargs: Any
 ) -> None:
     """Record whether this save retires the name: the stored row was live and this one is retired."""
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and "retired_at" not in update_fields:
+        instance._retires_now = False  # type: ignore[attr-defined]  # retired_at is not written by this save
+        return
     was_retired = (
         instance.pk is not None and AccountHostname.objects.filter(pk=instance.pk, retired_at__isnull=False).exists()
     )
