@@ -122,10 +122,17 @@ class PostgreSQLSafeRunner(MediaIsolatedRunner):
             check = ThreadConnectionCheck()
             check.install()
         try:
-            return super().run_tests(test_labels, **kwargs)
+            failures = super().run_tests(test_labels, **kwargs)
         finally:
             if check is not None:
                 check.uninstall()
+        if check is None:
+            return failures
+        # A thread that reported after the summary printed still fails the run.
+        late = check.drain_late_reports()
+        for message in late:
+            logger.error("🔥 [Tests] Reported after the summary: %s", message)
+        return failures + len(late)
 
     def setup_test_environment(self, **kwargs: Any) -> None:
         """Set up test environment with connection safety patches."""

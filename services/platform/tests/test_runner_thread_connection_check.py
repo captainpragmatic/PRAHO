@@ -288,6 +288,38 @@ class ThreadConnectionCheckTests(TransactionTestCase):
                 self.assertIsInstance(seen[0], ThreadConnectionCheck)
                 self.assertEqual((threading.Thread.start, threading.Thread.run), before)
 
+    def test_a_report_after_the_summary_still_fails_the_run(self) -> None:
+        # The worker's target has returned and its exit check is under way when finish() takes its
+        # final snapshot; the check's report then lands after the summary.
+        in_check, release = self._event(), self._event()
+        real_all = thread_connections.connections.all
+
+        def held_in_the_exit_check(*args: Any, **kwargs: Any) -> Any:
+            in_check.set()
+            release.wait(10)
+            return real_all(*args, **kwargs)
+
+        def run_and_leave_a_survivor(*_args: Any, **_kwargs: Any) -> int:
+            check = active_check()
+            assert check is not None
+            worker = self._thread()
+            with mock.patch.object(thread_connections.connections, "all", held_in_the_exit_check):
+                worker.start()
+                self.assertTrue(in_check.wait(10), "the worker never reached its exit check")
+                check.finish(unittest.TestResult(), wait=0)
+                release.set()
+                worker.join(10)
+            return 0
+
+        with (
+            mock.patch("django.test.runner.DiscoverRunner.run_tests", run_and_leave_a_survivor),
+            self.assertLogs("tests.runner", "ERROR") as logs,
+        ):
+            failures = PostgreSQLSafeRunner().run_tests(["tests"])
+
+        self.assertEqual(failures, 1)
+        self.assertIn("Reported after the summary", logs.output[0])
+
     def test_parallel_runs_skip_the_check(self) -> None:
         outer_check = active_check()
         seen: list[object] = []

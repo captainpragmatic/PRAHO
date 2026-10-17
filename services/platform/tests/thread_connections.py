@@ -14,8 +14,8 @@ report that arrives after its test ended is recorded on that test at the next bo
 arrives after the last test is recorded when the run stops.
 
 What it does not see: a ``Thread`` subclass that overrides ``run`` (``LiveServerThread`` does, and
-closes its own connections), a thread still running when the run ends (it is logged; if it
-holds a connection, the database teardown still fails), and parallel runs (serial only). It
+closes its own connections), a thread still running when the run ends (it is logged, and if it reports
+after the summary the run still fails), and parallel runs (serial only). It
 never calls ``gc.collect()``: that would close the leaks before they are seen.
 """
 
@@ -226,6 +226,12 @@ class ThreadConnectionCheck:
                 thread.name,
                 owner.id() if owner else "no test",
             )
+
+    def drain_late_reports(self) -> list[str]:
+        """Reports that arrived after finish(): a survivor exited, or was still checking, then."""
+        with self._lock:
+            reports, self._reports = self._reports, []
+        return [f"{(report.owner or _OutsideAnyTest()).id()}: {report.message}" for report in reports]
 
     def _alive(self) -> list[threading.Thread]:
         with self._lock:
