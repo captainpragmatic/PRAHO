@@ -1,7 +1,7 @@
 """Account hostnames: the opaque provider name that follows a hosting account across nodes (ADR-0061).
 
 A name is `<label>.<zone>`. The label is eight lowercase letters or digits, assigned once and never reused:
-the row outlives its account (`SET_NULL`), so a retired label stays taken. On a node the name is a
+the row outlives its account (`SET_NULL`) and refuses deletion, so a retired label stays taken. On a node the name is a
 Virtualmin sub-server of the customer's domain (lab contract `docs/domain/virtualmin-account-subserver-contract.md`).
 """
 
@@ -17,6 +17,15 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 LABEL_PATTERN = r"^[a-z0-9]{8}$"
+
+
+class ProtectedLabelError(Exception):
+    """An account hostname row cannot be deleted: deleting it would free its label for reuse."""
+
+
+class AccountHostnameQuerySet(models.QuerySet["AccountHostname"]):
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ProtectedLabelError("Account hostnames are retired, never deleted; a label is never reused.")
 
 
 class AccountHostname(models.Model):
@@ -55,6 +64,8 @@ class AccountHostname(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = AccountHostnameQuerySet.as_manager()
+
     class Meta:
         db_table = "provisioning_account_hostnames"
         verbose_name = _("Account Hostname")
@@ -65,6 +76,9 @@ class AccountHostname(models.Model):
 
     def __str__(self) -> str:
         return self.fqdn
+
+    def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
+        raise ProtectedLabelError("Account hostnames are retired, never deleted; a label is never reused.")
 
     @property
     def fqdn(self) -> str:

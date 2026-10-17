@@ -18,6 +18,7 @@ from apps.provisioning.account_hostname_models import (
     AccountHostname,
     AccountNameCertificate,
     AccountNameCertificateBudget,
+    ProtectedLabelError,
 )
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
@@ -73,6 +74,18 @@ class AccountHostnameLabelTests(TestCase):
 
         self.assertIsNone(hostname.account_id)
         self.assertEqual(hostname.label, "h7k3p2q9")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
+
+    def test_a_hostname_row_cannot_be_deleted_so_its_label_is_never_freed(self) -> None:
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
+
+        with self.assertRaises(ProtectedLabelError):
+            hostname.delete()
+        with self.assertRaises(ProtectedLabelError):
+            AccountHostname.objects.filter(pk=hostname.pk).delete()
+
+        self.assertTrue(AccountHostname.objects.filter(label="h7k3p2q9").exists())
         with self.assertRaises(IntegrityError), transaction.atomic():
             AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
 
@@ -180,3 +193,16 @@ class AccountHostnameAuditTests(TestCase):
 
         retired = AuditEvent.objects.get(action="account_hostname_retired", object_id=str(hostname.pk))
         self.assertEqual(retired.new_values["fqdn"], "h7k3p2q9.acct.praho.test")
+
+    def test_saving_an_already_retired_name_records_no_second_retirement(self) -> None:
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
+        hostname.retired_at = timezone.now()
+        hostname.save()
+
+        hostname.records = {"A": {"intended": "203.0.113.10"}}
+        hostname.save()  # a full save of a retired row, as an admin edit or a script would do
+        hostname.save(update_fields=["retired_at", "updated_at"])
+
+        self.assertEqual(
+            AuditEvent.objects.filter(action="account_hostname_retired", object_id=str(hostname.pk)).count(), 1
+        )

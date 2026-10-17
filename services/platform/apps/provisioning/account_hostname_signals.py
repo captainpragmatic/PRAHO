@@ -1,4 +1,7 @@
-"""Audit the account-hostname lifecycle (ADR-0061): a label assigned, a name retired, a row deleted."""
+"""Audit the account-hostname lifecycle (ADR-0061): a label assigned, a name retired.
+
+Rows are never deleted (`ProtectedLabelError`), so there is no delete event.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ import logging
 from typing import Any
 
 from django.conf import settings
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
@@ -38,17 +41,22 @@ def _log(instance: AccountHostname, event_type: str, description: str) -> None:
         )
 
 
+@receiver(pre_save, sender=AccountHostname)
+def remember_account_hostname_retirement(
+    sender: type[AccountHostname], instance: AccountHostname, **kwargs: Any
+) -> None:
+    """Record whether this save retires the name: the stored row was live and this one is retired."""
+    was_retired = (
+        instance.pk is not None and AccountHostname.objects.filter(pk=instance.pk, retired_at__isnull=False).exists()
+    )
+    instance._retires_now = instance.retired_at is not None and not was_retired  # type: ignore[attr-defined]  # per-save flag read by post_save
+
+
 @receiver(post_save, sender=AccountHostname)
 def audit_account_hostname_saved(
     sender: type[AccountHostname], instance: AccountHostname, created: bool, **kwargs: Any
 ) -> None:
-    update_fields = kwargs.get("update_fields")
     if created:
         _log(instance, "account_hostname_assigned", f"Account hostname {instance.fqdn} assigned")
-    elif instance.retired_at is not None and (update_fields is None or "retired_at" in update_fields):
+    if getattr(instance, "_retires_now", False):
         _log(instance, "account_hostname_retired", f"Account hostname {instance.fqdn} retired")
-
-
-@receiver(post_delete, sender=AccountHostname)
-def audit_account_hostname_deleted(sender: type[AccountHostname], instance: AccountHostname, **kwargs: Any) -> None:
-    _log(instance, "account_hostname_deleted", f"Account hostname {instance.fqdn} deleted")
