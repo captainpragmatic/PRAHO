@@ -74,6 +74,9 @@ class ThreadConnectionCheck:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._exits_done = threading.Condition(self._lock)
+        self._in_flight = 0  # exit checks under way
+        self._closed = False  # no exit check starts once the late reports are being drained
         self._reports: list[_Report] = []
         self._running: set[threading.Thread] = set()
         self._current: UnitTestCase | None = None
@@ -118,8 +121,11 @@ class ThreadConnectionCheck:
             finally:
                 # Routed by the check the thread was started under, not the one active now, so a
                 # worker that outlives a nested check is still checked.
-                if getattr(thread, _CHECK_ATTRIBUTE, None) is check and check._originals is not None:
-                    check._on_thread_exit(thread)
+                if getattr(thread, _CHECK_ATTRIBUTE, None) is check and check._begin_exit():
+                    try:
+                        check._on_thread_exit(thread)
+                    finally:
+                        check._end_exit()
 
         self._originals = (original_start, original_run)
         self._start_wrapper, self._run_wrapper = start, run
@@ -146,6 +152,18 @@ class ThreadConnectionCheck:
         return self._originals is not None and active_check() is self
 
     # -- the check, in the exiting thread -------------------------------------------------------
+
+    def _begin_exit(self) -> bool:
+        with self._lock:
+            if self._closed or self._originals is None:
+                return False
+            self._in_flight += 1
+            return True
+
+    def _end_exit(self) -> None:
+        with self._exits_done:
+            self._in_flight -= 1
+            self._exits_done.notify_all()
 
     def _on_thread_exit(self, thread: threading.Thread) -> None:
         # Never raises: an exception here would replace the target's own, or vanish into
@@ -227,11 +245,21 @@ class ThreadConnectionCheck:
                 owner.id() if owner else "no test",
             )
 
-    def drain_late_reports(self) -> list[str]:
-        """Reports that arrived after finish(): a survivor exited, or was still checking, then."""
-        with self._lock:
+    def drain_late_reports(self, *, wait: float = 10.0) -> list[str]:
+        """Reports that arrived after finish(), once every exit check under way has finished.
+
+        No exit check starts after this is called, so none can report after it returns. One still
+        running when ``wait`` runs out is itself a failure: its report could not be read.
+        """
+        with self._exits_done:
+            self._closed = True
+            self._exits_done.wait_for(lambda: self._in_flight == 0, timeout=wait)
             reports, self._reports = self._reports, []
-        return [f"{(report.owner or _OutsideAnyTest()).id()}: {report.message}" for report in reports]
+            unfinished = self._in_flight
+        messages = [f"{(report.owner or _OutsideAnyTest()).id()}: {report.message}" for report in reports]
+        if unfinished:
+            messages.append(f"{unfinished} thread exit check(s) still running after {wait:g}s; their reports are lost")
+        return messages
 
     def _alive(self) -> list[threading.Thread]:
         with self._lock:

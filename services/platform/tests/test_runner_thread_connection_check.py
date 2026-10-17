@@ -320,6 +320,41 @@ class ThreadConnectionCheckTests(TransactionTestCase):
         self.assertEqual(failures, 1)
         self.assertIn("Reported after the summary", logs.output[0])
 
+    def test_an_exit_check_still_running_when_the_run_returns_is_waited_for(self) -> None:
+        in_check, release = self._event(), self._event()
+        real_all = thread_connections.connections.all
+
+        def held_in_the_exit_check(*args: Any, **kwargs: Any) -> Any:
+            in_check.set()
+            release.wait(10)
+            return real_all(*args, **kwargs)
+
+        def release_once_draining(check: ThreadConnectionCheck) -> None:
+            while not check._closed:  # the drain has begun and is waiting on the exit check
+                threading.Event().wait(0.01)
+            release.set()
+
+        def return_with_an_exit_check_under_way(*_args: Any, **_kwargs: Any) -> int:
+            check = active_check()
+            assert check is not None
+            worker = self._thread()
+            patcher = mock.patch.object(thread_connections.connections, "all", held_in_the_exit_check)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+            worker.start()
+            self.assertTrue(in_check.wait(10), "the worker never reached its exit check")
+            self._thread(release_once_draining, args=(check,)).start()
+            return 0  # the worker is still inside its exit check
+
+        with (
+            mock.patch("django.test.runner.DiscoverRunner.run_tests", return_with_an_exit_check_under_way),
+            self.assertLogs("tests.runner", "ERROR") as logs,
+        ):
+            failures = PostgreSQLSafeRunner().run_tests(["tests"])
+
+        self.assertEqual(failures, 1)
+        self.assertIn("exited with 1 open database connection(s)", logs.output[0])
+
     def test_parallel_runs_skip_the_check(self) -> None:
         outer_check = active_check()
         seen: list[object] = []
