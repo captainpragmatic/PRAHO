@@ -599,8 +599,10 @@ class AuditEvent(models.Model):
     # Support both integer and UUID primary keys (CharField for mixed PK types)
     # PROTECT: cascading a ContentType delete must never silently erase audit evidence.
     # remove_stale_contenttypes requires an explicit retention decision first (ADR-0043).
-    content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
-    object_id = models.CharField(max_length=36, db_index=True)  # 36 chars for UUIDs, integers fit fine
+    # An event about no particular object (a login, a security signal, a nightly job) has none:
+    # it is never filed under a user, so selecting a person's events by object stays truthful.
+    content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT, null=True, blank=True)
+    object_id = models.CharField(max_length=36, db_index=True, blank=True)  # 36 chars for UUIDs, integers fit fine
     content_object = GenericForeignKey("content_type", "object_id")
 
     # Changes
