@@ -63,7 +63,7 @@ def _collect_named(value: Any, found: set[str], *, named: bool = False) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             _collect_named(item, found, named=named or _is_session_name(key))
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):  # a tuple is stored as a JSON array too
         for item in value:
             _collect_named(item, found, named=named)
     elif named and _is_session_value(value):
@@ -80,7 +80,7 @@ def _replace_raw(text: str, raw_keys: set[str]) -> str:
 def _scrub(value: Any, raw_keys: set[str], *, named: bool = False) -> Any:
     if isinstance(value, dict):
         return {key: _scrub(item, raw_keys, named=named or _is_session_name(key)) for key, item in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_scrub(item, raw_keys, named=named) for item in value]
     if named and _is_session_value(value):
         return session_key_digest(value)

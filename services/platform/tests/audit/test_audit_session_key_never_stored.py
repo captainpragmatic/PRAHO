@@ -233,3 +233,16 @@ class SessionNamedCollectionsAreScrubbedTests(TestCase):
         self.assertEqual(stored.metadata["session_id"], [session_key_digest(live)])
         self.assertEqual(stored.metadata["rotation"]["previous_session_keys"], [session_key_digest(rotated)])
         self.assertIn(session_key_digest(live), stored.metadata["elsewhere"])
+
+    def test_a_tuple_of_session_keys_is_digested_like_a_list(self) -> None:
+        live = "t1" + "e" * 30
+        event = AuditEvent.objects.create(
+            action="session_rotation",
+            category="authentication",
+            severity="low",
+            description="rotated the session",
+            metadata={"session_ids": (live,)},
+        )
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertNotIn(live, _all_text(stored))
+        self.assertEqual(stored.metadata["session_ids"], [session_key_digest(live)])
