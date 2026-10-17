@@ -29,6 +29,7 @@ from django.db import connection, connections
 from django.test.runner import DiscoverRunner, ParallelTestSuite
 
 from tests.media import isolated_media, setup_worker_media
+from tests.thread_connections import ThreadConnectionCheck, active_check
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,29 @@ class CacheClearingTestResult(TextTestResult):
             except Exception:
                 logger.warning("⚠️ [Tests] Failed to clear LocMem cache before %s", test.id(), exc_info=True)
         super().startTest(test)
+
+
+class ThreadConnectionTestResult(TextTestResult):
+    """Publish the thread connection check's reports at each test boundary and at the end."""
+
+    @override
+    def startTest(self, test: UnitTestCase) -> None:
+        if (check := active_check()) is not None:
+            check.test_started(test)
+        super().startTest(test)
+
+    @override
+    def stopTest(self, test: UnitTestCase) -> None:
+        if (check := active_check()) is not None:
+            check.test_stopped(self)
+        super().stopTest(test)
+
+    @override
+    def stopTestRun(self) -> None:
+        # Before the runner prints its summary, so these errors are listed with the others.
+        if (check := active_check()) is not None:
+            check.finish(self)
+        super().stopTestRun()
 
 
 class MediaIsolatedParallelSuite(ParallelTestSuite):
@@ -83,9 +107,25 @@ class PostgreSQLSafeRunner(MediaIsolatedRunner):
     def get_resultclass(self) -> type[TextTestResult]:
         """Preserve Django's SQL-debugging and debugger result behavior."""
         result_class = super().get_resultclass()
-        if result_class is None:
-            return CacheClearingTestResult
-        return type("CacheClearingResult", (CacheClearingTestResult, result_class), {})
+        bases: tuple[type[TextTestResult], ...] = (ThreadConnectionTestResult, CacheClearingTestResult)
+        if result_class is not None:
+            bases = (*bases, result_class)
+        return type("PostgreSQLSafeResult", bases, {})
+
+    @override
+    def run_tests(self, test_labels: list[str], **kwargs: object) -> int:
+        """Install the thread connection check around the whole run, discovery and teardown too."""
+        check: ThreadConnectionCheck | None = None
+        if self.parallel > 1:
+            logger.warning("⚠️ [Tests] The thread connection check is serial-only; skipped for --parallel")
+        else:
+            check = ThreadConnectionCheck()
+            check.install()
+        try:
+            return super().run_tests(test_labels, **kwargs)
+        finally:
+            if check is not None:
+                check.uninstall()
 
     def setup_test_environment(self, **kwargs: Any) -> None:
         """Set up test environment with connection safety patches."""
