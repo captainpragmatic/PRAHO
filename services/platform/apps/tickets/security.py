@@ -90,8 +90,10 @@ def _identify_png(uploaded_file: UploadedFile, size: int) -> Result[str, str]:
 
 
 def _identify_jpeg(uploaded_file: UploadedFile, size: int) -> Result[str, str]:
-    header = _read_at(uploaded_file, 0, 4)
-    if header[:3] == JPEG_SOI and len(header) == 4 and header[3] in JPEG_MARKER_RANGE:  # noqa: PLR2004
+    header = _read_at(uploaded_file, 0, 64)
+    # JPEG allows 0xFF fill bytes before a marker, so skip them to the first marker byte.
+    marker = header[3:].lstrip(b"\xff")[:1]
+    if header[:3] == JPEG_SOI and marker and marker[0] in JPEG_MARKER_RANGE:
         return Ok(ALLOWED_TYPES[".jpg"])
     return Err("The file is not a JPEG image.")
 
