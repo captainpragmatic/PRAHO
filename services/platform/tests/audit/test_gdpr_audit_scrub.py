@@ -18,7 +18,10 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent, AuditRetentionPolicy, audit_mutation_allowed
 from apps.audit.services import AuditIntegrityService, AuditRetentionService, GDPRDeletionService
+from apps.orders.models import Order, OrderStatusHistory
 from apps.settings.services import SettingsService
+from tests.factories.billing_factories import create_currency
+from tests.factories.core_factories import create_individual_customer
 
 User = get_user_model()
 
@@ -199,9 +202,11 @@ class ClaimsHoldTests(TestCase):
     def test_the_claims_period_follows_its_setting(self) -> None:
         now = timezone.now()
         event = self.checkout_evidence(now - timedelta(days=1100))
+        self.assertEqual(AuditRetentionService.claims_retention_cutoff(now), now - timedelta(days=2190))
         self.assertTrue(AuditRetentionService.is_held_for_claims(event, now))
         SettingsService.update_setting("audit.legal_claims_retention_days", 1000)
         event.refresh_from_db()
+        self.assertEqual(AuditRetentionService.claims_retention_cutoff(now), now - timedelta(days=1000))
         self.assertFalse(AuditRetentionService.is_held_for_claims(event, now))
 
         AuditRetentionService.apply_retention_policies(now=now)
@@ -228,3 +233,55 @@ class ClaimsHoldTests(TestCase):
         event.refresh_from_db()
         self.assertEqual(event.description, AuditRetentionService.ANONYMIZED_DESCRIPTION)
         self.assertIsNone(event.user_id)
+
+    def test_a_paid_order_cancelled_later_keeps_its_evidence(self) -> None:
+        AuditRetentionPolicy.objects.create(
+            name="operations delete", category="business_operation", retention_days=30, action="delete", is_active=True
+        )
+        order = Order.objects.create(
+            customer=create_individual_customer(email="claims@example.test"), currency=create_currency()
+        )
+        OrderStatusHistory.objects.create(order=order, old_status="awaiting_payment", new_status="paid")
+        Order.objects.filter(pk=order.pk).update(status="cancelled")
+        event = AuditEvent.objects.create(
+            action="order_status_changed",
+            category="business_operation",
+            severity="low",
+            content_type=ContentType.objects.get_for_model(Order),
+            object_id=str(order.pk),
+            description="Order paid",
+        )
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=60))
+
+        AuditRetentionService.apply_retention_policies()
+
+        self.assertTrue(AuditEvent.objects.filter(pk=event.pk).exists())
+
+    def test_retention_finishes_a_row_left_half_anonymized(self) -> None:
+        AuditRetentionPolicy.objects.create(
+            name="privacy anonymise", category="privacy", retention_days=30, action="anonymize", is_active=True
+        )
+        event = AuditEvent.objects.create(
+            action="profile_updated",
+            category="privacy",
+            severity="low",
+            user=self.person,
+            ip_address="198.51.100.7",
+            session_key="s" * 32,
+            description=AuditRetentionService.ANONYMIZED_DESCRIPTION,
+            old_values={"anonymized": True},
+            new_values={"anonymized": True},
+            metadata={"anonymized": True},
+        )
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=60))
+        status = AuditRetentionService.get_retention_status()
+        self.assertEqual(status["privacy"]["compliance_status"], "action_required")
+
+        AuditRetentionService.apply_retention_policies()
+
+        event.refresh_from_db()
+        self.assertIsNone(event.user_id)
+        self.assertIsNone(event.ip_address)
+        self.assertEqual(event.session_key, "")
