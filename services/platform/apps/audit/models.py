@@ -14,9 +14,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+from .session_digest import digest_session_identifiers, session_key_digest
 
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
@@ -76,6 +78,49 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
     def delete(self) -> tuple[int, dict[str, int]]:
         self._guard("delete()")
         return super().delete()
+
+    def bulk_create(  # noqa: PLR0913 - Django's signature
+        self,
+        objs: Iterable[AuditEvent],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[AuditEvent]:
+        """Insert events exactly as save() would: digested, stamped and chained.
+
+        bulk_create sends no pre_save or post_save, so it used to skip the integrity MAC and the
+        chain link. A conflict mode is refused: an upsert rewrites an existing row, and ignoring a
+        conflict would give an existing id a second chain link.
+        """
+        if ignore_conflicts or update_conflicts or update_fields or unique_fields:
+            raise AuditImmutabilityError(
+                "AuditEvent.bulk_create cannot ignore or update conflicts: audit rows are append-only"
+            )
+        from .signals import (  # noqa: PLC0415  # Deferred: signals imports this module
+            append_audit_event_chain_link,
+            stamp_audit_event_integrity_hash,
+        )
+
+        events = list(objs)
+        for event in events:
+            (event.session_key, event.description, event.metadata, event.old_values, event.new_values) = (
+                digest_session_identifiers(
+                    session_key=event.session_key,
+                    description=event.description,
+                    metadata=event.metadata,
+                    old_values=event.old_values,
+                    new_values=event.new_values,
+                )
+            )
+            stamp_audit_event_integrity_hash(sender=AuditEvent, instance=event)
+        created = super().bulk_create(events, batch_size=batch_size)
+        # One transaction, so the chain head is locked once for the whole batch.
+        with transaction.atomic():
+            for event in created:
+                append_audit_event_chain_link(sender=AuditEvent, instance=event, created=True)
+        return created
 
     @staticmethod
     def _guard(operation: str) -> None:
@@ -659,6 +704,8 @@ class AuditEvent(models.Model):
             raise AuditImmutabilityError(
                 "AuditEvent is append-only; save() on an existing row requires audit_mutation_allowed()"
             )
+        # The column only: metadata is MAC-covered and stamped before save() by every scrub.
+        self.session_key = session_key_digest(self.session_key)
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:

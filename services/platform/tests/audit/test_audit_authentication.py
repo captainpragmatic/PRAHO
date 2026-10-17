@@ -5,6 +5,7 @@ Tests all authentication events including login, logout, failures,
 account lockouts, and session security events with GDPR compliance.
 """
 
+import json
 import uuid
 from datetime import timedelta
 from unittest.mock import Mock, patch
@@ -25,6 +26,7 @@ from apps.audit.services import (
     LogoutEventData,
     SessionRotationEventData,
 )
+from apps.audit.session_digest import session_key_digest
 
 User = get_user_model()
 
@@ -178,8 +180,13 @@ class AuthenticationAuditServiceTest(TestCase):
 
         self.assertEqual(audit_event.action, "session_rotation")
         self.assertEqual(audit_event.metadata["rotation_reason"], "password_change")
-        self.assertEqual(audit_event.metadata["session_info"]["old_session_key"], old_session)
-        self.assertEqual(audit_event.metadata["session_info"]["new_session_key"], new_session)
+        # Both keys are kept as digests (ADR-0043): still comparable, never usable.
+        self.assertEqual(audit_event.metadata["session_info"]["old_session_key"], session_key_digest(old_session))
+        self.assertEqual(audit_event.metadata["session_info"]["new_session_key"], session_key_digest(new_session))
+        self.assertEqual(audit_event.session_key, session_key_digest(new_session))
+        stored = json.dumps(audit_event.metadata) + audit_event.description
+        self.assertNotIn(old_session, stored)
+        self.assertNotIn(new_session, stored)
         self.assertTrue(audit_event.metadata["security_enhancement"])
 
     def test_metadata_serialization_safety(self):

@@ -1,0 +1,153 @@
+"""No audit row, export or SIEM entry holds a usable session key.
+
+Django cycles the session key before user_logged_in fires, so a key recorded at login is the live
+one; an export holding it would let its reader resume that session. Audit rows keep a keyed digest:
+equal for the same session, so search and same-session correlation keep working.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+from typing import Any
+
+from django.contrib.auth import get_user_model
+from django.contrib.sessions.backends.db import SessionStore
+from django.test import Client, RequestFactory, TestCase, override_settings
+from django.urls import reverse
+
+from apps.audit.models import AuditChainHead, AuditChainLink, AuditEvent, AuditImmutabilityError
+from apps.audit.services import AuditContext, AuditEventData, AuditIntegrityService, AuditSearchService, AuditService
+from apps.audit.session_digest import SESSION_DIGEST_PREFIX, session_key_digest
+from apps.audit.siem import SIEMService
+from apps.users.mfa import MFAService
+from apps.users.services import SessionSecurityService
+
+User = get_user_model()
+
+
+def _all_text(event: AuditEvent) -> str:
+    """Every stored value of the row, as one string."""
+    values: list[Any] = [
+        event.session_key,
+        event.description,
+        event.request_id,
+        event.object_id,
+        json.dumps(event.metadata, default=str),
+        json.dumps(event.old_values, default=str),
+        json.dumps(event.new_values, default=str),
+    ]
+    return "\n".join(str(value) for value in values)
+
+
+class SessionKeysNeverStoredTests(TestCase):
+    def setUp(self) -> None:
+        self.admin = User.objects.create_user(
+            email="admin@example.com", password="x-pass-123", is_staff=True, staff_role="admin"
+        )
+        self.member = User.objects.create_user(email="member@example.com", password="x-pass-123")
+        self.seen_keys: set[str] = set()
+
+    def _session_request(self, user: Any) -> Any:
+        request = RequestFactory().get("/")
+        request.user = user
+        request.session = SessionStore()
+        request.session.create()
+        self.seen_keys.add(request.session.session_key)
+        return request
+
+    def _assert_no_raw_key_anywhere(self) -> None:
+        self.assertTrue(self.seen_keys)
+        events = list(AuditEvent.objects.all())
+        self.assertTrue(events)
+        for event in events:
+            text = _all_text(event)
+            for raw in self.seen_keys:
+                self.assertNotIn(raw, text, f"{event.action} holds a live session key")
+            if event.session_key:
+                self.assertTrue(event.session_key.startswith(SESSION_DIGEST_PREFIX), event.action)
+
+        siem = SIEMService()
+        for event in events:
+            entry = json.dumps(dataclasses.asdict(siem._create_log_entry(event)), default=str)
+            for raw in self.seen_keys:
+                self.assertNotIn(raw, entry, f"the SIEM entry for {event.action} holds a session key")
+
+        client = Client()
+        client.force_login(self.admin)
+        for export_format in ("csv", "json"):
+            response = client.get(reverse("audit:export_logs"), {"format": export_format})
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.streaming_content) if response.streaming else response.content
+            for raw in self.seen_keys:
+                self.assertNotIn(raw.encode(), body, f"the {export_format} export holds a session key")
+
+    def test_no_audit_row_or_export_holds_a_live_session_key(self) -> None:
+        # Login and logout through Django's own login(), which cycles the key first.
+        client = Client()
+        client.force_login(self.member)
+        self.seen_keys.add(client.session.session_key)
+        client.post(reverse("users:logout"))
+
+        # 2FA enrolment records the session as metadata["session_id"].
+        MFAService.enable_totp(self.member, self._session_request(self.member))
+
+        # A password-change rotation stores only short, unusable prefixes: they stay prefixes.
+        request = self._session_request(self.member)
+        SessionSecurityService.rotate_session_on_password_change(request, self.member)
+        self.seen_keys.add(request.session.session_key)
+        rotation = AuditEvent.objects.filter(action="session_rotated_password_change").first()
+        if rotation is not None:
+            prefix = rotation.metadata.get("old_session_key") or ""
+            self.assertTrue(prefix == "" or prefix.endswith("..."), prefix)
+
+        self._assert_no_raw_key_anywhere()
+
+    def test_session_search_finds_the_event_by_raw_or_digested_key(self) -> None:
+        raw = self._session_request(self.member).session.session_key
+        event = AuditService.log_event(
+            AuditEventData(event_type="login_success", description="signed in"),
+            AuditContext(user=self.member, session_key=raw),
+        )
+        self.assertEqual(event.session_key, session_key_digest(raw))
+
+        for search_value in (raw, session_key_digest(raw)):
+            queryset, _info = AuditSearchService.build_advanced_query({"session_keys": search_value}, self.admin)
+            self.assertEqual(list(queryset), [event], search_value)
+        empty, _info = AuditSearchService.build_advanced_query({"session_keys": ""}, self.admin)
+        self.assertIn(event, list(empty), "an empty filter is no filter, never the digest of nothing")
+
+
+@override_settings(AUDIT_CHAIN_ENABLED=True)
+class BulkCreateIsAuditedLikeSaveTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="bulk@example.com", password="x-pass-123")
+        AuditChainHead.objects.get_or_create(pk=1)
+        AuditChainHead.objects.filter(pk=1).update(backfill_complete=True)
+
+    def _unsaved(self, raw_key: str) -> AuditEvent:
+        return AuditEvent(
+            user=self.user,
+            action="login_success",
+            category="authentication",
+            severity="low",
+            description=f"signed in with session {raw_key}",
+            session_key=raw_key,
+            metadata={"session_info": {"session_key": raw_key}},
+        )
+
+    def test_bulk_create_stamps_chains_and_refuses_conflict_modes(self) -> None:
+        raw_keys = [f"{index:02d}" + "k" * 30 for index in range(3)]
+        created = AuditEvent.objects.bulk_create([self._unsaved(raw) for raw in raw_keys])
+
+        for event, raw in zip(created, raw_keys, strict=True):
+            stored = AuditEvent.objects.get(pk=event.pk)
+            self.assertEqual(stored.session_key, session_key_digest(raw))
+            self.assertNotIn(raw, _all_text(stored))
+            expected = AuditIntegrityService.integrity_stamp_marker(stored)["integrity_hash"]
+            self.assertEqual(stored.metadata.get("integrity_hash"), expected, "stamped like save()")
+            self.assertTrue(AuditChainLink.objects.filter(event_id_str=str(stored.pk)).exists(), "chained")
+
+        for conflict_mode in ({"ignore_conflicts": True}, {"update_conflicts": True}):
+            with self.assertRaises(AuditImmutabilityError):
+                AuditEvent.objects.bulk_create([self._unsaved("x" * 32)], **conflict_mode)
