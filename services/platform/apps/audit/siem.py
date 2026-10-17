@@ -127,6 +127,7 @@ class SIEMLogEntry:
     source_ip: str | None = None
     user_agent: str | None = None
     request_id: str | None = None
+    # A keyed digest of the session key (apps.audit.session_digest), never the key itself.
     session_id: str | None = None
 
     # Target information

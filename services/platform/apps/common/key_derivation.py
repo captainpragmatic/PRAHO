@@ -29,6 +29,10 @@ _DOMAIN_ENV_VARS: dict[str, str] = {
     # someone who has recovered the chain key. Provision AUDIT_ANCHOR_SECRET separately from
     # AUDIT_CHAIN_SECRET — ideally readable only by whatever verifies anchors, not by the app.
     "audit-anchor": "AUDIT_ANCHOR_SECRET",
+    # Session identifiers stored in audit rows are keyed digests of the session key, so an audit
+    # export or SIEM feed never holds a usable session. A DISTINCT domain: the digest key must not
+    # double as integrity or chain material.
+    "audit-session-digest": "AUDIT_SESSION_DIGEST_SECRET",
 }
 
 VALID_DOMAINS: frozenset[str] = frozenset(_DOMAIN_ENV_VARS.keys())

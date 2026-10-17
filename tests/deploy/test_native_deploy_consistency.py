@@ -391,3 +391,11 @@ def test_platform_passthrough_carries_the_anaf_switch() -> None:
     tasks = yaml.safe_load(NATIVE_TASKS.read_text())
     task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
     assert "ANAF_TRANSPORT_ENABLED" in task["vars"]["praho_passthrough"]
+
+
+def test_platform_passthrough_carries_the_audit_session_digest_secret() -> None:
+    # Deploy-time manage.py commands see only this list and write audit rows too, so without it
+    # their session digests would be keyed differently from the running services'.
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
+    assert "AUDIT_SESSION_DIGEST_SECRET" in task["vars"]["praho_passthrough"]

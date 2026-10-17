@@ -747,7 +747,7 @@ def _export_logs_csv(queryset: QuerySet[AuditEvent], timestamp: str) -> HttpResp
             "Is Sensitive",
             "Requires Review",
             "Request ID",
-            "Session Key",
+            "Session (digest)",
             "Old Values",
             "New Values",
             "Metadata",

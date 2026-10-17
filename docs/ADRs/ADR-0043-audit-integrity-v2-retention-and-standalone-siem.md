@@ -139,6 +139,21 @@ stream (`SIEMJSONFormatter`) for any log shipper, and on-demand export
 delivery guarantees belong to the log-shipping layer. The dead transport
 stack, duplicate services, and orphan models are deleted.
 
+**Amended 2026-10-17: session identifiers are digests.** An audit row, and so
+every export and SIEM entry made from it, never holds a usable session key.
+Django cycles the key before `user_logged_in` fires, so a key recorded at login
+is the live one, and an exported log was a way to resume that session. The
+`session_key` column, and every session identifier in the description, metadata
+and values, store `s1:` plus the first 32 hex characters of HMAC-SHA256 under the
+dedicated `audit-session-digest` key (`AUDIT_SESSION_DIGEST_SECRET` when set,
+else derived from `SECRET_KEY`; `apps/audit/session_digest.py`). The digest is
+equal for the same session, so search and same-session correlation keep working,
+and it is idempotent: an `s1:` value and a short `abcd1234...` prefix are left
+as they are. Searches digest their input, so a pasted raw key and a stored digest
+both match. SIEM `session_id` carries the digest. `bulk_create` digests, stamps
+and chains like `save()`, and refuses conflict modes, since an upsert rewrites a
+row and an ignored conflict would chain an existing id twice.
+
 ### 7. Coverage guardrails that cannot rot
 
 The model-coverage test now requires a receiver's defining module to reference

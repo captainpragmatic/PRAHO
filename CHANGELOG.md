@@ -240,6 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **No audit row, export or SIEM entry holds a usable session key** (ADR-0043). Django changes the key before the login signal fires, so the key recorded at login was the live one, and an exported audit log could resume that session. Audit rows now keep a keyed digest (`s1:…`, keyed by `AUDIT_SESSION_DIGEST_SECRET`, else derived from the secret key): equal for the same session, so search and same-session views still work. `bulk_create` of audit events is now stamped and chained like a single save, and refuses conflict modes.
 - **A ticket attachment's type now follows its bytes, not its name.**
   - **The gap.** The type came from the file extension, because the detection library the checks relied on was never installed. Any ZIP passed as a Word document, and a binary file passed as text.
   - **Now.** Each accepted type is identified from the file itself:
