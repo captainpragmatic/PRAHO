@@ -147,7 +147,7 @@ These are live defects today. Each ships with a test that fails without it.
     - "Repair DNS" enqueues a sync and returns at once; no DNS lookup inside a request.
     - Server IPs on the server pages.
 15. **P1.14 WordPress preview decision** (owner).
-16. **P1.15 The link playbook** (`infrastructure/ansible/playbooks/virtualmin_account_name_link.yml`, allowlisted in `ansible_service.py`).
+16. **P1.15 The link playbook** (`infrastructure/ansible/playbooks/virtualmin_account_name_link.yml`, allowlisted in `apps/infrastructure/ansible_service.py`).
     - Inputs: the sub-server's home (from the node's own listing, never built from user input), the customer's unix user. Validates that the home is `/home/<user>/domains/<label>.<zone>` and that `<user>` owns it.
     - Replaces `public_html` with the relative symlink `../../public_html`, owned by the customer's user (`chown -h`); idempotent (`ln -sfn` semantics, a real directory is moved aside once as `public_html.own`).
     - Lab test: the name serves the customer's marker and PHP as the customer's user; a second run changes nothing; `validate-domains --all-features` stays clean.
