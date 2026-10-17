@@ -176,3 +176,22 @@ class SessionInfoKeepsItsOtherFieldsTests(TestCase):
         self.assertEqual(info["session_key"], session_key_digest(raw))
         self.assertEqual(info["session_created"], created_at, "a timestamp is not a session key")
         self.assertEqual(info["duration_human"], "0:42:07.000001")
+
+
+class DirectInsertsAreScrubbedTests(TestCase):
+    def test_a_direct_create_digests_every_session_identifier_and_still_verifies(self) -> None:
+        raw = "d" * 32
+        event = AuditEvent.objects.create(
+            action="login_success",
+            category="authentication",
+            severity="low",
+            description=f"signed in with session {raw}",
+            session_key=raw,
+            metadata={"session_id": raw, "nested": {"old_session_key": raw}},
+            new_values={"session_key": raw},
+        )
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertNotIn(raw, _all_text(stored))
+        self.assertEqual(stored.metadata["session_id"], session_key_digest(raw))
+        expected = AuditIntegrityService.integrity_stamp_marker(stored)["integrity_hash"]
+        self.assertEqual(stored.metadata.get("integrity_hash"), expected, "the MAC covers the digests")

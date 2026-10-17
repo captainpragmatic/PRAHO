@@ -704,8 +704,22 @@ class AuditEvent(models.Model):
             raise AuditImmutabilityError(
                 "AuditEvent is append-only; save() on an existing row requires audit_mutation_allowed()"
             )
-        # The column only: metadata is MAC-covered and stamped before save() by every scrub.
-        self.session_key = session_key_digest(self.session_key)
+        if self._state.adding:
+            # A new row: digest every session identifier before super().save(), whose pre_save
+            # receiver stamps the integrity MAC over the digested values (ADR-0043).
+            (self.session_key, self.description, self.metadata, self.old_values, self.new_values) = (
+                digest_session_identifiers(
+                    session_key=self.session_key,
+                    description=self.description,
+                    metadata=self.metadata,
+                    old_values=self.old_values,
+                    new_values=self.new_values,
+                )
+            )
+        else:
+            # An existing row is re-stamped by its scrub before save(), so only the column, which
+            # the MAC does not cover, may change here.
+            self.session_key = session_key_digest(self.session_key)
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
