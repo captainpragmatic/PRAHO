@@ -105,6 +105,7 @@ CERT_TYPE = "acme_certificate"
 _ACCOUNT_KEY_DAYS = 3650
 _CERT_DAYS = 400
 _VAULT_REASON = "Account name certificate issuance"
+_INSTALLED_FINGERPRINT = re.compile(r"INSTALLED_FINGERPRINT=([0-9A-Fa-f:]+)")
 _PEM_BLOCK = re.compile(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", re.DOTALL)
 _ALERT_TTL_SECONDS = 24 * 3600
 _AUDIT_ALERT = "account_name_certificate_alert"
@@ -622,6 +623,15 @@ def _material_matches(fullchain_pem: str, key_pem: str, fqdn: str) -> bool:
     return same_key and names == [fqdn]
 
 
+def _normalised(fingerprint: str) -> str:
+    return fingerprint.replace(":", "").lower()
+
+
+def _fingerprint(leaf_pem: str) -> str:
+    """The SHA-256 fingerprint of a PEM certificate, as lowercase hex."""
+    return x509.load_pem_x509_certificate(leaf_pem.encode()).fingerprint(hashes.SHA256()).hex()
+
+
 def _leaf_not_after(fullchain_pem: str) -> datetime:
     blocks = _PEM_BLOCK.findall(fullchain_pem)
     if not blocks:
@@ -653,6 +663,20 @@ def _checked_material(certificate: AccountNameCertificate, fqdn: str) -> Result[
     return Ok((fullchain, key_pem))
 
 
+def _served_after_install(result: Result[Any, str], server: VirtualminServer, leaf: str) -> Result[None, str]:
+    """Ok when the play worked and the node reports serving exactly `leaf`."""
+    if result.is_err():
+        return Err(f"Certificate install failed: {result.unwrap_err()}")
+    if not result.unwrap().success:
+        return Err("The certificate install playbook failed on the node.")
+    served = _INSTALLED_FINGERPRINT.search(result.unwrap().stdout or "")
+    if served is None or _normalised(served.group(1)) != _fingerprint(leaf):
+        # Without the node's own word that it serves this certificate, nothing is recorded: readiness
+        # must never rest on a play that worked but left another certificate in place.
+        return Err(f"{server.hostname} does not report serving the certificate that was installed.")
+    return Ok(None)
+
+
 def install_current_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[None, str]:
     """Install the certificate in force on ``server`` and record it. The PEMs travel only in the playbook's vars file."""
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
@@ -677,10 +701,9 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
     result = AnsibleService().run_playbook(
         deployment, INSTALL_PLAYBOOK, variables, timeout_seconds=INSTALL_TIMEOUT_SECONDS
     )
-    if result.is_err():
-        return Err(f"Certificate install failed: {result.unwrap_err()}")
-    if not result.unwrap().success:
-        return Err("The certificate install playbook failed on the node.")
+    checked = _served_after_install(result, server, leaf)
+    if checked.is_err():
+        return checked
     record_installation(
         hostname, server, certificate_ref=certificate.current_certificate_ref, not_after=certificate.current_not_after
     )

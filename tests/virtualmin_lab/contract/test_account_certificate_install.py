@@ -11,6 +11,7 @@ proves P1.10 end to end.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
@@ -75,12 +76,18 @@ def _run(lab: Lab, key_pem: str, certificate_pem: str) -> tuple[bool, str]:
 
 def test_a_matching_certificate_installs_and_leaves_no_key_material(lab: Lab) -> None:
     key = _key()
+    certificate = _self_signed(key, SANDBOX_DOMAIN)
 
-    installed, output = _run(lab, _pem_key(key), _self_signed(key, SANDBOX_DOMAIN))
+    installed, output = _run(lab, _pem_key(key), certificate)
 
     assert installed, output[-2000:]
     assert _leftovers(lab) == []
     assert "BEGIN PRIVATE KEY" not in output
+    # The node's own word on what it now serves is what PRAHO checks before recording the install.
+    reported = re.search(r"INSTALLED_FINGERPRINT=([0-9A-Fa-f:]+)", output)
+    assert reported is not None, output[-2000:]
+    sent = x509.load_pem_x509_certificate(certificate.encode()).fingerprint(hashes.SHA256()).hex()
+    assert reported.group(1).replace(":", "").lower() == sent
 
 
 def test_a_certificate_that_does_not_match_its_key_fails_and_still_leaves_nothing(lab: Lab) -> None:

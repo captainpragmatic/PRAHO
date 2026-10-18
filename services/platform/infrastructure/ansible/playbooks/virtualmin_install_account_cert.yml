@@ -5,7 +5,11 @@
 # never on a command line. They are written into a root-only directory on /run (a memory filesystem, so
 # the files this play makes never reach the node's disk), handed to `virtualmin install-cert` by path,
 # and removed in the same play, whether or not the install worked. Ansible itself stages each task's
-# arguments under the connecting user's remote temporary directory and removes them after the task.
+# arguments, the key's content included, under the controller's and the connecting user's remote
+# temporary directories for the length of that task, and removes them after it.
+#
+# The play ends by printing the SHA-256 fingerprint of the certificate Virtualmin now serves for the
+# name (INSTALLED_FINGERPRINT=...). PRAHO records the install only when it is the certificate it sent.
 - name: Install an account name's certificate on a Virtualmin node
   hosts: all
   gather_facts: false
@@ -77,6 +81,24 @@
                   '--cert', cert_dir.path ~ '/cert.pem', '--key', cert_dir.path ~ '/key.pem']
                  + (['--ca', cert_dir.path ~ '/chain.pem'] if chain_pem | length > 0 else []) }}
           changed_when: true
+
+        - name: Read the fingerprint of the certificate the account name now serves
+          ansible.builtin.shell: |
+            set -euo pipefail
+            cert_file=$(virtualmin list-domains --domain "$ACCOUNT_NAME" --multiline \
+              | sed -n 's/^ *SSL cert file: //p' | head -n 1)
+            test -n "$cert_file"
+            openssl x509 -in "$cert_file" -noout -fingerprint -sha256
+          args:
+            executable: /bin/bash
+          environment:
+            ACCOUNT_NAME: "{{ account_name }}"
+          register: served_certificate
+          changed_when: false
+
+        - name: Report the fingerprint PRAHO checks before recording the install
+          ansible.builtin.debug:
+            msg: "INSTALLED_FINGERPRINT={{ served_certificate.stdout | regex_replace('^.*=', '') }}"
 
       always:
         - name: Remove the temporary directory and everything in it

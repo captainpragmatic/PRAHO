@@ -14,7 +14,8 @@ from itertools import count
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from cryptography.hazmat.primitives import serialization
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.cache import cache
 from django.db import connection
@@ -653,10 +654,18 @@ class NodeInstallTests(CertificateTestCase):
         with patch.object(VirtualminServer, "node_deployment", MagicMock(), create=True):
             yield
 
+    def served(self, fingerprint: str | None = None) -> MagicMock:
+        """A play that worked, reporting the fingerprint of what the node now serves (the one in force by default)."""
+        if fingerprint is None:
+            fullchain = certs.vault_secret(self.row().current_certificate_ref) or ""
+            leaf = x509.load_pem_x509_certificate(certs.split_chain(fullchain)[0].encode())
+            fingerprint = ":".join(f"{byte:02X}" for byte in leaf.fingerprint(hashes.SHA256()))
+        return MagicMock(success=True, stdout=f'"msg": "INSTALLED_FINGERPRINT={fingerprint}"')
+
     def test_the_stored_certificate_is_installed_through_the_playbook_vars_only(self) -> None:
         self.issue()
         runner = MagicMock()
-        runner.return_value.run_playbook.return_value = Ok(MagicMock(success=True))
+        runner.return_value.run_playbook.return_value = Ok(self.served())
 
         with patch("apps.infrastructure.ansible_service.AnsibleService", runner), self.managed_node():
             result = certs.install_current_certificate(self.hostname, self.server)
@@ -692,6 +701,18 @@ class NodeInstallTests(CertificateTestCase):
         self.assertIn("not for its stored key", result.unwrap_err())
         runner.return_value.run_playbook.assert_not_called()
         self.assertFalse(AccountNameCertificateInstall.objects.filter(hostname=self.hostname).exists())
+
+    def test_an_install_is_recorded_only_when_the_node_serves_that_certificate(self) -> None:
+        self.issue()
+        for report in (self.served("00:11:22"), MagicMock(success=True, stdout="ok=4 changed=1")):
+            with self.subTest(stdout=report.stdout):
+                runner = MagicMock()
+                runner.return_value.run_playbook.return_value = Ok(report)
+                with patch("apps.infrastructure.ansible_service.AnsibleService", runner), self.managed_node():
+                    result = certs.install_current_certificate(self.hostname, self.server)
+
+                self.assertTrue(result.is_err())
+                self.assertFalse(AccountNameCertificateInstall.objects.filter(hostname=self.hostname).exists())
 
     def test_a_failed_install_records_nothing(self) -> None:
         self.issue()
