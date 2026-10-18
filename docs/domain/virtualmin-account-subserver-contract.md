@@ -271,3 +271,20 @@ Reproved for P1.5 on `vmlab-a`, customer domain `p15parent.praho.test` with sub-
 | API `disable-domain` with `{"domain": parent}` only | parent only |
 
 `list-domains --parent <domain> --subserver --name-only` exits 0 with no output for a domain without a sub-server, and lists the child when there is one. The pair-restore script relies on both when it verifies that the domain and its sub-servers are disabled.
+
+## P1.15: the link playbook (2026-10-18, Virtualmin 8.3, ansible-core 2.20)
+
+`virtualmin_account_name_link.yml` on `vmlab-a`, sub-server `p15child9.acct.praho.test` of `p15parent.praho.test`, run through PRAHO's `AnsibleService`:
+
+| Case | Result |
+|---|---|
+| first run, `public_html` a real directory | changed; kept as `public_html.own`; `public_html -> ../../public_html` owned by the customer |
+| second run | unchanged |
+| request for the account name, HTTP and HTTPS | the customer's own `marker.txt` |
+| `virtualmin validate-domains --all-features` | "All features are good" |
+| the sub-server's home replaced by a link to `/etc` | `LINK=refused:unsafe_path`, nothing changed, `/etc` untouched |
+| an ancestor (`domains`) replaced by a link | `refused:unsafe_path` |
+| the script run as root instead of the customer | `refused:not_running_as_the_customer` |
+| a home under another user, or `customer_user=root` | refused (the script, or the playbook's input check) |
+
+ansible-core 2.20 prints a failed task as a YAML-style block (`msg: Assertion failed`); PRAHO's wrapper reads both that and the JSON form.
