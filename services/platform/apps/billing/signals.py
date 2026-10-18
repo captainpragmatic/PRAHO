@@ -18,7 +18,6 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import transaction
@@ -34,6 +33,7 @@ from apps.audit.services import (
     ComplianceEventRequest,
     actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
@@ -153,12 +153,8 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Log a lightweight lifecycle audit event for billing models."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-        if getattr(settings, "TESTING", False):
-            return
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
+    if audit_signals_disabled():
+        return
 
     event_metadata = {
         "source_app": "billing",
@@ -626,14 +622,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
             }
         )
 
-        _disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
-        _in_testing = getattr(settings, "TESTING", False)
-        if _disable_flag and not _in_testing:
-            logger.critical(
-                "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — "
-                "ignoring flag and continuing audit for safety"
-            )
-        if not _disable_flag or not _in_testing:
+        if not audit_signals_disabled():
             # Use specialized billing audit service for richer metadata
             from apps.audit.services import BusinessEventData
 
@@ -814,13 +803,7 @@ def handle_payment_created_or_updated(
 ) -> None:
     """Isolate optional effects; required settlement failures reach the caller."""
     old_values = _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
-    disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
-    in_testing = getattr(settings, "TESTING", False)
-    if disable_flag and not in_testing:
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
-    if not disable_flag or not in_testing:
+    if not audit_signals_disabled():
         with best_effort_atomic(logger=logger, scope="Payment Audit", message="Failed to audit payment save"):
             from apps.audit.services import BusinessEventData
 
@@ -926,7 +909,7 @@ def handle_proforma_invoice_conversion(
             }
         )
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
@@ -981,7 +964,7 @@ def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: b
             content_object=instance,
             description=f"Tax rule {instance.country_code} {instance.tax_type}: {instance.rate * 100}%",
         )
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             with best_effort_atomic(logger=logger, scope="Tax Audit", message="Failed to audit tax rule"):
                 AuditService.log_event(event_data)
 

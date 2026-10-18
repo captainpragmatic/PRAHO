@@ -28,6 +28,12 @@ Professional interface for staff to manage audit system
             </div>
         </div>
 
+        {% if audit_write_failures %}
+        <div class="bg-red-900 bg-opacity-30 border border-red-700 rounded-lg p-4 mb-6" role="alert">
+            <p class="text-red-300">{% blocktrans count count=audit_write_failures %}{{ count }} audit event could not be written and was skipped in the last 30 days. The action it described went ahead; check the server logs for "Failed to log event".{% plural %}{{ count }} audit events could not be written and were skipped in the last 30 days. The actions they described went ahead; check the server logs for "Failed to log event".{% endblocktrans %}</p>
+        </div>
+        {% endif %}
+
         <!-- Statistics Cards -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
             <!-- Total Events -->

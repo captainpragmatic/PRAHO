@@ -47,7 +47,8 @@ class LogBillingModelEventGuardTests(TestCase):
         """A critical log must be emitted when DISABLE_AUDIT_SIGNALS fires outside TESTING."""
         with (
             patch("apps.billing.signals.AuditService"),
-            self.assertLogs("apps.billing.signals", level=logging.CRITICAL) as log_cm,
+            patch("apps.audit.switches._warned", False),
+            self.assertLogs("apps.audit.switches", level=logging.CRITICAL) as log_cm,
         ):
             _log_billing_model_event(
                 event_type="test_event",

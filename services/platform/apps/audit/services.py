@@ -25,6 +25,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.billing.currency_service import default_selling_currency
+from apps.common import audit_failures
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
@@ -652,7 +653,6 @@ class AuthenticationAuditService:
             "failed_attempts_count": account_data.failed_attempts
             or getattr(account_data.user, "failed_login_attempts", 0),
             "user_id": str(account_data.user.id),
-            "user_email": account_data.user.email,
             "security_event": True,
             **account_data.metadata,
         }
@@ -664,7 +664,7 @@ class AuthenticationAuditService:
         audit_event_data = AuditEventData(
             event_type="account_locked",
             content_object=account_data.user,
-            description=f"Account locked for {account_data.user.email}: {account_data.trigger_reason}",
+            description=f"Account {account_data.user.pk} locked: {account_data.trigger_reason}",
         )
 
         return AuditService.log_event(audit_event_data, context)
@@ -800,19 +800,22 @@ class AuditService:
                 description=description,
                 ip_address=context.ip_address,
                 user_agent=context.user_agent or "",
-                request_id=context.request_id or str(uuid.uuid4()),
+                # Never invented: a request id that no request carried would look like one that did.
+                request_id=context.request_id or "",
                 session_key=session_key,
                 metadata=serialized_metadata,
             )
 
             logger.info(
-                f"✅ [Audit] {event_data.event_type} event logged for user {context.user.email if context.user else 'System'} ({category}/{severity})"
+                f"✅ [Audit] {event_data.event_type} event logged for "
+                f"{f'user {context.user.pk}' if context.user else 'System'} ({category}/{severity})"
             )
 
             return audit_event
 
         except Exception as e:
             logger.error(f"🔥 [Audit] Failed to log event {event_data.event_type}: {e}")
+            audit_failures.mark(e)
             raise
 
     @staticmethod

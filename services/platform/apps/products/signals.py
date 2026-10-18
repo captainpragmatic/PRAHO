@@ -196,18 +196,15 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                 "annual_discount": float(instance.annual_discount_percent),
             }
 
-            # We don't log every new price creation as it's too verbose
-            # Only log if it's for a high-attention category or high-value product
-            if instance.product.product_type in HIGH_ATTENTION_CATEGORIES or instance.monthly_price_cents > (
-                PRICING_THRESHOLDS["high_value_product_ron"] * 100
-            ):
-                ProductsAuditService.log_product_pricing_changed(
-                    product_price=instance,
-                    change_type="price_created",
-                    changes={"new_monthly_price_cents": instance.monthly_price_cents},
-                    romanian_business_context=romanian_context,
-                    context=actor_context(),
-                )
+            # Every price create and change is audited (owner decision O4): a price is what
+            # customers are billed, and the volume is low.
+            ProductsAuditService.log_product_pricing_changed(
+                product_price=instance,
+                change_type="price_created",
+                changes={"new_monthly_price_cents": instance.monthly_price_cents},
+                romanian_business_context=romanian_context,
+                context=actor_context(),
+            )
         else:
             # Check for significant pricing changes
             pricing_changes = _check_pricing_changes(instance)
@@ -300,17 +297,16 @@ def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
         # A free-to-paid change is significant, but has no finite percentage.
         percent_change = abs((new_amount - old_amount) / old_amount * 100) if old_amount else None
 
-        # Only log if change is significant
-        if percent_change is None or percent_change >= PRICING_THRESHOLDS["significant_change_percent"]:
-            changes["monthly_price_changed"] = {
-                "from_cents": instance._old_monthly_price_cents,
-                "to_cents": instance.monthly_price_cents,
-                "from_amount": float(old_amount),
-                "to_amount": float(new_amount),
-                "percent_change": float(percent_change) if percent_change is not None else None,
-                "price_increased": new_amount > old_amount,
-                "significant": True,
-            }
+        # Every change is recorded; "significant" only says whether it crosses the review threshold.
+        changes["monthly_price_changed"] = {
+            "from_cents": instance._old_monthly_price_cents,
+            "to_cents": instance.monthly_price_cents,
+            "from_amount": float(old_amount),
+            "to_amount": float(new_amount),
+            "percent_change": float(percent_change) if percent_change is not None else None,
+            "price_increased": new_amount > old_amount,
+            "significant": percent_change is None or percent_change >= PRICING_THRESHOLDS["significant_change_percent"],
+        }
 
     # Check setup fee changes
     if hasattr(instance, "_old_setup_cents") and instance._old_setup_cents != instance.setup_cents:

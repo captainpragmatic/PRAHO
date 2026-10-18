@@ -6,6 +6,7 @@ Romanian hosting provider authentication with multi-customer support.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, cast
@@ -20,6 +21,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.identity_fields import validate_international_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
+from apps.common.transactions import best_effort_atomic
 
 if TYPE_CHECKING:
     pass
@@ -33,6 +35,8 @@ from apps.common.encryption import (  # Core encryption needed for user model
 )
 from apps.common.transactional_save import TransactionalSaveModel
 from apps.customers.models import Customer  # Cross-app relationship
+
+logger = logging.getLogger(__name__)
 
 
 class UserManager(BaseUserManager["User"]):
@@ -340,9 +344,30 @@ class User(AbstractUser):
                 update_fields.append("account_locked_until")
 
             locked.save(update_fields=update_fields)
+            if "account_locked_until" in update_fields:
+                locked._audit_account_locked()
 
         self.failed_login_attempts = locked.failed_login_attempts
         self.account_locked_until = locked.account_locked_until
+
+    def _audit_account_locked(self) -> None:
+        """Record that failed sign-ins locked this account (best effort, in its own savepoint)."""
+        from apps.audit.services import (  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
+            AccountEventData,
+            AuthenticationAuditService,
+        )
+
+        with best_effort_atomic(logger=logger, scope="Auth", message="Could not audit an account lockout"):
+            AuthenticationAuditService.log_account_locked(
+                AccountEventData(
+                    user=self,
+                    trigger_reason="failed_login_threshold",
+                    failed_attempts=self.failed_login_attempts,
+                    metadata={
+                        "locked_until": self.account_locked_until.isoformat() if self.account_locked_until else ""
+                    },
+                )
+            )
 
     def reset_failed_login_attempts(self) -> None:
         """Reset failed login attempts and unlock account"""

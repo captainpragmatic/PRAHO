@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 User = get_user_model()
 
+USER_AGENT_MAX_LENGTH = 500
+
 # ===============================================================================
 # AUDIT EVENT IMMUTABILITY GUARD (ADR-0016 / ADR-0043)
 # ===============================================================================
@@ -116,6 +118,7 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
                     new_values=event.new_values,
                 )
             )
+            event.user_agent = (event.user_agent or "")[:USER_AGENT_MAX_LENGTH]
             stamp_audit_event_integrity_hash(sender=AuditEvent, instance=event)
         created = super().bulk_create(events, batch_size=batch_size)
         # One transaction, so the chain head is locked once for the whole batch.
@@ -1088,6 +1091,8 @@ class AuditEvent(models.Model):
                 "AuditEvent is append-only; save() on an existing row requires audit_mutation_allowed()"
             )
         if self._state.adding:
+            # Only the start of a user agent is evidence; the rest is a fingerprint nobody needs.
+            self.user_agent = (self.user_agent or "")[:USER_AGENT_MAX_LENGTH]
             # A new row: digest every session identifier before super().save(), whose pre_save
             # receiver stamps the integrity MAC over the digested values (ADR-0043).
             (self.session_key, self.description, self.metadata, self.old_values, self.new_values) = (

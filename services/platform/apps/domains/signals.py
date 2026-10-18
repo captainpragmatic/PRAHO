@@ -15,7 +15,6 @@ Includes:
 import logging
 from typing import Any, cast
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Model
@@ -30,6 +29,7 @@ from apps.audit.services import (
     DomainsAuditService,
     actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
@@ -72,7 +72,7 @@ def audit_domain_currency_transition(
     created: bool,
     **kwargs: Any,
 ) -> None:
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
     AuditService.log_simple_event(
         event_type="configuration_changed",
@@ -99,7 +99,7 @@ def audit_domain_currency_transition(
 def audit_tld_retail_price(
     sender: type[TLDRetailPrice], instance: TLDRetailPrice, created: bool, **kwargs: Any
 ) -> None:
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
     AuditService.log_simple_event(
         event_type="create" if created else "update",
@@ -164,7 +164,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
         }
 
         audit_values_ready = True
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             # Use specialized domains audit service for richer metadata
             DomainsAuditService.log_domain_event(
                 event_type=event_type,
@@ -315,7 +315,7 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
             "is_active": instance.is_active,
         }
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             DomainsAuditService.log_tld_event(
                 event_type=event_type,
                 tld=instance,
@@ -402,7 +402,7 @@ def handle_registrar_created_or_updated(
             or "api_key" in str(kwargs.get("update_fields", []))  # API credentials updated
         )
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             DomainsAuditService.log_registrar_event(
                 event_type=event_type,
                 registrar=instance,
@@ -482,7 +482,7 @@ def handle_tld_registrar_assignment(
             description=f"TLD .{instance.tld.extension} {'assigned to' if created else 'updated for'} registrar {instance.registrar.name}",
         )
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             AuditService.log_event(event_data)
 
     with swallow_application_errors(logger=logger, scope="Domains", message="Domain follow-up failed"):
@@ -529,7 +529,7 @@ def handle_domain_order_item_processing(
             "renewal_period_end": instance.renewal_terms.get("period_end"),
         }
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             DomainsAuditService.log_domain_order_event(
                 event_type=event_type,
                 domain_order_item=instance,

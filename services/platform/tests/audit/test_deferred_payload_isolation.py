@@ -3,7 +3,7 @@
 from django.test import override_settings
 
 from apps.audit.models import AuditEvent, CookieConsent
-from apps.audit.signals import cookie_consent_updated, customer_context_switched
+from apps.audit.signals import cookie_consent_updated
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User, UserProfile
 from tests.common._deferred_audit_reads import DeferredAuditReadTestCase
@@ -46,17 +46,6 @@ class DeferredAuditPayloadTests(DeferredAuditReadTestCase):
 
         self.run_deferred_read(consent, trigger)
         self.assertEqual(CookieConsent.objects.get(pk=consent.pk).status, "withdrawn")
-
-    def test_context_switch_preserves_write_when_deferred_customer_name_fetch_fails(self) -> None:
-        customer = Customer.objects.defer("name").get(pk=self.customer.pk)
-
-        def trigger() -> None:
-            self.user.first_name = "Switched"
-            self.user.save(update_fields=["first_name"])
-            customer_context_switched.send(sender=User, user=self.user, old_customer=None, new_customer=customer)
-
-        self.run_deferred_read(customer, trigger)
-        self.assertEqual(User.objects.get(pk=self.user.pk).first_name, "Switched")
 
     def test_failed_name_payload_does_not_skip_phone_event(self) -> None:
         user = User.objects.defer("last_name").get(pk=self.user.pk)

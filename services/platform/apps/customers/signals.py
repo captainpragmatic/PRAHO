@@ -16,7 +16,6 @@ Includes:
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
@@ -29,6 +28,7 @@ from apps.audit.services import (
     ComplianceEventRequest,
     actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
@@ -92,7 +92,7 @@ def handle_customer_created_or_updated(
         # Get previous values for audit trail
         old_values = getattr(instance, "_original_customer_values", {}) if not created else {}
         # Enhanced customer audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             event_type = "customer_created" if created else "customer_updated"
@@ -261,7 +261,7 @@ def handle_tax_profile_changes(
         # One audit record per change (#241 dedup): Romanian registrations get the
         # ComplianceLog below - the AuditEvent restated it. Non-RO profiles have no
         # ComplianceLog path, so they keep the AuditEvent for coverage.
-        if not is_romanian_registration and not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not is_romanian_registration and not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             with best_effort_atomic(logger=logger, scope="Customers", message="log_tax_profile_event failed"):
@@ -384,7 +384,7 @@ def handle_billing_profile_changes(
 
         old_values = getattr(instance, "_original_billing_values", {}) if not created else {}
         # Enhanced billing profile audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             with best_effort_atomic(logger=logger, scope="Customers", message="log_billing_profile_event failed"):
@@ -473,7 +473,7 @@ def handle_address_changes(
         event_type = "customer_address_created" if created else "customer_address_updated"
 
         # Enhanced address audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_address_values", {}) if not created else {}
@@ -571,7 +571,7 @@ def handle_payment_method_changes(
         event_type = "customer_payment_method_created" if created else "customer_payment_method_updated"
 
         # Enhanced payment method audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_payment_values", {}) if not created else {}
@@ -700,7 +700,7 @@ def handle_customer_note_changes(
     with swallow_application_errors(logger=logger, scope="customers", message="handle_customer_note_changes failed"):
         if created:
             # Enhanced customer note audit logging
-            if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+            if not audit_signals_disabled():
                 from apps.audit.services import CustomersAuditService
 
                 with best_effort_atomic(logger=logger, scope="Customers", message="log_note_event failed"):

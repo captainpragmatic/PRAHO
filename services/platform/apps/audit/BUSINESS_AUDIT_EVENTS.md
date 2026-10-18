@@ -1,457 +1,586 @@
-# PRAHO Business Transaction Audit Events
-
-This document describes the comprehensive business transaction audit system implemented for the PRAHO platform, covering all critical financial and order management events with Romanian business compliance requirements.
-
-## Overview
-
-The business audit system captures detailed audit trails for all financial transactions, order lifecycle events, and provisioning activities. This ensures complete traceability for business operations, regulatory compliance (GDPR, Romanian e-Factura), and financial reporting requirements.
-
-## Architecture
-
-### Domain-Specific Audit Services
-
-- **`BillingAuditService`** - Specialized service for billing, invoicing, and payment events
-- **`OrdersAuditService`** - Specialized service for order lifecycle and provisioning events
-- **Signal-based Integration** - Automatic event capture through Django model signals
-- **Rich Metadata Capture** - Comprehensive business context for each event
-
-## Billing & Invoice Events
-
-### Invoice Lifecycle Events
-
-| Event Type | Description | Metadata Captured |
-|------------|-------------|-------------------|
-| `invoice_created` | Invoice initially created in draft status | Invoice details, customer info, amounts |
-| `invoice_issued` | Invoice officially issued to customer | Sequential number, issue date, due date |
-| `invoice_sent` | Invoice sent to customer via email | Recipient, send timestamp, delivery status |
-| `invoice_paid` | Invoice fully paid by customer | Payment date, amount, payment method |
-| `invoice_partially_paid` | Partial payment received | Remaining balance, payment details |
-| `invoice_overdue` | Invoice past due date | Days overdue, dunning status |
-| `invoice_voided` | Invoice cancelled/voided | Void reason, compliance notes |
-| `invoice_refunded` | Invoice refunded to customer | Refund amount, refund date, reason |
-| `invoice_status_changed` | General status change event | Old status, new status, change reason |
-
-### Romanian e-Factura Compliance Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `efactura_submitted` | Invoice submitted to ANAF e-Factura | Submission ID, XML details |
-| `efactura_accepted` | e-Factura submission accepted | Acceptance timestamp, reference |
-| `efactura_rejected` | e-Factura submission rejected | Rejection reason, error codes |
-| `invoice_number_generated` | Sequential number assigned | Compliance with Romanian law |
-| `invoice_xml_generated` | e-Factura XML created | File path, validation status |
-| `vat_calculation_applied` | VAT calculation performed | Rate used, amount calculated |
-
-### ProformaInvoice Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `proforma_created` | Proforma invoice created | Validity period, amounts, customer |
-| `proforma_converted` | Converted to final invoice | Conversion timestamp, reason |
-| `proforma_expired` | Proforma validity expired | Expiry date, cleanup actions |
-
-## Payment Processing Events
-
-### Core Payment Events
-
-| Event Type | Description | Metadata Captured |
-|------------|-------------|-------------------|
-| `payment_initiated` | Payment process started | Gateway details, amount, method |
-| `payment_processing` | Payment being processed | Gateway transaction ID |
-| `payment_succeeded` | Payment completed successfully | Confirmation details, receipt |
-| `payment_failed` | Payment processing failed | Failure reason, error codes |
-| `payment_refunded` | Payment refunded | Refund amount, refund reason |
-| `payment_partially_refunded` | Partial refund processed | Remaining balance |
-
-### Payment Retry & Dunning Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `payment_retry_scheduled` | Retry scheduled per policy | Retry attempt number, schedule |
-| `payment_retry_attempted` | Retry attempt made | Attempt details, outcome |
-| `payment_retry_succeeded` | Retry attempt successful | Success after N attempts |
-| `payment_retry_failed` | Retry attempt failed | Failure details |
-| `payment_retry_exhausted` | All retries exhausted | Escalation triggered |
-| `dunning_email_sent` | Dunning notification sent | Email details, escalation level |
-
-### Payment Compliance & Security
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `payment_fraud_detected` | Fraudulent payment detected | Risk score, blocking reason |
-| `payment_chargeback_received` | Chargeback initiated | Chargeback reason, dispute ID |
-| `payment_method_changed` | Customer changed payment method | Old/new method details |
-| `payment_gateway_error` | Gateway processing error | Error details, retry status |
-
-## Credit & Balance Management
-
-### Credit Ledger Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `credit_added` | Credit added to account | Amount, reason, expiry |
-| `credit_used` | Credit applied to payment | Amount used, remaining balance |
-| `credit_adjusted` | Manual credit adjustment | Adjustment reason, amount |
-| `credit_expired` | Credit balance expired | Expired amount, cleanup |
-| `credit_limit_changed` | Credit limit modified | Old/new limit, approval |
-| `credit_hold_applied` | Account placed on credit hold | Hold reason, restrictions |
-| `credit_hold_released` | Credit hold removed | Release reason, timestamp |
-
-### Balance Monitoring Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `balance_low_warning` | Account balance below threshold | Current balance, threshold |
-| `balance_insufficient` | Insufficient funds for transaction | Required vs available |
-
-## Order Management Events
-
-### Order Lifecycle Events
-
-| Event Type | Description | Metadata Captured |
-|------------|-------------|-------------------|
-| `order_created` | New order placed | Customer details, items, amounts |
-| `order_updated` | Order details modified | Changed fields, reason |
-| `order_status_changed` | Order status transition | Old/new status, trigger |
-| `order_submitted` | Order submitted for processing | Submission timestamp |
-| `order_confirmed` | Order confirmed by customer | Confirmation details |
-| `order_processing` | Order being processed | Processing stage |
-| `order_completed` | Order fulfillment complete | Completion timestamp |
-| `order_cancelled_customer` | Customer cancelled order | Cancellation reason |
-| `order_cancelled_admin` | Admin cancelled order | Internal reason, refund status |
-| `order_failed` | Order processing failed | Failure reason, recovery actions |
-
-### Order Item Management
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `order_item_added` | Item added to order | Product details, pricing |
-| `order_item_removed` | Item removed from order | Removal reason |
-| `order_item_updated` | Item details changed | Changed attributes |
-| `order_quantity_changed` | Item quantity modified | Old/new quantity |
-| `order_pricing_updated` | Item pricing changed | Price change details |
-
-### Order Financial Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `order_discount_applied` | Discount applied to order | Discount type, amount |
-| `order_discount_removed` | Discount removed | Removal reason |
-| `order_tax_calculated` | Tax calculation performed | Tax rules applied |
-| `order_shipping_updated` | Shipping details changed | Address, method changes |
-
-### Order Refund Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `order_refund_requested` | Customer requested refund | Request details, reason |
-| `order_refund_approved` | Refund request approved | Approval details |
-| `order_refund_processed` | Refund completed | Processing details |
-
-## Provisioning & Service Events
-
-### Provisioning Lifecycle
-
-| Event Type | Description | Metadata Captured |
-|------------|-------------|-------------------|
-| `provisioning_started` | Service provisioning begun | Order item, service details |
-| `provisioning_in_progress` | Provisioning in progress | Progress status, stage |
-| `provisioning_completed` | Service successfully provisioned | Service details, credentials |
-| `provisioning_failed` | Provisioning failed | Error details, retry status |
-| `provisioning_retried` | Provisioning retry attempted | Retry count, outcome |
-
-### Service Management
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `service_activated` | Service activated for customer | Activation details |
-| `service_suspended` | Service suspended | Suspension reason |
-| `service_configuration_updated` | Service config changed | Configuration changes |
-| `service_credentials_generated` | Access credentials created | Credential type |
-| `service_access_granted` | Customer access granted | Access level, permissions |
-| `service_access_revoked` | Customer access removed | Revocation reason |
-
-### Domain & Resource Events
-
-| Event Type | Description | Business Context |
-|------------|-------------|------------------|
-| `domain_associated` | Domain linked to service | Domain details |
-| `domain_dissociated` | Domain unlinked from service | Unlinking reason |
-
-## Audit Metadata Structure
-
-### Common Metadata Fields
-
-All business audit events include these common metadata fields:
-
-```json
-{
-  "timestamp": "2024-12-01T10:30:00Z",
-  "actor_type": "system|user|admin",
-  "request_id": "req_abc123",
-  "ip_address": "192.168.1.100",
-  "user_agent": "Mozilla/5.0...",
-  "session_key": "session123"
-}
-```
-
-### Billing Event Metadata
-
-Invoice events include:
-
-```json
-{
-  "invoice_number": "INV-240001",
-  "invoice_status": "issued",
-  "customer_id": "uuid",
-  "customer_name": "Company SRL",
-  "currency": "RON",
-  "total_amount": "1000.00",
-  "total_cents": 100000,
-  "vat_amount": "190.00",
-  "vat_cents": 19000,
-  "due_date": "2024-12-31T23:59:59Z",
-  "is_overdue": false,
-  "romanian_compliance": {
-    "efactura_id": "EF123",
-    "efactura_sent": true,
-    "efactura_sent_date": "2024-12-01T11:00:00Z"
-  }
-}
-```
-
-Payment events include:
-
-```json
-{
-  "payment_id": "uuid",
-  "customer_id": "uuid",
-  "amount": "1000.00",
-  "amount_cents": 100000,
-  "currency": "RON",
-  "payment_method": "stripe",
-  "gateway_txn_id": "txn_123456",
-  "reference_number": "REF123",
-  "invoice_id": "uuid",
-  "invoice_number": "INV-240001",
-  "financial_impact": true
-}
-```
-
-### Order Event Metadata
-
-Order events include:
-
-```json
-{
-  "order_number": "ORD-20241201-000001",
-  "order_status": "processing",
-  "customer_id": "uuid",
-  "customer_email": "customer@company.com",
-  "customer_company": "Company SRL",
-  "customer_vat_id": "RO12345678",
-  "currency": "RON",
-  "total_amount": "500.00",
-  "total_cents": 50000,
-  "subtotal_cents": 42017,
-  "tax_cents": 7983,
-  "payment_method": "card",
-  "is_paid": true,
-  "source_tracking": {
-    "source_ip": "192.168.1.100",
-    "user_agent": "Mozilla/5.0...",
-    "utm_source": "google",
-    "utm_medium": "organic"
-  },
-  "items_count": 3
-}
-```
-
-## Usage Examples
-
-### Logging Invoice Events
-
-```python
-from apps.audit.services import BillingAuditService, AuditContext
-
-# Log invoice creation
-BillingAuditService.log_invoice_event(
-    event_type='invoice_created',
-    invoice=invoice,
-    user=request.user,
-    context=AuditContext(
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT'),
-        request_id=request.headers.get('X-Request-ID')
-    ),
-    description=f'Invoice {invoice.number} created for {invoice.customer.company_name}'
-)
-```
-
-### Logging Order Events
-
-```python
-from apps.audit.services import OrdersAuditService
-
-# Log order status change
-OrdersAuditService.log_order_event(
-    event_type='order_status_changed',
-    order=order,
-    old_values={'status': 'pending'},
-    new_values={'status': 'processing'},
-    context=AuditContext(actor_type='system'),
-    description=f'Order {order.order_number} advanced to processing'
-)
-```
-
-### Logging Provisioning Events
-
-```python
-# Log service provisioning completion
-OrdersAuditService.log_provisioning_event(
-    event_type='provisioning_completed',
-    order_item=order_item,
-    service=provisioned_service,
-    context=AuditContext(actor_type='system'),
-    description=f'Service {provisioned_service.id} provisioned for {order_item.product_name}'
-)
-```
-
-## Querying Business Audit Events
-
-### Common Business Queries
-
-```python
-from apps.audit.models import AuditEvent
-
-# Get all invoice events for a customer
-invoice_events = AuditEvent.objects.filter(
-    action__startswith='invoice_',
-    metadata__customer_id=str(customer.id)
-).order_by('-timestamp')
-
-# Get payment processing events for analysis
-payment_events = AuditEvent.objects.filter(
-    action__startswith='payment_',
-    timestamp__gte=start_date,
-    severity='high'
-)
-
-# Get order-to-cash audit trail
-order_to_cash = AuditEvent.objects.filter(
-    models.Q(metadata__order_number=order_number) |
-    models.Q(metadata__invoice_number=invoice_number)
-).order_by('timestamp')
-
-# Get provisioning failures for monitoring
-provisioning_failures = AuditEvent.objects.filter(
-    action='provisioning_failed',
-    timestamp__gte=timezone.now() - timedelta(hours=24)
-)
-```
-
-### Financial Compliance Queries
-
-```python
-# Get all VAT-related events for Romanian compliance
-vat_events = AuditEvent.objects.filter(
-    action__startswith='vat_',
-    timestamp__range=(start_date, end_date)
-)
-
-# Get e-Factura submission audit trail
-efactura_events = AuditEvent.objects.filter(
-    action__startswith='efactura_',
-    metadata__has_key='efactura_id'
-)
-
-# Get financial events requiring review
-financial_review = AuditEvent.objects.filter(
-    category='business_operation',
-    is_sensitive=True,
-    requires_review=True
-)
-```
-
-## Performance Considerations
-
-### Database Indexes
-
-The system includes specialized indexes for business queries:
-
-- `idx_audit_billing_events` - Fast billing event queries
-- `idx_audit_financial_compliance` - Financial compliance reporting
-- `idx_audit_romanian_compliance` - Romanian regulatory queries
-- `idx_audit_order_lifecycle` - Order lifecycle tracking
-- `idx_audit_provisioning` - Service provisioning queries
-- `idx_audit_revenue_events` - Revenue recognition queries
-
-### Query Optimization
-
-1. **Use specific event types** - Filter by `action` field for best performance
-2. **Include time ranges** - Always specify timestamp ranges for large datasets
-3. **Leverage metadata indexes** - Use JSON operators for metadata queries
-4. **Batch operations** - Use bulk queries for reporting and analytics
-
-## Security & Compliance
-
-### Data Sensitivity
-
-Business audit events are automatically marked as:
-- **Sensitive**: Payment, billing, customer data events
-- **High Severity**: Fraud detection, chargebacks, provisioning failures
-- **Review Required**: Financial compliance violations
-
-### Retention Policies
-
-- **Financial Events**: 7 years (Romanian legal requirement)
-- **Order Events**: 5 years
-- **Provisioning Events**: 3 years
-- **General Business Events**: 2 years
-
-### Access Controls
-
-- **Finance Team**: Full access to billing and payment events
-- **Operations Team**: Access to order and provisioning events
-- **Compliance Team**: Access to regulatory and audit events
-- **Customers**: Limited access to their own transaction events
-
-## Monitoring & Alerting
-
-### Key Business Metrics
-
-The audit system supports monitoring of:
-- Payment success/failure rates
-- Order completion times
-- Provisioning success rates
-- Invoice collection efficiency
-- Compliance event tracking
-
-### Alert Conditions
-
-- Multiple payment failures for a customer
-- Provisioning failures above threshold
-- e-Factura submission failures
-- High-value refunds requiring review
-- Unusual order patterns or fraud indicators
-
-## Integration Points
-
-### Signal-Based Automation
-
-The business audit system automatically captures events through:
-- Django model signals (post_save, pre_save, post_delete)
-- Service layer integration points
-- Webhook processing events
-- Background task completions
-
-### External System Integration
-
-- **Accounting Software**: Export audit trails for external reconciliation
-- **Business Intelligence**: Feed audit data to BI tools for analytics
-- **Compliance Tools**: Integration with Romanian e-Factura systems
-- **Monitoring Systems**: Real-time event streaming for alerts
-
----
-
-*This documentation covers the comprehensive business transaction audit system implemented for PRAHO Platform. For technical implementation details, see the source code in `apps/audit/services.py` and related signal handlers.*
+# PRAHO audit events
+
+<!-- Generated by tests/audit/test_audit_action_vocabulary.py. Do not edit. Regenerate: UPDATE_AUDIT_EVENTS_DOC=1 make test-file FILE=tests.audit.test_audit_action_vocabulary -->
+
+Every audit action the platform writes, with how it is classified. An action appears here only
+when some code writes it; the list is read from the code, so it cannot drift from it. The
+classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
+See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
+
+531 actions, in 9 categories.
+
+## Account management
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `email_changed` | medium | no | yes | audit |
+| `name_changed` | medium | no | yes | audit |
+| `phone_updated` | medium | no | yes | audit |
+| `profile_updated` | medium | no | yes | audit, customers |
+
+## Authentication and sessions
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `2fa_admin_reset` | high | yes | yes | users |
+| `2fa_backup_code_used` | medium | no | yes | users |
+| `2fa_backup_codes_generated` | medium | no | yes | users |
+| `2fa_disabled` | high | yes | yes | audit, users |
+| `2fa_enabled` | medium | no | yes | audit, users |
+| `2fa_verification_failed` | medium | no | yes | users |
+| `2fa_verification_success` | medium | no | yes | users |
+| `account_hostname_assigned` | low | no | no | provisioning |
+| `account_hostname_retired` | low | no | no | provisioning |
+| `account_locked` | medium | yes | yes | audit |
+| `account_unlocked_automatic` | low | no | no | users |
+| `api_token_created` | medium | no | no | users |
+| `api_token_deleted` | medium | no | no | users |
+| `login_failed` | medium | no | yes | audit |
+| `login_failed_2fa` | medium | yes | yes | audit |
+| `login_failed_account_locked` | medium | no | yes | audit |
+| `login_failed_password` | medium | no | yes | audit |
+| `login_failed_user_not_found` | medium | no | yes | audit |
+| `login_new_location` | medium | no | yes | users |
+| `login_success` | medium | no | yes | audit |
+| `logout_concurrent_session` | low | no | yes | audit |
+| `logout_manual` | medium | no | yes | audit |
+| `logout_security_event` | low | no | yes | audit |
+| `logout_session_expired` | low | no | yes | audit |
+| `password_reset_completed` | medium | no | yes | api |
+| `session_rotated_2fa_change` | low | no | no | users |
+| `session_rotated_password_change` | low | no | no | users |
+| `session_rotation` | medium | no | yes | audit |
+| `session_timeout_updated` | low | no | no | users |
+
+## Authorization and access
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `customer_address_created` | low | no | yes | customers |
+| `customer_address_updated` | low | no | yes | customers |
+| `customer_analytics_updated` | low | no | yes | customers |
+| `customer_billing_profile_created` | low | no | yes | customers |
+| `customer_billing_profile_updated` | low | no | yes | customers |
+| `customer_created` | low | no | yes | customers |
+| `customer_deleted` | low | no | yes | customers |
+| `customer_feedback_processed` | low | no | yes | customers |
+| `customer_hard_deletion_attempted` | low | no | yes | customers |
+| `customer_ltv_adjusted` | low | no | yes | billing |
+| `customer_membership_created` | medium | no | yes | audit |
+| `customer_membership_deleted` | high | yes | yes | audit |
+| `customer_membership_updated` | medium | no | yes | audit |
+| `customer_note_created` | low | no | yes | customers |
+| `customer_onboarding_started` | low | no | yes | customers |
+| `customer_payment_method_changed` | low | no | yes | customers |
+| `customer_payment_method_created` | low | no | yes | customers |
+| `customer_payment_method_deleted` | low | no | yes | customers |
+| `customer_payment_method_updated` | low | no | yes | customers |
+| `customer_reactivation_email_sent` | low | no | yes | customers |
+| `customer_registration_success` | low | no | yes | users |
+| `customer_role_changed` | high | yes | yes | audit |
+| `customer_services_suspended` | low | no | yes | provisioning |
+| `customer_stats_updated` | low | no | yes | customers |
+| `customer_status_changed` | low | no | yes | customers |
+| `customer_tax_profile_created` | low | no | yes | customers |
+| `customer_tax_profile_updated` | low | no | yes | customers |
+| `customer_updated` | low | no | yes | customers |
+| `customer_user_created` | low | no | yes | users |
+| `customer_welcome_email_failed` | low | no | yes | customers |
+| `customer_welcome_email_sent` | low | no | yes | customers |
+| `staff_role_changed` | high | yes | yes | audit |
+
+## Business operations (billing, orders, services, support)
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `access` | low | no | no | audit |
+| `anaf_lookup_completed` | low | no | no | customers |
+| `anaf_lookup_deferred` | low | no | no | customers |
+| `auto_payment_created` | low | no | no | billing |
+| `auto_payment_failed` | low | no | no | billing |
+| `automatic_payment_reservation_abandoned` | low | no | no | billing |
+| `billing_cycle_closed` | low | no | yes | billing |
+| `billing_workflow_completed` | low | no | yes | billing |
+| `bulk_grandfathering_applied` | low | no | no | billing |
+| `collection_run_completed` | low | no | no | billing |
+| `collection_run_failed` | low | no | no | billing |
+| `collection_run_started` | low | no | no | billing |
+| `coupon_batch_created` | low | no | no | promotions |
+| `coupon_created` | low | no | no | promotions |
+| `coupon_deleted` | low | no | no | promotions |
+| `coupon_redemption_applied` | low | no | no | promotions |
+| `coupon_redemption_failed` | low | no | no | promotions |
+| `coupon_redemption_initiated` | low | no | no | promotions |
+| `coupon_redemption_reversed` | low | no | no | promotions |
+| `coupon_redemption_updated` | low | no | no | promotions |
+| `coupon_reversal_failed_on_cancellation` | high | yes | no | promotions |
+| `coupon_reversal_failed_on_refund` | high | yes | no | promotions |
+| `coupon_updated` | low | no | no | promotions |
+| `create` | low | no | no | domains, promotions, provisioning, settings |
+| `credit_ledger_created` | low | no | yes | billing |
+| `credit_ledger_deleted` | low | no | yes | billing |
+| `credit_ledger_updated` | low | no | yes | billing |
+| `credit_score_reverted` | low | no | yes | customers |
+| `credit_score_updated` | low | no | yes | customers |
+| `d390_export` | low | no | no | billing |
+| `daily_billing_completed` | low | no | no | billing |
+| `delete` | low | no | no | audit, common, settings |
+| `dns_fallback` | low | no | no | common |
+| `domain_availability_unconfirmed` | low | no | no | domains |
+| `domain_deleted` | low | no | no | domains |
+| `domain_expired_webhook` | low | no | no | domains |
+| `domain_lock_changed` | low | no | no | domains |
+| `domain_operation_review_required` | low | yes | no | domains |
+| `domain_order_created` | low | no | no | domains |
+| `domain_order_updated` | low | no | no | domains |
+| `domain_recorded_by_staff` | low | no | no | domains |
+| `domain_refusal_recorded_by_staff` | low | no | no | domains |
+| `domain_registered` | low | no | no | domains |
+| `domain_registration_completed` | low | no | no | domains |
+| `domain_renewed_webhook` | low | no | no | domains |
+| `domain_status_changed` | low | no | no | domains |
+| `domain_suspended_webhook` | low | no | no | domains |
+| `domain_transfer_code_received` | low | no | no | domains |
+| `domain_transfer_code_revealed` | low | no | no | domains |
+| `domain_transfer_completed` | low | no | no | domains |
+| `domain_transfer_completed_webhook` | low | no | no | domains |
+| `domain_updated` | low | no | no | domains |
+| `dunning_process_started` | low | no | no | billing |
+| `email_bounced` | low | no | yes | notifications |
+| `email_complained` | low | no | yes | notifications |
+| `email_failed` | low | no | yes | notifications |
+| `email_sent` | low | no | yes | notifications |
+| `email_suppressed` | low | no | yes | notifications |
+| `email_suppression_added` | low | no | yes | notifications |
+| `email_suppression_removed` | low | no | yes | notifications |
+| `email_suppression_updated` | low | no | yes | notifications |
+| `email_template_deleted` | low | no | yes | notifications |
+| `email_template_updated` | low | no | yes | notifications |
+| `email_webhook_invalid_signature` | low | no | yes | notifications |
+| `emergency_contact_updated` | low | no | no | audit |
+| `expired_trials_processed` | low | no | no | billing |
+| `export` | low | no | no | audit |
+| `external_sync_completed` | low | no | no | integrations |
+| `financial_document_access_denied` | low | no | no | billing |
+| `financial_document_accessed` | low | no | no | billing |
+| `fiscal_correction_created` | low | no | no | billing |
+| `fiscal_correction_deleted` | low | no | no | billing |
+| `fiscal_correction_updated` | low | no | no | billing |
+| `fx_rate_conflict` | low | no | no | billing |
+| `fx_rate_error` | low | no | no | billing |
+| `fx_rate_fetch_failed` | low | no | no | billing |
+| `fx_rate_fetched` | low | no | no | billing |
+| `fx_rate_provenance_promoted` | low | no | no | billing |
+| `fx_rate_recorded` | low | no | no | billing |
+| `gift_card_activated` | low | no | no | promotions |
+| `gift_card_adjusted` | low | no | no | promotions |
+| `gift_card_cancelled` | low | no | no | promotions |
+| `gift_card_code_revealed` | low | no | no | api, promotions |
+| `gift_card_created` | low | no | no | promotions |
+| `gift_card_delivery_requested` | low | no | no | api, promotions |
+| `gift_card_depleted` | low | no | no | promotions |
+| `gift_card_expired` | low | no | no | promotions |
+| `gift_card_redeemed` | low | no | no | promotions |
+| `gift_card_refund_reviewed` | low | no | no | promotions |
+| `gift_card_refunded` | low | no | no | promotions |
+| `gift_card_reversal_failed_on_cancellation` | high | yes | no | promotions |
+| `gift_card_reversal_failed_on_refund` | high | yes | no | promotions |
+| `gift_card_status_changed` | low | no | no | promotions |
+| `grace_periods_processed` | low | no | no | billing |
+| `grandfathering_expired` | low | no | no | billing |
+| `illegal_invoice_deletion` | low | no | no | billing |
+| `integration_connection_test` | low | no | no | settings |
+| `invitation_email_sent` | low | no | no | users |
+| `invitation_sent` | low | no | no | users |
+| `invoice_created` | low | no | no | billing |
+| `invoice_created_from_order` | low | no | no | billing |
+| `invoice_edited` | low | no | no | billing |
+| `invoice_issued` | low | no | no | billing |
+| `invoice_metrics_updated` | low | no | no | billing |
+| `invoice_number_generated` | low | no | no | billing |
+| `invoice_payment_attempt_created` | low | no | no | billing |
+| `invoice_pdf_generated` | low | no | no | billing |
+| `invoice_provider_issue_attempted` | low | no | no | billing |
+| `invoice_provider_issue_failed` | low | no | no | billing |
+| `invoice_provider_issued` | low | no | no | billing |
+| `invoice_provider_outcome_unknown` | low | no | no | billing |
+| `invoice_refund_completed` | low | no | no | billing |
+| `invoice_refund_recorded` | low | no | no | billing |
+| `invoice_refund_service_action` | low | no | no | orders |
+| `invoice_refunded` | high | no | no | billing |
+| `invoice_sequence_increment` | low | no | no | billing |
+| `invoice_status_changed` | low | no | no | billing |
+| `invoice_validation` | low | no | no | billing |
+| `invoice_xml_generated` | low | no | no | billing |
+| `language_preference_changed` | low | no | no | audit |
+| `large_credit_limit_increase` | low | no | no | customers |
+| `loyalty_member_enrolled` | low | no | no | promotions |
+| `loyalty_points_adjusted` | low | no | no | promotions |
+| `loyalty_points_bonus` | low | no | no | promotions |
+| `loyalty_points_earned` | low | no | no | promotions |
+| `loyalty_points_expired` | low | no | no | promotions |
+| `loyalty_points_redeemed` | low | no | no | promotions |
+| `loyalty_points_refunded` | low | no | no | promotions |
+| `loyalty_program_created` | low | no | no | promotions |
+| `loyalty_tier_bonus` | low | no | no | promotions |
+| `loyalty_tier_changed` | low | no | no | promotions |
+| `metering_new_usage_blocked` | low | no | no | billing |
+| `metering_suspension_applied` | low | no | no | billing |
+| `metering_throttle_applied` | low | no | no | billing |
+| `method_error` | low | no | no | common |
+| `method_success` | low | no | no | common |
+| `node_drain_cancelled` | low | no | no | provisioning |
+| `node_drain_completed` | low | no | no | provisioning |
+| `node_drain_failed` | low | no | no | provisioning |
+| `node_drain_finalized` | low | no | no | provisioning |
+| `node_drain_paused` | high | yes | no | provisioning |
+| `node_drain_pending` | low | no | no | provisioning |
+| `node_drain_running` | low | no | no | provisioning |
+| `node_drain_started` | low | no | no | provisioning |
+| `notification_preference_created` | low | no | no | notifications |
+| `notification_preference_updated` | low | no | no | notifications |
+| `notification_settings_changed` | low | no | no | audit |
+| `order_confirmed_auto` | medium | no | no | orders |
+| `order_created` | medium | no | no | orders |
+| `order_deleted` | medium | no | no | orders |
+| `order_edit` | medium | no | no | orders |
+| `order_flagged_for_review` | medium | no | no | orders |
+| `order_invoice_linked` | medium | no | no | billing |
+| `order_item_added` | medium | no | no | orders |
+| `order_item_deleted` | medium | no | no | orders |
+| `order_item_fulfilled_by_staff` | medium | no | no | orders |
+| `order_item_updated` | medium | no | no | orders |
+| `order_marked_paid` | medium | no | no | orders |
+| `order_payment_confirmed` | medium | no | no | orders |
+| `order_payment_failed` | medium | no | no | orders |
+| `order_pricing_updated` | medium | no | no | orders |
+| `order_proforma_unavailable` | medium | no | no | orders |
+| `order_refund` | medium | no | no | orders |
+| `order_status_changed` | medium | no | no | orders |
+| `order_terms_accepted` | medium | no | no | orders |
+| `order_timeout_cancelled` | medium | no | no | orders |
+| `order_updated` | medium | no | no | orders |
+| `order_vat_calculation` | medium | no | no | common |
+| `payment_cancelled` | medium | no | yes | billing |
+| `payment_deleted` | medium | no | yes | billing |
+| `payment_disputed` | medium | no | yes | billing |
+| `payment_failed` | high | no | yes | billing |
+| `payment_gateway_fact_mismatch` | medium | no | yes | billing |
+| `payment_gateway_id_recovered` | medium | no | yes | billing |
+| `payment_gateway_refund` | medium | no | yes | billing |
+| `payment_gateway_refund_failed` | medium | no | yes | billing |
+| `payment_initiated` | medium | no | yes | billing |
+| `payment_intent_created_direct` | medium | no | yes | billing |
+| `payment_method_changed_non_draft` | medium | no | yes | orders |
+| `payment_partially_refunded` | medium | no | yes | billing |
+| `payment_pending` | medium | no | yes | billing |
+| `payment_recorded_on_proforma` | medium | no | yes | billing |
+| `payment_refunded` | medium | no | yes | billing |
+| `payment_reminders_cancelled` | medium | no | yes | billing |
+| `payment_reminders_scheduled` | medium | no | yes | billing |
+| `payment_status_changed` | medium | no | yes | billing |
+| `payment_succeeded` | medium | no | yes | billing |
+| `pending_registration_confirmed` | low | no | no | users |
+| `portal_password_changed` | low | no | no | api |
+| `price_grandfathering_created` | low | no | no | billing |
+| `price_grandfathering_deleted` | low | no | no | billing |
+| `price_grandfathering_updated` | low | no | no | billing |
+| `primary_customer_changed` | low | no | no | audit |
+| `product_availability_changed` | low | no | no | audit |
+| `product_create_attempt` | low | no | no | products |
+| `product_created` | low | no | no | audit, products |
+| `product_detail_access` | low | no | no | products |
+| `product_list_access` | low | no | no | products |
+| `product_price_create_attempt` | low | no | no | products |
+| `product_price_created` | low | no | no | products |
+| `product_price_delete_attempt` | low | no | no | products |
+| `product_price_deleted` | low | no | no | products |
+| `product_price_edit_attempt` | low | no | no | products |
+| `product_price_updated` | low | no | no | products |
+| `product_price_validation_failed` | low | no | no | products |
+| `product_pricing_access` | low | no | no | products |
+| `product_pricing_changed` | low | no | no | audit |
+| `product_status_changed` | low | no | no | products |
+| `product_validation_failed` | low | no | no | products |
+| `proforma_converted_to_invoice` | low | no | yes | billing |
+| `proforma_created` | medium | no | yes | billing |
+| `proforma_created_from_order` | low | no | yes | billing |
+| `proforma_number_generated` | low | no | yes | billing |
+| `proforma_updated` | low | no | yes | billing |
+| `proforma_validation` | low | no | yes | billing |
+| `promotion_campaign_created` | low | no | no | promotions |
+| `promotion_campaign_updated` | low | no | no | promotions |
+| `promotion_release_blocked_anomalous_payments` | high | yes | no | billing |
+| `promotion_rule_applied` | low | no | no | promotions |
+| `promotion_rule_created` | low | no | no | promotions |
+| `promotion_rule_updated` | low | no | no | promotions |
+| `provider_issuance_deleted` | low | no | no | billing |
+| `provider_partial_refund_needs_manual_correction` | low | no | no | billing |
+| `provisioning_cancelled` | low | no | no | orders |
+| `provisioning_completed` | medium | no | no | orders |
+| `provisioning_failed` | high | no | no | orders |
+| `provisioning_started` | low | no | no | orders |
+| `provisioning_task_created` | low | no | no | provisioning |
+| `provisioning_task_deleted` | low | no | no | provisioning |
+| `provisioning_task_updated` | low | no | no | provisioning |
+| `rate_limit_exceeded` | low | no | no | audit, common |
+| `recurring_payment_authorization_created` | low | no | no | billing |
+| `recurring_payment_authorization_deleted` | low | no | no | billing |
+| `recurring_payment_authorization_updated` | low | no | no | billing |
+| `recurring_payment_submission_created` | low | no | no | billing |
+| `recurring_payment_submission_deleted` | low | no | no | billing |
+| `recurring_payment_submission_updated` | low | no | no | billing |
+| `referral_cancelled` | low | no | no | promotions |
+| `referral_code_created` | low | no | no | promotions |
+| `referral_created` | low | no | no | promotions |
+| `referral_expired` | low | no | no | promotions |
+| `referral_qualified` | low | no | no | promotions |
+| `referral_rewarded` | low | no | no | promotions |
+| `refund_model_created` | low | no | no | billing |
+| `refund_model_deleted` | low | no | no | billing |
+| `refund_model_updated` | low | no | no | billing |
+| `refund_processed` | low | no | no | billing |
+| `refund_reconciliation_gap` | critical | no | no | billing |
+| `refund_retry` | low | no | no | promotions |
+| `registrar_api_credentials_updated` | low | no | no | domains |
+| `registrar_api_domain_availability_check` | low | no | no | domains |
+| `registrar_api_domain_lock` | low | no | no | domains |
+| `registrar_api_domain_registration` | low | no | no | domains |
+| `registrar_api_domain_renewal` | low | no | no | domains |
+| `registrar_api_domain_transfer` | low | no | no | domains |
+| `registrar_api_nameserver_update` | low | no | no | domains |
+| `registrar_created` | low | no | no | domains |
+| `registrar_updated` | low | no | no | domains |
+| `registrar_webhook_invalid_signature` | low | no | no | domains |
+| `registrar_webhook_processing_error` | low | no | no | domains |
+| `registration_system_error` | low | no | no | users |
+| `restore_domain_failed` | low | no | no | provisioning |
+| `review_gate_cancel_unauthorized` | low | no | no | orders |
+| `review_gate_unauthorized_attempt` | low | no | no | orders |
+| `server_registered` | low | no | no | provisioning |
+| `server_status_changed` | low | no | no | provisioning |
+| `service_activated` | low | no | no | provisioning |
+| `service_created` | low | no | no | provisioning |
+| `service_created_from_order` | low | no | no | orders |
+| `service_domain_bound` | low | no | no | provisioning |
+| `service_group_created` | low | no | no | provisioning |
+| `service_group_deleted` | low | no | no | provisioning |
+| `service_group_updated` | low | no | no | provisioning |
+| `service_marked_for_review` | low | no | no | provisioning |
+| `service_plan_created` | low | no | no | provisioning |
+| `service_plan_status_changed` | low | no | no | provisioning |
+| `service_status_changed` | low | no | no | provisioning |
+| `service_status_updated` | low | no | no | orders |
+| `services_deleted_on_cancellation` | low | no | no | orders |
+| `services_suspended_on_cancellation` | low | no | no | orders |
+| `sessions_revoked_password_reset` | low | no | no | users |
+| `setting_override_cleared` | low | no | yes | settings |
+| `setting_update_failed` | low | no | no | settings |
+| `settings_cache_refresh` | low | no | no | settings |
+| `settings_export` | low | no | no | settings |
+| `settings_export_full` | low | no | no | settings |
+| `settings_imported` | low | no | no | settings |
+| `status_changed` | low | no | no | audit |
+| `subscription_activated` | low | no | no | billing |
+| `subscription_cancelled` | low | no | no | billing |
+| `subscription_cancelled_nonpayment` | low | no | no | billing |
+| `subscription_created` | low | no | no | billing |
+| `subscription_currency_transition_created` | low | no | no | billing |
+| `subscription_currency_transition_updated` | low | no | no | billing |
+| `subscription_dunning_recovered` | low | no | no | billing |
+| `subscription_model_created` | low | no | no | billing |
+| `subscription_model_deleted` | low | no | no | billing |
+| `subscription_model_updated` | low | no | no | billing |
+| `subscription_paused` | low | no | no | billing |
+| `subscription_payment_failed` | low | no | no | billing |
+| `subscription_price_grandfathered` | low | no | no | billing |
+| `subscription_reactivated` | low | no | no | billing |
+| `subscription_resumed` | low | no | no | billing |
+| `subscription_suspended_nonpayment` | low | no | no | billing |
+| `subscription_trial_converted` | low | no | no | billing |
+| `subscription_trial_started` | low | no | no | billing |
+| `support_ticket_closed` | low | no | no | audit |
+| `support_ticket_created` | low | no | no | audit, provisioning |
+| `support_ticket_updated` | low | no | no | provisioning |
+| `tax_profile_cnp_set` | low | no | yes | api |
+| `tax_profile_created` | low | no | yes | users |
+| `tax_rule_created` | low | no | yes | billing |
+| `tax_rule_updated` | low | no | yes | billing |
+| `template_access` | low | no | no | notifications |
+| `template_email_send` | low | no | no | notifications |
+| `terms_of_service_accepted` | low | no | no | users |
+| `ticket_attachment_downloaded` | low | no | no | tickets |
+| `ticket_status_agent_started_work` | low | no | no | tickets |
+| `ticket_status_awaiting_customer_response` | low | no | no | tickets |
+| `ticket_status_customer_responded` | low | no | no | tickets |
+| `ticket_status_customer_responded_unassigned` | low | no | no | tickets |
+| `timezone_changed` | low | no | no | audit |
+| `tld_created` | low | no | no | domains |
+| `tld_registrar_assignment_created` | low | no | no | domains |
+| `tld_registrar_assignment_updated` | low | no | no | domains |
+| `tld_updated` | low | no | no | domains |
+| `update` | low | no | no | audit, domains, promotions, provisioning, settings |
+| `usage_aggregation_rated` | low | no | no | billing |
+| `usage_alert_created` | low | no | no | billing |
+| `usage_events_batch_processed` | low | no | no | billing |
+| `usage_invoice_created` | low | no | no | billing |
+| `user_linked_to_customer` | low | no | no | users |
+| `validation_failed` | low | no | no | common |
+| `vies_evidence_refused` | low | no | no | billing |
+| `virtualmin_account_activate_failed` | low | no | no | provisioning |
+| `virtualmin_account_created` | low | no | no | provisioning |
+| `virtualmin_account_delete_failed` | low | no | no | provisioning |
+| `virtualmin_account_deleted` | low | no | no | provisioning |
+| `virtualmin_account_hold_reenable_failed` | low | no | no | provisioning |
+| `virtualmin_account_hold_restore_safety_failed` | low | no | no | provisioning |
+| `virtualmin_account_provisioned_successfully` | low | no | no | provisioning |
+| `virtualmin_account_server_migrated` | low | no | no | provisioning |
+| `virtualmin_account_status_changed` | low | no | no | provisioning |
+| `virtualmin_account_suspend_failed` | low | no | no | provisioning |
+| `virtualmin_account_toggle_protection_failed` | low | no | no | provisioning |
+| `virtualmin_account_updated` | low | no | no | provisioning |
+| `virtualmin_accounts_sync_failed` | low | no | no | provisioning |
+| `virtualmin_activation_refused_untrusted_cert` | low | no | no | infrastructure |
+| `virtualmin_auto_provisioning_critical_error` | low | no | no | provisioning |
+| `virtualmin_auto_provisioning_scheduled` | low | no | no | provisioning |
+| `virtualmin_backup_form_failed` | low | no | no | provisioning |
+| `virtualmin_cert_pin_set_manually` | low | no | no | infrastructure |
+| `virtualmin_chain_backup_alert` | high | yes | no | provisioning |
+| `virtualmin_chain_backup_failed` | low | no | no | provisioning |
+| `virtualmin_chain_schedule_deferred` | high | yes | no | provisioning |
+| `virtualmin_connection_test_failed` | low | no | no | provisioning |
+| `virtualmin_health_check_failed` | low | no | no | provisioning |
+| `virtualmin_job_node_lost_failed` | low | no | no | provisioning |
+| `virtualmin_job_resolve_failed` | low | no | no | provisioning |
+| `virtualmin_job_retry_failed` | low | no | no | provisioning |
+| `virtualmin_migrate_form_failed` | low | no | no | provisioning |
+| `virtualmin_migration_completed` | low | no | no | provisioning |
+| `virtualmin_migration_failed` | low | no | no | provisioning |
+| `virtualmin_migration_needs_review` | low | yes | no | provisioning |
+| `virtualmin_migration_resolve_failed` | low | no | no | provisioning |
+| `virtualmin_migration_rolled_back` | low | no | no | provisioning |
+| `virtualmin_migration_started` | low | no | no | provisioning |
+| `virtualmin_pair_release_abandoned` | high | yes | no | provisioning |
+| `virtualmin_parameter_encryption_failed` | low | no | no | provisioning |
+| `virtualmin_parameter_validation_failed` | low | no | no | provisioning |
+| `virtualmin_provisioning_critical_error` | low | no | no | provisioning |
+| `virtualmin_provisioning_execution_failed` | low | no | no | provisioning |
+| `virtualmin_provisioning_failed` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_attention` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_cancelled` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_completed` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_created` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_failed` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_pending` | low | no | no | provisioning |
+| `virtualmin_provisioning_job_running` | low | no | no | provisioning |
+| `virtualmin_restore_form_failed` | low | no | no | provisioning |
+| `virtualmin_restore_hold_decision` | low | no | no | provisioning |
+| `virtualmin_restore_pair_form_failed` | low | no | no | provisioning |
+| `virtualmin_server_autofail_deferred` | high | yes | no | provisioning |
+| `virtualmin_server_capacity_exceeded` | low | no | no | provisioning |
+| `virtualmin_server_health_alert` | high | yes | no | provisioning |
+| `virtualmin_task_account_already_exists` | low | no | no | provisioning |
+| `virtualmin_task_parameter_decryption_failed` | low | no | no | provisioning |
+| `virtualmin_task_scheduling_failed` | low | no | no | provisioning |
+| `virtualmin_task_service_not_found` | low | no | no | provisioning |
+| `virtualmin_task_validation_failed` | low | no | no | provisioning |
+| `virtualmin_usage_collected` | low | no | no | billing |
+| `webauthn_credential_created` | low | no | no | users |
+| `webauthn_credential_deleted` | low | no | no | users |
+| `webauthn_credential_updated` | low | no | no | users |
+| `welcome_email_failed` | low | no | no | users |
+| `welcome_email_sent` | low | no | no | users |
+| `welcome_invite_rate_limited` | low | no | no | users |
+| `whois_privacy_changed` | low | no | no | domains |
+| `whois_privacy_changed_webhook` | low | no | no | domains |
+
+## Compliance (VAT, e-Factura, legal documents)
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `early_performance_requested` | low | no | no | orders |
+| `efactura_accepted` | low | no | yes | billing |
+| `efactura_file_downloaded` | low | no | yes | billing |
+| `efactura_oauth_token_created` | low | no | yes | billing |
+| `efactura_oauth_token_deleted` | low | no | yes | billing |
+| `efactura_oauth_token_updated` | low | no | yes | billing |
+| `efactura_rejected` | high | no | yes | billing |
+| `efactura_submission_attempted` | low | no | yes | billing |
+| `efactura_submission_failed` | high | no | yes | billing |
+| `efactura_submitted` | medium | no | yes | billing |
+| `legal_document_published` | low | no | no | common |
+| `vat_validation_completed` | low | no | yes | billing |
+
+## Integrations and webhooks
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `webhook_delivery_failure` | low | no | no | audit |
+| `webhook_delivery_success` | low | no | no | audit |
+| `webhook_retry_exhausted` | low | no | no | audit |
+
+## Privacy and consent
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `cookie_consent_updated` | high | no | yes | audit |
+| `data_anonymization_completed` | high | no | yes | audit |
+| `marketing_consent_granted` | high | no | yes | audit |
+| `marketing_consent_withdrawn` | high | yes | yes | audit |
+
+## Security events
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `security_bnr_outbound_blocked` | high | yes | yes | billing |
+| `suspicious_activity_detected` | critical | no | no | users |
+| `suspicious_ip_activity` | critical | no | no | users |
+| `suspicious_login_pattern` | critical | no | no | users |
+
+## System administration and infrastructure
+
+| Action | Severity | Review | Sensitive | Written by |
+|---|---|---|---|---|
+| `backup_domain_failed` | low | no | no | provisioning |
+| `cloud_provider_created` | low | no | no | infrastructure |
+| `cloud_provider_updated` | low | no | no | infrastructure |
+| `configuration_changed` | high | yes | no | billing, domains, settings |
+| `drift_accepted` | low | no | no | infrastructure |
+| `drift_auto_resolved` | low | no | no | infrastructure |
+| `drift_detected` | low | no | no | infrastructure |
+| `drift_dismissed` | low | no | no | infrastructure |
+| `drift_remediation_applied` | low | no | no | infrastructure |
+| `drift_remediation_approved` | low | no | no | infrastructure |
+| `drift_remediation_failed` | low | no | no | infrastructure |
+| `drift_remediation_rejected` | low | no | no | infrastructure |
+| `drift_remediation_requested` | low | no | no | infrastructure |
+| `drift_remediation_scheduled` | low | no | no | infrastructure |
+| `drift_rollback_triggered` | low | no | no | infrastructure |
+| `drift_scan_completed` | low | no | no | infrastructure |
+| `drift_scan_started` | low | no | no | infrastructure |
+| `infrastructure_ssh_key_generated` | low | no | no | infrastructure |
+| `infrastructure_ssh_key_revoked` | low | no | no | infrastructure |
+| `node_deployment_completed` | low | no | no | infrastructure |
+| `node_deployment_created` | low | no | no | infrastructure |
+| `node_deployment_failed` | low | no | no | infrastructure |
+| `node_deployment_retry` | low | no | no | infrastructure |
+| `node_deployment_started` | low | no | no | infrastructure |
+| `node_destroy_completed` | low | no | no | infrastructure |
+| `node_destroy_failed` | low | no | no | infrastructure |
+| `node_destroy_started` | low | no | no | infrastructure |
+| `node_maintenance_completed` | low | no | no | infrastructure |
+| `node_maintenance_failed` | low | no | no | infrastructure |
+| `node_maintenance_started` | low | no | no | infrastructure |
+| `node_reboot_completed` | low | no | no | infrastructure |
+| `node_reboot_failed` | low | no | no | infrastructure |
+| `node_region_toggled` | low | no | no | infrastructure |
+| `node_size_created` | low | no | no | infrastructure |
+| `node_size_updated` | low | no | no | infrastructure |
+| `node_start_completed` | low | no | no | infrastructure |
+| `node_start_failed` | low | no | no | infrastructure |
+| `node_stop_completed` | low | no | no | infrastructure |
+| `node_stop_failed` | low | no | no | infrastructure |
+| `node_stop_started` | low | no | no | infrastructure |
+| `node_upgrade_completed` | low | no | no | infrastructure |
+| `node_upgrade_failed` | low | no | no | infrastructure |
+| `node_upgrade_started` | low | no | no | infrastructure |

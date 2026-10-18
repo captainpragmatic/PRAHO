@@ -592,4 +592,6 @@ def log_security_event(
                 actor_type="system",
             )
     except Exception:
-        logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")
+        # The event type and the names of what it carried, never the values: details can hold emails,
+        # amounts and identifiers that belong in the audit trail, not in a log file.
+        logger.warning(f"🚨 [Security] {event_type}: details keys {sorted(details)} from IP: {request_ip}")

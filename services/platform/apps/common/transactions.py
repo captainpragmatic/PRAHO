@@ -46,6 +46,13 @@ class _SuppressingContextDecorator(ContextDecorator, AbstractContextManager[None
         return type(self)(self._factory)
 
 
+def _record_if_audit_failure(error: BaseException) -> None:
+    """Count a swallowed audit write (deferred import: the counter store is a model)."""
+    from apps.common import audit_failures  # noqa: PLC0415  # Deferred: models are not ready when this module loads
+
+    audit_failures.record(error)
+
+
 def swallow_application_errors(
     *, logger: Logger, scope: str, message: str, using: str | None = None
 ) -> _SuppressingContextDecorator:
@@ -64,9 +71,10 @@ def _swallow_application_errors(
         yield
     except (DatabaseError, InterfaceError, TransactionManagementError):
         raise
-    except Exception:
+    except Exception as error:
         if transaction.get_connection(using).needs_rollback:
             raise
+        _record_if_audit_failure(error)
         logger.exception(f"🔥 [{scope}] {message}")
 
 
@@ -101,12 +109,14 @@ def _best_effort_atomic(
             yield
         except InterfaceError:
             raise
-        except Exception:
+        except Exception as error:
             transaction.set_rollback(True, using=using)
             # Roll back before logging, including when a service marked needs_rollback.
             stack.close()
             if connection.needs_rollback or connection.closed_in_transaction:
                 raise
+            # A swallowed audit write is a missed event: count it, now the savepoint is gone.
+            _record_if_audit_failure(error)
             if level == logging.ERROR:
                 logger.exception(f"🔥 [{scope}] {message}")
             else:

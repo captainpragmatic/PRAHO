@@ -11,10 +11,6 @@ from apps.audit.classification import classify
 from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.audit.signals import (
     _create_audit_event,
-    api_key_generated,
-    api_key_revoked,
-    customer_context_switched,
-    privacy_settings_changed,
 )
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
@@ -424,87 +420,6 @@ class TestCustomerMembershipAudit(TestCase):
         assert audit_event.old_values["role"] == "tech"
         assert audit_event.requires_review is True  # This is now a model field, not metadata
         assert audit_event.metadata["access_revoked"] is True
-
-
-class TestCustomSignalHandlers(TestCase):
-    """Test custom signal handlers for business events"""
-
-    def setUp(self):
-        """Set up test data"""
-        self.user = User.objects.create_user(email="test@example.com", password="testpass123")
-        self.factory = RequestFactory()
-        self.request = self.factory.post("/")
-        self.request.user = self.user
-
-    def test_privacy_settings_changed_signal(self):
-        """Test privacy settings change signal"""
-        old_settings = {"marketing": True, "analytics": True}
-        new_settings = {"marketing": False, "analytics": False}
-
-        # Send signal
-        privacy_settings_changed.send(
-            sender=None, user=self.user, old_settings=old_settings, new_settings=new_settings, request=self.request
-        )
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="privacy_settings_changed", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values == old_settings
-        assert audit_event.new_values == new_settings
-        assert "gdpr_compliance" in audit_event.metadata
-
-    def test_api_key_generated_signal(self):
-        """Test API key generation signal"""
-        api_key_info = {"id": "key_123", "name": "Test API Key"}
-
-        # Send signal
-        api_key_generated.send(sender=None, user=self.user, api_key_info=api_key_info, request=self.request)
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="api_key_generated", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.new_values["api_key_id"] == "key_123"
-        assert audit_event.new_values["name"] == "Test API Key"
-        assert "integration_change" in audit_event.metadata
-        assert "security_sensitive" in audit_event.metadata
-
-    def test_api_key_revoked_signal(self):
-        """Test API key revocation signal"""
-        api_key_info = {"id": "key_123", "name": "Test API Key"}
-
-        # Send signal
-        api_key_revoked.send(sender=None, user=self.user, api_key_info=api_key_info, request=self.request)
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="api_key_revoked", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values["api_key_id"] == "key_123"
-        assert "security_action" in audit_event.metadata
-
-    def test_customer_context_switched_signal(self):
-        """Test customer context switching signal"""
-        customer = Customer.objects.create(company_name="Test Company", customer_type="business", status="active")
-
-        # Send signal
-        customer_context_switched.send(
-            sender=None, user=self.user, old_customer=None, new_customer=customer, request=self.request
-        )
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_context_switched", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values["customer"] is None
-        assert audit_event.new_values["customer"] == str(customer)
-        assert "context_change" in audit_event.metadata
-        assert "customer_id" in audit_event.metadata
 
 
 class TestAuditEventPerformance(TestCase):

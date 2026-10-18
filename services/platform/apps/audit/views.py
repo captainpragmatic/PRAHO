@@ -29,6 +29,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from apps.common import audit_failures
 from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.encryption import DecryptionError
 from apps.common.http import mark_download
@@ -579,6 +580,7 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
         "recent_integrity_checks": recent_integrity_checks,
         "retention_policies_count": retention_policies,
         "popular_searches": popular_searches,
+        "audit_write_failures": audit_failures.count(),
         "dashboard_refresh_interval": 30,  # seconds
     }
 

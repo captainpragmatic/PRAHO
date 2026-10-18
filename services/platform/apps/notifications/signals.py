@@ -11,11 +11,11 @@ Signal Handlers:
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 
@@ -66,7 +66,7 @@ def handle_anymail_post_send(sender: Any, message: Any, status: Any, esp_name: s
             logger.warning(f"Email send issue via {esp_name}: {message_id} - status: {send_status}")
 
         # Log to audit if available
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             log_security_event(
                 "email_sent",
                 {
@@ -144,7 +144,7 @@ def handle_template_save(sender: Any, instance: Any, created: bool, **kwargs: An
     """Handle email template save - clear cache."""
     clear_template_cache(instance.key, instance.locale)
 
-    if not created and not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if not created and not audit_signals_disabled():
         log_security_event(
             "email_template_updated",
             {
@@ -160,7 +160,7 @@ def handle_template_delete(sender: Any, instance: Any, **kwargs: Any) -> None:
     """Handle email template delete - clear cache."""
     clear_template_cache(instance.key, instance.locale)
 
-    if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if not audit_signals_disabled():
         log_security_event(
             "email_template_deleted",
             {
@@ -203,7 +203,7 @@ def handle_email_log_status_change(sender: Any, instance: Any, created: bool, **
 @receiver(post_save, sender="notifications.EmailSuppression")
 def handle_suppression_change(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
     """Audit email suppression additions and changes."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     action = "email_suppression_added" if created else "email_suppression_updated"
@@ -220,7 +220,7 @@ def handle_suppression_change(sender: Any, instance: Any, created: bool, **kwarg
 @receiver(post_delete, sender="notifications.EmailSuppression")
 def handle_suppression_removed(sender: Any, instance: Any, **kwargs: Any) -> None:
     """Audit email suppression removal."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     log_security_event(
@@ -240,7 +240,7 @@ def handle_suppression_removed(sender: Any, instance: Any, **kwargs: Any) -> Non
 @receiver(post_save, sender="notifications.EmailPreference")
 def handle_preference_change(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
     """Audit notification preference changes (GDPR-relevant consent tracking)."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     action = "notification_preference_created" if created else "notification_preference_updated"

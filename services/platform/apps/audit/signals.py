@@ -28,6 +28,7 @@ from .actor_context import current_actor
 from .models import AuditEvent, ComplianceLog, audit_mutation_allowed
 from .person_events import note_erasure_write
 from .services import AuditContext, AuditEventData, AuditService
+from .switches import audit_signals_disabled
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -58,32 +59,10 @@ logger = logging.getLogger(__name__)
 # CUSTOM SIGNALS FOR BUSINESS-SPECIFIC USER ACTIONS
 # ===============================================================================
 
-# Profile and account management signals
-profile_updated = Signal()
-profile_picture_changed = Signal()
-emergency_contact_updated = Signal()
-notification_preferences_changed = Signal()
-
-# Privacy and consent signals
-privacy_settings_changed = Signal()
-marketing_consent_changed = Signal()
-gdpr_consent_changed = Signal()
+# The one custom signal that is sent: the Portal's cookie-consent API raises it. The other
+# eighteen (profile, privacy, API key, membership and context-switch signals) were never sent by
+# any code, so their receivers audited nothing; they are gone rather than left to look like coverage.
 cookie_consent_updated = Signal()
-privacy_policy_accepted = Signal()
-terms_accepted = Signal()
-
-# Security configuration signals
-password_strength_check = Signal()
-api_key_generated = Signal()
-api_key_revoked = Signal()
-security_settings_changed = Signal()
-
-# Customer relationship signals
-customer_membership_role_changed = Signal()
-primary_customer_changed = Signal()
-customer_access_granted = Signal()
-customer_access_revoked = Signal()
-customer_context_switched = Signal()
 
 
 # ===============================================================================
@@ -213,10 +192,6 @@ _AUDITED_FIELDS_BY_MODEL: dict[type, tuple[str, ...]] = {
 }
 
 
-def _audit_signals_disabled() -> bool:
-    return bool(getattr(settings, "DISABLE_AUDIT_SIGNALS", False))
-
-
 def _actor_event_fields() -> dict[str, Any]:
     """The user and actor type an event written by a receiver carries.
 
@@ -241,7 +216,7 @@ def snapshot_persisted_values(
     ``update_fields`` limits the rest), and is skipped for fixture loads and inserts.
     """
     setattr(instance, _PERSISTED_VALUES_ATTR, None)
-    if raw or _audit_signals_disabled() or instance._state.adding or instance.pk is None:
+    if raw or audit_signals_disabled() or instance._state.adding or instance.pk is None:
         return
 
     deferred = instance.get_deferred_fields()
@@ -386,7 +361,7 @@ def audit_user_profile_changes(
     is audited as precisely as an ``update_fields`` one, and a save that changed nothing audited
     writes nothing. The event's user is the actor; its content object is the changed account.
     """
-    if created or raw or _audit_signals_disabled():
+    if created or raw or audit_signals_disabled():
         # New user creation is logged by the view, not here
         return
 
@@ -413,7 +388,7 @@ def audit_user_profile_preferences(
     sender: type[UserProfile], instance: UserProfile, created: bool, raw: bool = False, **kwargs: Any
 ) -> None:
     """Audit UserProfile changes for preference tracking"""
-    if created or raw or _audit_signals_disabled():
+    if created or raw or audit_signals_disabled():
         return
 
     with swallow_application_errors(logger=logger, scope="audit", message="audit_user_profile_preferences failed"):
@@ -503,7 +478,7 @@ def audit_customer_membership_changes(
     **kwargs: Any,
 ) -> None:
     """Audit customer membership changes for authorization tracking"""
-    if raw or _audit_signals_disabled():
+    if raw or audit_signals_disabled():
         return
 
     audit_user: User | None = None
@@ -578,7 +553,7 @@ def audit_customer_membership_deletion(
     sender: type[CustomerMembership], instance: CustomerMembership, **kwargs: Any
 ) -> None:
     """Audit customer membership deletion"""
-    if _audit_signals_disabled():
+    if audit_signals_disabled():
         return
 
     with best_effort_atomic(logger=logger, scope="audit", message="audit_customer_membership_deletion failed"):
@@ -606,66 +581,6 @@ def audit_customer_membership_deletion(
 # ===============================================================================
 # CUSTOM SIGNAL HANDLERS FOR BUSINESS-SPECIFIC EVENTS
 # ===============================================================================
-
-
-@receiver(privacy_settings_changed)
-def audit_privacy_settings_change(
-    sender: Any,
-    user: User,
-    old_settings: dict[str, Any],
-    new_settings: dict[str, Any],
-    request: HttpRequest | None = None,
-    **kwargs: Any,
-) -> None:
-    """Audit privacy settings changes"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="privacy_settings_changed",
-            user=user,
-            content_object=user,
-            old_values=old_settings,
-            new_values=new_settings,
-            description="Privacy settings updated",
-            request=request,
-            metadata={"gdpr_compliance": True, "privacy_change": True},
-        )
-    )
-
-
-@receiver(api_key_generated)
-def audit_api_key_generation(
-    sender: Any, user: User, api_key_info: dict[str, Any], request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit API key generation"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="api_key_generated",
-            user=user,
-            content_object=user,
-            new_values={"api_key_id": api_key_info.get("id"), "name": api_key_info.get("name")},
-            description=f"API key generated: {api_key_info.get('name', 'Unnamed')}",
-            request=request,
-            metadata={"integration_change": True, "security_sensitive": True},
-        )
-    )
-
-
-@receiver(api_key_revoked)
-def audit_api_key_revocation(
-    sender: Any, user: User, api_key_info: dict[str, Any], request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit API key revocation"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="api_key_revoked",
-            user=user,
-            content_object=user,
-            old_values={"api_key_id": api_key_info.get("id"), "name": api_key_info.get("name")},
-            description=f"API key revoked: {api_key_info.get('name', 'Unnamed')}",
-            request=request,
-            metadata={"integration_change": True, "security_action": True},
-        )
-    )
 
 
 @receiver(cookie_consent_updated)
@@ -743,25 +658,6 @@ def audit_cookie_consent_change(
         AuditService.log_compliance_event(compliance_request)
 
 
-@receiver(customer_context_switched)
-def audit_customer_context_switch(
-    sender: Any, user: User, old_customer: Any, new_customer: Any, request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit customer context switching"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="customer_context_switched",
-            user=user,
-            content_object=user,
-            old_values={"customer": str(old_customer) if old_customer else None},
-            new_values={"customer": str(new_customer) if new_customer else None},
-            description=f"Customer context switched to {new_customer}",
-            request=request,
-            metadata={"context_change": True, "customer_id": str(new_customer.id) if new_customer else None},
-        )
-    )
-
-
 # ===============================================================================
 # GENERIC FSM TRANSITION AUDIT (ADR-0034 / ADR-0016)
 # ===============================================================================
@@ -791,14 +687,8 @@ def audit_fsm_transition(sender: Any, instance: Any, name: str, source: str, tar
     only under TESTING; in production the flag is a misconfiguration - log critical
     and audit anyway (W8).
     """
-    from django.conf import settings as django_settings  # noqa: PLC0415
-
-    if getattr(django_settings, "DISABLE_AUDIT_SIGNALS", False):
-        if getattr(django_settings, "TESTING", False):
-            return
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
+    if audit_signals_disabled():
+        return
 
     label = f"{sender._meta.app_label}.{sender._meta.model_name}"
     if label in FSM_AUDIT_SENDER_SKIPLIST:

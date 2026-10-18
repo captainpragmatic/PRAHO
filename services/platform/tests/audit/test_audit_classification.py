@@ -22,8 +22,7 @@ CLASSIFICATION_KEYS = ("category", "severity", "is_sensitive", "requires_review"
 
 # What each action a model receiver writes was stored as before the receivers stopped writing a
 # classification of their own into metadata: (category, severity, is_sensitive, requires_review).
-# Severity and review never change. api_key_* now share the integration category the service
-# always gave them, and a customer context switch is sensitive like every customer_ event.
+# Severity and review never change.
 RECEIVER_ACTIONS: dict[str, tuple[str, str, bool, bool]] = {
     "email_changed": ("account_management", "medium", True, False),
     "name_changed": ("account_management", "medium", True, False),
@@ -43,11 +42,7 @@ RECEIVER_ACTIONS: dict[str, tuple[str, str, bool, bool]] = {
     "customer_membership_deleted": ("authorization", "high", True, True),
     "customer_role_changed": ("authorization", "high", True, True),
     "primary_customer_changed": ("business_operation", "low", False, False),
-    "privacy_settings_changed": ("privacy", "high", True, False),
-    "api_key_generated": ("integration", "low", False, False),
-    "api_key_revoked": ("integration", "low", False, False),
     "cookie_consent_updated": ("privacy", "high", True, False),
-    "customer_context_switched": ("authorization", "medium", True, False),
 }
 
 # Severity and review flags writers used to pass in event metadata, where they overrode the

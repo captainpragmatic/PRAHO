@@ -8,11 +8,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditEventData, AuditService, actor_context
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 
 from .account_hostname_models import AccountHostname
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _log(instance: AccountHostname, event_type: str, description: str) -> None:
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
     # A failed audit write never undoes the hostname change; its own savepoint keeps the transaction usable.
     with best_effort_atomic(logger=logger, scope="Account hostnames", message="Account hostname audit failed"):

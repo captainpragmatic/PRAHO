@@ -10,10 +10,11 @@ class AuditConfig(AppConfig):
         """Import signal handlers when app is ready."""
         from django_q.signals import post_execute, pre_execute
 
-        from . import signals
+        from . import checks, signals
         from .actor_context import clear_actor_for_task, restore_actor_after_task
 
         signals.register_audit_signals()
+        del checks  # imported for its @register side effect
 
         # A task acts for nobody: it must not inherit whoever ran before it in this process.
         pre_execute.connect(clear_actor_for_task, dispatch_uid="audit_clear_actor_for_task")
