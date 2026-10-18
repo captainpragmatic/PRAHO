@@ -5,10 +5,10 @@ Implements Romanian compliance requirements and security audit trails.
 
 from __future__ import annotations
 
-import threading
 import uuid
 from collections.abc import Collection, Iterable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -29,7 +29,9 @@ User = get_user_model()
 # AUDIT EVENT IMMUTABILITY GUARD (ADR-0016 / ADR-0043)
 # ===============================================================================
 
-_audit_mutation_context = threading.local()
+# A ContextVar, not a threading.local: asyncio tasks and copied contexts each keep their own
+# value, and a new thread starts with an empty context, so the permission never leaks sideways.
+_audit_mutation_reason: ContextVar[str | None] = ContextVar("audit_mutation_reason", default=None)
 
 
 class AuditImmutabilityError(Exception):
@@ -52,16 +54,15 @@ def audit_mutation_allowed(reason: str) -> Iterator[None]:
     """
     if not reason or not reason.strip():
         raise ValueError("audit_mutation_allowed() requires a non-blank reason")
-    previous = getattr(_audit_mutation_context, "reason", None)
-    _audit_mutation_context.reason = reason
+    token = _audit_mutation_reason.set(reason)
     try:
         yield
     finally:
-        _audit_mutation_context.reason = previous
+        _audit_mutation_reason.reset(token)
 
 
 def _mutation_allowed() -> bool:
-    return bool(getattr(_audit_mutation_context, "reason", None))
+    return bool(_audit_mutation_reason.get())
 
 
 class AuditEventQuerySet(models.QuerySet["AuditEvent"]):

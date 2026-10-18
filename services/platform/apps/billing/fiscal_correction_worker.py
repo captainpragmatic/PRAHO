@@ -32,6 +32,7 @@ from django.db import models, transaction
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.audit.actor_context import bind_current_actor
 from apps.common.types import Err
 from apps.common.utils import operator_local_date
 from apps.common.validators import log_security_event
@@ -448,7 +449,9 @@ def _route_provider_correction(correction: FiscalCorrection) -> str:
         "credit_cents": str(correction.total_cents),
     }
     # Raised once the hand-over commits, never for one that rolled back.
-    transaction.on_commit(lambda: log_security_event(event_type=MANUAL_STORNO_EVENT, details=details))
+    transaction.on_commit(
+        bind_current_actor(lambda: log_security_event(event_type=MANUAL_STORNO_EVENT, details=details))
+    )
     return "manual_required"
 
 

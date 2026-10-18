@@ -73,6 +73,7 @@ MIDDLEWARE: list[str] = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.audit.middleware.AuditActorMiddleware",  # After auth: the acting user for audit receivers
     "apps.common.localisation_middleware.LocalisationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "apps.common.middleware.MaintenanceModeMiddleware",  # 503 for non-staff while maintenance mode is active

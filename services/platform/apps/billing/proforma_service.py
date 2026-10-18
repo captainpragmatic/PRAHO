@@ -15,6 +15,7 @@ from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext
 
+from apps.audit.actor_context import bind_current_actor
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.types import Err, Ok, Result
 from apps.common.utils import operator_local_date
@@ -615,11 +616,13 @@ class ProformaPaymentService:
         _invoice = invoice
         _payment = payment
         transaction.on_commit(
-            lambda: proforma_payment_received.send(
-                sender=ProformaPaymentService,
-                proforma=_proforma,
-                invoice=_invoice,
-                payment=_payment,
+            bind_current_actor(
+                lambda: proforma_payment_received.send(
+                    sender=ProformaPaymentService,
+                    proforma=_proforma,
+                    invoice=_invoice,
+                    payment=_payment,
+                )
             )
         )
 

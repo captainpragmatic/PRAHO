@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
+from apps.audit.actor_context import bind_current_actor
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country
@@ -1300,7 +1301,7 @@ class OrderServiceCreationService:
                                 details,
                             )
 
-                        transaction.on_commit(log_committed_transition, robust=True)
+                        transaction.on_commit(bind_current_actor(log_committed_transition), robust=True)
 
             return Ok(updated_services)
 
