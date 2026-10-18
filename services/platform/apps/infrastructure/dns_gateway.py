@@ -17,7 +17,12 @@ Ownership model (why every record carries an owner tag):
     authoritative: it deletes every record in the stored zone bearing the tag,
     which also reclaims replay orphans.
 
-See #347 GAP 3. Let's Encrypt / cert issuance is out of scope here (#436).
+DNS-01 challenges (ADR-0061 P1.9) use the same ownership idea one level down: a challenge name holds
+several TXT values at once, one set per ACME order, each tagged ``praho:acme:<order>``. TXT records
+therefore never conflict with another owner's TXT records; ``reconcile_txt_values`` converges only the
+caller's own values, and ``sweep_owned_records`` reclaims the ones a crashed order left behind.
+
+See #347 GAP 3. Certificate issuance itself lives in ``apps.provisioning.account_name_certificates``.
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ from apps.common.types import Err, Ok, Result, Retriability
 
 logger = logging.getLogger(__name__)
 
-DnsRecordType = Literal["A", "AAAA"]
+DnsRecordType = Literal["A", "AAAA", "TXT"]
 
 CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
 
@@ -69,6 +74,10 @@ DEFAULT_MAX_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 1.0
 _MAX_IN_PROCESS_RETRY_SECONDS = 30.0
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE"})
+
+# Only owner tags under this namespace may be swept: an empty or foreign prefix would match records
+# PRAHO does not own.
+OWNER_TAG_NAMESPACE = "praho:"
 
 # Record listings follow every page (Cloudflare defaults to 100 per page).
 _LIST_PAGE_SIZE = 100
@@ -182,6 +191,33 @@ class DnsProviderGateway(ABC):
     @abstractmethod
     def delete_owned_records(self, zone_id: str, owner_tag: str) -> Result[list[str], str]:
         """Delete every record in ``zone_id`` bearing ``owner_tag``; return deleted ids."""
+
+    @abstractmethod
+    def reconcile_txt_values(
+        self, zone_id: str, name: str, values: list[str], owner_tag: str, *, ttl: int = DNS_RECORD_TTL_SECONDS
+    ) -> ReconcileOutcome:
+        """Converge the TXT values ``owner_tag`` holds at ``name`` to exactly ``values``.
+
+        Several values per name are normal (a DNS-01 challenge). Only records bearing ``owner_tag`` are
+        created, changed or deleted; another owner's TXT records on the same name are never touched
+        and never block, because a TXT set is multi-valued by nature.
+        """
+
+    @abstractmethod
+    def sweep_owned_records(
+        self,
+        zone_id: str,
+        owner_prefix: str,
+        *,
+        keep_owner_tags: frozenset[str],
+        min_age_seconds: float,
+        record_type: DnsRecordType = "TXT",
+    ) -> Result[list[str], str]:
+        """Delete stale ``record_type`` records whose owner tag starts with ``owner_prefix``.
+
+        A record is stale when its tag is not in ``keep_owner_tags`` and it is older than
+        ``min_age_seconds`` (a younger record may belong to an order that has not been saved yet).
+        """
 
 
 # =============================================================================
@@ -500,8 +536,9 @@ class CloudflareDnsGateway(DnsProviderGateway):
             return Err(f"cloudflare transport error: {exc}")
         if listed.is_err():
             return Err(listed.unwrap_err())
-        records = listed.unwrap()
+        return self._delete_records(zone_id, listed.unwrap())
 
+    def _delete_records(self, zone_id: str, records: list[dict[str, Any]]) -> Result[list[str], str]:
         deleted: list[str] = []
         errors: list[str] = []
         # Deleting is idempotent, so a teardown whose only failures were transient can simply be run again.
@@ -531,6 +568,107 @@ class CloudflareDnsGateway(DnsProviderGateway):
                 retriability=Retriability.RETRIABLE if only_transient else Retriability.UNKNOWN,
             )
         return Ok(deleted)
+
+    @staticmethod
+    def _txt_value(content: object) -> str:
+        """A TXT value without the quotes Cloudflare may store or return around it."""
+        text = str(content).strip()
+        if len(text) >= 2 and text.startswith('"') and text.endswith('"'):  # noqa: PLR2004  # an opening and a closing quote
+            text = text[1:-1]
+        return text
+
+    def reconcile_txt_values(
+        self, zone_id: str, name: str, values: list[str], owner_tag: str, *, ttl: int = DNS_RECORD_TTL_SECONDS
+    ) -> ReconcileOutcome:
+        outcome = ReconcileOutcome()
+        wanted = list(dict.fromkeys(self._txt_value(v) for v in values))
+        try:
+            listed = self._list_records(zone_id, {"name": name, "type": "TXT"})
+        except (requests.RequestException, OutboundSecurityError, DnsTransientError) as exc:
+            self._failure(outcome, exc)
+            return outcome
+        if listed.is_err():
+            outcome.error = listed.unwrap_err()
+            return outcome
+
+        owned: dict[str, list[dict[str, Any]]] = {}
+        for rec in listed.unwrap():
+            if rec.get("type") == "TXT" and rec.get("comment") == owner_tag:
+                owned.setdefault(self._txt_value(rec.get("content")), []).append(rec)
+
+        delete_ids: list[str] = []
+        try:
+            for value in wanted:
+                spec = DnsRecordSpec(record_type="TXT", name=name, content=value, owner_tag=owner_tag, ttl=ttl)
+                existing = owned.pop(value, [])
+                if not existing:
+                    res = self._create(zone_id, spec)
+                else:
+                    keep = existing[0]
+                    res = (
+                        Ok(self._to_result(zone_id, keep, spec))
+                        if keep.get("ttl") == ttl
+                        else self._update(zone_id, str(keep["id"]), spec)
+                    )
+                    delete_ids += [str(r["id"]) for r in existing[1:]]  # replayed duplicates
+                if res.is_err():
+                    outcome.error = res.unwrap_err()
+                    continue
+                outcome.applied.append(res.unwrap())
+            # Whatever is left in ``owned`` is a value this order no longer wants.
+            delete_ids += [str(r["id"]) for recs in owned.values() for r in recs]
+            failed = self._delete_ids(zone_id, delete_ids)
+        except (requests.RequestException, OutboundSecurityError, DnsTransientError) as exc:
+            self._failure(outcome, exc)
+            return outcome
+        if failed and not outcome.error:
+            outcome.error = f"failed to delete {len(failed)} stale/duplicate record(s): {failed}"
+        return outcome
+
+    def sweep_owned_records(
+        self,
+        zone_id: str,
+        owner_prefix: str,
+        *,
+        keep_owner_tags: frozenset[str],
+        min_age_seconds: float,
+        record_type: DnsRecordType = "TXT",
+    ) -> Result[list[str], str]:
+        if not owner_prefix.startswith(OWNER_TAG_NAMESPACE) or owner_prefix == OWNER_TAG_NAMESPACE:
+            return Err(f"refusing to sweep records under owner prefix {owner_prefix!r}")
+        try:
+            listed = self._list_records(zone_id, {"type": record_type, "comment.startswith": owner_prefix})
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
+        except (requests.RequestException, OutboundSecurityError) as exc:
+            return Err(f"cloudflare transport error: {exc}")
+        if listed.is_err():
+            return Err(listed.unwrap_err())
+
+        cutoff = datetime.now(UTC).timestamp() - min_age_seconds
+        stale = [
+            rec
+            for rec in listed.unwrap()
+            if rec.get("type") == record_type
+            and str(rec.get("comment", "")).startswith(owner_prefix)  # the provider filter is not trusted alone
+            and rec.get("comment") not in keep_owner_tags
+            and self._created_before(rec, cutoff)
+        ]
+        return self._delete_records(zone_id, stale)
+
+    @staticmethod
+    def _created_before(record: dict[str, Any], cutoff: float) -> bool:
+        """Whether the record was created before ``cutoff`` (a timestamp); a record with no valid creation time is not."""
+        raw = record.get("created_on")
+        if not isinstance(raw, str):
+            return False
+        try:
+            created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        return created.timestamp() < cutoff
 
 
 # =============================================================================

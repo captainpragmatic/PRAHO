@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 import json
 from collections import deque
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -95,7 +96,7 @@ class FakeCloudflare:
         if method == "GET" and path == RECORDS_PATH:
             return self._list(params)
         if method == "POST" and path == RECORDS_PATH:
-            record_id = self.add(**body)
+            record_id = self.add(created_on=datetime.now(UTC).isoformat(), **body)
             return FakeResponse(200, {"success": True, "result": self.store[record_id]})
         record_id = path.rsplit("/", 1)[-1]
         if method == "PUT" and path.startswith(f"{RECORDS_PATH}/"):
@@ -112,7 +113,9 @@ class FakeCloudflare:
             r
             for r in self.store.values()
             if ("name" not in params or r["name"] == params["name"])
+            and ("type" not in params or r["type"] == params["type"])
             and ("comment.exact" not in params or r.get("comment") == params["comment.exact"])
+            and ("comment.startswith" not in params or str(r.get("comment", "")).startswith(params["comment.startswith"]))
         ]
         page = int(params.get("page", 1))
         size = min(int(params.get("per_page", self.page_size)), self.page_size)
