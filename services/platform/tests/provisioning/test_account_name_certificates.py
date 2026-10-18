@@ -20,6 +20,7 @@ from django.core.cache import cache
 from django.db import connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+from django.utils.module_loading import import_string
 from django_q.models import Schedule
 from freezegun import freeze_time
 
@@ -369,6 +370,16 @@ class RenewalTests(CertificateTestCase):
         self.install = patch.object(certs, "install_current_certificate", return_value=Ok(None))
         self.install_mock = self.install.start()
         self.addCleanup(self.install.stop)
+        # The queue, run inline: each dispatched task runs as the cluster would run it, one after another.
+        self.dispatched: list[tuple[str, tuple[str, ...]]] = []
+
+        def run_inline(task: str, *args: str) -> None:
+            self.dispatched.append((task, args))
+            import_string(task)(*args)
+
+        dispatch = patch.object(certs, "_dispatch", run_inline)
+        dispatch.start()
+        self.addCleanup(dispatch.stop)
 
     def _age(self, hostname: AccountHostname, days_left: int) -> None:
         """Let time pass for one name: its 90-day certificate now has ``days_left`` days, and was issued that long ago."""
@@ -389,7 +400,7 @@ class RenewalTests(CertificateTestCase):
 
         counts = certs.renew_due_certificates()
 
-        self.assertEqual(counts["renewed"], 1)
+        self.assertEqual(counts["renewals"], 1)
         self.assertEqual(self.acme.place_calls, orders + 1)
         self.assertNotEqual(self.row(near).current_certificate_ref, old_ref)
         self.assertEqual(self.row(far).current_certificate_ref, far_ref)
@@ -489,9 +500,8 @@ class RenewalTests(CertificateTestCase):
         )
         self._age(self.hostname, 10)
 
-        counts = certs.renew_due_certificates()
+        certs.renew_due_certificates()
 
-        self.assertEqual(counts["installed"], 1)
         self.install_mock.assert_called_once()
         self.assertEqual(self.install_mock.call_args.args[1], self.server)
 
@@ -535,7 +545,7 @@ class RenewalTests(CertificateTestCase):
 
         counts = certs.renew_due_certificates()
 
-        self.assertEqual(counts["installed"], 0)
+        self.assertEqual(counts["installs"], 0)
         self.install_mock.assert_not_called()
 
     def test_the_daily_task_does_not_install_on_a_node_that_has_no_install_record(self) -> None:
@@ -543,7 +553,32 @@ class RenewalTests(CertificateTestCase):
 
         counts = certs.renew_due_certificates()
 
-        self.assertEqual((counts["installed"], counts["install_failed"]), (0, 0))
+        self.assertEqual(counts["installs"], 0)
+        self.install_mock.assert_not_called()
+
+    def test_each_certificate_is_renewed_by_its_own_task(self) -> None:
+        first, second = self.hostname, _hostname(self.server)
+        for host in (first, second):
+            self.issue(host)
+            self._age(host, 10)
+
+        certs.renew_due_certificates()
+
+        renewals = sorted(args for task, args in self.dispatched if task == certs.RENEW_TASK)
+        self.assertEqual(renewals, sorted([(str(first.pk), "renewal"), (str(second.pk), "renewal")]))
+
+    def test_an_install_waits_while_another_node_step_holds_the_name(self) -> None:
+        from apps.provisioning.account_name_lease import take_node_lease  # noqa: PLC0415
+
+        self.issue()
+        old = self.row()
+        certs.record_installation(
+            self.hostname, self.server, certificate_ref="acme_certificate:older", not_after=old.current_not_after
+        )
+        self.assertIsNotNone(take_node_lease(self.hostname))
+
+        certs.renew_due_certificates()
+
         self.install_mock.assert_not_called()
 
     def test_the_sweep_runs_with_the_renewal(self) -> None:
@@ -726,7 +761,7 @@ class ScheduleRegistrationTests(CertificateTestCase):
     def test_the_task_wrapper_runs_the_renewal_and_never_raises(self) -> None:
         result = virtualmin_tasks.renew_account_name_certificates()
         self.assertTrue(result["success"])
-        self.assertIn("renewed", result)
+        self.assertIn("renewals", result)
 
         with patch.object(certs, "renew_due_certificates", side_effect=RuntimeError("boom")):
             failed = virtualmin_tasks.renew_account_name_certificates()

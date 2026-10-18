@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LINK_PLAYBOOK = "virtualmin_account_name_link.yml"
+LINK_TIMEOUT_SECONDS = 180
 _REFUSAL = re.compile(r"LINK=refused:([a-z_]+)")
 _CHANGED = re.compile(r"\bchanged=([0-9]+)\b")
 # The playbook's input check failed: nothing ran on the node. ansible-core 2.20 prints the
@@ -45,7 +46,7 @@ def link_account_name_web_root(server: VirtualminServer, *, home: str, customer_
         deployment,
         LINK_PLAYBOOK,
         {"account_name_home": home, "customer_user": customer_user},
-        timeout_seconds=300,
+        timeout_seconds=LINK_TIMEOUT_SECONDS,
     )
     if result.is_err():
         return Err(f"The link playbook did not run: {result.unwrap_err()}", retriability=Retriability.UNKNOWN)

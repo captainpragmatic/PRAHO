@@ -8,6 +8,8 @@ back on its target before activating, and a terminated or deleted account retire
 
 from __future__ import annotations
 
+from decimal import Decimal
+from itertools import count
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -15,16 +17,45 @@ from uuid import uuid4
 
 from django.utils import timezone
 
+from apps.billing.models import Currency
 from apps.common.types import Ok
+from apps.customers.models import Customer
 from apps.infrastructure.dns_gateway import _DNS_PROVIDER_REGISTRY, register_dns_gateway
 from apps.provisioning import account_hostname_lifecycle as lifecycle
 from apps.provisioning import account_hostname_service as service
 from apps.provisioning.account_hostname_models import AccountHostname
+from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from apps.provisioning.virtualmin_models import VirtualminAccount
 from apps.settings.services import SettingsService
 from tests.helpers.fake_dns_gateway import FakeDnsGateway
 from tests.provisioning.test_cov_provisioning_services_creation import VirtualminServiceCoverageCase
+
+_domains = count(1)
+
+
+def _distinct_account(server: Any) -> VirtualminAccount:
+    """One more account, with its own customer and service, so several names can share a sweep."""
+    n = next(_domains)
+    domain = f"sweep{n}.example.test"
+    customer = Customer.objects.create(name=domain, customer_type="individual", primary_email=f"owner@{domain}")
+    currency, _created = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+    plan = ServicePlan.objects.create(name=f"plan {domain}", plan_type="shared_hosting", price_monthly=Decimal("10"))
+    service_row = Service.objects.create(
+        customer=customer,
+        currency=currency,
+        service_plan=plan,
+        service_name=domain,
+        domain=domain,
+        username=f"sweep{n}",
+        billing_cycle="monthly",
+        price=Decimal("10"),
+        status="active",
+    )
+    return VirtualminAccount.objects.create(
+        domain=domain, server=server, virtualmin_username=f"sweep{n}", service=service_row, status="active"
+    )
+
 
 ZONE = "praho-sites.net"
 ZONE_ID = "0123456789abcdef0123456789abcdef"
@@ -91,7 +122,9 @@ class AccountReadyTests(LifecycleCase):
                 enqueue.assert_not_called()
             for callback in pending:
                 callback()
-        enqueue.assert_called_once_with(lifecycle.ENSURE_TASK, str(account.pk))
+        enqueue.assert_called_once_with(
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+        )
 
     def test_the_task_allocates_the_name_points_it_at_the_node_and_serves_it(self) -> None:
         _configure(enabled=True)
@@ -206,7 +239,7 @@ class SweepTests(LifecycleCase):
         self.addCleanup(sync.stop)
 
     def _named(self, **fields: Any) -> AccountHostname:
-        account = self._account()
+        account = _distinct_account(self.server)
         hostname = service.allocate_account_hostname(account)
         AccountHostname.objects.filter(pk=hostname.pk).update(target_server=self.server, **fields)
         hostname.refresh_from_db()
@@ -218,13 +251,50 @@ class SweepTests(LifecycleCase):
         self.assertEqual(lifecycle.reconcile_account_names(), {"disabled": 1})
         self.assertEqual((self.synced, self.node_calls), ([], []))
 
-    def test_a_name_never_reconciled_gets_its_node_step_and_a_sync(self) -> None:
+    def test_a_name_never_reconciled_is_handed_to_its_own_task_not_run_inline(self) -> None:
         _configure(enabled=True)
         hostname = self._named()
-        counts = lifecycle.reconcile_account_names()
-        self.assertEqual(self.node_calls, ["ensure enabled=True"])
-        self.assertEqual(self.synced, [hostname.label])
-        self.assertEqual(counts["published"], 1)
+        with patch("django_q.tasks.async_task") as enqueue:
+            counts = lifecycle.reconcile_account_names()
+        enqueue.assert_called_once_with(
+            lifecycle.ENSURE_TASK, str(hostname.account_id), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+        )
+        self.assertEqual((self.node_calls, self.synced), ([], []))
+        self.assertEqual(counts["enqueued"], 1)
+
+    def test_names_that_cannot_be_published_yet_never_starve_the_published_ones(self) -> None:
+        _configure(enabled=True)
+        for _ in range(3):
+            self._named()  # never reconciled: their task cannot publish them (no certificate yet)
+        published = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
+        with patch("django_q.tasks.async_task"), patch.object(lifecycle, "SWEEP_BATCH", 2):
+            for _ in range(3):
+                lifecycle.reconcile_account_names()
+        self.assertIn(published.label, self.synced)
+
+    def test_every_pass_moves_a_name_to_the_back_of_the_queue(self) -> None:
+        _configure(enabled=True)
+        hostname = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
+        with patch.object(service, "sync_account_hostname", return_value=Ok("skipped:certificate_not_ready")):
+            lifecycle.reconcile_account_names()
+        hostname.refresh_from_db()
+        self.assertIsNotNone(hostname.last_swept_at)
+
+    def test_one_name_raising_does_not_stop_the_others(self) -> None:
+        _configure(enabled=True)
+        first = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
+        second = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=26))
+
+        def sync(hostname: AccountHostname) -> Any:
+            if hostname.pk == second.pk:
+                raise ValueError("unexpected")
+            self.synced.append(hostname.label)
+            return Ok("published")
+
+        with patch.object(service, "sync_account_hostname", sync):
+            counts = lifecycle.reconcile_account_names()
+        self.assertEqual(self.synced, [first.label])
+        self.assertEqual(counts["failed"], 1)
 
     def test_a_fresh_name_is_left_alone_and_a_stale_one_is_synced_again(self) -> None:
         _configure(enabled=True)
@@ -232,9 +302,10 @@ class SweepTests(LifecycleCase):
         lifecycle.reconcile_account_names()
         self.assertEqual(self.synced, [])
         AccountHostname.objects.update(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
-        lifecycle.reconcile_account_names()
+        with patch("django_q.tasks.async_task") as enqueue:
+            lifecycle.reconcile_account_names()
         self.assertEqual(len(self.synced), 1)
-        self.assertEqual(self.node_calls, [], "a name reconciled before does not repeat its node step")
+        enqueue.assert_not_called()  # a name reconciled before does not repeat its node step
 
     def test_an_account_in_an_operation_is_skipped(self) -> None:
         _configure(enabled=True)
@@ -245,7 +316,7 @@ class SweepTests(LifecycleCase):
 
     def test_one_run_handles_a_bounded_batch_oldest_first(self) -> None:
         _configure(enabled=True)
-        self._named()
+        self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
         with patch.object(lifecycle, "SWEEP_BATCH", 0):
             lifecycle.reconcile_account_names()
         self.assertEqual(self.synced, [])

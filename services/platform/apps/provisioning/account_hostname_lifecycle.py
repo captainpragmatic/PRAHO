@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import F, Q
@@ -26,6 +27,7 @@ from apps.common.types import Err, Ok, Result, retriability_of
 
 from . import account_hostname_config as config
 from .account_hostname_models import AccountHostname
+from .account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 logger = logging.getLogger(__name__)
@@ -40,7 +42,9 @@ def on_account_ready(account: VirtualminAccount) -> None:
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
 
     account_id = str(account.pk)
-    transaction.on_commit(lambda: async_task(ENSURE_TASK, account_id), robust=True)
+    transaction.on_commit(
+        lambda: async_task(ENSURE_TASK, account_id, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS), robust=True
+    )
 
 
 def ensure_account_name(account_id: str) -> dict[str, str]:
@@ -112,47 +116,60 @@ RECHECK_AFTER = timedelta(hours=24)
 def reconcile_account_names() -> dict[str, int]:
     """Every 15 minutes: converge the names that need it to their target server (ADR-0061 P1.8).
 
-    Only names that need work are picked, oldest first and at most SWEEP_BATCH a run: one never
-    reconciled (its node step is tried again too) or one not checked for RECHECK_AFTER. That keeps
-    the provider's rate limit and the nodes' listings out of reach of a large fleet. The decision to
-    skip is atomic: the row is locked and re-checked, and a name whose account is in a migration, a
-    backup, a restore or a delete is left alone. The node and DNS calls run after the lock is released.
-    """
-    from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
-    from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+    Only names that need work are picked, at most SWEEP_BATCH a run: one never reconciled, or one not
+    checked for RECHECK_AFTER. They are taken in rotation (`last_swept_at`, set on every pass whatever
+    the outcome), so names that cannot be published yet (no certificate, budget spent) never hold the
+    head of the queue against published names that are due a check.
 
+    A name never reconciled gets its node step in its own task (ENSURE_TASK), since a node step can run
+    an ACME exchange and two playbooks; the others are synced here, which is DNS calls only. The decision
+    to skip is atomic: the row is locked and re-checked, and a name whose account is in a migration, a
+    backup, a restore or a delete is left alone. Each name is guarded, so one cannot stop the batch.
+    """
     if not config.account_hostnames_enabled():
         return {"disabled": 1}
     due = Q(last_reconciled_at__isnull=True) | Q(last_reconciled_at__lt=timezone.now() - RECHECK_AFTER)
     candidates = list(
         AccountHostname.objects.filter(due, retired_at__isnull=True, account__isnull=False, target_server__isnull=False)
-        .order_by(F("last_reconciled_at").asc(nulls_first=True))
+        .order_by(F("last_swept_at").asc(nulls_first=True))
         .values_list("pk", flat=True)[:SWEEP_BATCH]
     )
-    counts = {"published": 0, "skipped": 0, "failed": 0}
+    counts = {"published": 0, "enqueued": 0, "skipped": 0, "failed": 0}
     for pk in candidates:
-        with transaction.atomic():
-            hostname = (
-                AccountHostname.objects.select_for_update(skip_locked=True, of=("self",))
-                .select_related("account", "account__server", "target_server")
-                .filter(pk=pk, retired_at__isnull=True)
-                .first()
-            )
-            account = hostname.account if hostname is not None else None
-            busy = account is None or account_has_active_operation(account)
-        if hostname is None or account is None or busy:
-            counts["skipped"] += 1
-            continue
-        if hostname.last_reconciled_at is None and account.server_id == hostname.target_server_id:
-            ensured = service.ensure_node_account_name(account, account.server, enabled=account.status == "active")
-            if ensured.is_err():
-                logger.warning("⚠️ [AccountName] Sweep: node step for %s: %s", hostname.fqdn, ensured.unwrap_err())
-        synced = service.sync_account_hostname(hostname)
-        if synced.is_err():
+        try:
+            counts[_sweep_one(pk)] += 1
+        except Exception:  # One name's surprise must not stop the batch; it is logged and counted
+            logger.exception("🔥 [AccountName] Sweep: name %s raised", pk)
             counts["failed"] += 1
-            logger.warning("⚠️ [AccountName] Sweep: DNS for %s: %s", hostname.fqdn, synced.unwrap_err())
-        elif synced.unwrap() == "published":
-            counts["published"] += 1
-        else:
-            counts["skipped"] += 1
     return counts
+
+
+def _sweep_one(pk: UUID) -> str:
+    """One name's pass: which count it adds to."""
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
+
+    from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
+    from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+
+    with transaction.atomic():
+        hostname = (
+            AccountHostname.objects.select_for_update(skip_locked=True, of=("self",))
+            .select_related("account", "account__server", "target_server")
+            .filter(pk=pk, retired_at__isnull=True)
+            .first()
+        )
+        if hostname is None:
+            return "skipped"
+        AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
+        account = hostname.account
+        busy = account is None or account_has_active_operation(account)
+    if account is None or busy:
+        return "skipped"
+    if hostname.last_reconciled_at is None and account.server_id == hostname.target_server_id:
+        async_task(ENSURE_TASK, str(account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
+        return "enqueued"
+    synced = service.sync_account_hostname(hostname)
+    if synced.is_err():
+        logger.warning("⚠️ [AccountName] Sweep: DNS for %s: %s", hostname.fqdn, synced.unwrap_err())
+        return "failed"
+    return "published" if synced.unwrap() == "published" else "skipped"

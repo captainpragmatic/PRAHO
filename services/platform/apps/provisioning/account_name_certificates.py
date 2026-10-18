@@ -89,12 +89,15 @@ TRANSIENT_BACKOFF = timedelta(minutes=5)
 SWEEP_MIN_AGE_SECONDS = 1800.0
 # Seconds to let the DNS provider publish the challenge values before the server is asked to check them.
 DNS_SETTLE_SECONDS = 10.0
-INSTALL_TIMEOUT_SECONDS = 300
+INSTALL_TIMEOUT_SECONDS = 180
 # A claim's lease: longer than the ACME exchange can take (its 180 s deadline, the settle wait, request
 # timeouts) and than any task the queue lets run an attempt, so a live worker never loses it.
 ATTEMPT_LEASE = timedelta(minutes=15)
 # Below the seven days an ACME order lives and the budget window: an older attempt is failed, not resumed.
 ATTEMPT_MAX_AGE = timedelta(days=6)
+
+RENEW_TASK = "apps.provisioning.account_name_certificates.renew_account_name_certificate"
+INSTALL_TASK = "apps.provisioning.account_name_certificates.install_account_name_certificate"
 
 ACCOUNT_KEY_TYPE = "acme_account_key"
 CERT_KEY_TYPE = "acme_certificate_key"
@@ -690,63 +693,104 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
 # =============================================================================
 
 
-def renew_due_certificates() -> dict[str, int]:
-    """Daily: renew certificates with under 30 days left, resume stalled attempts, reinstall stale installs, sweep DNS.
+def _dispatch(task: str, *args: str) -> None:
+    """Queue one account-name task with the timeout its work needs (tests run it inline)."""
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
 
-    Renewals take no budget. A renewed certificate is installed on every node that holds an older one, so it
-    does not wait for the next sync.
+    from .account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS  # noqa: PLC0415
+
+    async_task(task, *args, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
+
+
+def renew_due_certificates() -> dict[str, int]:
+    """Daily: hand each piece of work to its own task, so no run outgrows its queue timeout.
+
+    Stale installs are dispatched first, then a renewal per certificate under 30 days from expiry and a
+    resume per stalled attempt; a renewal that issues dispatches its own installs. Renewals take no budget.
+    Duplicate dispatches are harmless: the attempt lease and the node lease let one worker through.
     """
-    counts = {"renewed": 0, "resumed": 0, "deferred": 0, "failed": 0, "installed": 0, "install_failed": 0, "swept": 0}
+    counts = {"installs": 0, "renewals": 0, "resumes": 0, "swept": 0}
+    for install_id in _stale_install_ids(AccountNameCertificateInstall.objects.all()):
+        _dispatch(INSTALL_TASK, str(install_id))
+        counts["installs"] += 1
     now = timezone.now()
-    due = AccountNameCertificate.objects.filter(
-        hostname__retired_at__isnull=True, current_certificate_ref__gt="", current_not_after__lt=now + RENEW_WITHIN
-    ).select_related("hostname")
-    for certificate in due:
-        _count(counts, request_certificate(certificate.hostname, scheduled_renewal=True), "renewed")
-    resumable = AccountNameCertificate.objects.filter(
-        hostname__retired_at__isnull=True, attempt_status=AccountNameCertificate.AttemptStatus.ORDERING
-    ).select_related("hostname")
-    for certificate in resumable:
-        _count(counts, request_certificate(certificate.hostname), "resumed")
-    _install_stale(counts)
+    live = AccountNameCertificate.objects.filter(hostname__retired_at__isnull=True)
+    ordering = AccountNameCertificate.AttemptStatus.ORDERING
+    due = live.filter(current_certificate_ref__gt="", current_not_after__lt=now + RENEW_WITHIN).exclude(
+        attempt_status=ordering
+    )
+    for hostname_id in due.values_list("hostname_id", flat=True):
+        _dispatch(RENEW_TASK, str(hostname_id), "renewal")
+        counts["renewals"] += 1
+    for hostname_id in live.filter(attempt_status=ordering).values_list("hostname_id", flat=True):
+        _dispatch(RENEW_TASK, str(hostname_id), "resume")
+        counts["resumes"] += 1
     counts["swept"] = sweep_stale_challenge_records()
     return counts
 
 
-def _count(counts: dict[str, int], outcome: IssuanceOutcome, issued_key: str) -> None:
-    if outcome.status is IssuanceStatus.ISSUED:
-        counts[issued_key] += 1
-    elif outcome.status is IssuanceStatus.DEFERRED:
-        counts["deferred"] += 1
-    elif outcome.status in {IssuanceStatus.FAILED, IssuanceStatus.BUDGET_EXHAUSTED}:
-        counts["failed"] += 1
+def _stale_install_ids(installs: Any) -> list[UUID]:
+    """Install rows holding something other than the certificate in force, for names that have one."""
+    rows = installs.filter(hostname__retired_at__isnull=True, hostname__certificate__isnull=False).select_related(
+        "hostname__certificate"
+    )
+    return [
+        row.pk
+        for row in rows
+        if row.hostname.certificate.has_valid_material()
+        and row.certificate_ref != row.hostname.certificate.current_certificate_ref
+    ]
 
 
-def _install_stale(counts: dict[str, int]) -> None:
-    """Reinstall the certificate in force wherever a node still holds an older one.
+def renew_account_name_certificate(hostname_id: str, mode: str) -> dict[str, str]:
+    """Task: renew (`mode="renewal"`) or resume (`"resume"`) one name's certificate; never raises."""
+    try:
+        hostname = AccountHostname.objects.filter(pk=hostname_id, retired_at__isnull=True).first()
+        if hostname is None:
+            return {"status": IssuanceStatus.RETIRED.value}
+        outcome = request_certificate(hostname, scheduled_renewal=mode == "renewal")
+        if outcome.status is IssuanceStatus.ISSUED:
+            for install_id in _stale_install_ids(AccountNameCertificateInstall.objects.filter(hostname=hostname)):
+                _dispatch(INSTALL_TASK, str(install_id))
+        return {"status": outcome.status.value}
+    except Exception as exc:  # A task boundary: one name's failure is logged, never raised into the queue
+        logger.exception("🔥 [AccountCert] Renewal of %s failed", hostname_id)
+        return {"status": "error", "error": str(exc)}
+
+
+def install_account_name_certificate(install_id: str) -> dict[str, str]:
+    """Task: put the certificate in force on one node that holds an older one; never raises.
 
     Only nodes that already have an install record are touched. The first install on a name's intended node
-    belongs to `ensure_certificate_on_node`, which the hostname service calls after the node's sub-server
-    exists; running it from here would install ahead of that and fail every day until then.
+    belongs to `ensure_certificate_on_node`, which runs after the node's sub-server exists.
     """
-    installs = AccountNameCertificateInstall.objects.filter(
-        hostname__retired_at__isnull=True, hostname__certificate__isnull=False
-    ).select_related("hostname__certificate", "hostname__account", "server")
-    for install in installs:
-        certificate = install.hostname.certificate
-        if not certificate.has_valid_material() or install.certificate_ref == certificate.current_certificate_ref:
-            continue
+    from .account_name_lease import node_lease  # noqa: PLC0415
+
+    try:
+        install = (
+            AccountNameCertificateInstall.objects.select_related("hostname__account", "server")
+            .filter(pk=install_id)
+            .first()
+        )
+        if install is None or install.pk not in _stale_install_ids(
+            AccountNameCertificateInstall.objects.filter(pk=install_id)
+        ):
+            return {"outcome": "current"}
         if _name_under_operation(install.hostname):
-            continue  # A migration's target is neither the account's server nor the name's target yet
+            return {"outcome": "operation"}  # A migration's target is neither the account's node nor the target yet
         if install.server_id not in _serving_servers(install.hostname):
             # The account left that node (a migration's cleanup deletes the customer domain, and the
             # sub-server with it), so the row no longer describes anything that node serves.
             install.delete()
-            continue
-        if install_current_certificate(install.hostname, install.server).is_ok():
-            counts["installed"] += 1
-        else:
-            counts["install_failed"] += 1
+            return {"outcome": "forgotten"}
+        with node_lease(install.hostname) as token:
+            if token is None:
+                return {"outcome": "busy"}  # Another node step holds the name; the next run tries again
+            installed = install_current_certificate(install.hostname, install.server)
+        return {"outcome": "installed" if installed.is_ok() else "failed"}
+    except Exception as exc:  # A task boundary: one install's failure is logged, never raised into the queue
+        logger.exception("🔥 [AccountCert] Install %s failed", install_id)
+        return {"outcome": "error", "error": str(exc)}
 
 
 def _name_under_operation(hostname: AccountHostname) -> bool:
