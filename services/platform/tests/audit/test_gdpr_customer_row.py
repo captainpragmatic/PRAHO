@@ -26,6 +26,7 @@ class CustomerRowAnonymisationTests(TestCase):
         self.person = User.objects.create_user(email=EMAIL, password="x-pass-123", first_name="Ioana")
         self.customer = create_individual_customer(first_name="Ioana", last_name="Rowe", email=EMAIL)
         Customer.objects.filter(pk=self.customer.pk).update(website="https://ioana-rowe.example.test")
+        CustomerAddress.all_objects.filter(customer=self.customer).update(label="Ioana's home")
         CustomerMembership.objects.create(user=self.person, customer=self.customer, role="owner", is_primary=True)
 
     def anonymise(self) -> None:
@@ -50,9 +51,13 @@ class CustomerRowAnonymisationTests(TestCase):
         ).lower()
         for identifier in ("ioana", "rowe", EMAIL, "+40722123456"):
             self.assertNotIn(identifier, record)
-        for address in CustomerAddress.all_objects.filter(customer=self.customer):
-            self.assertNotIn("Str.", address.address_line1)
-            self.assertEqual(address.postal_code, "000000")
+        addresses = list(CustomerAddress.all_objects.filter(customer=self.customer))
+        self.assertTrue(addresses)
+        for address in addresses:
+            self.assertEqual(
+                (address.label, address.address_line1, address.address_line2, address.city, address.postal_code),
+                ("", "Anonymized", "", "Anonymized", "000000"),
+            )
         self.assertTrue(
             AuditEvent.objects.filter(
                 action="data_anonymization_completed", metadata__customer_id=str(self.customer.pk)

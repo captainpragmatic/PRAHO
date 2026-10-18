@@ -1763,6 +1763,7 @@ class GDPRDeletionService:
                 updated_at=timezone.now(),
             )
             CustomerAddress.all_objects.filter(customer_id=customer_id).update(
+                label="",
                 address_line1=cls.ANONYMIZED_ADDRESS,
                 address_line2="",
                 city=cls.ANONYMIZED_ADDRESS,

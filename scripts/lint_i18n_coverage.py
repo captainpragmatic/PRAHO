@@ -164,7 +164,7 @@ class I18nCoverageVisitor(ast.NodeVisitor):
         if not _is_string_constant(first_arg):
             return
         value = _get_string_value(first_arg)
-        if value and _is_technical_string(value):
+        if value is not None and _is_technical_string(value):
             return
         self._add_issue(
             line=node.lineno,
@@ -192,7 +192,7 @@ class I18nCoverageVisitor(ast.NodeVisitor):
         if not _is_string_constant(second_arg):
             return
         value = _get_string_value(second_arg)
-        if value and _is_technical_string(value):
+        if value is not None and _is_technical_string(value):
             return
         self._add_issue(
             line=node.lineno,
@@ -210,7 +210,7 @@ class I18nCoverageVisitor(ast.NodeVisitor):
         if not _is_string_constant(node.value):
             return
         value = _get_string_value(node.value)
-        if value and _is_technical_string(value):
+        if value is not None and _is_technical_string(value):
             return
         code, severity = KEYWORD_ISSUE_CODES[node.arg]
         self._add_issue(
@@ -238,7 +238,7 @@ class I18nCoverageVisitor(ast.NodeVisitor):
         if not _is_string_constant(node.value):
             return
         value = _get_string_value(node.value)
-        if value and _is_technical_string(value):
+        if value is not None and _is_technical_string(value):
             return
         self._add_issue(
             line=node.lineno,
@@ -269,7 +269,7 @@ class I18nCoverageVisitor(ast.NodeVisitor):
             if not _is_string_constant(label_node):
                 continue
             label_value = _get_string_value(label_node)
-            if label_value and _is_technical_string(label_value):
+            if label_value is not None and _is_technical_string(label_value):
                 continue
             self._add_issue(
                 line=label_node.lineno if hasattr(label_node, "lineno") else item.lineno,
