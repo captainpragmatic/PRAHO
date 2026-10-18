@@ -90,6 +90,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0058](ADR-0058-pending-totp-enrolment.md) | A TOTP Secret Waiting for Its First Code Lives in Its Own Row | Accepted | 2026-10-13 |
 | [ADR-0059](ADR-0059-differential-virtualmin-backups.md) | Differential Virtualmin Backups Are a Chain PRAHO Tracks and Fences | Accepted | 2026-10-15 |
 | [ADR-0060](ADR-0060-virtualmin-api-user-is-a-locked-down-master-admin.md) | The Virtualmin API User Is a Master Administrator, Locked Down | Accepted | 2026-10-14 |
+| [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) | Account Hostnames, Customer DNS and Mail Follow the Account Across Nodes | Proposed | 2026-10-14 |
 | [ADR-0062](ADR-0062-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
 | [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
 
@@ -209,6 +210,7 @@ Billing Ownership
 - [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) — portal session saves merge concurrent writes by compare-and-swap; key groups, record maps, revocation preserved
 - [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) — gunicorn gthread, 2 processes × 4 threads, so one customer waiting on Platform does not make the others wait; sync is the rollback
 - [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) — `MEDIA_STORAGE=s3` puts media in a private bucket for container platforms; filesystem stays the default; reads only through Django, fails closed
+- [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) — every hosting account gets an opaque provider hostname that follows it across nodes; customer domains point at it (our nameservers, ALIAS, or a www redirect), never at a node IP; mail follows the same name (proposed; phase 1 paused)
 - [ADR-0062](ADR-0062-deployment-branding-layer.md) — a deployment is env + settings + a brand folder: brand (`company.brand_name`, `BRAND_DIR`), public company identity, the env-only fiscal seller that production requires, and legal documents staff publish as immutable releases
 
 ### 💰 Business & Domain
@@ -227,9 +229,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 62 (ADR-0001 through ADR-0063, without the reserved ADR-0061)
-- **Active**: 56 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 63 (ADR-0001 through ADR-0063)
+- **Active**: 57 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Reserved**: ADR-0061, account hostnames, customer DNS and mail. It is written on branch `docs/account-hostnames-dns-mail`, and its Phase 0 code on master already cites it.
 - **Next available**: ADR-0064

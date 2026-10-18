@@ -228,9 +228,9 @@ def test_portal_isolation():
 
 On the platform domain, Caddy routes these paths to anyone: `/api/*` (the portal's HMAC-signed calls
 and API tokens), `/api/users/health/*`, `/integrations/webhooks/*`, `/notifications/webhooks/*` and
-`/notifications/unsubscribe/*`. Everything else, meaning the staff UI, `/static/` and `/media/`, is
-served only to `PLATFORM_ALLOWED_CIDRS` and answers 403 elsewhere. Both Caddy configs route the same
-way.
+`/notifications/unsubscribe/*`. Everything else, meaning the staff UI and `/static/`, is served only
+to `PLATFORM_ALLOWED_CIDRS` and answers 403 elsewhere. Both Caddy configs route the same way. No
+route serves media: stored files are read only through Django views that check access (ADR-0057).
 
 `docker-compose.platform-only.yml`, `docker-compose.portal-only.yml` and
 `docker-compose.container-service.yml` split the same services across hosts or a managed container

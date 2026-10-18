@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import d390_views, views
+from . import d390_views, efactura_file_views, views
 
 app_name = "billing"
 
@@ -54,6 +54,11 @@ urlpatterns = [
     path("e-factura/", views.efactura_dashboard, name="efactura_dashboard"),
     path("e-factura/documents/", views.efactura_documents_htmx, name="efactura_documents_htmx"),
     path("e-factura/<str:pk>/", views.efactura_document_detail, name="efactura_document_detail"),
+    path(
+        "e-factura/<uuid:pk>/files/<str:kind>/",
+        efactura_file_views.efactura_document_file,
+        name="efactura_document_file",
+    ),
     path("e-factura/<int:pk>/submit/", views.efactura_submit, name="efactura_submit"),
     path("e-factura/<str:pk>/retry/", views.efactura_retry, name="efactura_retry"),
     # Payment management

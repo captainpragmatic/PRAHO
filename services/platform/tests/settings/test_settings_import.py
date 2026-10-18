@@ -7,16 +7,18 @@ unknown key rejection, admin-only access, size limits, and security event loggin
 
 from __future__ import annotations
 
+import io
 import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile, UploadedFile
+from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
+from apps.settings.views import MAX_IMPORT_SIZE, _extract_import_payload
 
 User = get_user_model()
 
@@ -190,6 +192,26 @@ class SettingsImportTests(TestCase):
         self.assertEqual(response.status_code, 400)
         data = response.json()
         self.assertIn("too large", data["error"])
+
+    def test_an_uploaded_file_is_read_no_further_than_the_limit(self) -> None:
+        """An upload spools to disk past the memory threshold; reading it whole would load it all."""
+
+        class _BoundedOnly(io.BytesIO):
+            def read(self, size: int | None = -1) -> bytes:
+                if size is None or size < 0:
+                    raise AssertionError("the whole upload was read")
+                return super().read(size)
+
+        request = RequestFactory().post(self.url)
+        oversized = UploadedFile(_BoundedOnly(b"x" * (MAX_IMPORT_SIZE * 2)), name="settings.json")
+        small = UploadedFile(_BoundedOnly(b"{}"), name="settings.json")
+
+        for uploaded, expected in ((oversized, MAX_IMPORT_SIZE + 1), (small, 2)):
+            request.FILES["file"] = uploaded
+            raw, error = _extract_import_payload(request)
+            self.assertIsNone(error)
+            assert raw is not None
+            self.assertEqual(len(raw), expected)
 
     @patch("apps.settings.views.log_security_event")
     def test_import_logs_security_event(self, mock_log: object) -> None:

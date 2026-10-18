@@ -29,6 +29,7 @@ from django.views.decorators.http import require_http_methods
 from django_q.models import OrmQ, Schedule, Task
 
 from apps.common.decorators import admin_required
+from apps.common.http import mark_download
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Err, Ok
 
@@ -268,7 +269,7 @@ def export_settings(request: HttpRequest) -> HttpResponse:
         )
 
         response = HttpResponse(json.dumps(export_data, indent=2, ensure_ascii=False), content_type="application/json")
-        response["Content-Disposition"] = 'attachment; filename="praho_settings_export.json"'
+        mark_download(response, "praho_settings_export.json")
 
         return response
 
@@ -344,7 +345,7 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
         )
 
         response = HttpResponse(json.dumps(export_data, indent=2, ensure_ascii=False), content_type="application/json")
-        response["Content-Disposition"] = 'attachment; filename="praho_settings_full_export.json"'
+        mark_download(response, "praho_settings_full_export.json")
 
         return response
 
@@ -367,7 +368,9 @@ def _extract_import_payload(request: HttpRequest) -> tuple[bytes | None, str | N
         uploaded = request.FILES.get("file")
         if not uploaded:
             return None, "No file uploaded"
-        return uploaded.read(), None
+        # One byte past the limit is enough to refuse it; an upload past the memory threshold is on
+        # disk, and reading it whole would load all of it.
+        return uploaded.read(MAX_IMPORT_SIZE + 1), None
     return request.body, None
 
 

@@ -135,7 +135,9 @@ class EfacturaDocumentDetailViewTestCase(TestCase):
         self.assertContains(response, "Claim Lease Expired")
         self.assertNotContains(response, "Retry Submission")
 
-    def test_legacy_response_archive_is_visible_without_an_xml_hash(self):
+    def test_legacy_response_archive_is_marked_unverified_and_not_offered(self):
+        # An archive with no recorded digest cannot be verified, so the download view refuses it
+        # and the page offers no link. The storage path is never shown.
         from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory  # noqa: PLC0415
 
         invoice = InvoiceFactory(
@@ -152,8 +154,11 @@ class EfacturaDocumentDetailViewTestCase(TestCase):
 
         response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": document.pk}))
 
-        self.assertContains(response, "efactura/pdf/2026/07/legacy-response.pdf")
         self.assertContains(response, "Unverified legacy archive")
+        self.assertNotContains(response, "legacy-response.pdf")
+        self.assertNotContains(
+            response, reverse("billing:efactura_document_file", kwargs={"pk": document.pk, "kind": "archive"})
+        )
 
 
 class EfacturaSubmitViewTestCase(TestCase):

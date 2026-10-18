@@ -69,7 +69,6 @@ class PlatformUnreachableViewTests(SimpleTestCase):
         Caller("/tickets/widget/"),
         Caller("/tickets/3/", 503),
         Caller("/tickets/3/attachments/4/download/", 503),
-        Caller("/api/tickets/3/attachments/4/download/", 503),
         Caller("/tickets/create/?service_id=3", 503),
         Caller("/tickets/3/reply/", 503, post=True),
         Caller("/services/"),

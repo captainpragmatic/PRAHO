@@ -366,10 +366,8 @@ def generate_secure_filename(original_filename: str) -> str:
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
     random_component = secrets.token_hex(16)  # 32 character random string
 
-    secure_filename = f"ticket_{timestamp}_{random_component}{file_ext}"
-
-    logger.info(f"🔒 [Ticket Security] Generated secure filename: {original_filename} -> {secure_filename}")
-    return secure_filename
+    # The original name is not logged: it can carry a person's data.
+    return f"ticket_{timestamp}_{random_component}{file_ext}"
 
 
 def get_secure_upload_path(ticket_id: int, secure_filename: str) -> str:
