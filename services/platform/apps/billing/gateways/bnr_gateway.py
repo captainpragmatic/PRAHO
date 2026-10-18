@@ -202,7 +202,6 @@ def _audit_security_failure(exc: OutboundSecurityError) -> None:
                 "url": BNR_API_URL,
                 "policy": BNR_POLICY.name,
                 "error": str(exc),
-                "severity": "high",
             },
             actor_type="system",
         )

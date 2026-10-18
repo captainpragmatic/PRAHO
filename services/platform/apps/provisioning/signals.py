@@ -18,7 +18,6 @@ Note: Virtualmin-specific signals are in virtualmin_signals.py
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
@@ -28,7 +27,9 @@ from apps.audit.services import (
     AuditContext,
     AuditEventData,
     AuditService,
+    actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 from apps.settings.services import SettingsService
 
@@ -59,7 +60,7 @@ logger = logging.getLogger(__name__)
 def audit_service_plan_price(
     sender: type[ServicePlanPrice], instance: ServicePlanPrice, created: bool, **kwargs: Any
 ) -> None:
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
     AuditService.log_simple_event(
         event_type="create" if created else "update",
@@ -108,7 +109,7 @@ def _log_provisioning_model_event(  # Django signal parameters  # noqa: PLR0913 
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Log lightweight provisioning model lifecycle events."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     try:
@@ -129,7 +130,7 @@ def _log_provisioning_model_event(  # Django signal parameters  # noqa: PLR0913 
                     new_values=new_values or {},
                     description=description,
                 ),
-                context=AuditContext(actor_type="system", metadata=event_metadata),
+                context=actor_context(metadata=event_metadata),
             )
     except Exception as e:
         logger.exception(f"🔥 [Provisioning Lifecycle] Failed to log {event_type}: {e}")
@@ -232,7 +233,7 @@ def handle_service_plan_created_or_updated(
     - Security alerts for suspicious price changes
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     try:
@@ -294,7 +295,7 @@ def audit_service_lifecycle_events(sender: type[Service], instance: Service, cre
     - Customer relationship changes
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     try:
@@ -391,7 +392,7 @@ def audit_server_management_events(sender: type[Server], instance: Server, creat
     Logs server creation, configuration changes, and capacity monitoring.
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     try:
@@ -450,7 +451,7 @@ def handle_service_domain_changes(
     Triggers provisioning tasks for DNS configuration and SSL certificate management.
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     try:

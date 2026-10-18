@@ -21,6 +21,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.classification import classify
 from apps.billing.models import TaxRule
 
 # ===============================================================================
@@ -1122,7 +1123,8 @@ class TestEFacturaAuditPayloadReachesTheAuditService(TestCase):
         )
 
         self.assertEqual(event.event_type, "efactura_submission_failed")
-        self.assertEqual(event.context.metadata["severity"], "high")
+        self.assertEqual(classify(event.event_type).severity, "high")
+        self.assertNotIn("severity", event.context.metadata)
         self.assertEqual(event.context.metadata["error_message"], "ANAF rejected the upload")
 
     def test_a_successful_submission_is_medium_severity(self) -> None:
@@ -1132,4 +1134,4 @@ class TestEFacturaAuditPayloadReachesTheAuditService(TestCase):
         )
 
         self.assertEqual(event.event_type, "efactura_submitted")
-        self.assertEqual(event.context.metadata["severity"], "medium")
+        self.assertEqual(classify(event.event_type).severity, "medium")

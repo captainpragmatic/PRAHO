@@ -38,6 +38,11 @@ from apps.billing.issuers.policy import (
     assert_efactura_submission_allowed,
     efactura_submission_denied_reason,
 )
+from apps.billing.stored_files import (
+    EFACTURA_UNSENT_STATUSES,
+    delete_stored_files_on_failure,
+    record_stored_file,
+)
 
 from .client import (
     AuthenticationError,
@@ -430,6 +435,7 @@ class EFacturaService:
             **failure_options,
         )
 
+    @delete_stored_files_on_failure()  # Outside the atomic block: deletes the XML a rolled-back claim stored
     @transaction.atomic
     def _prepare_and_claim_submission(  # noqa: C901, PLR0911  # Explicit fail-closed lifecycle guards.
         self, invoice: Invoice
@@ -686,16 +692,22 @@ class EFacturaService:
             validate_response_archive(content)
 
             filename = f"efactura_{document.id}.zip"
+            superseded = document.response_archive.name  # Missing or failed its integrity check
             document.response_archive.save(filename, ContentFile(content), save=False)
             document.response_archive_sha256 = hashlib.sha256(content).hexdigest()
             document.response_archive_downloaded_at = timezone.now()
-            document.save(
-                update_fields=[
-                    "response_archive",
-                    "response_archive_sha256",
-                    "response_archive_downloaded_at",
-                    "updated_at",
-                ]
+            record_stored_file(
+                document.response_archive.storage,
+                document.response_archive.name,
+                superseded,
+                lambda: document.save(
+                    update_fields=[
+                        "response_archive",
+                        "response_archive_sha256",
+                        "response_archive_downloaded_at",
+                        "updated_at",
+                    ]
+                ),
             )
 
             logger.info(f"Downloaded and archived ANAF response ZIP for document {document.id}")
@@ -918,12 +930,19 @@ class EFacturaService:
             # Save XML bytes through the real storage backend at the staff-configured path.
             directory = document.xml_generated_at.strftime(EFacturaSettings().xml_storage_path)
             filename = posixpath.join(directory, f"{invoice.number}.xml")
+            # An XML that never left PRAHO is not a fiscal record once a newer one replaces it.
+            superseded = document.xml_file.name if document.status in EFACTURA_UNSENT_STATUSES else None
             document.xml_file.name = document.xml_file.storage.save(
                 filename,
                 ContentFile(xml_content.encode("utf-8")),
                 max_length=document.xml_file.field.max_length,
             )
-            document.save(update_fields=["xml_file", "updated_at"])
+            record_stored_file(
+                document.xml_file.storage,
+                document.xml_file.name,
+                superseded,
+                lambda: document.save(update_fields=["xml_file", "updated_at"]),
+            )
 
             return xml_content
 

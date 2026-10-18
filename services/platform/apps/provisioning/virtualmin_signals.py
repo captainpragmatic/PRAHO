@@ -13,7 +13,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from django.conf import settings
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 
@@ -22,6 +21,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
@@ -56,7 +56,7 @@ def audit_virtualmin_account_changes(
     - Customer relationship changes
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     with swallow_application_errors(
@@ -169,7 +169,7 @@ def audit_virtualmin_account_deletion(
     Critical for maintaining immutable audit trails of account lifecycle.
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     with swallow_application_errors(
@@ -215,7 +215,7 @@ def audit_job_status_transition(
     every terminal outcome (incl. takeovers and operator resolutions) is on the
     immutable trail.
     """
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
     AuditService.log_event(
         AuditEventData(
@@ -255,7 +255,7 @@ def audit_virtualmin_provisioning_jobs(
     Logs job creation, status changes, and completion for monitoring and debugging.
     """
     # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     with swallow_application_errors(

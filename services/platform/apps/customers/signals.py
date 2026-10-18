@@ -16,7 +16,6 @@ Includes:
 import logging
 from typing import Any
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
@@ -27,7 +26,9 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
     ComplianceEventRequest,
+    actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
@@ -53,6 +54,26 @@ _DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD = 60  # 60 days - Romanian law thresho
 # ===============================================================================
 
 
+# The customer fields an audit event records; old and new values use exactly these keys.
+AUDITED_CUSTOMER_FIELDS = (
+    "name",
+    "customer_type",
+    "status",
+    "company_name",
+    "primary_email",
+    "primary_phone",
+    "industry",
+    "website",
+    "data_processing_consent",
+    "marketing_consent",
+    "assigned_account_manager_id",
+)
+
+
+def _audited_customer_values(customer: Customer) -> dict[str, Any]:
+    return {field: getattr(customer, field) for field in AUDITED_CUSTOMER_FIELDS}
+
+
 @receiver(post_save, sender=Customer)
 def handle_customer_created_or_updated(
     sender: type[Customer], instance: Customer, created: bool, **kwargs: Any
@@ -71,32 +92,36 @@ def handle_customer_created_or_updated(
         # Get previous values for audit trail
         old_values = getattr(instance, "_original_customer_values", {}) if not created else {}
         # Enhanced customer audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             event_type = "customer_created" if created else "customer_updated"
 
-            # Best-effort + savepoint-isolated: a failure in this generic audit write must
-            # neither poison the surrounding transaction nor skip the consent-change handlers
-            # below (the canonical audit path for marketing/GDPR consent — issue #182).
+            # Best-effort + savepoint-isolated: a failure in this generic audit write, reading a
+            # deferred field included, must neither poison the surrounding transaction nor skip the
+            # consent-change handlers below (the canonical audit path for consent — issue #182).
             with best_effort_atomic(logger=logger, scope="Customers", message="Customer audit failed"):
-                new_values = {
-                    "name": instance.name,
-                    "customer_type": instance.customer_type,
-                    "status": instance.status,
-                    "company_name": instance.company_name,
-                    "primary_email": instance.primary_email,
-                    "primary_phone": instance.primary_phone,
-                }
-                CustomersAuditService.log_customer_event(
-                    event_type=event_type,
-                    customer=instance,
-                    user=getattr(instance, "_audit_user", None),
-                    context=AuditContext(actor_type="system"),
-                    old_values=old_values,
-                    new_values=new_values,
-                    description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
-                )
+                # One key set on both sides, the changed fields only (row 52). old_values itself
+                # stays whole: the status and consent handlers below read it.
+                current = _audited_customer_values(instance)
+                if created:
+                    audit_old: dict[str, Any] = {}
+                    audit_new = current
+                else:
+                    changed = [
+                        key for key in AUDITED_CUSTOMER_FIELDS if key in old_values and old_values[key] != current[key]
+                    ]
+                    audit_old = {key: old_values[key] for key in changed}
+                    audit_new = {key: current[key] for key in changed}
+                if created or audit_new:
+                    CustomersAuditService.log_customer_event(
+                        event_type=event_type,
+                        customer=instance,
+                        context=actor_context(),
+                        old_values=audit_old,
+                        new_values=audit_new,
+                        description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
+                    )
 
         if created:
             # New customer created
@@ -147,17 +172,7 @@ def store_original_customer_values(sender: type[Customer], instance: Customer, *
         if instance.pk:
             try:
                 original = Customer.all_objects.get(pk=instance.pk)
-                instance._original_customer_values = {
-                    "status": original.status,
-                    "customer_type": original.customer_type,
-                    "company_name": original.company_name,
-                    "primary_email": original.primary_email,
-                    "primary_phone": original.primary_phone,
-                    "data_processing_consent": original.data_processing_consent,
-                    "marketing_consent": original.marketing_consent,
-                    "industry": original.industry,
-                    "assigned_account_manager": original.assigned_account_manager,
-                }
+                instance._original_customer_values = _audited_customer_values(original)
             except Customer.DoesNotExist:
                 instance._original_customer_values = {}
     except Exception:
@@ -246,15 +261,14 @@ def handle_tax_profile_changes(
         # One audit record per change (#241 dedup): Romanian registrations get the
         # ComplianceLog below - the AuditEvent restated it. Non-RO profiles have no
         # ComplianceLog path, so they keep the AuditEvent for coverage.
-        if not is_romanian_registration and not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not is_romanian_registration and not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             with best_effort_atomic(logger=logger, scope="Customers", message="log_tax_profile_event failed"):
                 CustomersAuditService.log_tax_profile_event(
                     event_type=event_type,
                     tax_profile=instance,
-                    user=getattr(instance, "_audit_user", None),
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Tax profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -370,7 +384,7 @@ def handle_billing_profile_changes(
 
         old_values = getattr(instance, "_original_billing_values", {}) if not created else {}
         # Enhanced billing profile audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             with best_effort_atomic(logger=logger, scope="Customers", message="log_billing_profile_event failed"):
@@ -382,8 +396,7 @@ def handle_billing_profile_changes(
                 CustomersAuditService.log_billing_profile_event(
                     event_type=event_type,
                     billing_profile=instance,
-                    user=getattr(instance, "_audit_user", None),
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Billing profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -460,7 +473,7 @@ def handle_address_changes(
         event_type = "customer_address_created" if created else "customer_address_updated"
 
         # Enhanced address audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_address_values", {}) if not created else {}
@@ -481,8 +494,7 @@ def handle_address_changes(
             CustomersAuditService.log_address_event(
                 event_type=event_type,
                 address=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Address ({address_role}) {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -559,7 +571,7 @@ def handle_payment_method_changes(
         event_type = "customer_payment_method_created" if created else "customer_payment_method_updated"
 
         # Enhanced payment method audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import CustomersAuditService
 
             old_values = getattr(instance, "_original_payment_values", {}) if not created else {}
@@ -576,8 +588,7 @@ def handle_payment_method_changes(
             CustomersAuditService.log_payment_method_event(
                 event_type=event_type,
                 payment_method=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Payment method {instance.method_type} {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -689,7 +700,7 @@ def handle_customer_note_changes(
     with swallow_application_errors(logger=logger, scope="customers", message="handle_customer_note_changes failed"):
         if created:
             # Enhanced customer note audit logging
-            if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+            if not audit_signals_disabled():
                 from apps.audit.services import CustomersAuditService
 
                 with best_effort_atomic(logger=logger, scope="Customers", message="log_note_event failed"):

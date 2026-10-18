@@ -17,6 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
+from apps.common.transactional_save import TransactionalSaveModel
 
 # ===============================================================================
 # ORDER MANAGEMENT MODELS
@@ -31,7 +32,7 @@ def _order_has_items(instance: models.Model) -> bool:
     return bool(order.items.exists())
 
 
-class Order(ConcurrentTransitionMixin, models.Model):
+class Order(ConcurrentTransitionMixin, TransactionalSaveModel):
     """
     Customer order for products/services.
     Tracks the entire lifecycle from cart to provisioning.

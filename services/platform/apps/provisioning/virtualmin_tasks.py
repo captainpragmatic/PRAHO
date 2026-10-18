@@ -1087,8 +1087,6 @@ def release_lost_pair_node(job_id: str, attempt: int = 1) -> dict[str, Any]:
                         actor_type="system",
                         metadata={
                             "source_app": "provisioning",
-                            "severity": "high",
-                            "requires_review": True,
                             "job_id": str(job.pk),
                         },
                     ),

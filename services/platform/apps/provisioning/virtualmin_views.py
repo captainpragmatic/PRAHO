@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
 from urllib.parse import urlencode
@@ -1779,7 +1779,9 @@ def _execute_bulk_health_check(accounts: list[VirtualminAccount]) -> BulkOperati
         collected: set[Future[tuple[VirtualminAccount, bool, str | None]]] = set()
         try:
             future_to_account = {
-                executor.submit(_health_check_until_deadline, account, deadline): account for account in accounts
+                # One copied context per submission: a Context cannot be entered by two threads at once.
+                executor.submit(copy_context().run, _health_check_until_deadline, account, deadline): account
+                for account in accounts
             }
             try:
                 for future in as_completed(future_to_account, timeout=max(0.0, deadline - time.perf_counter())):

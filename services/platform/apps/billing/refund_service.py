@@ -1702,8 +1702,6 @@ class RefundService:
                         "invoice_id": str(invoice.pk) if invoice is not None else None,
                         "sibling_payment_ids": sibling_ids,
                         "reason": reason,
-                        "severity": "high",
-                        "requires_review": True,
                     },
                     actor_type="system",
                 )
@@ -2391,7 +2389,6 @@ class RefundService:
                     "gateway_status": "refunded",
                     "local_status": payment.status,
                     "refund_type": refund_type,
-                    "severity": "critical",
                     "action_required": "manual_reconciliation",
                 },
             )

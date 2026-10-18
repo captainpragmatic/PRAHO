@@ -11,13 +11,13 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
-from apps.audit.services import AuditContext, AuditEventData, AuditService, BusinessEventData, OrdersAuditService
+from apps.audit.actor_context import bind_current_actor
+from apps.audit.services import AuditEventData, AuditService, BusinessEventData, OrdersAuditService, actor_context
 from apps.common.transactions import best_effort_atomic
 from apps.common.validators import log_security_event
 
@@ -75,7 +75,7 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
                     event_type=event_type,
                     business_object=instance,
                     user=None,  # System event
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Order {instance.order_number} {'created' if created else 'updated'}",
@@ -97,7 +97,9 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
                 _old = old_status
                 _new = instance.status
                 transaction.on_commit(
-                    lambda order=instance, old=_old, new=_new: _handle_order_status_change(order, old, new)
+                    bind_current_actor(
+                        lambda order=instance, old=_old, new=_new: _handle_order_status_change(order, old, new)
+                    )
                 )
 
     except Exception as e:
@@ -505,7 +507,7 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
                     event_type=event_type,
                     business_object=instance,
                     user=None,
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}",
@@ -590,7 +592,7 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
                     BusinessEventData(
                         event_type=provisioning_events[new_status],
                         business_object=item,
-                        context=AuditContext(actor_type="system"),
+                        context=actor_context(),
                         description=f"Order item provisioning {new_status}: {item.product_name}",
                     )
                 )
@@ -868,11 +870,6 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
         logger.warning("⚠️ [Order Signal] Cache cleanup failed for %s: %s", instance.order_number, e)
 
     try:
-        _cleanup_order_files(instance)
-    except Exception as e:
-        logger.warning("⚠️ [Order Signal] File cleanup failed for %s: %s", instance.order_number, e)
-
-    try:
         _cancel_order_webhooks(instance)
     except Exception as e:
         logger.warning("⚠️ [Order Signal] Webhook cleanup failed for %s: %s", instance.order_number, e)
@@ -1029,37 +1026,6 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
 # ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
-
-
-_ALLOWED_UPLOAD_PREFIX = "orders/"
-
-
-def _cleanup_order_files(order: Order) -> None:
-    """Clean up any files associated with the order.
-
-    H5 fix: Validates each path before deletion to prevent path traversal attacks.
-    Paths must:
-    - Not contain ".." after normalization
-    - Start with the allowed "orders/" prefix
-    """
-    import posixpath  # noqa: PLC0415
-
-    try:
-        if order.meta.get("uploaded_files"):
-            for file_path in order.meta["uploaded_files"]:
-                try:
-                    normalized = posixpath.normpath(file_path)
-                    if ".." in normalized or not normalized.startswith(_ALLOWED_UPLOAD_PREFIX):
-                        logger.warning("⚠️ [File] Suspicious path in order meta, skipping: %s", file_path)
-                        continue
-                    if default_storage.exists(normalized):
-                        default_storage.delete(normalized)
-                        logger.info(f"🗑️ [File] Deleted {normalized}")
-                except Exception as e:
-                    logger.exception(f"🔥 [File] Failed to delete {file_path}: {e}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Order] File cleanup failed: {e}")
 
 
 def _cancel_order_webhooks(order: Order) -> None:

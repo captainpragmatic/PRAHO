@@ -1053,8 +1053,9 @@ class SideEffectDetector:
     ) -> None:
         # Analyze queries for writes
         for query in connection.queries[self._initial_query_count :]:
-            sql = query.get("sql", "").upper()
-            if any(keyword in sql for keyword in ["INSERT", "UPDATE", "DELETE"]):
+            # Match the statement verb, not a substring: a SELECT of `updated_at` is not a write.
+            sql = query.get("sql", "").lstrip().upper()
+            if sql.startswith(("INSERT", "UPDATE", "DELETE")):
                 self.writes.append({"sql": query.get("sql", "")[:200], "time": query.get("time")})
 
     @property

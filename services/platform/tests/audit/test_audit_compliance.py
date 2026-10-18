@@ -853,35 +853,33 @@ class TestExportReport(TestCase):
                 rows = list(csv.reader(f))
             self.assertEqual(len(rows), 1)  # Header only
 
-    def test_export_pdf_creates_txt_file(self) -> None:
+    def test_compliance_pdf_export_is_a_real_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._make_service_with_dir(tmpdir)
             report = self._make_report_with_violation()
             filepath = svc.export_report(report, ReportFormat.PDF)
-            self.assertTrue(os.path.exists(filepath))
-            self.assertTrue(filepath.endswith(".txt"))
+            self.assertTrue(filepath.endswith(".pdf"), filepath)
+            with open(filepath, "rb") as f:
+                data = f.read()
+        self.assertTrue(data.startswith(b"%PDF-"))
+        self.assertTrue(data.rstrip().endswith(b"%%EOF"))
+        # The trailer's startxref points at the cross-reference table: a reader can open it.
+        offset = int(data[data.rindex(b"startxref") :].split()[1])
+        self.assertTrue(data[offset:].startswith(b"xref"), data[offset : offset + 20])
+        self.assertIn(f"/Title ({report.report_id})".encode(), data)
 
     def test_export_pdf_content(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            svc = self._make_service_with_dir(tmpdir)
-            report = self._make_report_with_violation()
-            filepath = svc.export_report(report, ReportFormat.PDF)
-            with open(filepath, encoding="utf-8") as f:
-                content = f.read()
-            self.assertIn(report.report_id, content)
-            self.assertIn("COMPLIANCE REPORT", content)
-            self.assertIn("VIOLATIONS", content)
-            self.assertIn("Weak password", content)
-            self.assertIn("TEST SECTION", content.upper())
+        report = self._make_report_with_violation()
+        text = "\n".join(ComplianceReportService._pdf_lines(report))
+        self.assertIn(report.report_id, text)
+        self.assertIn("COMPLIANCE REPORT", text)
+        self.assertIn("VIOLATIONS", text)
+        self.assertIn("Weak password", text)
+        self.assertIn("TEST SECTION", text.upper())
 
     def test_export_pdf_no_violations(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            svc = self._make_service_with_dir(tmpdir)
-            report = make_report()
-            filepath = svc.export_report(report, ReportFormat.PDF)
-            with open(filepath, encoding="utf-8") as f:
-                content = f.read()
-            self.assertNotIn("VIOLATIONS", content)
+        text = "\n".join(ComplianceReportService._pdf_lines(make_report()))
+        self.assertNotIn("VIOLATIONS", text)
 
 
 # ---------------------------------------------------------------------------

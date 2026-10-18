@@ -292,7 +292,6 @@ class Invoice(ConcurrentTransitionMixin, models.Model):
 
     # File attachments
     pdf_file = models.FileField(upload_to="invoices/pdf/", blank=True, null=True)
-    xml_file = models.FileField(upload_to="invoices/xml/", blank=True, null=True)
 
     # Audit & Relationships
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="created_invoices")

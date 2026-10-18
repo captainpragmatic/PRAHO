@@ -58,7 +58,7 @@ class ProfileCurrencyBalancesTests(TestCase):
         ron = self.invoice("RON", 10_000)
         self.invoice("EUR", 10_000)
         self.payment(ron, 25_000)
-        event = CustomersAuditService.log_billing_profile_event("billing_profile_updated", self.profile)
+        event = CustomersAuditService.log_billing_profile_event("customer_billing_profile_updated", self.profile)
         self.assertNotIn("account_balance", event.metadata)
         self.assertEqual(event.metadata["account_balances"], {"RON": "0.00", "EUR": "100.00"})
         self.assertEqual(event.metadata["credit_limit_currency"], "RON")

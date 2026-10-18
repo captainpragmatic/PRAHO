@@ -15,6 +15,7 @@ from uuid import UUID
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
+from apps.audit.actor_context import current_actor
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 
@@ -134,19 +135,23 @@ def create_audit_event(  # Django signal parameters  # noqa: PLR0913  # Business
     metadata: dict[str, Any] | None = None,
 ) -> AuditEvent:
     """Create an audit event for a promotion-related action via the audit service."""
-    audit_metadata = dict(metadata or {})
-    audit_metadata["category"] = category
-    audit_metadata["severity"] = severity
-    audit_metadata["is_sensitive"] = is_sensitive
+    # ``category`` is kept for the callers that name it, but the audit service classifies the
+    # action. The severity and sensitivity are this event's own (a cancelling update is not a
+    # routine one), so they travel as explicit arguments, never as metadata.
+    del category
+    actor = user if user is not None else current_actor()
 
     return AuditService.log_simple_event(
         event_type=action,
-        user=user,
+        user=actor,
         content_object=instance,
         description=description,
         old_values=old_values,
         new_values=new_values,
-        metadata=audit_metadata,
+        metadata=dict(metadata or {}),
+        actor_type="user" if actor else "system",
+        severity=severity,
+        is_sensitive=is_sensitive,
     )
 
 

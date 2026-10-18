@@ -11,12 +11,18 @@ from __future__ import annotations
 import inspect
 import io
 import re
+import textwrap
 import tokenize
 from pathlib import Path
+from typing import Any
 
 from django.apps import apps
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.test import SimpleTestCase
+
+from apps.audit.signals import audit_user_profile_changes
+from apps.users.models import CustomerMembership, User, UserProfile
+from tests.audit import _receiver_fixtures
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,32 +86,46 @@ _AUDIT_API_NAMES = frozenset(
 )
 
 
-def _receiver_audits(receiver: object) -> bool:
-    """True when the receiver's defining MODULE references the audit API by NAME token.
+def _name_tokens(function: Any) -> set[str] | None:
+    """NAME tokens of one function's own source, or None when the source cannot be read."""
+    try:
+        source = inspect.getsource(function)
+        return {
+            tok.string
+            for tok in tokenize.generate_tokens(io.StringIO(textwrap.dedent(source)).readline)
+            if tok.type == tokenize.NAME
+        }
+    except (OSError, TypeError, tokenize.TokenizeError, IndentationError):
+        return None
+
+
+def _receiver_audits(receiver: Any, _seen: frozenset[int] = frozenset()) -> bool:
+    """True when the receiver, or a helper it calls by name, references the audit API by NAME token.
 
     A live receiver that merely invalidates a cache must not count as audit
     coverage - the pre-upgrade check accepted ANY receiver, which made the
     coverage guarantee vacuous for models whose only signals never audit.
-    Module scope (not function scope) because receivers routinely delegate to
-    module-level helpers (_log_billing_model_event, _handle_status_change);
-    tokenize still means comments cannot fake membership.
+    Checking the whole defining module was still vacuous: one auditing receiver
+    vouched for every other receiver in the same file. So only the receiver's own
+    source counts, plus the functions it names that resolve in its module globals
+    (receivers routinely delegate to _log_billing_model_event, _handle_status_change),
+    followed transitively. tokenize means comments cannot fake membership.
     """
-    try:
-        module = inspect.getmodule(inspect.unwrap(receiver))
-        if module is None:
-            return False
-        source = inspect.getsource(module)
-    except (OSError, TypeError):
+    function = inspect.unwrap(receiver)
+    if id(function) in _seen:
         return False
-    try:
-        names = {
-            tok.string
-            for tok in tokenize.generate_tokens(io.StringIO(source).readline)
-            if tok.type == tokenize.NAME
-        }
-    except tokenize.TokenizeError:
+    names = _name_tokens(function)
+    if names is None:
         return False
-    return bool(names & _AUDIT_API_NAMES)
+    if names & _AUDIT_API_NAMES:
+        return True
+    module_globals = getattr(getattr(function, "__func__", function), "__globals__", {})
+    seen = _seen | {id(function)}
+    for name in names:
+        helper = module_globals.get(name)
+        if inspect.isfunction(helper) and _receiver_audits(helper, seen):
+            return True
+    return False
 
 
 def _has_audit_signal(model: type) -> bool:
@@ -231,3 +251,54 @@ class TestAllowlistJustificationsAreTrue(SimpleTestCase):
             [],
             "Allowlist justification cites a mechanism that does not exist:\n" + "\n".join(unbacked),
         )
+
+
+class TestReceiverAuditsInspectsTheReceiver(SimpleTestCase):
+    """The detector must be able to fail: one auditing receiver must not vouch for its neighbours."""
+
+    def test_a_receiver_that_audits_directly_counts(self):
+        self.assertTrue(_receiver_audits(_receiver_fixtures.audits_directly))
+
+    def test_a_receiver_that_delegates_to_an_auditing_helper_counts(self):
+        self.assertTrue(_receiver_audits(_receiver_fixtures.audits_through_a_helper))
+
+    def test_a_non_auditing_receiver_does_not_count_because_its_module_audits(self):
+        self.assertFalse(_receiver_audits(_receiver_fixtures.only_invalidates_a_cache))
+
+    def test_a_self_calling_receiver_terminates_and_does_not_count(self):
+        self.assertFalse(_receiver_audits(_receiver_fixtures.loops_through_itself))
+
+
+def _audit_signals_receivers(signal: Any, model: type) -> list[Any]:
+    """Receivers of `signal` for `model` that are defined in apps.audit.signals and write audit events."""
+    raw_receivers = signal._live_receivers(model)
+    receivers = [*raw_receivers[0], *raw_receivers[1]] if isinstance(raw_receivers, tuple) else list(raw_receivers)
+    return [
+        r
+        for r in receivers
+        if getattr(inspect.unwrap(r), "__module__", "") == "apps.audit.signals" and _receiver_audits(r)
+    ]
+
+
+class TestIdentityModelsAreAuditedByTheAuditSignals(SimpleTestCase):
+    """User, UserProfile and CustomerMembership are audited by apps.audit.signals itself.
+
+    The model-coverage test above accepts a receiver from any module, so it keeps passing if the
+    audit receivers for these models are removed while some other app happens to audit them too.
+    """
+
+    def test_each_identity_model_has_an_auditing_receiver_in_the_audit_signals_module(self):
+        for model in (User, UserProfile, CustomerMembership):
+            with self.subTest(model=model.__name__):
+                self.assertTrue(_audit_signals_receivers(post_save, model))
+
+    def test_a_membership_deletion_is_audited_by_the_audit_signals_module(self):
+        self.assertTrue(_audit_signals_receivers(pre_delete, CustomerMembership))
+
+    def test_the_check_fails_when_the_receiver_is_disconnected(self):
+        post_save.disconnect(audit_user_profile_changes, sender=User)
+        try:
+            self.assertEqual(_audit_signals_receivers(post_save, User), [])
+        finally:
+            post_save.connect(audit_user_profile_changes, sender=User)
+        self.assertTrue(_audit_signals_receivers(post_save, User))

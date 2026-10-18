@@ -476,7 +476,7 @@ class BillingSecurityLoggingTests(TestCase):
         initial_count = AuditEvent.objects.count()
 
         log_security_event(
-            event_type='test_financial_operation',
+            event_type='invoice_validation',
             details={
                 'amount': 1000,
                 'customer_id': 123,
@@ -489,7 +489,7 @@ class BillingSecurityLoggingTests(TestCase):
         # Should create an audit event
         self.assertEqual(AuditEvent.objects.count(), initial_count + 1)
         event = AuditEvent.objects.order_by('-timestamp').first()
-        self.assertEqual(event.action, 'test_financial_operation')
+        self.assertEqual(event.action, 'invoice_validation')
         self.assertIn('amount', event.metadata)
         self.assertIn('user_email', event.metadata)
 

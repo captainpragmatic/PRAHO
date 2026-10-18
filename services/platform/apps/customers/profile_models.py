@@ -16,6 +16,7 @@ from apps.billing.currency_service import default_selling_currency
 from apps.common.cnp_validator import validate_cnp
 from apps.common.cui_validator import CUIValidator, validate_cui
 from apps.common.fields import EncryptedTextField
+from apps.common.transactional_save import TransactionalSaveModel
 from apps.common.types import CurrencyCode
 
 from .customer_models import SoftDeleteModel
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from apps.audit.models import AuditEvent
 
 
-class CustomerTaxProfile(SoftDeleteModel):
+class CustomerTaxProfile(TransactionalSaveModel, SoftDeleteModel):
     """
     Romanian tax compliance information separated from core customer data.
 

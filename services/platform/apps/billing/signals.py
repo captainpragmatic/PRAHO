@@ -18,7 +18,6 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import transaction
@@ -26,16 +25,19 @@ from django.db.models.signals import post_delete, post_save, pre_delete, pre_sav
 from django.dispatch import receiver
 from django.utils import timezone
 
+from apps.audit.actor_context import bind_current_actor
 from apps.audit.services import (
-    AuditContext,
     AuditEventData,
     AuditService,
     BillingAuditService,
     ComplianceEventRequest,
+    actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
+from .efactura.models import EFacturaDocument
 from .fiscal_identity import normalize_country_code
 from .issuers.models import IssuanceState, ProviderIssuance
 from .models import (
@@ -55,6 +57,7 @@ from .models import (
     TaxRule,
     VATValidation,
 )
+from .stored_files import delete_after_commit, efactura_document_is_fiscal, invoice_is_fiscal
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -150,12 +153,8 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Log a lightweight lifecycle audit event for billing models."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-        if getattr(settings, "TESTING", False):
-            return
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
+    if audit_signals_disabled():
+        return
 
     event_metadata = {
         "source_app": "billing",
@@ -171,7 +170,7 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
         new_values=_serialize_values_for_audit(new_values or {}),
         description=description,
     )
-    context = AuditContext(actor_type="system", metadata=event_metadata)
+    context = actor_context(metadata=event_metadata)
     with best_effort_atomic(logger=logger, scope="Billing Lifecycle", message=f"Failed to log {event_type}"):
         AuditService.log_event(event_data, context=context)
 
@@ -623,14 +622,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
             }
         )
 
-        _disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
-        _in_testing = getattr(settings, "TESTING", False)
-        if _disable_flag and not _in_testing:
-            logger.critical(
-                "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — "
-                "ignoring flag and continuing audit for safety"
-            )
-        if not _disable_flag or not _in_testing:
+        if not audit_signals_disabled():
             # Use specialized billing audit service for richer metadata
             from apps.audit.services import BusinessEventData
 
@@ -638,7 +630,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 event_type=event_type,
                 business_object=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Invoice {instance.audit_reference} {'created' if created else 'updated'}",
@@ -811,13 +803,7 @@ def handle_payment_created_or_updated(
 ) -> None:
     """Isolate optional effects; required settlement failures reach the caller."""
     old_values = _serialize_values_for_audit(getattr(instance, "_original_payment_values", {})) if not created else {}
-    disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
-    in_testing = getattr(settings, "TESTING", False)
-    if disable_flag and not in_testing:
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
-    if not disable_flag or not in_testing:
+    if not audit_signals_disabled():
         with best_effort_atomic(logger=logger, scope="Payment Audit", message="Failed to audit payment save"):
             from apps.audit.services import BusinessEventData
 
@@ -825,7 +811,7 @@ def handle_payment_created_or_updated(
                 event_type="payment_initiated" if created else f"payment_{instance.status}",
                 business_object=instance,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=_serialize_values_for_audit(
                     {
@@ -923,14 +909,14 @@ def handle_proforma_invoice_conversion(
             }
         )
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
                 event_type=event_type,
                 business_object=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Proforma {instance.number} {'created' if created else 'updated'}",
@@ -978,7 +964,7 @@ def handle_tax_rule_changes(sender: type[TaxRule], instance: TaxRule, created: b
             content_object=instance,
             description=f"Tax rule {instance.country_code} {instance.tax_type}: {instance.rate * 100}%",
         )
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        if not audit_signals_disabled():
             with best_effort_atomic(logger=logger, scope="Tax Audit", message="Failed to audit tax rule"):
                 AuditService.log_event(event_data)
 
@@ -1339,13 +1325,15 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
         )
 
         transaction.on_commit(
-            lambda inv=invoice: invoice_refunded.send(
-                sender=Invoice,
-                invoice=inv,
-                # TODO: Derive refund_type from invoice state when partial refund support is added.
-                # Currently _handle_invoice_refund_completion is only called for status=="refunded"
-                # (full refund path). Partial refunds route to a different handler.
-                refund_type="full",
+            bind_current_actor(
+                lambda inv=invoice: invoice_refunded.send(
+                    sender=Invoice,
+                    invoice=inv,
+                    # TODO: Derive refund_type from invoice state when partial refund support is added.
+                    # Currently _handle_invoice_refund_completion is only called for status=="refunded"
+                    # (full refund path). Partial refunds route to a different handler.
+                    refund_type="full",
+                )
             )
         )
 
@@ -2104,19 +2092,40 @@ def _delete_invoice_cache_keys(cache_keys: tuple[str, ...]) -> None:
 
 
 def _cleanup_invoice_files(invoice: Invoice) -> None:
-    """Delete captured invoice file paths only after the deletion commits."""
-    file_paths = (f"invoices/{invoice.number}.pdf", f"efactura/{invoice.number}.xml")
+    """Delete a deleted draft invoice's stored files once the deletion commits.
 
-    def _delete_after_commit() -> None:
-        for file_path in file_paths:
-            try:
-                if default_storage.exists(file_path):
-                    default_storage.delete(file_path)
-                    logger.info(f"🗑️ [File] Deleted invoice file {file_path}")
-            except Exception:
-                logger.exception(f"🔥 [File] Invoice file cleanup failed: {file_path}")
+    An issued invoice's documents are fiscal records: a deletion that reached it anyway (a cascade
+    bypasses Invoice.delete()) keeps them, and says so.
+    """
+    stored = [invoice.pdf_file] if invoice.pdf_file and invoice.pdf_file.name else []
+    if stored and invoice_is_fiscal(invoice):
+        logger.error(
+            "🔥 [File] Kept the files of deleted %s invoice %s: %s",
+            invoice.status,
+            invoice.number,
+            [f.name for f in stored],
+        )
+        return
+    for file in stored:
+        delete_after_commit(file.storage, file.name)
 
-    transaction.on_commit(_delete_after_commit)
+
+@receiver(pre_delete, sender=EFacturaDocument)
+def handle_efactura_document_cleanup(sender: type[EFacturaDocument], instance: EFacturaDocument, **kwargs: Any) -> None:
+    """Delete a deleted e-Factura document's XML and archive after commit, unless they are fiscal records."""
+    stored = [file for file in (instance.xml_file, instance.response_archive) if file and file.name]
+    if not stored:
+        return
+    if efactura_document_is_fiscal(instance):
+        logger.error(
+            "🔥 [File] Kept the files of deleted %s e-Factura document %s: %s",
+            instance.status,
+            instance.pk,
+            [f.name for f in stored],
+        )
+        return
+    for file in stored:
+        delete_after_commit(file.storage, file.name)
 
 
 def _cleanup_payment_files(payment: Payment) -> None:

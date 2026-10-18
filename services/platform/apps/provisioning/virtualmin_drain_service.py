@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 def _audit(obj: models.Model, action: str, user: User | None = None, detail: str = "") -> None:
-    review = action.endswith(("paused", "health_alert", "autofail_deferred"))
     AuditService.log_event(
         AuditEventData(event_type=action, content_object=obj, description=detail or action),
         AuditContext(
@@ -36,8 +35,6 @@ def _audit(obj: models.Model, action: str, user: User | None = None, detail: str
             actor_type="user" if user else "system",
             metadata={
                 "source_app": "provisioning",
-                "severity": "high" if review else "low",
-                "requires_review": review,
                 "detail": detail,
             },
         ),

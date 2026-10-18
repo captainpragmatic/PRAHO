@@ -9,6 +9,7 @@ import logging
 from typing import cast
 
 from django.contrib import messages
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -38,8 +39,10 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
             address = form.save(commit=False)
             address.customer = customer
 
-            # The model's save() enforces is_primary / is_billing exclusivity automatically
-            address.save()
+            # The model's save() enforces is_primary / is_billing exclusivity automatically. Atomic,
+            # so the erasure guard reads the customer under its lock (erasure_guard.py).
+            with transaction.atomic():
+                address.save()
             messages.success(request, _("✅ Address added"))
             return redirect("customers:detail", customer_id=customer.id)
         else:

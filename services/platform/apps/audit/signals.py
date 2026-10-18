@@ -6,6 +6,7 @@ Implements industry-standard user action auditing (GDPR, ISO 27001, NIST, SOX, P
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -23,9 +24,11 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.users.models import CustomerMembership, User, UserProfile
 
+from .actor_context import current_actor
 from .models import AuditEvent, ComplianceLog, audit_mutation_allowed
 from .person_events import note_erasure_write
 from .services import AuditContext, AuditEventData, AuditService
+from .switches import audit_signals_disabled
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -47,6 +50,7 @@ class AuditEventCreationData:
     description: str = ""
     request: HttpRequest | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    actor_type: str = "user"
 
 
 logger = logging.getLogger(__name__)
@@ -55,32 +59,10 @@ logger = logging.getLogger(__name__)
 # CUSTOM SIGNALS FOR BUSINESS-SPECIFIC USER ACTIONS
 # ===============================================================================
 
-# Profile and account management signals
-profile_updated = Signal()
-profile_picture_changed = Signal()
-emergency_contact_updated = Signal()
-notification_preferences_changed = Signal()
-
-# Privacy and consent signals
-privacy_settings_changed = Signal()
-marketing_consent_changed = Signal()
-gdpr_consent_changed = Signal()
+# The one custom signal that is sent: the Portal's cookie-consent API raises it. The other
+# eighteen (profile, privacy, API key, membership and context-switch signals) were never sent by
+# any code, so their receivers audited nothing; they are gone rather than left to look like coverage.
 cookie_consent_updated = Signal()
-privacy_policy_accepted = Signal()
-terms_accepted = Signal()
-
-# Security configuration signals
-password_strength_check = Signal()
-api_key_generated = Signal()
-api_key_revoked = Signal()
-security_settings_changed = Signal()
-
-# Customer relationship signals
-customer_membership_role_changed = Signal()
-primary_customer_changed = Signal()
-customer_access_granted = Signal()
-customer_access_revoked = Signal()
-customer_context_switched = Signal()
 
 
 # ===============================================================================
@@ -102,84 +84,6 @@ def _get_audit_context_from_request(request: HttpRequest | None, user: User | No
         session_key=getattr(request.session, "session_key", None) if hasattr(request, "session") else None,
         request_id=getattr(request, "id", None),
     )
-
-
-def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
-    """
-    Get category, severity, and flags for audit action
-
-    Returns: (category, severity, is_sensitive, requires_review)
-    """
-    # Define action patterns and their properties
-    # Each pattern maps to: (category, base_severity, is_sensitive, requires_review_func)
-    action_config = {
-        ("login_", "logout_", "session_", "account_"): (
-            "authentication",
-            "medium",
-            True,
-            lambda a: a in ["account_locked", "login_failed_2fa"],
-        ),
-        ("password_",): (
-            "authentication",
-            lambda a: "high" if a in ["password_compromised", "password_strength_weak"] else "medium",
-            True,
-            lambda a: a == "password_compromised",
-        ),
-        ("2fa_",): (
-            "authentication",
-            lambda a: "high" if a in ["2fa_disabled", "2fa_admin_reset"] else "medium",
-            True,
-            lambda a: a in ["2fa_disabled", "2fa_admin_reset"],
-        ),
-        ("privacy_", "gdpr_", "marketing_consent"): ("privacy", "high", True, lambda a: a.endswith("_withdrawn")),
-        ("customer_",): ("authorization", "medium", False, lambda a: a.endswith("_revoked")),
-        ("security_", "suspicious_", "brute_force", "malicious_"): ("security_event", "critical", True, lambda a: True),
-        ("data_export", "data_deletion", "data_breach"): ("data_protection", "high", True, lambda a: True),
-        ("system_", "backup_", "configuration_", "user_impersonation"): ("system_admin", "high", True, lambda a: True),
-    }
-
-    # Exact match patterns
-    exact_matches = {
-        "profile_updated": ("account_management", "medium", True, False),
-        "email_changed": ("account_management", "medium", True, False),
-        "phone_updated": ("account_management", "medium", True, False),
-        "name_changed": ("account_management", "medium", True, False),
-        "role_assigned": ("authorization", "high", True, True),
-        "role_removed": ("authorization", "high", True, True),
-        "permission_granted": ("authorization", "high", True, True),
-        "permission_revoked": ("authorization", "high", True, True),
-        "staff_role_changed": ("authorization", "high", True, True),
-        "customer_role_changed": ("authorization", "high", True, True),
-        "customer_membership_deleted": ("authorization", "high", True, True),
-        "customer_membership_created": ("authorization", "medium", True, False),
-        "customer_membership_updated": ("authorization", "medium", True, False),
-        "invoice_accessed": ("business_operation", "low", False, False),
-        "payment_method_added": ("business_operation", "low", False, False),
-        "order_placed": ("business_operation", "low", False, False),
-    }
-
-    # Check exact matches first
-    if action in exact_matches:
-        return exact_matches[action]
-
-    # Check prefix patterns
-    for patterns, config in action_config.items():
-        for pattern in patterns:
-            if action.startswith(pattern):
-                category, severity, is_sensitive, requires_review = config
-
-                # Handle dynamic severity
-                final_severity: str = str(severity(action)) if callable(severity) else str(severity)
-
-                # Handle dynamic requires_review
-                final_requires_review: bool = (
-                    bool(requires_review(action)) if callable(requires_review) else bool(requires_review)  # type: ignore[no-untyped-call]
-                )
-
-                return category, final_severity, is_sensitive, final_requires_review
-
-    # Default
-    return ("business_operation", "low", False, False)
 
 
 def _create_audit_event(  # Audit event creation requires comprehensive parameter set for full context capture  # audit trail fields  # noqa: PLR0913  # Business logic parameters
@@ -221,24 +125,15 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
 
         # Get context from request
         context = _get_audit_context_from_request(event_data.request, event_data.user)
+        context.actor_type = event_data.actor_type
 
         # Add additional metadata
         if event_data.metadata:
             context.metadata.update(event_data.metadata)
 
-        # Get action classification
-        category, severity, is_sensitive, requires_review = _get_action_category_severity(event_data.action)
-
-        # Add classification to metadata
-        context.metadata.update(
-            {
-                "category": category,
-                "severity": severity,
-                "is_sensitive": is_sensitive,
-                "requires_review": requires_review,
-                "audit_signal": True,
-            }
-        )
+        # Classification is the audit service's, from the action alone; the metadata only
+        # records that a signal receiver wrote the event.
+        context.metadata["audit_signal"] = True
 
         # Create event data
         audit_event_data = AuditEventData(
@@ -253,7 +148,9 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
         AuditService.log_event(audit_event_data, context)
 
         logger.info(
-            f"✅ [Audit Signal] {event_data.action} logged for user {event_data.user.email if event_data.user else 'System'} ({category}/{severity})"
+            "✅ [Audit Signal] %s logged for %s",
+            event_data.action,
+            f"user {event_data.user.pk}" if event_data.user else "System",
         )
 
 
@@ -262,246 +159,309 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
 # ===============================================================================
 
 
+# ===============================================================================
+# CHANGE DETECTION AND ATTRIBUTION FOR MODEL RECEIVERS
+# ===============================================================================
+
+_PERSISTED_VALUES_ATTR = "_audit_persisted_values"
+
+USER_AUDITED_FIELDS = (
+    "email",
+    "first_name",
+    "last_name",
+    "phone",
+    "staff_role",
+    "two_factor_enabled",
+    "accepts_marketing",
+)
+PROFILE_AUDITED_FIELDS = (
+    "preferred_language",
+    "timezone",
+    "email_notifications",
+    "sms_notifications",
+    "marketing_emails",
+    "emergency_contact_name",
+    "emergency_contact_phone",
+)
+MEMBERSHIP_AUDITED_FIELDS = ("role", "is_primary")
+
+_AUDITED_FIELDS_BY_MODEL: dict[type, tuple[str, ...]] = {
+    User: USER_AUDITED_FIELDS,
+    UserProfile: PROFILE_AUDITED_FIELDS,
+    CustomerMembership: MEMBERSHIP_AUDITED_FIELDS,
+}
+
+
+def _actor_event_fields() -> dict[str, Any]:
+    """The user and actor type an event written by a receiver carries.
+
+    A receiver sees the row that changed, not who changed it. The subject of an edit is the
+    event's content object; its author is whoever is acting now, or the system when nobody is.
+    """
+    actor = current_actor()
+    return {"user": actor, "actor_type": "user" if actor else "system"}
+
+
+@receiver(pre_save, sender=User, dispatch_uid="audit_snapshot_user")
+@receiver(pre_save, sender=UserProfile, dispatch_uid="audit_snapshot_user_profile")
+@receiver(pre_save, sender=CustomerMembership, dispatch_uid="audit_snapshot_membership")
+def snapshot_persisted_values(
+    sender: Any, instance: Any, raw: bool = False, using: str | None = None, **kwargs: Any
+) -> None:
+    """Remember what the row holds now, so the post_save receiver can tell what this save changed.
+
+    One read per save, on the signal's own database alias and in its own savepoint, so a failed
+    read can never poison the caller's transaction. It replaces the previous save's snapshot,
+    covers only the audited fields this save can touch (deferred fields were never loaded, and
+    ``update_fields`` limits the rest), and is skipped for fixture loads and inserts.
+    """
+    setattr(instance, _PERSISTED_VALUES_ATTR, None)
+    if raw or audit_signals_disabled() or instance._state.adding or instance.pk is None:
+        return
+
+    deferred = instance.get_deferred_fields()
+    update_fields = kwargs.get("update_fields")
+    fields = [
+        name
+        for name in _AUDITED_FIELDS_BY_MODEL[sender]
+        if name not in deferred and (update_fields is None or name in update_fields)
+    ]
+    if not fields:
+        return
+
+    with best_effort_atomic(
+        logger=logger, scope="audit", message=f"{sender.__name__} audit snapshot failed", using=using
+    ):
+        row = sender._base_manager.using(using).filter(pk=instance.pk).values(*fields).first()
+        setattr(instance, _PERSISTED_VALUES_ATTR, row)
+
+
+def _persisted_changes(instance: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """(old, new) values of the audited fields this save changed, or None without a snapshot."""
+    snapshot = getattr(instance, _PERSISTED_VALUES_ATTR, None)
+    setattr(instance, _PERSISTED_VALUES_ATTR, None)
+    if snapshot is None:
+        return None
+    old = {name: value for name, value in snapshot.items() if value != getattr(instance, name)}
+    return old, {name: getattr(instance, name) for name in old}
+
+
+def _changed_fields(
+    instance: Any, fields: tuple[str, ...], update_fields: Any
+) -> tuple[list[str], dict[str, Any], bool]:
+    """(changed fields in declaration order, their old values, snapshot available).
+
+    Without a snapshot the saved ``update_fields`` stand in, and no old values are known.
+    """
+    changes = _persisted_changes(instance)
+    if changes is not None:
+        old, _new = changes
+        return [name for name in fields if name in old], old, True
+    return [name for name in fields if update_fields and name in update_fields], {}, False
+
+
+def _build_user_event(
+    instance: User, kind: str, names: list[str], old: dict[str, Any], actor: dict[str, Any]
+) -> AuditEventCreationData:
+    """The event for one kind of change. Built inside the event's savepoint, never before it:
+    a description may read a deferred field, and that read must not poison the caller."""
+    old_of = {name: old[name] for name in names if name in old}
+    if kind == "email_changed":
+        return AuditEventCreationData(
+            action="email_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={"email": instance.email},
+            description="Email address changed",
+            metadata={"security_sensitive": True, "requires_verification": True},
+            **actor,
+        )
+    if kind == "name_changed":
+        return AuditEventCreationData(
+            action="name_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={name: getattr(instance, name) for name in names},
+            description=f"Name changed to {instance.get_full_name()}",
+            metadata={"identity_change": True},
+            **actor,
+        )
+    if kind == "phone_updated":
+        return AuditEventCreationData(
+            action="phone_updated",
+            content_object=instance,
+            old_values=old_of,
+            new_values={"phone": instance.phone},
+            description="Phone number updated",
+            metadata={"affects_2fa": True, "requires_verification": True},
+            **actor,
+        )
+    if kind == "staff_role_changed":
+        return AuditEventCreationData(
+            action="staff_role_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={"staff_role": instance.staff_role},
+            description=f"Staff role changed to {instance.staff_role}",
+            metadata={"authorization_change": True},
+            **actor,
+        )
+    if kind == "two_factor":
+        return AuditEventCreationData(
+            action="2fa_enabled" if instance.two_factor_enabled else "2fa_disabled",
+            content_object=instance,
+            old_values=old_of,
+            new_values={"two_factor_enabled": instance.two_factor_enabled},
+            description=f"2FA {'enabled' if instance.two_factor_enabled else 'disabled'}",
+            metadata={"security_configuration": True},
+            **actor,
+        )
+    return AuditEventCreationData(
+        action="marketing_consent_granted" if instance.accepts_marketing else "marketing_consent_withdrawn",
+        content_object=instance,
+        old_values=old_of,
+        new_values={"accepts_marketing": instance.accepts_marketing},
+        description=f"Marketing consent {'granted' if instance.accepts_marketing else 'withdrawn'}",
+        metadata={"gdpr_compliance": True, "consent_change": True},
+        **actor,
+    )
+
+
+_USER_EVENT_KINDS: dict[str, str] = {
+    "email": "email_changed",
+    "first_name": "name_changed",
+    "last_name": "name_changed",
+    "phone": "phone_updated",
+    "staff_role": "staff_role_changed",
+    "two_factor_enabled": "two_factor",
+    "accepts_marketing": "marketing_consent",
+}
+
+
+def _user_change_events(
+    instance: User, changed: list[str], old: dict[str, Any]
+) -> list[Callable[[], AuditEventCreationData]]:
+    """One event per kind of change: both names changing is one name_changed, not two."""
+    actor = _actor_event_fields()
+    fields_by_kind: dict[str, list[str]] = {}
+    for field_name in changed:
+        fields_by_kind.setdefault(_USER_EVENT_KINDS[field_name], []).append(field_name)
+    return [partial(_build_user_event, instance, kind, names, old, actor) for kind, names in fields_by_kind.items()]
+
+
 @receiver(post_save, sender=User)
-def audit_user_profile_changes(  # Complexity: multi-step business logic
-    sender: type[User], instance: User, created: bool, **kwargs: Any
-) -> None:  # Complexity: audit signal dispatch  # Complexity: multi-step business logic
+def audit_user_profile_changes(
+    sender: type[User], instance: User, created: bool, raw: bool = False, **kwargs: Any
+) -> None:
     """
     Audit User model changes for security and compliance
 
-    Tracks critical profile changes that may affect security or privacy:
-    - Email address changes (authentication impact)
-    - Name changes (identity verification)
-    - Phone number changes (2FA impact)
-    - Role changes (authorization impact)
-    - 2FA configuration changes
-    - Privacy consent changes
+    Tracks the changes that affect security or privacy: email, name, phone, staff role, 2FA and
+    marketing consent. The pre_save snapshot says what this save changed, so a full ``save()``
+    is audited as precisely as an ``update_fields`` one, and a save that changed nothing audited
+    writes nothing. The event's user is the actor; its content object is the changed account.
     """
-    if created:
+    if created or raw or audit_signals_disabled():
         # New user creation is logged by the view, not here
         return
 
-    # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-        return
-
     with swallow_application_errors(logger=logger, scope="audit", message="audit_user_profile_changes failed"):
-        # Check if we have update_fields specified - this helps detect specific changes
-        update_fields = kwargs.get("update_fields")
-
-        # If no specific fields were updated, we need to compare with previous version
-        # However, for post_save signal, we don't have the previous version easily
-        # We'll need to track changes differently
-
-        # For testing and development, we'll use a simplified approach
-        # In production, consider using django-model-utils or similar for change tracking
-
-        # Since we can't easily get the old version in post_save signal,
-        # we'll create audit events based on update_fields when available
-        # This is a simplified implementation for the audit system
-
-        # For comprehensive change tracking, consider using:
-        # 1. django-model-utils FieldTracker
-        # 2. Custom pre_save signal with caching
-        # 3. Database triggers
-
-        # Log general profile update for now
-        if update_fields:
-            sensitive_fields = {
-                "email",
-                "first_name",
-                "last_name",
-                "phone",
-                "staff_role",
-                "two_factor_enabled",
-                "accepts_marketing",
-            }
-            changed_fields = set(update_fields) & sensitive_fields
-
-            if changed_fields:
-                # Create specific audit events based on changed fields
-                for field in changed_fields:
-                    if field == "email":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="email_changed",
-                                user=instance,
-                                content_object=instance,
-                                new_values={"email": instance.email},
-                                description="Email address changed",
-                                metadata={"security_sensitive": True, "requires_verification": True},
-                            )
-                        )
-                    elif field in ["first_name", "last_name"]:
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="name_changed",
-                                user=instance,
-                                content_object=instance,
-                                new_values={"first_name": instance.first_name, "last_name": instance.last_name},
-                                description=f"Name changed to {instance.get_full_name()}",
-                                metadata={"identity_change": True},
-                            )
-                        )
-                    elif field == "phone":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="phone_updated",
-                                user=instance,
-                                content_object=instance,
-                                new_values={"phone": instance.phone},
-                                description="Phone number updated",
-                                metadata={"affects_2fa": True, "requires_verification": True},
-                            )
-                        )
-                    elif field == "staff_role":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="staff_role_changed",
-                                user=instance,
-                                content_object=instance,
-                                new_values={"staff_role": instance.staff_role},
-                                description=f"Staff role changed to {instance.staff_role}",
-                                metadata={"authorization_change": True, "requires_review": True},
-                            )
-                        )
-                    elif field == "two_factor_enabled":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="2fa_enabled" if instance.two_factor_enabled else "2fa_disabled",
-                                user=instance,
-                                content_object=instance,
-                                new_values={"two_factor_enabled": instance.two_factor_enabled},
-                                description=f"2FA {'enabled' if instance.two_factor_enabled else 'disabled'}",
-                                metadata={
-                                    "security_configuration": True,
-                                    "requires_review": not instance.two_factor_enabled,
-                                },
-                            )
-                        )
-                    elif field == "accepts_marketing":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action=(
-                                    "marketing_consent_granted"
-                                    if instance.accepts_marketing
-                                    else "marketing_consent_withdrawn"
-                                ),
-                                user=instance,
-                                content_object=instance,
-                                new_values={"accepts_marketing": instance.accepts_marketing},
-                                description=f"Marketing consent {'granted' if instance.accepts_marketing else 'withdrawn'}",
-                                metadata={"gdpr_compliance": True, "consent_change": True},
-                            )
-                        )
-        else:
-            # If no specific update_fields, log a general profile update
+        changed, old, have_snapshot = _changed_fields(instance, USER_AUDITED_FIELDS, kwargs.get("update_fields"))
+        if changed:
+            for event in _user_change_events(instance, changed, old):
+                _create_audit_event(event)
+        elif not have_snapshot and not kwargs.get("update_fields"):
+            # No snapshot and no field list: the change cannot be told, say only that the row was saved.
             _create_audit_event(
-                lambda: AuditEventCreationData(
+                AuditEventCreationData(
                     action="profile_updated",
-                    user=instance,
                     content_object=instance,
                     description="User profile updated",
                     metadata={"general_update": True},
+                    **_actor_event_fields(),
                 )
             )
 
 
 @receiver(post_save, sender=UserProfile)
 def audit_user_profile_preferences(
-    sender: type[UserProfile], instance: UserProfile, created: bool, **kwargs: Any
+    sender: type[UserProfile], instance: UserProfile, created: bool, raw: bool = False, **kwargs: Any
 ) -> None:
     """Audit UserProfile changes for preference tracking"""
-    if created:
-        return
-
-    # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-        return
-
-    audit_user: User | None = None
-    with best_effort_atomic(logger=logger, scope="Audit", message="Profile audit context failed"):
-        audit_user = instance.user
-    if audit_user is None:
+    if created or raw or audit_signals_disabled():
         return
 
     with swallow_application_errors(logger=logger, scope="audit", message="audit_user_profile_preferences failed"):
-        # Similar to User model, we'll use update_fields when available
-        update_fields = kwargs.get("update_fields")
+        changed, old, have_snapshot = _changed_fields(instance, PROFILE_AUDITED_FIELDS, kwargs.get("update_fields"))
+        actor = _actor_event_fields()
+        emergency_fields = ("emergency_contact_name", "emergency_contact_phone")
+        emergency_done = False
 
-        if update_fields:
-            preference_fields = {
-                "preferred_language",
-                "timezone",
-                "email_notifications",
-                "sms_notifications",
-                "marketing_emails",
-                "emergency_contact_name",
-                "emergency_contact_phone",
-            }
-            changed_fields = set(update_fields) & preference_fields
+        for field_name in changed:
+            if field_name in emergency_fields:
+                if emergency_done:
+                    continue
+                emergency_done = True
+            _create_audit_event(partial(_build_preference_event, instance, field_name, old, actor))
 
-            if changed_fields:
-                for field in changed_fields:
-                    if field == "preferred_language":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="language_preference_changed",
-                                user=audit_user,
-                                content_object=instance,
-                                new_values={"preferred_language": instance.preferred_language},
-                                description=f"Language preference changed to {instance.preferred_language}",
-                                metadata={"preference_change": True},
-                            )
-                        )
-                    elif field == "timezone":
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="timezone_changed",
-                                user=audit_user,
-                                content_object=instance,
-                                new_values={"timezone": instance.timezone},
-                                description=f"Timezone changed to {instance.timezone}",
-                                metadata={"preference_change": True},
-                            )
-                        )
-                    elif field in ["email_notifications", "sms_notifications", "marketing_emails"]:
-                        # Handle notification settings changes
-                        _create_audit_event(
-                            lambda field=field: AuditEventCreationData(
-                                action="notification_settings_changed",
-                                user=audit_user,
-                                content_object=instance,
-                                new_values={field: getattr(instance, field)},
-                                description=f"Notification preference changed: {field}",
-                                metadata={"notification_change": True, "channel": field},
-                            )
-                        )
-                    elif field in ["emergency_contact_name", "emergency_contact_phone"]:
-                        _create_audit_event(
-                            lambda: AuditEventCreationData(
-                                action="emergency_contact_updated",
-                                user=audit_user,
-                                content_object=instance,
-                                new_values={
-                                    "name": instance.emergency_contact_name,
-                                    "phone": instance.emergency_contact_phone,
-                                },
-                                description="Emergency contact information updated",
-                                metadata={"security_relevant": True},
-                            )
-                        )
-        else:
-            # General profile preferences update
+        if not changed and not have_snapshot and not kwargs.get("update_fields"):
             _create_audit_event(
                 lambda: AuditEventCreationData(
                     action="profile_updated",
-                    user=audit_user,
                     content_object=instance,
                     description="User profile preferences updated",
                     metadata={"preferences_update": True},
+                    **actor,
                 )
             )
+
+
+def _build_preference_event(
+    instance: UserProfile, field_name: str, old: dict[str, Any], actor: dict[str, Any]
+) -> AuditEventCreationData:
+    """The event for one changed preference, built inside its savepoint (see ``_build_user_event``)."""
+    old_of = {name: old[name] for name in (field_name,) if name in old}
+    if field_name == "preferred_language":
+        return AuditEventCreationData(
+            action="language_preference_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={field_name: instance.preferred_language},
+            description=f"Language preference changed to {instance.preferred_language}",
+            metadata={"preference_change": True},
+            **actor,
+        )
+    if field_name == "timezone":
+        return AuditEventCreationData(
+            action="timezone_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={field_name: instance.timezone},
+            description=f"Timezone changed to {instance.timezone}",
+            metadata={"preference_change": True},
+            **actor,
+        )
+    if field_name in ("email_notifications", "sms_notifications", "marketing_emails"):
+        return AuditEventCreationData(
+            action="notification_settings_changed",
+            content_object=instance,
+            old_values=old_of,
+            new_values={field_name: getattr(instance, field_name)},
+            description=f"Notification preference changed: {field_name}",
+            metadata={"notification_change": True, "channel": field_name},
+            **actor,
+        )
+    # Old and new values share the model's field names and hold only the changed halves.
+    emergency_old = {name: old[name] for name in ("emergency_contact_name", "emergency_contact_phone") if name in old}
+    return AuditEventCreationData(
+        action="emergency_contact_updated",
+        content_object=instance,
+        old_values=emergency_old,
+        new_values={name: getattr(instance, name) for name in emergency_old},
+        description="Emergency contact information updated",
+        metadata={"security_relevant": True},
+        **actor,
+    )
 
 
 # ===============================================================================
@@ -511,11 +471,14 @@ def audit_user_profile_preferences(
 
 @receiver(post_save, sender=CustomerMembership)
 def audit_customer_membership_changes(
-    sender: type[CustomerMembership], instance: CustomerMembership, created: bool, **kwargs: Any
+    sender: type[CustomerMembership],
+    instance: CustomerMembership,
+    created: bool,
+    raw: bool = False,
+    **kwargs: Any,
 ) -> None:
     """Audit customer membership changes for authorization tracking"""
-    # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if raw or audit_signals_disabled():
         return
 
     audit_user: User | None = None
@@ -527,11 +490,11 @@ def audit_customer_membership_changes(
         return
 
     with swallow_application_errors(logger=logger, scope="audit", message="audit_customer_membership_changes failed"):
+        actor = _actor_event_fields()
         if created:
             _create_audit_event(
                 lambda: AuditEventCreationData(
                     action="customer_membership_created",
-                    user=audit_user,
                     content_object=instance,
                     new_values={
                         "customer": str(audit_customer),
@@ -540,51 +503,49 @@ def audit_customer_membership_changes(
                     },
                     description=f"Customer membership created: {audit_user.email} → {audit_customer.company_name} ({instance.role})",
                     metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
+                    **actor,
                 )
             )
-        else:
-            # For updates, use update_fields when available
-            update_fields = kwargs.get("update_fields")
+            return
 
-            if update_fields:
-                if "role" in update_fields:
-                    _create_audit_event(
-                        lambda: AuditEventCreationData(
-                            action="customer_role_changed",
-                            user=audit_user,
-                            content_object=instance,
-                            new_values={"role": instance.role},
-                            description=f"Customer role changed to {instance.role}",
-                            metadata={
-                                "authorization_change": True,
-                                "customer_id": str(audit_customer.id),
-                                "requires_review": True,
-                            },
-                        )
-                    )
-
-                if "is_primary" in update_fields and instance.is_primary:
-                    _create_audit_event(
-                        lambda: AuditEventCreationData(
-                            action="primary_customer_changed",
-                            user=audit_user,
-                            content_object=instance,
-                            new_values={"new_primary": str(audit_customer)},
-                            description=f"Primary customer set to {audit_customer.company_name}",
-                            metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
-                        )
-                    )
-            else:
-                # General membership update
-                _create_audit_event(
-                    lambda: AuditEventCreationData(
-                        action="customer_membership_updated",
-                        user=audit_user,
-                        content_object=instance,
-                        description=f"Customer membership updated: {audit_user.email} → {audit_customer.company_name}",
-                        metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
-                    )
+        changed, old, have_snapshot = _changed_fields(instance, MEMBERSHIP_AUDITED_FIELDS, kwargs.get("update_fields"))
+        if "role" in changed:
+            _create_audit_event(
+                lambda: AuditEventCreationData(
+                    action="customer_role_changed",
+                    content_object=instance,
+                    old_values={"role": old["role"]} if "role" in old else None,
+                    new_values={"role": instance.role},
+                    description=f"Customer role changed to {instance.role}",
+                    metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
+                    **actor,
                 )
+            )
+
+        if "is_primary" in changed and instance.is_primary:
+            _create_audit_event(
+                lambda: AuditEventCreationData(
+                    action="primary_customer_changed",
+                    content_object=instance,
+                    old_values={"is_primary": old["is_primary"]} if "is_primary" in old else None,
+                    new_values={"new_primary": str(audit_customer)},
+                    description=f"Primary customer set to {audit_customer.company_name}",
+                    metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
+                    **actor,
+                )
+            )
+
+        if not changed and not have_snapshot and not kwargs.get("update_fields"):
+            # No snapshot and no field list: say only that the membership was saved.
+            _create_audit_event(
+                lambda: AuditEventCreationData(
+                    action="customer_membership_updated",
+                    content_object=instance,
+                    description=f"Customer membership updated: {audit_user.email} → {audit_customer.company_name}",
+                    metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
+                    **actor,
+                )
+            )
 
 
 @receiver(pre_delete, sender=CustomerMembership)
@@ -592,15 +553,14 @@ def audit_customer_membership_deletion(
     sender: type[CustomerMembership], instance: CustomerMembership, **kwargs: Any
 ) -> None:
     """Audit customer membership deletion"""
-    # Check if audit signals are disabled (for testing)
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     with best_effort_atomic(logger=logger, scope="audit", message="audit_customer_membership_deletion failed"):
+        actor = _actor_event_fields()
         _create_audit_event(
             lambda: AuditEventCreationData(
                 action="customer_membership_deleted",
-                user=instance.user,
                 content_object=instance,
                 old_values={
                     "customer": str(instance.customer),
@@ -613,6 +573,7 @@ def audit_customer_membership_deletion(
                     "customer_id": str(instance.customer.id),
                     "access_revoked": True,
                 },
+                **actor,
             )
         )
 
@@ -620,66 +581,6 @@ def audit_customer_membership_deletion(
 # ===============================================================================
 # CUSTOM SIGNAL HANDLERS FOR BUSINESS-SPECIFIC EVENTS
 # ===============================================================================
-
-
-@receiver(privacy_settings_changed)
-def audit_privacy_settings_change(
-    sender: Any,
-    user: User,
-    old_settings: dict[str, Any],
-    new_settings: dict[str, Any],
-    request: HttpRequest | None = None,
-    **kwargs: Any,
-) -> None:
-    """Audit privacy settings changes"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="privacy_settings_changed",
-            user=user,
-            content_object=user,
-            old_values=old_settings,
-            new_values=new_settings,
-            description="Privacy settings updated",
-            request=request,
-            metadata={"gdpr_compliance": True, "privacy_change": True},
-        )
-    )
-
-
-@receiver(api_key_generated)
-def audit_api_key_generation(
-    sender: Any, user: User, api_key_info: dict[str, Any], request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit API key generation"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="api_key_generated",
-            user=user,
-            content_object=user,
-            new_values={"api_key_id": api_key_info.get("id"), "name": api_key_info.get("name")},
-            description=f"API key generated: {api_key_info.get('name', 'Unnamed')}",
-            request=request,
-            metadata={"integration_change": True, "security_sensitive": True},
-        )
-    )
-
-
-@receiver(api_key_revoked)
-def audit_api_key_revocation(
-    sender: Any, user: User, api_key_info: dict[str, Any], request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit API key revocation"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="api_key_revoked",
-            user=user,
-            content_object=user,
-            old_values={"api_key_id": api_key_info.get("id"), "name": api_key_info.get("name")},
-            description=f"API key revoked: {api_key_info.get('name', 'Unnamed')}",
-            request=request,
-            metadata={"integration_change": True, "security_action": True},
-        )
-    )
 
 
 @receiver(cookie_consent_updated)
@@ -757,25 +658,6 @@ def audit_cookie_consent_change(
         AuditService.log_compliance_event(compliance_request)
 
 
-@receiver(customer_context_switched)
-def audit_customer_context_switch(
-    sender: Any, user: User, old_customer: Any, new_customer: Any, request: HttpRequest | None = None, **kwargs: Any
-) -> None:
-    """Audit customer context switching"""
-    _create_audit_event(
-        lambda: AuditEventCreationData(
-            action="customer_context_switched",
-            user=user,
-            content_object=user,
-            old_values={"customer": str(old_customer) if old_customer else None},
-            new_values={"customer": str(new_customer) if new_customer else None},
-            description=f"Customer context switched to {new_customer}",
-            request=request,
-            metadata={"context_change": True, "customer_id": str(new_customer.id) if new_customer else None},
-        )
-    )
-
-
 # ===============================================================================
 # GENERIC FSM TRANSITION AUDIT (ADR-0034 / ADR-0016)
 # ===============================================================================
@@ -805,14 +687,8 @@ def audit_fsm_transition(sender: Any, instance: Any, name: str, source: str, tar
     only under TESTING; in production the flag is a misconfiguration - log critical
     and audit anyway (W8).
     """
-    from django.conf import settings as django_settings  # noqa: PLC0415
-
-    if getattr(django_settings, "DISABLE_AUDIT_SIGNALS", False):
-        if getattr(django_settings, "TESTING", False):
-            return
-        logger.critical(
-            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
-        )
+    if audit_signals_disabled():
+        return
 
     label = f"{sender._meta.app_label}.{sender._meta.model_name}"
     if label in FSM_AUDIT_SENDER_SKIPLIST:
@@ -823,10 +699,9 @@ def audit_fsm_transition(sender: Any, instance: Any, name: str, source: str, tar
         with atomic():
             AuditService.log_simple_event(
                 event_type="status_changed",
-                user=None,
                 content_object=instance if instance.pk else None,
                 description=f"{sender.__name__} {instance.pk or '(unsaved)'} transition {name}: {source} -> {target}",
-                actor_type="system",
+                **_actor_event_fields(),
                 old_values={"status": source},
                 new_values={"status": target},
                 metadata={"source_app": sender._meta.app_label, "fsm_transition": name},

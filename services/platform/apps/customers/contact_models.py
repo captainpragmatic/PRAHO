@@ -14,6 +14,7 @@ from django.db.models import Q, UniqueConstraint
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.fields import EncryptedJSONField
+from apps.common.transactional_save import TransactionalSaveModel
 
 from .customer_models import SoftDeleteModel, validate_bank_details
 
@@ -26,7 +27,7 @@ def default_address_country() -> str:
     return country_name(get_localisation_defaults().default_country)
 
 
-class CustomerAddress(SoftDeleteModel):
+class CustomerAddress(TransactionalSaveModel, SoftDeleteModel):
     """
     Customer addresses with versioning support.
 

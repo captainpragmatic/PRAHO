@@ -398,7 +398,7 @@ class RecoveryTaskEffectsTests(VirtualminCoverageCase):
         self.assertEqual(counts["drains_reviewed"], 1)
         self.assertEqual(drain.status, "paused_needs_review")
         self.assertIn("Worker interrupted", drain.error_detail)
-        self.assertEqual(self._event("node_drain_paused", drain.pk).metadata["requires_review"], True)
+        self.assertEqual(self._event("node_drain_paused", drain.pk).requires_review, True)
         self.assertEqual(self.broker.queued(), [])
 
     def test_invalid_migration_and_drain_ids_return_errors(self) -> None:

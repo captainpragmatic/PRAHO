@@ -8,6 +8,8 @@ the rest. The DISABLE_AUDIT_SIGNALS flag follows billing's guarded contract.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 
@@ -59,7 +61,7 @@ class GenericFsmTransitionAuditTestCase(TestCase):
     def test_flag_without_testing_logs_critical_and_continues(self) -> None:
         """W8: in production the flag is a misconfiguration - audit anyway."""
         proforma = _make_proforma()
-        with self.assertLogs("apps.audit.signals", level="CRITICAL"):
+        with patch("apps.audit.switches._warned", False), self.assertLogs("apps.audit.switches", level="CRITICAL"):
             proforma.send_proforma()
         self.assertEqual(len(self._transition_events(proforma)), 1)
 

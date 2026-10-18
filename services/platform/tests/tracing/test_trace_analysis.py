@@ -45,6 +45,12 @@ if TYPE_CHECKING:
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def _debug_query_log(settings):
+    """QueryTracer and SideEffectDetector read Django's query log, which only fills when DEBUG is on."""
+    settings.DEBUG = True
+
+
 # =============================================================================
 # REQUEST ID FILTER TESTS
 # =============================================================================
@@ -151,14 +157,13 @@ class TestQueryTracer:
         # Create test users first
         for i in range(3):
             User.objects.create_user(
-                username=f"trace_test_user_{i}",
                 email=f"trace_test_{i}@example.com",
                 password="testpass123",
             )
 
         with QueryTracer() as tracer:
             # Simulate N+1 by querying same pattern multiple times
-            for user in User.objects.filter(username__startswith="trace_test_user_"):
+            for user in User.objects.filter(email__startswith="trace_test_"):
                 # This creates duplicate queries if not optimized
                 _ = user.pk
 
@@ -191,13 +196,12 @@ class TestQueryTracer:
         # Create test data
         for i in range(2):
             User.objects.create_user(
-                username=f"n1_test_user_{i}",
                 email=f"n1_test_{i}@example.com",
                 password="testpass123",
             )
 
         with QueryTracer() as tracer:
-            for user in User.objects.filter(username__startswith="n1_test_user_"):
+            for user in User.objects.filter(email__startswith="n1_test_"):
                 _ = user.email  # Access attribute
 
         report = tracer.get_n_plus_one_report()
@@ -391,7 +395,6 @@ class TestSideEffectDetector:
         """Test detection of database write operations."""
         with SideEffectDetector() as detector:
             User.objects.create_user(
-                username="side_effect_test",
                 email="side_effect@example.com",
                 password="testpass123",
             )
@@ -404,14 +407,13 @@ class TestSideEffectDetector:
         """Test that read operations don't trigger side effect detection."""
         # First create a user outside the detector
         User.objects.create_user(
-            username="read_test",
             email="read_test@example.com",
             password="testpass123",
         )
 
         with SideEffectDetector() as detector:
             # Only read
-            list(User.objects.filter(username="read_test"))
+            list(User.objects.filter(email="read_test@example.com"))
 
         # Reads should not count as side effects
         assert detector.get_report()["database_writes"] == 0
@@ -430,7 +432,6 @@ class TestCriticalPathAnalysis:
         """Test that user creation stays within query budget."""
         with assert_max_queries(max_count=10, raise_on_fail=True):
             user = User.objects.create_user(
-                username="query_budget_user",
                 email="budget@example.com",
                 password="testpass123",
             )
@@ -440,13 +441,12 @@ class TestCriticalPathAnalysis:
         """Test user lookup doesn't cause excessive queries."""
         # Setup
         User.objects.create_user(
-            username="lookup_test",
             email="lookup@example.com",
             password="testpass123",
         )
 
         with QueryTracer() as tracer:
-            user = User.objects.get(username="lookup_test")
+            user = User.objects.get(email="lookup@example.com")
             _ = user.email
 
         summary = tracer.get_summary()
@@ -458,7 +458,7 @@ class TestCriticalPathAnalysis:
         with QueryTracer() as tracer:
             # Bulk create should use single query
             User.objects.bulk_create(
-                [User(username=f"bulk_user_{i}", email=f"bulk_{i}@example.com") for i in range(10)]
+                [User(email=f"bulk_{i}@example.com") for i in range(10)]
             )
 
         summary = tracer.get_summary()
@@ -512,13 +512,12 @@ class TestPerformanceRegression:
         # Create test users
         for i in range(5):
             User.objects.create_user(
-                username=f"perf_user_{i}",
                 email=f"perf_{i}@example.com",
                 password="testpass123",
             )
 
         with QueryTracer() as tracer:
-            users = list(User.objects.filter(username__startswith="perf_user_"))
+            users = list(User.objects.filter(email__startswith="perf_"))
             for user in users:
                 _ = user.email  # Access attribute
 

@@ -245,7 +245,7 @@ class TestAuditServiceCategorization(TestCase):
             ('role_removed', 'authorization', 'high', True, True),
             ('permission_granted', 'authorization', 'high', True, True),
             ('permission_revoked', 'authorization', 'high', True, True),
-            ('customer_membership_created', 'authorization', 'medium', False, False),
+            ('customer_membership_created', 'authorization', 'medium', True, False),  # customer_ prefix is sensitive
         ]
 
         for action, expected_category, expected_severity, expected_sensitive, expected_review in test_cases:
@@ -257,7 +257,7 @@ class TestAuditServiceCategorization(TestCase):
 
                 assert category == expected_category
                 assert severity == expected_severity
-                # Authorization events may or may not be sensitive depending on context
+                assert is_sensitive == expected_sensitive
                 assert requires_review == expected_review
 
     def test_security_events_categorization(self):
@@ -331,9 +331,9 @@ class TestAuditEventCreationWithCategorization(TestCase):
         assert audit_event.is_sensitive is True
         assert audit_event.requires_review is False
 
-    def test_manual_categorization_override(self):
-        """Test that manual categorization overrides automatic detection"""
-        # Create audit event with manual categorization
+    def test_metadata_cannot_override_categorization(self):
+        """Keys named like the classification, in metadata, are evidence and never classify the event"""
+        # Create an audit event whose metadata tries to classify it
         context = AuditContext(
             user=self.user,
             metadata={
@@ -351,11 +351,12 @@ class TestAuditEventCreationWithCategorization(TestCase):
 
         audit_event = AuditService.log_event(event_data, context)
 
-        # Verify manual override
-        assert audit_event.category == 'system_admin'  # Overridden
-        assert audit_event.severity == 'critical'      # Overridden
-        assert audit_event.is_sensitive is False       # Overridden
-        assert audit_event.requires_review is True     # Overridden
+        # The action classifies it, whatever the metadata says
+        assert audit_event.category == 'authentication'
+        assert audit_event.severity == 'medium'
+        assert audit_event.is_sensitive is True
+        assert audit_event.requires_review is False
+        assert audit_event.metadata['severity'] == 'critical'  # kept as the evidence it is
 
     def test_2fa_event_categorization(self):
         """Test 2FA events are categorized with authentication context"""
@@ -513,7 +514,7 @@ class TestComplianceReporting(TestCase):
             ('gdpr_consent_granted', 'privacy'),
             ('data_export_requested', 'data_protection'),
             ('vat_validation_completed', 'compliance'),
-            ('efactura_submission_completed', 'compliance')
+            ('efactura_submitted', 'compliance')
         ]
 
         for action, category in compliance_events:

@@ -7,7 +7,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from django.conf import settings
 from django.contrib.auth.signals import (
     user_logged_in,
     user_logged_out,
@@ -19,14 +18,15 @@ from django.dispatch import receiver
 from django.http import HttpRequest
 
 from apps.audit.services import (
-    AuditContext,
     AuditEventData,
     AuditService,
     AuthenticationAuditService,
     AuthenticationEventData,
     LoginFailureEventData,
     LogoutEventData,
+    actor_context,
 )
+from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 
 from .mfa import LOGIN_METHOD_REQUEST_ATTR, WebAuthnCredential
@@ -60,7 +60,7 @@ def _log_user_model_event(
     event_data: Callable[[], AuditEventData], *, metadata: dict[str, object] | None = None
 ) -> None:
     """Build and log one optional user lifecycle event inside its savepoint."""
-    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+    if audit_signals_disabled():
         return
 
     with best_effort_atomic(logger=logger, scope="users", message="_log_user_model_event failed"):
@@ -71,7 +71,7 @@ def _log_user_model_event(
         if metadata:
             event_metadata.update(metadata)
 
-        AuditService.log_event(event_data(), context=AuditContext(actor_type="system", metadata=event_metadata))
+        AuditService.log_event(event_data(), context=actor_context(metadata=event_metadata))
 
 
 @receiver(post_save, sender="users.WebAuthnCredential")

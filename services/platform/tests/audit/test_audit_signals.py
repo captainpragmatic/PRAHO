@@ -6,19 +6,22 @@ Tests industry-standard audit requirements (GDPR, ISO 27001, NIST, SOX, PCI DSS)
 import pytest
 from django.test import RequestFactory, TestCase, override_settings
 
+from apps.audit.actor_context import acting_as
+from apps.audit.classification import classify
 from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.audit.signals import (
     _create_audit_event,
-    _get_action_category_severity,
-    api_key_generated,
-    api_key_revoked,
-    customer_context_switched,
-    privacy_settings_changed,
 )
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
 pytestmark = pytest.mark.django_db
+
+
+def _classify(action):
+    """(category, severity, is_sensitive, requires_review) from the one classifier."""
+    result = classify(action)
+    return result.category, result.severity, result.is_sensitive, result.requires_review
 
 
 class TestAuditSignalHelpers(TestCase):
@@ -27,14 +30,14 @@ class TestAuditSignalHelpers(TestCase):
     def test_get_action_category_severity_authentication(self):
         """Test categorization of authentication events"""
         # Authentication events
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("login_success")
+        category, severity, is_sensitive, requires_review = _classify("login_success")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # Failed login with account lockout
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("account_locked")
+        category, severity, is_sensitive, requires_review = _classify("account_locked")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
@@ -43,14 +46,14 @@ class TestAuditSignalHelpers(TestCase):
     def test_get_action_category_severity_password(self):
         """Test categorization of password events"""
         # Regular password change
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("password_changed")
+        category, severity, is_sensitive, requires_review = _classify("password_changed")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # Compromised password
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("password_compromised")
+        category, severity, is_sensitive, requires_review = _classify("password_compromised")
         assert category == "authentication"
         assert severity == "high"
         assert is_sensitive is True
@@ -59,14 +62,14 @@ class TestAuditSignalHelpers(TestCase):
     def test_get_action_category_severity_2fa(self):
         """Test categorization of 2FA events"""
         # 2FA enabled
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("2fa_enabled")
+        category, severity, is_sensitive, requires_review = _classify("2fa_enabled")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # 2FA disabled (high risk)
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("2fa_disabled")
+        category, severity, is_sensitive, requires_review = _classify("2fa_disabled")
         assert category == "authentication"
         assert severity == "high"
         assert is_sensitive is True
@@ -74,14 +77,14 @@ class TestAuditSignalHelpers(TestCase):
 
     def test_get_action_category_severity_privacy(self):
         """Test categorization of privacy events"""
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("privacy_settings_changed")
+        category, severity, is_sensitive, requires_review = _classify("privacy_settings_changed")
         assert category == "privacy"
         assert severity == "high"
         assert is_sensitive is True
         assert requires_review is False
 
         # GDPR consent withdrawn
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("gdpr_consent_withdrawn")
+        category, severity, is_sensitive, requires_review = _classify("gdpr_consent_withdrawn")
         assert category == "privacy"
         assert severity == "high"
         assert is_sensitive is True
@@ -89,13 +92,13 @@ class TestAuditSignalHelpers(TestCase):
 
     def test_get_action_category_severity_security_events(self):
         """Test categorization of security events"""
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("security_incident_detected")
+        category, severity, is_sensitive, requires_review = _classify("security_incident_detected")
         assert category == "security_event"
         assert severity == "critical"
         assert is_sensitive is True
         assert requires_review is True
 
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("suspicious_activity")
+        category, severity, is_sensitive, requires_review = _classify("suspicious_activity")
         assert category == "security_event"
         assert severity == "critical"
         assert is_sensitive is True
@@ -137,6 +140,8 @@ class TestUserProfileAuditSignals(TestCase):
         self.user = User.objects.create_user(
             email="test@example.com", password="testpass123", first_name="John", last_name="Doe", phone="+40123456789"
         )
+        # Self-service: the person changes their own account, so they are the actor.
+        self.enterContext(acting_as(self.user))
 
     def test_audit_email_change(self):
         """Test audit logging for email address changes"""
@@ -190,17 +195,20 @@ class TestUserProfileAuditSignals(TestCase):
         assert audit_event.metadata["requires_verification"] is True
 
     def test_audit_staff_role_change(self):
-        """Test audit logging for staff role changes"""
+        """A staff role change is credited to the administrator who made it, not to its subject"""
+        admin = User.objects.create_user(email="role-admin@example.com", password="testpass123", staff_role="admin")
         new_role = "admin"
 
-        self.user.staff_role = new_role
-        self.user.save(update_fields=["staff_role"])
+        with acting_as(admin):
+            self.user.staff_role = new_role
+            self.user.save(update_fields=["staff_role"])
 
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="staff_role_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="staff_role_changed", user=admin)
         assert audit_events.exists()
+        assert not AuditEvent.objects.filter(action="staff_role_changed", user=self.user).exists()
 
         audit_event = audit_events.first()
+        assert audit_event.content_object == self.user
         assert audit_event.new_values["staff_role"] == new_role
         assert "authorization_change" in audit_event.metadata
         assert audit_event.requires_review is True  # This is now a model field
@@ -262,6 +270,7 @@ class TestUserProfilePreferencesAudit(TestCase):
         self.user = User.objects.create_user(email="test@example.com", password="testpass123")
         # UserProfile is created automatically by signals
         self.profile = self.user.profile
+        self.enterContext(acting_as(self.user))
 
     def test_audit_language_preference_change(self):
         """Test audit logging for language preference changes"""
@@ -318,9 +327,24 @@ class TestUserProfilePreferencesAudit(TestCase):
         assert audit_events.exists()
 
         audit_event = audit_events.first()
-        assert audit_event.new_values["name"] == "Jane Doe"
-        assert audit_event.new_values["phone"] == "+40123456789"
+        assert audit_event.new_values == {
+            "emergency_contact_name": "Jane Doe",
+            "emergency_contact_phone": "+40123456789",
+        }
+        assert set(audit_event.old_values) == set(audit_event.new_values)
         assert "security_relevant" in audit_event.metadata
+
+    def test_only_the_changed_half_of_the_emergency_contact_is_recorded(self):
+        """Old and new values share the model's field names and hold only what changed."""
+        self.profile.emergency_contact_name = "Jane Doe"
+        self.profile.emergency_contact_phone = "+40123456789"
+        self.profile.save(update_fields=["emergency_contact_name", "emergency_contact_phone"])
+        self.profile.emergency_contact_phone = "+40999999999"
+        self.profile.save(update_fields=["emergency_contact_phone"])
+
+        audit_event = AuditEvent.objects.filter(action="emergency_contact_updated").order_by("timestamp").last()
+        assert audit_event.old_values == {"emergency_contact_phone": "+40123456789"}
+        assert audit_event.new_values == {"emergency_contact_phone": "+40999999999"}
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
@@ -330,14 +354,17 @@ class TestCustomerMembershipAudit(TestCase):
     def setUp(self):
         """Set up test data"""
         self.user = User.objects.create_user(email="test@example.com", password="testpass123")
+        self.admin = User.objects.create_user(email="member-admin@example.com", password="testpass123")
         self.customer = Customer.objects.create(company_name="Test Company", customer_type="business", status="active")
+        # Membership changes are made by someone: the event names them, not the member.
+        self.enterContext(acting_as(self.admin))
 
     def test_audit_customer_membership_creation(self):
         """Test audit logging for customer membership creation"""
         CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner", is_primary=True)
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_membership_created", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_membership_created", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -360,7 +387,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.save(update_fields=["role"])
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_role_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_role_changed", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -382,7 +409,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.save(update_fields=["is_primary"])
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="primary_customer_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="primary_customer_changed", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -400,7 +427,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.delete()
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_membership_deleted", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_membership_deleted", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -408,87 +435,6 @@ class TestCustomerMembershipAudit(TestCase):
         assert audit_event.old_values["role"] == "tech"
         assert audit_event.requires_review is True  # This is now a model field, not metadata
         assert audit_event.metadata["access_revoked"] is True
-
-
-class TestCustomSignalHandlers(TestCase):
-    """Test custom signal handlers for business events"""
-
-    def setUp(self):
-        """Set up test data"""
-        self.user = User.objects.create_user(email="test@example.com", password="testpass123")
-        self.factory = RequestFactory()
-        self.request = self.factory.post("/")
-        self.request.user = self.user
-
-    def test_privacy_settings_changed_signal(self):
-        """Test privacy settings change signal"""
-        old_settings = {"marketing": True, "analytics": True}
-        new_settings = {"marketing": False, "analytics": False}
-
-        # Send signal
-        privacy_settings_changed.send(
-            sender=None, user=self.user, old_settings=old_settings, new_settings=new_settings, request=self.request
-        )
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="privacy_settings_changed", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values == old_settings
-        assert audit_event.new_values == new_settings
-        assert "gdpr_compliance" in audit_event.metadata
-
-    def test_api_key_generated_signal(self):
-        """Test API key generation signal"""
-        api_key_info = {"id": "key_123", "name": "Test API Key"}
-
-        # Send signal
-        api_key_generated.send(sender=None, user=self.user, api_key_info=api_key_info, request=self.request)
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="api_key_generated", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.new_values["api_key_id"] == "key_123"
-        assert audit_event.new_values["name"] == "Test API Key"
-        assert "integration_change" in audit_event.metadata
-        assert "security_sensitive" in audit_event.metadata
-
-    def test_api_key_revoked_signal(self):
-        """Test API key revocation signal"""
-        api_key_info = {"id": "key_123", "name": "Test API Key"}
-
-        # Send signal
-        api_key_revoked.send(sender=None, user=self.user, api_key_info=api_key_info, request=self.request)
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="api_key_revoked", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values["api_key_id"] == "key_123"
-        assert "security_action" in audit_event.metadata
-
-    def test_customer_context_switched_signal(self):
-        """Test customer context switching signal"""
-        customer = Customer.objects.create(company_name="Test Company", customer_type="business", status="active")
-
-        # Send signal
-        customer_context_switched.send(
-            sender=None, user=self.user, old_customer=None, new_customer=customer, request=self.request
-        )
-
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_context_switched", user=self.user)
-        assert audit_events.exists()
-
-        audit_event = audit_events.first()
-        assert audit_event.old_values["customer"] is None
-        assert audit_event.new_values["customer"] == str(customer)
-        assert "context_change" in audit_event.metadata
-        assert "customer_id" in audit_event.metadata
 
 
 class TestAuditEventPerformance(TestCase):
@@ -507,13 +453,12 @@ class TestAuditEventPerformance(TestCase):
             AuditService,
         )
 
-        categories = ["authentication", "authorization", "account_management", "privacy"]
+        # One real action per category: the action alone decides the category.
+        actions = ["login_success", "role_assigned", "profile_updated", "privacy_settings_changed"]
 
-        for i, category in enumerate(categories):
-            context = AuditContext(user=self.user, metadata={"category": category})
-            event_data = AuditEventData(
-                event_type=f"test_action_{i}", content_object=self.user, description=f"Test event {i}"
-            )
+        for i, action in enumerate(actions):
+            context = AuditContext(user=self.user)
+            event_data = AuditEventData(event_type=action, content_object=self.user, description=f"Test event {i}")
             AuditService.log_event(event_data, context)
 
         # Query by category should use index

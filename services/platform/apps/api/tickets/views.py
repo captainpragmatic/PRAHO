@@ -425,12 +425,16 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
     except ValidationError as exc:
         return Response({"success": False, "errors": {"attachments": exc.detail}}, status=status.HTTP_400_BAD_REQUEST)
 
+    # The member who sent the reply, as authentication resolved them: not the ticket's contact,
+    # who may be another member. A GDPR erasure tells one member's replies from another's by this.
+    author = getattr(request, "_customer_user", None)
     comment = TicketComment.objects.create(
         ticket=ticket,
         content=serializer.validated_data["content"],
         comment_type="customer",
-        author_email=ticket.contact_email,
-        author_name=ticket.contact_person or "Customer",
+        author=author,
+        author_email=author.email if author else ticket.contact_email,
+        author_name=(author.get_full_name() or author.email) if author else (ticket.contact_person or "Customer"),
         is_public=True,
     )
     TicketStatusService.handle_customer_reply(ticket)
@@ -444,7 +448,7 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
                     filename=uploaded.name,
                     file_size=uploaded.size,
                     content_type=uploaded.content_type,
-                    uploaded_by_id=request_data.get("user_id"),
+                    uploaded_by=author,
                 ),
                 uploaded,
             )

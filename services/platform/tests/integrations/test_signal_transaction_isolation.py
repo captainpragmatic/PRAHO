@@ -25,7 +25,7 @@ class WebhookSignalIsolationTests(SignalIsolationTestCase):
 
     def test_failure_audit_does_not_prevent_retry_exhaustion_audit(self) -> None:
         def record_exhaustion(*args: object, **kwargs: object) -> None:
-            AuditService.log_simple_event(event_type="test_retry_exhaustion", content_object=self.event)
+            AuditService.log_simple_event(event_type="webhook_retry_exhausted", content_object=self.event)
 
         self.event.status = "failed"
         self.event.retry_count = 5
@@ -39,5 +39,5 @@ class WebhookSignalIsolationTests(SignalIsolationTestCase):
             self.event.save(update_fields=["status", "retry_count"])
         self.assertEqual(WebhookEvent.objects.get(pk=self.event.pk).retry_count, 5)
         self.assertTrue(
-            AuditEvent.objects.filter(action="test_retry_exhaustion", object_id=str(self.event.pk)).exists()
+            AuditEvent.objects.filter(action="webhook_retry_exhausted", object_id=str(self.event.pk)).exists()
         )

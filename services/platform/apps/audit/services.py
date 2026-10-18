@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -9,7 +10,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -24,6 +25,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.billing.currency_service import default_selling_currency
+from apps.common import audit_failures
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
@@ -31,6 +33,8 @@ from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
+from .actor_context import current_actor
+from .classification import classify
 from .export_files import delete_export_file, write_export_file
 from .models import (
     AuditAlert,
@@ -137,12 +141,12 @@ class AuditJSONEncoder(json.JSONEncoder):
 
     def default(self, obj: Any) -> Any:
         """Convert non-serializable objects to JSON-serializable formats"""
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
+        if isinstance(obj, uuid.UUID | Decimal):
+            return str(obj)  # A Decimal keeps its precision as a string
         elif isinstance(obj, datetime):
             return obj.isoformat()
-        elif isinstance(obj, Decimal):
-            return str(obj)  # Preserve precision as string
+        elif isinstance(obj, set | frozenset):
+            return sorted(obj, key=lambda item: (type(item).__name__, str(item)))
         elif hasattr(obj, "pk"):  # Django model instance
             return f"{obj.__class__.__name__}(pk={obj.pk})"
         elif hasattr(obj, "__dict__"):  # Generic object with attributes
@@ -152,21 +156,46 @@ class AuditJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def _unserializable_tag(value: Any) -> str:
+    """What stands in the evidence for a value that cannot be stored: its type and a short repr."""
+    try:
+        shown = repr(value)
+    except Exception:
+        shown = "<repr failed>"
+    return f"<unserializable {type(value).__name__}: {shown[:120]}>"
+
+
+def _serialize_value(value: Any, depth: int = 0) -> Any:
+    """JSON-safe copy of ``value``; only the part that cannot be encoded is replaced by a tag."""
+    try:
+        return json.loads(json.dumps(value, cls=AuditJSONEncoder, ensure_ascii=False))
+    except (TypeError, ValueError, RecursionError):
+        pass
+    if depth < _MAX_SALVAGE_DEPTH:
+        if isinstance(value, dict):
+            return {str(key): _serialize_value(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return [_serialize_value(item, depth + 1) for item in value]
+    return _unserializable_tag(value)
+
+
+_MAX_SALVAGE_DEPTH = 6
+
+
 def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """
     Safely serialize metadata dictionary for JSONField storage.
 
-    Pre-processes the metadata to convert non-serializable objects
-    using our custom encoder before storing in the database.
+    Pre-processes the metadata to convert non-serializable objects using our custom encoder
+    before storing in the database. When the whole dictionary cannot be encoded, each value is
+    tried on its own and only the offending one is replaced by a tag naming its type, so one
+    bad value no longer costs the rest of the evidence.
 
     Args:
         metadata: Raw metadata dictionary that may contain non-serializable objects
 
     Returns:
         Serializable metadata dictionary safe for JSONField
-
-    Raises:
-        TypeError: If metadata contains objects that cannot be serialized
     """
     if not metadata:
         return {}
@@ -177,14 +206,13 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         serialized_json = json.dumps(metadata, cls=AuditJSONEncoder, ensure_ascii=False)
         result: dict[str, Any] = json.loads(serialized_json)
         return result
-    except (TypeError, ValueError) as e:
-        logger.error(f"🔥 [Audit] Failed to serialize metadata: {e}")
-        # Fallback: return a safe version with error information
-        return {
-            "serialization_error": str(e),
-            "original_keys": list(metadata.keys()) if isinstance(metadata, dict) else "not_dict",
-            "timestamp": timezone.now().isoformat(),
-        }
+    except (TypeError, ValueError, RecursionError) as e:
+        logger.error(f"🔥 [Audit] Failed to serialize metadata as a whole, salvaging value by value: {e}")
+        salvaged = {str(key): _serialize_value(value) for key, value in metadata.items()}
+        bad_keys = sorted(key for key, value in salvaged.items() if "<unserializable " in json.dumps(value))
+        salvaged["serialization_error"] = str(e)
+        salvaged["unserializable_keys"] = bad_keys
+        return salvaged
 
 
 if TYPE_CHECKING:
@@ -250,6 +278,31 @@ class AuditContext:
     actor_type: str = "user"
 
 
+def actor_context(**fields: Any) -> AuditContext:
+    """A context for the user acting now, or for the system when nobody is.
+
+    For receivers, which see the row that changed and not who changed it: the user and the
+    actor type are filled together, so an event never names a user and calls it "system".
+    """
+    actor = current_actor()
+    return AuditContext(user=actor, actor_type="user" if actor else "system", **fields)
+
+
+def _with_user(context: AuditContext | None, user: User | None) -> AuditContext:
+    """The context a helper writes with: the caller's, with ``user`` filled in when it names nobody.
+
+    A helper given both used to ignore ``user`` whenever a context came along, so a note's author
+    was lost (row 41). A context that already names a user keeps it: it was built from the
+    request or the current actor, which is who acted, and ``user`` may well be the subject. The
+    caller's context is copied, never changed: callers reuse their context objects.
+    """
+    if context is None:
+        return AuditContext(user=user)
+    if user is None or context.user is not None:
+        return context
+    return replace(context, user=user)
+
+
 @dataclass
 class AuditEventData:
     """
@@ -265,6 +318,10 @@ class AuditEventData:
     old_values: dict[str, Any] | None = None
     new_values: dict[str, Any] | None = None
     description: str = ""
+    # Event-specific facts the action alone cannot say (see classification.classify): a coupon
+    # update that cancels, a setting that is sensitive. None means "as the action classifies".
+    severity: str | None = None
+    is_sensitive: bool | None = None
 
 
 @dataclass
@@ -597,7 +654,6 @@ class AuthenticationAuditService:
             "failed_attempts_count": account_data.failed_attempts
             or getattr(account_data.user, "failed_login_attempts", 0),
             "user_id": str(account_data.user.id),
-            "user_email": account_data.user.email,
             "security_event": True,
             **account_data.metadata,
         }
@@ -609,7 +665,7 @@ class AuthenticationAuditService:
         audit_event_data = AuditEventData(
             event_type="account_locked",
             content_object=account_data.user,
-            description=f"Account locked for {account_data.user.email}: {account_data.trigger_reason}",
+            description=f"Account {account_data.user.pk} locked: {account_data.trigger_reason}",
         )
 
         return AuditService.log_event(audit_event_data, context)
@@ -651,6 +707,30 @@ class AuthenticationAuditService:
         return AuditService.log_event(audit_event_data, context)
 
 
+class UnregisteredAuditActionError(ValueError):
+    """An audit event was written with an action AuditEvent.ACTION_CHOICES does not list."""
+
+
+def _check_registered_action(action: str) -> None:
+    """Refuse (under test) or shout about (in production) an action nobody registered.
+
+    No database constraint: the list grows too often for a migration per action. The AST guard
+    in tests/audit/test_audit_action_vocabulary.py catches a new writer before it ships; this
+    catches the one the guard cannot see (a name built at runtime). In production the event is
+    still written, because a mislabelled event is better evidence than none.
+    """
+    if action in _registered_actions():
+        return
+    if getattr(settings, "TESTING", False):
+        raise UnregisteredAuditActionError(f"Audit action {action!r} is not in AuditEvent.ACTION_CHOICES")
+    logger.error("🔥 [Audit] Unregistered audit action %r was written; add it to AuditEvent.ACTION_CHOICES", action)
+
+
+@functools.cache
+def _registered_actions() -> frozenset[str]:
+    return frozenset(value for value, _label in AuditEvent.ACTION_CHOICES)
+
+
 class AuditService:
     """Centralized audit logging service"""
 
@@ -663,9 +743,11 @@ class AuditService:
             event_data: AuditEventData containing event information
             context: AuditContext containing user and request context (optional)
         """
-        # Use default context if none provided
+        # No context names whoever is acting now, or nobody (a receiver that passes none).
         if context is None:
-            context = AuditContext()
+            context = AuditContext(user=current_actor())
+
+        _check_registered_action(event_data.event_type)
 
         try:
             # An event about no particular object has none. Filing it under the actor (or user 1
@@ -680,19 +762,15 @@ class AuditService:
             # Safely serialize metadata before storing
             serialized_metadata = serialize_metadata(context.metadata)
 
-            # Get automatic categorization from metadata or determine from action
-            category = context.metadata.get("category", AuditService._get_action_category(event_data.event_type))
-            severity = context.metadata.get("severity", AuditService._get_action_severity(event_data.event_type))
-            is_sensitive = context.metadata.get(
-                "is_sensitive", AuditService._is_action_sensitive(event_data.event_type)
+            # One classifier, fed by the action alone. Metadata is evidence, never an instruction:
+            # a key named "category" or "severity" in it used to override the classification.
+            classification = classify(
+                event_data.event_type, severity=event_data.severity, is_sensitive=event_data.is_sensitive
             )
-            requires_review = context.metadata.get(
-                "requires_review", AuditService._requires_review(event_data.event_type)
-            )
-
-            # Ensure category is never None (fallback to default)
-            if category is None:
-                category = "business_operation"
+            category = classification.category
+            severity = classification.severity
+            is_sensitive = classification.is_sensitive
+            requires_review = classification.requires_review
 
             # A usable session key never reaches the row, its exports or the SIEM (ADR-0043): the
             # column and every identifier in the description, metadata and values become digests.
@@ -723,19 +801,22 @@ class AuditService:
                 description=description,
                 ip_address=context.ip_address,
                 user_agent=context.user_agent or "",
-                request_id=context.request_id or str(uuid.uuid4()),
+                # Never invented: a request id that no request carried would look like one that did.
+                request_id=context.request_id or "",
                 session_key=session_key,
                 metadata=serialized_metadata,
             )
 
             logger.info(
-                f"✅ [Audit] {event_data.event_type} event logged for user {context.user.email if context.user else 'System'} ({category}/{severity})"
+                f"✅ [Audit] {event_data.event_type} event logged for "
+                f"{f'user {context.user.pk}' if context.user else 'System'} ({category}/{severity})"
             )
 
             return audit_event
 
         except Exception as e:
             logger.error(f"🔥 [Audit] Failed to log event {event_data.event_type}: {e}")
+            audit_failures.mark(e)
             raise
 
     @staticmethod
@@ -750,6 +831,8 @@ class AuditService:
         metadata: dict[str, Any] | None = None,
         ip_address: str | None = None,
         actor_type: str = "user",
+        severity: str | None = None,
+        is_sensitive: bool | None = None,
     ) -> AuditEvent:
         """
         🔐 Simplified audit logging method (DRY helper)
@@ -767,6 +850,8 @@ class AuditService:
             metadata: Additional metadata
             ip_address: IP address of the actor
             actor_type: Type of actor ("user", "system", "admin", etc.)
+            severity: This event's severity when the action alone does not say (see classify)
+            is_sensitive: Whether this event is sensitive when the action alone does not say
 
         Returns:
             AuditEvent: The created audit event
@@ -777,8 +862,13 @@ class AuditService:
             description=description,
             old_values=old_values,
             new_values=new_values,
+            severity=severity,
+            is_sensitive=is_sensitive,
         )
 
+        # A user event with no user names whoever is acting now; an explicit system event stays one.
+        if user is None and actor_type == "user":
+            user = current_actor()
         context = AuditContext(
             user=user,
             actor_type=actor_type,
@@ -790,219 +880,23 @@ class AuditService:
 
     @staticmethod
     def _get_action_category(action: str) -> str:
-        """Determine audit event category from action type"""
-        # Use a mapping approach to reduce branching complexity
-        category_mappings = {
-            # api_token_ must precede the integration api_ prefix — token lifecycle is authentication
-            "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_", "api_token_"],
-            "account_management": ["profile_updated", "email_changed", "phone_updated", "name_changed"],
-            "privacy": ["privacy_", "gdpr_", "marketing_consent_", "cookie_consent_"],
-            "authorization": [
-                "role_assigned",
-                "role_removed",
-                "permission_granted",
-                "permission_revoked",
-                "staff_role_changed",
-                "customer_",
-                "privilege_escalation_attempt",
-            ],
-            "security_event": ["security_", "suspicious_", "brute_force_", "malicious_", "data_breach_"],
-            "data_protection": ["data_export_", "data_deletion_"],
-            "integration": ["api_", "webhook_"],
-            "system_admin": ["system_", "backup_", "configuration_", "user_impersonation"],
-            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_", "early_performance_"],
-            "business_operation": [
-                "proforma_",
-                "invoice_",
-                "payment_",
-                "credit_",
-                "billing_",
-                "currency_conversion",
-                "order_",
-                "provisioning_",
-                "service_",
-                "domain_",
-                "support_ticket_",
-            ],
-        }
-
-        # Check each category's patterns
-        for category, patterns in category_mappings.items():
-            for pattern in patterns:
-                if pattern.endswith("_"):  # Prefix pattern
-                    if action.startswith(pattern):
-                        return category
-                elif action == pattern:
-                    return category
-
-        # Default to business operation
-        return "business_operation"
+        """Category of an action (see ``classification.classify``)."""
+        return classify(action).category
 
     @staticmethod
     def _get_action_severity(action: str) -> str:
-        """Determine severity level from action type"""
-        # Critical severity events
-        critical_actions = [
-            "data_breach_detected",
-            "security_incident_detected",
-            "account_compromised",
-            "malicious_request",
-            "brute_force_attempt",
-        ]
-
-        # High severity events
-        high_actions = [
-            "password_compromised",
-            "2fa_disabled",
-            "2fa_admin_reset",
-            "role_assigned",
-            "role_removed",
-            "permission_granted",
-            "permission_revoked",
-            "staff_role_changed",
-            "data_export_requested",
-            "data_deletion_requested",
-            "gdpr_consent_withdrawn",
-            "user_impersonation_started",
-            "system_maintenance_started",
-            "configuration_changed",
-            "payment_failed",
-            "payment_fraud_detected",
-            "payment_chargeback_received",
-            "invoice_voided",
-            "invoice_refunded",
-            "credit_limit_changed",
-            "credit_hold_applied",
-            "order_cancelled_admin",
-            "provisioning_failed",
-            "efactura_rejected",
-            "privilege_escalation_attempt",
-        ]
-
-        # Medium severity events
-        medium_actions = [
-            "login_success",
-            "login_failed",
-            "logout_manual",
-            "account_locked",
-            "session_rotation",
-            "password_changed",
-            "2fa_enabled",
-            "profile_updated",
-            "email_changed",
-            "phone_updated",
-            "customer_membership_created",
-            "api_key_generated",
-            "api_token_created",
-            "api_token_deleted",
-            "invoice_paid",
-            "payment_succeeded",
-            "order_created",
-            "order_completed",
-            "proforma_created",
-            "provisioning_completed",
-            "efactura_submitted",
-        ]
-
-        if action in critical_actions or action.startswith(("security_", "suspicious_", "data_breach")):
-            return "critical"
-        elif action in high_actions or action.startswith(
-            (
-                "data_",
-                "gdpr_",
-                "privacy_",
-                "marketing_consent",
-                "cookie_consent",
-                "role_",
-                "permission_",
-                "payment_fraud",
-                "payment_chargeback",
-            )
-        ):
-            return "high"
-        elif action in medium_actions or action.startswith(
-            ("login_", "password_", "2fa_", "profile_", "payment_", "order_")
-        ):
-            return "medium"
-        else:
-            return "low"
+        """Severity of an action (see ``classification.classify``)."""
+        return classify(action).severity
 
     @staticmethod
     def _is_action_sensitive(action: str) -> bool:
-        """Determine if action involves sensitive data"""
-        # Specific sensitive actions
-        sensitive_actions = [
-            "account_locked",
-            "account_unlocked",
-            "session_rotation",
-            "session_terminated",
-            "suspicious_activity",
-            "brute_force_attempt",
-            "malicious_request",
-            "privilege_escalation_attempt",
-        ]
-
-        # Sensitive patterns (excluding some common business operations)
-        sensitive_patterns = [
-            "login_",
-            "logout_",
-            "password_",
-            "2fa_",
-            "email_",
-            "phone_",
-            "profile_",
-            "privacy_",
-            "gdpr_",
-            "marketing_consent",
-            "cookie_consent",
-            "data_",
-            "security_",
-            "role_",
-            "permission_",
-            "payment_",
-            "billing_",
-            "tax_",
-            "credit_",
-            "proforma_",
-            "vat_",
-            "efactura_",
-            "customer_",
-        ]
-
-        # Non-sensitive invoice actions (basic business operations)
-        non_sensitive_invoice_actions = ["invoice_created", "invoice_sent"]
-        if action in non_sensitive_invoice_actions:
-            return False
-
-        return action in sensitive_actions or any(action.startswith(pattern) for pattern in sensitive_patterns)
+        """Whether an action involves sensitive data (see ``classification.classify``)."""
+        return classify(action).is_sensitive
 
     @staticmethod
     def _requires_review(action: str) -> bool:
-        """Determine if action requires manual review"""
-        review_actions = [
-            "account_locked",
-            "login_failed_2fa",
-            "password_compromised",
-            "2fa_disabled",
-            "2fa_admin_reset",
-            "role_assigned",
-            "role_removed",
-            "permission_granted",
-            "permission_revoked",
-            "staff_role_changed",
-            "privilege_escalation_attempt",
-            "data_export_requested",
-            "data_deletion_requested",
-            "gdpr_consent_withdrawn",
-            "security_incident_detected",
-            "suspicious_activity",
-            "brute_force_attempt",
-            "user_impersonation_started",
-            "configuration_changed",
-            "system_maintenance_started",
-        ]
-
-        return action in review_actions or action.startswith(("security_", "data_breach", "malicious_"))
+        """Whether an action needs manual review (see ``classification.classify``)."""
+        return classify(action).requires_review
 
     @staticmethod
     def log_2fa_event(request: TwoFactorAuditRequest) -> AuditEvent:
@@ -1015,12 +909,9 @@ class AuditService:
         - 2fa_secret_regenerated, 2fa_verification_success, 2fa_verification_failed
         """
         # Enhance metadata with 2FA context and automatic categorization
+        # Category, severity, sensitivity and review come from the action (classification.classify).
         enhanced_metadata = {
             "event_category": "authentication",  # 2FA is always authentication
-            "category": "authentication",
-            "severity": "high" if request.event_type in ["2fa_disabled", "2fa_admin_reset"] else "medium",
-            "is_sensitive": True,  # 2FA events are always sensitive
-            "requires_review": request.event_type in ["2fa_disabled", "2fa_admin_reset"],
             "timestamp": timezone.now().isoformat(),
             **request.context.metadata,
         }
@@ -1483,6 +1374,7 @@ class GDPRDeletionService:
         "phone": lambda: "+40700000000",
         "ip_address": lambda: "0.0.0.0",
     }
+    ANONYMIZED_ADDRESS = "Anonymized"
 
     @classmethod
     @transaction.atomic
@@ -1566,6 +1458,8 @@ class GDPRDeletionService:
             # One savepoint: a sweep that fails rolls the erasure back with it, instead of the
             # handler below committing an erasure that left the person in the audit log.
             with transaction.atomic(), erasure_in_progress() as writes:
+                # Tickets first, while every reply still names its author: deletion sets authors to NULL.
+                cls._erase_tickets(subject)
                 if deletion_type == "anonymize":
                     result = cls._anonymize_user_data(user)
                     action_taken = "anonymized"
@@ -1663,7 +1557,6 @@ class GDPRDeletionService:
         from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
-        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.pending_totp import discard as discard_pending_totp  # noqa: PLC0415  # Deferred: import cycle
 
         # Lock the row, then write only the fields anonymisation changes: a full save of a stale
@@ -1700,14 +1593,17 @@ class GDPRDeletionService:
         # whose address is the customer contact must not keep receiving marketing.
         GDPRConsentService._propagate_marketing_consent(user, consent=False)
 
+        # The person's individual customers are locked first, in pk order, before anything about
+        # them changes: a writer that read one earlier waits for this erasure, then is refused.
+        cls._lock_individual_customers(user)
+
         # An individual customer's CNP is the person's national identification number. It is
         # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
         # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
         # snapshot for the legal retention period. Queryset updates need no decryption, so an
         # unreadable CNP cannot block the erasure; all_objects includes soft-deleted profiles.
-        owned_individuals = CustomerMembership.objects.filter(
-            user=user, role="owner", is_active=True, customer__customer_type="individual"
-        ).values("customer_id")
+        # Only customers the person owns alone: one with another owner may be that person's.
+        owned_individuals = cls._solely_owned_individuals(user)
         cls._clear_cnp(
             CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals),
             "cnp",
@@ -1726,7 +1622,184 @@ class GDPRDeletionService:
             id_key="invoice_id",
             where="an invoice not yet issued",
         )
+        cls._anonymize_individual_customers(owned_individuals)
         cls._erase_audit_identity(subject)
+
+    @staticmethod
+    def _lock_individual_customers(user: User) -> None:
+        """Lock the rows of the individual customers the person owns (apps/customers/erasure_guard.py)."""
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        owned = CustomerMembership.objects.filter(
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
+        ).values("customer_id")
+        list(Customer.all_objects.select_for_update(of=("self",)).filter(pk__in=owned).order_by("pk").values("pk"))
+
+    @staticmethod
+    def _solely_owned_individuals(user: User) -> list[int]:
+        """The individual customers the person owns with no other active owner, in pk order.
+
+        Each one is the person, so its identity and CNP go. One with another owner may be that
+        other person's record, so the erasure leaves it to staff and logs it. Read after the lock
+        in _lock_individual_customers, so no owner is added or removed meanwhile by a guarded write.
+        """
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        owned = list(
+            CustomerMembership.objects.filter(
+                user=user, role="owner", is_active=True, customer__customer_type="individual"
+            )
+            .order_by("customer_id")
+            .values_list("customer_id", flat=True)
+        )
+        shared = set(
+            CustomerMembership.objects.filter(customer_id__in=owned, role="owner", is_active=True)
+            .exclude(user=user)
+            .values_list("customer_id", flat=True)
+        )
+        for customer_id in sorted(shared):
+            logger.warning(f"⚠️ [GDPR Anonymization] Customer {customer_id} has another owner; left for staff")
+        return [customer_id for customer_id in owned if customer_id not in shared]
+
+    @classmethod
+    def _anonymize_individual_customers(cls, customer_ids: list[int]) -> None:
+        """Anonymise the live record of each individual customer the person is (owner decision O5).
+
+        An individual customer the person alone owns is the person: its name, contact and
+        addresses go, and so does the buyer snapshot on its orders, proformas and invoices not yet
+        issued, which are not fiscal records. Issued invoices keep the buyer as issued. One with another
+        owner may be someone else's record, so it is left for staff and logged. An inactive owner
+        link is a removal, which needs another owner to remain, so that record is theirs, not the
+        person's. Queryset updates write no audit row holding the old values.
+        """
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.customers.contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: import cycle
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
+
+        for customer_id in customer_ids:
+            name = f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}"
+            Customer.all_objects.filter(pk=customer_id).update(
+                anonymized_at=timezone.now(),
+                name=name,
+                company_name="",
+                primary_email=cls.ANONYMIZATION_MAP["email"](),
+                primary_phone=cls.ANONYMIZATION_MAP["phone"](),
+                website="",
+                updated_at=timezone.now(),
+            )
+            CustomerAddress.all_objects.filter(customer_id=customer_id).update(
+                label="",
+                address_line1=cls.ANONYMIZED_ADDRESS,
+                address_line2="",
+                city=cls.ANONYMIZED_ADDRESS,
+                county="",
+                postal_code="000000",
+            )
+            buyer = {
+                "bill_to_name": name,
+                "bill_to_email": cls.ANONYMIZATION_MAP["email"](),
+                "bill_to_tax_id": "",
+                "bill_to_registration_number": "",
+                "bill_to_address1": cls.ANONYMIZED_ADDRESS,
+                "bill_to_address2": "",
+                "bill_to_city": cls.ANONYMIZED_ADDRESS,
+                "bill_to_region": "",
+                "bill_to_postal": "000000",
+            }
+            ProformaInvoice.objects.filter(customer_id=customer_id).update(**buyer)
+            Invoice.objects.filter(customer_id=customer_id, locked_at__isnull=True).update(**buyer)
+            Order.objects.filter(customer_id=customer_id).update(
+                customer_name=name,
+                customer_email=buyer["bill_to_email"],
+                customer_company="",
+                customer_vat_id="",
+                billing_address={},
+            )
+            AuditService.log_simple_event(
+                "data_anonymization_completed",
+                description="Customer record anonymised (GDPR erasure)",
+                metadata={"customer_id": str(customer_id)},
+                actor_type="system",
+            )
+
+    ERASED_TICKET_TITLE = "Erased ticket"
+    ERASED_TICKET_TEXT = "[Removed at the person's request]"
+
+    @classmethod
+    def _erase_tickets(cls, subject: ErasureSubject) -> None:
+        """Remove the person from support tickets (row 74, owner decision OF4).
+
+        A ticket the person raised with no other member's reply on it is theirs: its text, contact
+        details and comments are replaced, and its attachments deleted (their files once this
+        commits). Any other ticket that names them keeps its content, including the person's own
+        replies, and loses only the person's name and email: it may be another member's evidence.
+        A customer reply with no author is the person's when its email is one of theirs, and
+        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        """
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
+            Ticket,
+            TicketAttachment,
+            TicketComment,
+        )
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        # A customer the erasure leaves to staff may be another owner's record (shared, or reached
+        # only through an inactive owner link): its email is not the person's, and its tickets are
+        # never the person's alone. The person's own address always counts.
+        user = User.objects.filter(pk=subject.user_pk).first()
+        owned_ids = CustomerMembership.objects.filter(
+            user_id=subject.user_pk, role="owner", customer__customer_type="individual"
+        ).values_list("customer_id", flat=True)
+        solely_owned = set(cls._solely_owned_individuals(user)) if user is not None else set()
+        left_for_staff = set(owned_ids) - solely_owned
+        others = {
+            email.lower()
+            for email in Customer.all_objects.filter(pk__in=left_for_staff).values_list("primary_email", flat=True)
+            if email
+        }
+        emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier} - others
+        if user is not None and user.email:
+            emails.add(user.email.lower())
+
+        def is_persons(author_id: int | None, author_email: str) -> bool:
+            if author_id is not None:
+                return author_id == subject.user_pk
+            return author_email.lower() in emails
+
+        mentions = Q(created_by_id=subject.user_pk) | Q(comments__author_id=subject.user_pk)
+        for email in emails:
+            mentions |= Q(contact_email__iexact=email) | Q(comments__author_email__iexact=email)
+        ticket_ids = list(Ticket.objects.filter(mentions).values_list("pk", flat=True).distinct())
+        tickets = Ticket.objects.select_for_update(of=("self",)).filter(pk__in=ticket_ids).order_by("pk")
+        for ticket in tickets:
+            replies = list(ticket.comments.values_list("pk", "comment_type", "author_id", "author_email"))
+            persons = [pk for pk, _kind, author_id, email in replies if is_persons(author_id, email)]
+            alone = (
+                ticket.created_by_id == subject.user_pk
+                and ticket.customer_id not in left_for_staff
+                and all(is_persons(author_id, email) for _pk, kind, author_id, email in replies if kind == "customer")
+            )
+            if alone:
+                Ticket.objects.filter(pk=ticket.pk).update(
+                    title=cls.ERASED_TICKET_TITLE,
+                    description=cls.ERASED_TICKET_TEXT,
+                    contact_person="",
+                    contact_email="",
+                    contact_phone="",
+                    satisfaction_comment="",
+                )
+                TicketComment.objects.filter(ticket=ticket).update(
+                    content=cls.ERASED_TICKET_TEXT, author_name="", author_email=""
+                )
+                TicketAttachment.objects.filter(ticket=ticket).delete()  # Each file goes once this commits
+                continue
+            TicketComment.objects.filter(pk__in=persons).update(author_name="", author_email="")
+            if ticket.contact_email.lower() in emails:
+                Ticket.objects.filter(pk=ticket.pk).update(contact_person="", contact_email="", contact_phone="")
 
     @classmethod
     def _erase_audit_identity(cls, subject: ErasureSubject) -> None:
@@ -2169,8 +2242,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, invoice, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build invoice-specific metadata
         invoice_metadata = {
@@ -2231,8 +2303,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, payment, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build payment-specific metadata
         payment_metadata = {
@@ -2285,8 +2356,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, proforma, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build proforma-specific metadata
         proforma_metadata = {
@@ -2337,8 +2407,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, credit entry, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build credit-specific metadata
         credit_metadata = {
@@ -2402,8 +2471,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, order, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build order-specific metadata
         order_metadata = {
@@ -2482,8 +2550,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, order item, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build order item-specific metadata
         item_metadata = {
@@ -2546,8 +2613,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, business object (order_item or service), and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # For provisioning events, business_object can be either order_item or service
         # We need to handle both cases appropriately
@@ -2651,32 +2717,19 @@ class CustomersAuditService:
             description: Human-readable description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
-        # Build customer-specific metadata
+        # Identifiers and flags only (row 56): the record's values live in old_values and
+        # new_values, where an erasure finds them, never copied into metadata.
+        changed_fields = sorted(set(old_values or {}) | set(new_values or {})) if old_values else []
         customer_metadata = {
             "customer_id": str(customer.id),
-            "customer_name": customer.name,
             "customer_type": customer.customer_type,
             "status": customer.status,
-            "company_name": customer.company_name,
-            "primary_email": customer.primary_email,
-            "primary_phone": customer.primary_phone,
-            "industry": customer.industry,
-            "website": customer.website,
-            "assigned_account_manager": customer.assigned_account_manager.email
-            if customer.assigned_account_manager
-            else None,
+            "changed_fields": changed_fields,
             "data_processing_consent": customer.data_processing_consent,
             "marketing_consent": customer.marketing_consent,
-            "gdpr_consent_date": customer.gdpr_consent_date.isoformat() if customer.gdpr_consent_date else None,
-            "created_at": customer.created_at.isoformat(),
-            "updated_at": customer.updated_at.isoformat(),
-            "created_by": customer.created_by.email if customer.created_by else None,
             "is_deleted": customer.is_deleted,
-            "deleted_at": customer.deleted_at.isoformat() if customer.deleted_at else None,
-            "deleted_by": customer.deleted_by.email if customer.deleted_by else None,
             # Compliance tracking
             "romanian_compliance": {
                 "has_tax_profile": hasattr(customer, "tax_profile"),
@@ -2723,8 +2776,7 @@ class CustomersAuditService:
         Log customer tax profile audit event with Romanian compliance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build tax profile-specific metadata
         tax_metadata = {
@@ -2781,8 +2833,7 @@ class CustomersAuditService:
         Log customer billing profile audit event with financial context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build billing profile-specific metadata
         billing_metadata = {
@@ -2837,8 +2888,7 @@ class CustomersAuditService:
         Log customer address audit event with Romanian compliance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build address-specific metadata
         address_metadata = {
@@ -2901,8 +2951,7 @@ class CustomersAuditService:
         Log customer payment method audit event with security context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build payment method-specific metadata (avoiding sensitive data)
         payment_metadata = {
@@ -2958,8 +3007,7 @@ class CustomersAuditService:
         Log customer note audit event with interaction context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build note-specific metadata
         note_metadata = {
@@ -3032,8 +3080,7 @@ class ProvisioningAuditService:
         Log service plan audit event with pricing and availability context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service plan-specific metadata
         plan_metadata = {
@@ -3099,8 +3146,7 @@ class ProvisioningAuditService:
         Log server infrastructure audit event with capacity and resource context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build server-specific metadata
         server_metadata = {
@@ -3179,8 +3225,7 @@ class ProvisioningAuditService:
         Log service lifecycle audit event with customer and billing context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service-specific metadata
         service_metadata = {
@@ -3265,8 +3310,7 @@ class ProvisioningAuditService:
         Log service relationship audit event with dependency context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build relationship-specific metadata
         relationship_metadata = {
@@ -3329,8 +3373,7 @@ class ProvisioningAuditService:
         Log service group audit event with coordination and billing context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service group-specific metadata
         group_metadata = {
@@ -3392,8 +3435,7 @@ class ProvisioningAuditService:
         Log provisioning task audit event with execution and performance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build provisioning task-specific metadata
         task_metadata = {
@@ -3460,8 +3502,7 @@ class ProvisioningAuditService:
         Log service domain binding audit event with DNS and SSL context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service domain-specific metadata
         domain_metadata = {
@@ -5129,7 +5170,7 @@ class AuditRetentionService:
                 content_object=None,
                 description=f"Retention anonymization completed: {anonymized_count} events scrubbed",
                 actor_type="system",
-                metadata={"anonymized_count": anonymized_count, "category": "privacy"},
+                metadata={"anonymized_count": anonymized_count},
             )
 
         return anonymized_count
@@ -5507,21 +5548,17 @@ class TicketsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build comprehensive ticket metadata
         ticket_metadata = {
+            # Identifiers only (row 56): no title, customer name or contact, which the ticket holds.
             "ticket_number": ticket.ticket_number,
-            "title": ticket.title,
             "customer_id": str(ticket.customer.id),
-            "customer_name": ticket.customer.get_display_name(),
             "priority": ticket.priority,
-            "category": ticket.category.name if ticket.category else None,
+            "ticket_category": ticket.category.name if ticket.category else None,
             "source": ticket.source,
-            "contact_email": ticket.contact_email,
-            "contact_person": ticket.contact_person,
-            "assigned_to": ticket.assigned_to.get_full_name() if ticket.assigned_to else None,
+            "assigned_to_id": str(ticket.assigned_to_id) if ticket.assigned_to_id else None,
             "related_service_id": str(ticket.related_service.id) if ticket.related_service else None,
             "sla_tracking": sla_metadata,
             "auto_escalation_eligible": should_escalate,
@@ -5584,8 +5621,7 @@ class TicketsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Calculate resolution duration
         resolution_duration = None
@@ -5684,8 +5720,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build product creation metadata
         product_metadata = {
@@ -5752,8 +5787,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build availability change metadata
         availability_metadata = {
@@ -5822,8 +5856,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Accept the legacy key from older callers, but signals use the monthly model.
         price_change = changes.get("monthly_price_changed", changes.get("price_changed", {}))
@@ -5959,8 +5992,7 @@ class DomainsAuditService:
             security_context: Security-related metadata
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build domain event metadata
         domain_metadata = {
@@ -6031,8 +6063,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build TLD event metadata
         tld_metadata = {
@@ -6101,8 +6132,7 @@ class DomainsAuditService:
             security_sensitive: Whether this event involves sensitive security data
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build registrar event metadata (sanitize sensitive data)
         registrar_metadata = {
@@ -6169,8 +6199,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build domain order event metadata
         order_metadata = {
@@ -6238,8 +6267,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build security event metadata
         security_event_metadata = {
@@ -6306,8 +6334,7 @@ class SecurityAuditService:
             user: User if authenticated
             context: Additional audit context
         """
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build rate limit metadata
         metadata = {
@@ -6382,8 +6409,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build webhook success metadata
         success_metadata = {
@@ -6469,8 +6495,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Resolve once for both severity and retry-exhaustion metadata.
         max_retry_threshold = get_webhook_max_retry_threshold()
@@ -6565,8 +6590,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Calculate retry timeline
         retry_timeline = None

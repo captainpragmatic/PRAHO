@@ -1,0 +1,147 @@
+"""Anonymising a person also anonymises the live record of the individual customer they are.
+
+An individual customer is the person. Their live record (name, contact, addresses) goes with the
+user. Issued invoices are fiscal records and keep the buyer as issued.
+"""
+
+from __future__ import annotations
+
+from django.test import TestCase
+from django.utils import timezone
+
+from apps.audit.models import AuditEvent
+from apps.audit.services import GDPRDeletionService
+from apps.billing.invoice_models import Invoice
+from apps.billing.proforma_models import ProformaInvoice
+from apps.customers.contact_models import CustomerAddress
+from apps.customers.customer_models import Customer
+from apps.orders.models import Order
+from apps.users.models import CustomerMembership, User
+from tests.factories.billing_factories import create_currency, create_invoice
+from tests.factories.core_factories import create_individual_customer
+
+EMAIL = "ioana.rowe@example.test"
+BUYER = {
+    "bill_to_name": "Ioana Rowe",
+    "bill_to_email": EMAIL,
+    "bill_to_tax_id": "2900101123456",
+    "bill_to_registration_number": "J40/1/2020",
+    "bill_to_address1": "Str. Rowe 7",
+    "bill_to_address2": "Ap. 3",
+    "bill_to_city": "Cluj-Napoca",
+    "bill_to_region": "Cluj",
+    "bill_to_postal": "400001",
+}
+
+
+class CustomerRowAnonymisationTests(TestCase):
+    def setUp(self) -> None:
+        self.person = User.objects.create_user(email=EMAIL, password="x-pass-123", first_name="Ioana")
+        self.customer = create_individual_customer(first_name="Ioana", last_name="Rowe", email=EMAIL)
+        Customer.objects.filter(pk=self.customer.pk).update(website="https://ioana-rowe.example.test")
+        CustomerAddress.all_objects.filter(customer=self.customer).update(label="Ioana's home")
+        CustomerMembership.objects.create(user=self.person, customer=self.customer, role="owner", is_primary=True)
+
+    def anonymise(self) -> None:
+        request = GDPRDeletionService.create_deletion_request(user=self.person, deletion_type="anonymize").unwrap()
+        self.assertTrue(GDPRDeletionService.process_deletion_request(request).is_ok())
+
+    def test_the_live_customer_record_goes_and_the_issued_invoice_stays(self) -> None:
+        invoice = create_invoice(self.customer, number="INV-ROWE-1")
+        Invoice.objects.filter(pk=invoice.pk).update(
+            bill_to_name="Ioana Rowe", bill_to_email=EMAIL, bill_to_address1="Str. Rowe 7", locked_at=timezone.now()
+        )
+        company = Customer.objects.create(
+            name="Rowe Consulting SRL", customer_type="company", company_name="Rowe Consulting SRL", status="active"
+        )
+        CustomerMembership.objects.create(user=self.person, customer=company, role="owner")
+
+        self.anonymise()
+
+        self.customer.refresh_from_db()
+        record = " ".join(
+            [self.customer.name, self.customer.primary_email, self.customer.primary_phone, self.customer.website]
+        ).lower()
+        for identifier in ("ioana", "rowe", EMAIL, "+40722123456"):
+            self.assertNotIn(identifier, record)
+        addresses = list(CustomerAddress.all_objects.filter(customer=self.customer))
+        self.assertTrue(addresses)
+        for address in addresses:
+            self.assertEqual(
+                (address.label, address.address_line1, address.address_line2, address.city, address.postal_code),
+                ("", "Anonymized", "", "Anonymized", "000000"),
+            )
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="data_anonymization_completed", metadata__customer_id=str(self.customer.pk)
+            ).exists()
+        )
+        # The fiscal record keeps the buyer as issued; a company is not the person.
+        invoice.refresh_from_db()
+        self.assertEqual((invoice.bill_to_name, invoice.bill_to_email), ("Ioana Rowe", EMAIL))
+        self.assertEqual(invoice.bill_to_address1, "Str. Rowe 7")
+        company.refresh_from_db()
+        self.assertEqual(company.name, "Rowe Consulting SRL")
+
+    def test_orders_proformas_and_unissued_invoices_lose_the_buyer_snapshot(self) -> None:
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            number="PRO-ROWE-1",
+            currency=create_currency(),
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+            **BUYER,
+        )
+        draft = create_invoice(self.customer, number="INV-ROWE-DRAFT")
+        Invoice.objects.filter(pk=draft.pk).update(**BUYER)
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=proforma.currency,
+            customer_email=EMAIL,
+            customer_name="Ioana Rowe",
+            customer_vat_id="2900101123456",
+            billing_address={"address_line1": "Str. Rowe 7", "city": "Cluj-Napoca"},
+        )
+
+        self.anonymise()
+
+        order.refresh_from_db()
+        record = f"{order.customer_name} {order.customer_email} {order.customer_vat_id} {order.billing_address}".lower()
+        for identifier in ("ioana", "rowe", "2900101123456", "cluj"):
+            self.assertNotIn(identifier, record)
+
+        for document in (proforma, draft):
+            document.refresh_from_db()
+            snapshot = " ".join(getattr(document, field) for field in BUYER).lower()
+            for identifier in ("ioana", "rowe", "2900101123456", "j40", "cluj", "400001", "ap. 3"):
+                self.assertNotIn(identifier, snapshot, type(document).__name__)
+
+    def test_a_shared_individual_customer_keeps_its_cnp(self) -> None:
+        """A record with another owner may be that person's: neither its identity nor its CNP goes."""
+        from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415
+
+        other = User.objects.create_user(email="second.owner@example.test", password="x-pass-123")
+        CustomerMembership.objects.create(user=other, customer=self.customer, role="owner")
+        profile, _ = CustomerTaxProfile.objects.get_or_create(customer=self.customer)
+        profile.cnp = "1850101123451"
+        profile.save()
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            number="PRO-SHARED-1",
+            currency=create_currency(),
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+            bill_to_cnp="1850101123451",
+        )
+
+        self.anonymise()
+
+        self.assertEqual(CustomerTaxProfile.objects.get(pk=profile.pk).cnp, "1850101123451")
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "1850101123451")
+
+    def test_an_individual_customer_with_another_owner_is_left_as_it_is(self) -> None:
+        other = User.objects.create_user(email="second.owner@example.test", password="x-pass-123")
+        CustomerMembership.objects.create(user=other, customer=self.customer, role="owner")
+
+        self.anonymise()
+
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.primary_email, EMAIL)

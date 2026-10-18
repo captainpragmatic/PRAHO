@@ -55,7 +55,7 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
             user = None
             metadata = {
                 "setting_key": instance.key,
-                "category": instance.category,
+                "setting_category": instance.category,
                 "is_sensitive": instance.is_sensitive,
                 "is_required": instance.is_required,
                 "setting_value": instance.get_display_value() if not instance.is_sensitive else "(hidden)",
@@ -81,6 +81,7 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
                 old_values=old_values,
                 new_values=new_values,
                 metadata=metadata,
+                is_sensitive=instance.is_sensitive,
             )
 
         with best_effort_atomic(logger=logger, scope="Settings", message="Setting display snapshot failed"):
@@ -122,7 +123,7 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
                 description=f"System setting deleted: {instance.key}",
                 metadata={
                     "setting_key": instance.key,
-                    "category": instance.category,
+                    "setting_category": instance.category,
                     "data_type": instance.data_type,
                 },
             )

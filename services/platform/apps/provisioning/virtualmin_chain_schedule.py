@@ -181,8 +181,6 @@ def _alert(account: VirtualminAccount, description: str, *, detail: dict[str, An
             actor_type="system",
             metadata={
                 "source_app": "provisioning",
-                "severity": "high",
-                "requires_review": True,
                 "operational_event": True,
                 "domain": account.domain,
                 **detail,
@@ -289,8 +287,6 @@ def _note_deferral(deferred: bool) -> None:
             actor_type="system",
             metadata={
                 "source_app": "provisioning",
-                "severity": "high",
-                "requires_review": True,
                 "operational_event": True,
                 "consecutive_deferred_sweeps": count,
                 "admissions_per_sweep": MAX_ADMISSIONS_PER_SWEEP,

@@ -20,7 +20,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import F, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -29,6 +29,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from apps.common import audit_failures
 from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.encryption import DecryptionError
 from apps.common.http import mark_download
@@ -153,9 +154,11 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
         response = HttpResponse(file_content, content_type="application/json")
         mark_download(response, f"gdpr-export-{export_request.id}.json")
 
-        # Log the download
-        export_request.download_count += 1
-        export_request.save(update_fields=["download_count"])
+        # Counted in the database, and read back under the row lock the update holds, so overlapping
+        # downloads each count and each record their own number.
+        with transaction.atomic():
+            DataExport.objects.filter(pk=export_request.pk).update(download_count=F("download_count") + 1)
+            export_request.refresh_from_db(fields=["download_count"])
 
         # Log audit event for download
         compliance_request = ComplianceEventRequest(
@@ -300,9 +303,11 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         # Read before recording: a file that is refused is neither counted nor logged as downloaded.
         file_content = read_export_file(export_request).encode("utf-8")
 
-        # Increment download count
-        export_request.download_count += 1
-        export_request.save(update_fields=["download_count"])
+        # Counted in the database, and read back under the row lock the update holds, so overlapping
+        # downloads each count and each record their own number.
+        with transaction.atomic():
+            DataExport.objects.filter(pk=export_request.pk).update(download_count=F("download_count") + 1)
+            export_request.refresh_from_db(fields=["download_count"])
 
         # Log download
         AuditService.log_compliance_event(
@@ -575,6 +580,7 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
         "recent_integrity_checks": recent_integrity_checks,
         "retention_policies_count": retention_policies,
         "popular_searches": popular_searches,
+        "audit_write_failures": audit_failures.count(),
         "dashboard_refresh_interval": 30,  # seconds
     }
 

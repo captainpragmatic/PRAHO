@@ -1097,9 +1097,6 @@ class InfrastructureAuditService:
             severity = cls.SEVERITY_MAP.get(action, "low")
 
         audit_metadata = dict(metadata or {})
-        audit_metadata["category"] = cls.CATEGORY
-        audit_metadata["severity"] = severity
-        audit_metadata["is_sensitive"] = is_sensitive
         if user_agent:
             audit_metadata["user_agent"] = user_agent
 
@@ -1113,6 +1110,8 @@ class InfrastructureAuditService:
             metadata=audit_metadata,
             ip_address=ip_address,
             actor_type="user" if user else "system",
+            severity=severity,
+            is_sensitive=is_sensitive,
         )
 
         logger.info(f"[Audit] {action}: {description}")

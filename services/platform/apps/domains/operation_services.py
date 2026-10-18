@@ -59,7 +59,6 @@ class DomainOperationService:
                 description=f"Registrar {operation.operation_type} operation requires review",
                 actor_type="system",
                 metadata={
-                    "requires_review": True,
                     "operation_id": str(operation.pk),
                     "domain_name": operation.domain.name,
                     "operation_type": operation.operation_type,

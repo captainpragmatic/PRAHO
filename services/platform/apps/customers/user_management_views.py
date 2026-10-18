@@ -64,8 +64,9 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
             messages.error(request, _("User is already assigned to this customer."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Create membership
-        CustomerMembership.objects.create(customer=customer, user=user, role=role)
+        # Create membership. Atomic, so the erasure guard reads the customer under its lock.
+        with transaction.atomic():
+            CustomerMembership.objects.create(customer=customer, user=user, role=role)
 
         messages.success(request, _("User '{}' added to customer with {} role.").format(user.email, role))
         return redirect("customers:detail", customer_id=customer.id)

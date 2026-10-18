@@ -127,8 +127,8 @@ class MFAEnrolmentAPITests(HMACTestMixin, TestCase):
                 self.assertEqual(event.user_agent, BROWSER_AGENT)
 
     def test_the_browser_agent_is_taken_only_from_a_signed_printable_bounded_value(self) -> None:
-        """An agent with control characters is dropped, and a long one is cut to 512 characters."""
-        for index, (agent, recorded) in enumerate((("Bad\x07Agent", None), ("A" * 600, "A" * 512))):
+        """An agent with control characters is dropped, and a long one is cut to the 500 the audit log keeps."""
+        for index, (agent, recorded) in enumerate((("Bad\x07Agent", None), ("A" * 600, "A" * 500))):
             with self.subTest(agent=agent[:12]):
                 self.user = User.objects.create_user(email=f"agent{index}@example.com", password=PASSWORD)
                 CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner")

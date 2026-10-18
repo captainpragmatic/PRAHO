@@ -13,6 +13,7 @@ class DeferredAuditReadTestCase(SignalIsolationTestCase):
     def run_deferred_read(self, instance: Model, trigger: Callable[[], object]) -> None:
         reads: list[str] = []
         error: Exception | None = None
+        poisoned: bool | None = None
 
         def fail_fetch(*args: object, **kwargs: object) -> None:
             reads.append(str(kwargs.get("fields")))
@@ -24,9 +25,12 @@ class DeferredAuditReadTestCase(SignalIsolationTestCase):
         try:
             with patch.object(instance, "refresh_from_db", side_effect=fail_fetch), transaction.atomic():
                 trigger()
+                # Read it before the block exits: leaving an atomic block rolls back and clears the
+                # flag, so a check made afterwards passes whether or not the trigger poisoned it.
+                poisoned = transaction.get_connection().needs_rollback
         except Exception as exc:
             error = exc
 
         self.assertIsNone(error, "Optional payload reads must not abort the caller's transaction")
         self.assertTrue(reads, "The audit payload must attempt the deferred database fetch")
-        self.assertFalse(transaction.get_connection().needs_rollback)
+        self.assertIs(poisoned, False, "The failed optional read left the caller's transaction marked for rollback")

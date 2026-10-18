@@ -14,6 +14,7 @@ from typing import Any, cast
 from django.http import HttpRequest, HttpResponseBase, JsonResponse
 from rest_framework.response import Response
 
+from apps.audit.actor_context import record_request_actor
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.portal_hmac import parse_signed_user_id
 from apps.customers.models import Customer
@@ -162,6 +163,7 @@ def _validate_user_membership(
         return None, _uniform_error_response()  # Generic "access denied"
 
     logger.debug(f"✅ [API Security] {user.email} authenticated for {customer.company_name} ({action})")
+    record_request_actor(request, user)
     return membership, None
 
 
@@ -268,6 +270,7 @@ def get_authenticated_user(request: HttpRequest) -> tuple[User | None, Response 
             return None, _uniform_error_response()
 
         logger.debug(f"✅ [API Security] User {user.email} authenticated for session validation")
+        record_request_actor(request, user)
         return user, None
 
     except (ValueError, TypeError):

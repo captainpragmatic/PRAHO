@@ -124,7 +124,7 @@ class TestAuditJSONEncoder(TestCase):
     def test_encode_unsupported_raises(self):
         enc = AuditJSONEncoder()
         with self.assertRaises(TypeError):
-            enc.default(set())
+            enc.default(object())
 
 
 class TestSerializeMetadata(TestCase):
@@ -144,13 +144,13 @@ class TestSerializeMetadata(TestCase):
 class TestAuditServiceLogEvent(TestCase):
     def test_log_event_no_context(self):
         user = _make_user()
-        event_data = AuditEventData(event_type="test_event", content_object=user, description="test")
+        event_data = AuditEventData(event_type="view", content_object=user, description="test")
         event = AuditService.log_event(event_data)
-        self.assertEqual(event.action, "test_event")
+        self.assertEqual(event.action, "view")
 
     def test_log_event_no_content_object_no_user(self):
         """An event with no object and no actor has no object: it is never filed under user 1."""
-        event_data = AuditEventData(event_type="system_event", description="system action")
+        event_data = AuditEventData(event_type="system_maintenance_started", description="system action")
         context = AuditContext()
         event = AuditService.log_event(event_data, context)
         self.assertIsNone(event.content_type_id)
@@ -158,7 +158,7 @@ class TestAuditServiceLogEvent(TestCase):
 
     def test_log_event_no_content_object_with_user(self):
         user = _make_user()
-        event_data = AuditEventData(event_type="user_action", description="action")
+        event_data = AuditEventData(event_type="profile_updated", description="action")
         context = AuditContext(user=user)
         event = AuditService.log_event(event_data, context)
         # The actor is the actor, not the object.
@@ -166,10 +166,10 @@ class TestAuditServiceLogEvent(TestCase):
         self.assertIsNone(event.content_type_id)
         self.assertEqual(event.object_id, "")
 
-    def test_log_event_category_none_fallback(self):
-        """Cover the category is None fallback."""
+    def test_a_category_in_metadata_never_classifies(self):
+        """A null category in metadata does not strip the event's category."""
         user = _make_user()
-        event_data = AuditEventData(event_type="totally_unknown_event", content_object=user)
+        event_data = AuditEventData(event_type="view", content_object=user)
         context = AuditContext(user=user, metadata={"category": None})
         event = AuditService.log_event(event_data, context)
         self.assertEqual(event.category, "business_operation")
@@ -179,14 +179,14 @@ class TestAuditServiceSimpleEvent(TestCase):
     def test_log_simple_event(self):
         user = _make_user()
         event = AuditService.log_simple_event(
-            "test_simple",
+            "view",
             user=user,
             content_object=user,
             description="simple event",
             metadata={"key": "val"},
             ip_address="1.2.3.4",
         )
-        self.assertEqual(event.action, "test_simple")
+        self.assertEqual(event.action, "view")
 
 
 class TestAuditServiceCategorization(TestCase):
@@ -260,8 +260,8 @@ class TestLog2FAEvent(TestCase):
         user.save()
         request = TwoFactorAuditRequest(event_type="2fa_disabled", user=user, description="Disabled 2FA")
         event = AuditService.log_2fa_event(request)
-        self.assertEqual(event.metadata.get("severity"), "high")
-        self.assertTrue(event.metadata.get("requires_review"))
+        self.assertEqual((event.category, event.severity, event.is_sensitive), ("authentication", "high", True))
+        self.assertTrue(event.requires_review)
 
     def test_2fa_enabled_medium_severity(self):
         user = _make_user()
@@ -270,7 +270,7 @@ class TestLog2FAEvent(TestCase):
         user.save()
         request = TwoFactorAuditRequest(event_type="2fa_enabled", user=user)
         event = AuditService.log_2fa_event(request)
-        self.assertEqual(event.metadata.get("severity"), "medium")
+        self.assertEqual((event.severity, event.requires_review), ("medium", False))
 
 
 class TestLogComplianceEvent(TestCase):
@@ -1503,8 +1503,8 @@ class TestDomainsAuditService(TestCase):
 
     def test_log_domain_event_no_description(self):
         domain = self._make_domain()
-        event = DomainsAuditService.log_domain_event("domain_renewed", domain)
-        self.assertIn("domain renewed", event.description.lower())
+        event = DomainsAuditService.log_domain_event("domain_updated", domain)
+        self.assertIn("domain updated", event.description.lower())
 
     def test_log_tld_event(self):
         tld = _make_mock_with_pk(self._user.pk)
@@ -1535,7 +1535,7 @@ class TestDomainsAuditService(TestCase):
             api_endpoint="https://api.example.test",
             website_url="https://example.test",
         )
-        event = DomainsAuditService.log_registrar_event("api_credentials_updated", registrar, security_sensitive=True)
+        event = DomainsAuditService.log_registrar_event("registrar_updated", registrar, security_sensitive=True)
         self.assertIn("[SECURITY]", event.description)
         self.assertEqual(event.metadata["api_url"], "[REDACTED]")
 
@@ -1554,8 +1554,8 @@ class TestDomainsAuditService(TestCase):
 
     def test_log_domain_security_event(self):
         domain = self._make_domain()
-        event = DomainsAuditService.log_domain_security_event("epp_code_generated", domain, "epp_code_generation")
-        self.assertEqual(event.action, "epp_code_generated")
+        event = DomainsAuditService.log_domain_security_event("domain_transfer_code_revealed", domain, "epp_code_generation")
+        self.assertEqual(event.action, "domain_transfer_code_revealed")
 
 
 class TestCustomersAuditService(TestCase):
@@ -1620,8 +1620,8 @@ class TestCustomersAuditService(TestCase):
         tax_profile.validate_cui.return_value = True
         tax_profile.created_at = timezone.now()
         tax_profile.updated_at = timezone.now()
-        event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", tax_profile)
-        self.assertEqual(event.action, "tax_profile_updated")
+        event = CustomersAuditService.log_tax_profile_event("customer_tax_profile_updated", tax_profile)
+        self.assertEqual(event.action, "customer_tax_profile_updated")
 
     def test_log_tax_profile_event_without_rate_override(self):
         tax_profile = _make_mock_with_pk(self._user.pk)
@@ -1635,7 +1635,7 @@ class TestCustomersAuditService(TestCase):
         tax_profile.created_at = timezone.now()
         tax_profile.updated_at = timezone.now()
 
-        event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", tax_profile)
+        event = CustomersAuditService.log_tax_profile_event("customer_tax_profile_updated", tax_profile)
 
         self.assertIsNone(event.metadata["vat_rate"])
 
@@ -1648,8 +1648,8 @@ class TestCustomersAuditService(TestCase):
         billing_profile.get_account_balances.return_value = {"RON": Decimal("500.00")}
         billing_profile.created_at = timezone.now()
         billing_profile.updated_at = timezone.now()
-        event = CustomersAuditService.log_billing_profile_event("billing_profile_updated", billing_profile)
-        self.assertEqual(event.action, "billing_profile_updated")
+        event = CustomersAuditService.log_billing_profile_event("customer_billing_profile_updated", billing_profile)
+        self.assertEqual(event.action, "customer_billing_profile_updated")
 
     def test_log_address_event(self):
         address = _make_mock_with_pk(self._user.pk)
@@ -1670,8 +1670,8 @@ class TestCustomersAuditService(TestCase):
         address.get_full_address.return_value = "Str. Test 1, Bucharest, 010101"
         address.created_at = timezone.now()
         address.updated_at = timezone.now()
-        event = CustomersAuditService.log_address_event("address_created", address)
-        self.assertEqual(event.action, "address_created")
+        event = CustomersAuditService.log_address_event("customer_address_created", address)
+        self.assertEqual(event.action, "customer_address_created")
         self.assertTrue(event.metadata["is_romanian_address"])
 
     def test_log_payment_method_event(self):
@@ -1700,8 +1700,8 @@ class TestCustomersAuditService(TestCase):
         note.created_by = None
         note.created_at = timezone.now()
         note.content = "Customer reported an issue with their hosting service."
-        event = CustomersAuditService.log_note_event("note_created", note)
-        self.assertEqual(event.action, "note_created")
+        event = CustomersAuditService.log_note_event("customer_note_created", note)
+        self.assertEqual(event.action, "customer_note_created")
         self.assertTrue(event.metadata["is_feedback"])
 
 
@@ -1766,8 +1766,8 @@ class TestProvisioningAuditService(TestCase):
         server.next_maintenance = None
         server.created_at = timezone.now()
         server.updated_at = timezone.now()
-        event = ProvisioningAuditService.log_server_event("server_created", server)
-        self.assertEqual(event.action, "server_created")
+        event = ProvisioningAuditService.log_server_event("server_registered", server)
+        self.assertEqual(event.action, "server_registered")
 
     def test_log_service_event(self):
         customer = Mock()
@@ -1828,8 +1828,8 @@ class TestProvisioningAuditService(TestCase):
         rel.notes = "Test relationship"
         rel.created_at = timezone.now()
         rel.updated_at = timezone.now()
-        event = ProvisioningAuditService.log_service_relationship_event("relationship_created", rel)
-        self.assertEqual(event.action, "relationship_created")
+        event = ProvisioningAuditService.log_service_relationship_event("service_group_created", rel)
+        self.assertEqual(event.action, "service_group_created")
 
     def test_log_service_group_event(self):
         group = _make_mock_with_pk(self._user.pk)
@@ -1875,8 +1875,8 @@ class TestProvisioningAuditService(TestCase):
         task.next_retry_at = None
         task.updated_at = timezone.now()
         task.get_task_type_display.return_value = "Create Service"
-        event = ProvisioningAuditService.log_provisioning_task_event("task_completed", task)
-        self.assertEqual(event.action, "task_completed")
+        event = ProvisioningAuditService.log_provisioning_task_event("provisioning_task_updated", task)
+        self.assertEqual(event.action, "provisioning_task_updated")
 
     def test_log_service_domain_event(self):
         sd = _make_mock_with_pk(self._user.pk)
@@ -1897,8 +1897,8 @@ class TestProvisioningAuditService(TestCase):
         sd.notes = None
         sd.created_at = timezone.now()
         sd.updated_at = timezone.now()
-        event = ProvisioningAuditService.log_service_domain_event("domain_bound", sd)
-        self.assertEqual(event.action, "domain_bound")
+        event = ProvisioningAuditService.log_service_domain_event("service_domain_bound", sd)
+        self.assertEqual(event.action, "service_domain_bound")
 
 
 class TestSettingsServiceHelpers(TestCase):

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
+from apps.audit.actor_context import acting_as
 from apps.audit.models import AuditEvent
 from apps.audit.services import DomainsAuditService, ProductsAuditService
 from apps.billing.models import Currency
@@ -58,12 +59,21 @@ class RealPricingAuditTests(TestCase):
         self.assertEqual(event.old_values, {"promotional_pricing_changed": 0})
         self.assertEqual(event.new_values, {"promotional_pricing_changed": None})
 
-    def test_small_positive_price_change_preserves_threshold(self) -> None:
+    def test_every_price_change_is_audited_however_small(self) -> None:
+        """Owner decision O4: no threshold decides whether a price change is worth a record."""
         price = ProductPrice.objects.create(product=self.product, currency=self.currency, monthly_price_cents=10000)
         count = AuditEvent.objects.filter(action="product_pricing_changed").count()
         price.monthly_price_cents = 10001
         price.save()
-        self.assertEqual(AuditEvent.objects.filter(action="product_pricing_changed").count(), count)
+        self.assertEqual(AuditEvent.objects.filter(action="product_pricing_changed").count(), count + 1)
+        event = AuditEvent.objects.filter(action="product_pricing_changed", object_id=str(price.pk)).latest("timestamp")
+        self.assertEqual(event.new_values["monthly_price_changed"], 10001)
+
+    def test_every_price_creation_is_audited_with_the_actor(self) -> None:
+        with acting_as(self.user):
+            price = ProductPrice.objects.create(product=self.product, currency=self.currency, monthly_price_cents=1)
+        event = AuditEvent.objects.get(action="product_pricing_changed", object_id=str(price.pk))
+        self.assertEqual(event.user, self.user)
 
     def test_setup_fee_can_be_changed_to_zero(self) -> None:
         price = ProductPrice.objects.create(
