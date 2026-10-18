@@ -23,7 +23,8 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.users.models import CustomerMembership, User, UserProfile
 
-from .models import AuditEvent, audit_mutation_allowed
+from .models import AuditEvent, ComplianceLog, audit_mutation_allowed
+from .person_events import note_erasure_write
 from .services import AuditContext, AuditEventData, AuditService
 
 if TYPE_CHECKING:
@@ -890,6 +891,14 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, **kwargs
             instance.metadata = {**base_metadata, "integrity_hash_version": AuditIntegrityService.HASH_VERSION}
         except Exception:
             logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")
+
+
+@receiver(post_save, sender=AuditEvent, dispatch_uid="audit_note_erasure_write_event")
+@receiver(post_save, sender=ComplianceLog, dispatch_uid="audit_note_erasure_write_compliance")
+def note_erasure_writes(sender: Any, instance: AuditEvent | ComplianceLog, created: bool, **kwargs: Any) -> None:
+    """While an erasure runs, record the rows it writes, for its final sweep."""
+    if created:
+        note_erasure_write(instance)
 
 
 @receiver(post_save, sender=AuditEvent)
