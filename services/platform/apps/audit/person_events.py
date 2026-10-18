@@ -15,16 +15,19 @@ user's email and name.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
 
 if TYPE_CHECKING:
-    from django.db.models import QuerySet
+    from django.db.models import Model, QuerySet
 
-    from apps.audit.models import AuditEvent
+    from apps.audit.models import AuditEvent, ComplianceLog
     from apps.users.models import User
 
 REMOVED = "[removed]"
@@ -49,6 +52,40 @@ class ErasureSubject:
     identifiers: frozenset[str]
     objects: frozenset[tuple[int, str]]
     customer_ids: frozenset[str]
+
+
+@dataclass
+class ErasureWrites:
+    """The audit and compliance rows written while an erasure runs."""
+
+    audit_event_ids: list[Any] = field(default_factory=list)
+    compliance_log_ids: list[Any] = field(default_factory=list)
+
+
+# Row ids are random UUIDs, so no high-water mark finds what the erasure wrote: it is recorded.
+_ERASURE_WRITES: ContextVar[ErasureWrites | None] = ContextVar("erasure_writes", default=None)
+
+
+@contextmanager
+def erasure_in_progress() -> Iterator[ErasureWrites]:
+    """Record every audit and compliance row created inside the block."""
+    writes = ErasureWrites()
+    token = _ERASURE_WRITES.set(writes)
+    try:
+        yield writes
+    finally:
+        _ERASURE_WRITES.reset(token)
+
+
+def note_erasure_write(instance: Model) -> None:
+    """Record a created audit or compliance row, when an erasure is running."""
+    writes = _ERASURE_WRITES.get()
+    if writes is None:
+        return
+    if instance._meta.model_name == "auditevent":
+        writes.audit_event_ids.append(instance.pk)
+    else:
+        writes.compliance_log_ids.append(instance.pk)
 
 
 def _keep(value: Any) -> str | None:
@@ -136,8 +173,8 @@ def _about_query(subject: ErasureSubject) -> Q:
     if subject.customer_ids:
         ids = sorted(subject.customer_ids)
         query |= Q(metadata__customer_id__in=ids + [int(pk) for pk in ids if pk.isdigit()])
-    for field in ("metadata", "old_values", "new_values"):
-        query |= Q(**{f"{field}__user_id": subject.user_pk}) | Q(**{f"{field}__user_id": str(subject.user_pk)})
+    for column in ("metadata", "old_values", "new_values"):
+        query |= Q(**{f"{column}__user_id": subject.user_pk}) | Q(**{f"{column}__user_id": str(subject.user_pk)})
     return query
 
 
@@ -158,6 +195,15 @@ def events_about(subject: ErasureSubject) -> QuerySet[AuditEvent]:
     from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: app registry
 
     return AuditEvent.objects.filter(_about_query(subject)).exclude(action__in=ERASURE_PROOF_ACTIONS)
+
+
+def compliance_logs_concerning(subject: ErasureSubject) -> QuerySet[ComplianceLog]:
+    """Compliance records of the person, or naming them."""
+    from apps.audit.models import ComplianceLog  # noqa: PLC0415  # Deferred: app registry
+
+    return ComplianceLog.objects.filter(
+        Q(user_id=subject.user_pk) | _mentions_query(subject, ("description", "evidence", "metadata"))
+    )
 
 
 def events_concerning(subject: ErasureSubject) -> QuerySet[AuditEvent]:
@@ -195,30 +241,55 @@ def _scrub(value: Any, subject: ErasureSubject, *, network: bool, reserved: froz
     return value
 
 
-def remove_identity(event: AuditEvent, subject: ErasureSubject, *, removed_at: str) -> None:
+def remove_identity(event: AuditEvent, subject: ErasureSubject, *, removed_at: str) -> bool:
     """Remove the person's identifiers from `event` and re-stamp it; the caller allows the mutation.
 
     The row stays the evidence it was. Its network identity and session go only when the person
     was the actor, or there was none: a staff member's IP on an action against the person is theirs.
     The row is never marked anonymized, so a later retention policy can still fully scrub it.
+    Returns whether the row held anything of the person; a row that did not is left as it was.
     """
     from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: import cycle
 
     # A row with no actor (a failed login for the person's address) records the person's network.
     network = event.user_id in (subject.user_pk, None)
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    reserved = AuditIntegrityService.RESERVED_METADATA_KEYS
+    scrubbed = (
+        _replace(event.description or "", subject),
+        _scrub(event.old_values, subject, network=network),
+        _scrub(event.new_values, subject, network=network),
+        _scrub(metadata, subject, network=network, reserved=reserved),
+    )
+    has_network = network and any(
+        (event.user_id, event.ip_address, event.user_agent, event.request_id, event.session_key)
+    )
+    if not has_network and scrubbed == (event.description, event.old_values, event.new_values, metadata):
+        return False
     if network:
         event.user = None
         event.ip_address = None
         event.user_agent = ""
         event.request_id = ""
         event.session_key = ""
-    event.description = _replace(event.description or "", subject)
-    event.old_values = _scrub(event.old_values, subject, network=network)
-    event.new_values = _scrub(event.new_values, subject, network=network)
-    metadata = event.metadata if isinstance(event.metadata, dict) else {}
-    event.metadata = {
-        **_scrub(metadata, subject, network=network, reserved=AuditIntegrityService.RESERVED_METADATA_KEYS),
-        "identity_removed_at": removed_at,
-    }
+    event.description, event.old_values, event.new_values, kept_metadata = scrubbed
+    event.metadata = {**kept_metadata, "identity_removed_at": removed_at}
     event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
     event.save()
+    return True
+
+
+def remove_compliance_identity(log: ComplianceLog, subject: ErasureSubject, *, removed_at: str) -> bool:
+    """Keep the compliance record and remove the person from it, network identity included."""
+    metadata = log.metadata if isinstance(log.metadata, dict) else {}
+    scrubbed = (
+        _replace(log.description or "", subject),
+        _scrub(log.evidence, subject, network=True),
+        _scrub(metadata, subject, network=True),
+    )
+    if scrubbed == (log.description, log.evidence, metadata):
+        return False
+    log.description, log.evidence, kept_metadata = scrubbed
+    log.metadata = {**kept_metadata, "identity_removed_at": removed_at}
+    log.save(update_fields=["description", "evidence", "metadata"])
+    return True

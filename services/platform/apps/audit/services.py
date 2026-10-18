@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -42,7 +43,18 @@ from .models import (
     DataExport,
     audit_mutation_allowed,
 )
-from .person_events import ErasureSubject, capture_subject, events_about, events_concerning, remove_identity
+from .person_events import (
+    ERASURE_PROOF_ACTIONS,
+    ErasureSubject,
+    ErasureWrites,
+    capture_subject,
+    compliance_logs_concerning,
+    erasure_in_progress,
+    events_about,
+    events_concerning,
+    remove_compliance_identity,
+    remove_identity,
+)
 from .session_digest import digest_session_identifiers, session_key_digest
 
 # Constants for audit operations
@@ -1350,9 +1362,10 @@ class GDPRExportService:
             except ImportError:
                 data["support_tickets"] = {"note": "Support tickets not available"}
 
-        # Audit trail summary (privacy-focused)
+        # Audit trail summary (privacy-focused): every event concerning the person, not only those
+        # they performed, counted in full and listed up to the latest 100.
         if scope.get("include_audit_logs", True):
-            audit_events = AuditEvent.objects.filter(user=user).order_by("-timestamp")[:100]  # Last 100 events
+            audit_events = events_concerning(capture_subject(user)).order_by("-timestamp")
             data["audit_summary"] = {
                 "total_events": audit_events.count(),
                 "recent_activities": [
@@ -1361,7 +1374,7 @@ class GDPRExportService:
                         "timestamp": event.timestamp.isoformat(),
                         "description": event.description[:100],  # Truncated for privacy
                     }
-                    for event in audit_events[:10]  # Last 10 activities
+                    for event in audit_events[:100]
                 ],
             }
 
@@ -1543,34 +1556,47 @@ class GDPRDeletionService:
             deletion_request.status = "processing"
             deletion_request.save(update_fields=["status"])
 
-            if deletion_type == "anonymize":
-                result = cls._anonymize_user_data(user)
-                action_taken = "anonymized"
-            else:
-                result = cls._delete_user_data(user)
-                action_taken = "deleted"
-                if result.is_ok():
-                    # The database set this request's user to NULL (SET_NULL); the instance still
-                    # holds the deleted user, whose save Django refuses as an unsaved relation.
-                    deletion_request.user = None
+            # Who the person is and which compliance records are theirs, before the erasure
+            # overwrites or deletes them. The lock keeps them still until the transaction ends.
+            subject = capture_subject(User.objects.select_for_update().get(pk=user.pk))
+            earlier_logs = list(compliance_logs_concerning(subject).values_list("pk", flat=True))
 
-            if result.is_err():
-                deletion_request.status = "failed"
-                deletion_request.evidence["error"] = result.error if hasattr(result, "error") else str(result)
+            # One savepoint: a sweep that fails rolls the erasure back with it, instead of the
+            # handler below committing an erasure that left the person in the audit log.
+            with transaction.atomic(), erasure_in_progress() as writes:
+                if deletion_type == "anonymize":
+                    result = cls._anonymize_user_data(user)
+                    action_taken = "anonymized"
+                else:
+                    result = cls._delete_user_data(user)
+                    action_taken = "deleted"
+                    if result.is_ok():
+                        # The database set this request's user to NULL (SET_NULL); the instance still
+                        # holds the deleted user, whose save Django refuses as an unsaved relation.
+                        deletion_request.user = None
+
+                if result.is_err():
+                    deletion_request.status = "failed"
+                    deletion_request.evidence["error"] = result.error if hasattr(result, "error") else str(result)
+                    deletion_request.save(update_fields=["status", "evidence"])
+                    return result
+
+                # Mark as completed
+                deletion_request.status = "completed"
+                deletion_request.evidence["completed_at"] = timezone.now().isoformat()
+                deletion_request.evidence["action_taken"] = action_taken
                 deletion_request.save(update_fields=["status", "evidence"])
-                return result
-
-            # Mark as completed
-            deletion_request.status = "completed"
-            deletion_request.evidence["completed_at"] = timezone.now().isoformat()
-            deletion_request.evidence["action_taken"] = action_taken
-            deletion_request.save(update_fields=["status", "evidence"])
+                # Last, after the save above wrote the request's evidence back, email included.
+                cls._sweep_erasure(subject, writes, deletion_request, earlier_logs)
 
             logger.info(f"✅ [GDPR Deletion] User data {action_taken} for {user_email}")
             return Ok(f"User data successfully {action_taken}")
 
         except Exception as e:
             deletion_request.status = "failed"
+            # The savepoint rolled the completion back; the instance still carries it.
+            deletion_request.evidence.pop("completed_at", None)
+            deletion_request.evidence.pop("action_taken", None)
             deletion_request.evidence["error"] = str(e)
             deletion_request.save(update_fields=["status", "evidence"])
             logger.error(f"🔥 [GDPR Deletion] Processing failed: {e}")
@@ -1708,23 +1734,56 @@ class GDPRDeletionService:
         the rest: financial and contract evidence, events a staff member performed on the person,
         and the person's actions on other people's data (owner decision O2).
         """
+        own, keep = cls._route_audit_events(subject)
+        AuditRetentionService._anonymize_events(own)
+        cls._remove_audit_identity(keep, subject)
+
+    @classmethod
+    def _route_audit_events(cls, subject: ErasureSubject) -> tuple[list[AuditEvent], list[AuditEvent]]:
+        """Split the events concerning the person: their own, which erasure may destroy, and the rest.
+
+        Their own events are about them or are actions of theirs on no object, performed by them
+        or by nobody, and under no hold. An action of theirs on someone else's object is kept.
+        """
         now = timezone.now()
         claims_cutoff = AuditRetentionService.claims_retention_cutoff(now)
         about_ids = set(events_about(subject).values_list("id", flat=True))
-        scrub: list[AuditEvent] = []
+        own: list[AuditEvent] = []
         keep: list[AuditEvent] = []
         for event in events_concerning(subject):
             someone_else_acted = event.user_id is not None and event.user_id != subject.user_pk
+            theirs = event.id in about_ids or (event.user_id == subject.user_pk and event.content_type_id is None)
             retained = AuditRetentionService.is_retained(event, now, claims_cutoff=claims_cutoff)
-            if event.id not in about_ids or someone_else_acted or retained:
+            if not theirs or someone_else_acted or retained:
                 keep.append(event)
             else:
-                scrub.append(event)
-        AuditRetentionService._anonymize_events(scrub)
-        removed_at = now.isoformat()
+                own.append(event)
+        return own, keep
+
+    @staticmethod
+    def _remove_audit_identity(events: Iterable[AuditEvent], subject: ErasureSubject) -> None:
+        removed_at = timezone.now().isoformat()
         with audit_mutation_allowed("gdpr_identity_removal"):
-            for event in keep:
+            for event in events:
                 remove_identity(event, subject, removed_at=removed_at)
+
+    @classmethod
+    def _sweep_erasure(
+        cls, subject: ErasureSubject, writes: ErasureWrites, deletion_request: ComplianceLog, earlier_logs: list[Any]
+    ) -> None:
+        """Remove the person from what the erasure itself wrote, from the request and their compliance records.
+
+        Audit rows written by receivers during the erasure (a profile save, a membership deleted
+        with the user) hold the identifiers the erasure removed elsewhere. The proof that a CNP
+        was cleared stays as written.
+        """
+        written = AuditEvent.objects.filter(pk__in=writes.audit_event_ids).exclude(action__in=ERASURE_PROOF_ACTIONS)
+        cls._remove_audit_identity(written, subject)
+        removed_at = timezone.now().isoformat()
+        remove_compliance_identity(deletion_request, subject, removed_at=removed_at)
+        log_ids = {*writes.compliance_log_ids, *earlier_logs} - {deletion_request.pk}
+        for log in ComplianceLog.objects.filter(pk__in=log_ids):
+            remove_compliance_identity(log, subject, removed_at=removed_at)
 
     @staticmethod
     def _clear_cnp(rows: models.QuerySet[Any], field: str, *, id_key: str, where: str) -> None:
@@ -1760,23 +1819,22 @@ class GDPRDeletionService:
             with transaction.atomic():
                 cls._revoke_user_exports(user)
 
-                # The person's audit events go, except evidence the law still requires (GDPR
-                # Art. 17(3)(b)): financial and contract records within their period keep their content,
-                # lose the network identity, and are detached from the person when the user row
-                # goes (AuditEvent.user is SET_NULL). Other business events are the person's data.
-                now = timezone.now()
-                claims_cutoff = AuditRetentionService.claims_retention_cutoff(now)
-                held_ids = [
-                    event.id
-                    for event in AuditEvent.objects.filter(user=user)
-                    if AuditRetentionService.is_retained(event, now, claims_cutoff=claims_cutoff)
-                ]
+                # The person's own events go, tombstoned first so the audit chain records an
+                # authorised removal. The rest stay without the person: evidence the law still
+                # requires (GDPR Art. 17(3)(b)), staff actions on them, and their actions on
+                # other people's data. The lock was taken by the export revocation above.
+                subject = capture_subject(user)
+                own, keep = cls._route_audit_events(subject)
+                try:
+                    AuditIntegrityService.append_tombstone_links(own)
+                except Exception as e:
+                    # Fail-open like retention: a ledger fault must not block an erasure the law requires.
+                    logger.error(f"🔥 [Audit Chain] Failed to append erasure tombstones: {e}")
                 with audit_mutation_allowed("gdpr_erasure"):
-                    AuditEvent.objects.filter(user=user).exclude(id__in=held_ids).delete()
-                    AuditEvent.objects.filter(id__in=held_ids).update(
-                        ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
-                    )
+                    AuditEvent.objects.filter(id__in=[event.id for event in own]).delete()
+                cls._remove_audit_identity(keep, subject)
 
+                with audit_mutation_allowed("gdpr_erasure"):
                     # Delete user account
                     user.delete()
 
