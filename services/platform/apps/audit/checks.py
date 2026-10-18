@@ -7,7 +7,7 @@ from typing import Any
 
 from django.apps import AppConfig
 from django.core.checks import CheckMessage, Tags, Warning, register  # noqa: A004  # Django's own name
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.utils.translation import gettext as _
 
 from apps.common import audit_failures
@@ -22,7 +22,7 @@ def check_audit_write_failures(
         return []  # Only when the database is asked about: a check must not query unmigrated tables
     try:
         failed = audit_failures.count()
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         return []
     if not failed:
         return []
