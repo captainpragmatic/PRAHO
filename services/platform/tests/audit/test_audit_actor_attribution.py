@@ -235,6 +235,12 @@ class HelperUserTests(TestCase):
         self.assertIs(_with_user(result, None), result)
         self.assertIs(_with_user(result, self.author), result)
 
+    def test_a_context_that_names_the_actor_is_not_overridden_by_the_subject(self) -> None:
+        context = AuditContext(user=self.other)
+
+        self.assertIs(_with_user(context, self.author), context)
+        self.assertEqual(_with_user(context, self.author).user, self.other)
+
     def test_no_helper_ignores_the_user_it_was_given(self) -> None:
         """Every helper that takes both a user and a context goes through ``_with_user``."""
         import inspect  # noqa: PLC0415

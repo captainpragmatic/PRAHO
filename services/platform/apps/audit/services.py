@@ -289,15 +289,16 @@ def actor_context(**fields: Any) -> AuditContext:
 
 
 def _with_user(context: AuditContext | None, user: User | None) -> AuditContext:
-    """The context a helper writes with, honouring the ``user`` it was handed.
+    """The context a helper writes with: the caller's, with ``user`` filled in when it names nobody.
 
-    A helper given both used to ignore ``user`` whenever a context came along, so a note's
-    author or a changed-by user silently became whoever the context named (row 41). The
+    A helper given both used to ignore ``user`` whenever a context came along, so a note's author
+    was lost (row 41). A context that already names a user keeps it: it was built from the
+    request or the current actor, which is who acted, and ``user`` may well be the subject. The
     caller's context is copied, never changed: callers reuse their context objects.
     """
     if context is None:
         return AuditContext(user=user)
-    if user is None or context.user is user:
+    if user is None or context.user is not None:
         return context
     return replace(context, user=user)
 

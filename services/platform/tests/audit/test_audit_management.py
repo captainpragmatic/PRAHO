@@ -358,12 +358,13 @@ class AuditRetentionManagementTests(EnterpriseAuditManagementTestCase):
             name="Security Events Policy",
             category="security_event",
             retention_days=365,  # 1 year for security events
-            action="archive",
+            action="anonymize",
             legal_basis="Romanian Law 190/2018",
             is_mandatory=True,
             created_by=self.admin_user,
         )
 
+        self.assertIn(policy.action, dict(AuditRetentionPolicy.RETENTION_ACTION_CHOICES))
         self.assertEqual(policy.name, "Security Events Policy")
         self.assertEqual(policy.retention_days, 365)
         self.assertTrue(policy.is_mandatory)

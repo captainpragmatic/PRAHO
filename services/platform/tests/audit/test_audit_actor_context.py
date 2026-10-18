@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.db import transaction
@@ -27,7 +28,11 @@ from apps.audit.actor_context import (
 )
 from apps.audit.middleware import AuditActorMiddleware
 from apps.audit.models import _mutation_allowed, audit_mutation_allowed
+from apps.billing.models import Currency
+from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.users.models import APIToken, User
+from tests.helpers.fsm_helpers import force_status
 
 SETTINGS_DIR = Path(__file__).resolve().parents[2] / "config" / "settings"
 AUTH_MIDDLEWARE = "django.contrib.auth.middleware.AuthenticationMiddleware"
@@ -157,6 +162,36 @@ class OnCommitBindingTests(TestCase):
         for callback in callbacks:
             callback()
         self.assertEqual(seen, [self.admin])
+
+
+class OrderStatusOnCommitActorTests(TestCase):
+    """The order status handler runs on commit, after the request has ended, and must still know who acted."""
+
+    def test_the_status_handler_run_on_commit_sees_the_staff_member_who_changed_the_order(self) -> None:
+        staff = User.objects.create_user(email="order-staff@example.com", password="pw", staff_role="admin")
+        currency, _created = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        customer = Customer.objects.create(name="OnCommit SRL", customer_type="company", status="active")
+        order = Order.objects.create(
+            customer=customer,
+            currency=currency,
+            customer_email="oncommit@example.com",
+            customer_name=customer.name,
+            payment_method="bank_transfer",
+            subtotal_cents=1000,
+            tax_cents=210,
+            total_cents=1210,
+            billing_address={},
+        )
+        seen: list[Any] = []
+
+        with patch("apps.orders.signals._handle_order_status_change", lambda *args: seen.append(current_actor())):
+            with self.captureOnCommitCallbacks(execute=False) as callbacks, acting_as(staff):
+                force_status(order, "awaiting_payment")
+
+            self.assertIsNone(current_actor())  # the request-time binding is gone
+            for callback in callbacks:
+                callback()
+        self.assertEqual(seen, [staff])
 
 
 class DjangoQTests(TestCase):
