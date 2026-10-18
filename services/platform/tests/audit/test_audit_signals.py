@@ -327,9 +327,24 @@ class TestUserProfilePreferencesAudit(TestCase):
         assert audit_events.exists()
 
         audit_event = audit_events.first()
-        assert audit_event.new_values["name"] == "Jane Doe"
-        assert audit_event.new_values["phone"] == "+40123456789"
+        assert audit_event.new_values == {
+            "emergency_contact_name": "Jane Doe",
+            "emergency_contact_phone": "+40123456789",
+        }
+        assert set(audit_event.old_values) == set(audit_event.new_values)
         assert "security_relevant" in audit_event.metadata
+
+    def test_only_the_changed_half_of_the_emergency_contact_is_recorded(self):
+        """Old and new values share the model's field names and hold only what changed."""
+        self.profile.emergency_contact_name = "Jane Doe"
+        self.profile.emergency_contact_phone = "+40123456789"
+        self.profile.save(update_fields=["emergency_contact_name", "emergency_contact_phone"])
+        self.profile.emergency_contact_phone = "+40999999999"
+        self.profile.save(update_fields=["emergency_contact_phone"])
+
+        audit_event = AuditEvent.objects.filter(action="emergency_contact_updated").order_by("timestamp").last()
+        assert audit_event.old_values == {"emergency_contact_phone": "+40123456789"}
+        assert audit_event.new_values == {"emergency_contact_phone": "+40999999999"}
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)

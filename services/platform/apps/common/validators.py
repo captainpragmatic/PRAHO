@@ -19,6 +19,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common import audit_failures
 from apps.common.types import (
     EmailAddress,
 )
@@ -591,7 +592,9 @@ def log_security_event(
                 ip_address=request_ip,
                 actor_type="system",
             )
-    except Exception:
+    except Exception as error:
+        # Swallowed on purpose, after the savepoint rolled the write back: count the missed event.
+        audit_failures.record(error)
         # The event type and the names of what it carried, never the values: details can hold emails,
         # amounts and identifiers that belong in the audit trail, not in a log file.
         logger.warning(f"🚨 [Security] {event_type}: details keys {sorted(details)} from IP: {request_ip}")

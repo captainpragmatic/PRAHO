@@ -88,6 +88,13 @@ class WriteFailureCounterTests(TestCase):
 
         self.assertEqual(audit_failures.count(), 0)
 
+    def test_a_failed_security_event_is_counted(self) -> None:
+        """log_security_event swallows a failed audit write on purpose; the counter still hears of it."""
+        with self.captureOnCommitCallbacks(execute=True), self.fail_the_insert(), self.assertLogs(level="WARNING"):
+            log_security_event("sessions_revoked_password_reset", {"reason": "x"})
+
+        self.assertEqual(audit_failures.count(), 1)
+
     def test_a_failure_that_reaches_the_caller_is_not_counted(self) -> None:
         with (
             self.fail_the_insert(),

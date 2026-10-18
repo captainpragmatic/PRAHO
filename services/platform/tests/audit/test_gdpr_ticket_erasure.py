@@ -185,6 +185,25 @@ class TicketErasureTests(TestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.comments.get(author_email="someone@example.test").content, "Seen it too")
 
+    def test_a_shared_customers_email_does_not_pull_in_the_other_persons_tickets(self) -> None:
+        """A customer left to staff may be the other owner: its email is not the person's to erase."""
+        shared = Customer.objects.create(
+            name="Mihai Dobre", customer_type="individual", status="active", primary_email=OTHER_EMAIL
+        )
+        for user in (self.person, self.other):
+            CustomerMembership.objects.create(user=user, customer=shared, role="owner", is_active=True)
+        ticket = Ticket.objects.create(
+            customer=shared, created_by=self.person, category=self.category, status="open",
+            title="Mihai's hosting", description="Mihai's site is down",
+            contact_person="Mihai Dobre", contact_email=OTHER_EMAIL,
+        )
+
+        self._erase()
+
+        ticket.refresh_from_db()
+        self.assertEqual((ticket.title, ticket.description), ("Mihai's hosting", "Mihai's site is down"))
+        self.assertEqual((ticket.contact_person, ticket.contact_email), ("Mihai Dobre", OTHER_EMAIL))
+
     def test_a_failed_erasure_leaves_the_tickets_and_files(self) -> None:
         ticket = self._ticket(self.person, title="Ioana Rowe cannot log in", description="Ioana here")
         comment = TicketComment.objects.create(

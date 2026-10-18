@@ -1,5 +1,7 @@
 """Deferred optional audit payload reads preserve the caller's writes."""
 
+from unittest.mock import patch
+
 from django.test import override_settings
 
 from apps.audit.models import AuditEvent, CookieConsent
@@ -28,12 +30,16 @@ class DeferredAuditPayloadTests(DeferredAuditReadTestCase):
         self.run_deferred_read(customer, membership.save)
         self.assertTrue(CustomerMembership.objects.filter(pk=membership.pk, role="owner").exists())
 
-    def test_emergency_contact_update_commits_when_deferred_phone_fetch_fails(self) -> None:
+    def test_emergency_contact_update_commits_without_reading_the_deferred_phone(self) -> None:
+        """Only the changed half is recorded, so the unchanged, deferred phone is never fetched."""
         profile = UserProfile.objects.only("id", "user_id", "emergency_contact_name").get(user=self.user)
         profile.user = self.user
         profile.emergency_contact_name = "Persisted"
-        self.run_deferred_read(profile, lambda: profile.save(update_fields=["emergency_contact_name"]))
+        with patch.object(profile, "refresh_from_db", side_effect=AssertionError("the unchanged phone was fetched")):
+            profile.save(update_fields=["emergency_contact_name"])
         self.assertEqual(UserProfile.objects.get(pk=profile.pk).emergency_contact_name, "Persisted")
+        event = AuditEvent.objects.filter(action="emergency_contact_updated").latest("timestamp")
+        self.assertEqual(event.new_values, {"emergency_contact_name": "Persisted"})
 
     def test_cookie_update_commits_when_deferred_category_fetch_fails(self) -> None:
         consent = CookieConsent.objects.create(cookie_id="deferred-cookie")

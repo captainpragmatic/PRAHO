@@ -1739,13 +1739,31 @@ class GDPRDeletionService:
         A customer reply with no author is the person's when its email is one of theirs, and
         another member's otherwise. The tickets are locked in pk order, as replies lock them.
         """
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
         from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
             Ticket,
             TicketAttachment,
             TicketComment,
         )
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier}
+        # A customer the erasure leaves to staff may be another owner's record (shared, or reached
+        # only through an inactive owner link): its email is not the person's, and its tickets are
+        # never the person's alone. The person's own address always counts.
+        user = User.objects.filter(pk=subject.user_pk).first()
+        owned_ids = CustomerMembership.objects.filter(
+            user_id=subject.user_pk, role="owner", customer__customer_type="individual"
+        ).values_list("customer_id", flat=True)
+        solely_owned = set(cls._solely_owned_individuals(user)) if user is not None else set()
+        left_for_staff = set(owned_ids) - solely_owned
+        others = {
+            email.lower()
+            for email in Customer.all_objects.filter(pk__in=left_for_staff).values_list("primary_email", flat=True)
+            if email
+        }
+        emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier} - others
+        if user is not None and user.email:
+            emails.add(user.email.lower())
 
         def is_persons(author_id: int | None, author_email: str) -> bool:
             if author_id is not None:
@@ -1760,8 +1778,10 @@ class GDPRDeletionService:
         for ticket in tickets:
             replies = list(ticket.comments.values_list("pk", "comment_type", "author_id", "author_email"))
             persons = [pk for pk, _kind, author_id, email in replies if is_persons(author_id, email)]
-            alone = ticket.created_by_id == subject.user_pk and all(
-                is_persons(author_id, email) for _pk, kind, author_id, email in replies if kind == "customer"
+            alone = (
+                ticket.created_by_id == subject.user_pk
+                and ticket.customer_id not in left_for_staff
+                and all(is_persons(author_id, email) for _pk, kind, author_id, email in replies if kind == "customer")
             )
             if alone:
                 Ticket.objects.filter(pk=ticket.pk).update(

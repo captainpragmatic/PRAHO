@@ -451,13 +451,13 @@ def _build_preference_event(
             metadata={"notification_change": True, "channel": field_name},
             **actor,
         )
-    # The emergency contact is one record: both halves are written, the old values are the changed ones.
+    # Old and new values share the model's field names and hold only the changed halves.
     emergency_old = {name: old[name] for name in ("emergency_contact_name", "emergency_contact_phone") if name in old}
     return AuditEventCreationData(
         action="emergency_contact_updated",
         content_object=instance,
         old_values=emergency_old,
-        new_values={"name": instance.emergency_contact_name, "phone": instance.emergency_contact_phone},
+        new_values={name: getattr(instance, name) for name in emergency_old},
         description="Emergency contact information updated",
         metadata={"security_relevant": True},
         **actor,
