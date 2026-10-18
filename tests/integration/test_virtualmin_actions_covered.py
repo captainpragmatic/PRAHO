@@ -309,7 +309,7 @@ class TestEveryActionIsCovered:
 
     def test_every_node_playbook_is_named_by_a_lab_test(self) -> None:
         playbooks = [path.name for path in PLAYBOOKS.glob("virtualmin_*.yml")] + ["virtualmin.yml"]
-        assert len(playbooks) == 10, "a new playbook: it needs a lab test, then update this count"
+        assert len(playbooks) == 11, "a new playbook: it needs a lab test, then update this count"
         assert unreferenced_playbooks(playbooks, lab_test_sources()) == []
 
 
