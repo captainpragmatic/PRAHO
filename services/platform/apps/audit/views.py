@@ -31,6 +31,7 @@ from django.views.decorators.http import require_POST
 
 from apps.common.decorators import admin_required, staff_required_strict
 from apps.common.encryption import DecryptionError
+from apps.common.http import mark_download
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
@@ -150,8 +151,7 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
 
         # Create HTTP response with file download
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="gdpr-export-{export_request.id}.json"'
-        response["Cache-Control"] = "no-store"
+        mark_download(response, f"gdpr-export-{export_request.id}.json")
 
         # Log the download
         export_request.download_count += 1
@@ -323,7 +323,7 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
 
         # Serve file
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="gdpr_export_{export_request.id}.json"'
+        mark_download(response, f"gdpr_export_{export_request.id}.json")
         response["Content-Length"] = len(file_content)
         response["Cache-Control"] = "no-store"
 
@@ -779,7 +779,7 @@ def _export_logs_csv(queryset: QuerySet[AuditEvent], timestamp: str) -> HttpResp
         )
 
     response = HttpResponse(output.getvalue(), content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="audit_logs_{timestamp}.csv"'
+    mark_download(response, f"audit_logs_{timestamp}.csv")
     return response
 
 
@@ -832,7 +832,7 @@ def _export_logs_json(queryset: QuerySet[AuditEvent], timestamp: str) -> HttpRes
     response = HttpResponse(
         json.dumps(data, indent=2, default=str, ensure_ascii=False), content_type="application/json"
     )
-    response["Content-Disposition"] = f'attachment; filename="audit_logs_{timestamp}.json"'
+    mark_download(response, f"audit_logs_{timestamp}.json")
     return response
 
 
@@ -1052,7 +1052,7 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
 
         # Serve file
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="gdpr_export_{export_request.id}.json"'
+        mark_download(response, f"gdpr_export_{export_request.id}.json")
         response["Content-Length"] = len(file_content)
         response["Cache-Control"] = "no-store"
 

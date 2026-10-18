@@ -28,6 +28,7 @@ from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.billing.subscription_models import Subscription
+from apps.common.http import mark_download
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err
 from apps.customers.models import Customer, CustomerPaymentMethod
@@ -1124,7 +1125,7 @@ def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number:
                 status=status.HTTP_409_CONFLICT,
             )
         pdf_response = HttpResponse(pdf_result.unwrap(), content_type="application/pdf")
-        pdf_response["Content-Disposition"] = f'attachment; filename="factura_{invoice.number}.pdf"'
+        mark_download(pdf_response, f"factura_{invoice.number}.pdf")
 
         logger.info(
             f"✅ [Invoice PDF API] PDF generated for invoice {invoice_number} by customer {customer.company_name}"
