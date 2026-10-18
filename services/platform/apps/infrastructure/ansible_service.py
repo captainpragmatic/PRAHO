@@ -119,6 +119,7 @@ class AnsibleService:
             "virtualmin_pair_restore.yml",
             "virtualmin_remote_cleanup.yml",
             "virtualmin_account_name_link.yml",
+            "virtualmin_install_account_cert.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",
         }
