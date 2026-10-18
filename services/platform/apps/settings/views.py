@@ -486,7 +486,7 @@ def import_settings(request: HttpRequest) -> JsonResponse:
 # SETTINGS UI (three-surface IA: Business / Integrations / Platform — ADR-0042)
 # ===============================================================================
 
-INTEGRATION_GROUPS = ("stripe", "smartbill", "virtualmin", "efactura", "node-deployment", "backup")
+INTEGRATION_GROUPS = ("stripe", "smartbill", "virtualmin", "efactura", "node-deployment", "hosting-dns", "backup")
 
 SEARCH_MIN_QUERY_LENGTH = 2
 SEARCH_MAX_RESULTS = 30

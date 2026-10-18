@@ -387,6 +387,16 @@ class SettingsService:
         return None
 
     @classmethod
+    def _hosting_dns_guard(cls, key: str, value: Any) -> SettingValidationError | None:
+        from apps.provisioning.account_hostname_config import setting_refusal  # noqa: PLC0415  # ADR-0007
+
+        refusal = setting_refusal(key, value)
+        if refusal is None:
+            return None
+        code, message = refusal
+        return SettingValidationError(key=key, field="value", message=message, code=code)
+
+    @classmethod
     def _semantic_guard(cls, key: str, value: Any) -> SettingValidationError | None:
         """Refusals that depend on live system state, not on the value's shape.
 
@@ -402,8 +412,11 @@ class SettingsService:
         and after the setting's row lock is held, so two operators racing the same
         switch cannot both be told yes.
         """
-        if key == "billing.default_currency":
-            return cls._currency_switch_guard(key, value)
+        keyed_guard = cls._currency_switch_guard if key == "billing.default_currency" else None
+        if key.startswith("dns.account_"):
+            keyed_guard = cls._hosting_dns_guard
+        if keyed_guard is not None:
+            return keyed_guard(key, value)
         if key != "billing.invoice_issuer":
             return None
 
