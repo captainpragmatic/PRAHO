@@ -485,6 +485,37 @@ class RenewalTests(CertificateTestCase):
         self.install_mock.assert_called_once()
         self.assertEqual(self.install_mock.call_args.args[1], self.server)
 
+    def test_a_former_node_is_forgotten_not_reinstalled(self) -> None:
+        self.issue()
+        former = _server()
+        old = self.row()
+        for server in (self.server, former):
+            certs.record_installation(
+                self.hostname, server, certificate_ref=old.current_certificate_ref, not_after=old.current_not_after
+            )
+        self._age(self.hostname, 10)
+
+        certs.renew_due_certificates()
+
+        self.assertEqual([call.args[1] for call in self.install_mock.call_args_list], [self.server])
+        self.assertFalse(AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=former).exists())
+
+    def test_an_account_under_an_operation_keeps_every_install_row_untouched(self) -> None:
+        self.issue()
+        former = _server()
+        old = self.row()
+        for server in (self.server, former):
+            certs.record_installation(
+                self.hostname, server, certificate_ref=old.current_certificate_ref, not_after=old.current_not_after
+            )
+        self._age(self.hostname, 10)
+
+        with patch.object(certs, "_name_under_operation", return_value=True):
+            certs.renew_due_certificates()
+
+        self.install_mock.assert_not_called()
+        self.assertEqual(AccountNameCertificateInstall.objects.filter(hostname=self.hostname).count(), 2)
+
     def test_a_node_that_already_holds_the_current_certificate_is_not_reinstalled(self) -> None:
         self.issue()
         row = self.row()

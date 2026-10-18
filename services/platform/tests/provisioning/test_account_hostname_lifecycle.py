@@ -53,7 +53,9 @@ class LifecycleCase(VirtualminServiceCoverageCase):
         ensure = patch.object(
             service,
             "ensure_node_account_name",
-            lambda account, server, *, enabled: self.node_calls.append(f"ensure enabled={enabled}") or Ok(None),
+            lambda account, server, *, enabled, operation_owner=False: (
+                self.node_calls.append(f"ensure enabled={enabled}") or Ok(None)
+            ),
         )
         ensure.start()
         self.addCleanup(ensure.stop)
@@ -143,13 +145,13 @@ class MigrationTargetTests(LifecycleCase):
             patch.object(
                 service,
                 "ensure_node_account_name",
-                lambda account, server, *, enabled: (
-                    order.append(f"ensure {server.hostname} enabled={enabled}") or Ok(None)
+                lambda account, server, *, enabled, operation_owner=False: (
+                    order.append(f"ensure {server.hostname} enabled={enabled} owner={operation_owner}") or Ok(None)
                 ),
             ),
         ):
             migrator._verify(migration, uuid4())  # type: ignore[arg-type]  # a stand-in migration
-        self.assertEqual(order, ["ensure vm-target.example.com enabled=False", "move activating"])
+        self.assertEqual(order, ["ensure vm-target.example.com enabled=False owner=True", "move activating"])
 
 
 class TerminationTests(LifecycleCase):

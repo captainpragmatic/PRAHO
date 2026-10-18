@@ -82,7 +82,8 @@ def ensure_on_recreated_node(
         return Ok(None)
     if not AccountHostname.objects.filter(account=account, retired_at__isnull=True).exists():
         return Ok(None)  # The account has no name yet: on_account_ready gives it one
-    ensured = service.ensure_node_account_name(account, server, enabled=enabled)
+    # The migration or restore calling this is the account's operation, so it is not refused by it.
+    ensured = service.ensure_node_account_name(account, server, enabled=enabled, operation_owner=True)
     if ensured.is_err():
         return Err(ensured.unwrap_err(), retriability=retriability_of(ensured))
     return Ok(None)

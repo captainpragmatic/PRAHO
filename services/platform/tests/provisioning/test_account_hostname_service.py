@@ -238,6 +238,77 @@ class EnsureTests(AccountNameTestCase):
         self.assertIn(name, self.node.rows)
 
 
+class NodeStepExclusionTests(AccountNameTestCase):
+    """One node step per name at a time, never under another operation, never trusting old evidence."""
+
+    def _install_row(self) -> None:
+        from apps.provisioning.account_hostname_models import AccountNameCertificateInstall  # noqa: PLC0415
+
+        AccountNameCertificateInstall.objects.create(
+            hostname=self.hostname,
+            server=self.server,
+            certificate_ref="vault:old",
+            not_after=timezone.now() + timezone.timedelta(days=60),
+        )
+
+    def test_a_name_created_on_a_node_forgets_that_nodes_old_install_first(self) -> None:
+        from apps.provisioning.account_hostname_models import AccountNameCertificateInstall  # noqa: PLC0415
+
+        self._install_row()
+        seen: list[bool] = []
+        with patch.object(
+            service,
+            "install_certificate",
+            lambda hostname, server: seen.append(
+                AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server).exists()
+            )
+            or Ok(True),
+        ):
+            outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self.assertTrue(outcome.created)
+        self.assertEqual(seen, [False], "a fresh sub-server serves a self-signed certificate, not the recorded one")
+
+    def test_an_existing_name_keeps_its_install_evidence(self) -> None:
+        from apps.provisioning.account_hostname_models import AccountNameCertificateInstall  # noqa: PLC0415
+
+        service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self._install_row()
+        service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self.assertTrue(AccountNameCertificateInstall.objects.filter(hostname=self.hostname).exists())
+
+    def test_a_second_node_step_for_the_same_name_waits_and_touches_nothing(self) -> None:
+        from apps.provisioning.account_name_lease import release_node_lease, take_node_lease  # noqa: PLC0415
+
+        token = take_node_lease(self.hostname)
+        self.assertIsNotNone(token)
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True)
+        self.assertTrue(outcome.is_err())
+        self.assertIs(retriability_of(outcome), Retriability.UNKNOWN)
+        self.assertEqual(self.node.calls, [])
+        release_node_lease(self.hostname, str(token))
+        self.assertTrue(service.ensure_node_account_name(self.account, self.server, enabled=True).is_ok())
+
+    def test_the_lease_is_given_back_after_a_failed_step(self) -> None:
+        self.node.ambiguous.add("create-domain")
+        self.assertTrue(service.ensure_node_account_name(self.account, self.server, enabled=True).is_err())
+        self.hostname.refresh_from_db()
+        self.assertEqual((self.hostname.node_lease_token, self.hostname.node_lease_until), ("", None))
+
+    def test_a_step_that_owns_no_operation_leaves_an_account_under_one_alone(self) -> None:
+        with patch("apps.provisioning.virtualmin_migration_models.account_has_active_operation", return_value=True):
+            refused = service.ensure_node_account_name(self.account, self.server, enabled=True)
+            self.assertTrue(refused.is_err())
+            self.assertFalse([c for c in self.node.calls if c.startswith(("create-domain", "enable", "disable"))])
+            owned = service.ensure_node_account_name(self.account, self.server, enabled=False, operation_owner=True)
+        self.assertTrue(owned.is_ok(), "the migration or restore that owns the account is not refused")
+
+    def test_the_wanted_state_is_read_again_under_the_account_lock(self) -> None:
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(status="suspended")
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self.assertFalse(outcome.enabled)
+        self.assertIn(self.hostname.fqdn, self.node.disabled)
+
+
 class SyncTests(AccountNameTestCase):
     def setUp(self) -> None:
         super().setUp()

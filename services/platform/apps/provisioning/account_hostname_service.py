@@ -245,38 +245,60 @@ def _link_when_shipped(
     return Ok(True)
 
 
-def ensure_node_account_name(  # noqa: PLR0911  # One exit per step that can refuse or stay ambiguous
-    account: VirtualminAccount, server: VirtualminServer, *, enabled: bool
+def ensure_node_account_name(
+    account: VirtualminAccount, server: VirtualminServer, *, enabled: bool, operation_owner: bool = False
 ) -> Result[EnsureOutcome, str]:
     """Make `server` serve the account's name: owned, in the wanted state, linked, certified. Idempotent.
 
     `enabled` is False for a suspended account and for a migration target not yet activated: a
     child created under a disabled customer domain starts enabled (lab S10), so its state is set
     and verified before its content is linked.
+
+    One node step runs per name at a time (`account_name_lease`). A caller that does not own an
+    operation on the account (the create task, the sweep) changes the node only while it holds the
+    account's row lock, the one migration admission takes, and only when no migration, backup,
+    restore or delete owns the account; the wanted state is then read again under that lock. A
+    migration or restore, which is the account's operation, passes `operation_owner=True`.
     """
+    from .account_name_lease import node_lease  # noqa: PLC0415  # Deferred: keeps the module import light
+
     hostname = AccountHostname.objects.filter(account=account, retired_at__isnull=True).first()
     if hostname is None:
         return Err("The account has no live account name", retriability=Retriability.NOT_RETRIABLE)
-    name = hostname.fqdn
+    with node_lease(hostname) as token:
+        if token is None:
+            return Err(f"Another node step for {hostname.fqdn} is running", retriability=Retriability.UNKNOWN)
+        return _ensure_held(hostname, account, server, enabled=enabled, operation_owner=operation_owner)
+
+
+def _ensure_held(
+    hostname: AccountHostname,
+    account: VirtualminAccount,
+    server: VirtualminServer,
+    *,
+    enabled: bool,
+    operation_owner: bool,
+) -> Result[EnsureOutcome, str]:
     gateway = _gateway(server)
+    preflight = _preflight(gateway, hostname, account, server)
+    if preflight.is_err():
+        return Err(preflight.unwrap_err(), retriability=retriability_of(preflight))
+    if operation_owner:
+        placed = _place_name(gateway, hostname, account, enabled=enabled, rows=preflight.unwrap())
+    else:
+        with transaction.atomic():
+            locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            refusal = _admission_refusal(locked)
+            if refusal is not None:
+                return refusal
+            # Read again under the lock: the account and the node may have moved since the preflight.
+            wanted = enabled and locked.status == "active"
+            placed = _place_name(gateway, hostname, locked, enabled=wanted, rows=None)
+    if placed.is_err():
+        return Err(placed.unwrap_err(), retriability=retriability_of(placed))
+    created, now_enabled = placed.unwrap()
 
-    rows = _rows(gateway)
-    if rows.is_err():
-        return Err(rows.unwrap_err(), retriability=retriability_of(rows))
-    refusal = _ownership_refusal(rows.unwrap(), account, name)
-    if refusal is not None:
-        return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
-
-    created = name not in rows.unwrap()
-    if created:
-        create = _create_name(gateway, account, name)
-        if create.is_err():
-            return Err(create.unwrap_err(), retriability=retriability_of(create))
-
-    state = _set_state(gateway, name, enabled=enabled)
-    if state.is_err():
-        return Err(state.unwrap_err(), retriability=retriability_of(state))
-
+    name = hostname.fqdn
     linked = _link_when_shipped(gateway, server, account, name)
     if linked.is_err():
         return Err(linked.unwrap_err(), retriability=retriability_of(linked))
@@ -286,9 +308,74 @@ def ensure_node_account_name(  # noqa: PLR0911  # One exit per step that can ref
         return Err(certificate.unwrap_err(), retriability=retriability_of(certificate))
     return Ok(
         EnsureOutcome(
-            created=created, enabled=enabled, linked=linked.unwrap(), certificate_installed=certificate.unwrap()
+            created=created, enabled=now_enabled, linked=linked.unwrap(), certificate_installed=certificate.unwrap()
         )
     )
+
+
+def _preflight(
+    gateway: VirtualminGateway, hostname: AccountHostname, account: VirtualminAccount, server: VirtualminServer
+) -> Result[dict[str, dict[str, str]], str]:
+    """The node's rows, refused when the name belongs to anything else, and old evidence dropped.
+
+    A fresh sub-server serves Virtualmin's self-signed certificate, so an install recorded for an
+    earlier copy (a rolled-back migration, a restore from nothing, a return to a former node) must not
+    count. It is dropped before any create, outside the account lock, so a create that succeeds on the
+    node and is never answered cannot leave the old evidence in place.
+    """
+    from .account_name_certificates import forget_installation  # noqa: PLC0415  # Deferred: imports acme
+
+    rows = _rows(gateway)
+    if rows.is_err():
+        return Err(rows.unwrap_err(), retriability=retriability_of(rows))
+    refusal = _ownership_refusal(rows.unwrap(), account, hostname.fqdn)
+    if refusal is not None:
+        return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
+    if hostname.fqdn not in rows.unwrap():
+        forget_installation(hostname, server)
+    return Ok(rows.unwrap())
+
+
+def _admission_refusal(account: VirtualminAccount) -> Err[str] | None:
+    """None when a caller owning no operation may change the node now; the refusal otherwise."""
+    from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+
+    if account_has_active_operation(account):
+        return Err("An operation owns the account; its name is left to the sweep", retriability=Retriability.UNKNOWN)
+    if account.status not in SYNCABLE_STATUSES:
+        return Err(f"The account is {account.status}", retriability=Retriability.NOT_RETRIABLE)
+    return None
+
+
+def _place_name(
+    gateway: VirtualminGateway,
+    hostname: AccountHostname,
+    account: VirtualminAccount,
+    *,
+    enabled: bool,
+    rows: dict[str, dict[str, str]] | None,
+) -> Result[tuple[bool, bool], str]:
+    """The name's sub-server owned and in the wanted state: (created, enabled). `rows=None` reads them."""
+    name = hostname.fqdn
+    if rows is None:
+        listed = _rows(gateway)
+        if listed.is_err():
+            return Err(listed.unwrap_err(), retriability=retriability_of(listed))
+        rows = listed.unwrap()
+        refusal = _ownership_refusal(rows, account, name)
+        if refusal is not None:
+            return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
+
+    created = name not in rows
+    if created:
+        create = _create_name(gateway, account, name)
+        if create.is_err():
+            return Err(create.unwrap_err(), retriability=retriability_of(create))
+
+    state = _set_state(gateway, name, enabled=enabled)
+    if state.is_err():
+        return Err(state.unwrap_err(), retriability=retriability_of(state))
+    return Ok((created, enabled))
 
 
 def remove_node_account_name(account: VirtualminAccount, server: VirtualminServer) -> Result[bool, str]:

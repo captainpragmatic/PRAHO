@@ -170,6 +170,11 @@ def record_installation(
     return install
 
 
+def forget_installation(hostname: AccountHostname, server: VirtualminServer) -> None:
+    """The node no longer serves what was recorded: its sub-server is about to be created afresh."""
+    AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server).delete()
+
+
 def ensure_certificate_on_node(hostname: AccountHostname, server: VirtualminServer) -> NodeCertificateResult:
     """Make sure the name has valid material and that it is installed on ``server``.
 
@@ -602,15 +607,37 @@ def _install_stale(counts: dict[str, int]) -> None:
     """
     installs = AccountNameCertificateInstall.objects.filter(
         hostname__retired_at__isnull=True, hostname__certificate__isnull=False
-    ).select_related("hostname__certificate", "server")
+    ).select_related("hostname__certificate", "hostname__account", "server")
     for install in installs:
         certificate = install.hostname.certificate
         if not certificate.has_valid_material() or install.certificate_ref == certificate.current_certificate_ref:
+            continue
+        if _name_under_operation(install.hostname):
+            continue  # A migration's target is neither the account's server nor the name's target yet
+        if install.server_id not in _serving_servers(install.hostname):
+            # The account left that node (a migration's cleanup deletes the customer domain, and the
+            # sub-server with it), so the row no longer describes anything that node serves.
+            install.delete()
             continue
         if install_current_certificate(install.hostname, install.server).is_ok():
             counts["installed"] += 1
         else:
             counts["install_failed"] += 1
+
+
+def _name_under_operation(hostname: AccountHostname) -> bool:
+    from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+
+    account = hostname.account
+    return account is not None and account_has_active_operation(account)
+
+
+def _serving_servers(hostname: AccountHostname) -> set[UUID]:
+    """The nodes that serve the name when no operation is moving it: its target and the account's node."""
+    servers = {hostname.target_server_id}
+    if hostname.account is not None:
+        servers.add(hostname.account.server_id)
+    return {server for server in servers if server is not None}
 
 
 def sweep_stale_challenge_records() -> int:
