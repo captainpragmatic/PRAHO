@@ -42,6 +42,7 @@ from .models import (
     DataExport,
     audit_mutation_allowed,
 )
+from .person_events import ErasureSubject, capture_subject, events_about, events_concerning, remove_identity
 from .session_digest import digest_session_identifiers, session_key_digest
 
 # Constants for audit operations
@@ -1640,6 +1641,8 @@ class GDPRDeletionService:
         # Lock the row, then write only the fields anonymisation changes: a full save of a stale
         # instance would write back anything changed meanwhile, such as a role or a 2FA reset (#689).
         User.objects.select_for_update().filter(pk=user.pk).first()
+        # Who the person is, captured before their email and name are overwritten below.
+        subject = capture_subject(user)
 
         # Anonymize core user fields
         user.email = cls.ANONYMIZATION_MAP["email"]()
@@ -1669,12 +1672,6 @@ class GDPRDeletionService:
         # whose address is the customer contact must not keep receiving marketing.
         GDPRConsentService._propagate_marketing_consent(user, consent=False)
 
-        # Anonymize audit logs (IP addresses only)
-        with audit_mutation_allowed("gdpr_anonymization"):
-            AuditEvent.objects.filter(user=user).update(
-                ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
-            )
-
         # An individual customer's CNP is the person's national identification number. It is
         # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
         # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
@@ -1701,6 +1698,33 @@ class GDPRDeletionService:
             id_key="invoice_id",
             where="an invoice not yet issued",
         )
+        cls._erase_audit_identity(subject)
+
+    @classmethod
+    def _erase_audit_identity(cls, subject: ErasureSubject) -> None:
+        """Remove the person from the audit log without destroying anyone else's evidence.
+
+        The person's own events that no law requires are fully scrubbed. Identity removal keeps
+        the rest: financial and contract evidence, events a staff member performed on the person,
+        and the person's actions on other people's data (owner decision O2).
+        """
+        now = timezone.now()
+        claims_cutoff = AuditRetentionService.claims_retention_cutoff(now)
+        about_ids = set(events_about(subject).values_list("id", flat=True))
+        scrub: list[AuditEvent] = []
+        keep: list[AuditEvent] = []
+        for event in events_concerning(subject):
+            someone_else_acted = event.user_id is not None and event.user_id != subject.user_pk
+            retained = AuditRetentionService.is_retained(event, now, claims_cutoff=claims_cutoff)
+            if event.id not in about_ids or someone_else_acted or retained:
+                keep.append(event)
+            else:
+                scrub.append(event)
+        AuditRetentionService._anonymize_events(scrub)
+        removed_at = now.isoformat()
+        with audit_mutation_allowed("gdpr_identity_removal"):
+            for event in keep:
+                remove_identity(event, subject, removed_at=removed_at)
 
     @staticmethod
     def _clear_cnp(rows: models.QuerySet[Any], field: str, *, id_key: str, where: str) -> None:
@@ -1737,14 +1761,15 @@ class GDPRDeletionService:
                 cls._revoke_user_exports(user)
 
                 # The person's audit events go, except evidence the law still requires (GDPR
-                # Art. 17(3)(b)): financial records within their legal period keep their content,
+                # Art. 17(3)(b)): financial and contract records within their period keep their content,
                 # lose the network identity, and are detached from the person when the user row
                 # goes (AuditEvent.user is SET_NULL). Other business events are the person's data.
                 now = timezone.now()
+                claims_cutoff = AuditRetentionService.claims_retention_cutoff(now)
                 held_ids = [
                     event.id
                     for event in AuditEvent.objects.filter(user=user)
-                    if AuditRetentionService.is_held(event, now)
+                    if AuditRetentionService.is_retained(event, now, claims_cutoff=claims_cutoff)
                 ]
                 with audit_mutation_allowed("gdpr_erasure"):
                     AuditEvent.objects.filter(user=user).exclude(id__in=held_ids).delete()
@@ -4570,6 +4595,9 @@ class AuditIntegrityService:
         issues = []
 
         for event in events:
+            # An identity-removed row lacks the person and their network by design.
+            if isinstance(event.metadata, dict) and event.metadata.get("identity_removed_at"):
+                continue
             # Check required fields for GDPR events
             if event.category in ["privacy", "data_protection"]:
                 required_fields = ["user", "ip_address", "description"]
@@ -4743,12 +4771,65 @@ class AuditRetentionService:
         """Whether the law still requires this event: financial and newer than the cutoff."""
         return cls._is_financial_record(event) and event.timestamp >= cls.financial_retention_cutoff(now)
 
+    # What a customer agreed to or was given: the evidence for a contractual claim.
+    CLAIMS_ACTIONS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "order_terms_accepted",
+            "early_performance_requested",
+            "terms_of_service_accepted",
+            "terms_accepted",
+            "privacy_policy_accepted",
+        }
+    )
+    # An order in one of these states was paid for, so its lifecycle events are contract evidence.
+    CLAIMS_ORDER_STATUSES: ClassVar[frozenset[str]] = frozenset({"paid", "in_review", "provisioning", "completed"})
+
+    @classmethod
+    def claims_retention_cutoff(cls, now: datetime) -> datetime:
+        """The oldest instant still inside the period for contractual claims."""
+        return now - timedelta(days=SettingsService.get_integer_setting("audit.legal_claims_retention_days", 2190))
+
+    @classmethod
+    def is_held_for_claims(cls, event: AuditEvent, now: datetime, *, cutoff: datetime | None = None) -> bool:
+        """Whether the event proves a contract term and the period for claims has not run out.
+
+        A batch passes `cutoff` once: inside a transaction the setting is read uncached.
+        """
+        if event.timestamp < (cutoff or cls.claims_retention_cutoff(now)):
+            return False
+        if event.action in cls.CLAIMS_ACTIONS:
+            return True
+        if not event.content_type_id or not event.object_id:
+            return False
+        content_type = ContentType.objects.get_for_id(event.content_type_id)
+        if (content_type.app_label, content_type.model) == ("orders", "order"):
+            from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
+
+            # Ever paid, not only paid now: a paid order cancelled later is still a contract.
+            statuses = cls.CLAIMS_ORDER_STATUSES
+            return (
+                Order.objects.filter(pk=event.object_id)
+                .filter(Q(status__in=statuses) | Q(status_history__new_status__in=statuses))
+                .exists()
+            )
+        if (content_type.app_label, content_type.model) == ("provisioning", "service"):
+            from apps.provisioning.service_models import Service  # noqa: PLC0415  # Deferred: import cycle
+
+            return Service.objects.filter(pk=event.object_id).exists()
+        return False
+
+    @classmethod
+    def is_retained(cls, event: AuditEvent, now: datetime, *, claims_cutoff: datetime | None = None) -> bool:
+        """Whether any hold keeps this event's content: financial evidence or contract evidence."""
+        return cls.is_held(event, now) or cls.is_held_for_claims(event, now, cutoff=claims_cutoff)
+
     # Content types whose object_id identifies a person; anonymization replaces the
     # reference with a sentinel so the row stops pointing at the data subject.
     PERSON_BEARING_MODELS: ClassVar[frozenset[tuple[str, str]]] = frozenset(
         {
             ("users", "user"),
             ("users", "userprofile"),
+            ("users", "customermembership"),
             ("customers", "customer"),
             ("customers", "customertaxprofile"),
             ("customers", "customerbillingprofile"),
@@ -4756,6 +4837,42 @@ class AuditRetentionService:
         }
     )
     ANONYMIZED_OBJECT_SENTINEL = "anonymized"
+    ANONYMIZED_DESCRIPTION = "Anonymized under retention policy"
+
+    @classmethod
+    def _in_anonymized_post_state(cls, event: AuditEvent) -> bool:
+        """Whether the row already is what anonymisation leaves: marked, and with nothing left."""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        return (
+            bool(metadata.get("anonymized"))
+            and event.description == cls.ANONYMIZED_DESCRIPTION
+            and event.user_id is None
+            and not event.ip_address
+            and not event.user_agent
+            and not event.request_id
+            and not event.session_key
+            and event.old_values == {"anonymized": True}
+            and event.new_values == {"anonymized": True}
+        )
+
+    @classmethod
+    def _anonymized_post_state_query(cls) -> Q:
+        """`_in_anonymized_post_state` in SQL: only a row with nothing left is skipped.
+
+        has_key, not __anonymized=True: inside exclude(), SQL three-valued logic would make a
+        missing JSON key drop exactly the un-anonymized rows. The other columns are never NULL.
+        """
+        return Q(
+            metadata__has_key="anonymized",
+            description=cls.ANONYMIZED_DESCRIPTION,
+            user__isnull=True,
+            ip_address__isnull=True,
+            user_agent="",
+            request_id="",
+            session_key="",
+            old_values={"anonymized": True},
+            new_values={"anonymized": True},
+        )
 
     # Metadata keys that survive anonymization. An ALLOWLIST by design: a blocklist
     # scrub silently retains any identifying key nobody thought to enumerate.
@@ -4823,11 +4940,10 @@ class AuditRetentionService:
         if policy.severity:
             queryset = queryset.filter(severity=policy.severity)
         if policy.action == "anonymize":
-            # Idempotency (W4): already-anonymized rows never re-enter the pipeline,
-            # so a second weekly run performs zero mutations and emits no event.
-            # has_key, not __anonymized=True: SQL three-valued logic makes exclude()
-            # on a missing JSON key drop exactly the un-anonymized rows we want.
-            queryset = queryset.exclude(metadata__has_key="anonymized")
+            # Idempotency (W4): rows already in the anonymized post-state never re-enter, so a
+            # second run performs zero mutations. A row only marked anonymized, or left half
+            # scrubbed, still holds personal data and is scrubbed.
+            queryset = queryset.exclude(cls._anonymized_post_state_query())
 
         events_to_process = list(queryset)
         result = {"processed": len(events_to_process), "deleted": 0, "anonymized": 0}
@@ -4840,7 +4956,8 @@ class AuditRetentionService:
         elif policy.action == "anonymize":
             # Anonymisation blanks the evidence (descriptions, old/new values), so financial
             # records the law still requires are held here too.
-            held = [event for event in events_to_process if cls.is_held(event, now)]
+            claims_cutoff = cls.claims_retention_cutoff(now)
+            held = [event for event in events_to_process if cls.is_retained(event, now, claims_cutoff=claims_cutoff)]
             if held:
                 logger.info(
                     f"✅ [Retention] Held {len(held)} financial records from anonymisation (policy {policy.name})"
@@ -4865,8 +4982,9 @@ class AuditRetentionService:
         now = now or timezone.now()
         deletable_ids = []
         blocked = 0
+        claims_cutoff = cls.claims_retention_cutoff(now)
         for event in events:
-            if cls.is_held(event, now):
+            if cls.is_retained(event, now, claims_cutoff=claims_cutoff):
                 blocked += 1
                 continue
             deletable_ids.append(event.id)
@@ -4916,7 +5034,7 @@ class AuditRetentionService:
         with audit_mutation_allowed("retention_anonymize"):
             for event in events:
                 metadata = event.metadata if isinstance(event.metadata, dict) else {}
-                if metadata.get("anonymized"):
+                if cls._in_anonymized_post_state(event):
                     continue
 
                 event.user = None
@@ -4929,7 +5047,7 @@ class AuditRetentionService:
                     and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
                 ):
                     event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
-                event.description = "Anonymized under retention policy"
+                event.description = cls.ANONYMIZED_DESCRIPTION
                 event.old_values = {"anonymized": True}
                 event.new_values = {"anonymized": True}
                 event.metadata = {
@@ -4994,7 +5112,7 @@ class AuditRetentionService:
                 scope = scope.filter(severity=policy.severity)
                 past = past.filter(severity=policy.severity)
             if policy.action == "anonymize":
-                past = past.exclude(metadata__has_key="anonymized")
+                past = past.exclude(cls._anonymized_post_state_query())
 
             key = f"{policy.category}/{policy.severity}" if policy.severity else policy.category
             past_count = past.count()
