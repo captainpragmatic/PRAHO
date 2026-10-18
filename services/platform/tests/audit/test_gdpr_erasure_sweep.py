@@ -150,30 +150,36 @@ class ErasureSweepTests(TestCase):
         self.assertNotIn(EMAIL, written.description)
         self.assertNotIn("ip_address", written.metadata)
 
-    def test_the_proof_that_a_cnp_was_cleared_stays_as_written(self) -> None:
+    def test_the_proof_that_a_cnp_was_cleared_keeps_its_proof_and_nothing_of_the_person(self) -> None:
         user = self.person()
         clear_cnp = GDPRDeletionService._clear_cnp
 
         def clear_and_prove(*args: Any, **kwargs: Any) -> None:
             clear_cnp(*args, **kwargs)
-            # Something the sweep would otherwise change, so the exemption is what keeps it.
-            AuditEvent.objects.create(
-                action="data_anonymization_completed",
-                category="privacy",
-                severity="low",
-                description=f"CNP cleared for {EMAIL}",
-                metadata={"field": "cnp", "ip_address": "198.51.100.9"},
-            )
+            # The proof as written, and one a caller filled with the person's details.
+            for description, extra in (
+                ("CNP cleared from the customer tax profile (GDPR erasure)", {}),
+                (f"CNP cleared for {EMAIL}", {"ip_address": "198.51.100.9"}),
+            ):
+                AuditEvent.objects.create(
+                    action="data_anonymization_completed",
+                    category="privacy",
+                    severity="low",
+                    description=description,
+                    metadata={"field": "cnp", "customer_id": "7", **extra},
+                )
 
         with patch.object(GDPRDeletionService, "_clear_cnp", side_effect=clear_and_prove):
             self.process(user, "anonymize")
 
-        proofs = AuditEvent.objects.filter(action="data_anonymization_completed", description__contains="CNP cleared for")
-        self.assertTrue(proofs.exists())
+        proofs = AuditEvent.objects.filter(action="data_anonymization_completed", metadata__customer_id="7")
+        self.assertEqual(proofs.count(), 6)
         for proof in proofs:
-            self.assertEqual(proof.description, f"CNP cleared for {EMAIL}")
-            self.assertEqual(proof.metadata["ip_address"], "198.51.100.9")
-            self.assertNotIn("identity_removed_at", proof.metadata)
+            self.assertEqual((proof.metadata["field"], proof.metadata["customer_id"]), ("cnp", "7"))
+            self.assertNotIn(EMAIL, proof.description)
+            self.assertNotIn("ip_address", proof.metadata)
+            if proof.description.startswith("CNP cleared from"):
+                self.assertNotIn("identity_removed_at", proof.metadata)
 
     def test_a_failed_sweep_rolls_the_erasure_back(self) -> None:
         user = self.person()

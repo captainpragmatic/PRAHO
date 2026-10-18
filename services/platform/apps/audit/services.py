@@ -44,7 +44,6 @@ from .models import (
     audit_mutation_allowed,
 )
 from .person_events import (
-    ERASURE_PROOF_ACTIONS,
     ErasureSubject,
     ErasureWrites,
     capture_subject,
@@ -1774,10 +1773,10 @@ class GDPRDeletionService:
         """Remove the person from what the erasure itself wrote, from the request and their compliance records.
 
         Audit rows written by receivers during the erasure (a profile save, a membership deleted
-        with the user) hold the identifiers the erasure removed elsewhere. The proof that a CNP
-        was cleared stays as written.
+        with the user) hold the identifiers the erasure removed elsewhere. Identity removal keeps
+        what a row proves, so the proof that a CNP was cleared, which names no one, stays as written.
         """
-        written = AuditEvent.objects.filter(pk__in=writes.audit_event_ids).exclude(action__in=ERASURE_PROOF_ACTIONS)
+        written = AuditEvent.objects.filter(pk__in=writes.audit_event_ids)
         cls._remove_audit_identity(written, subject)
         removed_at = timezone.now().isoformat()
         remove_compliance_identity(deletion_request, subject, removed_at=removed_at)
