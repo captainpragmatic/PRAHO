@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditEventData, AuditService, actor_context
@@ -16,6 +16,7 @@ from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 
 from .account_hostname_models import AccountHostname
+from .virtualmin_models import VirtualminAccount
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +65,25 @@ def audit_account_hostname_saved(
         _log(instance, "account_hostname_assigned", f"Account hostname {instance.fqdn} assigned")
     if getattr(instance, "_retires_now", False):
         _log(instance, "account_hostname_retired", f"Account hostname {instance.fqdn} retired")
+
+
+@receiver(post_save, sender=VirtualminAccount, dispatch_uid="account_name_follows_termination")
+def retire_account_name_on_termination(
+    sender: type[VirtualminAccount], instance: VirtualminAccount, raw: bool = False, **kwargs: Any
+) -> None:
+    """An account that becomes terminated retires its name, whichever path terminated it (P1.7)."""
+    if raw or instance.status != "terminated":
+        return
+    from .account_hostname_lifecycle import on_account_terminated  # noqa: PLC0415  # Deferred: imports the service
+
+    on_account_terminated(instance)
+
+
+@receiver(pre_delete, sender=VirtualminAccount, dispatch_uid="account_name_follows_row_delete")
+def retire_account_name_on_row_delete(
+    sender: type[VirtualminAccount], instance: VirtualminAccount, **kwargs: Any
+) -> None:
+    """A deleted account row retires its name; the row keeps the label taken for ever."""
+    from .account_hostname_lifecycle import on_account_terminated  # noqa: PLC0415  # Deferred: imports the service
+
+    on_account_terminated(instance)

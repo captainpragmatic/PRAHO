@@ -48,6 +48,13 @@ case $cmd in
         if [[ -n ${FAKE_CHILD:-} && -e $state/child_disabled ]]; then echo "$FAKE_CHILD"; fi
         ;;
       multi)
+        want=""; prev=""; for a in "$@"; do [[ $prev != --domain ]] || want=$a; prev=$a; done
+        if [[ -n ${FAKE_CHILD:-} && $want == "$FAKE_CHILD" ]]; then
+          # The account name's own virtual host: its document root is the link, its names its own.
+          echo "    HTML directory: /home/node/domains/$FAKE_CHILD/public_html"
+          echo "    Website hostnames: $FAKE_CHILD www.$FAKE_CHILD webmail.$FAKE_CHILD admin.$FAKE_CHILD"
+          exit 0
+        fi
         # What a restore rewrote (state/docroot, state/hostnames) wins over the environment defaults.
         if [[ -e $state/listing_broken ]]; then echo "list-domains: cannot read the domain" >&2; exit 1; fi
         docroot=${FAKE_DOCROOT:-/home/node/public_html}; [[ ! -e $state/docroot ]] || docroot=$(<"$state/docroot")
@@ -369,6 +376,18 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(self.restores(), [])
         self.assertTrue(self.disabled(), "the node really is left disabled")
         self.assertFalse(self.maint.exists(), "the maintenance section was taken down")
+
+    def test_the_barrier_covers_the_account_names_virtual_host_too(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD)
+        self.assertEqual(result.outcome, "ok")
+        conf = self.maintenance_conf()  # the 503 section as the base restore began
+        escaped = CHILD.replace(".", "\\.")
+        self.assertIn(f"RewriteCond %{{DOCUMENT_ROOT}} ^/home/node/domains/{escaped}/public_html", conf)
+        for name in (CHILD, f"www.{CHILD}", f"webmail.{CHILD}", f"admin.{CHILD}"):
+            self.assertIn(name.replace(".", "\\."), conf, name)
+        probed = set((self.state / "probed").read_text().split())
+        self.assertIn(CHILD, probed)
+        self.assertIn(f"webmail.{CHILD}", probed)
 
     def test_the_account_name_is_disabled_with_the_domain_and_stays_disabled(self) -> None:
         result = self.step(FAKE_CHILD=CHILD)

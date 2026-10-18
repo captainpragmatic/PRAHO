@@ -253,14 +253,14 @@ add_probe_host() { # HOST : once per exact spelling (the upper-case spelling is 
   probe_hosts+=("$1")
 }
 
-# read_surface : read the domain's HTML directory and website hostnames NOW and fold them into the
-# barrier's matchers and the probe list. Only ever adds: what an earlier read found stays covered
+# read_one_surface DOMAIN : read DOMAIN's HTML directory and website hostnames NOW and fold them into
+# the barrier's matchers and the probe list. Only ever adds: what an earlier read found stays covered
 # and probed, so a restore that drops or moves something never narrows the barrier mid-flight.
 # Returns 1, changing nothing, when the document root cannot be read as a safe absolute path.
-read_surface() {
-  local info root hostnames name escaped_name
+read_one_surface() {
+  local dom=$1 info root hostnames name escaped_name
   local -a listed_names
-  info=$(virtualmin list-domains --domain "$domain" --multiline 2>/dev/null) || return 1
+  info=$(virtualmin list-domains --domain "$dom" --multiline 2>/dev/null) || return 1
   root=$(sed -n 's/^ *HTML directory: *//p' <<<"$info")
   root=${root%%$'\n'*}
   root=${root%/}
@@ -274,7 +274,7 @@ read_surface() {
   fi
   # read, not an unquoted expansion: a wildcard alias must not be globbed against the working directory.
   read -r -a listed_names <<<"$hostnames"
-  for name in "$domain" "www.$domain" "mail.$domain" ${listed_names[@]+"${listed_names[@]}"}; do
+  for name in "$dom" "www.$dom" "mail.$dom" ${listed_names[@]+"${listed_names[@]}"}; do
     [[ $name =~ $host_ok ]] || continue
     [[ $seen_names != *" $name "* ]] || continue
     seen_names+="$name "
@@ -288,8 +288,23 @@ read_surface() {
       add_probe_host "$name"
     fi
   done
-  add_probe_host "$(printf '%s' "$domain" | tr '[:lower:]' '[:upper:]')"
-  add_probe_host "$domain."
+  add_probe_host "$(printf '%s' "$dom" | tr '[:lower:]' '[:upper:]')"
+  add_probe_host "$dom."
+}
+
+# read_surface : the domain's own virtual host AND every sub-server under it. The account name
+# (ADR-0061) is a sub-server with a virtual host, document root and names of its own that serve the
+# customer's files through a link, so the barrier must answer 503 for it too. A child listing that
+# cannot be read fails like an unreadable document root.
+read_surface() {
+  local children child
+  read_one_surface "$domain" || return 1
+  children=$(virtualmin list-domains --parent "$domain" --subserver --name-only 2>/dev/null) || return 1
+  while IFS= read -r child; do
+    [[ -n $child ]] || continue
+    [[ $child =~ $host_ok ]] || return 1
+    read_one_surface "$child" || return 1
+  done <<<"$children"
   printf -v name_regex '%s|' "${name_alternatives[@]}"
   name_regex=${name_regex%|}
 }

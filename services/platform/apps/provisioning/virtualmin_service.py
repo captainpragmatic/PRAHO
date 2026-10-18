@@ -28,6 +28,7 @@ from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
+from .account_hostname_lifecycle import on_account_ready
 from .domain_veto import domain_disables_hosting
 from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
@@ -405,6 +406,12 @@ class VirtualminProvisioningService:
             if not committed:
                 account.server = previous_server
 
+    @staticmethod
+    def _domain_created(account: VirtualminAccount) -> None:
+        """A verified create: say so, and let the account's name follow (ADR-0061 P1.7)."""
+        logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
+        on_account_ready(account)
+
     def _execute_domain_creation(  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
@@ -497,7 +504,7 @@ class VirtualminProvisioningService:
 
                             job.mark_completed(response.data, completed_rollback)
 
-                        logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
+                        self._domain_created(account)
                         return Ok(response.data)
 
                     except Exception as db_error:
@@ -1349,6 +1356,7 @@ class VirtualminProvisioningService:
 
                 job.mark_completed({"recovered": "remote domain already present"})
             logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
+            on_account_ready(account)
             return Ok(True)
 
         creation_result = self._execute_domain_creation(account, job)

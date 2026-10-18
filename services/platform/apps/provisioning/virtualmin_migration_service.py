@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .account_hostname_lifecycle import ensure_on_recreated_node
 from .account_hostname_models import AccountHostname
 from .placement import order_placement_candidates
 from .virtualmin_backup_service import (
@@ -591,6 +592,11 @@ class VirtualminMigrationService:
                 expected, actual = " ".join(sorted(expected.split())), " ".join(sorted(actual.split()))
             if actual != expected:
                 raise ValueError(f"Restored domain differs from snapshot: {key}")
+        # The archive carries the customer domain only: put the account name back on the target,
+        # disabled. The activation's cascading enable turns it on with the account (ADR-0061 P1.7).
+        named = ensure_on_recreated_node(migration.account, migration.target_server, enabled=False)
+        if named.is_err():
+            logger.warning("⚠️ [VirtualminMigration] Account name not ensured on the target: %s", named.unwrap_err())
         self._move(migration, token, "activating")
 
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:

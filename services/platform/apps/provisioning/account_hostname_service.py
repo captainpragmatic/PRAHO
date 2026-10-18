@@ -387,7 +387,8 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
         deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
         if deleted.is_err():
             return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
-    AccountHostname.objects.filter(pk=hostname.pk).update(
-        retired_at=timezone.now(), records={}, updated_at=timezone.now()
-    )
+    # A save, not a queryset update: the retirement is audited by the row's own signals.
+    hostname.retired_at = timezone.now()
+    hostname.records = {}
+    hostname.save(update_fields=["retired_at", "records", "updated_at"])
     return Ok(None)

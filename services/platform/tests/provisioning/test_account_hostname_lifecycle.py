@@ -1,0 +1,193 @@
+"""Account names at the account's lifecycle boundaries (ADR-0061 P1.7).
+
+First the safety net: with `dns.account_hostnames_enabled` off, the create, suspend and migration
+paths behave exactly as before, with no name row, no node call and no DNS call. Then each boundary
+with it on: a finished create ensures the name on the account's node, a migration puts the name
+back on its target before activating, and a terminated or deleted account retires its name.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
+from uuid import uuid4
+
+from django.utils import timezone
+
+from apps.common.types import Ok
+from apps.infrastructure.dns_gateway import _DNS_PROVIDER_REGISTRY, register_dns_gateway
+from apps.provisioning import account_hostname_lifecycle as lifecycle
+from apps.provisioning import account_hostname_service as service
+from apps.provisioning.account_hostname_models import AccountHostname
+from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
+from apps.provisioning.virtualmin_models import VirtualminAccount
+from apps.settings.services import SettingsService
+from tests.helpers.fake_dns_gateway import FakeDnsGateway
+from tests.provisioning.test_cov_provisioning_services_creation import VirtualminServiceCoverageCase
+
+ZONE = "praho-sites.net"
+ZONE_ID = "0123456789abcdef0123456789abcdef"
+
+
+def _configure(*, enabled: bool) -> None:
+    for key, value in (
+        ("dns.account_hostname_zone", ZONE),
+        ("dns.account_hostname_zone_id", ZONE_ID),
+        ("dns.account_zone_api_token", "token-value"),
+    ):
+        SettingsService.update_setting(key, value).unwrap()
+    SettingsService.update_setting("dns.account_hostnames_enabled", enabled).unwrap()
+
+
+class LifecycleCase(VirtualminServiceCoverageCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.payloads["disable-domain"] = {"status": "success", "message": "disabled"}
+        self.payloads["enable-domain"] = {"status": "success", "message": "enabled"}
+        previous = _DNS_PROVIDER_REGISTRY.get(service.DNS_PROVIDER)
+        register_dns_gateway(service.DNS_PROVIDER, FakeDnsGateway)
+        self.addCleanup(lambda: register_dns_gateway(service.DNS_PROVIDER, previous) if previous else None)
+        FakeDnsGateway.reset({ZONE_ID: ZONE})
+        self.node_calls: list[str] = []
+        ensure = patch.object(
+            service,
+            "ensure_node_account_name",
+            lambda account, server, *, enabled: self.node_calls.append(f"ensure enabled={enabled}") or Ok(None),
+        )
+        ensure.start()
+        self.addCleanup(ensure.stop)
+
+
+class FeatureOffChangesNothingTests(LifecycleCase):
+    def test_create_suspend_and_unsuspend_make_no_name_and_no_dns_or_node_call(self) -> None:
+        _configure(enabled=False)
+        with patch("django_q.tasks.async_task") as enqueue, self.captureOnCommitCallbacks(execute=True):
+            account = self.provisioning.create_virtualmin_account(self._creation()).unwrap()
+            self.provisioning.suspend_account(account, "billing hold").unwrap()
+            self.provisioning.unsuspend_account(account).unwrap()
+        enqueue.assert_not_called()
+        self.assertFalse(AccountHostname.objects.exists())
+        self.assertEqual(FakeDnsGateway.calls, [])
+        self.assertEqual(self.node_calls, [])
+
+    def test_the_task_and_the_recreate_hook_do_nothing_while_off(self) -> None:
+        _configure(enabled=False)
+        account = self._account()
+        self.assertEqual(lifecycle.ensure_account_name(str(account.pk)), {"outcome": "disabled"})
+        self.assertEqual(lifecycle.ensure_on_recreated_node(account, self.server, enabled=False), Ok(None))
+        self.assertFalse(AccountHostname.objects.exists())
+        self.assertEqual(self.node_calls, [])
+
+
+class AccountReadyTests(LifecycleCase):
+    def test_a_finished_create_enqueues_the_name_once_it_commits(self) -> None:
+        _configure(enabled=True)
+        with patch("django_q.tasks.async_task") as enqueue:
+            with self.captureOnCommitCallbacks(execute=False) as pending:
+                account = self.provisioning.create_virtualmin_account(self._creation()).unwrap()
+                enqueue.assert_not_called()
+            for callback in pending:
+                callback()
+        enqueue.assert_called_once_with(lifecycle.ENSURE_TASK, str(account.pk))
+
+    def test_the_task_allocates_the_name_points_it_at_the_node_and_serves_it(self) -> None:
+        _configure(enabled=True)
+        account = self._account()
+        VirtualminAccount.objects.filter(pk=account.pk).update(provisioned_at=timezone.now())
+        self.server.__class__.objects.filter(pk=self.server.pk).update(ipv4_address="95.217.0.10")
+        outcome = lifecycle.ensure_account_name(str(account.pk))
+        hostname = AccountHostname.objects.get(account=account)
+        self.assertEqual(hostname.target_server, self.server)
+        self.assertEqual(self.node_calls, ["ensure enabled=True"])
+        self.assertEqual(outcome, {"outcome": "skipped:certificate_not_ready"})
+
+    def test_a_suspended_account_gets_its_name_disabled(self) -> None:
+        _configure(enabled=True)
+        account = self._account()
+        VirtualminAccount.objects.filter(pk=account.pk).update(status="suspended", provisioned_at=timezone.now())
+        lifecycle.ensure_account_name(str(account.pk))
+        self.assertEqual(self.node_calls, ["ensure enabled=False"])
+
+    def test_the_target_server_is_set_once_and_never_moved_by_the_task(self) -> None:
+        _configure(enabled=True)
+        account = self._account()
+        other = self.server.__class__.objects.create(name="Other", hostname="vm-other.example.com")
+        hostname = service.allocate_account_hostname(account)
+        AccountHostname.objects.filter(pk=hostname.pk).update(target_server=other)
+        lifecycle.ensure_account_name(str(account.pk))
+        hostname.refresh_from_db()
+        self.assertEqual(hostname.target_server, other, "only a cutover or a recovery moves it")
+
+
+class MigrationTargetTests(LifecycleCase):
+    def test_the_name_is_put_back_on_the_target_disabled_before_activation(self) -> None:
+        _configure(enabled=True)
+        account = self._account()
+        service.allocate_account_hostname(account)
+        target = self.server.__class__.objects.create(name="Target", hostname="vm-target.example.com")
+        order: list[str] = []
+        migration = SimpleNamespace(
+            account=account,
+            target_server=target,
+            pre_migration_snapshot={"remote": {"username": account.virtualmin_username, "attributes": {}}},
+        )
+        migrator = VirtualminMigrationService()
+        with (
+            patch.object(
+                migrator,
+                "_domain",
+                lambda server, domain: {"username": account.virtualmin_username, "enabled": False, "attributes": {}},
+            ),
+            patch.object(migrator, "_move", lambda migration, token, state, **kw: order.append(f"move {state}")),
+            patch.object(
+                service,
+                "ensure_node_account_name",
+                lambda account, server, *, enabled: (
+                    order.append(f"ensure {server.hostname} enabled={enabled}") or Ok(None)
+                ),
+            ),
+        ):
+            migrator._verify(migration, uuid4())  # type: ignore[arg-type]  # a stand-in migration
+        self.assertEqual(order, ["ensure vm-target.example.com enabled=False", "move activating"])
+
+
+class TerminationTests(LifecycleCase):
+    def _named_account(self) -> tuple[VirtualminAccount, AccountHostname]:
+        _configure(enabled=True)
+        account = self._account()
+        return account, service.allocate_account_hostname(account)
+
+    def test_a_terminated_account_retires_its_name_once_it_commits(self) -> None:
+        account, hostname = self._named_account()
+        with self.captureOnCommitCallbacks(execute=True):
+            account.status = "terminated"
+            account.save(update_fields=["status", "updated_at"])
+        hostname.refresh_from_db()
+        self.assertIsNotNone(hostname.retired_at)
+
+    def test_a_deleted_account_row_retires_its_name_and_keeps_the_label_taken(self) -> None:
+        account, hostname = self._named_account()
+        with self.captureOnCommitCallbacks(execute=True):
+            account.delete()
+        hostname.refresh_from_db()
+        self.assertIsNotNone(hostname.retired_at)
+        self.assertIsNone(hostname.account_id)
+
+    def test_suspension_does_not_retire_the_name(self) -> None:
+        account, hostname = self._named_account()
+        with self.captureOnCommitCallbacks(execute=True):
+            account.status = "suspended"
+            account.save(update_fields=["status", "updated_at"])
+        hostname.refresh_from_db()
+        self.assertIsNone(hostname.retired_at)
+
+    def test_a_retirement_is_audited(self) -> None:
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        account, hostname = self._named_account()
+        with self.captureOnCommitCallbacks(execute=True):
+            account.status = "terminated"
+            account.save(update_fields=["status", "updated_at"])
+        events: Any = AuditEvent.objects.filter(object_id=str(hostname.pk)).values_list("action", flat=True)
+        self.assertTrue(any("retired" in action for action in events), list(events))
