@@ -98,6 +98,7 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
             raise AuditImmutabilityError(
                 "AuditEvent.bulk_create cannot ignore or update conflicts: audit rows are append-only"
             )
+        from .person_events import note_erasure_write  # noqa: PLC0415  # Deferred: app registry
         from .signals import (  # noqa: PLC0415  # Deferred: signals imports this module
             append_audit_event_chain_link,
             stamp_audit_event_integrity_hash,
@@ -120,6 +121,7 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
         with transaction.atomic():
             for event in created:
                 append_audit_event_chain_link(sender=AuditEvent, instance=event, created=True)
+                note_erasure_write(event)
         return created
 
     @staticmethod

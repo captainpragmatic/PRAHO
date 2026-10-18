@@ -241,6 +241,22 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="audit.legal_claims_retention_days",
+        data_type="integer",
+        default=2190,
+        group="advanced",
+        section=_("Audit"),
+        label=_("Contract evidence retention days"),
+        help_text=_(
+            "How long audit evidence of what a customer agreed to or was given (checkout terms, an early "
+            "start request, a paid order) is kept for claims. Retention and GDPR erasure keep its content "
+            "until then and remove only the person's identifiers."
+        ),
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="audit.max_files_displayed",
         data_type="integer",
         default=5,
