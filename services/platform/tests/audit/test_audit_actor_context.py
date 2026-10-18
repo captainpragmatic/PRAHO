@@ -309,6 +309,73 @@ class SignedPortalCallActorTests(TestCase):
         self.assertIsNone(current_actor())
 
 
+    def test_a_signed_principal_is_the_actor_where_no_view_recorded_one(self) -> None:
+        """A view that resolves the signed user itself (company creation) still credits that user."""
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.users.models import CustomerMembership  # noqa: PLC0415
+
+        user = User.objects.create_user(email="signed-creator@example.com", password="pw")
+        request = RequestFactory().post("/api/customers/create/")
+        request.user = AnonymousUser()
+        request._portal_principal = f"user:{user.pk}"  # type: ignore[attr-defined]  # as the HMAC middleware sets it
+
+        with acting_for_request(request):
+            self.assertEqual(current_actor(), user)
+            customer = Customer.objects.create(name="Signed Creator SRL", customer_type="company", status="active")
+            CustomerMembership.objects.create(user=user, customer=customer, role="owner")
+
+        event = AuditEvent.objects.filter(action="customer_membership_created").latest("timestamp")
+        self.assertEqual(event.user, user)
+
+    def test_an_inactive_or_ip_principal_is_nobody(self) -> None:
+        inactive = User.objects.create_user(email="inactive-signed@example.com", password="pw", is_active=False)
+        for principal in (f"user:{inactive.pk}", "ip:203.0.113.7", "anonymous"):
+            with self.subTest(principal=principal):
+                request = RequestFactory().post("/api/x/")
+                request.user = AnonymousUser()
+                request._portal_principal = principal  # type: ignore[attr-defined]  # as the HMAC middleware sets it
+                with acting_for_request(request):
+                    self.assertIsNone(current_actor())
+
+
+class ContextlessWritersCreditTheActorTests(TestCase):
+    """A writer that passes no context, or no user, still names whoever is acting (review of rows 36/41)."""
+
+    def setUp(self) -> None:
+        self.admin = User.objects.create_user(email="actor-admin@example.com", password="pw", is_staff=True)
+
+    def test_a_customer_deletion_names_the_staff_member(self) -> None:
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        customer = Customer.objects.create(name="Deleted Co", customer_type="company", status="active")
+        with acting_as(self.admin):
+            customer.delete()
+        event = AuditEvent.objects.filter(action="customer_deleted").latest("timestamp")
+        self.assertEqual(event.user, self.admin)
+
+    def test_a_vat_rule_change_names_the_staff_member(self) -> None:
+        from datetime import date  # noqa: PLC0415
+        from decimal import Decimal  # noqa: PLC0415
+
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.billing.tax_models import TaxRule  # noqa: PLC0415
+
+        with acting_as(self.admin):
+            TaxRule.objects.create(country_code="DE", rate=Decimal("0.19"), valid_from=date(2020, 1, 1))
+        event = AuditEvent.objects.filter(action__startswith="tax_rule").latest("timestamp")
+        self.assertEqual(event.user, self.admin)
+
+    def test_an_explicit_system_event_stays_the_systems(self) -> None:
+        from apps.audit.services import AuditService  # noqa: PLC0415
+
+        with acting_as(self.admin):
+            event = AuditService.log_simple_event("view", actor_type="system")
+            named = AuditService.log_simple_event("view")
+        self.assertIsNone(event.user)
+        self.assertEqual(named.user, self.admin)
+
+
 class MiddlewareListsTests(SimpleTestCase):
     def test_every_platform_middleware_list_has_the_actor_middleware_after_authentication(self) -> None:
         for name in ("base", "staging", "prod", "test"):

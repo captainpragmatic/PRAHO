@@ -69,6 +69,7 @@ class AuditSavepointPostgresTests(TransactionTestCase):
                 # request_id is varchar(36): a real DataError at INSERT, not a mock.
                 AuditService.log_event(AuditEventData(event_type="view"), AuditContext(request_id="x" * 80))
 
-            self.assertEqual(audit_failures.count(), 1)
+            self.assertEqual(audit_failures.count(), 0, "counted after commit, outside this transaction")
             self.assertFalse(transaction.get_connection().needs_rollback)
             self.assertEqual(User.objects.filter(pk=self.admin.pk).count(), 1)
+        self.assertEqual(audit_failures.count(), 1)

@@ -53,10 +53,30 @@ def current_actor() -> Any:
         return bound
     try:
         user = getattr(bound, _REQUEST_ACTOR_ATTR, None) or getattr(bound, "user", None)
-        return user if _is_authenticated(user) else None
+        if _is_authenticated(user):
+            return user
+        return _signed_principal_user(bound)
     except Exception:
         logger.warning("⚠️ [Audit] Could not resolve the acting user of the request", exc_info=True)
         return None
+
+
+def _signed_principal_user(request: HttpRequest) -> Any:
+    """The user a verified Portal call is signed for (``user:<id>``), when no view recorded one.
+
+    The HMAC middleware sets the principal from the body it has just verified, the same signed
+    ``user_id`` the API's own authentication trusts, so every signed path has an actor even where
+    a view resolves the user itself. The lookup is cached on the request.
+    """
+    principal = getattr(request, "_portal_principal", None)
+    if not isinstance(principal, str) or not principal.startswith("user:"):
+        return None
+    from django.contrib.auth import get_user_model  # noqa: PLC0415  # Deferred: app registry
+
+    user = get_user_model().objects.filter(pk=int(principal.removeprefix("user:")), is_active=True).first()
+    if user is not None:
+        setattr(request, _REQUEST_ACTOR_ATTR, user)
+    return user
 
 
 @contextmanager

@@ -35,15 +35,25 @@ def is_marked(error: BaseException) -> bool:
     return bool(getattr(error, _MARK, False))
 
 
-def record(error: BaseException) -> None:
-    """Count a swallowed audit write failure, without ever failing the caller."""
-    if not is_marked(error):
-        return
+def _increment() -> None:
     try:
         with transaction.atomic():
             counters.increment(AUDIT_WRITE_FAILURES_KEY, WINDOW_SECONDS)
     except Exception:
         logger.exception("🔥 [Audit] Could not count a failed audit write")
+
+
+def record(error: BaseException) -> None:
+    """Count a swallowed audit write failure once the caller commits, without ever failing it.
+
+    Counted after commit, outside the caller's transaction: the counter is one shared row, and an
+    increment inside a long money-moving transaction would hold its lock until that commits, so
+    every request would queue on it during an audit outage. An action that rolled back left no
+    hole in the trail, so it is not counted.
+    """
+    if not is_marked(error):
+        return
+    transaction.on_commit(_increment, robust=True)
 
 
 def count() -> int:

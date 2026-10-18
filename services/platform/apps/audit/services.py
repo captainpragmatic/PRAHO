@@ -743,9 +743,9 @@ class AuditService:
             event_data: AuditEventData containing event information
             context: AuditContext containing user and request context (optional)
         """
-        # Use default context if none provided
+        # No context names whoever is acting now, or nobody (a receiver that passes none).
         if context is None:
-            context = AuditContext()
+            context = AuditContext(user=current_actor())
 
         _check_registered_action(event_data.event_type)
 
@@ -866,6 +866,9 @@ class AuditService:
             is_sensitive=is_sensitive,
         )
 
+        # A user event with no user names whoever is acting now; an explicit system event stays one.
+        if user is None and actor_type == "user":
+            user = current_actor()
         context = AuditContext(
             user=user,
             actor_type=actor_type,

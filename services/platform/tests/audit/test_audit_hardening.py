@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
+from django.db import transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.audit import signals as audit_signals
@@ -51,24 +52,41 @@ class WriteFailureCounterTests(TestCase):
         return patch("apps.audit.services.AuditEvent.objects.create", side_effect=ValueError("insert refused"))
 
     def test_a_swallowed_audit_write_is_counted(self) -> None:
-        with (
-            self.fail_the_insert(),
-            self.assertLogs("apps.audit.services", level="ERROR"),
-            best_effort_atomic(logger=logger, scope="test", message="audit write failed"),
-        ):
-            AuditService.log_simple_event("view")
+        with self.captureOnCommitCallbacks(execute=True):
+            with (
+                self.fail_the_insert(),
+                self.assertLogs("apps.audit.services", level="ERROR"),
+                best_effort_atomic(logger=logger, scope="test", message="audit write failed"),
+            ):
+                AuditService.log_simple_event("view")
+            self.assertEqual(audit_failures.count(), 0, "counted after commit, never inside the caller's transaction")
 
         self.assertEqual(audit_failures.count(), 1)
 
     def test_swallow_application_errors_counts_it_too(self) -> None:
-        with (
-            self.fail_the_insert(),
-            self.assertLogs(level="ERROR"),
-            swallow_application_errors(logger=logger, scope="test", message="audit write failed"),
-        ):
-            AuditService.log_simple_event("view")
+        with self.captureOnCommitCallbacks(execute=True):
+            with (
+                self.fail_the_insert(),
+                self.assertLogs(level="ERROR"),
+                swallow_application_errors(logger=logger, scope="test", message="audit write failed"),
+            ):
+                AuditService.log_simple_event("view")
+            self.assertEqual(audit_failures.count(), 0, "counted after commit, never inside the caller's transaction")
 
         self.assertEqual(audit_failures.count(), 1)
+
+    def test_a_swallowed_failure_in_a_rolled_back_action_is_not_counted(self) -> None:
+        # The action whose audit write failed then rolls back itself.
+        with self.captureOnCommitCallbacks(execute=True), self.assertRaises(RuntimeError), transaction.atomic():
+            with (
+                self.fail_the_insert(),
+                self.assertLogs("apps.audit.services", level="ERROR"),
+                best_effort_atomic(logger=logger, scope="test", message="audit write failed"),
+            ):
+                AuditService.log_simple_event("view")
+            raise RuntimeError("the action fails after its audit write")
+
+        self.assertEqual(audit_failures.count(), 0)
 
     def test_a_failure_that_reaches_the_caller_is_not_counted(self) -> None:
         with (
@@ -92,6 +110,7 @@ class WriteFailureCounterTests(TestCase):
     def test_the_health_check_warns_once_a_write_has_failed(self) -> None:
         self.assertEqual(check_audit_write_failures(None, databases=["default"]), [])
         with (
+            self.captureOnCommitCallbacks(execute=True),
             self.fail_the_insert(),
             self.assertLogs(level="ERROR"),
             best_effort_atomic(logger=logger, scope="test", message="audit write failed"),
@@ -107,7 +126,12 @@ class DisableSignalsGateTests(SimpleTestCase):
     def test_the_flag_is_honoured_only_under_testing(self) -> None:
         with override_settings(DISABLE_AUDIT_SIGNALS=True, TESTING=True):
             self.assertTrue(audit_signals_disabled())
-        with override_settings(DISABLE_AUDIT_SIGNALS=True, TESTING=False), self.assertLogs("apps.audit.switches"):
+        # The warning is once per process: start from a process that has not warned yet.
+        with (
+            patch("apps.audit.switches._warned", False),
+            override_settings(DISABLE_AUDIT_SIGNALS=True, TESTING=False),
+            self.assertLogs("apps.audit.switches"),
+        ):
             self.assertFalse(audit_signals_disabled())
         with override_settings(DISABLE_AUDIT_SIGNALS=False, TESTING=True):
             self.assertFalse(audit_signals_disabled())
