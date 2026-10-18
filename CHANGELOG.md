@@ -240,6 +240,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A ticket attachment or GDPR export leaves no file behind once its record is gone.**
+  - **Replies.** A staff reply stores its files only after its status change succeeds, so a refused change stores none. A failed attachment save deletes every file the reply wrote, on the staff and API paths alike.
+  - **Deletion.** Deleting an attachment, or the ticket that holds it, deletes the file once the delete commits.
+  - **Daily sweep.** A scheduled task deletes ticket attachments and GDPR exports that no record names a day after they were written, for example after a crash. It deletes only the names those writers produce, keeps a file whose age it cannot read, and audits each deletion. Billing documents are never swept.
+  - **Restores.** Both restore scripts pause the sweep for seven days (`media_sweep.paused_until`), because files written since the backup have no record.
+  - **Startup checks.** Startup fails when the sweep's grace period is shorter than four times the longest Django-Q task budget. `efactura.storage.xml_path` must stay under `efactura/`.
 - **GDPR anonymisation removes the person from the audit log, not only their IP.**
   - **The gap.** Anonymising a person cleared the IP and browser of their own audit rows and nothing else. Their email, name and phone stayed in descriptions and values, events about them that someone else performed were not touched, and a row only marked as anonymised was skipped by retention even when it still held personal data.
   - **Now.** The person's identifiers are captured first, earlier emails and names included. Their own events that no law requires are fully scrubbed. Every other row that concerns them keeps its content and loses only their identifiers: financial records, contract evidence, a staff member's actions on their account (the staff member stays the actor), and their own actions on other people's data.

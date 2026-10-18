@@ -171,8 +171,8 @@ class TicketScheduleTests(TestCase):
         schedule = Schedule.objects.get(name="tickets-auto-close-inactive")
         self.assertEqual(schedule.func, "apps.tickets.tasks.auto_close_inactive_tickets")
         self.assertEqual(schedule.schedule_type, Schedule.HOURLY)
-        self.assertEqual(first, {"auto_close_inactive": "created"})
-        self.assertEqual(second, {"auto_close_inactive": "already_exists"})
+        self.assertEqual(first, {"auto_close_inactive": "created", "sweep_orphaned_media": "created"})
+        self.assertEqual(second, {"auto_close_inactive": "already_exists", "sweep_orphaned_media": "already_exists"})
         self.assertEqual(Schedule.objects.filter(name="tickets-auto-close-inactive").count(), 1)
 
     @patch(

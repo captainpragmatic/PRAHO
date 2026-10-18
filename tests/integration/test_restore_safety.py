@@ -130,3 +130,28 @@ def test_retention_cannot_remove_the_staged_selected_dump_or_media(project: Proj
     assert ["cp", "-a", "-", "praho_platform:/app"] in [call["argv"] for call in project.calls()]
     assert len(list((project.root / "backups").glob("*.sql.gz"))) == 1
     assert list((project.root / "staging").iterdir()) == []
+
+
+def test_restore_pauses_the_media_sweep_before_any_worker_starts(project: Project) -> None:
+    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n")
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [call["argv"] for call in project.calls()]
+    restored = next(i for i, call in enumerate(calls) if call[:3] == ["exec", "-i", "praho_db"])
+    paused = next(i for i, call in enumerate(calls) if any("media_sweep.paused_until" in a for a in call))
+    started = next(i for i, call in enumerate(calls) if call[0] == "start")
+    assert restored < paused < started
+    assert "--set=ON_ERROR_STOP=1" in calls[paused]
+
+
+def test_a_failed_sweep_pause_keeps_every_worker_stopped(project: Project) -> None:
+    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_FAILS="1")
+    assert result.returncode != 0
+    assert "Applications remain stopped" in result.stdout
+    assert not any(call["argv"][0] == "start" for call in project.calls())
+
+
+def test_a_sweep_pause_that_writes_nothing_keeps_every_worker_stopped(project: Project) -> None:
+    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_ANSWER="")
+    assert result.returncode != 0
+    assert "Applications remain stopped" in result.stdout
+    assert not any(call["argv"][0] == "start" for call in project.calls())

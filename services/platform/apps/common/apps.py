@@ -29,6 +29,14 @@ class CommonConfig(AppConfig):
         _validate_hmac_rate_limits_at_startup()
         _validate_encryption_keyring_at_startup()
         _validate_portal_hmac_registry_at_startup()
+        _validate_media_sweep_at_startup()
+
+
+def _validate_media_sweep_at_startup() -> None:
+    """Fail the deploy when the orphaned-media sweeper could delete a file that is still being written."""
+    from apps.common.media_sweep import validate_sweep_configuration  # local import avoids an app-load import cycle
+
+    validate_sweep_configuration()
 
 
 def _validate_portal_hmac_registry_at_startup() -> None:

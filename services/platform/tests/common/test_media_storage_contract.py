@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
@@ -54,6 +55,9 @@ class PathlessStorage(Storage):
 
     def listdir(self, path: str) -> tuple[list[str], list[str]]:
         return self._inner.listdir(path)
+
+    def get_modified_time(self, name: str) -> datetime:
+        return self._inner.get_modified_time(name)
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=True)

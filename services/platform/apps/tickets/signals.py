@@ -6,16 +6,26 @@ Focus on status transitions and audit logging without SLA complexity.
 import logging
 from typing import Any
 
-from django.db import models
-from django.db.models.signals import post_save, pre_save
+from django.db import models, transaction
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import AuditService, TicketsAuditService
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
-from .models import Ticket
+from .models import Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_delete, sender=TicketAttachment)
+def delete_attachment_file(sender: type[TicketAttachment], instance: TicketAttachment, **kwargs: Any) -> None:
+    """Delete a deleted attachment's file once the delete commits; a ticket's CASCADE included."""
+    if not instance.file.name:
+        return
+    storage, name = instance.file.storage, instance.file.name
+    # robust: a storage error must not fail a delete that already committed; the sweeper reclaims the file.
+    transaction.on_commit(lambda: storage.delete(name), robust=True)
 
 
 @receiver(pre_save, sender=Ticket)

@@ -1544,6 +1544,9 @@ CATALOG: tuple[SettingDef, ...] = (
         group="efactura",
         section=_("Storage"),
         label=_("XML path"),
+        help_text=_("A folder under efactura/, so that no other files share it."),
+        # Never a folder the orphaned-media sweeper owns (apps/common/media_sweep.py).
+        validation={"pattern": r"|efactura/(?!.*\.\.)[^\r\n]*"},
     ),
     SettingDef(
         key="efactura.submission.auto_submit_enabled",
@@ -2798,6 +2801,19 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("When enabled, only staff users can access the system."),
         input_kind="toggle",
         critical=True,
+    ),
+    SettingDef(
+        key="media_sweep.paused_until",
+        data_type="string",
+        default="",
+        group="platform",
+        section=_("Availability"),
+        label=_("Orphaned file cleanup paused until"),
+        help_text=_(
+            "The daily cleanup of ticket attachments and GDPR exports that no record names deletes nothing "
+            "before this time. A database restore sets it seven days ahead. Leave empty to run it."
+        ),
+        validation={"pattern": r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?"},
     ),
     SettingDef(
         key="tickets.allowed_file_extensions",

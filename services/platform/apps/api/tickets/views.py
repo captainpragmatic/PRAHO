@@ -23,7 +23,7 @@ from apps.common.http import mark_download
 from apps.customers.models import Customer
 from apps.tickets.download_audit import audit_attachment_download
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
-from apps.tickets.services import TicketStatusService
+from apps.tickets.services import TicketStatusService, save_attachment_files
 
 from .attachments import decode_attachments
 from .helpers import create_customer_ticket
@@ -435,26 +435,22 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
     )
     TicketStatusService.handle_customer_reply(ticket)
 
-    # File storage is not transactional. Remove every written file if persistence
-    # fails; the enclosing transaction rolls back the comment and lifecycle change.
-    stored = []
-    try:
-        for uploaded in attachments:
-            attachment = TicketAttachment(
-                ticket=ticket,
-                comment=comment,
-                filename=uploaded.name,
-                file_size=uploaded.size,
-                content_type=uploaded.content_type,
-                uploaded_by_id=request_data.get("user_id"),
+    save_attachment_files(
+        [
+            (
+                TicketAttachment(
+                    ticket=ticket,
+                    comment=comment,
+                    filename=uploaded.name,
+                    file_size=uploaded.size,
+                    content_type=uploaded.content_type,
+                    uploaded_by_id=request_data.get("user_id"),
+                ),
+                uploaded,
             )
-            attachment.file.save(uploaded.name, uploaded, save=False)
-            stored.append(attachment.file)
-            attachment.save()
-    except Exception:
-        for file in stored:
-            file.delete(save=False)
-        raise
+            for uploaded in attachments
+        ]
+    )
 
     return Response(
         {

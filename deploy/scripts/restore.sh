@@ -134,6 +134,24 @@ stage_and_check_archives() {
     check_media_restorable "$RESTORE_TMP_DIR/backup.sql.gz"
 }
 
+# After a restore, files written since the backup have no row, and the orphaned-media sweep would
+# delete them a day later: pause it for seven days. A backup taken before the sweeper existed has no
+# row, so the statement inserts one. The same statement runs in both restore scripts
+# (tests/common/test_media_sweep_restore_pause.py runs it against the schema).
+PAUSE_MEDIA_SWEEP_SQL="INSERT INTO setting_entries (key, category, name, description, help_text, data_type, value, default_value, is_required, is_sensitive, is_active, requires_restart, created_at, updated_at, revision) VALUES ('media_sweep.paused_until', 'platform', 'Orphaned file cleanup paused until', 'Set by a database restore', '', 'string', to_jsonb(now() + interval '7 days'), to_jsonb(''::text), false, false, true, false, now(), now(), 1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), revision = setting_entries.revision + 1 RETURNING value #>> '{}'"
+pause_media_sweep() {
+    local until
+    if ! until="$(docker exec praho_db psql -U praho -d praho --set=ON_ERROR_STOP=1 -tAq -c "$PAUSE_MEDIA_SWEEP_SQL")"; then
+        log_error "Could not pause the orphaned-media sweep. Set media_sweep.paused_until seven days ahead in Settings."
+        return 1
+    fi
+    if [ -z "$until" ]; then
+        log_error "The orphaned-media sweep pause returned no value."
+        return 1
+    fi
+    log_info "Orphaned-media sweep paused until ${until}"
+}
+
 # Before anything is dropped: the companion must be an intact tar archive, and its volume present.
 check_media_restorable() {
     local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
@@ -242,6 +260,11 @@ restore_backup() {
     # A media failure must not leave the services down: they restart, and the run fails at the end.
     local MEDIA_FAILED=0
     restore_media "${BACKUP_FILE}" || MEDIA_FAILED=1
+    # Before any worker starts: a worker started unpaused could sweep files the restored rows lack.
+    if ! pause_media_sweep; then
+        log_error "Applications remain stopped. Set media_sweep.paused_until seven days ahead before restarting them."
+        exit 1
+    fi
 
     if $LEAVE_STOPPED; then
         if [ "$MEDIA_FAILED" -ne 0 ]; then

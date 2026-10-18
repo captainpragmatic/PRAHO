@@ -115,16 +115,25 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
     }
 
 
-def setup_ticket_scheduled_tasks() -> dict[str, str]:
-    """Register the hourly ticket lifecycle worker idempotently."""
-    schedule_name = "tickets-auto-close-inactive"
-    if Schedule.objects.filter(name=schedule_name).exists():
-        return {"auto_close_inactive": "already_exists"}
-
-    schedule(
+# Each schedule is reconciled on its own: one that exists never stops another being created.
+_SCHEDULES = (
+    (
+        "auto_close_inactive",
+        Schedule.HOURLY,
+        "tickets-auto-close-inactive",
         "apps.tickets.tasks.auto_close_inactive_tickets",
-        schedule_type=Schedule.HOURLY,
-        name=schedule_name,
-        cluster="praho-cluster",
-    )
-    return {"auto_close_inactive": "created"}
+    ),
+    ("sweep_orphaned_media", Schedule.DAILY, "media-sweep-orphaned", "apps.common.media_sweep.sweep_orphaned_media"),
+)
+
+
+def setup_ticket_scheduled_tasks() -> dict[str, str]:
+    """Register the hourly ticket lifecycle worker and the daily orphaned-media sweep idempotently."""
+    results = {}
+    for result_key, schedule_type, schedule_name, func in _SCHEDULES:
+        if Schedule.objects.filter(name=schedule_name).exists():
+            results[result_key] = "already_exists"
+            continue
+        schedule(func, schedule_type=schedule_type, name=schedule_name, cluster="praho-cluster")
+        results[result_key] = "created"
+    return results
