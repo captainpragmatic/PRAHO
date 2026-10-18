@@ -115,6 +115,28 @@ class CustomerRowAnonymisationTests(TestCase):
             for identifier in ("ioana", "rowe", "2900101123456", "j40", "cluj", "400001", "ap. 3"):
                 self.assertNotIn(identifier, snapshot, type(document).__name__)
 
+    def test_a_shared_individual_customer_keeps_its_cnp(self) -> None:
+        """A record with another owner may be that person's: neither its identity nor its CNP goes."""
+        from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415
+
+        other = User.objects.create_user(email="second.owner@example.test", password="x-pass-123")
+        CustomerMembership.objects.create(user=other, customer=self.customer, role="owner")
+        profile, _ = CustomerTaxProfile.objects.get_or_create(customer=self.customer)
+        profile.cnp = "1850101123451"
+        profile.save()
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            number="PRO-SHARED-1",
+            currency=create_currency(),
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+            bill_to_cnp="1850101123451",
+        )
+
+        self.anonymise()
+
+        self.assertEqual(CustomerTaxProfile.objects.get(pk=profile.pk).cnp, "1850101123451")
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_cnp, "1850101123451")
+
     def test_an_individual_customer_with_another_owner_is_left_as_it_is(self) -> None:
         other = User.objects.create_user(email="second.owner@example.test", password="x-pass-123")
         CustomerMembership.objects.create(user=other, customer=self.customer, role="owner")

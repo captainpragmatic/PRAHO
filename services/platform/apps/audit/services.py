@@ -1557,7 +1557,6 @@ class GDPRDeletionService:
         from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: import cycle
-        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.pending_totp import discard as discard_pending_totp  # noqa: PLC0415  # Deferred: import cycle
 
         # Lock the row, then write only the fields anonymisation changes: a full save of a stale
@@ -1603,9 +1602,8 @@ class GDPRDeletionService:
         # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
         # snapshot for the legal retention period. Queryset updates need no decryption, so an
         # unreadable CNP cannot block the erasure; all_objects includes soft-deleted profiles.
-        owned_individuals = CustomerMembership.objects.filter(
-            user=user, role="owner", is_active=True, customer__customer_type="individual"
-        ).values("customer_id")
+        # Only customers the person owns alone: one with another owner may be that person's.
+        owned_individuals = cls._solely_owned_individuals(user)
         cls._clear_cnp(
             CustomerTaxProfile.all_objects.filter(customer_id__in=owned_individuals),
             "cnp",
@@ -1624,7 +1622,7 @@ class GDPRDeletionService:
             id_key="invoice_id",
             where="an invoice not yet issued",
         )
-        cls._anonymize_individual_customers(user)
+        cls._anonymize_individual_customers(owned_individuals)
         cls._erase_audit_identity(subject)
 
     @staticmethod
@@ -1638,8 +1636,34 @@ class GDPRDeletionService:
         ).values("customer_id")
         list(Customer.all_objects.select_for_update(of=("self",)).filter(pk__in=owned).order_by("pk").values("pk"))
 
+    @staticmethod
+    def _solely_owned_individuals(user: User) -> list[int]:
+        """The individual customers the person owns with no other active owner, in pk order.
+
+        Each one is the person, so its identity and CNP go. One with another owner may be that
+        other person's record, so the erasure leaves it to staff and logs it. Read after the lock
+        in _lock_individual_customers, so no owner is added or removed meanwhile by a guarded write.
+        """
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        owned = list(
+            CustomerMembership.objects.filter(
+                user=user, role="owner", is_active=True, customer__customer_type="individual"
+            )
+            .order_by("customer_id")
+            .values_list("customer_id", flat=True)
+        )
+        shared = set(
+            CustomerMembership.objects.filter(customer_id__in=owned, role="owner", is_active=True)
+            .exclude(user=user)
+            .values_list("customer_id", flat=True)
+        )
+        for customer_id in sorted(shared):
+            logger.warning(f"⚠️ [GDPR Anonymization] Customer {customer_id} has another owner; left for staff")
+        return [customer_id for customer_id in owned if customer_id not in shared]
+
     @classmethod
-    def _anonymize_individual_customers(cls, user: User) -> None:
+    def _anonymize_individual_customers(cls, customer_ids: list[int]) -> None:
         """Anonymise the live record of each individual customer the person is (owner decision O5).
 
         An individual customer the person alone owns is the person: its name, contact and
@@ -1654,23 +1678,8 @@ class GDPRDeletionService:
         from apps.customers.contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
         from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
-        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        owned = (
-            CustomerMembership.objects.filter(
-                user=user, role="owner", is_active=True, customer__customer_type="individual"
-            )
-            .order_by("customer_id")
-            .values_list("customer_id", flat=True)
-        )
-        for customer_id in owned:
-            if (
-                CustomerMembership.objects.filter(customer_id=customer_id, role="owner", is_active=True)
-                .exclude(user=user)
-                .exists()
-            ):
-                logger.warning(f"⚠️ [GDPR Anonymization] Customer {customer_id} has another owner; left for staff")
-                continue
+        for customer_id in customer_ids:
             name = f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}"
             Customer.all_objects.filter(pk=customer_id).update(
                 anonymized_at=timezone.now(),
