@@ -300,3 +300,20 @@ On `vmlab-a` before the change, a request with an unknown `Host` got the first v
 | `conf-enabled/praho-default-site.conf` (shipped) | 404 / 404 with `0.praho.test` present | `0.praho.test`, `p15parent.praho.test` and its account name served |
 
 Debian's `apache2.conf` includes `conf-enabled/*.conf` (line 222) before `sites-enabled/*.conf` (line 225), so the shipped default is first for both ports whatever any domain is called.
+
+## Phase 1 end to end: a name, its certificate, a move, the barrier (2026-10-19, Virtualmin 8.3)
+
+Run through PRAHO's own code on the lab (`config.settings.lab`, `lab_transport`), with a self-signed certificate standing in for Let's Encrypt as the material in force:
+
+| Step | Result |
+|------|--------|
+| `ensure_node_account_name` on node A for `roundtrip.praho.test` | sub-server created, enabled, web root linked, certificate installed; the playbook's reported fingerprint matched, so the install was recorded |
+| SNI request to A for the name | the exact fingerprint sent; the customer's own `index.html` served |
+| Customer domain backed up alone on A (`backup-domain --domain`, no `--parent`), restored on B | only the parent's archive; B has no trace of the sub-server |
+| `ensure_on_recreated_node` on B | sub-server created afresh and the same stored certificate installed: B serves the same fingerprint and the customer's site; install rows for both nodes |
+| A name no domain claims, on a node without the default site | the newest customer's site, 200: the leak P1.16 closes |
+| The same, with `conf-enabled/praho-default-site.conf` | 404 on 80 and on 443; the account name still served |
+| `praho-pair-restore.sh` stopped after its barrier (archives that verify, then fail to restore) | its checkpoints: domain disabled, 503 on 80, 443 and every probed host; probed by hand, the customer domain and the account name both 503 on both ports; `release` brings both back |
+| `install-cert` on a sub-server | Virtualmin's own SSL renewal is switched off for it, so it cannot replace the certificate; the listing's `SSL cert expiry` stays stale, so the fingerprint is read from the certificate file |
+
+The pair-restore script verifies both archives before it raises anything: with archives that do not verify it refuses with nothing touched.
