@@ -51,6 +51,22 @@ CANONICAL_VALIDATION_FILES = {
 # Critical app directories that must have audit coverage in service files
 CRITICAL_APP_DIRS = {"billing", "orders", "users", "customers"}
 
+# Service files in a critical domain that legitimately write nothing the audit trail should hold.
+# Every entry needs a reason; a file that mutates customer, order or billing state belongs in the
+# audit trail instead.
+SERVICE_NO_AUDIT_ALLOWLIST: dict[str, str] = {
+    "apps/billing/currency_service.py": "validates and normalizes currency codes; writes nothing",
+    "apps/billing/ec_sales_service.py": "read-only reconciliation over frozen invoice facts; writes nothing",
+    "apps/billing/exchange_rate_service.py": "read-only FXRate lookup; writes nothing",
+    "apps/billing/fiscal_correction_service.py": "FiscalCorrection saves are audited by its model signal receiver",
+    "apps/billing/numbering_service.py": "consumes an InvoiceSequence number; the Invoice that takes it is audited by its model receiver",
+    "apps/billing/recurring_authorization_service.py": "RecurringPaymentAuthorization, Subscription and CustomerPaymentMethod saves are audited by model receivers",
+    "apps/billing/recurring_submission_service.py": "RecurringPaymentSubmission saves are audited by its model signal receiver",
+    "apps/customers/contact_service.py": "address, payment method and note saves are audited by their model receivers",
+    "apps/customers/customer_service.py": "Customer saves are audited by its model signal receiver",
+    "apps/customers/profile_service.py": "tax and billing profile saves are audited by their model receivers",
+}
+
 COMMENTED_DECORATOR_RE = re.compile(r"^\s*#\s*@audit_service_call\(")
 
 
@@ -253,6 +269,31 @@ def scan_file_for_comments(file_path: Path, source_lines: list[str]) -> list[Iss
     return issues
 
 
+def _imports_audit(tree: ast.AST) -> bool:
+    """Whether the parsed module imports from `apps.audit` or reaches `log_security_event`.
+
+    Walks the AST, so a docstring, comment or string that merely mentions `apps.audit` does not
+    count. Function-level imports count: cross-app imports are deferred to break cycles (ADR-0007).
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level == 0 and (module == "apps.audit" or module.startswith("apps.audit.")):
+                return True
+            if any(alias.name == "log_security_event" for alias in node.names):
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name == "apps.audit" or alias.name.startswith("apps.audit.") for alias in node.names):
+                return True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (isinstance(func, ast.Name) and func.id == "log_security_event") or (
+                isinstance(func, ast.Attribute) and func.attr == "log_security_event"
+            ):
+                return True
+    return False
+
+
 def check_service_audit_imports(file_path: Path, source: str) -> list[Issue]:
     """Check that service files in critical domains import audit functions."""
     posix = file_path.as_posix()
@@ -271,21 +312,26 @@ def check_service_audit_imports(file_path: Path, source: str) -> list[Issue]:
     if "/tests/" in posix:
         return []
 
-    # Check for audit-related imports or usage
-    has_audit_import = "apps.audit" in source
-    has_security_event = "log_security_event" in source
+    if any(posix.endswith(allowed) for allowed in SERVICE_NO_AUDIT_ALLOWLIST):
+        return []
 
-    if not has_audit_import and not has_security_event:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []  # scan_file reports the parse error
+
+    if not _imports_audit(tree):
         return [
             Issue(
                 file=posix,
                 line=1,
                 col=0,
-                severity="low",
+                severity="medium",
                 code="service-no-audit",
                 message=(
                     f"Service file `{filename}` in critical domain has no audit imports "
-                    "— consider adding `log_security_event` for key operations."
+                    "— add `log_security_event` for key operations, or justify the file in "
+                    "SERVICE_NO_AUDIT_ALLOWLIST."
                 ),
                 snippet="",
             )

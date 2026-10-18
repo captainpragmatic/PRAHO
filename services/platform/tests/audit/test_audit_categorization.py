@@ -245,7 +245,7 @@ class TestAuditServiceCategorization(TestCase):
             ('role_removed', 'authorization', 'high', True, True),
             ('permission_granted', 'authorization', 'high', True, True),
             ('permission_revoked', 'authorization', 'high', True, True),
-            ('customer_membership_created', 'authorization', 'medium', False, False),
+            ('customer_membership_created', 'authorization', 'medium', True, False),  # customer_ prefix is sensitive
         ]
 
         for action, expected_category, expected_severity, expected_sensitive, expected_review in test_cases:
@@ -257,7 +257,7 @@ class TestAuditServiceCategorization(TestCase):
 
                 assert category == expected_category
                 assert severity == expected_severity
-                # Authorization events may or may not be sensitive depending on context
+                assert is_sensitive == expected_sensitive
                 assert requires_review == expected_review
 
     def test_security_events_categorization(self):
