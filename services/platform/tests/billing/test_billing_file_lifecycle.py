@@ -13,6 +13,7 @@ import tempfile
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 from django.core.files.base import ContentFile
@@ -178,7 +179,7 @@ class BillingFileLifecycleTests(TestCase):
         document, _ = EFacturaDocument.objects.get_or_create(invoice=invoice, defaults={"environment": "test"})
         original_save = EFacturaDocument.save
 
-        def fail_on_recording_the_file(instance: EFacturaDocument, *args: object, **kwargs: object) -> None:
+        def fail_on_recording_the_file(instance: EFacturaDocument, *args: Any, **kwargs: Any) -> None:
             if "xml_file" in (kwargs.get("update_fields") or ()):
                 raise OSError("row save failed")
             original_save(instance, *args, **kwargs)
@@ -222,7 +223,7 @@ class BillingFileLifecycleTests(TestCase):
         )
         original_save = Invoice.save
 
-        def fail_on_recording_the_file(instance: Invoice, *args: object, **kwargs: object) -> None:
+        def fail_on_recording_the_file(instance: Invoice, *args: Any, **kwargs: Any) -> None:
             if "pdf_file" in (kwargs.get("update_fields") or ()):
                 raise OSError("row save failed")
             original_save(instance, *args, **kwargs)
@@ -236,3 +237,16 @@ class BillingFileLifecycleTests(TestCase):
 
         self.assertFalse(default_storage.exists(f"invoices/pdf/invoice_{invoice.number}.pdf"))
         self.assertEqual(list(self.media.rglob("*.pdf")), [])
+
+    def test_a_rolled_back_submission_claim_deletes_the_xml_it_stored(self) -> None:
+        invoice = self._invoice(status="issued")
+        EFacturaDocument.objects.filter(invoice=invoice).delete()
+
+        with (
+            patch.object(EFacturaService, "_is_b2c", side_effect=RuntimeError("detector failed")),
+            self.assertRaises(RuntimeError),
+        ):
+            EFacturaService()._prepare_and_claim_submission(invoice)
+
+        self.assertFalse(EFacturaDocument.objects.filter(invoice=invoice).exists(), "the claim rolled back")
+        self.assertEqual(list((self.media / "efactura").rglob("*.xml")), [])

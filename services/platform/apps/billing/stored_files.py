@@ -12,7 +12,9 @@ may have reached ANAF, are fiscal records: deleting their rows never deletes the
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from django.core.files.storage import Storage
@@ -23,6 +25,9 @@ if TYPE_CHECKING:
     from .invoice_models import Invoice
 
 logger = logging.getLogger(__name__)
+
+# Files stored inside the innermost delete_stored_files_on_failure() block.
+_GUARDED: ContextVar[list[tuple[Storage, str]] | None] = ContextVar("billing_stored_files", default=None)
 
 # Statuses in which the document may have reached ANAF; draft, queued and error never left PRAHO.
 EFACTURA_UNSENT_STATUSES = frozenset({"draft", "queued", "error"})
@@ -65,5 +70,27 @@ def record_stored_file(storage: Storage, stored: str, superseded: str | None, re
     except Exception:
         _delete(storage, stored)
         raise
+    guarded = _GUARDED.get()
+    if guarded is not None:
+        guarded.append((storage, stored))
     if superseded and superseded != stored:
         delete_after_commit(storage, superseded)
+
+
+@contextmanager
+def delete_stored_files_on_failure() -> Iterator[None]:
+    """Delete every file recorded inside this block if the block raises.
+
+    Wrap a whole atomic block with it: when a later step raises, the transaction rolls back the row
+    that named the file, and this deletes the file. Rollback has no hook of its own in Django.
+    """
+    stored: list[tuple[Storage, str]] = []
+    token = _GUARDED.set(stored)
+    try:
+        yield
+    except Exception:
+        for storage, name in stored:
+            _delete(storage, name)
+        raise
+    finally:
+        _GUARDED.reset(token)
