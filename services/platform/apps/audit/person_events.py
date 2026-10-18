@@ -35,6 +35,8 @@ _PLACEHOLDERS = frozenset({"anonymized", "user", "anonymized user", "+4070000000
 _ANONYMIZED_EMAIL = re.compile(r"^anonymized_[0-9a-f]+@example\.com$")
 # Shorter values (initials, empty names) would match unrelated text.
 _MIN_IDENTIFIER_LENGTH = 3
+# Where an audit row can name the person.
+_TEXT_FIELDS = ("description", "metadata", "old_values", "new_values")
 # The proof that a CNP was cleared must stay; it carries no identifier.
 ERASURE_PROOF_ACTIONS = frozenset({"data_anonymization_completed"})
 
@@ -75,11 +77,17 @@ def capture_subject(user: User) -> ErasureSubject:
 
     texts = [user.email, user.first_name, user.last_name, user.get_full_name(), getattr(user, "phone", "")]
     content_type = ContentType.objects.get_for_model(user)
-    for change in AuditEvent.objects.filter(
-        content_type=content_type,
-        object_id=str(user.pk),
-        action__in=("email_changed", "name_changed", "phone_updated"),
-    ).only("new_values", "old_values"):
+    # Earlier values: a change event records only the new one, so every event about the account
+    # is read, and the address the authentication log recorded for the person's own actions.
+    texts.extend(
+        str(email)
+        for email in AuditEvent.objects.filter(user_id=user.pk, metadata__has_key="user_email").values_list(
+            "metadata__user_email", flat=True
+        )
+    )
+    for change in AuditEvent.objects.filter(content_type=content_type, object_id=str(user.pk)).only(
+        "new_values", "old_values"
+    ):
         for values in (change.new_values, change.old_values):
             if isinstance(values, dict):
                 texts.extend(str(values.get(key) or "") for key in ("email", "first_name", "last_name", "phone"))
@@ -133,13 +141,15 @@ def _about_query(subject: ErasureSubject) -> Q:
     return query
 
 
-def _mentions_query(subject: ErasureSubject) -> Q:
+def _mentions_query(subject: ErasureSubject, fields: tuple[str, ...] = _TEXT_FIELDS) -> Q:
     # A bounded text net: a row that only names the person's address is a candidate for identity
-    # removal, not the person's own data (their note about someone else names them too).
+    # removal, not the person's own data (their note about someone else names them too). JSON
+    # fields are searched as text: a security event can name the person only in its metadata.
     query = Q(pk__in=[])
     for identifier in subject.identifiers:
         if "@" in identifier:
-            query |= Q(description__icontains=identifier)
+            for name in fields:
+                query |= Q(**{f"{name}__icontains": identifier})
     return query
 
 
@@ -200,6 +210,7 @@ def remove_identity(event: AuditEvent, subject: ErasureSubject, *, removed_at: s
         event.user = None
         event.ip_address = None
         event.user_agent = ""
+        event.request_id = ""
         event.session_key = ""
     event.description = _replace(event.description or "", subject)
     event.old_values = _scrub(event.old_values, subject, network=network)

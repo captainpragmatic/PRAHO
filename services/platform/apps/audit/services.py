@@ -1761,14 +1761,15 @@ class GDPRDeletionService:
                 cls._revoke_user_exports(user)
 
                 # The person's audit events go, except evidence the law still requires (GDPR
-                # Art. 17(3)(b)): financial records within their legal period keep their content,
+                # Art. 17(3)(b)): financial and contract records within their period keep their content,
                 # lose the network identity, and are detached from the person when the user row
                 # goes (AuditEvent.user is SET_NULL). Other business events are the person's data.
                 now = timezone.now()
+                claims_cutoff = AuditRetentionService.claims_retention_cutoff(now)
                 held_ids = [
                     event.id
                     for event in AuditEvent.objects.filter(user=user)
-                    if AuditRetentionService.is_held(event, now)
+                    if AuditRetentionService.is_retained(event, now, claims_cutoff=claims_cutoff)
                 ]
                 with audit_mutation_allowed("gdpr_erasure"):
                     AuditEvent.objects.filter(user=user).exclude(id__in=held_ids).delete()

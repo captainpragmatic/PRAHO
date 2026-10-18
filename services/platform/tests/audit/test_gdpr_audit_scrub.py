@@ -116,6 +116,16 @@ class GDPRAuditScrubTests(TestCase):
             description=f"Note on {self.other.email} written by {EMAIL}",
             new_values={"email": self.other.email},
         )
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=actor_only.pk).update(request_id="req-ana-123")
+        # A security event names the person only in its metadata, with no actor and no object.
+        security_probe = AuditEvent.objects.create(
+            action="security_event",
+            category="security_event",
+            severity="low",
+            description="Security event: product_list_access",
+            metadata={"user_email": EMAIL},
+        )
         held_invoice = self.event(
             "invoice_issued",
             actor=self.person,
@@ -136,7 +146,7 @@ class GDPRAuditScrubTests(TestCase):
 
         self.erase(self.person)
 
-        for event in (own_login, staff_reset, actor_only, held_invoice, consent, marked_but_full):
+        for event in (own_login, staff_reset, actor_only, held_invoice, consent, marked_but_full, security_probe):
             event.refresh_from_db()
             text = _row_text(event).lower()
             for identifier in (EMAIL, "ana", "erasure", PHONE, "198.51.100.7", "mozilla"):
@@ -147,6 +157,7 @@ class GDPRAuditScrubTests(TestCase):
         self.assertIn("2FA reset for", staff_reset.description)
         # The person's note on someone else keeps that person's evidence, not the author.
         self.assertIsNone(actor_only.user_id)
+        self.assertEqual(actor_only.request_id, "")
         self.assertIn(self.other.email, actor_only.description)
         self.assertEqual(actor_only.new_values, {"email": self.other.email})
         # Held evidence keeps amounts and structure; a number equal to the person's id is not theirs.
@@ -157,6 +168,21 @@ class GDPRAuditScrubTests(TestCase):
         self.assertEqual(marked_but_full.description, AuditRetentionService.ANONYMIZED_DESCRIPTION)
         events = list(AuditEvent.objects.all())
         self.assertEqual(AuditIntegrityService._verify_hash_chain(events), [])
+
+    def test_an_email_from_before_a_change_is_removed(self) -> None:
+        # The authentication log records the actor's own address; the change event only the new one.
+        self.event("login_success", actor=self.person, metadata={"user_email": "previous.addr@example.test"})
+        self.person.email = "current.addr@example.test"
+        self.person.save(update_fields=["email"])
+        staff_note = self.event(
+            "staff_note", actor=self.staff, about=self.person, description="Ticket from previous.addr@example.test"
+        )
+
+        self.erase(self.person)
+
+        staff_note.refresh_from_db()
+        self.assertNotIn("previous.addr@example.test", staff_note.description)
+        self.assertEqual(staff_note.user_id, self.staff.pk)
 
     def test_an_empty_name_and_a_second_erasure_touch_no_one_else(self) -> None:
         nameless = User.objects.create_user(email="nameless@example.test", password="x-pass-123")
@@ -233,6 +259,26 @@ class ClaimsHoldTests(TestCase):
         event.refresh_from_db()
         self.assertEqual(event.description, AuditRetentionService.ANONYMIZED_DESCRIPTION)
         self.assertIsNone(event.user_id)
+
+    def test_full_deletion_keeps_contract_evidence(self) -> None:
+        user_type = ContentType.objects.get_for_model(User)
+        terms = AuditEvent.objects.create(
+            action="terms_accepted",
+            category="compliance",
+            severity="low",
+            user=self.person,
+            content_type=user_type,
+            object_id=str(self.person.pk),
+            description="Terms v3 accepted",
+        )
+        request = GDPRDeletionService.create_deletion_request(user=self.person, deletion_type="delete").unwrap()
+
+        self.assertTrue(GDPRDeletionService.process_deletion_request(request).is_ok())
+
+        self.assertFalse(User.objects.filter(pk=self.person.pk).exists())
+        terms.refresh_from_db()
+        self.assertEqual(terms.description, "Terms v3 accepted")
+        self.assertIsNone(terms.user_id)
 
     def test_a_paid_order_cancelled_later_keeps_its_evidence(self) -> None:
         AuditRetentionPolicy.objects.create(
