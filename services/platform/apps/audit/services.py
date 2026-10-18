@@ -2806,29 +2806,17 @@ class CustomersAuditService:
         if context is None:
             context = AuditContext(user=user)
 
-        # Build customer-specific metadata
+        # Identifiers and flags only (row 56): the record's values live in old_values and
+        # new_values, where an erasure finds them, never copied into metadata.
+        changed_fields = sorted(set(old_values or {}) | set(new_values or {})) if old_values else []
         customer_metadata = {
             "customer_id": str(customer.id),
-            "customer_name": customer.name,
             "customer_type": customer.customer_type,
             "status": customer.status,
-            "company_name": customer.company_name,
-            "primary_email": customer.primary_email,
-            "primary_phone": customer.primary_phone,
-            "industry": customer.industry,
-            "website": customer.website,
-            "assigned_account_manager": customer.assigned_account_manager.email
-            if customer.assigned_account_manager
-            else None,
+            "changed_fields": changed_fields,
             "data_processing_consent": customer.data_processing_consent,
             "marketing_consent": customer.marketing_consent,
-            "gdpr_consent_date": customer.gdpr_consent_date.isoformat() if customer.gdpr_consent_date else None,
-            "created_at": customer.created_at.isoformat(),
-            "updated_at": customer.updated_at.isoformat(),
-            "created_by": customer.created_by.email if customer.created_by else None,
             "is_deleted": customer.is_deleted,
-            "deleted_at": customer.deleted_at.isoformat() if customer.deleted_at else None,
-            "deleted_by": customer.deleted_by.email if customer.deleted_by else None,
             # Compliance tracking
             "romanian_compliance": {
                 "has_tax_profile": hasattr(customer, "tax_profile"),
@@ -5664,16 +5652,13 @@ class TicketsAuditService:
 
         # Build comprehensive ticket metadata
         ticket_metadata = {
+            # Identifiers only (row 56): no title, customer name or contact, which the ticket holds.
             "ticket_number": ticket.ticket_number,
-            "title": ticket.title,
             "customer_id": str(ticket.customer.id),
-            "customer_name": ticket.customer.get_display_name(),
             "priority": ticket.priority,
             "category": ticket.category.name if ticket.category else None,
             "source": ticket.source,
-            "contact_email": ticket.contact_email,
-            "contact_person": ticket.contact_person,
-            "assigned_to": ticket.assigned_to.get_full_name() if ticket.assigned_to else None,
+            "assigned_to_id": str(ticket.assigned_to_id) if ticket.assigned_to_id else None,
             "related_service_id": str(ticket.related_service.id) if ticket.related_service else None,
             "sla_tracking": sla_metadata,
             "auto_escalation_eligible": should_escalate,
