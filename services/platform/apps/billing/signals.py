@@ -36,6 +36,7 @@ from apps.audit.services import (
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
 
+from .efactura.models import EFacturaDocument
 from .fiscal_identity import normalize_country_code
 from .issuers.models import IssuanceState, ProviderIssuance
 from .models import (
@@ -55,6 +56,7 @@ from .models import (
     TaxRule,
     VATValidation,
 )
+from .stored_files import delete_after_commit, efactura_document_is_fiscal, invoice_is_fiscal
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -2104,19 +2106,40 @@ def _delete_invoice_cache_keys(cache_keys: tuple[str, ...]) -> None:
 
 
 def _cleanup_invoice_files(invoice: Invoice) -> None:
-    """Delete captured invoice file paths only after the deletion commits."""
-    file_paths = (f"invoices/{invoice.number}.pdf", f"efactura/{invoice.number}.xml")
+    """Delete a deleted draft invoice's stored files once the deletion commits.
 
-    def _delete_after_commit() -> None:
-        for file_path in file_paths:
-            try:
-                if default_storage.exists(file_path):
-                    default_storage.delete(file_path)
-                    logger.info(f"🗑️ [File] Deleted invoice file {file_path}")
-            except Exception:
-                logger.exception(f"🔥 [File] Invoice file cleanup failed: {file_path}")
+    An issued invoice's documents are fiscal records: a deletion that reached it anyway (a cascade
+    bypasses Invoice.delete()) keeps them, and says so.
+    """
+    stored = [file for file in (invoice.pdf_file, invoice.xml_file) if file and file.name]
+    if stored and invoice_is_fiscal(invoice):
+        logger.error(
+            "🔥 [File] Kept the files of deleted %s invoice %s: %s",
+            invoice.status,
+            invoice.number,
+            [f.name for f in stored],
+        )
+        return
+    for file in stored:
+        delete_after_commit(file.storage, file.name)
 
-    transaction.on_commit(_delete_after_commit)
+
+@receiver(pre_delete, sender=EFacturaDocument)
+def handle_efactura_document_cleanup(sender: type[EFacturaDocument], instance: EFacturaDocument, **kwargs: Any) -> None:
+    """Delete a deleted e-Factura document's XML and archive after commit, unless they are fiscal records."""
+    stored = [file for file in (instance.xml_file, instance.response_archive) if file and file.name]
+    if not stored:
+        return
+    if efactura_document_is_fiscal(instance):
+        logger.error(
+            "🔥 [File] Kept the files of deleted %s e-Factura document %s: %s",
+            instance.status,
+            instance.pk,
+            [f.name for f in stored],
+        )
+        return
+    for file in stored:
+        delete_after_commit(file.storage, file.name)
 
 
 def _cleanup_payment_files(payment: Payment) -> None:
