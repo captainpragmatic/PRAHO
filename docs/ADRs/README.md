@@ -210,7 +210,7 @@ Billing Ownership
 - [ADR-0055](ADR-0055-portal-sessions-merge-concurrent-writes.md) — portal session saves merge concurrent writes by compare-and-swap; key groups, record maps, revocation preserved
 - [ADR-0056](ADR-0056-portal-serves-requests-on-threads.md) — gunicorn gthread, 2 processes × 4 threads, so one customer waiting on Platform does not make the others wait; sync is the rollback
 - [ADR-0057](ADR-0057-media-storage-filesystem-or-private-bucket.md) — `MEDIA_STORAGE=s3` puts media in a private bucket for container platforms; filesystem stays the default; reads only through Django, fails closed
-- [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) — every hosting account gets an opaque provider hostname that follows it across nodes; customer domains point at it (our nameservers, ALIAS, or a www redirect), never at a node IP; mail follows the same name (proposed; phase 1 paused)
+- [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) — every hosting account gets an opaque provider hostname that follows it across nodes; customer domains point at it (our nameservers, ALIAS, or a www redirect), never at a node IP; mail follows the same name (proposed; phase 1 built behind a flag that stays off until phase 2)
 - [ADR-0062](ADR-0062-deployment-branding-layer.md) — a deployment is env + settings + a brand folder: brand (`company.brand_name`, `BRAND_DIR`), public company identity, the env-only fiscal seller that production requires, and legal documents staff publish as immutable releases
 
 ### 💰 Business & Domain
