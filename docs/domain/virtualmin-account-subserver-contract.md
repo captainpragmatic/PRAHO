@@ -288,3 +288,15 @@ Reproved for P1.5 on `vmlab-a`, customer domain `p15parent.praho.test` with sub-
 | a home under another user, or `customer_user=root` | refused (the script, or the playbook's input check) |
 
 ansible-core 2.20 prints a failed task as a YAML-style block (`msg: Assertion failed`); PRAHO's wrapper reads both that and the JSON form.
+
+## P1.16: a neutral default site (2026-10-18, Virtualmin 8.3)
+
+On `vmlab-a` before the change, a request with an unknown `Host` got the first virtual host Apache loaded: the welcome page of an account name (`p14apiab.acct.praho.test`), and once `0.praho.test` existed, that domain's site. Virtualmin writes `<VirtualHost *:80>` and `<VirtualHost *:443>`.
+
+| Default site | Unknown `Host`, HTTP / HTTPS | Real domains |
+|---|---|---|
+| none | the first site loaded | served |
+| `sites-enabled/000-praho-default.conf` | 404 / 404, until a domain sorts earlier: `0.praho.test.conf` then won | served |
+| `conf-enabled/praho-default-site.conf` (shipped) | 404 / 404 with `0.praho.test` present | `0.praho.test`, `p15parent.praho.test` and its account name served |
+
+Debian's `apache2.conf` includes `conf-enabled/*.conf` (line 222) before `sites-enabled/*.conf` (line 225), so the shipped default is first for both ports whatever any domain is called.
