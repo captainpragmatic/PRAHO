@@ -55,7 +55,7 @@ from .virtualmin_forms import (
     VirtualminRestorePairForm,
     VirtualminServerForm,
 )
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, is_customer_domain_row
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -249,10 +249,11 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
             service = VirtualminProvisioningService()
             gateway = service._get_gateway(server)
 
-            # SAFE READ-ONLY operation - no deletion risk
-            domains_result = gateway.list_domains(name_only=False)
+            # SAFE READ-ONLY operation - no deletion risk. Customer domains only: an account
+            # name is shown on its account, not as a domain of its own.
+            domains_result = gateway.list_domains_with_owners()
             if domains_result.is_ok():
-                raw_domains = domains_result.unwrap()
+                raw_domains = [row for row in domains_result.unwrap() if is_customer_domain_row(row)]
 
                 # Get existing PRAHO accounts for comparison
                 recent_accounts_domains = {acc.domain for acc in recent_accounts}
@@ -1904,7 +1905,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                 logger.warning(f"⚠️ [AccountSync] {error_msg}")
                 continue
 
-            domains = domains_result.unwrap()
+            # Customer domains only: an account name is its customer's sub-server, never an account.
+            domains = [row for row in domains_result.unwrap() if is_customer_domain_row(row)]
             sync_results["accounts_found"] += len(domains)
 
             # Group domains by username (actual Virtualmin accounts)

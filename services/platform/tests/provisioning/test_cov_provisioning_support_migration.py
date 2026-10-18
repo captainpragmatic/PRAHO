@@ -50,7 +50,16 @@ class ProvisioningSupportMigrationTests(ProvisioningSupportMigrationFixture):
         kept = {"Username": [" tenant "], "Status": ["Unknown"]}
         self.assertEqual(
             result.unwrap(),
-            [{"domain": "tenant.example.com", "username": "tenant", "enabled": None, "attributes": kept}],
+            [
+                {
+                    "domain": "tenant.example.com",
+                    "username": "tenant",
+                    "enabled": None,
+                    "type": "",
+                    "parent_domain": "",
+                    "attributes": kept,
+                }
+            ],
         )
 
     def test_listing_strict_refuses_malformed_rows_while_sync_retains_valid_rows(self) -> None:

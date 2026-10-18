@@ -519,6 +519,19 @@ class VirtualminQuotaExceededError(VirtualminAPIError):
     """Server quota exceeded - try different server"""
 
 
+TOP_LEVEL_SERVER = "Top-level server"
+
+
+def is_customer_domain_row(row: dict[str, Any]) -> bool:
+    """Whether a listing row is a customer domain rather than a sub-server or alias (ADR-0061).
+
+    An account name is a sub-server of its customer domain and has its own row. A row with no type
+    (an older listing, a test payload) counts as a customer domain, as every row did before.
+    """
+    kind = str(row.get("type") or "").strip()
+    return not kind or kind == TOP_LEVEL_SERVER
+
+
 def listing_attribute(values: dict[str, Any], label: str) -> str:
     """One `list-domains --multiline` attribute, in either key form.
 
@@ -1406,7 +1419,11 @@ class VirtualminGateway:
         return result.is_ok()
 
     def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
-        """Full multiline listing normalized to [{'domain', 'username'}] rows."""
+        """Every row of the multiline listing, with its owner, type and parent.
+
+        Sub-servers and aliases are kept: collision and ownership checks need every name on the
+        node. Callers that show or count customer domains filter with `is_customer_domain_row`.
+        """
         result = self.call("list-domains", {"multiline": ""})
         if result.is_err():
             return Err(f"Domain listing failed: {result.unwrap_err()}", retriability=retriability_of(result))
@@ -1423,7 +1440,15 @@ class VirtualminGateway:
         for item in response.data["data"]:
             if isinstance(item, dict) and item.get("name"):
                 values = item.get("values", {}) or {}
-                rows.append({"domain": str(item["name"]), "username": listing_attribute(values, "Username")})
+                rows.append(
+                    {
+                        "domain": str(item["name"]),
+                        "username": listing_attribute(values, "Username"),
+                        "type": listing_attribute(values, "Type"),
+                        "parent_domain": listing_attribute(values, "Parent domain"),
+                        "description": listing_attribute(values, "Description"),
+                    }
+                )
         return Ok(rows)
 
     def get_domain_state(self, domain: str) -> Result[dict[str, Any], str]:

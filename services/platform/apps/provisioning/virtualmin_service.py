@@ -45,6 +45,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     classify_virtualmin_application_error,
     get_virtualmin_config,
+    is_customer_domain_row,
 )
 from .virtualmin_models import (
     VirtualminAccount,
@@ -1695,16 +1696,16 @@ class VirtualminServerManagementService:
                     retriability=retriability_of(info_result),
                 )
 
-            # Get domain list
-            domains_result = gateway.list_domains(name_only=True)
+            # Customer domains only: the name-only listing cannot tell an account name (its
+            # customer's sub-server) from a domain, and counting it would halve a node's capacity.
+            domains_result = gateway.list_domains_with_owners()
             if domains_result.is_err():
                 return Err(
                     f"Failed to list domains: {domains_result.unwrap_err()}",
                     retriability=retriability_of(domains_result),
                 )
 
-            domains = domains_result.unwrap()
-            domain_count = len(domains) if isinstance(domains, list) else 0
+            domain_count = sum(1 for row in domains_result.unwrap() if is_customer_domain_row(row))
 
             # Update server statistics
             server.current_domains = domain_count
