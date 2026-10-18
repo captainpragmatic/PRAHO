@@ -2164,7 +2164,6 @@ class TestCleanupInvoiceFiles(TestCase):
     def _invoice(status: str) -> MagicMock:
         invoice = MagicMock(status=status, locked_at=None, number="INV-001")
         invoice.pdf_file.name = "invoices/pdf/invoice_INV-001.pdf"
-        invoice.xml_file.__bool__.return_value = False
         return invoice
 
     def test_deletes_the_stored_file_after_commit(self) -> None:

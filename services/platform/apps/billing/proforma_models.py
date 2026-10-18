@@ -162,7 +162,6 @@ class ProformaInvoice(models.Model):
     bill_to_country = models.CharField(max_length=2, blank=True)
 
     # Files
-    pdf_file = models.FileField(upload_to="proformas/pdf/", blank=True, null=True)
 
     # Private attributes for change tracking (not DB fields - annotations only)
     _original_proforma_values: _ProformaSnapshot | None = None

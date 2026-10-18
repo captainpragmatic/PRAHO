@@ -247,7 +247,7 @@ def _monitored_files(base_dir: Path) -> list[Path]:
         "apps/common/validators.py",
         "apps/common/encryption.py",
         "apps/common/credential_vault.py",
-        "apps/common/file_upload_security.py",
+        "apps/tickets/security.py",
         "apps/users/mfa.py",
         "apps/audit/services.py",
         # Middleware

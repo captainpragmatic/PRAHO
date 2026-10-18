@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # Helvetica is WinAnsi-encoded and SILENTLY substitutes missing glyphs (no exception),
 # so those characters render as blanks/boxes. We register a vendored Unicode TTF
 # (DejaVuSans, broad Latin coverage) and use it for every text run.
-_FONT = "DejaVuSans"
-_FONT_BOLD = "DejaVuSans-Bold"
+_FONT = PDF_FONT = "DejaVuSans"
+_FONT_BOLD = PDF_FONT_BOLD = "DejaVuSans-Bold"
 _FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
 
 
@@ -71,6 +71,9 @@ def _register_fonts() -> None:
         pdfmetrics.registerFont(TTFont(name, str(path)))
     # Map the family so bold resolution is correct for any future flowable use.
     pdfmetrics.registerFontFamily(_FONT, normal=_FONT, bold=_FONT_BOLD, italic=_FONT, boldItalic=_FONT_BOLD)
+
+
+register_pdf_fonts = _register_fonts  # For other apps' PDFs (ADR-0007 function-level import)
 
 
 # Coordinate-based layout has no text wrapping/clipping, so free-text fields must

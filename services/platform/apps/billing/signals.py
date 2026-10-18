@@ -2111,7 +2111,7 @@ def _cleanup_invoice_files(invoice: Invoice) -> None:
     An issued invoice's documents are fiscal records: a deletion that reached it anyway (a cascade
     bypasses Invoice.delete()) keeps them, and says so.
     """
-    stored = [file for file in (invoice.pdf_file, invoice.xml_file) if file and file.name]
+    stored = [invoice.pdf_file] if invoice.pdf_file and invoice.pdf_file.name else []
     if stored and invoice_is_fiscal(invoice):
         logger.error(
             "🔥 [File] Kept the files of deleted %s invoice %s: %s",

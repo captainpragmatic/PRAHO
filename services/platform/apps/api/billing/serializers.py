@@ -115,7 +115,6 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     is_overdue = serializers.SerializerMethodField()
     amount_due = serializers.SerializerMethodField()
     bill_to = serializers.SerializerMethodField()
-    pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -139,7 +138,6 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "is_overdue",
             "amount_due",
             "bill_to",
-            "pdf_url",
             "efactura_sent",
             "meta",
         ]
@@ -181,12 +179,6 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "email": obj.bill_to_email,
             "address": ", ".join(address_parts) if address_parts else "",
         }
-
-    def get_pdf_url(self, obj: Invoice) -> str:
-        """Return PDF URL if available"""
-        if obj.pdf_file:
-            return f"/invoices/pdf/{obj.number}.pdf"
-        return ""
 
 
 # ===============================================================================
@@ -400,7 +392,6 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
     total = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
     bill_to = serializers.SerializerMethodField()
-    pdf_url = serializers.SerializerMethodField()
     gift_reserved_cents = serializers.SerializerMethodField()
     cash_due_cents = serializers.SerializerMethodField()
 
@@ -432,7 +423,6 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
             "total",
             "is_expired",
             "bill_to",
-            "pdf_url",
             "notes",
             "meta",
             "gift_reserved_cents",
@@ -473,9 +463,3 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
             "email": obj.bill_to_email,
             "address": ", ".join(address_parts) if address_parts else "",
         }
-
-    def get_pdf_url(self, obj: ProformaInvoice) -> str:
-        """Return PDF URL if available"""
-        if obj.pdf_file:
-            return f"/proformas/pdf/{obj.number}.pdf"
-        return ""

@@ -163,12 +163,13 @@ form-action 'self'
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Max File Size | Implemented (10MB) | `config/settings/base.py` — `FILE_UPLOAD_MAX_MEMORY_SIZE` |
+| Max File Size | Implemented (setting, at most 10 MiB per file and 5 files per reply) | `tickets.max_file_size_bytes`, `tickets.max_attachments_per_reply`; staff request bodies are also capped at the edge |
+| In-memory upload threshold | 2.5 MiB, not a size cap | `config/settings/base.py` — `FILE_UPLOAD_MAX_MEMORY_SIZE`: larger uploads spool to a temporary file |
 | File Permissions | Implemented (0o644) | `config/settings/base.py` — `FILE_UPLOAD_PERMISSIONS` |
-| Max Data Upload | Implemented (10MB) | `config/settings/base.py` — `DATA_UPLOAD_MAX_MEMORY_SIZE` |
-| MIME Type Validation | Not implemented | |
-| Content Scanning | Not implemented | No malware scanning |
-| Extension Whitelist | Not implemented | Not formalized |
+| Max Data Upload | Implemented (10 MiB) | `config/settings/base.py` — `DATA_UPLOAD_MAX_MEMORY_SIZE`: non-file request data, including the tickets API's base64 attachments |
+| Content Type Validation | Implemented | `apps/tickets/security.py` — the type is identified from the file's content and must match its extension; the declared type is ignored |
+| Content Scanning | Not implemented | No malware scanning (ADR-0063): files are type-checked and served as downloads, never executed |
+| Extension Allowlist | Implemented | `tickets.allowed_file_extensions` |
 
 ---
 
