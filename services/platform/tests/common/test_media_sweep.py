@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -145,12 +146,15 @@ class MediaSweepTests(TestCase):
 
     def test_a_file_whose_age_is_unknown_is_kept_and_reported(self) -> None:
         name = self._store(_attachment_name("9"))
+        # No modification time, a file gone since the listing, and S3's answer for an object gone since it.
+        gone_from_s3 = ClientError({"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject")
+        for failure in (NotImplementedError(), FileNotFoundError(), gone_from_s3):
+            with self.subTest(failure=type(failure).__name__):
+                with patch.object(PathlessStorage, "get_modified_time", side_effect=failure):
+                    result = sweep_orphaned_media()
 
-        with patch.object(PathlessStorage, "get_modified_time", side_effect=NotImplementedError):
-            result = sweep_orphaned_media()
-
-        self.assertTrue(self._exists(name))
-        self.assertEqual((result["deleted"], result["kept_unknown"]), (0, 1))
+                self.assertTrue(self._exists(name))
+                self.assertEqual((result["deleted"], result["kept_unknown"]), (0, 1))
 
     def test_a_paused_sweeper_deletes_nothing(self) -> None:
         name = self._store(_attachment_name("1"))

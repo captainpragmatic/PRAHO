@@ -257,14 +257,17 @@ restore_backup() {
     fi
 
     # A media failure must not leave the services down: they restart, and the run fails at the end.
-    local MEDIA_FAILED=0 SWEEP_FAILED=0
+    local MEDIA_FAILED=0
     restore_media "${BACKUP_FILE}" || MEDIA_FAILED=1
-    # Before any worker starts, so no sweep runs against the restored rows unpaused.
-    pause_media_sweep || SWEEP_FAILED=1
+    # Before any worker starts: a worker started unpaused could sweep files the restored rows lack.
+    if ! pause_media_sweep; then
+        log_error "Applications remain stopped. Set media_sweep.paused_until seven days ahead before restarting them."
+        exit 1
+    fi
 
     if $LEAVE_STOPPED; then
-        if [ "$MEDIA_FAILED" -ne 0 ] || [ "$SWEEP_FAILED" -ne 0 ]; then
-            log_error "Media restore or pausing its sweep failed; applications remain stopped for recovery."
+        if [ "$MEDIA_FAILED" -ne 0 ]; then
+            log_error "Media restore failed; applications remain stopped for recovery."
             exit 1
         fi
         log_success "Database and media restored; applications remain stopped."
@@ -285,10 +288,6 @@ restore_backup() {
     fi
     if [ "$MEDIA_FAILED" -ne 0 ]; then
         log_error "The database was restored and the services are up, but restoring the media failed."
-        exit 1
-    fi
-    if [ "$SWEEP_FAILED" -ne 0 ]; then
-        log_error "The database was restored and the services are up, but the orphaned-media sweep is not paused."
         exit 1
     fi
     log_success "Restore completed successfully!"

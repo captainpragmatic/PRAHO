@@ -143,8 +143,8 @@ def test_restore_pauses_the_media_sweep_before_any_worker_starts(project: Projec
     assert "--set=ON_ERROR_STOP=1" in calls[paused]
 
 
-def test_a_failed_sweep_pause_fails_the_restore_once_services_are_up(project: Project) -> None:
+def test_a_failed_sweep_pause_keeps_every_worker_stopped(project: Project) -> None:
     result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_FAILS="1")
     assert result.returncode != 0
-    assert "the orphaned-media sweep is not paused" in result.stdout
-    assert any(call["argv"][0] == "start" for call in project.calls())
+    assert "Applications remain stopped" in result.stdout
+    assert not any(call["argv"][0] == "start" for call in project.calls())

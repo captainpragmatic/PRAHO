@@ -152,7 +152,7 @@ def sweep_orphaned_media(*, storage: Storage | None = None) -> SweepResult:
                 continue  # Not a name this sweeper's owners write
             try:
                 modified: datetime | None = storage.get_modified_time(name)
-            except (NotImplementedError, OSError) as exc:
+            except Exception as exc:  # No time, or gone since the listing (S3 answers a ClientError, not OSError)
                 modified = None
                 logger.warning("⚠️ [MediaSweep] Kept %s: its age is unknown (%s)", name, type(exc).__name__)
             if modified is None or timezone.is_naive(modified):
