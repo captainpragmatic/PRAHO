@@ -301,6 +301,9 @@
                         </div>
                     </div>
                 </div>
+                {% if account_name %}
+                  {% include "provisioning/virtualmin/partials/account_name_card.html" %}
+                {% endif %}
             </div>
 
             <!-- Backups Tab -->

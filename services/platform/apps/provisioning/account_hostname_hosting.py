@@ -140,3 +140,31 @@ def _send_activation(hostname_pk: UUID, claimed: datetime) -> None:
         return
     AccountHostname.objects.filter(pk=hostname_pk, activation_notified_at=claimed).update(activation_notified_at=None)
     logger.warning("⚠️ [AccountName] Activation message for %s not sent, retried later: %s", row.fqdn, result.error)
+
+
+def staff_account_name(account: VirtualminAccount) -> dict[str, Any] | None:
+    """What staff see on the account page: the name, where it points, its records and its certificate (P1.13)."""
+    from .account_hostname_models import AccountNameCertificate, AccountNameCertificateInstall  # noqa: PLC0415
+
+    hostname = (
+        AccountHostname.objects.select_related("target_server").filter(account=account, retired_at__isnull=True).first()
+    )
+    if hostname is None:
+        return None
+    certificate = AccountNameCertificate.objects.filter(hostname=hostname).first()
+    installs = AccountNameCertificateInstall.objects.filter(hostname=hostname).select_related("server")
+    return {
+        "fqdn": hostname.fqdn,
+        "target_server": hostname.target_server,
+        "records": [
+            {"type": record_type, "intended": entry.get("intended", ""), "applied": entry.get("applied", "")}
+            for record_type, entry in sorted((hostname.records or {}).items())
+        ],
+        "published": records_published(hostname),
+        "live": live_account_name(account) is not None,
+        "last_reconciled_at": hostname.last_reconciled_at,
+        "activation_notified_at": hostname.activation_notified_at,
+        "certificate": certificate,
+        "installs": list(installs),
+        "enabled": config.account_hostnames_enabled(),
+    }

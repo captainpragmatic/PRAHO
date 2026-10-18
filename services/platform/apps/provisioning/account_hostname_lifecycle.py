@@ -47,6 +47,24 @@ def on_account_ready(account: VirtualminAccount) -> None:
     )
 
 
+def queue_repair(account: VirtualminAccount) -> bool:
+    """Staff's "Repair DNS": queue the name's node step and sync again; nothing is looked up here (P1.13).
+
+    False when account names are off or the account has no live name to repair.
+    """
+    if not config.account_hostnames_enabled():
+        return False
+    if not AccountHostname.objects.filter(account=account, retired_at__isnull=True).exists():
+        return False
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
+
+    account_id = str(account.pk)
+    transaction.on_commit(
+        lambda: async_task(ENSURE_TASK, account_id, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS), robust=True
+    )
+    return True
+
+
 def ensure_account_name(account_id: str) -> dict[str, str]:
     """Task: allocate the name, point it at the account's node, serve it there, sync its records.
 

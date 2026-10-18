@@ -931,6 +931,7 @@ class AuditEvent(models.Model):
         ("virtualmin_account_delete_failed", "Virtualmin account delete failed"),
         ("virtualmin_account_deleted", "Virtualmin account deleted"),
         ("virtualmin_account_hold_reenable_failed", "Virtualmin account hold reenable failed"),
+        ("virtualmin_account_repair_dns_failed", "Virtualmin account repair dns failed"),
         ("virtualmin_account_hold_restore_safety_failed", "Virtualmin account hold restore safety failed"),
         ("virtualmin_account_provisioned_successfully", "Virtualmin account provisioned successfully"),
         ("virtualmin_account_server_migrated", "Virtualmin account server migrated"),
