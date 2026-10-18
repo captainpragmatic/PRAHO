@@ -2,9 +2,10 @@
 # Install an account name's certificate into its Virtualmin sub-server (ADR-0061 P1.10).
 #
 # The key and the certificate arrive as variables in the 0600 extra-vars file the controller writes,
-# never on a command line. They are written into a root-only directory on /run (a memory filesystem,
-# so the key never reaches the node's disk), handed to `virtualmin install-cert` by path, and removed
-# in the same play, whether or not the install worked.
+# never on a command line. They are written into a root-only directory on /run (a memory filesystem, so
+# the files this play makes never reach the node's disk), handed to `virtualmin install-cert` by path,
+# and removed in the same play, whether or not the install worked. Ansible itself stages each task's
+# arguments under the connecting user's remote temporary directory and removes them after the task.
 - name: Install an account name's certificate on a Virtualmin node
   hosts: all
   gather_facts: false

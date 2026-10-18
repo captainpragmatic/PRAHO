@@ -182,26 +182,26 @@ class ClientFlowTests(SimpleTestCase):
         with self.assertRaises(AcmeOrderFailed):
             adapter.complete(order)
 
+    @staticmethod
+    def authz(status: Any, *chall: Any) -> Any:
+        bodies = [
+            messages.ChallengeBody(chall=c, uri=f"https://acme.test/chall/{i}", status=messages.STATUS_PENDING)
+            for i, c in enumerate(chall)
+        ]
+        return messages.AuthorizationResource(
+            body=messages.Authorization(
+                identifier=messages.Identifier(typ=messages.IDENTIFIER_FQDN, value="h7k3p2q8.praho-sites.net"),
+                status=status,
+                challenges=tuple(bodies),
+            ),
+            uri="https://acme.test/authz/1",
+        )
+
     def test_an_order_offers_the_dns01_challenge_of_each_pending_authorization_only(self) -> None:
         adapter, client = self.build()
-
-        def authz(status: Any, *chall: Any) -> Any:
-            bodies = [
-                messages.ChallengeBody(chall=c, uri=f"https://acme.test/chall/{i}", status=messages.STATUS_PENDING)
-                for i, c in enumerate(chall)
-            ]
-            return messages.AuthorizationResource(
-                body=messages.Authorization(
-                    identifier=messages.Identifier(typ=messages.IDENTIFIER_FQDN, value="h7k3p2q8.praho-sites.net"),
-                    status=status,
-                    challenges=tuple(bodies),
-                ),
-                uri="https://acme.test/authz/1",
-            )
-
         token = b"a" * 32
-        pending = authz(messages.STATUS_PENDING, challenges.HTTP01(token=token), challenges.DNS01(token=token))
-        done = authz(messages.STATUS_VALID, challenges.DNS01(token=token))
+        pending = self.authz(messages.STATUS_PENDING, challenges.HTTP01(token=token), challenges.DNS01(token=token))
+        done = self.authz(messages.STATUS_VALID, challenges.DNS01(token=token))
         client.new_order.return_value = MagicMock(uri="https://acme.test/order/1", authorizations=[pending, done])
 
         order = adapter.place_order(b"csr")
@@ -210,3 +210,26 @@ class ClientFlowTests(SimpleTestCase):
         self.assertEqual([c.name for c in order.challenges], ["_acme-challenge.h7k3p2q8.praho-sites.net"])
         self.assertTrue(order.challenges[0].value)
         self.assertNotIn("=", order.challenges[0].value, "a DNS-01 value is unpadded base64url")
+
+    def test_a_stored_order_is_read_back_by_its_url_and_keeps_its_csr(self) -> None:
+        adapter, client = self.build()
+        url = "https://acme.test/order/7"
+        body = messages.Order(
+            identifiers=(messages.Identifier(typ=messages.IDENTIFIER_FQDN, value="h7k3p2q8.praho-sites.net"),),
+            status=messages.STATUS_PENDING,
+            authorizations=("https://acme.test/authz/1",),
+        )
+        client._post_as_get.return_value.json.return_value = body.to_json()
+        client._authzr_from_response.return_value = self.authz(
+            messages.STATUS_PENDING, challenges.DNS01(token=b"a" * 32)
+        )
+
+        order = adapter.load_order(url, b"the-csr")
+
+        self.assertEqual(
+            [call.args[0] for call in client._post_as_get.call_args_list], [url, "https://acme.test/authz/1"]
+        )
+        self.assertEqual(order.url, url)
+        self.assertEqual((order.handle.uri, order.handle.csr_pem), (url, b"the-csr"))
+        self.assertEqual([c.name for c in order.challenges], ["_acme-challenge.h7k3p2q8.praho-sites.net"])
+        client.new_order.assert_not_called()

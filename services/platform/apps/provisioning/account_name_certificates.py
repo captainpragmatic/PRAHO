@@ -45,6 +45,7 @@ from django.utils import timezone
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.credential_vault import CredentialData, get_credential_vault
+from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.dns_gateway import DnsProviderGateway, get_dns_gateway
 
@@ -298,24 +299,31 @@ def _reserve_budget(certificate: AccountNameCertificate, now: datetime) -> bool:
 
 
 def _alert(zone: str, kind: str, description: str, used: int, limit: int) -> None:
-    """Flag staff through the audit trail, once a day per zone and kind."""
-    if not cache.add(f"account-cert-alert:{zone}:{kind}:{timezone.localdate()}", 1, _ALERT_TTL_SECONDS):
+    """Flag staff through the audit trail, once a day per zone and kind.
+
+    The write has its own savepoint, so a failed audit write cannot take the reservation's transaction down
+    with it, and the day's quiet marker is set only once the alert is written.
+    """
+    key = f"account-cert-alert:{zone}:{kind}:{timezone.localdate()}"
+    if cache.get(key):
         return
     logger.error("🔥 [AccountCert] %s", description)
     budget = AccountNameCertificateBudget.objects.filter(zone=zone).first()
-    AuditService.log_event(
-        AuditEventData(event_type=_AUDIT_ALERT, content_object=budget, description=description),
-        AuditContext(
-            actor_type="system",
-            metadata={
-                "source_app": "provisioning",
-                "operational_event": True,
-                "zone": zone,
-                "used": used,
-                "limit": limit,
-            },
-        ),
-    )
+    with best_effort_atomic(logger=logger, scope="AccountCert", message="Certificate budget alert failed"):
+        AuditService.log_event(
+            AuditEventData(event_type=_AUDIT_ALERT, content_object=budget, description=description),
+            AuditContext(
+                actor_type="system",
+                metadata={
+                    "source_app": "provisioning",
+                    "operational_event": True,
+                    "zone": zone,
+                    "used": used,
+                    "limit": limit,
+                },
+            ),
+        )
+        cache.set(key, 1, _ALERT_TTL_SECONDS)
 
 
 def _attempt_id(certificate: AccountNameCertificate) -> str:
@@ -551,8 +559,8 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
 def renew_due_certificates() -> dict[str, int]:
     """Daily: renew certificates with under 30 days left, resume stalled attempts, reinstall stale installs, sweep DNS.
 
-    Renewals take no budget. After any certificate is issued here it is installed on every node that
-    holds an older one (and on the intended node), so a renewed certificate does not wait for the next sync.
+    Renewals take no budget. A renewed certificate is installed on every node that holds an older one, so it
+    does not wait for the next sync.
     """
     counts = {"renewed": 0, "resumed": 0, "deferred": 0, "failed": 0, "installed": 0, "install_failed": 0, "swept": 0}
     now = timezone.now()
@@ -581,29 +589,23 @@ def _count(counts: dict[str, int], outcome: IssuanceOutcome, issued_key: str) ->
 
 
 def _install_stale(counts: dict[str, int]) -> None:
-    """Install the certificate in force wherever the node has an older one or none (the intended node)."""
-    for certificate in AccountNameCertificate.objects.filter(
-        hostname__retired_at__isnull=True, current_certificate_ref__gt=""
-    ).select_related("hostname", "hostname__target_server"):
-        if not certificate.has_valid_material():
+    """Reinstall the certificate in force wherever a node still holds an older one.
+
+    Only nodes that already have an install record are touched. The first install on a name's intended node
+    belongs to `ensure_certificate_on_node`, which the hostname service calls after the node's sub-server
+    exists; running it from here would install ahead of that and fail every day until then.
+    """
+    installs = AccountNameCertificateInstall.objects.filter(
+        hostname__retired_at__isnull=True, hostname__certificate__isnull=False
+    ).select_related("hostname__certificate", "server")
+    for install in installs:
+        certificate = install.hostname.certificate
+        if not certificate.has_valid_material() or install.certificate_ref == certificate.current_certificate_ref:
             continue
-        hostname = certificate.hostname
-        servers = {
-            install.server.pk: install.server for install in hostname.certificate_installs.select_related("server")
-        }
-        target = hostname.target_server
-        if target is not None:
-            servers.setdefault(target.pk, target)
-        for server_pk, server in servers.items():
-            current = hostname.certificate_installs.filter(
-                server_id=server_pk, certificate_ref=certificate.current_certificate_ref
-            ).exists()
-            if current:
-                continue
-            if install_current_certificate(hostname, server).is_ok():
-                counts["installed"] += 1
-            else:
-                counts["install_failed"] += 1
+        if install_current_certificate(install.hostname, install.server).is_ok():
+            counts["installed"] += 1
+        else:
+            counts["install_failed"] += 1
 
 
 def sweep_stale_challenge_records() -> int:

@@ -338,6 +338,16 @@ class BudgetTests(CertificateTestCase):
             AuditEvent.objects.filter(action="account_name_certificate_alert", description__contains="used up").exists()
         )
 
+    def test_a_failed_alert_write_does_not_stop_the_reservation(self) -> None:
+        _write("dns.account_cert_weekly_budget", 1)
+
+        with patch.object(certs.AuditService, "log_event", side_effect=RuntimeError("audit down")):
+            outcome = self.issue()
+
+        self.assertEqual(outcome.status, IssuanceStatus.ISSUED, "1 of 1 is over 80%, so the alert ran and failed")
+        self.assertEqual(self.reservations(), 1)
+        self.assertEqual(self._alerts(), 0)
+
     def _alerts(self) -> int:
         return AuditEvent.objects.filter(action="account_name_certificate_alert").count()
 
@@ -474,6 +484,26 @@ class RenewalTests(CertificateTestCase):
         self.assertEqual(counts["installed"], 1)
         self.install_mock.assert_called_once()
         self.assertEqual(self.install_mock.call_args.args[1], self.server)
+
+    def test_a_node_that_already_holds_the_current_certificate_is_not_reinstalled(self) -> None:
+        self.issue()
+        row = self.row()
+        certs.record_installation(
+            self.hostname, self.server, certificate_ref=row.current_certificate_ref, not_after=row.current_not_after
+        )
+
+        counts = certs.renew_due_certificates()
+
+        self.assertEqual(counts["installed"], 0)
+        self.install_mock.assert_not_called()
+
+    def test_the_daily_task_does_not_install_on_a_node_that_has_no_install_record(self) -> None:
+        self.issue()
+
+        counts = certs.renew_due_certificates()
+
+        self.assertEqual((counts["installed"], counts["install_failed"]), (0, 0))
+        self.install_mock.assert_not_called()
 
     def test_the_sweep_runs_with_the_renewal(self) -> None:
         self.cloudflare.add(
