@@ -5,7 +5,6 @@ Tests the BillingAuditService and OrdersAuditService implementations.
 
 import uuid
 from decimal import Decimal
-from unittest.mock import Mock, patch
 
 import pytest
 import unittest
@@ -255,7 +254,7 @@ class TestOrdersAuditService:
         return Product.objects.create(
             name='Shared Hosting Plan',
             product_type='hosting',
-            status='active'
+            is_active=True
         )
 
     @pytest.fixture
@@ -276,13 +275,15 @@ class TestOrdersAuditService:
         """Test order events capture comprehensive business context"""
         # Act
         audit_event = OrdersAuditService.log_order_event(
-            event_type='order_created',
-            order=order,
-            context=AuditContext(
-                actor_type='user',
-                ip_address=order.source_ip
-            ),
-            description='Customer placed new order'
+            BusinessEventData(
+                event_type='order_created',
+                business_object=order,
+                context=AuditContext(
+                    actor_type='user',
+                    ip_address=order.source_ip
+                ),
+                description='Customer placed new order'
+            )
         )
 
         # Assert
@@ -310,9 +311,11 @@ class TestOrdersAuditService:
         """Test order item events include product and pricing details"""
         # Act
         audit_event = OrdersAuditService.log_order_item_event(
-            event_type='order_item_added',
-            order_item=order_item,
-            context=AuditContext(actor_type='system')
+            BusinessEventData(
+                event_type='order_item_added',
+                business_object=order_item,
+                context=AuditContext(actor_type='system')
+            )
         )
 
         # Assert
@@ -326,30 +329,26 @@ class TestOrdersAuditService:
         assert metadata['tax_rate'] == str(order_item.tax_rate)
         assert metadata['provisioning_status'] == order_item.provisioning_status
 
-    def test_log_provisioning_event_with_service_context(self, order_item):
-        """Test provisioning events link order items with services"""
-        # Setup - create a mock service
-        mock_service = Mock()
-        mock_service.id = uuid.uuid4()
-        mock_service.service_type = 'hosting'
-
+    def test_log_provisioning_event_links_order_item_context(self, order_item):
+        """Test provisioning events carry the order item's order and product context"""
         # Act
         audit_event = OrdersAuditService.log_provisioning_event(
-            event_type='provisioning_completed',
-            order_item=order_item,
-            service=mock_service,
-            context=AuditContext(actor_type='system'),
-            description='Service provisioned successfully'
+            BusinessEventData(
+                event_type='provisioning_completed',
+                business_object=order_item,
+                context=AuditContext(actor_type='system'),
+                description='Service provisioned successfully'
+            )
         )
 
-        # Assert
+        # Assert - an order item with no service yet is the audited object
         assert audit_event.action == 'provisioning_completed'
-        assert audit_event.content_object == mock_service
+        assert audit_event.content_object == order_item
         metadata = audit_event.metadata
         assert metadata['order_number'] == order_item.order.order_number
+        assert metadata['order_item_id'] == str(order_item.id)
         assert metadata['product_name'] == order_item.product_name
-        assert metadata['service_id'] == str(mock_service.id)
-        assert metadata['service_type'] == mock_service.service_type
+        assert metadata['service_id'] is None
 
     def test_order_status_change_tracking(self, order):
         """Test order status changes are properly tracked with old/new values"""
@@ -359,10 +358,12 @@ class TestOrdersAuditService:
 
         # Act
         audit_event = OrdersAuditService.log_order_event(
-            event_type='order_status_changed',
-            order=order,
-            old_values=old_values,
-            new_values=new_values
+            BusinessEventData(
+                event_type='order_status_changed',
+                business_object=order,
+                old_values=old_values,
+                new_values=new_values
+            )
         )
 
         # Assert
@@ -373,8 +374,7 @@ class TestOrdersAuditService:
         """Test order events include count of items for context"""
         # Act - order now has 1 item
         audit_event = OrdersAuditService.log_order_event(
-            event_type='order_updated',
-            order=order
+            BusinessEventData(event_type='order_updated', business_object=order)
         )
 
         # Assert
@@ -389,10 +389,12 @@ class TestOrdersAuditService:
 
         # Act
         audit_event = OrdersAuditService.log_order_item_event(
-            event_type='order_quantity_changed',
-            order_item=order_item,
-            old_values=old_values,
-            new_values=new_values
+            BusinessEventData(
+                event_type='order_quantity_changed',
+                business_object=order_item,
+                old_values=old_values,
+                new_values=new_values
+            )
         )
 
         # Assert
@@ -407,132 +409,64 @@ class TestAuditEventCategorization:
 
     def test_billing_events_categorization(self):
         """Test billing events are properly categorized"""
-        # Test various billing event types
-        billing_events = [
-            'invoice_created', 'invoice_paid', 'invoice_voided',
-            'payment_succeeded', 'payment_failed', 'payment_refunded',
-            'proforma_created', 'proforma_converted',
-            'credit_added', 'credit_used'
-        ]
+        from apps.customers.models import Customer
 
-        for event_type in billing_events:
-            # Create mock objects for testing
-            mock_invoice = Mock()
-            mock_invoice.number = 'TEST-001'
-            mock_invoice.status = 'draft'
-            mock_invoice.customer = Mock()
-            mock_invoice.customer.id = 1
-            mock_invoice.customer.company_name = 'Test Co'
-            mock_invoice.currency = Mock()
-            mock_invoice.currency.code = 'EUR'
-            mock_invoice.total = Decimal('100.00')
-            mock_invoice.tax_amount = Decimal('19.00')
-            mock_invoice.total_cents = 10000
-            mock_invoice.tax_cents = 1900
-            mock_invoice.due_at = None
-            mock_invoice.issued_at = None
-            mock_invoice.is_overdue = Mock(return_value=False)
-            mock_invoice.efactura_id = ''
-            mock_invoice.efactura_sent = False
-            mock_invoice.efactura_sent_date = None
-            mock_invoice.bill_to_name = 'Test Co'
+        currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        customer = Customer.objects.create(company_name='Test Co', customer_type='business', status='active')
+        invoice = Invoice.objects.create(
+            customer=customer, currency=currency, number='CAT-001', status='draft',
+            total_cents=10000, tax_cents=1900, subtotal_cents=8100, bill_to_name='Test Co',
+        )
+        payment = Payment.objects.create(
+            customer=customer, invoice=invoice, currency=currency, amount_cents=10000,
+            status='pending', payment_method='stripe', gateway_txn_id='txn_123',
+        )
+        invoice_events = ['invoice_created', 'invoice_paid', 'invoice_voided']
+        payment_events = ['payment_succeeded', 'payment_failed', 'payment_refunded']
 
-            if event_type.startswith('invoice_'):
-                audit_event = BillingAuditService.log_invoice_event(
-                    event_type=event_type,
-                    invoice=mock_invoice
-                )
-            elif event_type.startswith('payment_'):
-                mock_payment = Mock()
-                mock_payment.id = 1
-                mock_payment.customer = mock_invoice.customer
-                mock_payment.currency = mock_invoice.currency
-                mock_payment.amount = Decimal('100.00')
-                mock_payment.amount_cents = 10000
-                mock_payment.status = 'succeeded'
-                mock_payment.payment_method = 'stripe'
-                mock_payment.gateway_txn_id = 'txn_123'
-                mock_payment.reference_number = 'ref_123'
-                mock_payment.received_at = timezone.now()
-                mock_payment.invoice = mock_invoice
+        for event_type in invoice_events:
+            audit_event = BillingAuditService.log_invoice_event(
+                BusinessEventData(event_type=event_type, business_object=invoice)
+            )
+            assert audit_event.category == 'business_operation', event_type
+            assert audit_event.content_object == invoice, event_type
 
-                audit_event = BillingAuditService.log_payment_event(
-                    event_type=event_type,
-                    payment=mock_payment
-                )
-            else:
-                continue
-
-            assert audit_event.category == 'business_operation'
-            assert audit_event.is_sensitive is True
+        for event_type in payment_events:
+            audit_event = BillingAuditService.log_payment_event(
+                BusinessEventData(event_type=event_type, business_object=payment)
+            )
+            assert audit_event.category == 'business_operation', event_type
+            assert audit_event.is_sensitive is True, event_type  # payment_ prefix is sensitive
 
     def test_orders_events_categorization(self):
         """Test order events are properly categorized"""
-        order_events = [
-            'order_created', 'order_status_changed', 'order_completed',
-            'provisioning_started', 'provisioning_completed', 'provisioning_failed'
-        ]
+        from apps.customers.models import Customer
+        from apps.products.models import Product
 
-        for event_type in order_events:
-            # Create mock objects
-            mock_order = Mock()
-            mock_order.order_number = 'ORD-001'
-            mock_order.status = 'draft'
-            mock_order.customer = Mock()
-            mock_order.customer.id = 1
-            mock_order.customer_email = 'test@test.com'
-            mock_order.customer_name = 'Test User'
-            mock_order.customer_company = 'Test Co'
-            mock_order.customer_vat_id = ''
-            mock_order.currency = Mock()
-            mock_order.currency.code = 'EUR'
-            mock_order.total = Decimal('100.00')
-            mock_order.total_cents = 10000
-            mock_order.subtotal_cents = 8403
-            mock_order.tax_cents = 1597
-            mock_order.discount_cents = 0
-            mock_order.payment_method = 'card'
-            mock_order.transaction_id = ''
-            mock_order.is_draft = True
-            mock_order.is_paid = False
-            mock_order.can_be_cancelled = True
-            mock_order.created_at = timezone.now()
-            mock_order.completed_at = None
-            mock_order.expires_at = None
-            mock_order.invoice = None
-            mock_order.source_ip = '127.0.0.1'
-            mock_order.user_agent = 'Test Agent'
-            mock_order.referrer = ''
-            mock_order.utm_source = ''
-            mock_order.utm_medium = ''
-            mock_order.utm_campaign = ''
-            mock_order.items = Mock()
-            mock_order.items.count = Mock(return_value=1)
+        currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        customer = Customer.objects.create(company_name='Test Co', customer_type='business', status='active')
+        order = Order.objects.create(
+            customer=customer, order_number='ORD-CAT-001', currency=currency, status='draft',
+            total_cents=10000, subtotal_cents=8403, tax_cents=1597,
+            customer_email='test@test.com', customer_name='Test User', customer_company='Test Co',
+        )
+        product = Product.objects.create(name='Hosting', product_type='hosting', is_active=True)
+        order_item = OrderItem.objects.create(
+            order=order, product=product, product_name='Hosting', product_type='hosting',
+            quantity=1, unit_price_cents=4200, tax_rate=Decimal('0.19'), provisioning_status='pending',
+        )
 
-            if event_type.startswith('order_'):
-                audit_event = OrdersAuditService.log_order_event(
-                    event_type=event_type,
-                    order=mock_order
-                )
-            elif event_type.startswith('provisioning_'):
-                mock_item = Mock()
-                mock_item.order = mock_order
-                mock_item.id = uuid.uuid4()
-                mock_item.product_name = 'Test Product'
-                mock_item.product_type = 'hosting'
-                mock_item.domain_name = ''
-                mock_item.provisioning_status = 'pending'
-                mock_item.provisioning_notes = ''
-                mock_item.config = {}
+        for event_type in ['order_created', 'order_status_changed', 'order_completed']:
+            audit_event = OrdersAuditService.log_order_event(
+                BusinessEventData(event_type=event_type, business_object=order)
+            )
+            assert audit_event.category == 'business_operation', event_type
 
-                audit_event = OrdersAuditService.log_provisioning_event(
-                    event_type=event_type,
-                    order_item=mock_item
-                )
-            else:
-                continue
-
-            assert audit_event.category == 'business_operation'
+        for event_type in ['provisioning_started', 'provisioning_completed', 'provisioning_failed']:
+            audit_event = OrdersAuditService.log_provisioning_event(
+                BusinessEventData(event_type=event_type, business_object=order_item)
+            )
+            assert audit_event.category == 'business_operation', event_type
 
     def test_high_severity_events(self):
         """Test events that should be marked as high severity"""
@@ -577,9 +511,11 @@ class TestAuditEventPerformance:
         # Test - should use minimal queries for audit logging
         with django_assert_max_num_queries(5):  # ContentType lookup, User lookup, AuditEvent create
             BillingAuditService.log_invoice_event(
-                event_type='invoice_created',
-                invoice=invoice,
-                description='Performance test'
+                BusinessEventData(
+                    event_type='invoice_created',
+                    business_object=invoice,
+                    description='Performance test'
+                )
             )
 
     def test_metadata_serialization_performance(self):

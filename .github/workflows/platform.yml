@@ -21,6 +21,7 @@ on:
       # What platform-postgres runs: its Makefile target, the scan, and the database bootstrap.
       - 'Makefile'
       - 'scripts/pg_gated_test_modules.py'
+      - 'scripts/plain_test_class_modules.py'
       - 'scripts/start_ci_postgres.sh'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -124,6 +125,11 @@ jobs:
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" combine
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-platform.xml
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing
+
+    # The Django runner above only collects unittest.TestCase subclasses. Plain pytest-style
+    # Test* classes run here, from a scan of the tests so a new one needs no workflow edit.
+    - name: Plain Test* classes (pytest-only, derived from the tests themselves)
+      run: make test-platform-pytest-only
 
     - name: Platform type checking
       run: make check-types-platform

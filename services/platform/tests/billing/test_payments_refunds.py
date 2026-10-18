@@ -9,7 +9,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.billing.models import Currency, Invoice, Payment
+from apps.billing.models import Currency, Invoice, Payment, Refund
 from apps.billing.services import RefundData, RefundQueryService, RefundReason, RefundService, RefundType
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order
@@ -340,12 +340,13 @@ class TestRefundServiceWithFixtures:
         )
         order.invoice = invoice
         order.save(update_fields=["invoice", "updated_at"])
-        Payment.objects.create(
+        payment = Payment.objects.create(
             customer=data["customer"],
             invoice=invoice,
             status="succeeded",
             amount_cents=10000,
             currency=data["currency"],
+            payment_method="bank",  # a gateway method would call out to the gateway
             gateway_txn_id="test_txn_concurrent",
         )
 
@@ -363,7 +364,10 @@ class TestRefundServiceWithFixtures:
         result = RefundService.refund_order(order.id, refund_data)
         assert result.is_ok()
 
-        # Second attempt should fail
+        # Second attempt should fail: the first refund spent the only refundable payment
         result2 = RefundService.refund_order(order.id, refund_data)
         assert result2.is_err()
-        assert "already been fully refunded" in result2.error
+        assert "No successful payments found to refund" in result2.error
+        payment.refresh_from_db()
+        assert payment.status == "refunded"
+        assert Refund.objects.filter(order=order).count() == 1

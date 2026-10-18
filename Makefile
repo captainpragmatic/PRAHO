@@ -54,6 +54,7 @@ help:
 	@echo "  make test-ci-focused MODULES='tests.X tests.Y' - Focused CI test run"
 	@echo "  make test-file FILE=tests.X.test_Y - Run a specific test file"
 	@echo "  make test-platform-pytest - Test platform service with pytest"
+	@echo "  make test-platform-pytest-only - Run the plain Test* classes the Django runner skips"
 	@echo "  make test-portal       - Test portal service (NO DB access)"
 	@echo "  make test-integration  - Test platform→portal API communication"
 	@echo "  make test-e2e          - All E2E tests (requires both services)"
@@ -638,6 +639,17 @@ ci-postgres-start:
 
 ci-postgres-stop:
 	@./scripts/start_ci_postgres.sh --stop
+
+# Platform test classes that are not unittest.TestCase subclasses are skipped by the Django runner
+# that `make test-platform` uses, so they only run under pytest. This runs exactly the modules
+# holding them, found by scanning the tests. POSIX sh on purpose (see the target below).
+.PHONY: test-platform-pytest-only
+test-platform-pytest-only:
+	@echo "🧪 [Platform] Plain Test* classes (pytest-only, derived from the tests themselves)..."
+	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/plain_test_class_modules.py) || exit 1; \
+	if [ -z "$$modules" ]; then echo "🔥 [Platform] The plain-test-class scan found no modules" >&2; exit 1; fi; \
+	cd services/platform && PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test \
+		$(PWD)/$(VENV_DIR)/bin/python -m pytest -o addopts= --nomigrations --tb=short -q $$modules
 
 # Every platform test module that only means something on PostgreSQL, found by scanning the
 # tests. Needs a running PostgreSQL (`make ci-postgres-start`, or DB_* pointing at one).

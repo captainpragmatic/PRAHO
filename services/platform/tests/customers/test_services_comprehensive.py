@@ -42,7 +42,7 @@ class TestCustomerModel:
         assert customer.pk is not None
         assert customer.customer_type == 'company'
         assert customer.company_name == 'SC Test SRL'
-        assert customer.status == 'active'
+        assert customer.status == 'prospect'  # new customers start as prospects; activation is an FSM transition
 
     def test_customer_creation_individual(self):
         """Individual customer should be created correctly"""
@@ -103,7 +103,7 @@ class TestCustomerTaxProfile:
         tax_profile = customer.tax_profile
 
         assert tax_profile is not None
-        assert tax_profile.cui == 'RO12345678'
+        assert tax_profile.cui == '12345678'  # stored as digits: an RO prefix would assert VAT registration
         assert tax_profile.vat_number == 'RO12345678'
         assert tax_profile.is_vat_payer is True
         assert tax_profile.vat_rate == Decimal('21.00')
@@ -225,8 +225,8 @@ class TestCustomerSoftDelete:
         customer = create_full_customer()
         customer_pk = customer.pk
 
-        # Perform soft delete
-        customer.delete()
+        # Perform soft delete (Model.delete() is a hard delete; soft_delete() is the API)
+        customer.soft_delete()
 
         # Customer should still exist in database with deleted_at set
         deleted_customer = Customer.all_objects.get(pk=customer_pk)
@@ -239,7 +239,7 @@ class TestCustomerSoftDelete:
         customer = create_full_customer()
         customer_pk = customer.pk
 
-        customer.delete()
+        customer.soft_delete()
 
         # Should not be found with normal query
         assert not Customer.objects.filter(pk=customer_pk).exists()
@@ -251,7 +251,7 @@ class TestCustomerSoftDelete:
         customer = create_full_customer()
         customer_pk = customer.pk
 
-        customer.delete()
+        customer.soft_delete()
 
         # Should be found with all_objects
         assert Customer.all_objects.filter(pk=customer_pk).exists()
@@ -261,8 +261,8 @@ class TestCustomerSoftDelete:
 class TestCustomerCreationValidation:
     """Test customer creation validation"""
 
-    def test_email_defaults_to_placeholder(self):
-        """Customer without explicit email gets default placeholder."""
+    def test_email_is_optional_and_defaults_to_blank(self):
+        """Customer without explicit email stays blank, with no invented placeholder address."""
         from tests.factories.core_factories import create_admin_user
 
         admin = create_admin_user(username='customer_admin_email')
@@ -275,9 +275,9 @@ class TestCustomerCreationValidation:
             created_by=admin,
         )
 
-        # Model has a default; full_clean should pass
-        customer.full_clean()
-        assert customer.primary_email == 'contact@example.com'
+        # The field is blank=True; full_clean should pass (status is a protected FSM field, so exclude it)
+        customer.full_clean(exclude=['status'])
+        assert customer.primary_email == ''
 
     def test_customer_type_defaults_to_individual(self):
         """Customer type should default to 'individual'."""
