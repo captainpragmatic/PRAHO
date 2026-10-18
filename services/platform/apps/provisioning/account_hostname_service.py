@@ -64,17 +64,41 @@ def owner_tag(hostname: AccountHostname) -> str:
 
 
 # ----------------------------------------------------------------------------- certificates
-# P1.10 owns issuance and installation. Until it is wired in, nothing counts as ready, so no name
-# is ever published or announced without a certificate.
+# P1.10 (account_name_certificates) owns issuance and installation. A name is published and
+# announced only once an unexpired certificate for it is installed on the node DNS points at.
 
 
 def certificate_ready_on(hostname: AccountHostname, server: VirtualminServer) -> bool:
     """Whether an unexpired certificate for the name is installed on `server`."""
-    return False
+    from .account_name_certificates import certificate_installed_on  # noqa: PLC0415  # Deferred: imports acme
+
+    return certificate_installed_on(hostname, server.pk)
 
 
 def install_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[bool, str]:
-    """Install the name's current certificate on `server`; Ok(False) when there is none yet."""
+    """Order the name's certificate if it needs one and install it on `server`; Ok(False) when not yet.
+
+    An issuance that is deferred, out of budget, failed or not configured leaves the name unready
+    and unpublished, and the sweep tries again; that is not an error of this node. A certificate in
+    hand that did not install is.
+    """
+    from .account_name_certificates import (  # noqa: PLC0415  # Deferred: imports acme
+        IssuanceStatus,
+        ensure_certificate_on_node,
+    )
+
+    result = ensure_certificate_on_node(hostname, server)
+    if result.ready:
+        return Ok(True)
+    issued = result.issuance is not None and result.issuance.status in {
+        IssuanceStatus.ISSUED,
+        IssuanceStatus.ALREADY_VALID,
+    }
+    if issued:
+        return Err(
+            f"Certificate not installed on {server.hostname}: {result.detail}", retriability=Retriability.UNKNOWN
+        )
+    logger.info("⏳ [AccountName] Certificate for %s not ready yet: %s", hostname.fqdn, result.detail)
     return Ok(False)
 
 

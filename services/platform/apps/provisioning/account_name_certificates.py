@@ -148,8 +148,13 @@ def account_name_ready(hostname: AccountHostname) -> bool:
     """
     if hostname.target_server_id is None:
         return False
+    return certificate_installed_on(hostname, hostname.target_server_id)
+
+
+def certificate_installed_on(hostname: AccountHostname, server_id: UUID) -> bool:
+    """Whether an unexpired certificate for the name is recorded as installed on that node."""
     return AccountNameCertificateInstall.objects.filter(
-        hostname=hostname, server_id=hostname.target_server_id, not_after__gt=timezone.now()
+        hostname=hostname, server_id=server_id, not_after__gt=timezone.now()
     ).exists()
 
 

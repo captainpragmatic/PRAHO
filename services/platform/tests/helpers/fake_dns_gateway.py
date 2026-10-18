@@ -11,7 +11,14 @@ import itertools
 from typing import Any, ClassVar
 
 from apps.common.types import Err, Ok, Result
-from apps.infrastructure.dns_gateway import DnsProviderGateway, DnsRecordResult, DnsRecordSpec, ReconcileOutcome
+from apps.infrastructure.dns_gateway import (
+    DNS_RECORD_TTL_SECONDS,
+    DnsProviderGateway,
+    DnsRecordResult,
+    DnsRecordSpec,
+    DnsRecordType,
+    ReconcileOutcome,
+)
 
 FAKE_PROVIDER = "fake"
 
@@ -95,6 +102,65 @@ class FakeDnsGateway(DnsProviderGateway):
         for record_id in deleted:
             del self.records[record_id]
         return Ok(deleted)
+
+    def reconcile_txt_values(
+        self, zone_id: str, name: str, values: list[str], owner_tag: str, *, ttl: int = DNS_RECORD_TTL_SECONDS
+    ) -> ReconcileOutcome:
+        self.calls.append(f"txt {zone_id} {name} {owner_tag} {sorted(values)}")
+        for record_id, record in list(self.records.items()):
+            if (record["zone_id"], record["type"], record["name"], record["owner"]) == (
+                zone_id,
+                "TXT",
+                name,
+                owner_tag,
+            ):
+                del self.records[record_id]
+        outcome = ReconcileOutcome()
+        for value in values:
+            record_id = str(next(self._ids))
+            self.records[record_id] = {
+                "zone_id": zone_id,
+                "type": "TXT",
+                "name": name,
+                "content": value,
+                "ttl": ttl,
+                "owner": owner_tag,
+            }
+            outcome.applied.append(
+                DnsRecordResult(
+                    provider=self.provider,
+                    zone_id=zone_id,
+                    record_id=record_id,
+                    record_type="TXT",
+                    name=name,
+                    content=value,
+                    owner_tag=owner_tag,
+                )
+            )
+        return outcome
+
+    def sweep_owned_records(
+        self,
+        zone_id: str,
+        owner_prefix: str,
+        *,
+        keep_owner_tags: frozenset[str],
+        min_age_seconds: float,
+        record_type: DnsRecordType = "TXT",
+    ) -> Result[list[str], str]:
+        # Records here have no age: every unkept one counts as old enough.
+        self.calls.append(f"sweep {zone_id} {owner_prefix}")
+        stale = [
+            rid
+            for rid, r in self.records.items()
+            if r["zone_id"] == zone_id
+            and r["type"] == record_type
+            and r["owner"].startswith(owner_prefix)
+            and r["owner"] not in keep_owner_tags
+        ]
+        for record_id in stale:
+            del self.records[record_id]
+        return Ok(stale)
 
     @classmethod
     def published(cls, name: str) -> dict[str, str]:

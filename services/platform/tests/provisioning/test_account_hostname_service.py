@@ -153,6 +153,7 @@ class AccountNameTestCase(TestCase):
             service, "install_certificate", lambda hostname, server: self.node.calls.append("certificate") or Ok(True)
         )
         certificate.start()
+        self._certificate = certificate
         self.addCleanup(certificate.stop)
 
     def _psl_shipped(self) -> None:
@@ -321,3 +322,63 @@ class AllocationTests(AccountNameTestCase):
 
     def test_the_same_account_gets_its_existing_name(self) -> None:
         self.assertEqual(service.allocate_account_hostname(self.account), self.hostname)
+
+
+class CertificateWiringTests(AccountNameTestCase):
+    """P1.4 reads P1.10's install records and maps its outcomes; the patched ones above stand in for it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._certificate.stop()
+
+    def test_ready_means_an_unexpired_install_on_that_very_server(self) -> None:
+        from apps.provisioning.account_hostname_models import AccountNameCertificateInstall  # noqa: PLC0415
+
+        other = VirtualminServer.objects.create(name="Other", hostname="node2.example.com")
+        self.assertFalse(service.certificate_ready_on(self.hostname, self.server))
+        install = AccountNameCertificateInstall.objects.create(
+            hostname=self.hostname,
+            server=self.server,
+            certificate_ref="ref",
+            not_after=timezone.now() + timezone.timedelta(days=60),
+        )
+        self.assertTrue(service.certificate_ready_on(self.hostname, self.server))
+        self.assertFalse(service.certificate_ready_on(self.hostname, other))
+        AccountNameCertificateInstall.objects.filter(pk=install.pk).update(
+            not_after=timezone.now() - timezone.timedelta(minutes=1)
+        )
+        self.assertFalse(service.certificate_ready_on(self.hostname, self.server))
+
+    def test_issuance_not_done_is_not_yet_and_a_failed_install_is_an_error(self) -> None:
+        from apps.provisioning import account_name_certificates as certificates  # noqa: PLC0415
+
+        cases = (
+            (certificates.NodeCertificateResult(ready=True), Ok(True)),
+            (
+                certificates.NodeCertificateResult(
+                    ready=False, issuance=certificates.IssuanceOutcome(certificates.IssuanceStatus.BUDGET_EXHAUSTED)
+                ),
+                Ok(False),
+            ),
+            (
+                certificates.NodeCertificateResult(
+                    ready=False, issuance=certificates.IssuanceOutcome(certificates.IssuanceStatus.DEFERRED)
+                ),
+                Ok(False),
+            ),
+        )
+        for node_result, expected in cases:
+            with (
+                self.subTest(expected=expected),
+                patch.object(certificates, "ensure_certificate_on_node", return_value=node_result),
+            ):
+                self.assertEqual(service.install_certificate(self.hostname, self.server), expected)
+        failed_install = certificates.NodeCertificateResult(
+            ready=False,
+            issuance=certificates.IssuanceOutcome(certificates.IssuanceStatus.ALREADY_VALID),
+            detail="playbook failed",
+        )
+        with patch.object(certificates, "ensure_certificate_on_node", return_value=failed_install):
+            outcome = service.install_certificate(self.hostname, self.server)
+        self.assertTrue(outcome.is_err(), "a certificate in hand that did not install is not 'not yet'")
+        self.assertIs(retriability_of(outcome), Retriability.UNKNOWN)
