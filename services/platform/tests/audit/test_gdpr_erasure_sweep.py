@@ -181,6 +181,27 @@ class ErasureSweepTests(TestCase):
             if proof.description.startswith("CNP cleared from"):
                 self.assertNotIn("identity_removed_at", proof.metadata)
 
+    def test_an_earlier_proof_row_naming_the_person_keeps_only_its_proof(self) -> None:
+        for mode in ("anonymize", "delete"):
+            with self.subTest(mode=mode):
+                user = self.person(mode)
+                proof = AuditEvent.objects.create(
+                    action="data_anonymization_completed",
+                    category="privacy",
+                    severity="low",
+                    user=user,
+                    description=f"CNP cleared for {EMAIL}",
+                    metadata={"field": "cnp", "customer_id": "7", "ip_address": "198.51.100.9"},
+                )
+
+                self.process(user, mode)
+
+                proof.refresh_from_db()
+                self.assertIsNone(proof.user_id)
+                self.assertNotIn(EMAIL, proof.description)
+                self.assertEqual((proof.metadata["field"], proof.metadata["customer_id"]), ("cnp", "7"))
+                self.assertNotIn("ip_address", proof.metadata)
+
     def test_a_failed_sweep_rolls_the_erasure_back(self) -> None:
         user = self.person()
         request = GDPRDeletionService.create_deletion_request(user=user, deletion_type="anonymize").unwrap()

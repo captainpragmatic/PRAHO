@@ -206,13 +206,22 @@ def compliance_logs_concerning(subject: ErasureSubject) -> QuerySet[ComplianceLo
     )
 
 
+def _concerning_query(subject: ErasureSubject) -> Q:
+    return _about_query(subject) | _mentions_query(subject) | Q(user_id=subject.user_pk)
+
+
 def events_concerning(subject: ErasureSubject) -> QuerySet[AuditEvent]:
     """Every row about the person, naming them, or acted in by them."""
     from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: app registry
 
-    return AuditEvent.objects.filter(
-        _about_query(subject) | _mentions_query(subject) | Q(user_id=subject.user_pk)
-    ).exclude(action__in=ERASURE_PROOF_ACTIONS)
+    return AuditEvent.objects.filter(_concerning_query(subject)).exclude(action__in=ERASURE_PROOF_ACTIONS)
+
+
+def proofs_concerning(subject: ErasureSubject) -> QuerySet[AuditEvent]:
+    """Proof rows concerning the person: never destroyed, but they lose the person's identifiers."""
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: app registry
+
+    return AuditEvent.objects.filter(_concerning_query(subject), action__in=ERASURE_PROOF_ACTIONS)
 
 
 def _replace(text: str, subject: ErasureSubject) -> str:

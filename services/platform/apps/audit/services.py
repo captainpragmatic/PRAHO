@@ -51,6 +51,7 @@ from .person_events import (
     erasure_in_progress,
     events_about,
     events_concerning,
+    proofs_concerning,
     remove_compliance_identity,
     remove_identity,
 )
@@ -1757,6 +1758,7 @@ class GDPRDeletionService:
                 keep.append(event)
             else:
                 own.append(event)
+        keep.extend(proofs_concerning(subject))
         return own, keep
 
     @staticmethod
