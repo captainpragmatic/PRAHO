@@ -1567,6 +1567,8 @@ class GDPRDeletionService:
             # One savepoint: a sweep that fails rolls the erasure back with it, instead of the
             # handler below committing an erasure that left the person in the audit log.
             with transaction.atomic(), erasure_in_progress() as writes:
+                # Tickets first, while every reply still names its author: deletion sets authors to NULL.
+                cls._erase_tickets(subject)
                 if deletion_type == "anonymize":
                     result = cls._anonymize_user_data(user)
                     action_taken = "anonymized"
@@ -1821,6 +1823,62 @@ class GDPRDeletionService:
                 metadata={"customer_id": str(customer_id)},
                 actor_type="system",
             )
+
+    ERASED_TICKET_TITLE = "Erased ticket"
+    ERASED_TICKET_TEXT = "[Removed at the person's request]"
+
+    @classmethod
+    def _erase_tickets(cls, subject: ErasureSubject) -> None:
+        """Remove the person from support tickets (row 74, owner decision OF4).
+
+        A ticket the person raised with no other member's reply on it is theirs: its text, contact
+        details and comments are replaced, and its attachments deleted (their files once this
+        commits). Any other ticket that names them keeps its content, including the person's own
+        replies, and loses only the person's name and email: it may be another member's evidence.
+        A customer reply with no author is the person's when its email is one of theirs, and
+        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        """
+        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
+            Ticket,
+            TicketAttachment,
+            TicketComment,
+        )
+
+        emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier}
+
+        def is_persons(author_id: int | None, author_email: str) -> bool:
+            if author_id is not None:
+                return author_id == subject.user_pk
+            return author_email.lower() in emails
+
+        mentions = Q(created_by_id=subject.user_pk) | Q(comments__author_id=subject.user_pk)
+        for email in emails:
+            mentions |= Q(contact_email__iexact=email) | Q(comments__author_email__iexact=email)
+        ticket_ids = list(Ticket.objects.filter(mentions).values_list("pk", flat=True).distinct())
+        tickets = Ticket.objects.select_for_update(of=("self",)).filter(pk__in=ticket_ids).order_by("pk")
+        for ticket in tickets:
+            replies = list(ticket.comments.values_list("pk", "comment_type", "author_id", "author_email"))
+            persons = [pk for pk, _kind, author_id, email in replies if is_persons(author_id, email)]
+            alone = ticket.created_by_id == subject.user_pk and all(
+                is_persons(author_id, email) for _pk, kind, author_id, email in replies if kind == "customer"
+            )
+            if alone:
+                Ticket.objects.filter(pk=ticket.pk).update(
+                    title=cls.ERASED_TICKET_TITLE,
+                    description=cls.ERASED_TICKET_TEXT,
+                    contact_person="",
+                    contact_email="",
+                    contact_phone="",
+                    satisfaction_comment="",
+                )
+                TicketComment.objects.filter(ticket=ticket).update(
+                    content=cls.ERASED_TICKET_TEXT, author_name="", author_email=""
+                )
+                TicketAttachment.objects.filter(ticket=ticket).delete()  # Each file goes once this commits
+                continue
+            TicketComment.objects.filter(pk__in=persons).update(author_name="", author_email="")
+            if ticket.contact_email.lower() in emails:
+                Ticket.objects.filter(pk=ticket.pk).update(contact_person="", contact_email="", contact_phone="")
 
     @classmethod
     def _erase_audit_identity(cls, subject: ErasureSubject) -> None:
