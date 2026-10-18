@@ -4,7 +4,12 @@ Imports all feature models for migrations and admin.
 """
 
 # Import all models from feature files
-from .account_hostname_models import AccountHostname, AccountNameCertificate, AccountNameCertificateBudget
+from .account_hostname_models import (
+    AccountHostname,
+    AccountNameCertificate,
+    AccountNameCertificateBudget,
+    AccountNameCertificateInstall,
+)
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
 from .service_request_models import ServiceRequest
@@ -21,6 +26,7 @@ __all__ = [
     "AccountHostname",
     "AccountNameCertificate",
     "AccountNameCertificateBudget",
+    "AccountNameCertificateInstall",
     "NodeDrain",
     "ProvisioningTask",
     "Server",

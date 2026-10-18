@@ -179,3 +179,35 @@ class AccountNameCertificateBudget(models.Model):
 
     def __str__(self) -> str:
         return f"certificate budget for {self.zone}"
+
+
+class AccountNameCertificateInstall(models.Model):
+    """A certificate for an account name that is installed on a node.
+
+    Written when an install succeeds (`account_name_certificates.record_installation`), one row per
+    (name, node). A name is ready for a node when the row for that node holds an unexpired certificate:
+    the installed material, not the issuance attempt, is what the node serves.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    hostname = models.ForeignKey(AccountHostname, on_delete=models.CASCADE, related_name="certificate_installs")
+    server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.CASCADE, related_name="account_name_certificate_installs"
+    )
+    # The vault reference of the certificate that was installed, so a newer one is known to be missing.
+    certificate_ref = models.CharField(max_length=255)
+    not_after = models.DateTimeField()
+    installed_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "provisioning_account_name_certificate_installs"
+        verbose_name = _("Account Name Certificate Install")
+        verbose_name_plural = _("Account Name Certificate Installs")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["hostname", "server"], name="account_name_certificate_install_per_node"),
+        ]
+
+    def __str__(self) -> str:
+        return f"certificate for {self.hostname_id} on {self.server_id}"

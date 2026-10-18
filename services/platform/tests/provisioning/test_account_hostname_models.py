@@ -18,6 +18,7 @@ from apps.provisioning.account_hostname_models import (
     AccountHostname,
     AccountNameCertificate,
     AccountNameCertificateBudget,
+    AccountNameCertificateInstall,
     ProtectedLabelError,
 )
 from apps.provisioning.models import Service, ServicePlan
@@ -230,3 +231,34 @@ class AccountHostnameAuditTests(TestCase):
         self.assertEqual(
             AuditEvent.objects.filter(action="account_hostname_retired", object_id=str(hostname.pk)).count(), 1
         )
+
+
+class AccountNameCertificateInstallTests(TestCase):
+    def test_a_name_has_one_install_record_per_node(self) -> None:
+        server = _make_server()
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE, target_server=server)
+        later = timezone.now() + timedelta(days=60)
+        AccountNameCertificateInstall.objects.create(
+            hostname=hostname, server=server, certificate_ref="acme_certificate:x", not_after=later
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AccountNameCertificateInstall.objects.create(
+                hostname=hostname, server=server, certificate_ref="acme_certificate:y", not_after=later
+            )
+        AccountNameCertificateInstall.objects.create(
+            hostname=hostname, server=_make_server(), certificate_ref="acme_certificate:x", not_after=later
+        )
+
+    def test_deleting_a_node_removes_only_its_install_records(self) -> None:
+        keep, drop = _make_server(), _make_server()
+        hostname = AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE, target_server=keep)
+        later = timezone.now() + timedelta(days=60)
+        for server in (keep, drop):
+            AccountNameCertificateInstall.objects.create(
+                hostname=hostname, server=server, certificate_ref="acme_certificate:x", not_after=later
+            )
+
+        drop.delete()
+
+        self.assertEqual(list(AccountNameCertificateInstall.objects.values_list("server_id", flat=True)), [keep.pk])
