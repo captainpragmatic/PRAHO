@@ -293,6 +293,20 @@ class FullErasureChainTests(TestCase):
 
 
 class ExportListsTheWholeAuditTrailTests(TestCase):
+    def test_export_includes_the_erasure_proof_rows_about_the_person(self) -> None:
+        user = User.objects.create_user(email=EMAIL, password="x-pass-123")
+        AuditEvent.objects.create(action="login_success", category="authentication", severity="low", user=user)
+        AuditEvent.objects.create(
+            action="data_anonymization_completed", category="privacy", severity="medium", user=user,
+            description="Anonymisation completed for an earlier request",
+        )
+
+        summary = GDPRExportService._collect_user_data(user, {"include_audit_logs": True})["audit_summary"]
+
+        actions = [entry["action"] for entry in summary["recent_activities"]]
+        self.assertIn("data_anonymization_completed", actions)
+        self.assertEqual(summary["total_events"], len(actions))
+
     def test_export_counts_every_event_about_the_person(self) -> None:
         user = User.objects.create_user(email=EMAIL, password="x-pass-123")
         staff = User.objects.create_user(email="staff.export@example.test", password="x-pass-123", is_staff=True)
