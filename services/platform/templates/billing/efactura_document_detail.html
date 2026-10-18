@@ -228,9 +228,11 @@
           {% endif %}
           {% if document.response_archive %}
           <dt class="text-xs text-slate-400">{% trans "ANAF Response Archive" %}</dt>
+          {% if document.response_archive_sha256 %}
           <dd class="mt-1 text-xs">
             <a href="{% url 'billing:efactura_document_file' pk=document.pk kind='archive' %}" class="text-blue-400 hover:text-blue-300">{% trans "Download the ANAF response archive" %}</a>
           </dd>
+          {% endif %}
           <dt class="text-xs text-slate-400">{% trans "Response Archive SHA-256" %}</dt>
           {% trans "Unverified legacy archive" as unverified_archive %}
           <dd class="mt-1 text-xs text-slate-300 font-mono break-all">

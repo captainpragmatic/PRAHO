@@ -16,9 +16,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError, EndpointConnectionError
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.storage import FileSystemStorage
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
@@ -121,6 +123,29 @@ class EFacturaFileDownloadTests(TestCase):
         self.document.xml_file.storage.delete(self.document.xml_file.name)
         self.assertEqual(self._get("xml").status_code, 404)
         self.assertEqual([e.metadata["outcome"] for e in self._events()], ["served", "unavailable", "missing"])
+
+    def test_object_store_errors_are_404_or_503(self) -> None:
+        # On MEDIA_STORAGE=s3 a read fails with botocore's errors, not OSError: a missing key is a
+        # 404 response from the store, and a refused or unreachable store is anything else.
+        def client_error(status: int) -> ClientError:
+            return ClientError({"Error": {"Code": str(status)}, "ResponseMetadata": {"HTTPStatusCode": status}}, "GetObject")
+
+        for error, expected in (
+            (client_error(404), 404),
+            (client_error(403), 503),
+            (EndpointConnectionError(endpoint_url="https://objects.example.test"), 503),
+        ):
+            with self.subTest(error=type(error).__name__), patch.object(FileSystemStorage, "_open", side_effect=error):
+                self.assertEqual(self._get("xml").status_code, expected)
+        self.assertEqual([e.metadata["outcome"] for e in self._events()], ["missing", "unavailable", "unavailable"])
+
+    def test_detail_page_links_both_verifiable_files(self) -> None:
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": self.document.pk}))
+
+        for kind in ("xml", "archive"):
+            url = reverse("billing:efactura_document_file", kwargs={"pk": self.document.pk, "kind": kind})
+            self.assertContains(response, f'href="{url}"')
+        self.assertNotContains(response, self.document.response_archive.name)
 
     def test_non_billing_staff_cannot_download_fiscal_files(self) -> None:
         support = User.objects.create_user(email="support-files@example.com", is_staff=True, staff_role="support")

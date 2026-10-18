@@ -739,7 +739,9 @@ def ticket_attachment_download_api(
         # Set download headers
         mark_download(response, attachment.filename)
         response["Content-Length"] = attachment.file_size
-        audit_attachment_download(attachment, channel="api", customer_id=customer.pk)
+        audit_attachment_download(
+            attachment, channel="api", user=getattr(request, "_customer_user", None), customer_id=customer.pk
+        )
 
         logger.info(
             f"✅ [API] Ticket attachment download: {attachment.filename}, ticket={attachment.ticket.ticket_number}"

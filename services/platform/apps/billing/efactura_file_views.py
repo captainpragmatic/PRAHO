@@ -13,8 +13,10 @@ import hashlib
 import hmac
 import logging
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET
@@ -55,6 +57,12 @@ def _audit(request: HttpRequest, document: Any, kind: str, outcome: str) -> None
     )
 
 
+def _unavailable(request: HttpRequest, document: Any, kind: str) -> HttpResponse:
+    logger.exception(f"🔥 [e-Factura] Could not read the stored {kind} for document {document.pk}")
+    _audit(request, document, kind, "unavailable")
+    return HttpResponse("The file store is unavailable.", status=503, content_type="text/plain")
+
+
 @billing_staff_required
 @require_GET
 def efactura_document_file(request: HttpRequest, pk: str, kind: str) -> HttpResponse:
@@ -75,10 +83,14 @@ def efactura_document_file(request: HttpRequest, pk: str, kind: str) -> HttpResp
     except FileNotFoundError:
         _audit(request, document, kind, "missing")
         raise Http404("The stored file is gone") from None
-    except (OSError, ValueError):
-        logger.exception(f"🔥 [e-Factura] Could not read the stored {kind} for document {document.pk}")
-        _audit(request, document, kind, "unavailable")
-        return HttpResponse("The file store is unavailable.", status=503, content_type="text/plain")
+    except ClientError as exc:
+        # On MEDIA_STORAGE=s3 a missing key is the store's 404; anything else is the store failing.
+        if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == HTTPStatus.NOT_FOUND:
+            _audit(request, document, kind, "missing")
+            raise Http404("The stored file is gone") from None
+        return _unavailable(request, document, kind)
+    except (OSError, ValueError, BotoCoreError):
+        return _unavailable(request, document, kind)
 
     expected = getattr(document, spec.digest_field)
     if not expected or not hmac.compare_digest(hashlib.sha256(content).hexdigest(), expected):

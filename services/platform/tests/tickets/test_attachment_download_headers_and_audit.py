@@ -33,7 +33,12 @@ class AttachmentDownloadHeadersAndAuditTests(AttachmentVisibilityBaseTest):
             data=json.dumps({"customer_id": self.customer.pk, "action": "download_attachment"}),
             content_type="application/json",
         )
-        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+        def authenticate(request: object, roles: object = None) -> tuple[object, None]:
+            # As the real check does: it records the verified portal member on the request.
+            request._customer_user = self.customer_user  # type: ignore[attr-defined]  # request-scoped auth context, as secure_auth sets it
+            return self.customer, None
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", side_effect=authenticate):
             return ticket_attachment_download_api(request, ticket_id=self.ticket.pk, attachment_id=attachment.pk)
 
     def test_staff_and_api_downloads_are_private_no_store(self) -> None:
@@ -61,8 +66,11 @@ class AttachmentDownloadHeadersAndAuditTests(AttachmentVisibilityBaseTest):
         self._web_download(self.att_public)
         self._api_download(self.att_public)
 
-        events = list(AuditEvent.objects.filter(action="ticket_attachment_downloaded"))
+        events = list(AuditEvent.objects.filter(action="ticket_attachment_downloaded").order_by("timestamp"))
         self.assertEqual(len(events), 2)
+        # Both name the member who downloaded, the API one included: a customer can have several.
+        self.assertEqual([(event.user, event.metadata["channel"]) for event in events],
+                         [(self.customer_user, "web"), (self.customer_user, "api")])
         for event in events:
             self.assertEqual(event.metadata["attachment_id"], self.att_public.pk)
             self.assertEqual(event.metadata["ticket_id"], str(self.ticket.pk))
