@@ -345,7 +345,7 @@ class BudgetTests(CertificateTestCase):
 
         self.issue()
 
-        self.assertGreater(self._alerts(), before - 1)
+        self.assertEqual(self._alerts(), before + 1)
         self.assertTrue(
             AuditEvent.objects.filter(action="account_name_certificate_alert", description__contains="used up").exists()
         )

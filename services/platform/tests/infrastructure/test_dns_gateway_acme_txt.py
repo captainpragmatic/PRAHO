@@ -190,7 +190,14 @@ class StaleSweepTests(SimpleTestCase):
         fake = FakeCloudflare(
             [
                 txt("manual", "manual", age_seconds=9999),
-                {"type": "A", "name": "x.accounts.example.net", "content": "203.0.113.1", "comment": ORDER_A},
+                {
+                    "type": "A",
+                    "name": "x.accounts.example.net",
+                    "content": "203.0.113.1",
+                    "comment": ORDER_A,
+                    # Old enough and owned like a stale challenge: only its type keeps it.
+                    "created_on": (datetime.now(UTC) - timedelta(seconds=9999)).isoformat(),
+                },
             ]
         )
 
