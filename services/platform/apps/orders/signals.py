@@ -11,7 +11,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
@@ -868,11 +867,6 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
         logger.warning("⚠️ [Order Signal] Cache cleanup failed for %s: %s", instance.order_number, e)
 
     try:
-        _cleanup_order_files(instance)
-    except Exception as e:
-        logger.warning("⚠️ [Order Signal] File cleanup failed for %s: %s", instance.order_number, e)
-
-    try:
         _cancel_order_webhooks(instance)
     except Exception as e:
         logger.warning("⚠️ [Order Signal] Webhook cleanup failed for %s: %s", instance.order_number, e)
@@ -1029,37 +1023,6 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
 # ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
-
-
-_ALLOWED_UPLOAD_PREFIX = "orders/"
-
-
-def _cleanup_order_files(order: Order) -> None:
-    """Clean up any files associated with the order.
-
-    H5 fix: Validates each path before deletion to prevent path traversal attacks.
-    Paths must:
-    - Not contain ".." after normalization
-    - Start with the allowed "orders/" prefix
-    """
-    import posixpath  # noqa: PLC0415
-
-    try:
-        if order.meta.get("uploaded_files"):
-            for file_path in order.meta["uploaded_files"]:
-                try:
-                    normalized = posixpath.normpath(file_path)
-                    if ".." in normalized or not normalized.startswith(_ALLOWED_UPLOAD_PREFIX):
-                        logger.warning("⚠️ [File] Suspicious path in order meta, skipping: %s", file_path)
-                        continue
-                    if default_storage.exists(normalized):
-                        default_storage.delete(normalized)
-                        logger.info(f"🗑️ [File] Deleted {normalized}")
-                except Exception as e:
-                    logger.exception(f"🔥 [File] Failed to delete {file_path}: {e}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Order] File cleanup failed: {e}")
 
 
 def _cancel_order_webhooks(order: Order) -> None:

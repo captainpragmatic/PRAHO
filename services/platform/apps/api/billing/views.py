@@ -668,7 +668,6 @@ def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoic
                     "line_total_cents": 12100
                 }
             ],
-            "pdf_url": "/invoices/pdf/INV-000123.pdf",
             "is_overdue": false,
             "amount_due": 15000
         }
@@ -1006,7 +1005,6 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
                     "line_total_cents": 12100
                 }
             ],
-            "pdf_url": "/proformas/pdf/PRO-000123.pdf",
             "is_expired": false,
             "notes": "Additional details..."
         }
