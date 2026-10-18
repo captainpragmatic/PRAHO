@@ -21,6 +21,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 
 from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.billing.stored_files import record_stored_file
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -119,7 +120,9 @@ def _fetch_and_store_provider_pdf(invoice: Invoice) -> Result[bytes, str]:
         # already-issued invoice — but it must go through save(update_fields=...),
         # because InvoiceQuerySet.update() refuses to touch a locked row at all.
         current.pdf_file.save(f"invoice_{current.number}.pdf", ContentFile(content), save=False)
-        current.save(update_fields=["pdf_file"])
+        record_stored_file(
+            current.pdf_file.storage, current.pdf_file.name, None, lambda: current.save(update_fields=["pdf_file"])
+        )
 
     logger.info(f"📄 [Documents] Stored provider PDF for invoice {invoice.number}")
     return Ok(content)

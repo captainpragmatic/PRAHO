@@ -2160,32 +2160,26 @@ class TestInvalidateBillingDashboardCache(TestCase):
 
 
 class TestCleanupInvoiceFiles(TestCase):
-    @patch("apps.billing.signals.default_storage")
-    def test_deletes_existing_files(self, mock_storage: MagicMock) -> None:
-        mock_storage.exists.return_value = True
-        invoice = MagicMock()
-        invoice.number = "INV-001"
-        with self.captureOnCommitCallbacks(execute=True):
-            _cleanup_invoice_files(invoice)
-            invoice.number = "CHANGED"
-            mock_storage.exists.assert_not_called()
-            mock_storage.delete.assert_not_called()
-        self.assertEqual(mock_storage.delete.call_count, 2)
-        self.assertEqual(
-            [call.args[0] for call in mock_storage.delete.call_args_list],
-            ["invoices/INV-001.pdf", "efactura/INV-001.xml"],
-        )
+    @staticmethod
+    def _invoice(status: str) -> MagicMock:
+        invoice = MagicMock(status=status, locked_at=None, number="INV-001")
+        invoice.pdf_file.name = "invoices/pdf/invoice_INV-001.pdf"
+        invoice.xml_file.__bool__.return_value = False
+        return invoice
 
-    @patch("apps.billing.signals.default_storage")
-    def test_no_files(self, mock_storage: MagicMock) -> None:
-        mock_storage.exists.return_value = False
-        invoice = MagicMock()
-        invoice.number = "INV-002"
+    def test_deletes_the_stored_file_after_commit(self) -> None:
+        invoice = self._invoice("draft")
         with self.captureOnCommitCallbacks(execute=True):
             _cleanup_invoice_files(invoice)
-            mock_storage.exists.assert_not_called()
-        self.assertEqual(mock_storage.exists.call_count, 2)
-        mock_storage.delete.assert_not_called()
+            invoice.pdf_file.name = "CHANGED"
+            invoice.pdf_file.storage.delete.assert_not_called()
+        invoice.pdf_file.storage.delete.assert_called_once_with("invoices/pdf/invoice_INV-001.pdf")
+
+    def test_an_issued_invoice_keeps_its_files(self) -> None:
+        invoice = self._invoice("issued")
+        with self.captureOnCommitCallbacks(execute=True), self.assertLogs("apps.billing.signals", "ERROR"):
+            _cleanup_invoice_files(invoice)
+        invoice.pdf_file.storage.delete.assert_not_called()
 
 
 class TestCleanupPaymentFiles(TestCase):
