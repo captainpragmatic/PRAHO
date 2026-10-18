@@ -136,7 +136,7 @@
         # in effect. Media has no route here: every stored file is read through a Django view that
         # checks who is asking and records it (ADR-0057).
         request_body {
-            max_size 52MiB
+            max_size 62MiB
         }
 
         handle_path /static/* {

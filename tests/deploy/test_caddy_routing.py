@@ -71,7 +71,7 @@ PLATFORM_PUBLIC_BODY_CAP = "10MiB"
 # The largest staff reply Django can accept: tickets.max_attachments_per_reply (at most 5) files of
 # tickets.max_file_size_bytes (at most 10 MiB), plus 2 MiB of multipart headroom. Caddy cannot read
 # settings, so the cap sits at their upper bounds and Django enforces the values in effect.
-PLATFORM_STAFF_BODY_CAP = "52MiB"
+PLATFORM_STAFF_BODY_CAP = "62MiB"
 SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-policy/", "/auth/login/")
 PUBLIC_ROUTES = (
     ("GET", "/api/users/health/"),
@@ -640,13 +640,25 @@ def _catalog_bound(key: str) -> int:
     raise AssertionError(f"{key} is not in the catalog")
 
 
+def _django_setting(name: str) -> int:
+    match = re.search(rf"^{name} = (\d+)", _read("services/platform/config/settings/base.py"), re.MULTILINE)
+    assert match, f"{name} is not set in base.py"
+    return int(match.group(1))
+
+
 def test_platform_staff_body_cap_covers_the_largest_staff_reply() -> None:
-    """A staff reply the settings allow must fit under the edge cap, which cannot read them."""
+    """A staff reply the settings allow must fit under the edge cap, which cannot read them.
+
+    The largest reply is every file at its largest, plus the non-file fields, which Django lets reach
+    DATA_UPLOAD_MAX_MEMORY_SIZE on their own, plus multipart headroom.
+    """
     files = _catalog_bound("tickets.max_attachments_per_reply")
     file_size = _catalog_bound("tickets.max_file_size_bytes")
-    assert (files, file_size) == (5, 10 * 1024 * 1024)
-    assert PLATFORM_STAFF_BODY_CAP == "52MiB"
-    assert files * file_size + 2 * 1024 * 1024 == 52 * 1024 * 1024
+    fields = _django_setting("DATA_UPLOAD_MAX_MEMORY_SIZE")
+    largest_reply = files * file_size + fields + 2 * 1024 * 1024
+    cap = int(PLATFORM_STAFF_BODY_CAP.removesuffix("MiB")) * 1024 * 1024
+    assert largest_reply <= cap, (largest_reply, cap)
+    assert cap == largest_reply, "the cap should not grow past the largest reply"
 
 
 @pytest.mark.parametrize("topology", ["single-server", "platform-only"])
@@ -694,7 +706,7 @@ def test_live_platform_public_body_cap(name: str, tmp_path: Path, docker_daemon:
 @pytest.mark.parametrize("name", [name for name in CONFIGS if name != "portal"])
 def test_live_platform_staff_body_cap(name: str, tmp_path: Path, docker_daemon: None) -> None:
     """At the cap a staff POST is proxied; one byte over, the edge refuses it with 413."""
-    limit = 52 * 1024 * 1024
+    limit = 62 * 1024 * 1024
     with _running_edge(name, tmp_path, upstream_reads_body=True) as (edge, _peer, _published):
         # Sent from the edge container itself, so it comes from loopback, the default staff network.
         assert _post_size(edge, "127.0.0.1", "/tickets/1/reply/", limit) == 200
