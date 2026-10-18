@@ -56,3 +56,20 @@ class RestorePausesTheSweeperTests(TestCase):
         self.assertTrue(sweep_orphaned_media()["paused"])
         call_command("setup_default_settings", verbosity=0)  # Every platform start runs the catalog sync
         self.assertTrue(sweep_orphaned_media()["paused"], "the sync keeps the pause the restore wrote")
+
+    def test_restoring_a_backup_without_the_setting_still_pauses_the_sweeper(self) -> None:
+        statement = _restore_statement()
+        if connection.vendor != "postgresql":
+            self.skipTest("the restore scripts run this statement with psql against PostgreSQL")
+        call_command("setup_default_settings", verbosity=0)
+        SystemSetting.objects.filter(key=PAUSE_SETTING).delete()  # A backup taken before the sweeper existed
+
+        with connection.cursor() as cursor:
+            cursor.execute(statement)
+            (returned,) = cursor.fetchone()
+
+        self.assertEqual(SystemSetting.objects.get(key=PAUSE_SETTING).value, returned)
+        self.assertTrue(sweep_orphaned_media()["paused"])
+        call_command("setup_default_settings", verbosity=0)
+        self.assertTrue(sweep_orphaned_media()["paused"], "the first start keeps the pause the restore wrote")
+        self.assertEqual(SystemSetting.objects.get(key=PAUSE_SETTING).category, "platform")

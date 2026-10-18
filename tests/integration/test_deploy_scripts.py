@@ -88,6 +88,8 @@ elif argv[:1] == ["exec"] and os.environ.get("DOCKER_PAUSE_FAILS") and any("medi
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
+elif argv[:1] == ["exec"] and any("media_sweep" in a for a in argv):
+    print(os.environ.get("DOCKER_PAUSE_ANSWER", "2026-10-25T00:00:00+00:00"))
 elif argv[:3] == ["exec", "-i", "praho_db"]:
     sql = sys.stdin.read()
     if os.environ.get("DOCKER_SQL_INPUT"):

@@ -135,9 +135,10 @@ stage_and_check_archives() {
 }
 
 # After a restore, files written since the backup have no row, and the orphaned-media sweep would
-# delete them a day later: pause it for seven days. The same statement runs in both restore scripts
+# delete them a day later: pause it for seven days. A backup taken before the sweeper existed has no
+# row, so the statement inserts one. The same statement runs in both restore scripts
 # (tests/common/test_media_sweep_restore_pause.py runs it against the schema).
-PAUSE_MEDIA_SWEEP_SQL="UPDATE setting_entries SET value = to_jsonb(now() + interval '7 days'), updated_at = now(), revision = revision + 1 WHERE key = 'media_sweep.paused_until' RETURNING value #>> '{}'"
+PAUSE_MEDIA_SWEEP_SQL="INSERT INTO setting_entries (key, category, name, description, help_text, data_type, value, default_value, is_required, is_sensitive, is_active, requires_restart, created_at, updated_at, revision) VALUES ('media_sweep.paused_until', 'platform', 'Orphaned file cleanup paused until', 'Set by a database restore', '', 'string', to_jsonb(now() + interval '7 days'), to_jsonb(''::text), false, false, true, false, now(), now(), 1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), revision = setting_entries.revision + 1 RETURNING value #>> '{}'"
 pause_media_sweep() {
     local until
     if ! until="$(docker exec praho_db psql -U praho -d praho --set=ON_ERROR_STOP=1 -tAq -c "$PAUSE_MEDIA_SWEEP_SQL")"; then
@@ -145,10 +146,10 @@ pause_media_sweep() {
         return 1
     fi
     if [ -z "$until" ]; then
-        log_warn "The backup predates the orphaned-media sweep. Set media_sweep.paused_until seven days ahead in Settings."
-    else
-        log_info "Orphaned-media sweep paused until ${until}"
+        log_error "The orphaned-media sweep pause returned no value."
+        return 1
     fi
+    log_info "Orphaned-media sweep paused until ${until}"
 }
 
 # Before anything is dropped: the companion must be an intact tar archive, and its volume present.

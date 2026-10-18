@@ -148,3 +148,10 @@ def test_a_failed_sweep_pause_keeps_every_worker_stopped(project: Project) -> No
     assert result.returncode != 0
     assert "Applications remain stopped" in result.stdout
     assert not any(call["argv"][0] == "start" for call in project.calls())
+
+
+def test_a_sweep_pause_that_writes_nothing_keeps_every_worker_stopped(project: Project) -> None:
+    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_ANSWER="")
+    assert result.returncode != 0
+    assert "Applications remain stopped" in result.stdout
+    assert not any(call["argv"][0] == "start" for call in project.calls())

@@ -877,8 +877,9 @@ reported without creating containers from a different deployment topology.
 Every restore pauses the daily orphaned-media sweep for seven days, before any worker starts. Files
 written since the backup (ticket attachments, GDPR exports) have no row in the restored database,
 and the sweep would otherwise delete them a day later. Reconcile them within the seven days, or move
-`media_sweep.paused_until` in Settings further out. If the restore warns that the backup predates
-the sweep, set that setting seven days ahead yourself.
+`media_sweep.paused_until` in Settings further out. A backup taken before the sweep existed has no
+such setting; the restore creates it. If the pause cannot be written, the restore stops with the
+applications offline.
 
 Run the offline recovery contracts with `make test-deploy`. `make test-deploy-docker` runs the
 disposable Caddy acceptance tests and requires a working Docker daemon.

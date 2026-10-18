@@ -71,15 +71,16 @@ if $HAS_MEDIA; then
     sudo -u {{ project_user | quote }} tar --no-same-owner --no-same-permissions -C "{{ project_root }}" -xzf "$STAGE/media.tar.gz"
 fi
 # After a restore, files written since the backup have no row, and the orphaned-media sweep would
-# delete them a day later: pause it for seven days. The same statement runs in both restore scripts
+# delete them a day later: pause it for seven days. A backup taken before the sweeper existed has no
+# row, so the statement inserts one. The same statement runs in both restore scripts
 # (tests/common/test_media_sweep_restore_pause.py runs it against the schema).
-PAUSE_MEDIA_SWEEP_SQL="UPDATE setting_entries SET value = to_jsonb(now() + interval '7 days'), updated_at = now(), revision = revision + 1 WHERE key = 'media_sweep.paused_until' RETURNING value #>> '{}'"
+PAUSE_MEDIA_SWEEP_SQL="INSERT INTO setting_entries (key, category, name, description, help_text, data_type, value, default_value, is_required, is_sensitive, is_active, requires_restart, created_at, updated_at, revision) VALUES ('media_sweep.paused_until', 'platform', 'Orphaned file cleanup paused until', 'Set by a database restore', '', 'string', to_jsonb(now() + interval '7 days'), to_jsonb(''::text), false, false, true, false, now(), now(), 1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), revision = setting_entries.revision + 1 RETURNING value #>> '{}'"
 PAUSED_UNTIL=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --set=ON_ERROR_STOP=1 -tAq -c "$PAUSE_MEDIA_SWEEP_SQL")
 if [ -z "$PAUSED_UNTIL" ]; then
-    echo 'WARNING: The backup predates the orphaned-media sweep. Set media_sweep.paused_until seven days ahead in Settings.'
-else
-    echo "Orphaned-media sweep paused until $PAUSED_UNTIL"
+    echo 'ERROR: The orphaned-media sweep pause returned no value; applications remain stopped.' >&2
+    exit 1
 fi
+echo "Orphaned-media sweep paused until $PAUSED_UNTIL"
 hold_offline() {
     systemctl stop praho-qcluster praho-portal praho-platform ||
         echo 'ERROR: Could not hold every application offline; operator intervention required' >&2
