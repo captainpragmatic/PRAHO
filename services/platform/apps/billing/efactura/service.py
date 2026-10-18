@@ -38,7 +38,11 @@ from apps.billing.issuers.policy import (
     assert_efactura_submission_allowed,
     efactura_submission_denied_reason,
 )
-from apps.billing.stored_files import EFACTURA_UNSENT_STATUSES, record_stored_file
+from apps.billing.stored_files import (
+    EFACTURA_UNSENT_STATUSES,
+    delete_stored_files_on_failure,
+    record_stored_file,
+)
 
 from .client import (
     AuthenticationError,
@@ -431,6 +435,7 @@ class EFacturaService:
             **failure_options,
         )
 
+    @delete_stored_files_on_failure()  # Outside the atomic block: deletes the XML a rolled-back claim stored
     @transaction.atomic
     def _prepare_and_claim_submission(  # noqa: C901, PLR0911  # Explicit fail-closed lifecycle guards.
         self, invoice: Invoice
