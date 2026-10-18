@@ -1481,6 +1481,7 @@ class GDPRDeletionService:
         "phone": lambda: "+40700000000",
         "ip_address": lambda: "0.0.0.0",
     }
+    ANONYMIZED_ADDRESS = "Anonymized"
 
     @classmethod
     @transaction.atomic
@@ -1724,7 +1725,54 @@ class GDPRDeletionService:
             id_key="invoice_id",
             where="an invoice not yet issued",
         )
+        cls._anonymize_individual_customers(user)
         cls._erase_audit_identity(subject)
+
+    @classmethod
+    def _anonymize_individual_customers(cls, user: User) -> None:
+        """Anonymise the live record of each individual customer the person is (owner decision O5).
+
+        An individual customer the person alone owns is the person: its name, contact and
+        addresses go. Issued invoices keep the buyer as issued, from their own snapshot. One with
+        another owner may be someone else's record, so it is left for staff and logged. Queryset
+        updates write no audit row holding the old values.
+        """
+        from apps.customers.contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: import cycle
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        owned = CustomerMembership.objects.filter(
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
+        ).values_list("customer_id", flat=True)
+        for customer_id in owned:
+            if (
+                CustomerMembership.objects.filter(customer_id=customer_id, role="owner", is_active=True)
+                .exclude(user=user)
+                .exists()
+            ):
+                logger.warning(f"⚠️ [GDPR Anonymization] Customer {customer_id} has another owner; left for staff")
+                continue
+            Customer.all_objects.filter(pk=customer_id).update(
+                name=f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}",
+                company_name="",
+                primary_email=cls.ANONYMIZATION_MAP["email"](),
+                primary_phone=cls.ANONYMIZATION_MAP["phone"](),
+                website="",
+                updated_at=timezone.now(),
+            )
+            CustomerAddress.all_objects.filter(customer_id=customer_id).update(
+                address_line1=cls.ANONYMIZED_ADDRESS,
+                address_line2="",
+                city=cls.ANONYMIZED_ADDRESS,
+                county="",
+                postal_code="000000",
+            )
+            AuditService.log_simple_event(
+                "data_anonymization_completed",
+                description="Customer record anonymised (GDPR erasure)",
+                metadata={"customer_id": str(customer_id)},
+                actor_type="system",
+            )
 
     @classmethod
     def _erase_audit_identity(cls, subject: ErasureSubject) -> None:
