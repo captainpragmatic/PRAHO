@@ -12,4 +12,6 @@ class CustomersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when the app is ready."""
-        from . import signals  # noqa: F401  # Signal registration
+        from . import erasure_guard, signals  # noqa: F401  # Signal registration
+
+        erasure_guard.connect()

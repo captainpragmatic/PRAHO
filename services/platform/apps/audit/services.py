@@ -1701,6 +1701,10 @@ class GDPRDeletionService:
         # whose address is the customer contact must not keep receiving marketing.
         GDPRConsentService._propagate_marketing_consent(user, consent=False)
 
+        # The person's individual customers are locked first, in pk order, before anything about
+        # them changes: a writer that read one earlier waits for this erasure, then is refused.
+        cls._lock_individual_customers(user)
+
         # An individual customer's CNP is the person's national identification number. It is
         # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
         # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
@@ -1730,6 +1734,17 @@ class GDPRDeletionService:
         cls._anonymize_individual_customers(user)
         cls._erase_audit_identity(subject)
 
+    @staticmethod
+    def _lock_individual_customers(user: User) -> None:
+        """Lock the rows of the individual customers the person owns (apps/customers/erasure_guard.py)."""
+        from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
+
+        owned = CustomerMembership.objects.filter(
+            user=user, role="owner", is_active=True, customer__customer_type="individual"
+        ).values("customer_id")
+        list(Customer.all_objects.select_for_update(of=("self",)).filter(pk__in=owned).order_by("pk").values("pk"))
+
     @classmethod
     def _anonymize_individual_customers(cls, user: User) -> None:
         """Anonymise the live record of each individual customer the person is (owner decision O5).
@@ -1747,9 +1762,13 @@ class GDPRDeletionService:
         from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        owned = CustomerMembership.objects.filter(
-            user=user, role="owner", is_active=True, customer__customer_type="individual"
-        ).values_list("customer_id", flat=True)
+        owned = (
+            CustomerMembership.objects.filter(
+                user=user, role="owner", is_active=True, customer__customer_type="individual"
+            )
+            .order_by("customer_id")
+            .values_list("customer_id", flat=True)
+        )
         for customer_id in owned:
             if (
                 CustomerMembership.objects.filter(customer_id=customer_id, role="owner", is_active=True)
@@ -1760,6 +1779,7 @@ class GDPRDeletionService:
                 continue
             name = f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}"
             Customer.all_objects.filter(pk=customer_id).update(
+                anonymized_at=timezone.now(),
                 name=name,
                 company_name="",
                 primary_email=cls.ANONYMIZATION_MAP["email"](),

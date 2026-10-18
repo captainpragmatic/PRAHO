@@ -275,6 +275,8 @@ class Customer(SoftDeleteModel):
     meta = models.JSONField(default=dict, blank=True, verbose_name=_("Metadata"))
 
     # GDPR Compliance (simplified)
+    # Set by GDPR erasure: the record is anonymised and refuses personal data (erasure_guard.py).
+    anonymized_at = models.DateTimeField(null=True, blank=True, editable=False)
     data_processing_consent = models.BooleanField(default=False)
     marketing_consent = models.BooleanField(default=False)
     gdpr_consent_date = models.DateTimeField(null=True, blank=True)
