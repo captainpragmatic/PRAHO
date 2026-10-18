@@ -19,13 +19,13 @@ from django.dispatch import receiver
 from django.http import HttpRequest
 
 from apps.audit.services import (
-    AuditContext,
     AuditEventData,
     AuditService,
     AuthenticationAuditService,
     AuthenticationEventData,
     LoginFailureEventData,
     LogoutEventData,
+    actor_context,
 )
 from apps.common.transactions import best_effort_atomic
 
@@ -71,7 +71,7 @@ def _log_user_model_event(
         if metadata:
             event_metadata.update(metadata)
 
-        AuditService.log_event(event_data(), context=AuditContext(actor_type="system", metadata=event_metadata))
+        AuditService.log_event(event_data(), context=actor_context(metadata=event_metadata))
 
 
 @receiver(post_save, sender="users.WebAuthnCredential")

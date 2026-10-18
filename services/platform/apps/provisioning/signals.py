@@ -28,6 +28,7 @@ from apps.audit.services import (
     AuditContext,
     AuditEventData,
     AuditService,
+    actor_context,
 )
 from apps.common.transactions import best_effort_atomic
 from apps.settings.services import SettingsService
@@ -129,7 +130,7 @@ def _log_provisioning_model_event(  # Django signal parameters  # noqa: PLR0913 
                     new_values=new_values or {},
                     description=description,
                 ),
-                context=AuditContext(actor_type="system", metadata=event_metadata),
+                context=actor_context(metadata=event_metadata),
             )
     except Exception as e:
         logger.exception(f"🔥 [Provisioning Lifecycle] Failed to log {event_type}: {e}")

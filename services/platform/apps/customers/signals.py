@@ -27,6 +27,7 @@ from apps.audit.services import (
     AuditEventData,
     AuditService,
     ComplianceEventRequest,
+    actor_context,
 )
 from apps.common.cui_validator import is_romanian_cui
 from apps.common.localisation import normalize_country_code
@@ -116,8 +117,7 @@ def handle_customer_created_or_updated(
                     CustomersAuditService.log_customer_event(
                         event_type=event_type,
                         customer=instance,
-                        user=getattr(instance, "_audit_user", None),
-                        context=AuditContext(actor_type="system"),
+                        context=actor_context(),
                         old_values=audit_old,
                         new_values=audit_new,
                         description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
@@ -268,8 +268,7 @@ def handle_tax_profile_changes(
                 CustomersAuditService.log_tax_profile_event(
                     event_type=event_type,
                     tax_profile=instance,
-                    user=getattr(instance, "_audit_user", None),
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Tax profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -397,8 +396,7 @@ def handle_billing_profile_changes(
                 CustomersAuditService.log_billing_profile_event(
                     event_type=event_type,
                     billing_profile=instance,
-                    user=getattr(instance, "_audit_user", None),
-                    context=AuditContext(actor_type="system"),
+                    context=actor_context(),
                     old_values=old_values,
                     new_values=new_values,
                     description=f"Billing profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -496,8 +494,7 @@ def handle_address_changes(
             CustomersAuditService.log_address_event(
                 event_type=event_type,
                 address=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Address ({address_role}) {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
@@ -591,8 +588,7 @@ def handle_payment_method_changes(
             CustomersAuditService.log_payment_method_event(
                 event_type=event_type,
                 payment_method=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Payment method {instance.method_type} {'created' if created else 'updated'} for {instance.customer.get_display_name()}",

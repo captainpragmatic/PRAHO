@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from functools import partial
@@ -31,6 +31,7 @@ from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
+from .actor_context import current_actor
 from .export_files import delete_export_file, write_export_file
 from .models import (
     AuditAlert,
@@ -248,6 +249,30 @@ class AuditContext:
     session_key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     actor_type: str = "user"
+
+
+def actor_context(**fields: Any) -> AuditContext:
+    """A context for the user acting now, or for the system when nobody is.
+
+    For receivers, which see the row that changed and not who changed it: the user and the
+    actor type are filled together, so an event never names a user and calls it "system".
+    """
+    actor = current_actor()
+    return AuditContext(user=actor, actor_type="user" if actor else "system", **fields)
+
+
+def _with_user(context: AuditContext | None, user: User | None) -> AuditContext:
+    """The context a helper writes with, honouring the ``user`` it was handed.
+
+    A helper given both used to ignore ``user`` whenever a context came along, so a note's
+    author or a changed-by user silently became whoever the context named (row 41). The
+    caller's context is copied, never changed: callers reuse their context objects.
+    """
+    if context is None:
+        return AuditContext(user=user)
+    if user is None or context.user is user:
+        return context
+    return replace(context, user=user)
 
 
 @dataclass
@@ -2322,8 +2347,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, invoice, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build invoice-specific metadata
         invoice_metadata = {
@@ -2384,8 +2408,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, payment, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build payment-specific metadata
         payment_metadata = {
@@ -2438,8 +2461,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, proforma, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build proforma-specific metadata
         proforma_metadata = {
@@ -2490,8 +2512,7 @@ class BillingAuditService:
             event_data: Business event data containing event type, credit entry, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build credit-specific metadata
         credit_metadata = {
@@ -2555,8 +2576,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, order, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build order-specific metadata
         order_metadata = {
@@ -2635,8 +2655,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, order item, and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # Build order item-specific metadata
         item_metadata = {
@@ -2699,8 +2718,7 @@ class OrdersAuditService:
             event_data: Business event data containing event type, business object (order_item or service), and context info
         """
         # Use default context if none provided
-        if event_data.context is None:
-            event_data.context = AuditContext(user=event_data.user)
+        event_data.context = _with_user(event_data.context, event_data.user)
 
         # For provisioning events, business_object can be either order_item or service
         # We need to handle both cases appropriately
@@ -2804,8 +2822,7 @@ class CustomersAuditService:
             description: Human-readable description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Identifiers and flags only (row 56): the record's values live in old_values and
         # new_values, where an erasure finds them, never copied into metadata.
@@ -2864,8 +2881,7 @@ class CustomersAuditService:
         Log customer tax profile audit event with Romanian compliance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build tax profile-specific metadata
         tax_metadata = {
@@ -2922,8 +2938,7 @@ class CustomersAuditService:
         Log customer billing profile audit event with financial context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build billing profile-specific metadata
         billing_metadata = {
@@ -2978,8 +2993,7 @@ class CustomersAuditService:
         Log customer address audit event with Romanian compliance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build address-specific metadata
         address_metadata = {
@@ -3042,8 +3056,7 @@ class CustomersAuditService:
         Log customer payment method audit event with security context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build payment method-specific metadata (avoiding sensitive data)
         payment_metadata = {
@@ -3099,8 +3112,7 @@ class CustomersAuditService:
         Log customer note audit event with interaction context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build note-specific metadata
         note_metadata = {
@@ -3173,8 +3185,7 @@ class ProvisioningAuditService:
         Log service plan audit event with pricing and availability context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service plan-specific metadata
         plan_metadata = {
@@ -3240,8 +3251,7 @@ class ProvisioningAuditService:
         Log server infrastructure audit event with capacity and resource context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build server-specific metadata
         server_metadata = {
@@ -3320,8 +3330,7 @@ class ProvisioningAuditService:
         Log service lifecycle audit event with customer and billing context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service-specific metadata
         service_metadata = {
@@ -3406,8 +3415,7 @@ class ProvisioningAuditService:
         Log service relationship audit event with dependency context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build relationship-specific metadata
         relationship_metadata = {
@@ -3470,8 +3478,7 @@ class ProvisioningAuditService:
         Log service group audit event with coordination and billing context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service group-specific metadata
         group_metadata = {
@@ -3533,8 +3540,7 @@ class ProvisioningAuditService:
         Log provisioning task audit event with execution and performance context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build provisioning task-specific metadata
         task_metadata = {
@@ -3601,8 +3607,7 @@ class ProvisioningAuditService:
         Log service domain binding audit event with DNS and SSL context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build service domain-specific metadata
         domain_metadata = {
@@ -5648,8 +5653,7 @@ class TicketsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build comprehensive ticket metadata
         ticket_metadata = {
@@ -5722,8 +5726,7 @@ class TicketsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Calculate resolution duration
         resolution_duration = None
@@ -5822,8 +5825,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build product creation metadata
         product_metadata = {
@@ -5890,8 +5892,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build availability change metadata
         availability_metadata = {
@@ -5960,8 +5961,7 @@ class ProductsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Accept the legacy key from older callers, but signals use the monthly model.
         price_change = changes.get("monthly_price_changed", changes.get("price_changed", {}))
@@ -6097,8 +6097,7 @@ class DomainsAuditService:
             security_context: Security-related metadata
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build domain event metadata
         domain_metadata = {
@@ -6169,8 +6168,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build TLD event metadata
         tld_metadata = {
@@ -6239,8 +6237,7 @@ class DomainsAuditService:
             security_sensitive: Whether this event involves sensitive security data
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build registrar event metadata (sanitize sensitive data)
         registrar_metadata = {
@@ -6307,8 +6304,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build domain order event metadata
         order_metadata = {
@@ -6376,8 +6372,7 @@ class DomainsAuditService:
             description: Human-readable event description
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build security event metadata
         security_event_metadata = {
@@ -6444,8 +6439,7 @@ class SecurityAuditService:
             user: User if authenticated
             context: Additional audit context
         """
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build rate limit metadata
         metadata = {
@@ -6520,8 +6514,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Build webhook success metadata
         success_metadata = {
@@ -6607,8 +6600,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Resolve once for both severity and retry-exhaustion metadata.
         max_retry_threshold = get_webhook_max_retry_threshold()
@@ -6703,8 +6695,7 @@ class IntegrationsAuditService:
             context: Additional audit context
         """
         # Use default context if none provided
-        if context is None:
-            context = AuditContext(user=user)
+        context = _with_user(context, user)
 
         # Calculate retry timeline
         retry_timeline = None

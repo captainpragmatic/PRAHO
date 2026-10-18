@@ -13,6 +13,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.audit.actor_context import acting_as
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRConsentService, GDPRDeletionService
 from apps.customers import user_management_views
@@ -77,7 +78,8 @@ class ConsentWithdrawalTests(TestCase):
         stale = User.objects.get(pk=user.pk)
         MFAService.apply_state_change(user, action="disable")
 
-        self.assertTrue(GDPRConsentService.withdraw_consent(stale, ["marketing"]).is_ok())
+        with acting_as(user):  # self-service: the person withdrawing is the actor
+            self.assertTrue(GDPRConsentService.withdraw_consent(stale, ["marketing"]).is_ok())
 
         fresh = User.objects.get(pk=user.pk)
         self.assertFalse(fresh.accepts_marketing)

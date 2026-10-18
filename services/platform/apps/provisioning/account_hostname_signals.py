@@ -12,7 +12,7 @@ from django.conf import settings
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from apps.audit.services import AuditContext, AuditEventData, AuditService
+from apps.audit.services import AuditEventData, AuditService, actor_context
 from apps.common.transactions import best_effort_atomic
 
 from .account_hostname_models import AccountHostname
@@ -37,7 +37,7 @@ def _log(instance: AccountHostname, event_type: str, description: str) -> None:
                 },
                 description=description,
             ),
-            context=AuditContext(actor_type="system"),
+            context=actor_context(),
         )
 
 

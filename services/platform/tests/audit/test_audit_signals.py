@@ -6,6 +6,7 @@ Tests industry-standard audit requirements (GDPR, ISO 27001, NIST, SOX, PCI DSS)
 import pytest
 from django.test import RequestFactory, TestCase, override_settings
 
+from apps.audit.actor_context import acting_as
 from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.audit.signals import (
     _create_audit_event,
@@ -137,6 +138,8 @@ class TestUserProfileAuditSignals(TestCase):
         self.user = User.objects.create_user(
             email="test@example.com", password="testpass123", first_name="John", last_name="Doe", phone="+40123456789"
         )
+        # Self-service: the person changes their own account, so they are the actor.
+        self.enterContext(acting_as(self.user))
 
     def test_audit_email_change(self):
         """Test audit logging for email address changes"""
@@ -190,17 +193,20 @@ class TestUserProfileAuditSignals(TestCase):
         assert audit_event.metadata["requires_verification"] is True
 
     def test_audit_staff_role_change(self):
-        """Test audit logging for staff role changes"""
+        """A staff role change is credited to the administrator who made it, not to its subject"""
+        admin = User.objects.create_user(email="role-admin@example.com", password="testpass123", staff_role="admin")
         new_role = "admin"
 
-        self.user.staff_role = new_role
-        self.user.save(update_fields=["staff_role"])
+        with acting_as(admin):
+            self.user.staff_role = new_role
+            self.user.save(update_fields=["staff_role"])
 
-        # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="staff_role_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="staff_role_changed", user=admin)
         assert audit_events.exists()
+        assert not AuditEvent.objects.filter(action="staff_role_changed", user=self.user).exists()
 
         audit_event = audit_events.first()
+        assert audit_event.content_object == self.user
         assert audit_event.new_values["staff_role"] == new_role
         assert "authorization_change" in audit_event.metadata
         assert audit_event.requires_review is True  # This is now a model field
@@ -262,6 +268,7 @@ class TestUserProfilePreferencesAudit(TestCase):
         self.user = User.objects.create_user(email="test@example.com", password="testpass123")
         # UserProfile is created automatically by signals
         self.profile = self.user.profile
+        self.enterContext(acting_as(self.user))
 
     def test_audit_language_preference_change(self):
         """Test audit logging for language preference changes"""
@@ -330,14 +337,17 @@ class TestCustomerMembershipAudit(TestCase):
     def setUp(self):
         """Set up test data"""
         self.user = User.objects.create_user(email="test@example.com", password="testpass123")
+        self.admin = User.objects.create_user(email="member-admin@example.com", password="testpass123")
         self.customer = Customer.objects.create(company_name="Test Company", customer_type="business", status="active")
+        # Membership changes are made by someone: the event names them, not the member.
+        self.enterContext(acting_as(self.admin))
 
     def test_audit_customer_membership_creation(self):
         """Test audit logging for customer membership creation"""
         CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner", is_primary=True)
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_membership_created", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_membership_created", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -360,7 +370,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.save(update_fields=["role"])
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_role_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_role_changed", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -382,7 +392,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.save(update_fields=["is_primary"])
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="primary_customer_changed", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="primary_customer_changed", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()
@@ -400,7 +410,7 @@ class TestCustomerMembershipAudit(TestCase):
         membership.delete()
 
         # Verify audit event
-        audit_events = AuditEvent.objects.filter(action="customer_membership_deleted", user=self.user)
+        audit_events = AuditEvent.objects.filter(action="customer_membership_deleted", user=self.admin)
         assert audit_events.exists()
 
         audit_event = audit_events.first()

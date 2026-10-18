@@ -100,9 +100,9 @@ class TermsDocumentTests(HMACTestMixin, TestCase):
         self.assertEqual(event.metadata["terms_document"], newer.reference())
         self.assertEqual(event.metadata["registration_id"], str(self.row.pk))
         self.assertEqual(event.user_id, user.pk)
-        # Every confirmation writes one, for the new user's preferences. The terms are set when the
-        # user is created, so recording them adds no second one.
-        self.assertEqual(AuditEvent.objects.filter(action="profile_updated", user=user).count(), 1)
+        # Recording the terms changes none of the user's audited fields, so it writes no
+        # "profile updated" event either: an event now means something changed.
+        self.assertEqual(AuditEvent.objects.filter(action="profile_updated").count(), 0)
 
         self.assertTrue(self.accept(romanian, romanian_row).is_ok())
         self.assertEqual(User.objects.get(email=romanian_row.email).terms_document, romanian)

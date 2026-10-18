@@ -10,7 +10,7 @@ from typing import Any
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from apps.audit.services import ProductsAuditService
+from apps.audit.services import ProductsAuditService, actor_context
 from apps.common.operator import operator_country
 from apps.common.transactions import best_effort_atomic
 
@@ -102,7 +102,7 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
             }
 
             ProductsAuditService.log_product_created(
-                product=instance, romanian_business_context=romanian_context, context=None
+                product=instance, romanian_business_context=romanian_context, context=actor_context()
             )
 
         else:
@@ -116,7 +116,7 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
                         "vat_compliance_affected": availability_changed.get("vat_setting_changed", False),
                         "customer_impact_level": _assess_customer_impact(instance),
                     },
-                    context=None,
+                    context=actor_context(),
                 )
 
 
@@ -206,7 +206,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                     change_type="price_created",
                     changes={"new_monthly_price_cents": instance.monthly_price_cents},
                     romanian_business_context=romanian_context,
-                    context=None,
+                    context=actor_context(),
                 )
         else:
             # Check for significant pricing changes
@@ -231,7 +231,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                     change_type="price_updated",
                     changes=pricing_changes,
                     romanian_business_context=romanian_context,
-                    context=None,
+                    context=actor_context(),
                 )
 
 

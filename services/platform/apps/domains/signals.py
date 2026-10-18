@@ -25,10 +25,10 @@ from django.utils import timezone
 from django_fsm.signals import post_transition
 
 from apps.audit.services import (
-    AuditContext,
     AuditEventData,
     AuditService,
     DomainsAuditService,
+    actor_context,
 )
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
@@ -170,7 +170,7 @@ def handle_domain_created_or_updated(sender: type[Domain], instance: Domain, cre
                 event_type=event_type,
                 domain=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Domain {instance.name} {'registered' if created else 'updated'}",
@@ -320,7 +320,7 @@ def handle_tld_created_or_updated(sender: type[TLD], instance: TLD, created: boo
                 event_type=event_type,
                 tld=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"TLD .{instance.extension} {'created' if created else 'updated'}",
@@ -407,7 +407,7 @@ def handle_registrar_created_or_updated(
                 event_type=event_type,
                 registrar=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Registrar {instance.name} {'created' if created else 'updated'}",
@@ -534,7 +534,7 @@ def handle_domain_order_item_processing(
                 event_type=event_type,
                 domain_order_item=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Domain order {instance.action}: {instance.domain_name}",

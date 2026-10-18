@@ -17,6 +17,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.audit.actor_context import acting_as
 from apps.audit.models import AuditChainHead, AuditChainLink, AuditEvent, ComplianceLog, audit_mutation_allowed
 from apps.audit.services import AuditIntegrityService, AuditRetentionService, GDPRDeletionService, GDPRExportService
 from apps.users.mfa import WebAuthnCredential
@@ -116,6 +117,25 @@ class ErasureSweepTests(TestCase):
                 consent = ComplianceLog.objects.get(compliance_type="gdpr_consent")
                 self.assertEqual(consent.status, "success")
                 consent.delete()
+
+    def test_erasure_run_by_a_staff_member_leaves_no_old_value_in_the_events_it_writes(self) -> None:
+        """Receivers record the old value of what the erasure changes; the sweep must reach it."""
+        for mode in ("anonymize", "delete"):
+            with self.subTest(mode=mode):
+                user = self.person(mode)
+                with acting_as(self.staff):
+                    self.process(user, mode)
+
+                text = _texts()
+                for identifier in IDENTIFIERS:
+                    self.assertNotIn(identifier.lower(), text, f"{mode} left {identifier}")
+                self.assertTrue(
+                    AuditEvent.objects.filter(user=self.staff).exists(),
+                    "the receivers' events are credited to the staff member who ran the erasure",
+                )
+                with audit_mutation_allowed("test fixture"):
+                    AuditEvent.objects.all().delete()
+                ComplianceLog.objects.all().delete()
 
     def test_sweep_finds_events_whose_uuid_sorts_below_existing_rows(self) -> None:
         user = self.person()

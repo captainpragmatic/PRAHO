@@ -26,12 +26,13 @@ from django.db.models.signals import post_delete, post_save, pre_delete, pre_sav
 from django.dispatch import receiver
 from django.utils import timezone
 
+from apps.audit.actor_context import bind_current_actor
 from apps.audit.services import (
-    AuditContext,
     AuditEventData,
     AuditService,
     BillingAuditService,
     ComplianceEventRequest,
+    actor_context,
 )
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 from apps.common.validators import log_security_event
@@ -173,7 +174,7 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
         new_values=_serialize_values_for_audit(new_values or {}),
         description=description,
     )
-    context = AuditContext(actor_type="system", metadata=event_metadata)
+    context = actor_context(metadata=event_metadata)
     with best_effort_atomic(logger=logger, scope="Billing Lifecycle", message=f"Failed to log {event_type}"):
         AuditService.log_event(event_data, context=context)
 
@@ -640,7 +641,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 event_type=event_type,
                 business_object=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Invoice {instance.audit_reference} {'created' if created else 'updated'}",
@@ -827,7 +828,7 @@ def handle_payment_created_or_updated(
                 event_type="payment_initiated" if created else f"payment_{instance.status}",
                 business_object=instance,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=_serialize_values_for_audit(
                     {
@@ -932,7 +933,7 @@ def handle_proforma_invoice_conversion(
                 event_type=event_type,
                 business_object=instance,
                 user=None,  # System event
-                context=AuditContext(actor_type="system"),
+                context=actor_context(),
                 old_values=old_values,
                 new_values=new_values,
                 description=f"Proforma {instance.number} {'created' if created else 'updated'}",
@@ -1341,13 +1342,15 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
         )
 
         transaction.on_commit(
-            lambda inv=invoice: invoice_refunded.send(
-                sender=Invoice,
-                invoice=inv,
-                # TODO: Derive refund_type from invoice state when partial refund support is added.
-                # Currently _handle_invoice_refund_completion is only called for status=="refunded"
-                # (full refund path). Partial refunds route to a different handler.
-                refund_type="full",
+            bind_current_actor(
+                lambda inv=invoice: invoice_refunded.send(
+                    sender=Invoice,
+                    invoice=inv,
+                    # TODO: Derive refund_type from invoice state when partial refund support is added.
+                    # Currently _handle_invoice_refund_completion is only called for status=="refunded"
+                    # (full refund path). Partial refunds route to a different handler.
+                    refund_type="full",
+                )
             )
         )
 
