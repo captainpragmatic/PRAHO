@@ -1735,12 +1735,16 @@ class GDPRDeletionService:
         """Anonymise the live record of each individual customer the person is (owner decision O5).
 
         An individual customer the person alone owns is the person: its name, contact and
-        addresses go. Issued invoices keep the buyer as issued, from their own snapshot. One with
-        another owner may be someone else's record, so it is left for staff and logged. Queryset
-        updates write no audit row holding the old values.
+        addresses go, and so does the buyer snapshot on its orders, proformas and invoices not yet
+        issued, which are not fiscal records. Issued invoices keep the buyer as issued. One with another
+        owner may be someone else's record, so it is left for staff and logged. Queryset updates
+        write no audit row holding the old values.
         """
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
+        from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
         owned = CustomerMembership.objects.filter(
@@ -1754,8 +1758,9 @@ class GDPRDeletionService:
             ):
                 logger.warning(f"⚠️ [GDPR Anonymization] Customer {customer_id} has another owner; left for staff")
                 continue
+            name = f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}"
             Customer.all_objects.filter(pk=customer_id).update(
-                name=f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}",
+                name=name,
                 company_name="",
                 primary_email=cls.ANONYMIZATION_MAP["email"](),
                 primary_phone=cls.ANONYMIZATION_MAP["phone"](),
@@ -1769,6 +1774,26 @@ class GDPRDeletionService:
                 city=cls.ANONYMIZED_ADDRESS,
                 county="",
                 postal_code="000000",
+            )
+            buyer = {
+                "bill_to_name": name,
+                "bill_to_email": cls.ANONYMIZATION_MAP["email"](),
+                "bill_to_tax_id": "",
+                "bill_to_registration_number": "",
+                "bill_to_address1": cls.ANONYMIZED_ADDRESS,
+                "bill_to_address2": "",
+                "bill_to_city": cls.ANONYMIZED_ADDRESS,
+                "bill_to_region": "",
+                "bill_to_postal": "000000",
+            }
+            ProformaInvoice.objects.filter(customer_id=customer_id).update(**buyer)
+            Invoice.objects.filter(customer_id=customer_id, locked_at__isnull=True).update(**buyer)
+            Order.objects.filter(customer_id=customer_id).update(
+                customer_name=name,
+                customer_email=buyer["bill_to_email"],
+                customer_company="",
+                customer_vat_id="",
+                billing_address={},
             )
             AuditService.log_simple_event(
                 "data_anonymization_completed",
