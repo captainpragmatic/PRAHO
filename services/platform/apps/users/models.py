@@ -31,6 +31,7 @@ from apps.common.encryption import (  # Core encryption needed for user model
     generate_backup_codes,
     hash_backup_code,
 )
+from apps.common.transactional_save import TransactionalSaveModel
 from apps.customers.models import Customer  # Cross-app relationship
 
 
@@ -423,7 +424,7 @@ class UserCredentialVersion(models.Model):
     version = models.PositiveIntegerField(default=0)
 
 
-class CustomerMembership(models.Model):
+class CustomerMembership(TransactionalSaveModel):
     """
     Junction table for user-customer relationships with roles.
     Aligns with PostgreSQL customer_membership table.

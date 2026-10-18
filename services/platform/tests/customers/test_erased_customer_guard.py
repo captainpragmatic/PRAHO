@@ -172,6 +172,46 @@ class EveryScrubHasItsGuardTests(TestCase):
 class ErasureLockTests(TransactionTestCase):
     """On PostgreSQL a writer waits for the erasure's customer lock, then is refused."""
 
+    def test_an_autocommit_writer_waits_for_the_erasure_and_is_then_refused(self) -> None:
+        """A save outside any transaction (the proforma edit view's plain save()) still holds the lock."""
+        if connection.vendor != "postgresql":
+            self.skipTest("row locks need PostgreSQL")
+        from django.db import transaction  # noqa: PLC0415
+
+        _person, customer = _make_person()
+        proforma = ProformaInvoice.objects.create(
+            customer=customer,
+            number="PRO-AUTOCOMMIT-1",
+            currency=create_currency(),
+            valid_until=timezone.now() + timedelta(days=30),
+            bill_to_name="Ioana Rowe",
+        )
+        stale = ProformaInvoice.objects.get(pk=proforma.pk)
+        locked = threading.Event()
+        outcome: list[str] = []
+
+        def writer() -> None:
+            locked.wait(5)
+            try:
+                stale.save()  # Autocommit: no caller transaction
+                outcome.append("saved")
+            except CustomerErasedError:
+                outcome.append("refused")
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        with transaction.atomic():
+            list(Customer.all_objects.select_for_update().filter(pk=customer.pk))
+            ProformaInvoice.objects.filter(pk=proforma.pk).update(bill_to_name="Anonymized User")
+            locked.set()
+            time.sleep(0.5)
+            Customer.all_objects.filter(pk=customer.pk).update(name="Anonymized User", anonymized_at=timezone.now())
+        thread.join(10)
+        self.assertEqual(outcome, ["refused"])
+        self.assertEqual(ProformaInvoice.objects.get(pk=proforma.pk).bill_to_name, "Anonymized User")
+
     def test_a_writer_waits_for_the_erasure_and_is_then_refused(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("row locks need PostgreSQL")

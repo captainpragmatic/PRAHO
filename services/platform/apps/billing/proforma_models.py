@@ -32,6 +32,7 @@ from apps.billing.validators import (
 from apps.common.cnp_validator import validate_cnp
 from apps.common.fields import EncryptedTextField
 from apps.common.financial_arithmetic import HasLineTotals, calculate_document_totals, calculate_line_totals
+from apps.common.transactional_save import TransactionalSaveModel
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -99,7 +100,7 @@ class ProformaSequence(models.Model):
 # ===============================================================================
 
 
-class ProformaInvoice(models.Model):
+class ProformaInvoice(TransactionalSaveModel):
     """
     Proforma invoices - estimates/quotes before actual invoicing.
     Separate from Invoice model with different business logic.

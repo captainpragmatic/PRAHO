@@ -1754,8 +1754,9 @@ class GDPRDeletionService:
         An individual customer the person alone owns is the person: its name, contact and
         addresses go, and so does the buyer snapshot on its orders, proformas and invoices not yet
         issued, which are not fiscal records. Issued invoices keep the buyer as issued. One with another
-        owner may be someone else's record, so it is left for staff and logged. Queryset updates
-        write no audit row holding the old values.
+        owner may be someone else's record, so it is left for staff and logged. An inactive owner
+        link is a removal, which needs another owner to remain, so that record is theirs, not the
+        person's. Queryset updates write no audit row holding the old values.
         """
         from apps.billing.invoice_models import Invoice  # noqa: PLC0415  # Deferred: import cycle
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415  # Deferred: import cycle

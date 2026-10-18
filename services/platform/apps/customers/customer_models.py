@@ -17,6 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, transition
 
 from apps.common.identity_fields import validate_international_phone
+from apps.common.transactional_save import TransactionalSaveModel
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -200,7 +201,7 @@ class SoftDeleteModel(models.Model):
         return self.deleted_at is not None
 
 
-class Customer(SoftDeleteModel):
+class Customer(TransactionalSaveModel, SoftDeleteModel):
     """
     Core customer model - only essential identifying information.
     All other data is normalized into separate profile models.
