@@ -13,14 +13,18 @@ How the state is kept (`AccountNameCertificate`):
   committed before any network call, and an attempt left `ordering` after a crash resumes with the slot it
   already holds, from its stored order URL, instead of ordering (or reserving) twice.
 * **Keys live in the vault**, per hostname: the ACME account key under the name, each certificate key under
-  the issuance that made it, so a renewal never overwrites the key of the certificate in force.
+  the attempt that made it (`attempt_id`), so a renewal never overwrites the key of the certificate in force.
+  Keys are created once and never overwritten: only "not found" counts as missing.
+* **One worker per attempt.** A claim takes a lease (`attempt_token`, `attempt_lease_until`) under the row lock;
+  a live lease defers everyone else, and an expired one is taken over with the same attempt, key and order.
+  Every later write of the attempt is conditioned on the token, so a worker that lost its lease changes
+  nothing. The lease outlives any worker the queue lets run (see ACCOUNT_NAME_TASK_TIMEOUT_SECONDS).
+* **A pair is checked before use.** A certificate is put in force, and installed, only when its leaf's key is
+  the stored key and its only name is the account name.
 
-A renewal overwrites the row's reservation time (the vault identifier of its new key follows from it), so a
-renewal inside seven days of the first issuance would drop that issuance from the count; with certificates of
-more than 37 days and renewal at 30 days left, that cannot happen.
-
-Resuming is idempotent rather than exclusive: two workers on the same `ordering` row read the same order and
-publish the same challenge values, so the worst case is a repeated read, never a second order.
+A crash between the CA accepting an order and its URL being saved leaves an abandoned pending order; the
+takeover places another. That costs no budget slot (the reservation was taken first) and no Let's Encrypt
+certificate.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import hashlib
 import logging
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -46,7 +51,7 @@ from django.utils import timezone
 from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.credential_vault import CredentialData, get_credential_vault
 from apps.common.transactions import best_effort_atomic
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 from apps.infrastructure.dns_gateway import DnsProviderGateway, get_dns_gateway
 
 from . import account_hostname_config as config
@@ -85,6 +90,11 @@ SWEEP_MIN_AGE_SECONDS = 1800.0
 # Seconds to let the DNS provider publish the challenge values before the server is asked to check them.
 DNS_SETTLE_SECONDS = 10.0
 INSTALL_TIMEOUT_SECONDS = 300
+# A claim's lease: longer than the ACME exchange can take (its 180 s deadline, the settle wait, request
+# timeouts) and than any task the queue lets run an attempt, so a live worker never loses it.
+ATTEMPT_LEASE = timedelta(minutes=15)
+# Below the seven days an ACME order lives and the budget window: an older attempt is failed, not resumed.
+ATTEMPT_MAX_AGE = timedelta(days=6)
 
 ACCOUNT_KEY_TYPE = "acme_account_key"
 CERT_KEY_TYPE = "acme_certificate_key"
@@ -121,6 +131,22 @@ class NodeCertificateResult:
     ready: bool
     issuance: IssuanceOutcome | None = None
     detail: str = ""
+
+
+@dataclass(frozen=True)
+class AttemptClaim:
+    """The attempt this worker holds, and the token every write of it must carry."""
+
+    certificate_id: UUID
+    token: str
+
+
+class _FencedError(Exception):
+    """Another worker took the attempt over: this one stops and writes nothing more."""
+
+
+class _DnsRefusedError(Exception):
+    """The DNS provider refused in a way retrying cannot cure (token scope, quota)."""
 
 
 class _Defer(Exception):  # noqa: N818  # Internal control flow: keep the order and try again later
@@ -231,8 +257,10 @@ def request_certificate(hostname: AccountHostname, *, scheduled_renewal: bool = 
     return _run_order(claim)
 
 
-def _claim_attempt(certificate_id: UUID, *, scheduled_renewal: bool) -> UUID | IssuanceOutcome:
-    """Decide, under the row lock, whether to order; take the budget reservation when a new name needs one."""
+def _claim_attempt(  # noqa: PLR0911  # One exit per decision the row lock makes
+    certificate_id: UUID, *, scheduled_renewal: bool
+) -> AttemptClaim | IssuanceOutcome:
+    """Decide, under the row lock, whether to order; take the lease, and a budget slot when a new name needs one."""
     now = timezone.now()
     with transaction.atomic():
         certificate = (
@@ -246,24 +274,38 @@ def _claim_attempt(certificate_id: UUID, *, scheduled_renewal: bool) -> UUID | I
             and certificate.current_not_after - now < RENEW_WITHIN
         ):
             return IssuanceOutcome(IssuanceStatus.ALREADY_VALID)
+        if certificate.attempt_lease_until is not None and certificate.attempt_lease_until > now:
+            return IssuanceOutcome(
+                IssuanceStatus.DEFERRED,
+                "Another worker holds the attempt.",
+                retry_after=certificate.attempt_lease_until,
+            )
         if certificate.retry_after is not None and certificate.retry_after > now:
             return IssuanceOutcome(IssuanceStatus.DEFERRED, "Waiting out a delay.", retry_after=certificate.retry_after)
+        token = uuid.uuid4().hex
         if certificate.attempt_status == AccountNameCertificate.AttemptStatus.ORDERING:
-            return certificate.pk  # a crashed or deferred attempt: resume it with the slot it already holds
+            started = certificate.attempt_started_at
+            if started is None or now - started > ATTEMPT_MAX_AGE:
+                return _fail_locked(certificate, "The attempt outlived its order.")
+            # A crashed or deferred attempt: take it over with its slot, key and order.
+            certificate.attempt_token = token
+            certificate.attempt_lease_until = now + ATTEMPT_LEASE
+            certificate.save(update_fields=["attempt_token", "attempt_lease_until", "updated_at"])
+            return AttemptClaim(certificate.pk, token)
 
         renewal = bool(certificate.current_certificate_ref)
-        if renewal:
-            certificate.attempt_reserved_at = now
-        else:
-            reserved = _reserve_budget(certificate, now)
-            if not reserved:
-                return IssuanceOutcome(IssuanceStatus.BUDGET_EXHAUSTED, "No new-certificate slot is left this week.")
+        if not renewal and not _reserve_budget(certificate, now):
+            return IssuanceOutcome(IssuanceStatus.BUDGET_EXHAUSTED, "No new-certificate slot is left this week.")
         certificate.attempt_is_renewal = renewal
         certificate.attempt_status = AccountNameCertificate.AttemptStatus.ORDERING
         certificate.attempt_order_url = ""
+        certificate.attempt_id = uuid.uuid4().hex
+        certificate.attempt_started_at = now
+        certificate.attempt_token = token
+        certificate.attempt_lease_until = now + ATTEMPT_LEASE
         certificate.retry_after = None
         certificate.save()
-    return certificate.pk
+    return AttemptClaim(certificate.pk, token)
 
 
 def _reserve_budget(certificate: AccountNameCertificate, now: datetime) -> bool:
@@ -272,24 +314,19 @@ def _reserve_budget(certificate: AccountNameCertificate, now: datetime) -> bool:
     Called inside the claim transaction, after the certificate row lock and always in that order, so two
     workers can never wait on each other. The count is the rolling seven-day number of non-renewal
     reservations other than this row's own; a failed first attempt that still holds a slot inside the window
-    keeps it rather than taking another.
+    keeps it rather than taking another. Renewals never set `attempt_reserved_at`, so a renewal cannot move a
+    first issuance out of the count.
     """
     zone = certificate.hostname.zone
     AccountNameCertificateBudget.objects.select_for_update().get(zone=zone)
     window_start = now - BUDGET_WINDOW
     others = (
-        AccountNameCertificate.objects.filter(
-            hostname__zone=zone, attempt_is_renewal=False, attempt_reserved_at__gt=window_start
-        )
+        AccountNameCertificate.objects.filter(hostname__zone=zone, attempt_reserved_at__gt=window_start)
         .exclude(pk=certificate.pk)
         .count()
     )
     limit = config.account_cert_weekly_budget()
-    holds_slot = (
-        certificate.attempt_reserved_at is not None
-        and certificate.attempt_reserved_at > window_start
-        and not certificate.attempt_is_renewal
-    )
+    holds_slot = certificate.attempt_reserved_at is not None and certificate.attempt_reserved_at > window_start
     if holds_slot:
         return True
     if others >= limit:
@@ -337,53 +374,71 @@ def _alert(zone: str, kind: str, description: str, used: int, limit: int) -> Non
 
 
 def _attempt_id(certificate: AccountNameCertificate) -> str:
-    """The vault identifier of one issuance's material, fixed by when its attempt reserved its slot."""
-    reserved = certificate.attempt_reserved_at
-    stamp = reserved.strftime("%Y%m%dT%H%M%S%f") if reserved else "none"
-    return f"{certificate.hostname.fqdn}@{stamp}"
+    """The vault identifier of one attempt's material: fixed when the attempt began, kept by a takeover."""
+    return f"{certificate.hostname.fqdn}@{certificate.attempt_id}"
 
 
-def _run_order(certificate_id: UUID) -> IssuanceOutcome:
+def _run_order(claim: AttemptClaim) -> IssuanceOutcome:
     """Place or resume the order, publish its challenge values, wait for the certificate and put it in force."""
-    certificate = AccountNameCertificate.objects.select_related("hostname").get(pk=certificate_id)
-    try:
-        fullchain, not_after = _exchange(certificate)
-    except (AcmeError, _Defer, _KeyUnavailableError) as exc:
-        return _after_exchange_error(certificate_id, exc)
-
+    certificate = AccountNameCertificate.objects.select_related("hostname").get(pk=claim.certificate_id)
+    fqdn = certificate.hostname.fqdn
     attempt = _attempt_id(certificate)
-    stored = _vault_store(CERT_TYPE, attempt, fullchain, days=_CERT_DAYS)
-    if stored.is_err():
-        return _defer(certificate_id, None, stored.unwrap_err())
+    try:
+        fullchain = _exchange(certificate, claim)
+        key_pem = _load_or_create_key(CERT_KEY_TYPE, attempt, days=_CERT_DAYS)
+    except _FencedError:
+        return _fenced(claim)
+    except (AcmeError, _Defer, _KeyUnavailableError, _DnsRefusedError) as exc:
+        return _after_exchange_error(claim, exc)
+    if not _material_matches(fullchain, key_pem, fqdn):
+        return _fail(claim, "The issued certificate is not for the attempt's key and name.")
+
+    # Create-only: what the vault already holds under this attempt (a worker fenced out after storing) is
+    # kept, and it is the one checked and put in force.
+    _vault_store(CERT_TYPE, attempt, fullchain, days=_CERT_DAYS, create_only=True)
+    stored = vault_secret(f"{CERT_TYPE}:{attempt}")
+    if not stored or not _material_matches(stored, key_pem, fqdn):
+        return _defer(claim, None, "The certificate could not be stored and read back.")
     with transaction.atomic():
-        row = AccountNameCertificate.objects.select_for_update().get(pk=certificate_id)
+        row = AccountNameCertificate.objects.select_for_update().get(pk=claim.certificate_id)
+        if row.attempt_token != claim.token:
+            return _fenced(claim)
         row.current_certificate_ref = f"{CERT_TYPE}:{attempt}"
         row.current_key_ref = f"{CERT_KEY_TYPE}:{attempt}"
-        row.current_not_after = not_after
+        row.current_not_after = _leaf_not_after(stored)
         row.attempt_status = AccountNameCertificate.AttemptStatus.ISSUED
         row.attempt_order_url = ""
+        row.attempt_token = ""
+        row.attempt_lease_until = None
         row.retry_after = None
         row.save()
-    logger.info(
-        "✅ [AccountCert] Certificate for %s issued, valid until %s", certificate.hostname.fqdn, not_after.date()
-    )
+    logger.info("✅ [AccountCert] Certificate for %s issued, valid until %s", fqdn, row.current_not_after.date())
     return IssuanceOutcome(IssuanceStatus.ISSUED)
 
 
-def _after_exchange_error(certificate_id: UUID, exc: Exception) -> IssuanceOutcome:
+def _fenced(claim: AttemptClaim) -> IssuanceOutcome:
+    logger.warning("⚠️ [AccountCert] Attempt %s was taken over; this worker stops", claim.certificate_id)
+    return IssuanceOutcome(IssuanceStatus.DEFERRED, "Another worker took the attempt over.")
+
+
+def _holds(claim: AttemptClaim) -> bool:
+    return AccountNameCertificate.objects.filter(pk=claim.certificate_id, attempt_token=claim.token).exists()
+
+
+def _after_exchange_error(claim: AttemptClaim, exc: Exception) -> IssuanceOutcome:
     """A rejected order ends the attempt; anything else keeps it (and its slot and order) for a later try."""
-    if isinstance(exc, AcmeOrderFailed):
-        return _fail(certificate_id, str(exc))
+    if isinstance(exc, (AcmeOrderFailed, _DnsRefusedError)):
+        return _fail(claim, str(exc))
     if isinstance(exc, AcmeRateLimited):
-        return _defer(certificate_id, exc.retry_after_seconds, f"rate limited: {exc}")
+        return _defer(claim, exc.retry_after_seconds, f"rate limited: {exc}")
     if isinstance(exc, (AcmeError, _Defer)):
         seconds = exc.retry_after_seconds if isinstance(exc, AcmeError) else exc.seconds
-        return _defer(certificate_id, seconds, str(exc))
-    return _defer(certificate_id, None, str(exc))
+        return _defer(claim, seconds, str(exc))
+    return _defer(claim, None, str(exc))
 
 
-def _exchange(certificate: AccountNameCertificate) -> tuple[str, datetime]:
-    """The ACME exchange for one attempt: the full chain and its expiry. Challenge records never outlive it."""
+def _exchange(certificate: AccountNameCertificate, claim: AttemptClaim) -> str:
+    """The ACME exchange for one attempt: the full chain. Challenge records never outlive it."""
     fqdn = certificate.hostname.fqdn
     attempt = _attempt_id(certificate)
     zone_id = config.account_zone_id()
@@ -396,15 +451,20 @@ def _exchange(certificate: AccountNameCertificate) -> tuple[str, datetime]:
         order = acme.load_order(certificate.attempt_order_url, csr_pem)
     else:
         order = acme.place_order(csr_pem)
-        AccountNameCertificate.objects.filter(pk=certificate.pk).update(attempt_order_url=order.url)
+        saved = AccountNameCertificate.objects.filter(pk=certificate.pk, attempt_token=claim.token).update(
+            attempt_order_url=order.url
+        )
+        if saved != 1:
+            raise _FencedError
     tag = order_owner_tag(order.url)
     try:
         _publish_challenges(gateway, zone_id, order, tag)
         time.sleep(DNS_SETTLE_SECONDS)
-        fullchain = acme.complete(order).decode()
-        return fullchain, _leaf_not_after(fullchain)
+        return acme.complete(order).decode()
     finally:
-        _clean_challenges(gateway, zone_id, tag)
+        # The holder cleans up; a worker fenced out leaves the shared order's records to it and to the sweep.
+        if _holds(claim):
+            _clean_challenges(gateway, zone_id, tag)
 
 
 def _publish_challenges(gateway: DnsProviderGateway, zone_id: str, order: AcmeOrder, tag: str) -> None:
@@ -414,6 +474,8 @@ def _publish_challenges(gateway: DnsProviderGateway, zone_id: str, order: AcmeOr
         by_name.setdefault(challenge.name, []).append(challenge.value)
     for name, values in by_name.items():
         outcome = gateway.reconcile_txt_values(zone_id, name, values, tag)
+        if outcome.error and outcome.retriability is Retriability.NOT_RETRIABLE:
+            raise _DnsRefusedError(f"DNS refused the challenge records: {outcome.error}")
         if outcome.error:
             raise _Defer(outcome.retry_after_seconds or TRANSIENT_BACKOFF.total_seconds(), outcome.error)
 
@@ -425,25 +487,38 @@ def _clean_challenges(gateway: DnsProviderGateway, zone_id: str, tag: str) -> No
         logger.warning("⚠️ [AccountCert] Challenge cleanup for %s failed: %s", tag, result.unwrap_err())
 
 
-def _defer(certificate_id: UUID, seconds: float | None, detail: str) -> IssuanceOutcome:
-    """Keep the attempt (`ordering`, with its reservation and order) and ask again after a delay."""
+def _defer(claim: AttemptClaim, seconds: float | None, detail: str) -> IssuanceOutcome:
+    """Keep the attempt (`ordering`, with its reservation and order), give the lease back, ask again later."""
     delay = timedelta(seconds=seconds) if seconds else TRANSIENT_BACKOFF
     retry_after = timezone.now() + delay
-    AccountNameCertificate.objects.filter(pk=certificate_id).update(retry_after=retry_after)
-    logger.warning("⚠️ [AccountCert] Attempt %s deferred until %s: %s", certificate_id, retry_after, detail)
+    kept = AccountNameCertificate.objects.filter(pk=claim.certificate_id, attempt_token=claim.token).update(
+        retry_after=retry_after, attempt_token="", attempt_lease_until=None
+    )
+    if kept != 1:
+        return _fenced(claim)
+    logger.warning("⚠️ [AccountCert] Attempt %s deferred until %s: %s", claim.certificate_id, retry_after, detail)
     return IssuanceOutcome(IssuanceStatus.DEFERRED, detail, retry_after=retry_after)
 
 
-def _fail(certificate_id: UUID, detail: str) -> IssuanceOutcome:
+def _fail(claim: AttemptClaim, detail: str) -> IssuanceOutcome:
     """End the attempt. The current certificate, if there is one, stays in force."""
-    retry_after = timezone.now() + FAILED_BACKOFF
     with transaction.atomic():
-        row = AccountNameCertificate.objects.select_for_update().get(pk=certificate_id)
-        row.attempt_status = AccountNameCertificate.AttemptStatus.FAILED
-        row.attempt_order_url = ""
-        row.retry_after = retry_after
-        row.save()
-    logger.error("🔥 [AccountCert] Order for certificate %s failed: %s", certificate_id, detail)
+        row = AccountNameCertificate.objects.select_for_update().get(pk=claim.certificate_id)
+        if row.attempt_token != claim.token:
+            return _fenced(claim)
+        return _fail_locked(row, detail)
+
+
+def _fail_locked(row: AccountNameCertificate, detail: str) -> IssuanceOutcome:
+    """End the attempt of a row the caller holds locked."""
+    retry_after = timezone.now() + FAILED_BACKOFF
+    row.attempt_status = AccountNameCertificate.AttemptStatus.FAILED
+    row.attempt_order_url = ""
+    row.attempt_token = ""
+    row.attempt_lease_until = None
+    row.retry_after = retry_after
+    row.save()
+    logger.error("🔥 [AccountCert] Order for certificate %s failed: %s", row.pk, detail)
     return IssuanceOutcome(IssuanceStatus.FAILED, detail, retry_after=retry_after)
 
 
@@ -456,7 +531,9 @@ class _KeyUnavailableError(Exception):
     """The vault would not store or return a key."""
 
 
-def _vault_store(service_type: str, identifier: str, secret: str, *, days: int) -> Result[None, str]:
+def _vault_store(
+    service_type: str, identifier: str, secret: str, *, days: int, create_only: bool = False
+) -> Result[None, str]:
     stored = get_credential_vault().store_credential(
         CredentialData(
             service_type=service_type,
@@ -466,6 +543,7 @@ def _vault_store(service_type: str, identifier: str, secret: str, *, days: int) 
             expires_in_days=days,
             user=None,
             reason=_VAULT_REASON,
+            create_only=create_only,
         )
     )
     return Err(stored.unwrap_err()) if stored.is_err() else Ok(None)
@@ -478,8 +556,22 @@ def vault_secret(ref: str) -> str | None:
     return None if result.is_err() else result.unwrap()[1]
 
 
+_NOT_FOUND = "Credential not found"
+
+
+def _vault_lookup(service_type: str, identifier: str) -> str | None:
+    """The secret, or None when the vault has none; any other vault error raises (it is not "missing")."""
+    result = get_credential_vault().get_credential(service_type, identifier, user=None, reason=_VAULT_REASON)
+    if result.is_ok():
+        return result.unwrap()[1]
+    if result.unwrap_err().startswith(_NOT_FOUND):
+        return None
+    raise _KeyUnavailableError(f"vault could not read {service_type}: {result.unwrap_err()}")
+
+
 def _load_or_create_key(service_type: str, identifier: str, *, days: int) -> str:
-    existing = vault_secret(f"{service_type}:{identifier}")
+    """The key under this identifier, made once. It is never overwritten, so a key in use stays the key."""
+    existing = _vault_lookup(service_type, identifier)
     if existing:
         return existing
     pem = (
@@ -487,10 +579,11 @@ def _load_or_create_key(service_type: str, identifier: str, *, days: int) -> str
         .private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
         .decode()
     )
-    stored = _vault_store(service_type, identifier, pem, days=days)
-    if stored.is_err():
-        raise _KeyUnavailableError(f"vault refused a key: {stored.unwrap_err()}")
-    return pem
+    _vault_store(service_type, identifier, pem, days=days, create_only=True)
+    stored = _vault_lookup(service_type, identifier)  # Whoever stored first wins; use what the vault holds
+    if not stored:
+        raise _KeyUnavailableError(f"vault refused a {service_type}")
+    return stored
 
 
 def _csr(key_pem: str, fqdn: str) -> bytes:
@@ -504,6 +597,26 @@ def _csr(key_pem: str, fqdn: str) -> bytes:
         .sign(key, hashes.SHA256())
     )
     return csr.public_bytes(serialization.Encoding.PEM)
+
+
+def _material_matches(fullchain_pem: str, key_pem: str, fqdn: str) -> bool:
+    """Whether the chain's leaf is for this key and for exactly this one name."""
+    blocks = _PEM_BLOCK.findall(fullchain_pem)
+    if not blocks:
+        return False
+    try:
+        leaf = x509.load_pem_x509_certificate(blocks[0].encode())
+        key = serialization.load_pem_private_key(key_pem.encode(), password=None)
+        names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(
+            x509.DNSName
+        )
+    except (ValueError, TypeError, x509.ExtensionNotFound):
+        return False
+    spki = serialization.PublicFormat.SubjectPublicKeyInfo
+    same_key = leaf.public_key().public_bytes(serialization.Encoding.DER, spki) == key.public_key().public_bytes(
+        serialization.Encoding.DER, spki
+    )
+    return same_key and names == [fqdn]
 
 
 def _leaf_not_after(fullchain_pem: str) -> datetime:
@@ -526,6 +639,17 @@ def split_chain(fullchain_pem: str) -> tuple[str, str]:
 # =============================================================================
 
 
+def _checked_material(certificate: AccountNameCertificate, fqdn: str) -> Result[tuple[str, str], str]:
+    """The full chain and key in force, read from the vault and checked to belong together."""
+    fullchain = vault_secret(certificate.current_certificate_ref)
+    key_pem = vault_secret(certificate.current_key_ref)
+    if not fullchain or not key_pem:
+        return Err("The certificate or its key could not be read from the vault.")
+    if not _material_matches(fullchain, key_pem, fqdn):
+        return Err("The stored certificate is not for its stored key and name; nothing was installed.")
+    return Ok((fullchain, key_pem))
+
+
 def install_current_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[None, str]:
     """Install the certificate in force on ``server`` and record it. The PEMs travel only in the playbook's vars file."""
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
@@ -536,10 +660,10 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
     deployment = getattr(server, "node_deployment", None)
     if deployment is None:
         return Err(f"Server {server.hostname} is manually registered (no managed node deployment); cannot install.")
-    fullchain = vault_secret(certificate.current_certificate_ref)
-    key_pem = vault_secret(certificate.current_key_ref)
-    if not fullchain or not key_pem:
-        return Err("The certificate or its key could not be read from the vault.")
+    material = _checked_material(certificate, hostname.fqdn)
+    if material.is_err():
+        return Err(material.unwrap_err())
+    fullchain, key_pem = material.unwrap()
     leaf, chain = split_chain(fullchain)
     variables: dict[str, Any] = {
         "account_name": hostname.fqdn,

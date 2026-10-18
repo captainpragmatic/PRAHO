@@ -36,6 +36,7 @@ _USER_AGENT = "praho-acme"
 _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVICE_UNAVAILABLE = 503
 _REQUEST_TIMEOUT_SECONDS = 30.0
+_INVALID_ORDER_MESSAGE = "The certificate order failed."
 
 
 class AcmeError(Exception):
@@ -145,7 +146,13 @@ def _translating() -> Iterator[None]:
         raise AcmeOrderFailed(str(exc)) from exc
     except (acme_errors.ValidationError, acme_errors.IssuanceError) as exc:
         raise AcmeOrderFailed(str(exc)) from exc
-    except (acme_errors.Error, requests.RequestException, OutboundSecurityError) as exc:
+    except acme_errors.Error as exc:
+        # The library says an order the server marked invalid with no reason only in this message; it is
+        # as final as any other invalid order, so it must not be retried for ever.
+        if str(exc).startswith(_INVALID_ORDER_MESSAGE):
+            raise AcmeOrderFailed(str(exc)) from exc
+        raise AcmeTransientError(f"{type(exc).__name__}: {exc}") from exc
+    except (requests.RequestException, OutboundSecurityError) as exc:
         raise AcmeTransientError(f"{type(exc).__name__}: {exc}") from exc
 
 
@@ -184,6 +191,9 @@ class LibraryAcmeClient:
         with _translating():
             # The library has no public "order by URL"; a POST-as-GET of the stored URL is the protocol's way.
             body = messages.Order.from_json(self._client._post_as_get(url).json())
+            if body.status == messages.STATUS_INVALID:
+                # Expired or rejected since it was stored: resuming it can only wait out the deadline.
+                raise AcmeOrderFailed("The stored order is invalid.")
             authzrs = [
                 self._client._authzr_from_response(self._client._post_as_get(auth_url), uri=auth_url)
                 for auth_url in body.authorizations

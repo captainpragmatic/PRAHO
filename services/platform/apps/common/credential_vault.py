@@ -57,6 +57,8 @@ class CredentialData:
     expires_in_days: int = CREDENTIAL_EXPIRY_DAYS
     user: Any | None = None
     reason: str = "Credential storage"
+    # Insert only: an existing credential under the same type and identifier is kept, and the store fails.
+    create_only: bool = False
 
 
 @dataclass
@@ -323,20 +325,31 @@ class CredentialVault:
                 # Calculate expiration
                 expires_at = timezone.now() + timedelta(days=credential_data.expires_in_days)
 
-                # Store or update credential
-                credential, created = EncryptedCredential.objects.update_or_create(
-                    service_type=credential_data.service_type,
-                    service_identifier=credential_data.service_identifier,
-                    defaults={
-                        "encrypted_username": encrypted_username,
-                        "encrypted_password": encrypted_password,
-                        "encrypted_metadata": encrypted_metadata,
-                        "expires_at": expires_at,
-                        "is_active": True,
-                        "rotation_in_progress": False,
-                        "rotation_failure_count": 0,
-                    },
-                )
+                values = {
+                    "encrypted_username": encrypted_username,
+                    "encrypted_password": encrypted_password,
+                    "encrypted_metadata": encrypted_metadata,
+                    "expires_at": expires_at,
+                    "is_active": True,
+                    "rotation_in_progress": False,
+                    "rotation_failure_count": 0,
+                }
+                if credential_data.create_only:
+                    # The (type, identifier) unique constraint makes this an insert-if-absent: a second
+                    # writer gets an IntegrityError, reported below, and the stored secret stands.
+                    credential = EncryptedCredential.objects.create(
+                        service_type=credential_data.service_type,
+                        service_identifier=credential_data.service_identifier,
+                        **values,
+                    )
+                    created = True
+                else:
+                    # Store or update credential
+                    credential, created = EncryptedCredential.objects.update_or_create(
+                        service_type=credential_data.service_type,
+                        service_identifier=credential_data.service_identifier,
+                        defaults=values,
+                    )
 
                 if not created:
                     credential.rotation_count += 1

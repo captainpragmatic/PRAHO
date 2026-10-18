@@ -11,8 +11,11 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import timedelta
 from itertools import count
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.cache import cache
 from django.db import connection
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -22,7 +25,7 @@ from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent
 from apps.common.credential_vault import EncryptedCredential
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.provisioning import account_name_certificates as certs
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.account_hostname_models import (
@@ -89,9 +92,8 @@ class CertificateTestCase(TestCase):
         return certs.request_certificate(hostname or self.hostname)
 
     def reservations(self) -> int:
-        return AccountNameCertificate.objects.filter(
-            hostname__zone=ZONE, attempt_is_renewal=False, attempt_reserved_at__isnull=False
-        ).count()
+        # A slot is a new name's reservation; a renewal never takes or moves one.
+        return AccountNameCertificate.objects.filter(hostname__zone=ZONE, attempt_reserved_at__isnull=False).count()
 
 
 class IssuanceTests(CertificateTestCase):
@@ -205,6 +207,12 @@ class IssuanceTests(CertificateTestCase):
 
 
 class CrashResumeTests(CertificateTestCase):
+    def _lease_runs_out(self) -> None:
+        """The dead worker's lease expires; until then everyone else is deferred (AttemptOwnershipTests)."""
+        AccountNameCertificate.objects.filter(hostname=self.hostname).update(
+            attempt_lease_until=timezone.now() - timedelta(seconds=1)
+        )
+
     def test_a_crash_in_ordering_resumes_the_same_order(self) -> None:
         self.acme.crash_in_complete = True
 
@@ -214,6 +222,7 @@ class CrashResumeTests(CertificateTestCase):
         self.assertEqual(crashed.attempt_status, AccountNameCertificate.AttemptStatus.ORDERING)
         stored_url = crashed.attempt_order_url
         self.assertTrue(stored_url)
+        self._lease_runs_out()
 
         outcome = self.issue()
 
@@ -228,6 +237,7 @@ class CrashResumeTests(CertificateTestCase):
             self.issue()
         self.assertEqual(self.row().attempt_status, AccountNameCertificate.AttemptStatus.ORDERING)
         self.assertEqual(self.row().attempt_order_url, "")
+        self._lease_runs_out()
 
         outcome = self.issue()
 
@@ -628,6 +638,26 @@ class NodeInstallTests(CertificateTestCase):
             AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=self.server).exists()
         )
 
+    def test_a_stored_pair_that_does_not_match_is_never_installed(self) -> None:
+        self.issue()
+        row = self.row()
+        stranger = (
+            ec.generate_private_key(ec.SECP256R1())
+            .private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+            .decode()
+        )
+        _type, _sep, identifier = row.current_key_ref.partition(":")
+        certs._vault_store(certs.CERT_KEY_TYPE, identifier, stranger, days=30)
+        runner = MagicMock()
+        runner.return_value.run_playbook.return_value = Ok(MagicMock(success=True))
+        with patch("apps.infrastructure.ansible_service.AnsibleService", runner), self.managed_node():
+            result = certs.install_current_certificate(self.hostname, self.server)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("not for its stored key", result.unwrap_err())
+        runner.return_value.run_playbook.assert_not_called()
+        self.assertFalse(AccountNameCertificateInstall.objects.filter(hostname=self.hostname).exists())
+
     def test_a_failed_install_records_nothing(self) -> None:
         self.issue()
         runner = MagicMock()
@@ -701,6 +731,171 @@ class ScheduleRegistrationTests(CertificateTestCase):
         with patch.object(certs, "renew_due_certificates", side_effect=RuntimeError("boom")):
             failed = virtualmin_tasks.renew_account_name_certificates()
         self.assertEqual(failed, {"success": False, "error": "boom"})
+
+
+class AttemptOwnershipTests(CertificateTestCase):
+    """One worker per attempt; a worker that lost its lease changes nothing; a pair is checked before use."""
+
+    def _crash_once(self) -> None:
+        self.acme.crash_in_complete = True
+        with self.assertRaises(SimulatedCrash):
+            self.issue()
+
+    def _expire_lease(self) -> None:
+        AccountNameCertificate.objects.filter(hostname=self.hostname).update(
+            attempt_lease_until=timezone.now() - timedelta(seconds=1)
+        )
+
+    def test_a_live_lease_defers_without_asking_the_ca(self) -> None:
+        self._crash_once()
+        calls = (self.acme.place_calls, self.acme.load_calls, self.acme.complete_calls)
+
+        outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.DEFERRED)
+        self.assertEqual((self.acme.place_calls, self.acme.load_calls, self.acme.complete_calls), calls)
+
+    def test_an_expired_lease_is_taken_over_and_the_same_order_resumed(self) -> None:
+        self._crash_once()
+        attempt = self.row().attempt_id
+        self._expire_lease()
+
+        outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.ISSUED)
+        self.assertEqual((self.acme.place_calls, self.acme.load_calls), (1, 1))
+        self.assertIn(attempt, self.row().current_certificate_ref, "a takeover keeps the attempt and its key")
+
+    def test_a_worker_that_lost_its_lease_changes_nothing(self) -> None:
+        first = certs._claim_attempt(self.row_for_claim().pk, scheduled_renewal=False)
+        assert isinstance(first, certs.AttemptClaim)
+        self._expire_lease()
+        second = certs._claim_attempt(self.row().pk, scheduled_renewal=False)
+        assert isinstance(second, certs.AttemptClaim)
+
+        outcome = certs._run_order(first)
+
+        row = self.row()
+        self.assertIs(outcome.status, IssuanceStatus.DEFERRED)
+        self.assertEqual(row.attempt_token, second.token)
+        self.assertEqual((row.attempt_order_url, row.current_certificate_ref), ("", ""))
+        self.assertEqual(row.attempt_status, AccountNameCertificate.AttemptStatus.ORDERING)
+        self.assertEqual(self.acme.complete_calls, 0, "the CA must not issue a certificate the worker would discard")
+
+    def test_a_worker_fenced_during_the_exchange_puts_nothing_in_force_and_leaves_the_records(self) -> None:
+        from tests.provisioning.acme_fakes import FakeAcme  # noqa: PLC0415
+
+        row = self.row_for_claim()
+
+        def taken_over_while_waiting(order: Any) -> bytes:
+            self._expire_lease()
+            assert isinstance(certs._claim_attempt(row.pk, scheduled_renewal=False), certs.AttemptClaim)
+            return FakeAcme.complete(self.acme, order)
+
+        with patch.object(self.acme, "complete", taken_over_while_waiting):
+            outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.DEFERRED)
+        self.assertEqual(self.row().current_certificate_ref, "")
+        txt = [r for r in self.cloudflare.store.values() if r["type"] == "TXT"]
+        self.assertTrue(txt, "the new holder still needs the shared order's challenge records")
+
+    def test_a_fenced_failure_or_deferral_leaves_the_new_holder_alone(self) -> None:
+        first = certs._claim_attempt(self.row_for_claim().pk, scheduled_renewal=False)
+        assert isinstance(first, certs.AttemptClaim)
+        self._expire_lease()
+        second = certs._claim_attempt(self.row().pk, scheduled_renewal=False)
+        assert isinstance(second, certs.AttemptClaim)
+
+        certs._fail(first, "late failure")
+        certs._defer(first, 60, "late deferral")
+
+        row = self.row()
+        self.assertEqual(row.attempt_status, AccountNameCertificate.AttemptStatus.ORDERING)
+        self.assertEqual((row.attempt_token, row.retry_after), (second.token, None))
+
+    def test_an_attempt_older_than_an_order_can_live_fails_without_asking_the_ca(self) -> None:
+        self._crash_once()
+        AccountNameCertificate.objects.filter(hostname=self.hostname).update(
+            attempt_started_at=timezone.now() - certs.ATTEMPT_MAX_AGE - timedelta(minutes=1),
+            attempt_lease_until=None,
+        )
+        calls = (self.acme.place_calls, self.acme.load_calls)
+
+        outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.FAILED)
+        self.assertEqual(self.row().attempt_order_url, "")
+        self.assertEqual((self.acme.place_calls, self.acme.load_calls), calls)
+
+    def test_a_certificate_for_another_key_is_never_put_in_force(self) -> None:
+        from tests.provisioning.acme_fakes import issue_chain  # noqa: PLC0415
+
+        stranger = certs._csr(
+            ec.generate_private_key(ec.SECP256R1())
+            .private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+            .decode(),
+            self.hostname.fqdn,
+        )
+        with patch.object(self.acme, "complete", lambda order: issue_chain(stranger, 90).encode()):
+            outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.FAILED)
+        self.assertEqual(self.row().current_certificate_ref, "")
+
+    def test_a_vault_read_error_never_replaces_a_key(self) -> None:
+        vault = certs.get_credential_vault()
+        with (
+            patch.object(vault, "get_credential", return_value=Err("Credential expired 3 days ago")),
+            patch.object(vault, "store_credential", wraps=vault.store_credential) as store,
+            patch.object(certs, "get_credential_vault", return_value=vault),
+        ):
+            outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.DEFERRED)
+        store.assert_not_called()
+
+    def test_a_dns_refusal_that_retrying_cannot_cure_fails_the_attempt(self) -> None:
+        from apps.common.types import Retriability  # noqa: PLC0415
+        from apps.infrastructure.dns_gateway import ReconcileOutcome  # noqa: PLC0415
+
+        refused = ReconcileOutcome()
+        refused.error = "403 token cannot edit the zone"
+        refused.retriability = Retriability.NOT_RETRIABLE
+        with patch("apps.infrastructure.dns_gateway.CloudflareDnsGateway.reconcile_txt_values", return_value=refused):
+            outcome = self.issue()
+
+        self.assertIs(outcome.status, IssuanceStatus.FAILED)
+
+    def test_a_renewal_inside_the_window_keeps_its_first_issuance_counted(self) -> None:
+        _write("dns.account_cert_weekly_budget", 1)
+        self.issue()
+        AccountNameCertificate.objects.filter(hostname=self.hostname).update(
+            current_not_after=timezone.now() + timedelta(days=5)
+        )
+        self.assertIs(certs.request_certificate(self.hostname, scheduled_renewal=True).status, IssuanceStatus.ISSUED)
+
+        outcome = self.issue(_hostname(self.server))
+
+        self.assertIs(outcome.status, IssuanceStatus.BUDGET_EXHAUSTED, "the week's one slot is still the first name's")
+
+    def test_a_renewal_takes_no_slot_even_when_its_first_issuance_left_the_window(self) -> None:
+        _write("dns.account_cert_weekly_budget", 1)
+        self.issue()
+        AccountNameCertificate.objects.filter(hostname=self.hostname).update(
+            current_not_after=timezone.now() + timedelta(days=5),
+            attempt_reserved_at=timezone.now() - timedelta(days=8),
+        )
+        reserved = self.row().attempt_reserved_at
+
+        self.assertIs(certs.request_certificate(self.hostname, scheduled_renewal=True).status, IssuanceStatus.ISSUED)
+
+        self.assertEqual(self.row().attempt_reserved_at, reserved)
+        self.assertIs(self.issue(_hostname(self.server)).status, IssuanceStatus.ISSUED)
+
+    def row_for_claim(self) -> AccountNameCertificate:
+        AccountNameCertificateBudget.objects.get_or_create(zone=ZONE)
+        return AccountNameCertificate.objects.get_or_create(hostname=self.hostname)[0]
 
 
 class ConcurrentReservationTests(TransactionTestCase):

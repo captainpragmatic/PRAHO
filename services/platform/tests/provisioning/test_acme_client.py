@@ -115,6 +115,12 @@ class TranslationTests(SimpleTestCase):
             with self.subTest(exc=type(exc).__name__):
                 self.assertIsInstance(self.raised(exc), AcmeOrderFailed)
 
+    def test_an_invalid_order_without_a_reason_ends_the_order(self) -> None:
+        # What the library raises when the server marks the order invalid and gives no error object.
+        exc = acme_errors.Error("The certificate order failed. No further information was provided by the server.")
+
+        self.assertIsInstance(self.raised(exc), AcmeOrderFailed)
+
     def test_network_trouble_and_timeouts_keep_the_order(self) -> None:
         for exc in (
             requests.ConnectionError("down"),
@@ -210,6 +216,18 @@ class ClientFlowTests(SimpleTestCase):
         self.assertEqual([c.name for c in order.challenges], ["_acme-challenge.h7k3p2q8.praho-sites.net"])
         self.assertTrue(order.challenges[0].value)
         self.assertNotIn("=", order.challenges[0].value, "a DNS-01 value is unpadded base64url")
+
+    def test_a_stored_order_the_server_now_calls_invalid_is_not_resumed(self) -> None:
+        adapter, client = self.build()
+        body = messages.Order(
+            identifiers=(messages.Identifier(typ=messages.IDENTIFIER_FQDN, value="h7k3p2q8.praho-sites.net"),),
+            status=messages.STATUS_INVALID,
+            authorizations=(),
+        )
+        client._post_as_get.return_value.json.return_value = body.to_json()
+
+        with self.assertRaises(AcmeOrderFailed):
+            adapter.load_order("https://acme.test/order/7", b"the-csr")
 
     def test_a_stored_order_is_read_back_by_its_url_and_keeps_its_csr(self) -> None:
         adapter, client = self.build()
