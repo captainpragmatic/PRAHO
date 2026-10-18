@@ -191,3 +191,70 @@ class TerminationTests(LifecycleCase):
             account.save(update_fields=["status", "updated_at"])
         events: Any = AuditEvent.objects.filter(object_id=str(hostname.pk)).values_list("action", flat=True)
         self.assertTrue(any("retired" in action for action in events), list(events))
+
+
+class SweepTests(LifecycleCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.synced: list[str] = []
+        sync = patch.object(
+            service, "sync_account_hostname", lambda hostname: self.synced.append(hostname.label) or Ok("published")
+        )
+        sync.start()
+        self.addCleanup(sync.stop)
+
+    def _named(self, **fields: Any) -> AccountHostname:
+        account = self._account()
+        hostname = service.allocate_account_hostname(account)
+        AccountHostname.objects.filter(pk=hostname.pk).update(target_server=self.server, **fields)
+        hostname.refresh_from_db()
+        return hostname
+
+    def test_the_sweep_does_nothing_while_off(self) -> None:
+        _configure(enabled=False)
+        self._named()
+        self.assertEqual(lifecycle.reconcile_account_names(), {"disabled": 1})
+        self.assertEqual((self.synced, self.node_calls), ([], []))
+
+    def test_a_name_never_reconciled_gets_its_node_step_and_a_sync(self) -> None:
+        _configure(enabled=True)
+        hostname = self._named()
+        counts = lifecycle.reconcile_account_names()
+        self.assertEqual(self.node_calls, ["ensure enabled=True"])
+        self.assertEqual(self.synced, [hostname.label])
+        self.assertEqual(counts["published"], 1)
+
+    def test_a_fresh_name_is_left_alone_and_a_stale_one_is_synced_again(self) -> None:
+        _configure(enabled=True)
+        self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=1))
+        lifecycle.reconcile_account_names()
+        self.assertEqual(self.synced, [])
+        AccountHostname.objects.update(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
+        lifecycle.reconcile_account_names()
+        self.assertEqual(len(self.synced), 1)
+        self.assertEqual(self.node_calls, [], "a name reconciled before does not repeat its node step")
+
+    def test_an_account_in_an_operation_is_skipped(self) -> None:
+        _configure(enabled=True)
+        self._named()
+        with patch("apps.provisioning.virtualmin_migration_models.account_has_active_operation", return_value=True):
+            counts = lifecycle.reconcile_account_names()
+        self.assertEqual((self.synced, counts["skipped"]), ([], 1))
+
+    def test_one_run_handles_a_bounded_batch_oldest_first(self) -> None:
+        _configure(enabled=True)
+        self._named()
+        with patch.object(lifecycle, "SWEEP_BATCH", 0):
+            lifecycle.reconcile_account_names()
+        self.assertEqual(self.synced, [])
+
+    def test_the_sweep_is_scheduled_every_fifteen_minutes(self) -> None:
+        from django_q.models import Schedule  # noqa: PLC0415
+
+        from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks  # noqa: PLC0415
+
+        setup_virtualmin_scheduled_tasks()
+        row = Schedule.objects.get(name="account-names-reconcile")
+        self.assertEqual(
+            (row.func, row.minutes), ("apps.provisioning.account_hostname_lifecycle.reconcile_account_names", 15)
+        )

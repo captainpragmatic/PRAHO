@@ -16,8 +16,11 @@ With `dns.account_hostnames_enabled` off none of this does anything: no row, no 
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import F, Q
+from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, retriability_of
 
@@ -99,3 +102,56 @@ def on_account_terminated(account: VirtualminAccount) -> None:
             logger.warning("⚠️ [AccountName] Retiring %s left to the sweep: %s", hostname.fqdn, retired.unwrap_err())
 
     transaction.on_commit(_retire, robust=True)
+
+
+SWEEP_BATCH = 50
+RECHECK_AFTER = timedelta(hours=24)
+
+
+def reconcile_account_names() -> dict[str, int]:
+    """Every 15 minutes: converge the names that need it to their target server (ADR-0061 P1.8).
+
+    Only names that need work are picked, oldest first and at most SWEEP_BATCH a run: one never
+    reconciled (its node step is tried again too) or one not checked for RECHECK_AFTER. That keeps
+    the provider's rate limit and the nodes' listings out of reach of a large fleet. The decision to
+    skip is atomic: the row is locked and re-checked, and a name whose account is in a migration, a
+    backup, a restore or a delete is left alone. The node and DNS calls run after the lock is released.
+    """
+    from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
+    from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+
+    if not config.account_hostnames_enabled():
+        return {"disabled": 1}
+    due = Q(last_reconciled_at__isnull=True) | Q(last_reconciled_at__lt=timezone.now() - RECHECK_AFTER)
+    candidates = list(
+        AccountHostname.objects.filter(due, retired_at__isnull=True, account__isnull=False, target_server__isnull=False)
+        .order_by(F("last_reconciled_at").asc(nulls_first=True))
+        .values_list("pk", flat=True)[:SWEEP_BATCH]
+    )
+    counts = {"published": 0, "skipped": 0, "failed": 0}
+    for pk in candidates:
+        with transaction.atomic():
+            hostname = (
+                AccountHostname.objects.select_for_update(skip_locked=True, of=("self",))
+                .select_related("account", "account__server", "target_server")
+                .filter(pk=pk, retired_at__isnull=True)
+                .first()
+            )
+            account = hostname.account if hostname is not None else None
+            busy = account is None or account_has_active_operation(account)
+        if hostname is None or account is None or busy:
+            counts["skipped"] += 1
+            continue
+        if hostname.last_reconciled_at is None and account.server_id == hostname.target_server_id:
+            ensured = service.ensure_node_account_name(account, account.server, enabled=account.status == "active")
+            if ensured.is_err():
+                logger.warning("⚠️ [AccountName] Sweep: node step for %s: %s", hostname.fqdn, ensured.unwrap_err())
+        synced = service.sync_account_hostname(hostname)
+        if synced.is_err():
+            counts["failed"] += 1
+            logger.warning("⚠️ [AccountName] Sweep: DNS for %s: %s", hostname.fqdn, synced.unwrap_err())
+        elif synced.unwrap() == "published":
+            counts["published"] += 1
+        else:
+            counts["skipped"] += 1
+    return counts

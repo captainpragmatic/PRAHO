@@ -2122,6 +2122,19 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     )
     tasks_created["chain_backups"] = "created" if created else "updated"
 
+    # Account-name sweep every 15 minutes (ADR-0061 P1.8). Registered whatever the flag says: the
+    # task does nothing while dns.account_hostnames_enabled is off.
+    _, created = ScheduleModel.objects.update_or_create(
+        name="account-names-reconcile",
+        defaults={
+            "func": "apps.provisioning.account_hostname_lifecycle.reconcile_account_names",
+            "schedule_type": "I",
+            "minutes": 15,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["account_names_reconcile"] = "created" if created else "updated"
+
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:
         schedule(
