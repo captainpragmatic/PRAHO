@@ -192,7 +192,7 @@ class TestAuditServiceDirectCalls(TestCase):
         event = InfrastructureAuditService.log_destroy_started(deployment)
 
         self.assertEqual(event.action, "node_destroy_started")
-        self.assertEqual(event.metadata["severity"], "high")
+        self.assertEqual((event.category, event.severity), ("system_admin", "high"))
 
     def test_log_destroy_completed(self) -> None:
         deployment = _create_deployment(
@@ -213,7 +213,7 @@ class TestAuditServiceDirectCalls(TestCase):
         )
 
         self.assertEqual(event.action, "node_destroy_failed")
-        self.assertEqual(event.metadata["severity"], "critical")
+        self.assertEqual((event.category, event.severity), ("system_admin", "critical"))
 
     def test_log_provider_created(self) -> None:
         event = InfrastructureAuditService.log_provider_created(self.provider)

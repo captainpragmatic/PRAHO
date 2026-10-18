@@ -127,7 +127,7 @@ class ProvisioningSupportMigrationTests(ProvisioningSupportMigrationFixture):
         self.assertIsNone(migration.worker_lease_expires_at)
         self.assertEqual(VirtualminMigration.active_reservations(self.target), 1)
         event = AuditEvent.objects.get(action="virtualmin_migration_needs_review", object_id=str(migration.pk))
-        self.assertTrue(event.metadata["requires_review"])
+        self.assertTrue(event.requires_review)
         self.assertEqual(event.new_values["status"], "needs_review")
         self.assertEqual(self.requests, [])
 

@@ -113,8 +113,6 @@ def release_promotions_for_order(order: Order, *, trigger: str) -> None:  # noqa
                     metadata={
                         "order_id": str(order.id),
                         "order_number": order.order_number,
-                        "severity": "high",
-                        "requires_review": True,
                     },
                     actor_type="system",
                 )

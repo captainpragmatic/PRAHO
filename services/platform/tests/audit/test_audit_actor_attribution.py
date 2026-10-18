@@ -215,13 +215,13 @@ class HelperUserTests(TestCase):
         forget_events()
 
         CustomersAuditService.log_note_event(
-            event_type="customer_note_updated",
+            event_type="customer_note_created",
             note=note,
             user=self.author,
             context=AuditContext(ip_address="203.0.113.7"),
         )
 
-        (event,) = events("customer_note_updated")
+        (event,) = events("customer_note_created")
         self.assertEqual(event.user, self.author)
         self.assertEqual(str(event.ip_address), "203.0.113.7")
 

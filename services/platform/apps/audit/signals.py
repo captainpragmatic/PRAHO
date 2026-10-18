@@ -107,84 +107,6 @@ def _get_audit_context_from_request(request: HttpRequest | None, user: User | No
     )
 
 
-def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
-    """
-    Get category, severity, and flags for audit action
-
-    Returns: (category, severity, is_sensitive, requires_review)
-    """
-    # Define action patterns and their properties
-    # Each pattern maps to: (category, base_severity, is_sensitive, requires_review_func)
-    action_config = {
-        ("login_", "logout_", "session_", "account_"): (
-            "authentication",
-            "medium",
-            True,
-            lambda a: a in ["account_locked", "login_failed_2fa"],
-        ),
-        ("password_",): (
-            "authentication",
-            lambda a: "high" if a in ["password_compromised", "password_strength_weak"] else "medium",
-            True,
-            lambda a: a == "password_compromised",
-        ),
-        ("2fa_",): (
-            "authentication",
-            lambda a: "high" if a in ["2fa_disabled", "2fa_admin_reset"] else "medium",
-            True,
-            lambda a: a in ["2fa_disabled", "2fa_admin_reset"],
-        ),
-        ("privacy_", "gdpr_", "marketing_consent"): ("privacy", "high", True, lambda a: a.endswith("_withdrawn")),
-        ("customer_",): ("authorization", "medium", False, lambda a: a.endswith("_revoked")),
-        ("security_", "suspicious_", "brute_force", "malicious_"): ("security_event", "critical", True, lambda a: True),
-        ("data_export", "data_deletion", "data_breach"): ("data_protection", "high", True, lambda a: True),
-        ("system_", "backup_", "configuration_", "user_impersonation"): ("system_admin", "high", True, lambda a: True),
-    }
-
-    # Exact match patterns
-    exact_matches = {
-        "profile_updated": ("account_management", "medium", True, False),
-        "email_changed": ("account_management", "medium", True, False),
-        "phone_updated": ("account_management", "medium", True, False),
-        "name_changed": ("account_management", "medium", True, False),
-        "role_assigned": ("authorization", "high", True, True),
-        "role_removed": ("authorization", "high", True, True),
-        "permission_granted": ("authorization", "high", True, True),
-        "permission_revoked": ("authorization", "high", True, True),
-        "staff_role_changed": ("authorization", "high", True, True),
-        "customer_role_changed": ("authorization", "high", True, True),
-        "customer_membership_deleted": ("authorization", "high", True, True),
-        "customer_membership_created": ("authorization", "medium", True, False),
-        "customer_membership_updated": ("authorization", "medium", True, False),
-        "invoice_accessed": ("business_operation", "low", False, False),
-        "payment_method_added": ("business_operation", "low", False, False),
-        "order_placed": ("business_operation", "low", False, False),
-    }
-
-    # Check exact matches first
-    if action in exact_matches:
-        return exact_matches[action]
-
-    # Check prefix patterns
-    for patterns, config in action_config.items():
-        for pattern in patterns:
-            if action.startswith(pattern):
-                category, severity, is_sensitive, requires_review = config
-
-                # Handle dynamic severity
-                final_severity: str = str(severity(action)) if callable(severity) else str(severity)
-
-                # Handle dynamic requires_review
-                final_requires_review: bool = (
-                    bool(requires_review(action)) if callable(requires_review) else bool(requires_review)  # type: ignore[no-untyped-call]
-                )
-
-                return category, final_severity, is_sensitive, final_requires_review
-
-    # Default
-    return ("business_operation", "low", False, False)
-
-
 def _create_audit_event(  # Audit event creation requires comprehensive parameter set for full context capture  # audit trail fields  # noqa: PLR0913  # Business logic parameters
     event_data: AuditEventCreationData | Callable[[], AuditEventCreationData] | None = None,
     *,
@@ -230,19 +152,9 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
         if event_data.metadata:
             context.metadata.update(event_data.metadata)
 
-        # Get action classification
-        category, severity, is_sensitive, requires_review = _get_action_category_severity(event_data.action)
-
-        # Add classification to metadata
-        context.metadata.update(
-            {
-                "category": category,
-                "severity": severity,
-                "is_sensitive": is_sensitive,
-                "requires_review": requires_review,
-                "audit_signal": True,
-            }
-        )
+        # Classification is the audit service's, from the action alone; the metadata only
+        # records that a signal receiver wrote the event.
+        context.metadata["audit_signal"] = True
 
         # Create event data
         audit_event_data = AuditEventData(
@@ -257,7 +169,9 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
         AuditService.log_event(audit_event_data, context)
 
         logger.info(
-            f"✅ [Audit Signal] {event_data.action} logged for user {event_data.user.email if event_data.user else 'System'} ({category}/{severity})"
+            "✅ [Audit Signal] %s logged for %s",
+            event_data.action,
+            f"user {event_data.user.pk}" if event_data.user else "System",
         )
 
 
@@ -414,7 +328,7 @@ def _build_user_event(
             old_values=old_of,
             new_values={"staff_role": instance.staff_role},
             description=f"Staff role changed to {instance.staff_role}",
-            metadata={"authorization_change": True, "requires_review": True},
+            metadata={"authorization_change": True},
             **actor,
         )
     if kind == "two_factor":
@@ -424,7 +338,7 @@ def _build_user_event(
             old_values=old_of,
             new_values={"two_factor_enabled": instance.two_factor_enabled},
             description=f"2FA {'enabled' if instance.two_factor_enabled else 'disabled'}",
-            metadata={"security_configuration": True, "requires_review": not instance.two_factor_enabled},
+            metadata={"security_configuration": True},
             **actor,
         )
     return AuditEventCreationData(
@@ -628,11 +542,7 @@ def audit_customer_membership_changes(
                     old_values={"role": old["role"]} if "role" in old else None,
                     new_values={"role": instance.role},
                     description=f"Customer role changed to {instance.role}",
-                    metadata={
-                        "authorization_change": True,
-                        "customer_id": str(audit_customer.id),
-                        "requires_review": True,
-                    },
+                    metadata={"authorization_change": True, "customer_id": str(audit_customer.id)},
                     **actor,
                 )
             )

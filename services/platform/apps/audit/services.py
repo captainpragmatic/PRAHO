@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -32,6 +33,7 @@ from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .actor_context import current_actor
+from .classification import classify
 from .export_files import delete_export_file, write_export_file
 from .models import (
     AuditAlert,
@@ -138,12 +140,12 @@ class AuditJSONEncoder(json.JSONEncoder):
 
     def default(self, obj: Any) -> Any:
         """Convert non-serializable objects to JSON-serializable formats"""
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
+        if isinstance(obj, uuid.UUID | Decimal):
+            return str(obj)  # A Decimal keeps its precision as a string
         elif isinstance(obj, datetime):
             return obj.isoformat()
-        elif isinstance(obj, Decimal):
-            return str(obj)  # Preserve precision as string
+        elif isinstance(obj, set | frozenset):
+            return sorted(obj, key=lambda item: (type(item).__name__, str(item)))
         elif hasattr(obj, "pk"):  # Django model instance
             return f"{obj.__class__.__name__}(pk={obj.pk})"
         elif hasattr(obj, "__dict__"):  # Generic object with attributes
@@ -153,21 +155,46 @@ class AuditJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def _unserializable_tag(value: Any) -> str:
+    """What stands in the evidence for a value that cannot be stored: its type and a short repr."""
+    try:
+        shown = repr(value)
+    except Exception:
+        shown = "<repr failed>"
+    return f"<unserializable {type(value).__name__}: {shown[:120]}>"
+
+
+def _serialize_value(value: Any, depth: int = 0) -> Any:
+    """JSON-safe copy of ``value``; only the part that cannot be encoded is replaced by a tag."""
+    try:
+        return json.loads(json.dumps(value, cls=AuditJSONEncoder, ensure_ascii=False))
+    except (TypeError, ValueError, RecursionError):
+        pass
+    if depth < _MAX_SALVAGE_DEPTH:
+        if isinstance(value, dict):
+            return {str(key): _serialize_value(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return [_serialize_value(item, depth + 1) for item in value]
+    return _unserializable_tag(value)
+
+
+_MAX_SALVAGE_DEPTH = 6
+
+
 def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """
     Safely serialize metadata dictionary for JSONField storage.
 
-    Pre-processes the metadata to convert non-serializable objects
-    using our custom encoder before storing in the database.
+    Pre-processes the metadata to convert non-serializable objects using our custom encoder
+    before storing in the database. When the whole dictionary cannot be encoded, each value is
+    tried on its own and only the offending one is replaced by a tag naming its type, so one
+    bad value no longer costs the rest of the evidence.
 
     Args:
         metadata: Raw metadata dictionary that may contain non-serializable objects
 
     Returns:
         Serializable metadata dictionary safe for JSONField
-
-    Raises:
-        TypeError: If metadata contains objects that cannot be serialized
     """
     if not metadata:
         return {}
@@ -178,14 +205,13 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         serialized_json = json.dumps(metadata, cls=AuditJSONEncoder, ensure_ascii=False)
         result: dict[str, Any] = json.loads(serialized_json)
         return result
-    except (TypeError, ValueError) as e:
-        logger.error(f"🔥 [Audit] Failed to serialize metadata: {e}")
-        # Fallback: return a safe version with error information
-        return {
-            "serialization_error": str(e),
-            "original_keys": list(metadata.keys()) if isinstance(metadata, dict) else "not_dict",
-            "timestamp": timezone.now().isoformat(),
-        }
+    except (TypeError, ValueError, RecursionError) as e:
+        logger.error(f"🔥 [Audit] Failed to serialize metadata as a whole, salvaging value by value: {e}")
+        salvaged = {str(key): _serialize_value(value) for key, value in metadata.items()}
+        bad_keys = sorted(key for key, value in salvaged.items() if "<unserializable " in json.dumps(value))
+        salvaged["serialization_error"] = str(e)
+        salvaged["unserializable_keys"] = bad_keys
+        return salvaged
 
 
 if TYPE_CHECKING:
@@ -290,6 +316,10 @@ class AuditEventData:
     old_values: dict[str, Any] | None = None
     new_values: dict[str, Any] | None = None
     description: str = ""
+    # Event-specific facts the action alone cannot say (see classification.classify): a coupon
+    # update that cancels, a setting that is sensitive. None means "as the action classifies".
+    severity: str | None = None
+    is_sensitive: bool | None = None
 
 
 @dataclass
@@ -676,6 +706,30 @@ class AuthenticationAuditService:
         return AuditService.log_event(audit_event_data, context)
 
 
+class UnregisteredAuditActionError(ValueError):
+    """An audit event was written with an action AuditEvent.ACTION_CHOICES does not list."""
+
+
+def _check_registered_action(action: str) -> None:
+    """Refuse (under test) or shout about (in production) an action nobody registered.
+
+    No database constraint: the list grows too often for a migration per action. The AST guard
+    in tests/audit/test_audit_action_vocabulary.py catches a new writer before it ships; this
+    catches the one the guard cannot see (a name built at runtime). In production the event is
+    still written, because a mislabelled event is better evidence than none.
+    """
+    if action in _registered_actions():
+        return
+    if getattr(settings, "TESTING", False):
+        raise UnregisteredAuditActionError(f"Audit action {action!r} is not in AuditEvent.ACTION_CHOICES")
+    logger.error("🔥 [Audit] Unregistered audit action %r was written; add it to AuditEvent.ACTION_CHOICES", action)
+
+
+@functools.cache
+def _registered_actions() -> frozenset[str]:
+    return frozenset(value for value, _label in AuditEvent.ACTION_CHOICES)
+
+
 class AuditService:
     """Centralized audit logging service"""
 
@@ -692,6 +746,8 @@ class AuditService:
         if context is None:
             context = AuditContext()
 
+        _check_registered_action(event_data.event_type)
+
         try:
             # An event about no particular object has none. Filing it under the actor (or user 1
             # with no actor) made every object-less event look like an event about that person.
@@ -705,19 +761,15 @@ class AuditService:
             # Safely serialize metadata before storing
             serialized_metadata = serialize_metadata(context.metadata)
 
-            # Get automatic categorization from metadata or determine from action
-            category = context.metadata.get("category", AuditService._get_action_category(event_data.event_type))
-            severity = context.metadata.get("severity", AuditService._get_action_severity(event_data.event_type))
-            is_sensitive = context.metadata.get(
-                "is_sensitive", AuditService._is_action_sensitive(event_data.event_type)
+            # One classifier, fed by the action alone. Metadata is evidence, never an instruction:
+            # a key named "category" or "severity" in it used to override the classification.
+            classification = classify(
+                event_data.event_type, severity=event_data.severity, is_sensitive=event_data.is_sensitive
             )
-            requires_review = context.metadata.get(
-                "requires_review", AuditService._requires_review(event_data.event_type)
-            )
-
-            # Ensure category is never None (fallback to default)
-            if category is None:
-                category = "business_operation"
+            category = classification.category
+            severity = classification.severity
+            is_sensitive = classification.is_sensitive
+            requires_review = classification.requires_review
 
             # A usable session key never reaches the row, its exports or the SIEM (ADR-0043): the
             # column and every identifier in the description, metadata and values become digests.
@@ -775,6 +827,8 @@ class AuditService:
         metadata: dict[str, Any] | None = None,
         ip_address: str | None = None,
         actor_type: str = "user",
+        severity: str | None = None,
+        is_sensitive: bool | None = None,
     ) -> AuditEvent:
         """
         🔐 Simplified audit logging method (DRY helper)
@@ -792,6 +846,8 @@ class AuditService:
             metadata: Additional metadata
             ip_address: IP address of the actor
             actor_type: Type of actor ("user", "system", "admin", etc.)
+            severity: This event's severity when the action alone does not say (see classify)
+            is_sensitive: Whether this event is sensitive when the action alone does not say
 
         Returns:
             AuditEvent: The created audit event
@@ -802,6 +858,8 @@ class AuditService:
             description=description,
             old_values=old_values,
             new_values=new_values,
+            severity=severity,
+            is_sensitive=is_sensitive,
         )
 
         context = AuditContext(
@@ -815,219 +873,23 @@ class AuditService:
 
     @staticmethod
     def _get_action_category(action: str) -> str:
-        """Determine audit event category from action type"""
-        # Use a mapping approach to reduce branching complexity
-        category_mappings = {
-            # api_token_ must precede the integration api_ prefix — token lifecycle is authentication
-            "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_", "api_token_"],
-            "account_management": ["profile_updated", "email_changed", "phone_updated", "name_changed"],
-            "privacy": ["privacy_", "gdpr_", "marketing_consent_", "cookie_consent_"],
-            "authorization": [
-                "role_assigned",
-                "role_removed",
-                "permission_granted",
-                "permission_revoked",
-                "staff_role_changed",
-                "customer_",
-                "privilege_escalation_attempt",
-            ],
-            "security_event": ["security_", "suspicious_", "brute_force_", "malicious_", "data_breach_"],
-            "data_protection": ["data_export_", "data_deletion_"],
-            "integration": ["api_", "webhook_"],
-            "system_admin": ["system_", "backup_", "configuration_", "user_impersonation"],
-            "compliance": ["vat_", "efactura_", "data_retention", "tax_rule", "legal_document_", "early_performance_"],
-            "business_operation": [
-                "proforma_",
-                "invoice_",
-                "payment_",
-                "credit_",
-                "billing_",
-                "currency_conversion",
-                "order_",
-                "provisioning_",
-                "service_",
-                "domain_",
-                "support_ticket_",
-            ],
-        }
-
-        # Check each category's patterns
-        for category, patterns in category_mappings.items():
-            for pattern in patterns:
-                if pattern.endswith("_"):  # Prefix pattern
-                    if action.startswith(pattern):
-                        return category
-                elif action == pattern:
-                    return category
-
-        # Default to business operation
-        return "business_operation"
+        """Category of an action (see ``classification.classify``)."""
+        return classify(action).category
 
     @staticmethod
     def _get_action_severity(action: str) -> str:
-        """Determine severity level from action type"""
-        # Critical severity events
-        critical_actions = [
-            "data_breach_detected",
-            "security_incident_detected",
-            "account_compromised",
-            "malicious_request",
-            "brute_force_attempt",
-        ]
-
-        # High severity events
-        high_actions = [
-            "password_compromised",
-            "2fa_disabled",
-            "2fa_admin_reset",
-            "role_assigned",
-            "role_removed",
-            "permission_granted",
-            "permission_revoked",
-            "staff_role_changed",
-            "data_export_requested",
-            "data_deletion_requested",
-            "gdpr_consent_withdrawn",
-            "user_impersonation_started",
-            "system_maintenance_started",
-            "configuration_changed",
-            "payment_failed",
-            "payment_fraud_detected",
-            "payment_chargeback_received",
-            "invoice_voided",
-            "invoice_refunded",
-            "credit_limit_changed",
-            "credit_hold_applied",
-            "order_cancelled_admin",
-            "provisioning_failed",
-            "efactura_rejected",
-            "privilege_escalation_attempt",
-        ]
-
-        # Medium severity events
-        medium_actions = [
-            "login_success",
-            "login_failed",
-            "logout_manual",
-            "account_locked",
-            "session_rotation",
-            "password_changed",
-            "2fa_enabled",
-            "profile_updated",
-            "email_changed",
-            "phone_updated",
-            "customer_membership_created",
-            "api_key_generated",
-            "api_token_created",
-            "api_token_deleted",
-            "invoice_paid",
-            "payment_succeeded",
-            "order_created",
-            "order_completed",
-            "proforma_created",
-            "provisioning_completed",
-            "efactura_submitted",
-        ]
-
-        if action in critical_actions or action.startswith(("security_", "suspicious_", "data_breach")):
-            return "critical"
-        elif action in high_actions or action.startswith(
-            (
-                "data_",
-                "gdpr_",
-                "privacy_",
-                "marketing_consent",
-                "cookie_consent",
-                "role_",
-                "permission_",
-                "payment_fraud",
-                "payment_chargeback",
-            )
-        ):
-            return "high"
-        elif action in medium_actions or action.startswith(
-            ("login_", "password_", "2fa_", "profile_", "payment_", "order_")
-        ):
-            return "medium"
-        else:
-            return "low"
+        """Severity of an action (see ``classification.classify``)."""
+        return classify(action).severity
 
     @staticmethod
     def _is_action_sensitive(action: str) -> bool:
-        """Determine if action involves sensitive data"""
-        # Specific sensitive actions
-        sensitive_actions = [
-            "account_locked",
-            "account_unlocked",
-            "session_rotation",
-            "session_terminated",
-            "suspicious_activity",
-            "brute_force_attempt",
-            "malicious_request",
-            "privilege_escalation_attempt",
-        ]
-
-        # Sensitive patterns (excluding some common business operations)
-        sensitive_patterns = [
-            "login_",
-            "logout_",
-            "password_",
-            "2fa_",
-            "email_",
-            "phone_",
-            "profile_",
-            "privacy_",
-            "gdpr_",
-            "marketing_consent",
-            "cookie_consent",
-            "data_",
-            "security_",
-            "role_",
-            "permission_",
-            "payment_",
-            "billing_",
-            "tax_",
-            "credit_",
-            "proforma_",
-            "vat_",
-            "efactura_",
-            "customer_",
-        ]
-
-        # Non-sensitive invoice actions (basic business operations)
-        non_sensitive_invoice_actions = ["invoice_created", "invoice_sent"]
-        if action in non_sensitive_invoice_actions:
-            return False
-
-        return action in sensitive_actions or any(action.startswith(pattern) for pattern in sensitive_patterns)
+        """Whether an action involves sensitive data (see ``classification.classify``)."""
+        return classify(action).is_sensitive
 
     @staticmethod
     def _requires_review(action: str) -> bool:
-        """Determine if action requires manual review"""
-        review_actions = [
-            "account_locked",
-            "login_failed_2fa",
-            "password_compromised",
-            "2fa_disabled",
-            "2fa_admin_reset",
-            "role_assigned",
-            "role_removed",
-            "permission_granted",
-            "permission_revoked",
-            "staff_role_changed",
-            "privilege_escalation_attempt",
-            "data_export_requested",
-            "data_deletion_requested",
-            "gdpr_consent_withdrawn",
-            "security_incident_detected",
-            "suspicious_activity",
-            "brute_force_attempt",
-            "user_impersonation_started",
-            "configuration_changed",
-            "system_maintenance_started",
-        ]
-
-        return action in review_actions or action.startswith(("security_", "data_breach", "malicious_"))
+        """Whether an action needs manual review (see ``classification.classify``)."""
+        return classify(action).requires_review
 
     @staticmethod
     def log_2fa_event(request: TwoFactorAuditRequest) -> AuditEvent:
@@ -1040,12 +902,9 @@ class AuditService:
         - 2fa_secret_regenerated, 2fa_verification_success, 2fa_verification_failed
         """
         # Enhance metadata with 2FA context and automatic categorization
+        # Category, severity, sensitivity and review come from the action (classification.classify).
         enhanced_metadata = {
             "event_category": "authentication",  # 2FA is always authentication
-            "category": "authentication",
-            "severity": "high" if request.event_type in ["2fa_disabled", "2fa_admin_reset"] else "medium",
-            "is_sensitive": True,  # 2FA events are always sensitive
-            "requires_review": request.event_type in ["2fa_disabled", "2fa_admin_reset"],
             "timestamp": timezone.now().isoformat(),
             **request.context.metadata,
         }
@@ -5275,7 +5134,7 @@ class AuditRetentionService:
                 content_object=None,
                 description=f"Retention anonymization completed: {anonymized_count} events scrubbed",
                 actor_type="system",
-                metadata={"anonymized_count": anonymized_count, "category": "privacy"},
+                metadata={"anonymized_count": anonymized_count},
             )
 
         return anonymized_count
@@ -5661,7 +5520,7 @@ class TicketsAuditService:
             "ticket_number": ticket.ticket_number,
             "customer_id": str(ticket.customer.id),
             "priority": ticket.priority,
-            "category": ticket.category.name if ticket.category else None,
+            "ticket_category": ticket.category.name if ticket.category else None,
             "source": ticket.source,
             "assigned_to_id": str(ticket.assigned_to_id) if ticket.assigned_to_id else None,
             "related_service_id": str(ticket.related_service.id) if ticket.related_service else None,

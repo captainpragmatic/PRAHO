@@ -7,10 +7,10 @@ import pytest
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.audit.actor_context import acting_as
+from apps.audit.classification import classify
 from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.audit.signals import (
     _create_audit_event,
-    _get_action_category_severity,
     api_key_generated,
     api_key_revoked,
     customer_context_switched,
@@ -22,20 +22,26 @@ from apps.users.models import CustomerMembership, User
 pytestmark = pytest.mark.django_db
 
 
+def _classify(action):
+    """(category, severity, is_sensitive, requires_review) from the one classifier."""
+    result = classify(action)
+    return result.category, result.severity, result.is_sensitive, result.requires_review
+
+
 class TestAuditSignalHelpers(TestCase):
     """Test helper functions for audit signals"""
 
     def test_get_action_category_severity_authentication(self):
         """Test categorization of authentication events"""
         # Authentication events
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("login_success")
+        category, severity, is_sensitive, requires_review = _classify("login_success")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # Failed login with account lockout
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("account_locked")
+        category, severity, is_sensitive, requires_review = _classify("account_locked")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
@@ -44,14 +50,14 @@ class TestAuditSignalHelpers(TestCase):
     def test_get_action_category_severity_password(self):
         """Test categorization of password events"""
         # Regular password change
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("password_changed")
+        category, severity, is_sensitive, requires_review = _classify("password_changed")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # Compromised password
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("password_compromised")
+        category, severity, is_sensitive, requires_review = _classify("password_compromised")
         assert category == "authentication"
         assert severity == "high"
         assert is_sensitive is True
@@ -60,14 +66,14 @@ class TestAuditSignalHelpers(TestCase):
     def test_get_action_category_severity_2fa(self):
         """Test categorization of 2FA events"""
         # 2FA enabled
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("2fa_enabled")
+        category, severity, is_sensitive, requires_review = _classify("2fa_enabled")
         assert category == "authentication"
         assert severity == "medium"
         assert is_sensitive is True
         assert requires_review is False
 
         # 2FA disabled (high risk)
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("2fa_disabled")
+        category, severity, is_sensitive, requires_review = _classify("2fa_disabled")
         assert category == "authentication"
         assert severity == "high"
         assert is_sensitive is True
@@ -75,14 +81,14 @@ class TestAuditSignalHelpers(TestCase):
 
     def test_get_action_category_severity_privacy(self):
         """Test categorization of privacy events"""
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("privacy_settings_changed")
+        category, severity, is_sensitive, requires_review = _classify("privacy_settings_changed")
         assert category == "privacy"
         assert severity == "high"
         assert is_sensitive is True
         assert requires_review is False
 
         # GDPR consent withdrawn
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("gdpr_consent_withdrawn")
+        category, severity, is_sensitive, requires_review = _classify("gdpr_consent_withdrawn")
         assert category == "privacy"
         assert severity == "high"
         assert is_sensitive is True
@@ -90,13 +96,13 @@ class TestAuditSignalHelpers(TestCase):
 
     def test_get_action_category_severity_security_events(self):
         """Test categorization of security events"""
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("security_incident_detected")
+        category, severity, is_sensitive, requires_review = _classify("security_incident_detected")
         assert category == "security_event"
         assert severity == "critical"
         assert is_sensitive is True
         assert requires_review is True
 
-        category, severity, is_sensitive, requires_review = _get_action_category_severity("suspicious_activity")
+        category, severity, is_sensitive, requires_review = _classify("suspicious_activity")
         assert category == "security_event"
         assert severity == "critical"
         assert is_sensitive is True
@@ -517,13 +523,12 @@ class TestAuditEventPerformance(TestCase):
             AuditService,
         )
 
-        categories = ["authentication", "authorization", "account_management", "privacy"]
+        # One real action per category: the action alone decides the category.
+        actions = ["login_success", "role_assigned", "profile_updated", "privacy_settings_changed"]
 
-        for i, category in enumerate(categories):
-            context = AuditContext(user=self.user, metadata={"category": category})
-            event_data = AuditEventData(
-                event_type=f"test_action_{i}", content_object=self.user, description=f"Test event {i}"
-            )
+        for i, action in enumerate(actions):
+            context = AuditContext(user=self.user)
+            event_data = AuditEventData(event_type=action, content_object=self.user, description=f"Test event {i}")
             AuditService.log_event(event_data, context)
 
         # Query by category should use index

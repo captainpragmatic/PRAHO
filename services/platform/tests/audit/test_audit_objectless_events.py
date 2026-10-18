@@ -35,7 +35,7 @@ class ObjectlessEventsHaveNoObjectTests(TestCase):
         actor = User.objects.create_user(email="actor@example.com", password="x-pass-123")
 
         with_actor = AuditService.log_simple_event("login_success", user=actor, description="signed in")
-        without_actor = AuditService.log_simple_event("system_maintenance", description="nightly job")
+        without_actor = AuditService.log_simple_event("system_maintenance_started", description="nightly job")
         log_security_event("suspicious_activity", {"reason": "probe"}, request_ip="203.0.113.9")
         security = AuditEvent.objects.get(action="suspicious_activity")
 
@@ -49,7 +49,7 @@ class ObjectlessEventsHaveNoObjectTests(TestCase):
         founder = _user_with_pk_one()
         user_type = ContentType.objects.get_for_model(User)
 
-        AuditService.log_simple_event("system_maintenance", description="no actor, no object")
+        AuditService.log_simple_event("system_maintenance_started", description="no actor, no object")
         SecurityAuditService.log_rate_limit_event(
             {
                 "endpoint": "/api/login",
@@ -70,9 +70,9 @@ class ObjectlessEventsHaveNoObjectTests(TestCase):
         admin = User.objects.create_user(
             email="admin@example.com", password="x-pass-123", is_staff=True, staff_role="admin"
         )
-        event = AuditService.log_simple_event("system_maintenance", description="no object at all")
+        event = AuditService.log_simple_event("system_maintenance_started", description="no object at all")
 
-        self.assertIn("system_maintenance", str(event))
+        self.assertIn("system_maintenance_started", str(event))
         entry = SIEMService()._create_log_entry(event)
         self.assertIsNone(entry.target_type)
         self.assertFalse(AuditRetentionService._is_financial_record(event))
@@ -83,7 +83,7 @@ class ObjectlessEventsHaveNoObjectTests(TestCase):
         exported = client.get(reverse("audit:export_logs"), {"format": "json"})
         self.assertEqual(exported.status_code, 200)
         rows = json.loads(b"".join(exported.streaming_content) if exported.streaming else exported.content)
-        exported_event = next(row for row in rows["audit_events"] if row["action"] == "system_maintenance")
+        exported_event = next(row for row in rows["audit_events"] if row["action"] == "system_maintenance_started")
         self.assertEqual(exported_event["content_type"], {"app_label": None, "model": None})
         self.assertEqual(exported_event["object_id"], "")
         self.assertEqual(client.get(reverse("audit:export_logs"), {"format": "csv"}).status_code, 200)

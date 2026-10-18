@@ -160,7 +160,7 @@ class SessionInfoKeepsItsOtherFieldsTests(TestCase):
         raw = "r" * 32
         created_at = "2026-10-17T10:00:00.123456+00:00"
         event = AuditService.log_event(
-            AuditEventData(event_type="logout", description="signed out"),
+            AuditEventData(event_type="logout_manual", description="signed out"),
             AuditContext(
                 user=user,
                 session_key=raw,

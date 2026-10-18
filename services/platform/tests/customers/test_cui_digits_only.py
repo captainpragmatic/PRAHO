@@ -57,14 +57,14 @@ class StoredCUITests(TestCase):
         self.assertTrue(
             ComplianceLog.objects.filter(compliance_type="romanian_tax_registration", reference_id=CUI).exists()
         )
-        event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", profile)
+        event = CustomersAuditService.log_tax_profile_event("customer_tax_profile_updated", profile)
         self.assertTrue(event.metadata["is_romanian_entity"])
 
     def test_a_foreign_tax_id_is_left_as_entered_and_is_not_romanian(self) -> None:
         profile = CustomerTaxProfile.objects.create(customer=customer(), cui="DE999999999")
         profile.refresh_from_db()
         self.assertEqual(profile.cui, "DE999999999")
-        event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", profile)
+        event = CustomersAuditService.log_tax_profile_event("customer_tax_profile_updated", profile)
         self.assertFalse(event.metadata["is_romanian_entity"])
 
     def test_staff_search_finds_a_cui_typed_with_or_without_ro(self) -> None:

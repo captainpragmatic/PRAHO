@@ -11,6 +11,7 @@ from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.classification import classify
 from apps.billing.models import Currency, Invoice, Payment, Refund
 from apps.billing.refund_service import (
     RefundConvergenceService,
@@ -860,7 +861,8 @@ class PromotionReleaseOnRefundTest(TestCase):
         self.assertEqual(len(blocked_calls), 1)
         metadata = blocked_calls[0].kwargs["metadata"]
         self.assertEqual(metadata["sibling_payment_ids"], [str(retained_payment.pk)])
-        self.assertTrue(metadata["requires_review"])
+        self.assertTrue(classify("promotion_release_blocked_anomalous_payments").requires_review)
+        self.assertNotIn("requires_review", metadata)
 
     def test_disputed_payment_blocks_release_and_audits(self) -> None:
         """19. Disputed invoice money blocks promotion release conservatively."""
@@ -909,7 +911,8 @@ class PromotionReleaseOnRefundTest(TestCase):
         self.assertEqual(len(blocked_calls), 1)
         metadata = blocked_calls[0].kwargs["metadata"]
         self.assertEqual(metadata["sibling_payment_ids"], [str(disputed_payment.pk)])
-        self.assertTrue(metadata["requires_review"])
+        self.assertTrue(classify("promotion_release_blocked_anomalous_payments").requires_review)
+        self.assertNotIn("requires_review", metadata)
 
     def test_release_retries_when_retained_sibling_later_settles(self) -> None:
         """20. A guard-blocked release fires once every retained payment settles.

@@ -114,7 +114,7 @@ class UUIDSerializationTestCase(TestCase):
         )
 
         event_data = AuditEventData(
-            event_type='test_uuid_metadata',
+            event_type='view',
             description='Testing UUID serialization in audit events'
         )
 
@@ -123,7 +123,7 @@ class UUIDSerializationTestCase(TestCase):
 
         # Verify the audit event was created successfully
         self.assertIsNotNone(audit_event.id)
-        self.assertEqual(audit_event.action, 'test_uuid_metadata')
+        self.assertEqual(audit_event.action, 'view')
 
         # Verify metadata was properly serialized and stored.
         # Assert the caller's keys survive rather than the total count: audit events are also

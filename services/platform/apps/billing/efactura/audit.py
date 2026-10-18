@@ -139,7 +139,6 @@ class EFacturaAuditService:
                 context=AuditContext(
                     actor_type="system",
                     metadata={
-                        "severity": "medium" if success else "high",
                         "document_id": str(document.id),
                         "upload_index": upload_index,
                         "environment": document.environment,
@@ -293,7 +292,6 @@ class EFacturaAuditService:
                 context=AuditContext(
                     actor_type="system",
                     metadata={
-                        "severity": "high",
                         "document_id": str(document.id),
                         "upload_index": document.anaf_upload_index,
                         "environment": document.environment,

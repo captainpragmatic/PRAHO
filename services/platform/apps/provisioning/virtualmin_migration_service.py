@@ -232,7 +232,6 @@ class VirtualminMigrationService:
                 metadata={
                     "source_app": "provisioning",
                     "compensation_failure": compensation_failure,
-                    "requires_review": action == "needs_review",
                 },
             ),
         )
