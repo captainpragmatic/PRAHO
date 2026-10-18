@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-12
+- Amended: 2026-10-18 (media is never served directly, on any storage)
 - Authors: PRAHO maintainers
 - Related: ADR-0040 (row-bound encrypted fields), ADR-0054 (supported deployment paths)
 
@@ -40,6 +41,15 @@ With `s3`, the bucket's versioning and a lifecycle rule that expires noncurrent 
 ## Consequences
 
 - The container-service stack can keep media across deploys and between its containers.
-- Other stacks are unchanged. With the filesystem, Caddy's staff-network `/media/` route still serves files directly (pre-existing); with `s3` nothing serves media directly.
+- Other stacks are unchanged, except that media is no longer served directly on any of them (see the amendment below).
 - `django-storages[s3]` joins the platform dependency group. The portal stores no media and doesn't get it.
 - Reading a file now costs a bucket round trip on `s3`. Downloads are staff- or customer-initiated and small, so this is acceptable without caching.
+
+## Amendment (2026-10-18): media is never served directly
+
+The filesystem stacks used to keep a staff-network `/media/` route in Caddy, which served any stored file with a day-long public cache, no access check and no record. Stored names could be guessed (attachments kept the uploader's filename, invoice PDFs are named by their sequential number), so anyone on the staff network could read them.
+
+- **No route serves media**, on any storage. Every Caddyfile variant has lost its `/media/` handler, and the compose stacks no longer mount the media volume into Caddy. Production Django has no media URL either (`static()` adds one only under `DEBUG`).
+- **Every read goes through a Django view** that checks who is asking, answers `private, no-store`, and records ticket-attachment and e-Factura file downloads in the audit log. The e-Factura XML and ANAF archive are checked against their recorded SHA-256 before they are served.
+- **New attachments get random stored names** (`tickets/attachments/ticket_<time>_<random>.<ext>`); the name they were uploaded with is kept only for display. Rows stored before keep their names and stay readable.
+- A staff request at the edge is capped at 62 MiB, derived from the upper bounds of what one staff reply may carry: 5 files of at most 10 MiB, the non-file fields up to Django's `DATA_UPLOAD_MAX_MEMORY_SIZE` (10 MiB), and 2 MiB of multipart headroom. Caddy cannot read settings, so a test derives the same total from them. Django enforces the values in effect.

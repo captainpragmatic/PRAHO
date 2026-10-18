@@ -2806,11 +2806,12 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Attachments"),
         label=_("Max attachments per staff reply"),
         help_text=_(
-            "How many files a staff reply may carry. Customer replies through the portal are fixed at 5 files "
-            "and 1 MiB in total."
+            "How many files a staff reply may carry, at most 5. Customer replies through the portal are fixed "
+            "at 5 files and 1 MiB in total."
         ),
         input_kind="number",
-        validation={"min": 1, "max": 20},
+        # The edge caps a staff request at 52 MiB, which it derives from this bound and the file size's.
+        validation={"min": 1, "max": 5},
     ),
     SettingDef(
         key="tickets.auto_close_inactive_hours",
@@ -2833,10 +2834,11 @@ CATALOG: tuple[SettingDef, ...] = (
         group="support",
         section=_("Attachments"),
         label=_("Max file size"),
-        help_text=_("Maximum upload size in bytes. Default: 2MB (2097152)."),
+        help_text=_("Maximum upload size in bytes, at most 10 MiB (10485760). Default: 2MB (2097152)."),
         unit="bytes",
         input_kind="number",
-        validation={"min": 0},
+        # The edge caps a staff request at 52 MiB, which it derives from this bound and the file count's.
+        validation={"min": 0, "max": 10485760},
     ),
     SettingDef(
         key="tickets.security_alert_threshold",

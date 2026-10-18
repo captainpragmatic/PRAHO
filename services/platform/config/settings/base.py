@@ -293,7 +293,10 @@ X_FRAME_OPTIONS = "DENY"
 CSP_SCRIPT_NONCE_ENFORCED = True
 
 # File upload security
-FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
+# Not a size cap: an uploaded file larger than this spools to a temporary file instead of memory.
+# Staff replies may carry up to 50 MiB of files (the edge caps the body at 52 MiB), so anything
+# past 2.5 MiB goes to disk rather than into a worker's memory.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2621440  # 2.5 MiB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 FILE_UPLOAD_PERMISSIONS = 0o644
 

@@ -368,7 +368,9 @@ def _extract_import_payload(request: HttpRequest) -> tuple[bytes | None, str | N
         uploaded = request.FILES.get("file")
         if not uploaded:
             return None, "No file uploaded"
-        return uploaded.read(), None
+        # One byte past the limit is enough to refuse it; an upload past the memory threshold is on
+        # disk, and reading it whole would load all of it.
+        return uploaded.read(MAX_IMPORT_SIZE + 1), None
     return request.body, None
 
 

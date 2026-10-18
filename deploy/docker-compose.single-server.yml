@@ -236,7 +236,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - static_files:/srv/static:ro
-      - media_files:/srv/media:ro
       - portal_static:/srv/portal-static:ro
     depends_on:
       - platform

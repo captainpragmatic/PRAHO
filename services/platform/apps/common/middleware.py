@@ -855,7 +855,6 @@ class StaffMFAEnrollmentMiddleware:
         "/auth/logout/",
         "/i18n/",
         "/static/",
-        "/media/",
         "/settings/api/health/",
     )
 
@@ -994,7 +993,6 @@ class MaintenanceModeMiddleware:
     EXEMPT_PREFIXES = (
         "/auth/",  # login/logout/password reset
         "/static/",
-        "/media/",
         "/i18n/",
         "/settings/api/health/",
     )
