@@ -1131,6 +1131,21 @@ def schedule_virtualmin_chain_backups() -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def renew_account_name_certificates() -> dict[str, Any]:
+    """Daily: renew account-name certificates under 30 days from expiry, resume stalled orders, sweep stale challenges.
+
+    Renewals take no part of the weekly new-certificate budget. Never raises: a Django-Q schedule that
+    raised would only be retried into the same failure.
+    """
+    from .account_name_certificates import renew_due_certificates  # noqa: PLC0415
+
+    try:
+        return {"success": True, **renew_due_certificates()}
+    except Exception as e:
+        logger.exception("💥 [VirtualminTask] Account name certificate renewal failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
 _SPOOL_ORPHAN_MAX_AGE_HOURS = 48
 
 
@@ -2134,6 +2149,18 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         },
     )
     tasks_created["account_names_reconcile"] = "created" if created else "updated"
+
+    # Account-name certificates, daily (ADR-0061 P1.10). A no-op until names have certificates.
+    _, created = ScheduleModel.objects.update_or_create(
+        name="account-name-certificate-renewal",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.renew_account_name_certificates",
+            "schedule_type": "I",
+            "minutes": 24 * 60,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["account_name_certificates"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

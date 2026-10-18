@@ -619,6 +619,7 @@ class AuditEvent(models.Model):
         # ======================================================================
         ("account_hostname_assigned", "Account hostname assigned"),
         ("account_hostname_retired", "Account hostname retired"),
+        ("account_name_certificate_alert", "Account name certificate alert"),
         ("account_unlocked_automatic", "Account unlocked automatic"),
         ("api_token_created", "Api token created"),
         ("api_token_deleted", "Api token deleted"),

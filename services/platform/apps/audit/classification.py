@@ -40,6 +40,7 @@ ACTION_OVERRIDES: dict[str, dict[str, Any]] = {
     "gift_card_reversal_failed_on_refund": {"severity": "high", "requires_review": True},
     "promotion_release_blocked_anomalous_payments": {"severity": "high", "requires_review": True},
     "domain_operation_review_required": {"requires_review": True},
+    "account_name_certificate_alert": {"severity": "high", "requires_review": True},
     "virtualmin_chain_backup_alert": {"severity": "high", "requires_review": True},
     "virtualmin_chain_schedule_deferred": {"severity": "high", "requires_review": True},
     "virtualmin_pair_release_abandoned": {"severity": "high", "requires_review": True},
