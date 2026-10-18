@@ -16,7 +16,7 @@
 #      every restore the document root and website hostnames are read again and the matchers and
 #      the probe list become the UNION of everything seen so far: they never shrink while a restore
 #      is in flight, and a restore whose result cannot be read back fails closed, barrier up;
-#   2. barrier layer (b): disable-domain, verified;
+#   2. barrier layer (b): disable-domain with its sub-servers (the account name), both verified;
 #   3. restore the base, then re-read what reaches the virtual host, re-apply and verify both layers;
 #   4. restore the differential, then do the same;
 #   5. verify, and only then take the 503 section down.
@@ -102,8 +102,23 @@ emit() {
   printf 'PAIR_RESULT=%s\n' "$(printf '%s' "$json" | base64 | tr -d '\n')"
 }
 
-is_disabled() {
+# domain_disabled : the domain itself is disabled, whatever its sub-servers are. What "as it was"
+# means for the refusal path: an account suspended before sub-servers were cascaded has a disabled
+# domain and an enabled account name, and must not be re-enabled by a refused restore.
+domain_disabled() {
   virtualmin list-domains --disabled --name-only 2>/dev/null | grep -qxF -- "$domain"
+}
+
+# is_disabled : the domain AND every sub-server under it (its account name, ADR-0061) are disabled.
+# A sub-server keeps serving unless it is disabled too; a listing that cannot be read is "not disabled".
+is_disabled() {
+  local disabled children child
+  disabled=$(virtualmin list-domains --disabled --name-only 2>/dev/null) || return 1
+  grep -qxF -- "$domain" <<<"$disabled" || return 1
+  children=$(virtualmin list-domains --parent "$domain" --subserver --name-only 2>/dev/null) || return 1
+  while IFS= read -r child; do
+    [[ -z $child ]] || grep -qxF -- "$child" <<<"$disabled" || return 1
+  done <<<"$children"
 }
 
 http_code() { # SCHEME PORT [HOST]
@@ -286,19 +301,19 @@ fi
 
 # ---- layer (a): the server-level 503 section; layer (b): disable-domain -----------------------
 pre_disabled=false
-is_disabled && pre_disabled=true
+domain_disabled && pre_disabled=true
 rm -f -- "$RUN_DIR/pair-$domain_id.diag"
 barrier_up
-virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
+virtualmin disable-domain --domain "$domain" --subservers >/dev/null 2>&1 || true
 checkpoint barrier_up
 if ! barrier_holds; then
   # Nothing destructive has run: undo our own changes and refuse, so a refusal always means
   # the node is as it was. If the domain cannot be enabled again it is NOT as it was: that is
   # reported as such (a failure PRAHO parks for an operator), never as a clean refusal.
   barrier_down
-  if [[ $pre_disabled == false ]] && is_disabled; then
-    virtualmin enable-domain --domain "$domain" >/dev/null 2>&1 || true
-    if is_disabled; then
+  if [[ $pre_disabled == false ]] && domain_disabled; then
+    virtualmin enable-domain --domain "$domain" --subservers >/dev/null 2>&1 || true
+    if domain_disabled; then
       emit failed barrier_undo_incomplete true
       exit 0
     fi
@@ -323,7 +338,7 @@ reapply() {
   read_surface || surface_read=false
   barrier_up
   if ! is_disabled; then
-    virtualmin disable-domain --domain "$domain" >/dev/null 2>&1 || true
+    virtualmin disable-domain --domain "$domain" --subservers >/dev/null 2>&1 || true
   fi
   checkpoint "$1"
   if [[ $surface_read == false ]]; then

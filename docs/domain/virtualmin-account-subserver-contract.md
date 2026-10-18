@@ -256,3 +256,18 @@ virtualmin disable-domain / enable-domain --domain subparent.praho.test [--subse
 virtualmin backup-domain --domain subparent.praho.test [--parent] --dest <file> --all-features --no-differential
 virtualmin delete-domain --domain subparent.praho.test ; virtualmin restore-domain --domain <each, customer first> --source <file> --all-features
 ```
+
+## P1.5: suspend and unsuspend cascade to the account name (2026-10-18, Virtualmin 8.3)
+
+Reproved for P1.5 on `vmlab-a`, customer domain `p15parent.praho.test` with sub-server `p15child9.acct.praho.test`:
+
+| Call | Disabled afterwards |
+|---|---|
+| CLI `disable-domain --domain <parent> --subservers` | parent and child |
+| CLI `enable-domain --domain <parent> --subservers` | none |
+| CLI `disable-domain --domain <parent>` (no flag) | parent only: the child keeps serving |
+| API (PRAHO gateway) `disable-domain` with `domain_state_params(parent)` (`subservers=`) | parent and child |
+| API `enable-domain` with `domain_state_params(parent)` | none |
+| API `disable-domain` with `{"domain": parent}` only | parent only |
+
+`list-domains --parent <domain> --subserver --name-only` exits 0 with no output for a domain without a sub-server, and lists the child when there is one. The pair-restore script relies on both when it verifies that the domain and its sub-servers are disabled.

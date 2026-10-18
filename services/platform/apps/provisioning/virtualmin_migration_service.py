@@ -26,6 +26,7 @@ from .virtualmin_backup_service import (
     restore_domain_params,
 )
 from .virtualmin_chain import invalidate_chain
+from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
@@ -427,9 +428,9 @@ class VirtualminMigrationService:
         **params: object,
     ) -> None:
         timeout = self.backup_timeout if program in {"backup-domain", "restore-domain"} else 30
-        result = self._gateway(server).call(
-            program, {"domain": migration.account.domain, **params}, timeout_seconds=timeout
-        )
+        domain = migration.account.domain
+        base = domain_state_params(domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": domain}
+        result = self._gateway(server).call(program, {**base, **params}, timeout_seconds=timeout)
         if result.is_err():
             if retriability_of(result) is not Retriability.UNKNOWN:
                 raise DefiniteMigrationFailureError(str(result.unwrap_err()))

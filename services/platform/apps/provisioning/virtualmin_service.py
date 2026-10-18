@@ -39,6 +39,7 @@ from .virtualmin_backup_service import (
     RestoreConfig,
     VirtualminBackupService,
 )
+from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
@@ -885,7 +886,9 @@ class VirtualminProvisioningService:
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
             previous_status_message = account.status_message
-            result = gateway.call("disable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "disable-domain", domain_state_params(account.domain), correlation_id=job.correlation_id
+            )
 
             if result.is_ok():
                 response = result.unwrap()
@@ -895,7 +898,7 @@ class VirtualminProvisioningService:
                     rollback_operations = [
                         {
                             "operation": "enable-domain",
-                            "params": {"domain": account.domain},
+                            "params": domain_state_params(account.domain),
                             "description": f"Re-enable domain {account.domain} if DB update fails",
                         }
                     ]
@@ -1022,7 +1025,9 @@ class VirtualminProvisioningService:
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
             previous_status_message = account.status_message
-            result = gateway.call("enable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "enable-domain", domain_state_params(account.domain), correlation_id=job.correlation_id
+            )
 
             if result.is_ok():
                 response = result.unwrap()
@@ -1032,7 +1037,7 @@ class VirtualminProvisioningService:
                     rollback_operations = [
                         {
                             "operation": "disable-domain",
-                            "params": {"domain": account.domain},
+                            "params": domain_state_params(account.domain),
                             "description": f"Re-disable domain {account.domain} if DB update fails",
                         }
                     ]
@@ -1422,7 +1427,8 @@ class VirtualminProvisioningService:
 
         job.mark_started()
         gateway = self._get_gateway(account.server)
-        result = gateway.call(program, {"domain": account.domain}, correlation_id=job.correlation_id)
+        params = domain_state_params(account.domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": account.domain}
+        result = gateway.call(program, params, correlation_id=job.correlation_id)
 
         if result.is_err():
             error_msg = str(result.unwrap_err())

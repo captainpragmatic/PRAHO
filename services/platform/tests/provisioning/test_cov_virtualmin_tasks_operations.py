@@ -37,7 +37,9 @@ class LifecycleTaskEffectsTests(VirtualminCoverageCase):
         self.assertEqual(
             job.parameters, {"domain": account.domain, "reason": "Unpaid invoice", "task_budget_seconds": 600}
         )
-        self.assertEqual(self.requests, [{"program": "disable-domain", "domain": account.domain, "json": "1"}])
+        self.assertEqual(
+            self.requests, [{"program": "disable-domain", "domain": account.domain, "subservers": "", "json": "1"}]
+        )
 
     def test_unsuspend_clears_reason_and_persists_completed_job(self) -> None:
         account = self._account("suspended")
@@ -49,7 +51,9 @@ class LifecycleTaskEffectsTests(VirtualminCoverageCase):
         self.assertEqual(account.status_message, "")
         self.assertEqual(result, {"success": True, "account_id": str(account.pk), "domain": account.domain})
         self.assertEqual(VirtualminProvisioningJob.objects.get(account=account).status, "completed")
-        self.assertEqual(self.requests, [{"program": "enable-domain", "domain": account.domain, "json": "1"}])
+        self.assertEqual(
+            self.requests, [{"program": "enable-domain", "domain": account.domain, "subservers": "", "json": "1"}]
+        )
 
     def test_delete_retains_audit_row_and_decrements_server_usage(self) -> None:
         account = self._account("error")
