@@ -1255,6 +1255,64 @@ class Command(BaseCommand):
                 },
             },
             {
+                "key": "account_name_live",
+                "locale": "ro",
+                "category": "provisioning",
+                "subject": "Numele găzduirii dumneavoastră este gata - {{brand_name}}",
+                "body_html": """
+                <h2>Numele găzduirii este gata</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Găzduirea pentru <strong>{{domain}}</strong> are acum un nume propriu: <strong>{{account_name}}</strong>.
+                Numele rămâne același oriunde mutăm găzduirea.</p>
+                <p>Ca domeniul să ajungă aici, setați aceste înregistrări la furnizorul de DNS:</p>
+                <ul>
+                    <li><code>{{www_record}}</code></li>
+                    <li><code>{{apex_record}}</code></li>
+                </ul>
+                <p>Unii furnizori nu au ALIAS pentru domeniul fără www. În acest caz păstrați înregistrarea pentru www
+                și redirecționați domeniul către www de la registrar.</p>
+                <p>Găsiți oricând aceste detalii în zona client.</p>
+                <p>Echipa {{brand_name}}</p>
+                """,
+                "description": "Notificare: numele găzduirii este gata, cu înregistrările DNS de setat",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "domain": "Domeniul găzduirii",
+                    "account_name": "Numele găzduirii",
+                    "www_record": "Înregistrarea pentru www",
+                    "apex_record": "Înregistrarea pentru domeniul fără www",
+                },
+            },
+            {
+                "key": "account_name_live",
+                "locale": "en",
+                "category": "provisioning",
+                "subject": "Your hosting name is ready - {{brand_name}}",
+                "body_html": """
+                <h2>Your hosting name is ready</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your hosting for <strong>{{domain}}</strong> now has its own name: <strong>{{account_name}}</strong>.
+                The name stays the same wherever we move your hosting.</p>
+                <p>To point your domain here, set these records at your DNS provider:</p>
+                <ul>
+                    <li><code>{{www_record}}</code></li>
+                    <li><code>{{apex_record}}</code></li>
+                </ul>
+                <p>Some providers have no ALIAS for the bare domain. In that case keep the www record and redirect
+                the bare domain to www at your registrar.</p>
+                <p>You can find these details any time in the client area.</p>
+                <p>The {{brand_name}} Team</p>
+                """,
+                "description": "Notification: the hosting name is ready, with the DNS records to set",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "domain": "Hosting domain",
+                    "account_name": "Hosting name",
+                    "www_record": "The www record",
+                    "apex_record": "The bare-domain record",
+                },
+            },
+            {
                 "key": "provisioning_failed",
                 "locale": "ro",
                 "category": "provisioning",

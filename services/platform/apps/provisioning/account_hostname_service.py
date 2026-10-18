@@ -487,6 +487,9 @@ def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
     )
     if outcome.error is not None:
         return Err(f"DNS reconcile failed: {outcome.error}", retriability=outcome.retriability)
+    from .account_hostname_hosting import announce_when_live  # noqa: PLC0415  # Deferred: imports acme
+
+    announce_when_live(hostname)
     return Ok("published")
 
 
