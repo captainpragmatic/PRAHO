@@ -409,6 +409,17 @@ class TicketComment(models.Model):
         return self.author_name or "Anonim"
 
 
+def attachment_upload_to(instance: TicketAttachment, filename: str) -> str:
+    """Store a new attachment under a random name; the name it was uploaded with stays in ``filename``.
+
+    A stored name used to be the uploader's filename, which could be guessed and could carry a
+    person's data. Rows stored before this keep their names and stay readable.
+    """
+    from .security import generate_secure_filename  # noqa: PLC0415  # Deferred: security imports settings services
+
+    return f"tickets/attachments/{generate_secure_filename(filename)}"
+
+
 class TicketAttachment(models.Model):
     """File attachments for tickets"""
 
@@ -422,7 +433,7 @@ class TicketAttachment(models.Model):
         verbose_name=_("Comment"),
     )
 
-    file = models.FileField(upload_to="tickets/attachments/", verbose_name=_("File"))
+    file = models.FileField(upload_to=attachment_upload_to, verbose_name=_("File"))
     filename = models.CharField(max_length=255, verbose_name=_("Filename"))
     file_size = models.PositiveIntegerField(verbose_name=_("File Size"))
     content_type = models.CharField(max_length=100, verbose_name=_("Content Type"))

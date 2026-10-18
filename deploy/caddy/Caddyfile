@@ -130,16 +130,19 @@
     # Space-separated CIDRs; Caddy is the edge and matches the immediate peer.
     @staff remote_ip {$PLATFORM_ALLOWED_CIDRS:127.0.0.1/32 ::1/128}
     handle @staff {
+        # The largest staff reply Django can accept: tickets.max_attachments_per_reply (at most 5)
+        # files of tickets.max_file_size_bytes (at most 10 MiB), plus 2 MiB of multipart headroom.
+        # Caddy cannot read settings, so this sits at their upper bounds; Django enforces the values
+        # in effect. Media has no route here: every stored file is read through a Django view that
+        # checks who is asking and records it (ADR-0057).
+        request_body {
+            max_size 52MiB
+        }
+
         handle_path /static/* {
             root * /srv/static
             file_server
             header Cache-Control "public, max-age=31536000, immutable"
-        }
-
-        handle_path /media/* {
-            root * /srv/media
-            file_server
-            header Cache-Control "public, max-age=86400"
         }
 
         handle {

@@ -68,6 +68,10 @@ STAFF_SESSION_PREFIXES = ["/api/customers/"]
 # Equal to Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10485760). That limit excludes file uploads,
 # so the equivalence holds only because no public Platform route accepts multipart files.
 PLATFORM_PUBLIC_BODY_CAP = "10MiB"
+# The largest staff reply Django can accept: tickets.max_attachments_per_reply (at most 5) files of
+# tickets.max_file_size_bytes (at most 10 MiB), plus 2 MiB of multipart headroom. Caddy cannot read
+# settings, so the cap sits at their upper bounds and Django enforces the values in effect.
+PLATFORM_STAFF_BODY_CAP = "52MiB"
 SHARED_PATHS = ("/dashboard/", "/billing/", "/tickets/", "/i18n/", "/cookie-policy/", "/auth/login/")
 PUBLIC_ROUTES = (
     ("GET", "/api/users/health/"),
@@ -171,6 +175,11 @@ def _proxy_targets(nodes: list[Directive]) -> list[str]:
 
 def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -> None:
     sites = _parse(source)
+    # Every variant: a body must arrive in time, so a trickled upload cannot hold a buffer or a worker.
+    timeouts = _one(_one(_one(sites, *()).children, "servers").children, "timeouts").children
+    _one(timeouts, "read_body", "120s")
+    # The edge serves no media: every stored file is read through a Django view that checks and audits it.
+    assert not any(node.words[:1] == ("root",) and "media" in node.words[-1] for node in _walk(sites))
     if name != "platform":
         portal = _one(sites, PORTAL_HOST).children
         assert all(target.endswith(":8701") for target in _proxy_targets(portal))
@@ -186,9 +195,6 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         # Above the 5MB body cap: a buffer equal to it would pass a body on before its last byte.
         _one(proxy, "request_buffers", "6MB")
         _one(proxy, "response_buffers", "10MiB")
-        # And a body must arrive in time, so a trickled upload cannot hold that buffer indefinitely.
-        timeouts = _one(_one(_one(sites, *()).children, "servers").children, "timeouts").children
-        _one(timeouts, "read_body", "120s")
     if name != "portal":
         platform = _one(sites, PLATFORM_HOST).children
         handles = [node for node in platform if node.words[0] == "handle"]
@@ -211,8 +217,9 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
             assert not any(node.words[0].startswith("@") for node in _walk(public.children))
         assert not any(node.words[0] in {"handle_path", "reverse_proxy"} for node in platform)
         staff = handles[-1].children
+        _one(_one(staff, "request_body").children, "max_size", PLATFORM_STAFF_BODY_CAP)
         _one(staff, "handle_path", "/static/*")
-        _one(staff, "handle_path", "/media/*")
+        assert not any(node.words[0] == "handle_path" and node.words[1] != "/static/*" for node in staff)
         assert len(_proxy_targets(_one(staff, "handle").children)) == 1
     obsolete = {("handle", "/health/*"), ("handle", "/portal-health/*")}
     assert not any(node.words in obsolete for node in _walk(sites))
@@ -591,6 +598,9 @@ def test_live_routing_spoofed_headers_and_published_port(name: str, tmp_path: Pa
         status, body, remote = _request(edge, "127.0.0.1", PLATFORM_HOST, "/dashboard/", edge=edge)
         assert (status, body) == (200, "platform GET /dashboard/")
         assert ipaddress.ip_address(remote).is_loopback
+        # A staff request for media reaches Django, never a file server at the edge.
+        status, body, _ = _request(edge, "127.0.0.1", PLATFORM_HOST, "/media/probe.txt", edge=edge)
+        assert (status, body) == (200, "platform GET /media/probe.txt")
         for address in (edge, published):
             for headers in (
                 (),
@@ -616,6 +626,34 @@ def test_platform_public_body_cap_matches_django_upload_limit() -> None:
     assert len(limits) == 1 and isinstance(limits[0], ast.Constant)
     assert PLATFORM_PUBLIC_BODY_CAP == "10MiB"
     assert limits[0].value == 10 * 1024 * 1024
+
+
+def _catalog_bound(key: str) -> int:
+    """The upper bound the settings catalog allows for ``key``, read without importing Django."""
+    tree = ast.parse(_read("services/platform/apps/settings/catalog.py"))
+    for node in ast.walk(tree):
+        keywords = {keyword.arg: keyword.value for keyword in getattr(node, "keywords", [])}
+        if isinstance(keywords.get("key"), ast.Constant) and keywords["key"].value == key:
+            bound = ast.literal_eval(keywords["validation"])["max"]
+            assert isinstance(bound, int)
+            return bound
+    raise AssertionError(f"{key} is not in the catalog")
+
+
+def test_platform_staff_body_cap_covers_the_largest_staff_reply() -> None:
+    """A staff reply the settings allow must fit under the edge cap, which cannot read them."""
+    files = _catalog_bound("tickets.max_attachments_per_reply")
+    file_size = _catalog_bound("tickets.max_file_size_bytes")
+    assert (files, file_size) == (5, 10 * 1024 * 1024)
+    assert PLATFORM_STAFF_BODY_CAP == "52MiB"
+    assert files * file_size + 2 * 1024 * 1024 == 52 * 1024 * 1024
+
+
+@pytest.mark.parametrize("topology", ["single-server", "platform-only"])
+def test_caddy_mounts_no_media(topology: str) -> None:
+    services = yaml.safe_load(_read(f"deploy/docker-compose.{topology}.yml"))["services"]
+    assert not [volume for volume in services["caddy"]["volumes"] if "media" in str(volume)]
+    assert "media_files:/app/media" in services["platform"]["volumes"]
 
 
 def _post_size(peer: str, edge: str, path: str, size: int) -> int:
@@ -650,6 +688,17 @@ def test_live_platform_public_body_cap(name: str, tmp_path: Path, docker_daemon:
         for path in ("/integrations/webhooks/stripe/", "/api/users/login/"):
             assert _post_size(peer, edge, path, limit) == 200, path
             assert _post_size(peer, edge, path, limit + 1) == 413, path
+
+
+@pytest.mark.docker
+@pytest.mark.parametrize("name", [name for name in CONFIGS if name != "portal"])
+def test_live_platform_staff_body_cap(name: str, tmp_path: Path, docker_daemon: None) -> None:
+    """At the cap a staff POST is proxied; one byte over, the edge refuses it with 413."""
+    limit = 52 * 1024 * 1024
+    with _running_edge(name, tmp_path, upstream_reads_body=True) as (edge, _peer, _published):
+        # Sent from the edge container itself, so it comes from loopback, the default staff network.
+        assert _post_size(edge, "127.0.0.1", "/tickets/1/reply/", limit) == 200
+        assert _post_size(edge, "127.0.0.1", "/tickets/1/reply/", limit + 1) == 413
 
 
 def test_official_image_pull_falls_back_and_keeps_the_test_reference(monkeypatch: pytest.MonkeyPatch) -> None:
