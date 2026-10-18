@@ -1365,7 +1365,9 @@ class GDPRExportService:
         # Audit trail summary (privacy-focused): every event concerning the person, not only those
         # they performed, counted in full and listed up to the latest 100.
         if scope.get("include_audit_logs", True):
-            audit_events = events_concerning(capture_subject(user)).order_by("-timestamp")
+            subject = capture_subject(user)
+            # The proof rows concern the person too; the sweep keeps them, so the export must list them.
+            audit_events = (events_concerning(subject) | proofs_concerning(subject)).order_by("-timestamp")
             data["audit_summary"] = {
                 "total_events": audit_events.count(),
                 "recent_activities": [
