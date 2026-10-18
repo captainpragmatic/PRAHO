@@ -3,18 +3,45 @@ Ticket Status Service for PRAHO Platform
 Centralized state management for the 4-status ticket system.
 """
 
+from __future__ import annotations
+
 import logging
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
+from django.core.files import File
 from django.db.models import QuerySet
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.users.models import User
 
-from .models import Ticket
+from .models import Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
+
+
+def save_attachment_files(attachments: Sequence[tuple[TicketAttachment, File[Any]]]) -> None:
+    """Store each attachment's file under its random name and save its row; on any failure, delete them all.
+
+    File storage is not transactional: the caller's transaction rolls the rows back, and this deletes
+    the files it wrote. Call it last, once nothing the caller knows of can still roll the reply back;
+    the orphaned-media sweeper owns what a crash or a failed commit leaves.
+    """
+    stored = []
+    try:
+        for attachment, content in attachments:
+            attachment.file.save(content.name or "", content, save=False)  # upload_to picks the stored name
+            stored.append((attachment.file.storage, attachment.file.name))
+            attachment.save()
+    except Exception:
+        for storage, name in stored:
+            try:
+                storage.delete(name)
+            except Exception:
+                logger.exception("🔥 [Tickets] Could not delete %s after a failed attachment save", name)
+        raise
+
 
 # FSM transition dispatch map: new_status -> method_name on Ticket
 _TICKET_TRANSITION_MAP: dict[str, str] = {

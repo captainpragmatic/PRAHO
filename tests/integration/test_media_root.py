@@ -208,6 +208,7 @@ def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (stubs / "sudo").write_text('#!/bin/sh\nshift 2\n[ "$1" = tar ] && exec "$@"\nexit 0\n')
     (stubs / "pg_restore").write_text('#!/bin/sh\n[ "$1" = --list ] && echo "1; 0 1 TABLE DATA public django_migrations praho"\nexit 0\n')
     (stubs / "curl").write_text('#!/bin/sh\nprintf 200\n')
+    (stubs / "psql").write_text('#!/bin/sh\necho 2026-10-25T00:00:00+00:00\n')
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     (root / "scripts").mkdir()
@@ -274,3 +275,4 @@ def test_a_native_restore_puts_the_media_back(tmp_path: Path) -> None:
     result = _run(_render("restore-native.sh.j2", root), env, str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "media" / "efactura" / "response.zip").read_bytes() == b"anaf"
+    assert "Orphaned-media sweep paused until 2026-10-25" in result.stdout

@@ -134,6 +134,23 @@ stage_and_check_archives() {
     check_media_restorable "$RESTORE_TMP_DIR/backup.sql.gz"
 }
 
+# After a restore, files written since the backup have no row, and the orphaned-media sweep would
+# delete them a day later: pause it for seven days. The same statement runs in both restore scripts
+# (tests/common/test_media_sweep_restore_pause.py runs it against the schema).
+PAUSE_MEDIA_SWEEP_SQL="UPDATE setting_entries SET value = to_jsonb(now() + interval '7 days'), updated_at = now(), revision = revision + 1 WHERE key = 'media_sweep.paused_until' RETURNING value #>> '{}'"
+pause_media_sweep() {
+    local until
+    if ! until="$(docker exec praho_db psql -U praho -d praho --set=ON_ERROR_STOP=1 -tAq -c "$PAUSE_MEDIA_SWEEP_SQL")"; then
+        log_error "Could not pause the orphaned-media sweep. Set media_sweep.paused_until seven days ahead in Settings."
+        return 1
+    fi
+    if [ -z "$until" ]; then
+        log_warn "The backup predates the orphaned-media sweep. Set media_sweep.paused_until seven days ahead in Settings."
+    else
+        log_info "Orphaned-media sweep paused until ${until}"
+    fi
+}
+
 # Before anything is dropped: the companion must be an intact tar archive, and its volume present.
 check_media_restorable() {
     local MEDIA_FILE="${1%.sql.gz}.media.tar.gz"
@@ -240,12 +257,14 @@ restore_backup() {
     fi
 
     # A media failure must not leave the services down: they restart, and the run fails at the end.
-    local MEDIA_FAILED=0
+    local MEDIA_FAILED=0 SWEEP_FAILED=0
     restore_media "${BACKUP_FILE}" || MEDIA_FAILED=1
+    # Before any worker starts, so no sweep runs against the restored rows unpaused.
+    pause_media_sweep || SWEEP_FAILED=1
 
     if $LEAVE_STOPPED; then
-        if [ "$MEDIA_FAILED" -ne 0 ]; then
-            log_error "Media restore failed; applications remain stopped for recovery."
+        if [ "$MEDIA_FAILED" -ne 0 ] || [ "$SWEEP_FAILED" -ne 0 ]; then
+            log_error "Media restore or pausing its sweep failed; applications remain stopped for recovery."
             exit 1
         fi
         log_success "Database and media restored; applications remain stopped."
@@ -266,6 +285,10 @@ restore_backup() {
     fi
     if [ "$MEDIA_FAILED" -ne 0 ]; then
         log_error "The database was restored and the services are up, but restoring the media failed."
+        exit 1
+    fi
+    if [ "$SWEEP_FAILED" -ne 0 ]; then
+        log_error "The database was restored and the services are up, but the orphaned-media sweep is not paused."
         exit 1
     fi
     log_success "Restore completed successfully!"

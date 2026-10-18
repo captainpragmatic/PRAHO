@@ -228,7 +228,7 @@ class EFacturaSchedulingSettingsEffectTests(TestCase):
 
     def test_xml_path_changes_saved_file_and_keeps_issued_tax_rates(self) -> None:
         service = EFacturaService()
-        for template in ("staff/xml/%Y/%m/", "other/xml"):
+        for template in ("efactura/staff/%Y/%m/", "efactura/other"):
             with self.subTest(template=template):
                 self._write("efactura.storage.xml_path", template)
                 document = self._document()

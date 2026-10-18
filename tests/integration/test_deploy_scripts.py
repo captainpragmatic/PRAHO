@@ -84,6 +84,8 @@ elif argv[:1] == ["inspect"]:
     print(("running " if ".State.Status" in " ".join(argv) else "") + health)
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
+elif argv[:1] == ["exec"] and os.environ.get("DOCKER_PAUSE_FAILS") and any("media_sweep" in a for a in argv):
+    sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
 elif argv[:3] == ["exec", "-i", "praho_db"]:

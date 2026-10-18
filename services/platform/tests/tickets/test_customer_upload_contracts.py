@@ -91,14 +91,14 @@ class CustomerUploadContracts(HMACTestMixin, TestCase):
                 self.assertFalse(TicketAttachment.objects.exists())
         self.assertEqual(self.upload([self.file()] * 6).status_code, 400)
         self.assertEqual(self.upload([self.file(content=b"x" * 600000)] * 2).status_code, 400)
-        self.assertEqual(list(self.directory.rglob("*.txt")), [])
+        self.assertEqual([path for path in self.directory.rglob("*") if path.is_file()], [])
 
     def test_storage_failure_rolls_back_reply_and_cleans_written_files(self):
         with patch.object(TicketAttachment, "save", side_effect=OSError("storage failed")):
             response = self.upload([self.file()])
         self.assertEqual(response.status_code, 500)
         self.assertFalse(TicketComment.objects.filter(ticket=self.ticket).exists())
-        self.assertEqual(list(self.directory.rglob("*.txt")), [])
+        self.assertEqual([path for path in self.directory.rglob("*") if path.is_file()], [])
 
     def test_foreign_customer_closed_ticket_internal_and_unsafe_files_fail_closed(self):
         other = Customer.objects.create(name="Other customer", status="active")

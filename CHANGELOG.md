@@ -240,6 +240,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A ticket attachment or GDPR export leaves no file behind once its record is gone.**
+  - **Replies.** A staff reply stores its files only after its status change succeeds, so a refused change stores none. A failed attachment save deletes every file the reply wrote, on the staff and API paths alike.
+  - **Deletion.** Deleting an attachment, or the ticket that holds it, deletes the file once the delete commits.
+  - **Daily sweep.** A scheduled task deletes ticket attachments and GDPR exports that no record names a day after they were written, for example after a crash. It deletes only the names those writers produce, keeps a file whose age it cannot read, and audits each deletion. Billing documents are never swept.
+  - **Restores.** Both restore scripts pause the sweep for seven days (`media_sweep.paused_until`), because files written since the backup have no record.
+  - **Startup checks.** Startup fails when the sweep's grace period is shorter than four times the longest Django-Q task budget. `efactura.storage.xml_path` must stay under `efactura/`.
 - **Media is no longer served by the web server.** Caddy's staff-network `/media/` route served any stored file (invoice PDFs named by number, ticket attachments named as uploaded, e-Factura records) with a day-long public cache, no access check and no record. It is gone from every Caddyfile, and Caddy no longer mounts the media volume. Every file is read through a Django view that checks who is asking.
   - **Random stored names.** New ticket attachments are stored as `ticket_<time>_<random>.<ext>`; the name they were uploaded with is kept for display and download. Existing files keep their names and stay readable.
   - **Bounded staff uploads.** The staff site caps a request at 62 MiB, the most a staff reply can carry (`tickets.max_attachments_per_reply` is now at most 5, `tickets.max_file_size_bytes` at most 10 MiB, plus up to 10 MiB of text fields). `Caddyfile.platform` gains the 120 s `read_body` limit the other variants had. Uploads past 2.5 MiB spool to disk instead of memory, and the settings import reads no more than its 1 MiB limit.

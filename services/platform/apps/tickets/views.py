@@ -30,7 +30,7 @@ from apps.users.models import User
 from .download_audit import audit_attachment_download
 from .models import Ticket, TicketAttachment, TicketComment
 from .security import TicketAttachmentSecurityScanner
-from .services import TicketStatusService
+from .services import TicketStatusService, save_attachment_files
 
 logger = logging.getLogger(__name__)
 
@@ -357,17 +357,22 @@ def _save_reply_attachments(
     user: User, ticket: Ticket, comment: TicketComment, attachments: list[_CheckedAttachment]
 ) -> None:
     """Store the files a reply carries, with the type each was identified as."""
-    for attachment in attachments:
-        uploaded_file = attachment.uploaded_file
-        TicketAttachment.objects.create(
-            ticket=ticket,
-            comment=comment,
-            file=uploaded_file,
-            filename=uploaded_file.name,
-            file_size=uploaded_file.size or 0,
-            content_type=attachment.content_type,
-            uploaded_by=user,
-        )
+    save_attachment_files(
+        [
+            (
+                TicketAttachment(
+                    ticket=ticket,
+                    comment=comment,
+                    filename=attachment.uploaded_file.name,
+                    file_size=attachment.uploaded_file.size or 0,
+                    content_type=attachment.content_type,
+                    uploaded_by=user,
+                ),
+                attachment.uploaded_file,
+            )
+            for attachment in attachments
+        ]
+    )
 
 
 def _ticket_reply_error_response(
@@ -527,13 +532,14 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         sets_waiting_on_customer=(reply_data.reply_action == "reply_and_wait"),
     )
 
-    _save_reply_attachments(user, ticket, comment, attachments)
-
     # Handle status transitions
     success_msg, status_error = _handle_ticket_status_update(request, ticket, user, reply_action, resolution_code)
     if status_error:
         transaction.set_rollback(True)
         return status_error
+
+    # Files last: storage does not roll back, so nothing that can still refuse the reply follows them.
+    _save_reply_attachments(user, ticket, comment, attachments)
 
     # Handle HTMX response
     if request.headers.get("HX-Request"):

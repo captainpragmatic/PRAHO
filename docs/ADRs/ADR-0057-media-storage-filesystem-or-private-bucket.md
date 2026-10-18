@@ -29,6 +29,8 @@ Media storage is chosen by `MEDIA_STORAGE` in production and staging settings (`
 
 With `s3`, the bucket's versioning and a lifecycle rule that expires noncurrent versions are the media backup; the backup scripts' media archive is then empty. Deleting a file (GDPR erasure, export cleanup) removes the current version only, so the noncurrent-version expiry also bounds how long a deleted file survives. It plays the role the dump retention plays for the database.
 
+The orphaned-media sweep (`apps/common/media_sweep.py`) deletes ticket attachments and GDPR exports that no row names, a day after they were written. Like any delete, on `s3` it removes the current version only, so sweeping alone does not prove a file, or anything encrypted under a retired key, is gone until the noncurrent versions expire. A restore pauses the sweep for seven days, because files written since the backup have no row.
+
 ### Why not the alternatives
 
 | Option | Why not |
