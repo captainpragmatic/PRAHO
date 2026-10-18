@@ -22,6 +22,7 @@ from rest_framework.request import Request
 
 from apps.audit.actor_context import (
     acting_as,
+    acting_for_request,
     bind_current_actor,
     current_actor,
     record_request_actor,
@@ -281,6 +282,30 @@ class MiddlewareTests(TestCase):
         middleware: Any = AuditActorMiddleware(get_response)
         asyncio.run(middleware(request))
         self.assertEqual(seen, [self.admin])
+        self.assertIsNone(current_actor())
+
+
+class SignedPortalCallActorTests(TestCase):
+    """A signed Portal call never reaches request.user: the HMAC helper records who it resolved."""
+
+    def test_the_user_a_signed_call_resolves_becomes_the_actor(self) -> None:
+        from apps.api.secure_auth import get_authenticated_user  # noqa: PLC0415
+
+        user = User.objects.create_user(email="portal-user@example.com", password="pw")
+        request = RequestFactory().post("/api/users/session/validate/")
+        request.user = AnonymousUser()
+
+        with (
+            patch(
+                "apps.api.secure_auth.validate_hmac_authenticated_request", return_value=({"user_id": user.pk}, None)
+            ),
+            patch("apps.api.secure_auth._signed_user_id", return_value=user.pk),
+            acting_for_request(request),
+        ):
+            resolved, error = get_authenticated_user(request)
+            self.assertIsNone(error)
+            self.assertEqual(current_actor(), user)
+        self.assertEqual(resolved, user)
         self.assertIsNone(current_actor())
 
 
