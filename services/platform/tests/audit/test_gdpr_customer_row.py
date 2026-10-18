@@ -12,13 +12,26 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRDeletionService
 from apps.billing.invoice_models import Invoice
+from apps.billing.proforma_models import ProformaInvoice
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.customer_models import Customer
+from apps.orders.models import Order
 from apps.users.models import CustomerMembership, User
-from tests.factories.billing_factories import create_invoice
+from tests.factories.billing_factories import create_currency, create_invoice
 from tests.factories.core_factories import create_individual_customer
 
 EMAIL = "ioana.rowe@example.test"
+BUYER = {
+    "bill_to_name": "Ioana Rowe",
+    "bill_to_email": EMAIL,
+    "bill_to_tax_id": "2900101123456",
+    "bill_to_registration_number": "J40/1/2020",
+    "bill_to_address1": "Str. Rowe 7",
+    "bill_to_address2": "Ap. 3",
+    "bill_to_city": "Cluj-Napoca",
+    "bill_to_region": "Cluj",
+    "bill_to_postal": "400001",
+}
 
 
 class CustomerRowAnonymisationTests(TestCase):
@@ -69,6 +82,38 @@ class CustomerRowAnonymisationTests(TestCase):
         self.assertEqual(invoice.bill_to_address1, "Str. Rowe 7")
         company.refresh_from_db()
         self.assertEqual(company.name, "Rowe Consulting SRL")
+
+    def test_orders_proformas_and_unissued_invoices_lose_the_buyer_snapshot(self) -> None:
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            number="PRO-ROWE-1",
+            currency=create_currency(),
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+            **BUYER,
+        )
+        draft = create_invoice(self.customer, number="INV-ROWE-DRAFT")
+        Invoice.objects.filter(pk=draft.pk).update(**BUYER)
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=proforma.currency,
+            customer_email=EMAIL,
+            customer_name="Ioana Rowe",
+            customer_vat_id="2900101123456",
+            billing_address={"address_line1": "Str. Rowe 7", "city": "Cluj-Napoca"},
+        )
+
+        self.anonymise()
+
+        order.refresh_from_db()
+        record = f"{order.customer_name} {order.customer_email} {order.customer_vat_id} {order.billing_address}".lower()
+        for identifier in ("ioana", "rowe", "2900101123456", "cluj"):
+            self.assertNotIn(identifier, record)
+
+        for document in (proforma, draft):
+            document.refresh_from_db()
+            snapshot = " ".join(getattr(document, field) for field in BUYER).lower()
+            for identifier in ("ioana", "rowe", "2900101123456", "j40", "cluj", "400001", "ap. 3"):
+                self.assertNotIn(identifier, snapshot, type(document).__name__)
 
     def test_an_individual_customer_with_another_owner_is_left_as_it_is(self) -> None:
         other = User.objects.create_user(email="second.owner@example.test", password="x-pass-123")
