@@ -209,8 +209,13 @@ def ensure_certificate_on_node(hostname: AccountHostname, server: VirtualminServ
     """Make sure the name has valid material and that it is installed on ``server``.
 
     Never orders for a name that already has valid material: it reinstalls the stored certificate. A node
-    that already holds the current certificate is left alone.
+    that already holds the current certificate is left alone. A manually registered node (no managed
+    deployment) cannot take a certificate, so nothing is ordered for it and no budget slot is spent.
     """
+    if getattr(server, "node_deployment", None) is None:
+        return NodeCertificateResult(
+            ready=False, detail=f"{server.hostname} is manually registered; it cannot take a certificate."
+        )
     issuance = request_certificate(hostname)
     certificate = AccountNameCertificate.objects.filter(hostname=hostname).first()
     if certificate is None or not certificate.has_valid_material():

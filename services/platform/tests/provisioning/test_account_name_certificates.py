@@ -735,10 +735,17 @@ class NodeInstallTests(CertificateTestCase):
     def test_a_name_without_a_certificate_has_nothing_to_install(self) -> None:
         self.assertTrue(certs.install_current_certificate(self.hostname, self.server).is_err())
 
+    def test_a_manually_registered_node_spends_no_budget_on_a_certificate_it_cannot_take(self) -> None:
+        result = certs.ensure_certificate_on_node(self.hostname, self.server)
+
+        self.assertFalse(result.ready)
+        self.assertIsNone(result.issuance)
+        self.assertEqual((self.acme.place_calls, self.reservations()), (0, 0))
+
     def test_ensure_on_a_node_reinstalls_the_stored_certificate_without_ordering(self) -> None:
         self.issue()
         orders = self.acme.place_calls
-        with patch.object(certs, "install_current_certificate", return_value=Ok(None)) as install:
+        with patch.object(certs, "install_current_certificate", return_value=Ok(None)) as install, self.managed_node():
             result = certs.ensure_certificate_on_node(self.hostname, self.server)
 
         self.assertEqual(self.acme.place_calls, orders)
@@ -752,7 +759,7 @@ class NodeInstallTests(CertificateTestCase):
             self.hostname, self.server, certificate_ref=row.current_certificate_ref, not_after=row.current_not_after
         )
 
-        with patch.object(certs, "install_current_certificate") as install:
+        with patch.object(certs, "install_current_certificate") as install, self.managed_node():
             result = certs.ensure_certificate_on_node(self.hostname, self.server)
 
         install.assert_not_called()
@@ -761,7 +768,8 @@ class NodeInstallTests(CertificateTestCase):
     def test_ensure_on_a_node_without_a_certificate_is_not_ready_and_says_why(self) -> None:
         self.acme.rate_limit_seconds = 600
 
-        result = certs.ensure_certificate_on_node(self.hostname, self.server)
+        with self.managed_node():
+            result = certs.ensure_certificate_on_node(self.hostname, self.server)
 
         self.assertFalse(result.ready)
         self.assertEqual(result.issuance.status, IssuanceStatus.DEFERRED)
