@@ -259,7 +259,7 @@ class PlacementTests(MigrationTestBase):
         ) as start:
             self.assertEqual(NodeDrainService._migrate(drain, self.account), "boundary stop")
         start.assert_called_once_with(
-            self.account, self.target, initiated_by=self.staff, reason="drain", enqueue=False
+            self.account, self.target, initiated_by=self.staff, reason="drain", enqueue=False, drain=drain
         )
 
 
