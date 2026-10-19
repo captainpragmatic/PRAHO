@@ -39,8 +39,9 @@ from tests.virtualmin_lab.workflows.harness import Bench, DomainData
 # Long enough for a lost answer to show as a timeout, short enough for a test.
 CALL_TIMEOUT_SECONDS = 30
 BLOB_MB = 150
-# The restore-domain call starts about a second after the archive lands; this puts the fault inside it.
-RESTORE_FAULT_DELAY = 4.0
+# Once restore-domain is running on the node, this puts the fault inside it. A fixed delay after the archive
+# landed did not: a fast runner finished the restore first, so the fault hit what came after it (#728).
+RESTORE_FAULT_DELAY = 0.5
 
 
 @pytest.fixture(autouse=True)
@@ -77,9 +78,7 @@ def _assert_restore_parked(
     for refusal in (
         management.create_backup_job(account, BackupConfig()),
         management.create_restore_job(account, RestoreConfig(backup_id="any", force_restore=True)),
-        VirtualminMigrationService().start_migration(
-            account, bench.server("vm-b"), initiated_by=None, reason="manual"
-        ),
+        VirtualminMigrationService().start_migration(account, bench.server("vm-b"), initiated_by=None, reason="manual"),
     ):
         assert refusal.is_err() and "active" in refusal.unwrap_err(), refusal
     # The reconciler yields to it (ADR-0051): a Service change cannot enable or disable the domain meanwhile.
@@ -125,12 +124,18 @@ def _restore_under_fault(bench: Bench, chaos: Chaos, domain: str, fault: Callabl
         )
         assert admitted.is_ok(), admitted
         job = admitted.unwrap()
-        with count_attempts() as attempts, chaos.during(
-            chaos.staging_has_archive("vm-a"), fault, delay=RESTORE_FAULT_DELAY
+        with (
+            count_attempts() as attempts,
+            chaos.during(chaos.running("vm-a", "restore-domain"), fault, delay=RESTORE_FAULT_DELAY),
         ):
             bench.run_one("run_virtualmin_restore")
         job.refresh_from_db()
         chaos.mend()
+        # The fault is meant for the destructive call itself. One that lands after it (a fast node finishes the
+        # restore first) tests something else and once left the restored domain impossible to delete (#728).
+        assert job.status_message.startswith("Restore failed:"), (
+            f"the fault missed restore-domain: {job.status} {job.status_message!r}"
+        )
         _assert_restore_parked(bench, account, job, attempts)
         chaos.remove_staged("vm-a")
 
