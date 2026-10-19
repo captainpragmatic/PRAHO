@@ -36,15 +36,22 @@ ENSURE_TASK = "apps.provisioning.account_hostname_lifecycle.ensure_account_name"
 
 
 def on_account_ready(account: VirtualminAccount) -> None:
-    """A create finished: once it commits, give the account its name on the node now serving it."""
-    if not config.account_hostnames_enabled():
-        return
-    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
+    """A create finished: once it commits, give the account its name on the node now serving it.
 
-    account_id = str(account.pk)
-    transaction.on_commit(
-        lambda: async_task(ENSURE_TASK, account_id, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS), robust=True
-    )
+    Never raises: it runs inside the create, whose failure path deletes the new domain, and a name
+    that is not queued here is picked up by the sweep.
+    """
+    try:
+        if not config.account_hostnames_enabled():
+            return
+        from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
+
+        account_id = str(account.pk)
+        transaction.on_commit(
+            lambda: async_task(ENSURE_TASK, account_id, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS), robust=True
+        )
+    except Exception:  # A hook in someone else's operation: logged, never raised into it
+        logger.exception("🔥 [AccountName] Could not queue the name for %s; the sweep picks it up", account.pk)
 
 
 def queue_repair(account: VirtualminAccount) -> bool:
@@ -115,7 +122,11 @@ def on_account_terminated(account: VirtualminAccount) -> None:
     """The account is terminated: retire its name, once the termination commits."""
     from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
 
-    hostname = AccountHostname.objects.filter(account=account, retired_at__isnull=True).first()
+    try:
+        hostname = AccountHostname.objects.filter(account=account, retired_at__isnull=True).first()
+    except Exception:  # A hook in the termination: logged, never raised into it; the sweep retires it
+        logger.exception("🔥 [AccountName] Could not look up the name of %s; the sweep retires it", account.pk)
+        return
     if hostname is None:
         return
 
@@ -129,6 +140,9 @@ def on_account_terminated(account: VirtualminAccount) -> None:
 
 SWEEP_BATCH = 50
 RECHECK_AFTER = timedelta(hours=24)
+# A name never reconciled gets its node step (in its own task) at most this often: one that cannot be
+# published yet (budget spent, a deferral) must not cost a node step every 15 minutes.
+NODE_STEP_BACKOFF = timedelta(hours=1)
 
 
 def reconcile_account_names() -> dict[str, int]:
@@ -146,13 +160,14 @@ def reconcile_account_names() -> dict[str, int]:
     """
     if not config.account_hostnames_enabled():
         return {"disabled": 1}
+    retired = _finish_retirements()
     due = Q(last_reconciled_at__isnull=True) | Q(last_reconciled_at__lt=timezone.now() - RECHECK_AFTER)
     candidates = list(
         AccountHostname.objects.filter(due, retired_at__isnull=True, account__isnull=False, target_server__isnull=False)
         .order_by(F("last_swept_at").asc(nulls_first=True))
         .values_list("pk", flat=True)[:SWEEP_BATCH]
     )
-    counts = {"published": 0, "enqueued": 0, "skipped": 0, "failed": 0}
+    counts = {"published": 0, "enqueued": 0, "skipped": 0, "failed": 0, "retired": retired}
     for pk in candidates:
         try:
             counts[_sweep_one(pk)] += 1
@@ -160,6 +175,27 @@ def reconcile_account_names() -> dict[str, int]:
             logger.exception("🔥 [AccountName] Sweep: name %s raised", pk)
             counts["failed"] += 1
     return counts
+
+
+def _finish_retirements() -> int:
+    """Retire the names a termination or a delete could not: their account is gone or terminated."""
+    from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
+
+    pending = AccountHostname.objects.filter(retired_at__isnull=True).filter(
+        Q(account__isnull=True) | Q(account__status="terminated")
+    )[:SWEEP_BATCH]
+    finished = 0
+    for hostname in pending:
+        try:
+            retired = service.retire_account_hostname(hostname)
+        except Exception:  # One name's surprise must not stop the sweep
+            logger.exception("🔥 [AccountName] Sweep: retiring %s raised", hostname.fqdn)
+            continue
+        if retired.is_ok():
+            finished += 1
+        else:
+            logger.warning("⚠️ [AccountName] Sweep: retiring %s failed again: %s", hostname.fqdn, retired.unwrap_err())
+    return finished
 
 
 def _sweep_one(pk: UUID) -> str:
@@ -178,12 +214,15 @@ def _sweep_one(pk: UUID) -> str:
         )
         if hostname is None:
             return "skipped"
+        previous_sweep = hostname.last_swept_at
         AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
         account = hostname.account
         busy = account is None or account_has_active_operation(account)
     if account is None or busy:
         return "skipped"
     if hostname.last_reconciled_at is None and account.server_id == hostname.target_server_id:
+        if previous_sweep is not None and timezone.now() - previous_sweep < NODE_STEP_BACKOFF:
+            return "skipped"
         async_task(ENSURE_TASK, str(account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
         return "enqueued"
     synced = service.sync_account_hostname(hostname)

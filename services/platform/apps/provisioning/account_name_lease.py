@@ -21,10 +21,11 @@ from django.utils import timezone
 from .account_hostname_models import AccountHostname
 
 # Every account-name task (the ensure task, a renewal, an install) gets this queue timeout: room for a
-# link and an install (each an SSH wait plus its playbook) and an ACME exchange. The node lease outlives
+# node step's Virtualmin calls, a link and an install (each an SSH wait plus its playbook) and an ACME
+# exchange. The node lease outlives
 # it, so a worker the queue still lets run never loses the lease (test_account_name_bounds).
-ACCOUNT_NAME_TASK_TIMEOUT_SECONDS = 1500
-NODE_LEASE = timedelta(minutes=30)
+ACCOUNT_NAME_TASK_TIMEOUT_SECONDS = 2400
+NODE_LEASE = timedelta(minutes=45)
 
 
 def take_node_lease(hostname: AccountHostname) -> str | None:

@@ -368,6 +368,7 @@ class RenewalTests(CertificateTestCase):
     def setUp(self) -> None:
         super().setUp()
         _write("dns.account_cert_weekly_budget", 2)
+        _write("dns.account_hostnames_enabled", True)  # The daily job does nothing while the feature is off
         self.install = patch.object(certs, "install_current_certificate", return_value=Ok(None))
         self.install_mock = self.install.start()
         self.addCleanup(self.install.stop)
@@ -788,6 +789,7 @@ class ScheduleRegistrationTests(CertificateTestCase):
         self.assertEqual(Schedule.objects.filter(name="account-name-certificate-renewal").count(), 1)
 
     def test_the_task_wrapper_runs_the_renewal_and_never_raises(self) -> None:
+        _write("dns.account_hostnames_enabled", True)
         result = virtualmin_tasks.renew_account_name_certificates()
         self.assertTrue(result["success"])
         self.assertIn("renewals", result)

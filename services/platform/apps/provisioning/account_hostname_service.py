@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -39,6 +40,9 @@ from .virtualmin_gateway import (
     listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+
+if TYPE_CHECKING:
+    from apps.infrastructure.dns_gateway import DnsRecordType
 
 logger = logging.getLogger(__name__)
 
@@ -120,14 +124,24 @@ def allocate_account_hostname(account: VirtualminAccount) -> AccountHostname:
         if existing.retired_at is not None:
             raise AccountNameRetiredError(f"The account name {existing.fqdn} was retired")
         return existing
-    zone = config.account_zone()
+    return _create_name_row(account, config.account_zone())
+
+
+def _create_name_row(account: VirtualminAccount, zone: str) -> AccountHostname:
+    """Insert the account's name with a fresh label; the row another caller created meanwhile wins."""
     for _ in range(_LABEL_ATTEMPTS):
         label = "".join(secrets.choice(_LABEL_ALPHABET) for _ in range(_LABEL_LENGTH))
         try:
             with transaction.atomic():
                 return AccountHostname.objects.create(label=label, zone=zone, account=account)
         except IntegrityError:
-            continue  # A label is never reused, retired ones included: draw again
+            # Either the label is taken (never reused, retired ones included: draw again) or the
+            # account got its name from a concurrent allocation, which is then the answer.
+            existing = AccountHostname.objects.filter(account=account).first()
+            if existing is not None:
+                if existing.retired_at is not None:
+                    raise AccountNameRetiredError(f"The account name {existing.fqdn} was retired") from None
+                return existing
     raise RuntimeError("Could not draw an unused account-name label")
 
 
@@ -476,15 +490,31 @@ def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
     AccountHostname.objects.filter(pk=hostname.pk).update(records=intended, updated_at=timezone.now())
 
     outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
+    return _record_outcome(gateway, zone_id, hostname, intended, outcome)
+
+
+def _record_outcome(
+    gateway: Any,
+    zone_id: str,
+    hostname: AccountHostname,
+    intended: Mapping[DnsRecordType, dict[str, object]],
+    outcome: Any,
+) -> Result[str, str]:
+    """Store what the provider applied; a name retired meanwhile has its records deleted again."""
     applied = {
         record.record_type: {**intended.get(record.record_type, {}), "applied": record.content, "id": record.record_id}
         for record in outcome.applied
     }
-    AccountHostname.objects.filter(pk=hostname.pk).update(
+    kept = AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(
         records={**intended, **applied},
         last_reconciled_at=timezone.now() if outcome.error is None else hostname.last_reconciled_at,
         updated_at=timezone.now(),
     )
+    if kept == 0:
+        # Retired while this sync talked to the provider: the retire's delete may have run before the
+        # records came back, so they are deleted again and the retired row is left as it is.
+        gateway.delete_owned_records(zone_id, owner_tag(hostname))
+        return Ok("retired")
     if outcome.error is not None:
         return Err(f"DNS reconcile failed: {outcome.error}", retriability=outcome.retriability)
     from .account_hostname_hosting import announce_when_live  # noqa: PLC0415  # Deferred: imports acme
@@ -504,5 +534,6 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
     # A save, not a queryset update: the retirement is audited by the row's own signals.
     hostname.retired_at = timezone.now()
     hostname.records = {}
-    hostname.save(update_fields=["retired_at", "records", "updated_at"])
+    hostname.target_server = None  # A retired name holds no node, so the node can be unregistered
+    hostname.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
     return Ok(None)

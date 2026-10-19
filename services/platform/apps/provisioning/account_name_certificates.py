@@ -737,6 +737,8 @@ def renew_due_certificates() -> dict[str, int]:
     resume per stalled attempt; a renewal that issues dispatches its own installs. Renewals take no budget.
     Duplicate dispatches are harmless: the attempt lease and the node lease let one worker through.
     """
+    if not config.account_hostnames_enabled():
+        return {"disabled": 1}  # With the feature off nothing is ordered, installed or swept
     counts = {"installs": 0, "renewals": 0, "resumes": 0, "swept": 0}
     for install_id in _stale_install_ids(AccountNameCertificateInstall.objects.all()):
         _dispatch(INSTALL_TASK, str(install_id))

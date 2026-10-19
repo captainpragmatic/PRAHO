@@ -16,6 +16,8 @@ from apps.provisioning import account_name_node, acme_client
 from apps.provisioning.account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, NODE_LEASE
 
 SSH_WAIT_SECONDS = 180  # AnsibleService._wait_for_ssh's default, waited before every playbook
+VIRTUALMIN_CALL_SECONDS = 30 * 3  # the gateway's default request timeout times its default attempts
+NODE_STEP_CALLS = 8  # listing (twice), create, re-list, state (twice), enable or disable, home
 ACME_REQUESTS = 8  # account, order, authorizations, answers, polls and finalisation, each request-bounded
 
 
@@ -37,7 +39,8 @@ class BoundsTests(SimpleTestCase):
 
     def test_a_node_step_fits_its_task(self) -> None:
         playbooks = 2 * SSH_WAIT_SECONDS + certs.INSTALL_TIMEOUT_SECONDS + account_name_node.LINK_TIMEOUT_SECONDS
-        self.assertGreater(ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, playbooks + _acme_exchange_seconds())
+        node_calls = NODE_STEP_CALLS * VIRTUALMIN_CALL_SECONDS
+        self.assertGreater(ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, playbooks + node_calls + _acme_exchange_seconds())
 
     def test_the_node_lease_outlives_the_task_and_the_queue_retries_after_it(self) -> None:
         self.assertGreater(NODE_LEASE.total_seconds(), ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
