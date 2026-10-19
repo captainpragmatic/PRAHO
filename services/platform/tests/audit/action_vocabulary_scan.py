@@ -239,9 +239,17 @@ class Writers:
         return self.public.get(name)
 
     def add(self, path: Path, name: str, param: str, index: int | None, templates: tuple[str, ...]) -> bool:
+        """Learn that ``name`` writes ``param`` under ``templates``; True when that is new.
+
+        Templates accumulate: a wrapper that hands one parameter to a writer more than once (an
+        ``audit_service_call`` writes ``{}_success`` and ``{}_failed``) writes every one of them.
+        Replacing them would keep only the last call site and silently drop the others.
+        """
         table = self.private[path] if name.startswith("_") and name not in SEED_WRITERS else self.public
         spec = table.setdefault(name, {})
-        entry = (index, templates)
+        known_index, known = spec.get(param, (index, ()))
+        merged = tuple(sorted(set(known) | set(templates)))
+        entry = (known_index if known_index is not None else index, merged)
         if spec.get(param) == entry:
             return False
         spec[param] = entry

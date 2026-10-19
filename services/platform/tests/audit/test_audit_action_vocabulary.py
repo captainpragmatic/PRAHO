@@ -123,6 +123,39 @@ class ActionVocabularyGuardTests(SimpleTestCase):
                 self.assertIn(action, known)
 
 
+class WrapperTemplatesTests(SimpleTestCase):
+    """A wrapper that writes one parameter under several templates writes every one of them."""
+
+    def test_a_decorator_writing_success_and_failed_teaches_both(self) -> None:
+        import ast  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        from tests.audit.action_vocabulary_scan import _learn_wrappers  # noqa: PLC0415
+
+        planted = (
+            "def audit_call(event_type):\n"
+            "    def decorator(func):\n"
+            "        def wrapper():\n"
+            "            try:\n"
+            "                log_security_event(f'{event_type}_success', {})\n"
+            "            except Exception:\n"
+            "                log_security_event(f'{event_type}_failed', {})\n"
+            "        return wrapper\n"
+            "    return decorator\n"
+        )
+        path = Path("planted.py")
+        writers = _learn_wrappers({path: ast.parse(planted)})
+
+        spec = writers.spec(path, "audit_call")
+        assert spec is not None
+        self.assertEqual(set(spec["event_type"][1]), {"{}_success", "{}_failed"})
+
+    def test_the_real_service_call_decorator_registers_its_success_actions(self) -> None:
+        found = scan().literals
+        self.assertIn("backup_domain_success", found)
+        self.assertIn("backup_domain_failed", found)
+
+
 class UnregisteredActionRuntimeTests(TestCase):
     def test_an_unregistered_action_is_refused_under_test(self) -> None:
         with self.assertRaises(UnregisteredAuditActionError):
