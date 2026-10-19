@@ -44,10 +44,11 @@ DIAGNOSTICS_DIR = Path(__file__).resolve().parents[3] / "output" / "virtualmin-l
 # Webmin's lock files hold the locking process's PID. A failed search fails the listing (set -e), never empties it.
 LOCK_LISTING = (
     "set -e; list=$(find /etc/webmin /var/webmin -name '*.lock'); "
-    "printf '%s\\n' \"$list\" | while read -r f; do [ -n \"$f\" ] || continue; "
+    'printf \'%s\\n\' "$list" | while read -r f; do [ -n "$f" ] || continue; '
     'pid=$(head -c 32 "$f" 2>/dev/null | tr -dc 0-9); '
     'if [ -n "$pid" ] && [ -d "/proc/$pid" ]; then echo "$f $pid"; fi; done'
 )
+SYSTEMD_STATE = "echo '--- systemd jobs'; systemctl list-jobs --no-pager 2>&1; systemctl --failed --no-pager 2>&1"
 NODE_STATE = (
     "echo '--- processes'; ps -eo pid,ppid,etime,stat,wchan:24,args --forest; "
     "echo '--- sockets'; ss -tanp 2>/dev/null; "
@@ -159,6 +160,12 @@ class Chaos:
 
     # ---------------------------------------------------------------- timing
 
+    def running(self, key: str, program: str) -> Callable[[], bool]:
+        """True while ``program`` runs on the node (remote.cgi runs it as virtual-server/<program>.pl)."""
+        container = self.bench.node(key).container
+        marker = f"/virtual-server/{program}.pl"
+        return lambda: any(marker in operation for operation in in_flight_operations(container))
+
     def staging_has_archive(self, key: str) -> Callable[[], bool]:
         """True once an archive is being written in (or has been pushed to) the node's staging directory."""
         container = self.bench.node(key).container
@@ -245,7 +252,9 @@ class Chaos:
         running, locks = in_flight_operations(container), held_locks(container)
         if not running and not locks:
             return
-        path = self._record(key, [f"{key}: {len(running)} in-flight command(s), {len(locks)} held lock(s)", *running, *locks])
+        path = self._record(
+            key, [f"{key}: {len(running)} in-flight command(s), {len(locks)} held lock(s)", *running, *locks]
+        )
         try:
             self._append(path, [_capture(container, NODE_STATE)])
             deadline = time.monotonic() + DRAIN_WAIT_SECONDS
@@ -303,12 +312,21 @@ class Chaos:
         The body's assertions see the node as the fault left it; the removal then never waits behind a command
         the fault stranded.
         """
-        with self.bench.hosted(domain, node=node) as account:
-            try:
-                yield account
-            finally:
-                self.mend()
-                self.settle(node)
+        try:
+            with self.bench.hosted(domain, node=node) as account:
+                try:
+                    yield account
+                finally:
+                    self.mend()
+                    self.settle(node)
+        except AssertionError as error:
+            if "delete-domain" in str(error):
+                # The domain a fault touched could not be removed: keep the node's state for CI, which cannot be
+                # inspected afterwards, so the next failure says where the delete was stuck (#728).
+                container = self.bench.node(node).container
+                path = self._record(node, [f"{node}: removing {domain} failed: {error}"])
+                self._append(path, [_capture(container, NODE_STATE), _capture(container, SYSTEMD_STATE)])
+            raise
 
     def restore_all(self) -> None:
         """`mend` and `settle`, then clear the debris a fault left: parked jobs and queued tasks."""
