@@ -520,7 +520,12 @@ def _record_outcome(
 ) -> Result[str, str]:
     """Store what the provider applied; a name retired meanwhile has its records deleted again."""
     applied = {
-        record.record_type: {**intended.get(record.record_type, {}), "applied": record.content, "id": record.record_id}
+        record.record_type: {
+            **intended.get(record.record_type, {}),
+            "applied": record.content,
+            "applied_ttl": record.ttl,
+            "id": record.record_id,
+        }
         for record in outcome.applied
     }
     kept = AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(

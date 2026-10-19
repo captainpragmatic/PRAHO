@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
@@ -29,6 +30,9 @@ from . import account_hostname_config as config
 from .account_hostname_models import AccountHostname
 from .account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+
+if TYPE_CHECKING:
+    from .account_hostname_service import EnsureOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +108,12 @@ def ensure_account_name(account_id: str) -> dict[str, str]:
 
 def ensure_on_recreated_node(
     account: VirtualminAccount, server: VirtualminServer, *, enabled: bool
-) -> Result[None, str]:
-    """A customer domain was recreated from nothing on `server`: put its account name back there."""
+) -> Result[EnsureOutcome | None, str]:
+    """A customer domain was recreated from nothing on `server`: put its account name back there.
+
+    Ok(None) means there was nothing to put back (the feature is off, or the account has no name
+    yet); otherwise the outcome says what the node now serves, which the cutover gates on.
+    """
     from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
 
     if not config.account_hostnames_enabled():
@@ -116,7 +124,7 @@ def ensure_on_recreated_node(
     ensured = service.ensure_node_account_name(account, server, enabled=enabled, operation_owner=True)
     if ensured.is_err():
         return Err(ensured.unwrap_err(), retriability=retriability_of(ensured))
-    return Ok(None)
+    return Ok(ensured.unwrap())
 
 
 def on_account_terminated(account: VirtualminAccount) -> None:

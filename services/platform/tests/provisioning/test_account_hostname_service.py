@@ -7,6 +7,7 @@ against the in-memory DNS provider. Certificates (P1.10) are patched where a tes
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -346,6 +347,25 @@ class SyncTests(AccountNameTestCase):
         self.hostname.refresh_from_db()
         self.assertEqual(self.hostname.records["A"]["applied"], "95.217.0.10")
         self.assertIsNotNone(self.hostname.last_reconciled_at)
+
+    def test_the_ttl_the_provider_reports_is_stored_beside_the_one_asked_for(self) -> None:
+        self._enable()
+        original = FakeDnsGateway.reconcile_records
+
+        def provider_keeps_its_own_ttl(gateway: FakeDnsGateway, *args: Any, **kwargs: Any) -> Any:
+            outcome = original(gateway, *args, **kwargs)
+            outcome.applied = [dataclasses.replace(record, ttl=3600) for record in outcome.applied]
+            return outcome
+
+        with (
+            patch.object(service, "certificate_ready_on", return_value=True),
+            patch.object(FakeDnsGateway, "reconcile_records", provider_keeps_its_own_ttl),
+        ):
+            service.sync_account_hostname(self.hostname).unwrap()
+
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records["A"]["applied_ttl"], 3600)
+        self.assertNotEqual(self.hostname.records["A"]["ttl"], 3600, "the asked-for TTL must stay distinguishable")
 
     def test_a_published_name_whose_certificate_is_gone_is_withdrawn(self) -> None:
         self._enable()

@@ -333,6 +333,11 @@ class AuthoritativeDnsTests(SimpleTestCase):
             self.assertFalse(call.args[0].flags & dns.flags.RD)
             self.assertEqual(call.kwargs["timeout"], 10)
 
+    def test_an_answer_carries_its_records_ttl_and_a_negative_answer_none(self):
+        answers = authoritative_addresses(FQDN)
+        self.assertEqual(answers[0].ttl, 60)
+        self.assertIsNone(answers[1].ttl)
+
     def test_one_server_timeout_does_not_suppress_other_answers(self):
         self.query.side_effect = lambda query, address, **kwargs: (
             self.answer(query, address) if address == "9.9.9.9" else (_ for _ in ()).throw(dns.exception.Timeout())

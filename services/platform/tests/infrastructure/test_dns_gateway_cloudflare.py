@@ -414,3 +414,19 @@ class NodeDeployKeepsHardFailureTests(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("DNS configuration failed: cloudflare HTTP 429", result.unwrap_err())
         self.assertEqual(retriability_of(result), Retriability.UNKNOWN)
+
+
+class ReportedTtlTests(SimpleTestCase):
+    """An applied record carries the TTL the provider reports, so a TTL change is confirmed, not assumed."""
+
+    def test_a_created_record_reports_the_providers_ttl(self) -> None:
+        outcome = reconcile(FakeCloudflare(), [spec(ttl=60)])
+
+        self.assertEqual([record.ttl for record in outcome.applied], [60])
+
+    def test_an_unchanged_record_reports_the_ttl_it_already_has(self) -> None:
+        fake = FakeCloudflare([{"id": "r1", "type": "A", "name": NAME, "content": "203.0.113.10", "comment": OWNER, "ttl": 60}])
+
+        outcome = reconcile(fake, [spec(ttl=60)])
+
+        self.assertEqual([record.ttl for record in outcome.applied], [60])
