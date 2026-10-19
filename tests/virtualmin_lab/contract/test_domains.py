@@ -127,7 +127,16 @@ def test_list_domains(lab: Lab) -> None:
         )
         assert_accepted(everything)
         owners, _ = lab.observe(lambda gateway: gateway.list_domains_with_owners())
-        assert owners.unwrap() == [{"domain": SANDBOX_DOMAIN, "username": "contract"}]
+        # Each row says what it is (ADR-0061 P1.6): a top-level customer domain, or an account name's sub-server.
+        assert owners.unwrap() == [
+            {
+                "domain": SANDBOX_DOMAIN,
+                "username": "contract",
+                "type": "Top-level server",
+                "parent_domain": "",
+                "description": "contract-recovery-seed",
+            }
+        ]
 
         table = lab.call("list-domains", {}, case="table", note="list_domains: the plain table, header rows included")
         assert_accepted(table)

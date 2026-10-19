@@ -231,6 +231,11 @@ class TerminationTests(LifecycleCase):
 class SweepTests(LifecycleCase):
     def setUp(self) -> None:
         super().setUp()
+        # A name reconciled before has its certificate on its node; one that lost it is a node repair
+        # (test_account_name_hardening.NodeRepairForReconciledNamesTests).
+        ready = patch.object(service, "certificate_ready_on", return_value=True)
+        ready.start()
+        self.addCleanup(ready.stop)
         self.synced: list[str] = []
         sync = patch.object(
             service, "sync_account_hostname", lambda hostname: self.synced.append(hostname.label) or Ok("published")

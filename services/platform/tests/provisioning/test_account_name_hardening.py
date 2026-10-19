@@ -170,3 +170,36 @@ class AllocationRaceTests(AccountNameTestCase):
         created = service._create_name_row(self.account, "praho-sites.net")
 
         self.assertEqual(created.pk, self.hostname.pk)
+
+
+class NodeRepairForReconciledNamesTests(LifecycleCase):
+    def test_a_reconciled_name_that_lost_its_certificate_gets_its_node_step_again(self) -> None:
+        _configure(enabled=True)
+        hostname = service.allocate_account_hostname(_distinct_account(self.server))
+        AccountHostname.objects.filter(pk=hostname.pk).update(
+            target_server=self.server, last_reconciled_at=timezone.now() - timezone.timedelta(hours=25)
+        )
+        with (
+            patch("django_q.tasks.async_task") as enqueue,
+            patch.object(service, "certificate_ready_on", return_value=False),
+        ):
+            counts = lifecycle.reconcile_account_names()
+
+        enqueue.assert_called_once()
+        self.assertEqual(counts["enqueued"], 1)
+
+    def test_a_reconciled_name_still_ready_is_only_synced(self) -> None:
+        _configure(enabled=True)
+        hostname = service.allocate_account_hostname(_distinct_account(self.server))
+        AccountHostname.objects.filter(pk=hostname.pk).update(
+            target_server=self.server, last_reconciled_at=timezone.now() - timezone.timedelta(hours=25)
+        )
+        with (
+            patch("django_q.tasks.async_task") as enqueue,
+            patch.object(service, "certificate_ready_on", return_value=True),
+            patch.object(service, "sync_account_hostname", return_value=service.Ok("published")) as sync,
+        ):
+            lifecycle.reconcile_account_names()
+
+        enqueue.assert_not_called()
+        sync.assert_called_once()

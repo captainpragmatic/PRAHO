@@ -220,7 +220,13 @@ def _sweep_one(pk: UUID) -> str:
         busy = account is None or account_has_active_operation(account)
     if account is None or busy:
         return "skipped"
-    if hostname.last_reconciled_at is None and account.server_id == hostname.target_server_id:
+    # A name never reconciled, or one whose certificate is no longer on its node (a restore that recreated
+    # the sub-server and then failed), needs its node step, not just a DNS sync.
+    target = hostname.target_server
+    needs_node_step = hostname.last_reconciled_at is None or (
+        target is not None and not service.certificate_ready_on(hostname, target)
+    )
+    if needs_node_step and account.server_id == hostname.target_server_id:
         if previous_sweep is not None and timezone.now() - previous_sweep < NODE_STEP_BACKOFF:
             return "skipped"
         async_task(ENSURE_TASK, str(account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)

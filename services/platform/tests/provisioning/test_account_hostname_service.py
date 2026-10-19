@@ -340,6 +340,26 @@ class SyncTests(AccountNameTestCase):
         self.assertEqual(self.hostname.records["A"]["applied"], "95.217.0.10")
         self.assertIsNotNone(self.hostname.last_reconciled_at)
 
+    def test_a_published_name_whose_certificate_is_gone_is_withdrawn(self) -> None:
+        self._enable()
+        with patch.object(service, "certificate_ready_on", return_value=True):
+            service.sync_account_hostname(self.hostname).unwrap()
+        self.hostname.refresh_from_db()
+
+        outcome = service.sync_account_hostname(self.hostname)
+
+        self.assertEqual(outcome, Ok("withdrawn"))
+        self.assertEqual(FakeDnsGateway.published(self.hostname.fqdn), {})
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records, {})
+        self.assertIsNone(self.hostname.last_reconciled_at, "due again at every sweep until it is repaired")
+
+    def test_a_name_never_published_and_not_ready_is_only_skipped(self) -> None:
+        self._enable()
+
+        self.assertEqual(service.sync_account_hostname(self.hostname), Ok("skipped:certificate_not_ready"))
+        self.assertFalse([call for call in FakeDnsGateway.calls if call.startswith("delete")])
+
     def test_a_token_that_cannot_read_the_zone_or_reads_another_publishes_nothing(self) -> None:
         self._enable()
         for zones in ({}, {ZONE_ID: "other-zone.net"}):

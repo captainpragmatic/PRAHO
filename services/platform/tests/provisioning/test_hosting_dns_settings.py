@@ -70,6 +70,14 @@ class AccountZoneLockTests(TestCase):
         self.assertIsNone(_write("dns.account_zone_api_token", "new-token-value"))
         self.assertEqual(config.account_zone_api_token(), "new-token-value")
 
+    def test_a_zone_beyond_dns_length_limits_is_refused(self) -> None:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        for zone in ("a" * 64 + ".example.net", ".".join(["a" * 60] * 5) + ".net"):
+            with self.subTest(length=len(zone)):
+                self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", zone).is_err())
+        self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", "a" * 63 + ".example.net").is_ok())
+
     def test_a_zone_id_of_the_wrong_shape_is_refused(self) -> None:
         self.assertIsNotNone(_write("dns.account_hostname_zone_id", "not-a-zone-id"))
 

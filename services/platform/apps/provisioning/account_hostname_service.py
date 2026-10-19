@@ -458,6 +458,8 @@ def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
     if not config.account_hostnames_enabled():
         return Ok("disabled")
     reason = _syncable(hostname)
+    if reason == "certificate_not_ready" and hostname.records:
+        return _withdraw(hostname)
     if reason is not None:
         return Ok(f"skipped:{reason}")
     server = hostname.target_server
@@ -491,6 +493,22 @@ def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
 
     outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
     return _record_outcome(gateway, zone_id, hostname, intended, outcome)
+
+
+def _withdraw(hostname: AccountHostname) -> Result[str, str]:
+    """A published name whose certificate is gone stops being published, and is due again at every sweep.
+
+    Publishing means only a name with an unexpired certificate installed on its node is in DNS; a name
+    that lost it would send customers to a node that cannot serve it.
+    """
+    deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
+    if deleted.is_err():
+        return Err(f"Record withdrawal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+    AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(
+        records={}, last_reconciled_at=None, updated_at=timezone.now()
+    )
+    logger.warning("⚠️ [AccountName] %s withdrawn from DNS: no valid certificate on its node", hostname.fqdn)
+    return Ok("withdrawn")
 
 
 def _record_outcome(
