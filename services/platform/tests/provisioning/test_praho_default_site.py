@@ -21,6 +21,9 @@ class DefaultSiteConfigTests(SimpleTestCase):
         self.assertIn("<VirtualHost *:80>", conf)
         self.assertIn("<VirtualHost *:443>", conf)
         self.assertEqual(conf.count("RedirectMatch 404 ^"), 2)
+        # Port 80 lets ACME HTTP-01 challenge tokens through, and nothing else; 443 answers 404 for all.
+        self.assertIn(r"RedirectMatch 404 ^/(?!\.well-known/acme-challenge/[A-Za-z0-9_-]+$)", conf)
+        self.assertEqual(conf.count("RedirectMatch 404 ^\n"), 1)
         self.assertEqual(conf.count("ServerName praho-default.invalid"), 2, "a name no real site can have")
         self.assertIn("ssl-cert-snakeoil", conf)
 
