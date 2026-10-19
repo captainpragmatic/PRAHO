@@ -1344,7 +1344,9 @@ class Command(BaseCommand):
         after = reach(10000, "https")
         self._ok("after the play, vm-a cannot reach vm-b:10000", after == "000", after)
         web = reach(80, "http")
-        self._ok("port 80 stays open to vm-a", web == "200", web)
+        # Any HTTP answer proves the port is open. A request by address is claimed by no domain, so the
+        # node's default site answers it with its empty 404 (ADR-0061 P1.16); "000" means no connection.
+        self._ok("port 80 stays open to vm-a", web in {"200", "404"}, web)
         listed = gateway.call("list-domains", {"multiline": ""})
         self._ok("Platform still reaches the API", listed.is_ok() and listed.unwrap().success, listed)
 
