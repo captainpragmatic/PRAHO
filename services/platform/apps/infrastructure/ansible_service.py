@@ -117,6 +117,7 @@ class AnsibleService:
             "virtualmin_backup_push.yml",
             "virtualmin_chain_backup.yml",
             "virtualmin_pair_restore.yml",
+            "virtualmin_write_barrier.yml",
             "virtualmin_remote_cleanup.yml",
             "virtualmin_account_name_link.yml",
             "virtualmin_install_account_cert.yml",
