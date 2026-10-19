@@ -239,13 +239,8 @@ def _sweep_one(pk: UUID) -> str:
     from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
     with transaction.atomic():
-        hostname = (
-            AccountHostname.objects.select_for_update(skip_locked=True, of=("self",))
-            .select_related("account", "account__server", "target_server")
-            .filter(pk=pk, retired_at__isnull=True)
-            .first()
-        )
-        if hostname is None:
+        hostname = service.lock_for_publication(pk, skip_locked=True)
+        if hostname is None or hostname.retired_at is not None:
             return "skipped"
         previous_sweep = hostname.last_swept_at
         AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
@@ -264,7 +259,7 @@ def _sweep_one(pk: UUID) -> str:
             return "skipped"
         async_task(ENSURE_TASK, str(account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
         return "enqueued"
-    synced = service.sync_account_hostname(hostname)
+    synced = service.sync_account_hostname(hostname, skip_locked=True)  # A name being published is next pass's
     if synced.is_err():
         logger.warning("⚠️ [AccountName] Sweep: DNS for %s: %s", hostname.fqdn, synced.unwrap_err())
         return "failed"

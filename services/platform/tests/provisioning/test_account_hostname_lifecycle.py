@@ -12,7 +12,7 @@ from decimal import Decimal
 from itertools import count
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from django.utils import timezone
@@ -247,7 +247,9 @@ class SweepTests(LifecycleCase):
         self.addCleanup(ready.stop)
         self.synced: list[str] = []
         sync = patch.object(
-            service, "sync_account_hostname", lambda hostname: self.synced.append(hostname.label) or Ok("published")
+            service,
+            "sync_account_hostname",
+            lambda hostname, *, skip_locked=False: self.synced.append(hostname.label) or Ok("published"),
         )
         sync.start()
         self.addCleanup(sync.stop)
@@ -299,7 +301,7 @@ class SweepTests(LifecycleCase):
         first = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
         second = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=26))
 
-        def sync(hostname: AccountHostname) -> Any:
+        def sync(hostname: AccountHostname, *, skip_locked: bool = False) -> Any:
             if hostname.pk == second.pk:
                 raise ValueError("unexpected")
             self.synced.append(hostname.label)
@@ -320,6 +322,16 @@ class SweepTests(LifecycleCase):
             lifecycle.reconcile_account_names()
         self.assertEqual(len(self.synced), 1)
         enqueue.assert_not_called()  # a name reconciled before does not repeat its node step
+
+    def test_the_sweep_passes_over_a_name_being_published_rather_than_wait(self) -> None:
+        _configure(enabled=True)
+        self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
+        sync = Mock(return_value=Ok("published"))
+
+        with patch.object(service, "sync_account_hostname", sync):
+            lifecycle.reconcile_account_names()
+
+        self.assertEqual([call.kwargs for call in sync.call_args_list], [{"skip_locked": True}])
 
     def test_an_account_in_an_operation_is_skipped(self) -> None:
         _configure(enabled=True)
