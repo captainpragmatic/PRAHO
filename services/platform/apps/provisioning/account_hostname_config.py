@@ -30,7 +30,14 @@ _BRAND_EMAIL_KEYS = ("company.email_contact", "company.email_support", "company.
 
 
 def account_hostnames_enabled() -> bool:
-    return SettingsService.get_boolean_setting(ENABLED, False)
+    """On by default, but in effect only once the zone, its id and its token are all set.
+
+    So a fresh install does nothing until the account zone is configured, and clearing any of the
+    three switches account names off again, whatever the flag says.
+    """
+    if not SettingsService.get_boolean_setting(ENABLED, True):
+        return False
+    return bool(account_zone() and account_zone_id() and account_zone_api_token())
 
 
 def account_zone() -> str:

@@ -134,6 +134,11 @@ class AccountNameTestCase(TestCase):
             ("dns.account_zone_api_token", "token-value"),
         ):
             SettingsService.update_setting(key, value).unwrap()
+        # The feature is on once configured, so DNS calls are real unless faked: never reach a provider.
+        previous_dns = _DNS_PROVIDER_REGISTRY.get(service.DNS_PROVIDER)
+        register_dns_gateway(service.DNS_PROVIDER, FakeDnsGateway)
+        self.addCleanup(lambda: register_dns_gateway(service.DNS_PROVIDER, previous_dns) if previous_dns else None)
+        FakeDnsGateway.reset({ZONE_ID: ZONE})
         self.hostname = service.allocate_account_hostname(self.account)
         self.node = FakeNode()
         gateway = patch.object(service, "_gateway", lambda server: self.node)
@@ -323,6 +328,8 @@ class SyncTests(AccountNameTestCase):
         SettingsService.update_setting("dns.account_hostnames_enabled", True).unwrap()
 
     def test_nothing_happens_while_the_feature_is_off(self) -> None:
+        SettingsService.update_setting("dns.account_hostnames_enabled", False).unwrap()  # on by default
+
         self.assertEqual(service.sync_account_hostname(self.hostname), Ok("disabled"))
         self.assertEqual(FakeDnsGateway.calls, [])
 
