@@ -203,3 +203,62 @@ class NodeRepairForReconciledNamesTests(LifecycleCase):
 
         enqueue.assert_not_called()
         sync.assert_called_once()
+
+
+class AccountsWithoutACompleteNameTests(LifecycleCase):
+    """An account whose name was never queued, or whose row never got a target, is not lost."""
+
+    def _provisioned(self) -> VirtualminAccount:
+        account = _distinct_account(self.server)
+        VirtualminAccount.objects.filter(pk=account.pk).update(provisioned_at=timezone.now())
+        return account
+
+    def test_an_account_with_no_name_row_is_handed_to_its_task(self) -> None:
+        _configure(enabled=True)
+        account = self._provisioned()
+        with patch("django_q.tasks.async_task") as enqueue:
+            counts = lifecycle.reconcile_account_names()
+
+        enqueue.assert_any_call(
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+        )
+        self.assertGreaterEqual(counts["enqueued"], 1)
+
+    def test_a_name_row_without_a_target_is_handed_to_its_task(self) -> None:
+        _configure(enabled=True)
+        account = self._provisioned()
+        service.allocate_account_hostname(account)  # the worker died before it set target_server
+        with patch("django_q.tasks.async_task") as enqueue:
+            lifecycle.reconcile_account_names()
+
+        enqueue.assert_any_call(
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+        )
+
+    def test_accounts_that_should_have_no_name_are_left_alone(self) -> None:
+        _configure(enabled=True)
+        unprovisioned = _distinct_account(self.server)
+        terminated = self._provisioned()
+        VirtualminAccount.objects.filter(pk=terminated.pk).update(status="terminated")
+        with patch("django_q.tasks.async_task") as enqueue:
+            lifecycle.reconcile_account_names()
+
+        queued = {call.args[1] for call in enqueue.call_args_list}
+        self.assertNotIn(str(unprovisioned.pk), queued)
+        self.assertNotIn(str(terminated.pk), queued)
+
+    def test_staff_repair_queues_an_account_with_no_name_yet(self) -> None:
+        _configure(enabled=True)
+        account = self._provisioned()
+        with patch("django_q.tasks.async_task") as enqueue, self.captureOnCommitCallbacks(execute=True):
+            self.assertTrue(lifecycle.queue_repair(account))
+
+        enqueue.assert_called_once()
+
+    def test_staff_repair_does_not_revive_a_retired_name(self) -> None:
+        _configure(enabled=True)
+        account = self._provisioned()
+        hostname = service.allocate_account_hostname(account)
+        AccountHostname.objects.filter(pk=hostname.pk).update(retired_at=timezone.now())
+
+        self.assertFalse(lifecycle.queue_repair(account))

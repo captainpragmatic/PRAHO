@@ -61,7 +61,8 @@ def queue_repair(account: VirtualminAccount) -> bool:
     """
     if not config.account_hostnames_enabled():
         return False
-    if not AccountHostname.objects.filter(account=account, retired_at__isnull=True).exists():
+    # An account with no name yet gets one from the task; only a retired name stays retired.
+    if AccountHostname.objects.filter(account=account, retired_at__isnull=False).exists():
         return False
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
 
@@ -161,13 +162,14 @@ def reconcile_account_names() -> dict[str, int]:
     if not config.account_hostnames_enabled():
         return {"disabled": 1}
     retired = _finish_retirements()
+    unnamed = _queue_unnamed_accounts()
     due = Q(last_reconciled_at__isnull=True) | Q(last_reconciled_at__lt=timezone.now() - RECHECK_AFTER)
     candidates = list(
         AccountHostname.objects.filter(due, retired_at__isnull=True, account__isnull=False, target_server__isnull=False)
         .order_by(F("last_swept_at").asc(nulls_first=True))
         .values_list("pk", flat=True)[:SWEEP_BATCH]
     )
-    counts = {"published": 0, "enqueued": 0, "skipped": 0, "failed": 0, "retired": retired}
+    counts = {"published": 0, "enqueued": unnamed, "skipped": 0, "failed": 0, "retired": retired}
     for pk in candidates:
         try:
             counts[_sweep_one(pk)] += 1
@@ -175,6 +177,29 @@ def reconcile_account_names() -> dict[str, int]:
             logger.exception("🔥 [AccountName] Sweep: name %s raised", pk)
             counts["failed"] += 1
     return counts
+
+
+def _queue_unnamed_accounts() -> int:
+    """Queue the ensure task for accounts that should have a name and have no complete one.
+
+    The create's hook may never have queued it (the queue was down at the commit), or a worker died
+    between allocating the row and setting its target; neither shows up among the names below.
+    """
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
+
+    from .account_hostname_service import SYNCABLE_STATUSES  # noqa: PLC0415  # Deferred: imports the gateway
+
+    eligible = VirtualminAccount.objects.filter(
+        status__in=SYNCABLE_STATUSES, provisioned_at__isnull=False, server__isnull=False
+    ).filter(
+        Q(account_hostname__isnull=True)
+        | Q(account_hostname__retired_at__isnull=True, account_hostname__target_server__isnull=True)
+    )
+    queued = 0
+    for account_id in eligible.values_list("pk", flat=True)[:SWEEP_BATCH]:
+        async_task(ENSURE_TASK, str(account_id), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
+        queued += 1
+    return queued
 
 
 def _finish_retirements() -> int:

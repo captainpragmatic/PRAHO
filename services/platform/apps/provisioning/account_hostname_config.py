@@ -89,16 +89,22 @@ def _live_names_exist() -> bool:
     return AccountHostname.objects.filter(retired_at__isnull=True).exists()
 
 
-_DNS_NAME_MAX = 253
 _DNS_LABEL_MAX = 63
+# The zone is embedded in longer values, and the tightest is a certificate key's vault reference,
+# `acme_certificate_key:<label>.<zone>@<attempt id>` in a 255-character field: 21 + 9 + zone + 1 + 32.
+# A zone of at most 192 characters therefore fits it, and every account name stays far below DNS's 253.
+ZONE_MAX_LENGTH = 192
 
 
 def setting_refusal(key: str, value: Any) -> tuple[str, str] | None:
     """Why a hosting-dns write is refused, as (code, message), or None when it may be stored."""
     if key == ZONE:
         zone = _normal_name(str(value or ""))
-        if zone and (len(zone) > _DNS_NAME_MAX or any(len(label) > _DNS_LABEL_MAX for label in zone.split("."))):
-            return "invalid_zone", "A DNS name is at most 253 characters, and each of its labels at most 63."
+        if zone and (len(zone) > ZONE_MAX_LENGTH or any(len(label) > _DNS_LABEL_MAX for label in zone.split("."))):
+            return (
+                "invalid_zone",
+                f"The account zone is at most {ZONE_MAX_LENGTH} characters, and each of its labels at most 63.",
+            )
         if zone != account_zone() and _live_names_exist():
             return "live_account_names", "The account zone cannot change while account names are live."
         zone_site = _registrable(zone) if zone else None

@@ -78,6 +78,20 @@ class AccountZoneLockTests(TestCase):
                 self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", zone).is_err())
         self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", "a" * 63 + ".example.net").is_ok())
 
+    def test_the_longest_zone_accepted_fits_every_value_derived_from_it(self) -> None:
+        from apps.provisioning.account_hostname_config import ZONE_MAX_LENGTH  # noqa: PLC0415
+        from apps.provisioning.account_hostname_models import AccountNameCertificate  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        zone = f"{'a' * 63}.{'b' * 63}.{'c' * (ZONE_MAX_LENGTH - 130)}.d"  # valid labels, exactly the maximum
+        self.assertEqual(len(zone), ZONE_MAX_LENGTH)
+        self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", zone).is_ok())
+        self.assertTrue(SettingsService.update_setting("dns.account_hostname_zone", "e" + zone).is_err())
+        fqdn = "x" * 8 + "." + zone
+        key_ref = f"acme_certificate_key:{fqdn}@{'f' * 32}"
+        self.assertLessEqual(len(fqdn), 253)
+        self.assertLessEqual(len(key_ref), AccountNameCertificate._meta.get_field("current_key_ref").max_length)
+
     def test_a_zone_id_of_the_wrong_shape_is_refused(self) -> None:
         self.assertIsNotNone(_write("dns.account_hostname_zone_id", "not-a-zone-id"))
 
