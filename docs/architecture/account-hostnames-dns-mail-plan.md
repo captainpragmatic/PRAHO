@@ -16,9 +16,14 @@ Every task: a test that fails first (quote the failure line), the fix, green, `m
 - **Sub-servers appear in `list-domains`** (`type: Sub-server`, `parent_domain`) and would corrupt the account sync, `update_server_statistics` and `list_migration_domains`. They are filtered in P1.6.
 - **There is no ACME client.** Virtualmin GPL's DNS-01 needs BIND, and nodes run without it. Certificates are issued on Platform with the Python `acme` and `josepy` libraries, so the Cloudflare token stays off the nodes.
 
-## Status (2026-10-17)
+## Status (2026-10-19)
 
 - **Phase 0 is built** (PR #695, merged).
+- **Phase 1 is built, behind `dns.account_hostnames_enabled` (off)** (P1.2 to P1.16, one PR). It stays off until Phase 2: a migration does not move `target_server` before the cutover exists, so a name turned on now would keep pointing at a node a migration left. Departures from the tasks below:
+  - **The zone token is proven at use, not at save.** The settings guard checks only what it can offline (the zone's registrable domain, the PSL gate, the completeness of the settings); every sync proves the token reads the configured zone before it publishes anything.
+  - **Cutover settings are deferred to Phase 2** (the lowered TTL and the bridge window belong to the cutover that uses them).
+  - **P1.14 is built as "no preview offered"**, pending the owner's decision: nothing links to an account name, and the Portal shows it as text.
+  - **The review of P1.9 and P1.10 added guarantees** the tasks did not name: one worker per issuance attempt (a lease, and a token on every write of the attempt); keys created once and never overwritten; a certificate put in force and installed only when it matches its key and name; an install recorded only when the node reports serving that certificate's fingerprint; install evidence dropped before a sub-server is created afresh; one node step per name at a time, and a caller that owns no operation changes the node only under the account lock migration admission takes; every account-name task bounded and dispatched one name per task; the sweep rotated so names that cannot be published never starve the others.
 - **P1.0 is done: the sub-server design is proven on Virtualmin 8.3** (`docs/domain/virtualmin-account-subserver-contract.md` on `feat/adr61-phase1-account-hostnames`). The alias attempt before it is recorded in `virtualmin-account-alias-contract.md`. What the lab established, and what every task below relies on:
   - the sub-server has its own vhost on 80 and 443 and its own certificate by SNI, key root-only;
   - its `public_html` replaced by the relative symlink `../../public_html` serves the customer's site, with PHP as the customer's user; no Virtualmin program can do this (`modify-web --document-dir` refuses `..`, a `create-redirect` alias answers 403);

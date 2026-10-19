@@ -42,6 +42,8 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
         fields: ClassVar[list[str]] = [
             "name",
             "hostname",
+            "ipv4_address",
+            "ipv6_address",
             "api_port",
             "api_username",
             "use_ssl",
@@ -55,6 +57,8 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
         widgets: ClassVar[dict[str, Any]] = {
             "name": PRAHOTextWidget(attrs={"placeholder": 'Server display name (e.g., "Primary Web Server")'}),
             "hostname": PRAHOTextWidget(attrs={"placeholder": "server.example.com"}),
+            "ipv4_address": PRAHOTextWidget(attrs={"placeholder": "Public IPv4 (account names point here)"}),
+            "ipv6_address": PRAHOTextWidget(attrs={"placeholder": "Public IPv6 (optional)"}),
             "api_port": PRAHOTextWidget(attrs={"placeholder": "10000", "type": "number"}),
             "api_username": PRAHOTextWidget(attrs={"placeholder": "webmin_api_user"}),
             "use_ssl": PRAHOCheckboxWidget(),
@@ -67,6 +71,24 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
             "max_disk_gb": PRAHOTextWidget(attrs={"placeholder": "1000", "type": "number"}),
             "max_bandwidth_gb": PRAHOTextWidget(attrs={"placeholder": "5000", "type": "number"}),
         }
+
+    def _clean_public_address(self, field: str, version: int) -> str | None:
+        """An address account names may point at: public, of the right family, normalised."""
+        from apps.infrastructure.panel_cert_probes import public_address  # noqa: PLC0415  # Deferred: imports dnspython
+
+        value = self.cleaned_data.get(field)
+        if not value:
+            return None
+        try:
+            return public_address(str(value), version)
+        except ValueError as error:
+            raise ValidationError(_("Enter a public IPv%(version)d address.") % {"version": version}) from error
+
+    def clean_ipv4_address(self) -> str | None:
+        return self._clean_public_address("ipv4_address", 4)
+
+    def clean_ipv6_address(self) -> str | None:
+        return self._clean_public_address("ipv6_address", 6)
 
     def clean_hostname(self) -> str:
         """Validate hostname format."""

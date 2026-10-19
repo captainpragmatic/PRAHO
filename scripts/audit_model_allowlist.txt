@@ -75,6 +75,7 @@ tickets.TicketWorklog           # child of Ticket
 # ── 5. Virtualmin integration internals ────────────────────────────────────────
 provisioning.AccountNameCertificate     # issuance attempt state and vault references for an account name's certificate; no key material, the hostname row it belongs to is audited
 provisioning.AccountNameCertificateBudget # lock row serializing a zone's certificate reservations; no business lifecycle
+provisioning.AccountNameCertificateInstall # which node serves which issued certificate; a derived record, the hostname it belongs to is audited and the install is a node-side effect with its own log line
 provisioning.NodeDrain                  # lifecycle audited explicitly by NodeDrainService (node_drain_* events)
 provisioning.SpoolReservation           # transient capacity accounting rows; no business lifecycle
 provisioning.SpoolRoot                  # singleton serialization lock row; no business lifecycle

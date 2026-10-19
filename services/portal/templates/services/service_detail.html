@@ -236,6 +236,10 @@
                   </div>
                 </div>
 
+                {% if service.hosting %}
+                  {% include "services/partials/dns_instructions.html" with hosting=service.hosting only %}
+                {% endif %}
+
                 <!-- Contact Information -->
                 <div class="bg-slate-700/30 rounded-lg p-6 border border-slate-600/50">
                   <div class="flex items-center space-x-3 mb-4">

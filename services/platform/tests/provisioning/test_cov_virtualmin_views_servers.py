@@ -92,12 +92,20 @@ class VirtualminServerPageCoverageTests(VirtualminViewsFixture):
         )
 
     def test_server_detail_distinguishes_tracked_and_remote_domains(self) -> None:
-        self.payload["domains"] = [
-            {"domain": self.account.domain, "username": self.account.virtualmin_username},
-            {"domain": "remote.example.com", "username": "remoteuser", "description": "Remote tenant"},
+        self.payload["data"] = [
+            {"name": self.account.domain, "values": {"username": [self.account.virtualmin_username]}},
+            {
+                "name": "remote.example.com",
+                "values": {"username": ["remoteuser"], "description": ["Remote tenant"], "type": ["Top-level server"]},
+            },
+            {  # An account name: its customer's sub-server, shown on the account and not as a domain
+                "name": "h7k3p2q9.acct.example.net",
+                "values": {"username": ["remoteuser"], "type": ["Sub-server"], "parent_domain": ["remote.example.com"]},
+            },
         ]
         response = self.client.get(reverse("provisioning:virtualmin_server_detail", args=[self.server.pk]))
         self.assertContains(response, "remote.example.com")
+        self.assertNotContains(response, "h7k3p2q9.acct.example.net")
         self.assertEqual([row["is_tracked_in_praho"] for row in response.context["actual_domains"]], [True, False])
         self.assertIsNone(response.context["domains_error"])
 

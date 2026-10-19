@@ -17,6 +17,8 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .account_hostname_lifecycle import ensure_on_recreated_node
+from .account_hostname_models import AccountHostname
 from .placement import order_placement_candidates
 from .virtualmin_backup_service import (
     CHAIN_ROLE_STANDALONE,
@@ -25,7 +27,14 @@ from .virtualmin_backup_service import (
     restore_domain_params,
 )
 from .virtualmin_chain import invalidate_chain
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, listing_attribute, listing_enabled
+from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
+from .virtualmin_gateway import (
+    VirtualminConfig,
+    VirtualminGateway,
+    is_customer_domain_row,
+    listing_attribute,
+    listing_enabled,
+)
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -139,12 +148,47 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
                 "domain": str(item["name"]),
                 "username": listing_attribute(values, "Username"),
                 "enabled": listing_enabled(values),
+                # Read from the raw row: the snapshot allowlist below drops the type and parent.
+                "type": listing_attribute(values, "Type"),
+                "parent_domain": listing_attribute(values, "Parent domain"),
                 "attributes": snapshot_attributes(values),
             }
         )
     if len({row["domain"] for row in rows}) != len(rows):
         return Err("Duplicate domains in Virtualmin listing")
     return Ok(rows)
+
+
+def account_name_children(hostname: AccountHostname | None) -> set[str]:
+    """The account-name sub-server a live hostname puts under its customer domain, if any."""
+    if hostname is None or hostname.retired_at is not None:
+        return set()
+    return {f"{hostname.label}.{hostname.zone}"}
+
+
+def owned_customer_rows(
+    rows: list[dict[str, Any]], account: VirtualminAccount, account_names: set[str]
+) -> list[dict[str, Any]]:
+    """The source owner's rows a migration moves, refusing any it cannot (ADR-0061 P1.6).
+
+    A migration archives the customer domain alone, so every other row the owner has would be lost
+    on the target. The one exception is the account's own account name: a sub-server of the
+    account's domain, owned by the same user, named by its live hostname. PRAHO recreates it from
+    that record on the target. Any other sub-server, alias or extra domain refuses the migration.
+    """
+    owned = [row for row in rows if row["username"] == account.virtualmin_username]
+    kept = [
+        row
+        for row in owned
+        if not (
+            row.get("type") == "Sub-server"
+            and row.get("parent_domain") == account.domain
+            and row["domain"] in account_names
+        )
+    ]
+    if len(kept) != 1 or kept[0]["domain"] != account.domain or not is_customer_domain_row(kept[0]):
+        raise ValueError("Source owner must have exactly one domain: the account's own domain")
+    return kept
 
 
 def migration_task_timeout() -> int:
@@ -335,10 +379,8 @@ class VirtualminMigrationService:
                     if any(row["domain"] == account.domain for row in target_rows):
                         raise ValueError("Domain already exists on target")
                     source_rows = self._listing(self._gateway(account.server))
-                    owned = [row for row in source_rows if row["username"] == account.virtualmin_username]
-                    if len(owned) != 1 or owned[0]["domain"] != account.domain:
-                        raise ValueError("Source owner must have exactly one domain: the account's own domain")
-                    remote = owned[0]
+                    names = account_name_children(AccountHostname.objects.filter(account=account).first())
+                    remote = owned_customer_rows(source_rows, account, names)[0]
                     if remote["enabled"] is not (account.status == "active"):
                         raise ValueError("Source enabled state disagrees with the account snapshot")
                     self._move(
@@ -387,9 +429,9 @@ class VirtualminMigrationService:
         **params: object,
     ) -> None:
         timeout = self.backup_timeout if program in {"backup-domain", "restore-domain"} else 30
-        result = self._gateway(server).call(
-            program, {"domain": migration.account.domain, **params}, timeout_seconds=timeout
-        )
+        domain = migration.account.domain
+        base = domain_state_params(domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": domain}
+        result = self._gateway(server).call(program, {**base, **params}, timeout_seconds=timeout)
         if result.is_err():
             if retriability_of(result) is not Retriability.UNKNOWN:
                 raise DefiniteMigrationFailureError(str(result.unwrap_err()))
@@ -550,6 +592,11 @@ class VirtualminMigrationService:
                 expected, actual = " ".join(sorted(expected.split())), " ".join(sorted(actual.split()))
             if actual != expected:
                 raise ValueError(f"Restored domain differs from snapshot: {key}")
+        # The archive carries the customer domain only: put the account name back on the target,
+        # disabled. The activation's cascading enable turns it on with the account (ADR-0061 P1.7).
+        named = ensure_on_recreated_node(migration.account, migration.target_server, enabled=False)
+        if named.is_err():
+            logger.warning("⚠️ [VirtualminMigration] Account name not ensured on the target: %s", named.unwrap_err())
         self._move(migration, token, "activating")
 
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:

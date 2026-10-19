@@ -796,6 +796,16 @@ class VirtualminBackupService:
                 )
 
             determinate = True
+            if not domain_exists:
+                # Recreated from nothing: the archive carries the customer domain only, so its
+                # account name goes back with the account's own state (ADR-0061 P1.7).
+                from .account_hostname_lifecycle import ensure_on_recreated_node  # noqa: PLC0415  # Circular
+
+                named = ensure_on_recreated_node(account, target_server, enabled=account.status == "active")
+                if named.is_err():
+                    logger.warning(
+                        "⚠️ [Restore] Account name not ensured on %s: %s", target_server.hostname, named.unwrap_err()
+                    )
             self._update_restore_progress(restore_id, "completed", 100)
             return Ok(
                 {

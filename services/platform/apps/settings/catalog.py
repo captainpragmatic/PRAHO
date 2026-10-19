@@ -138,6 +138,13 @@ GROUPS: tuple[GroupDef, ...] = (
         "node-deployment", ZONE_INTEGRATIONS, _("Node Deployment"), _("Terraform, DNS, and node backup configuration")
     ),
     GroupDef("backup", ZONE_INTEGRATIONS, _("Backup Storage"), _("S3 storage for Virtualmin backups")),
+    GroupDef(
+        "hosting-dns",
+        ZONE_INTEGRATIONS,
+        _("Hosting DNS"),
+        _("Account names: the zone they live in, its API token, record TTL and certificates"),
+        section_order=("Account names", "Certificates"),
+    ),
     GroupDef("platform", ZONE_PLATFORM, _("Maintenance & Availability"), _("Platform-wide availability controls")),
     GroupDef(
         "advanced",
@@ -1975,6 +1982,103 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("Local: disk on node. S3: external (requires S3 bucket configuration)."),
         input_kind="select",
         validation={"choices": ["local", "s3"]},
+    ),
+    SettingDef(
+        key="dns.account_hostnames_enabled",
+        data_type="boolean",
+        default=False,
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Account names enabled"),
+        help_text=_(
+            "Give every hosting account a provider hostname in the account zone. Needs the zone, its id "
+            "and its API token."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
+        key="dns.account_hostname_zone",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Account zone"),
+        help_text=_(
+            "The DNS zone account names live in, e.g. example-sites.net. It must be a different registrable "
+            "domain from the brand and the Portal, and cannot change while account names are live."
+        ),
+        validation={"pattern": r"|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+"},
+    ),
+    SettingDef(
+        key="dns.account_hostname_zone_id",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Account zone id"),
+        help_text=_("The Cloudflare zone id of the account zone (32 hexadecimal characters)."),
+        validation={"pattern": r"|[0-9a-f]{32}"},
+    ),
+    SettingDef(
+        key="dns.account_zone_api_token",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Account zone API token"),
+        help_text=_(
+            "A Cloudflare token with Zone:Read and DNS:Edit on the account zone only, never the node token. "
+            "It can be replaced at any time; nothing is published until it can read and edit the zone."
+        ),
+        input_kind="secret",
+        sensitive=True,
+    ),
+    SettingDef(
+        key="dns.account_record_ttl_seconds",
+        data_type="integer",
+        default=300,
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Record TTL (seconds)"),
+        help_text=_("TTL of the A and AAAA records published for account names."),
+        validation={"min": 60, "max": 86400},
+    ),
+    SettingDef(
+        key="dns.account_zone_psl_shipped",
+        data_type="boolean",
+        default=False,
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Zone is on the shipped Public Suffix List"),
+        help_text=_(
+            "Turn on only once the account zone's Public Suffix List entry is in current browsers. Until "
+            "then account names serve a neutral page, never customer content."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
+        key="dns.account_cert_weekly_budget",
+        data_type="integer",
+        default=40,
+        group="hosting-dns",
+        section=_("Certificates"),
+        label=_("New certificates per week"),
+        help_text=_(
+            "At most this many new account-name certificates in any seven days, under Let's Encrypt's limit "
+            "for one registered domain. Renewals do not count."
+        ),
+        validation={"min": 1, "max": 50},
+    ),
+    SettingDef(
+        key="dns.account_acme_directory_url",
+        data_type="string",
+        default="https://acme-v02.api.letsencrypt.org/directory",
+        group="hosting-dns",
+        section=_("Certificates"),
+        label=_("ACME directory"),
+        help_text=_("The ACME server account-name certificates are ordered from. Let's Encrypt by default."),
+        validation={"pattern": r"https://[^\s]+"},
+        advanced=True,
     ),
     SettingDef(
         key="node_deployment.dns_cloudflare_api_token",

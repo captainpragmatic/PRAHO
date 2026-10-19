@@ -73,6 +73,14 @@ class AccountHostname(models.Model):
     previous_ttl = models.PositiveIntegerField(null=True, blank=True)
     ttl_lowered_at = models.DateTimeField(null=True, blank=True)
     last_reconciled_at = models.DateTimeField(null=True, blank=True)
+    # The sweep's rotation: set on every pass whatever the outcome, so names that cannot be published
+    # yet never hold the head of the queue (`last_reconciled_at` keeps gating the one-time node step).
+    last_swept_at = models.DateTimeField(null=True, blank=True)
+    # One node step (create, link, install) at a time per name, whichever task runs it.
+    node_lease_token = models.CharField(max_length=32, blank=True)
+    node_lease_until = models.DateTimeField(null=True, blank=True)
+    # Set once, when the customer is told the name is live (P1.12).
+    activation_notified_at = models.DateTimeField(null=True, blank=True)
     retired_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -131,7 +139,14 @@ class AccountNameCertificate(models.Model):
     attempt_status = models.CharField(max_length=10, choices=AttemptStatus.choices, default=AttemptStatus.PENDING)
     attempt_is_renewal = models.BooleanField(default=False)
     attempt_order_url = models.CharField(max_length=500, blank=True)
+    # When this name took a new-certificate budget slot; a renewal never touches it.
     attempt_reserved_at = models.DateTimeField(null=True, blank=True)
+    # One attempt's identity (its vault ids), kept across a resume or a takeover; its age.
+    attempt_id = models.CharField(max_length=32, blank=True)
+    attempt_started_at = models.DateTimeField(null=True, blank=True)
+    # The worker holding the attempt: every write of the attempt is conditioned on this token.
+    attempt_token = models.CharField(max_length=32, blank=True)
+    attempt_lease_until = models.DateTimeField(null=True, blank=True)
     retry_after = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -179,3 +194,35 @@ class AccountNameCertificateBudget(models.Model):
 
     def __str__(self) -> str:
         return f"certificate budget for {self.zone}"
+
+
+class AccountNameCertificateInstall(models.Model):
+    """A certificate for an account name that is installed on a node.
+
+    Written when an install succeeds (`account_name_certificates.record_installation`), one row per
+    (name, node). A name is ready for a node when the row for that node holds an unexpired certificate:
+    the installed material, not the issuance attempt, is what the node serves.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    hostname = models.ForeignKey(AccountHostname, on_delete=models.CASCADE, related_name="certificate_installs")
+    server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.CASCADE, related_name="account_name_certificate_installs"
+    )
+    # The vault reference of the certificate that was installed, so a newer one is known to be missing.
+    certificate_ref = models.CharField(max_length=255)
+    not_after = models.DateTimeField()
+    installed_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "provisioning_account_name_certificate_installs"
+        verbose_name = _("Account Name Certificate Install")
+        verbose_name_plural = _("Account Name Certificate Installs")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["hostname", "server"], name="account_name_certificate_install_per_node"),
+        ]
+
+    def __str__(self) -> str:
+        return f"certificate for {self.hostname_id} on {self.server_id}"

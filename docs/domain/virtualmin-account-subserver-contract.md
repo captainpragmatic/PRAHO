@@ -256,3 +256,64 @@ virtualmin disable-domain / enable-domain --domain subparent.praho.test [--subse
 virtualmin backup-domain --domain subparent.praho.test [--parent] --dest <file> --all-features --no-differential
 virtualmin delete-domain --domain subparent.praho.test ; virtualmin restore-domain --domain <each, customer first> --source <file> --all-features
 ```
+
+## P1.5: suspend and unsuspend cascade to the account name (2026-10-18, Virtualmin 8.3)
+
+Reproved for P1.5 on `vmlab-a`, customer domain `p15parent.praho.test` with sub-server `p15child9.acct.praho.test`:
+
+| Call | Disabled afterwards |
+|---|---|
+| CLI `disable-domain --domain <parent> --subservers` | parent and child |
+| CLI `enable-domain --domain <parent> --subservers` | none |
+| CLI `disable-domain --domain <parent>` (no flag) | parent only: the child keeps serving |
+| API (PRAHO gateway) `disable-domain` with `domain_state_params(parent)` (`subservers=`) | parent and child |
+| API `enable-domain` with `domain_state_params(parent)` | none |
+| API `disable-domain` with `{"domain": parent}` only | parent only |
+
+`list-domains --parent <domain> --subserver --name-only` exits 0 with no output for a domain without a sub-server, and lists the child when there is one. The pair-restore script relies on both when it verifies that the domain and its sub-servers are disabled.
+
+## P1.15: the link playbook (2026-10-18, Virtualmin 8.3, ansible-core 2.20)
+
+`virtualmin_account_name_link.yml` on `vmlab-a`, sub-server `p15child9.acct.praho.test` of `p15parent.praho.test`, run through PRAHO's `AnsibleService`:
+
+| Case | Result |
+|---|---|
+| first run, `public_html` a real directory | changed; kept as `public_html.own`; `public_html -> ../../public_html` owned by the customer |
+| second run | unchanged |
+| request for the account name, HTTP and HTTPS | the customer's own `marker.txt` |
+| `virtualmin validate-domains --all-features` | "All features are good" |
+| the sub-server's home replaced by a link to `/etc` | `LINK=refused:unsafe_path`, nothing changed, `/etc` untouched |
+| an ancestor (`domains`) replaced by a link | `refused:unsafe_path` |
+| the script run as root instead of the customer | `refused:not_running_as_the_customer` |
+| a home under another user, or `customer_user=root` | refused (the script, or the playbook's input check) |
+
+ansible-core 2.20 prints a failed task as a YAML-style block (`msg: Assertion failed`); PRAHO's wrapper reads both that and the JSON form.
+
+## P1.16: a neutral default site (2026-10-18, Virtualmin 8.3)
+
+On `vmlab-a` before the change, a request with an unknown `Host` got the first virtual host Apache loaded: the welcome page of an account name (`p14apiab.acct.praho.test`), and once `0.praho.test` existed, that domain's site. Virtualmin writes `<VirtualHost *:80>` and `<VirtualHost *:443>`.
+
+| Default site | Unknown `Host`, HTTP / HTTPS | Real domains |
+|---|---|---|
+| none | the first site loaded | served |
+| `sites-enabled/000-praho-default.conf` | 404 / 404, until a domain sorts earlier: `0.praho.test.conf` then won | served |
+| `conf-enabled/praho-default-site.conf` (shipped) | 404 / 404 with `0.praho.test` present | `0.praho.test`, `p15parent.praho.test` and its account name served |
+
+Debian's `apache2.conf` includes `conf-enabled/*.conf` (line 222) before `sites-enabled/*.conf` (line 225), so the shipped default is first for both ports whatever any domain is called.
+
+## Phase 1 end to end: a name, its certificate, a move, the barrier (2026-10-19, Virtualmin 8.3)
+
+Run through PRAHO's own code on the lab (`config.settings.lab`, `lab_transport`), with a self-signed certificate standing in for Let's Encrypt as the material in force:
+
+| Step | Result |
+|------|--------|
+| `ensure_node_account_name` on node A for `roundtrip.praho.test` | sub-server created, enabled, web root linked, certificate installed; the playbook's reported fingerprint matched, so the install was recorded |
+| SNI request to A for the name | the exact fingerprint sent; the customer's own `index.html` served |
+| Customer domain backed up alone on A (`backup-domain --domain`, no `--parent`), restored on B | only the parent's archive; B has no trace of the sub-server |
+| `ensure_on_recreated_node` on B | sub-server created afresh and the same stored certificate installed: B serves the same fingerprint and the customer's site; install rows for both nodes |
+| A name no domain claims, on a node without the default site | the newest customer's site, 200: the leak P1.16 closes |
+| The same, with `conf-enabled/praho-default-site.conf` | 404 on 80 and on 443; the account name still served |
+| `praho-pair-restore.sh` stopped after its barrier (archives that verify, then fail to restore) | its checkpoints: domain disabled, 503 on 80, 443 and every probed host; probed by hand, the customer domain and the account name both 503 on both ports; `release` brings both back |
+| `install-cert` on a sub-server | Virtualmin's own SSL renewal is switched off for it, so it cannot replace the certificate; the listing's `SSL cert expiry` stays stale, so the fingerprint is read from the certificate file |
+
+The pair-restore script verifies both archives before it raises anything: with archives that do not verify it refuses with nothing touched.

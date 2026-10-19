@@ -52,7 +52,10 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
     def test_statistics_persist_remote_domain_count_and_return_server_info(self) -> None:
         self.payloads["list-domains"] = {
             "status": "success",
-            "data": [{"name": "one.example.com one First hosting"}, {"name": "two.example.com two Second hosting"}],
+            "data": [
+                {"name": "one.example.com", "values": {"username": ["one"], "type": ["Top-level server"]}},
+                {"name": "two.example.com", "values": {"username": ["two"], "type": ["Top-level server"]}},
+            ],
         }
         result = VirtualminServerManagementService().update_server_statistics(self.server)
         self.assertEqual(result.unwrap()["domain_count"], 2)
@@ -60,7 +63,8 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
         self.server.refresh_from_db()
         self.assertEqual(self.server.current_domains, 2)
         self.assertEqual(self._programs(), ["info", "list-domains"])
-        self.assertEqual(self.requests[-1], {"program": "list-domains", "json": "1"})
+        # The multiline listing: only it says which rows are customer domains (ADR-0061 P1.6).
+        self.assertEqual(self.requests[-1], {"program": "list-domains", "multiline": "", "json": "1"})
 
     def test_statistics_failures_preserve_existing_counter(self) -> None:
         for program, expected in (("info", "Failed to get server info:"), ("list-domains", "Failed to list domains:")):

@@ -211,6 +211,11 @@ platform = [
     "dnspython>=2.8.0",
     "pydo>=0.3.0",
 
+    # Account names (ADR-0061): per-name certificates by DNS-01, and the registrable-domain guard
+    "acme>=5.7,<5.8",  # 5.8 pulls cryptography 47+; lift with the next deliberate cryptography upgrade
+    "josepy>=2.0.0",
+    "publicsuffixlist>=1.0.2",
+
     # Monitoring & Logging
     "sentry-sdk[django]>=1.32.0",
     "django-health-check>=3.17.0",

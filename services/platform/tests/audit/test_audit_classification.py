@@ -54,6 +54,7 @@ WRITER_FLAGS: dict[str, tuple[str, bool]] = {
     "gift_card_reversal_failed_on_refund": ("high", True),
     "promotion_release_blocked_anomalous_payments": ("high", True),
     "domain_operation_review_required": ("low", True),
+    "account_name_certificate_alert": ("high", True),
     "virtualmin_chain_backup_alert": ("high", True),
     "virtualmin_chain_schedule_deferred": ("high", True),
     "virtualmin_pair_release_abandoned": ("high", True),

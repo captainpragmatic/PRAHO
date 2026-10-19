@@ -89,6 +89,29 @@
                                     </div>
                                 </div>
 
+                                <!-- Public addresses: what account names point at (ADR-0061) -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="{{ form.ipv4_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.ipv4_address.label }}
+                                        </label>
+                                        {{ form.ipv4_address }}
+                                        {% if form.ipv4_address.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.ipv4_address.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    <div>
+                                        <label for="{{ form.ipv6_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                            {{ form.ipv6_address.label }}
+                                        </label>
+                                        {{ form.ipv6_address }}
+                                        {% if form.ipv6_address.errors %}
+                                        <p class="mt-1 text-sm text-red-400">{{ form.ipv6_address.errors.0 }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
                                 <!-- Connection Details -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>

@@ -1,0 +1,39 @@
+---
+# Point one account name's web root at its customer's site (ADR-0061 P1.15).
+#
+# The account name is a Virtualmin sub-server of the customer's domain. Its public_html becomes the
+# relative link ../../public_html, so it serves the customer's own site, PHP as the customer's user.
+# Every filesystem step runs AS THE CUSTOMER (runuser), never as root: see files/praho-account-name-link.sh.
+# Inputs come from the node's own listing, re-checked by PRAHO just before this runs.
+- name: Link an account name's web root to its customer's site
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate single-host link inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - customer_user is match('^[a-z][a-z0-9_-]{0,31}$')
+          - account_name_home is match('^/home/[a-z][a-z0-9_-]{0,31}/domains/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
+          - account_name_home.startswith('/home/' ~ customer_user ~ '/domains/')
+          - "'..' not in account_name_home"
+
+    # The script travels on stdin: Ansible's temporary copy would be root-only, and the
+    # customer must run it.
+    - name: Link the web root as the customer
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - "{{ customer_user }}"
+          - --
+          - /bin/bash
+          - -s
+          - --
+          - "{{ account_name_home }}"
+          - "{{ customer_user }}"
+        stdin: "{{ lookup('ansible.builtin.file', 'files/praho-account-name-link.sh') }}"
+      register: link_result
+      changed_when: "'LINK=changed' in link_result.stdout"
+      failed_when: link_result.rc != 0 or not (link_result.stdout is search('^LINK=(changed|unchanged)$', multiline=True))

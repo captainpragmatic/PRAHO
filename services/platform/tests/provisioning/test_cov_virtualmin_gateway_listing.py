@@ -118,10 +118,10 @@ class VirtualminGatewayListingCoverageTests(TestCase):
         self.assertEqual(
             result.unwrap(),
             [
-                {"domain": "alpha.example.test", "username": "alice"},
-                {"domain": "beta.example.test", "username": "bob"},
-                {"domain": "gamma.example.test", "username": ""},
-                {"domain": "delta.example.test", "username": ""},
+                {"domain": "alpha.example.test", "username": "alice", "type": "", "parent_domain": "", "description": ""},
+                {"domain": "beta.example.test", "username": "bob", "type": "", "parent_domain": "", "description": ""},
+                {"domain": "gamma.example.test", "username": "", "type": "", "parent_domain": "", "description": ""},
+                {"domain": "delta.example.test", "username": "", "type": "", "parent_domain": "", "description": ""},
             ],
         )
 

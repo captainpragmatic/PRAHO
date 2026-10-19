@@ -1,0 +1,31 @@
+{% load i18n ui_components %}
+{# The account name and the records to set for it (ADR-0061 P1.11). Shown only once Platform offers a live name. #}
+<div class="bg-slate-700/30 rounded-lg p-6 border border-slate-600/50" data-testid="hosting-dns-instructions">
+  <div class="flex items-center space-x-3 mb-4">
+    <div class="w-10 h-10 bg-emerald-600/20 rounded-lg flex items-center justify-center">
+      {% icon "globe" size="sm" css_class="text-emerald-400" %}
+    </div>
+    <div>
+      <h3 class="text-lg font-semibold text-white">{% trans "Point your domain here" %}</h3>
+      <p class="text-sm text-slate-400">{% trans "Your hosting has its own name, which follows it wherever it is served from." %}</p>
+    </div>
+  </div>
+  <div class="flex justify-between mb-4">
+    <span class="text-slate-400">{% trans "Hosting name" %}</span>
+    <span class="text-white font-mono break-all" data-testid="hosting-account-name">{{ hosting.account_name }}</span>
+  </div>
+  <p class="text-sm text-slate-300 mb-2">{% trans "At your DNS provider, set:" %}</p>
+  <dl class="space-y-2 mb-4">
+    {% for record in hosting.records %}
+      <div class="flex flex-wrap items-baseline gap-x-3 text-sm">
+        <dt class="font-mono text-slate-400 w-16">{{ record.type }}</dt>
+        <dd class="font-mono text-white break-all">{{ record.name }} &rarr; {{ record.value }}</dd>
+      </div>
+    {% endfor %}
+  </dl>
+  <p class="text-xs text-slate-400">
+    {% blocktrans trimmed %}
+      If your DNS provider has no ALIAS or CNAME flattening for the bare domain, keep the www record and set an HTTP redirect from the bare domain to www at your registrar. Many registrar redirects have no certificate, so https:// on the bare domain may fail before it redirects. http:// and www still work.
+    {% endblocktrans %}
+  </p>
+</div>

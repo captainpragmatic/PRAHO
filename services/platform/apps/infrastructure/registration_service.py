@@ -26,6 +26,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _public_address_or_none(value: object, version: int) -> str | None:
+    """A deployment address as the server stores it: normalised when public, else empty.
+
+    A lab or private-network node registers like any other; DNS for account names is simply never
+    published to an address the Internet cannot reach.
+    """
+    from apps.infrastructure.panel_cert_probes import public_address  # noqa: PLC0415  # Deferred: imports dnspython
+
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return public_address(value, version)
+    except ValueError:
+        logger.warning("⚠️ [Registration] Address %s is not a public IPv%d address; left empty", value, version)
+        return None
+
+
 class NodeRegistrationService:
     """
     📝 Node Registration Service
@@ -128,6 +145,9 @@ class NodeRegistrationService:
                     encrypted_api_password=b"",  # Stored in CredentialVault instead
                     max_domains=deployment.node_size.max_domains if deployment.node_size else 50,
                     max_bandwidth_gb=deployment.node_size.max_bandwidth_gb if deployment.node_size else 1000,
+                    # The addresses account names point at (ADR-0061); a private one stays empty.
+                    ipv4_address=_public_address_or_none(deployment.ipv4_address, 4),
+                    ipv6_address=_public_address_or_none(deployment.ipv6_address, 6),
                 )
 
                 # Store credentials in vault if password provided

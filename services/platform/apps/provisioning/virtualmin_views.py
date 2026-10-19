@@ -35,6 +35,7 @@ from apps.common.security_decorators import (
 from apps.common.types import Result
 from apps.users.models import User
 
+from .account_hostname_hosting import staff_account_name
 from .service_models import Service
 from .services import HostingAccountStaffActions
 from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
@@ -55,7 +56,7 @@ from .virtualmin_forms import (
     VirtualminRestorePairForm,
     VirtualminServerForm,
 )
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, is_customer_domain_row
 from .virtualmin_migration_models import account_has_active_migration
 from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -249,10 +250,11 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
             service = VirtualminProvisioningService()
             gateway = service._get_gateway(server)
 
-            # SAFE READ-ONLY operation - no deletion risk
-            domains_result = gateway.list_domains(name_only=False)
+            # SAFE READ-ONLY operation - no deletion risk. Customer domains only: an account
+            # name is shown on its account, not as a domain of its own.
+            domains_result = gateway.list_domains_with_owners()
             if domains_result.is_ok():
-                raw_domains = domains_result.unwrap()
+                raw_domains = [row for row in domains_result.unwrap() if is_customer_domain_row(row)]
 
                 # Get existing PRAHO accounts for comparison
                 recent_accounts_domains = {acc.domain for acc in recent_accounts}
@@ -491,6 +493,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
         "toggle_protection_url": reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
+        "account_name": staff_account_name(account),
+        "repair_dns_url": reverse("provisioning:virtualmin_account_repair_dns", args=[account.id]),
     }
 
     response = render(request, "provisioning/virtualmin/account_detail.html", context)
@@ -629,6 +633,22 @@ def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
     audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
     messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_account_repair_dns")
+def virtualmin_account_repair_dns(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Staff: queue the account name's node step and DNS sync; the request itself looks nothing up (ADR-0061 P1.13)."""
+    from .account_hostname_lifecycle import queue_repair  # noqa: PLC0415  # Deferred: imports the DNS gateway
+
+    account = get_object_or_404(VirtualminAccount, pk=account_id)
+    if queue_repair(account):
+        messages.success(request, _("DNS repair is queued. The account name is checked and synced in the background."))
+    else:
+        messages.error(request, _("Account names are off, or this account has no name to repair."))
+    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
 
 
 @login_required
@@ -1904,7 +1924,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                 logger.warning(f"⚠️ [AccountSync] {error_msg}")
                 continue
 
-            domains = domains_result.unwrap()
+            # Customer domains only: an account name is its customer's sub-server, never an account.
+            domains = [row for row in domains_result.unwrap() if is_customer_domain_row(row)]
             sync_results["accounts_found"] += len(domains)
 
             # Group domains by username (actual Virtualmin accounts)

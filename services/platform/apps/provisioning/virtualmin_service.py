@@ -28,6 +28,7 @@ from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
+from .account_hostname_lifecycle import on_account_ready
 from .domain_veto import domain_disables_hosting
 from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
@@ -39,12 +40,14 @@ from .virtualmin_backup_service import (
     RestoreConfig,
     VirtualminBackupService,
 )
+from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
     classify_virtualmin_application_error,
     get_virtualmin_config,
+    is_customer_domain_row,
 )
 from .virtualmin_models import (
     VirtualminAccount,
@@ -403,6 +406,12 @@ class VirtualminProvisioningService:
             if not committed:
                 account.server = previous_server
 
+    @staticmethod
+    def _domain_created(account: VirtualminAccount) -> None:
+        """A verified create: say so, and let the account's name follow (ADR-0061 P1.7)."""
+        logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
+        on_account_ready(account)
+
     def _execute_domain_creation(  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
@@ -495,7 +504,7 @@ class VirtualminProvisioningService:
 
                             job.mark_completed(response.data, completed_rollback)
 
-                        logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
+                        self._domain_created(account)
                         return Ok(response.data)
 
                     except Exception as db_error:
@@ -884,7 +893,9 @@ class VirtualminProvisioningService:
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
             previous_status_message = account.status_message
-            result = gateway.call("disable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "disable-domain", domain_state_params(account.domain), correlation_id=job.correlation_id
+            )
 
             if result.is_ok():
                 response = result.unwrap()
@@ -894,7 +905,7 @@ class VirtualminProvisioningService:
                     rollback_operations = [
                         {
                             "operation": "enable-domain",
-                            "params": {"domain": account.domain},
+                            "params": domain_state_params(account.domain),
                             "description": f"Re-enable domain {account.domain} if DB update fails",
                         }
                     ]
@@ -1021,7 +1032,9 @@ class VirtualminProvisioningService:
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
             previous_status_message = account.status_message
-            result = gateway.call("enable-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "enable-domain", domain_state_params(account.domain), correlation_id=job.correlation_id
+            )
 
             if result.is_ok():
                 response = result.unwrap()
@@ -1031,7 +1044,7 @@ class VirtualminProvisioningService:
                     rollback_operations = [
                         {
                             "operation": "disable-domain",
-                            "params": {"domain": account.domain},
+                            "params": domain_state_params(account.domain),
                             "description": f"Re-disable domain {account.domain} if DB update fails",
                         }
                     ]
@@ -1343,6 +1356,7 @@ class VirtualminProvisioningService:
 
                 job.mark_completed({"recovered": "remote domain already present"})
             logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
+            on_account_ready(account)
             return Ok(True)
 
         creation_result = self._execute_domain_creation(account, job)
@@ -1421,7 +1435,8 @@ class VirtualminProvisioningService:
 
         job.mark_started()
         gateway = self._get_gateway(account.server)
-        result = gateway.call(program, {"domain": account.domain}, correlation_id=job.correlation_id)
+        params = domain_state_params(account.domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": account.domain}
+        result = gateway.call(program, params, correlation_id=job.correlation_id)
 
         if result.is_err():
             error_msg = str(result.unwrap_err())
@@ -1695,16 +1710,16 @@ class VirtualminServerManagementService:
                     retriability=retriability_of(info_result),
                 )
 
-            # Get domain list
-            domains_result = gateway.list_domains(name_only=True)
+            # Customer domains only: the name-only listing cannot tell an account name (its
+            # customer's sub-server) from a domain, and counting it would halve a node's capacity.
+            domains_result = gateway.list_domains_with_owners()
             if domains_result.is_err():
                 return Err(
                     f"Failed to list domains: {domains_result.unwrap_err()}",
                     retriability=retriability_of(domains_result),
                 )
 
-            domains = domains_result.unwrap()
-            domain_count = len(domains) if isinstance(domains, list) else 0
+            domain_count = sum(1 for row in domains_result.unwrap() if is_customer_domain_row(row))
 
             # Update server statistics
             server.current_domains = domain_count

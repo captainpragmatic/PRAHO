@@ -245,6 +245,9 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     # Customer permissions
     permissions = serializers.SerializerMethodField()
 
+    # The account name to point the customer's domain at, once it is live (ADR-0061 P1.11)
+    hosting = serializers.SerializerMethodField()
+
     class Meta:
         model = Service
         fields: ClassVar = [
@@ -293,6 +296,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             # Admin notes (limited)
             "suspension_reason",
             "permissions",
+            "hosting",
         ]
 
     def get_status_color(self, obj: Service) -> str:
@@ -383,6 +387,11 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             "plan_features": plan.features,
             "auto_provision": plan.auto_provision,
         }
+
+    def get_hosting(self, obj: Service) -> dict[str, Any] | None:
+        from apps.provisioning.account_hostname_hosting import hosting_summary  # noqa: PLC0415  # Cross-app (ADR-0007)
+
+        return hosting_summary(obj)
 
     def get_permissions(self, obj: Service) -> dict[str, bool]:
         """Get customer permissions for this service"""

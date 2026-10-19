@@ -98,6 +98,11 @@ urlpatterns = [
         virtualmin_views.virtualmin_account_toggle_protection,
         name="virtualmin_account_toggle_protection",
     ),
+    path(
+        "accounts/<uuid:account_id>/repair-dns/",
+        virtualmin_views.virtualmin_account_repair_dns,
+        name="virtualmin_account_repair_dns",
+    ),
     # Backup and restore operations
     path("backups/", virtualmin_views.virtualmin_backups_list, name="virtualmin_backups"),
     path("jobs/<uuid:job_id>/status/", virtualmin_views.virtualmin_job_status, name="virtualmin_job_status"),

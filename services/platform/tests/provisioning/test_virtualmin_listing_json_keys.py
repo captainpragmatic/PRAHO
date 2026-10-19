@@ -82,7 +82,16 @@ class VirtualminJsonListingKeysTests(TestCase):
             owners = self.gateway.list_domains_with_owners().unwrap()
 
         self.assertEqual(owner, "roundtrip")
-        self.assertIn({"domain": "paused.praho.test", "username": "paused"}, owners)
+        self.assertIn(
+            {
+                "domain": "paused.praho.test",
+                "username": "paused",
+                "type": "Top-level server",
+                "parent_domain": "",
+                "description": "",
+            },
+            owners,
+        )
 
     def test_title_case_rows_keep_working(self) -> None:
         self.payload = _listing(

@@ -157,6 +157,43 @@
       loop: "{{ webserver_modules }}"
       notify: Restart apache
 
+    # A request for a name no virtual server claims would get the first site Apache loads, a
+    # customer's or an account name's (ADR-0061 P1.16). PRAHO's default site loads first and
+    # answers 404 with no content on 80 and 443.
+    - name: Install the self-signed certificate the default site answers 443 with
+      ansible.builtin.apt:
+        name: ssl-cert
+        state: present
+
+    - name: Create the default site's empty document root
+      ansible.builtin.file:
+        path: /var/www/praho-default
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    # In conf-enabled, which apache2.conf includes before sites-enabled: a site file would sort after
+    # a domain such as 0.example.com (lab-proven).
+    - name: Install the PRAHO default site
+      ansible.builtin.copy:
+        src: files/praho-default-site.conf
+        dest: /etc/apache2/conf-available/praho-default-site.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart apache
+
+    - name: Enable the PRAHO default site
+      ansible.builtin.command: a2enconf praho-default-site
+      args:
+        creates: /etc/apache2/conf-enabled/praho-default-site.conf
+      notify: Restart apache
+
+    - name: Validate the Apache configuration with the default site
+      ansible.builtin.command: apache2ctl configtest
+      changed_when: false
+
 # Let's Encrypt issuance/install (#436). Failures stay non-fatal until the
     # staging drill proves the real CLI contract — but they are VISIBLE
     # (LETSENCRYPT_FAILED banners below), and the idempotency marker is only

@@ -30,6 +30,7 @@ BASE = "virtualmin_backup_" + "b" * 32 + ".tar.gz"
 DIFF = "virtualmin_backup_" + "d" * 32 + ".tar.gz"
 NEW_DOCROOT = "/home/node/restored_html"
 NEW_ALIAS = f"old-shop.{DOMAIN}"
+CHILD = "h7k3p2q9.acct.example.net"  # The account name: a sub-server of DOMAIN (ADR-0061)
 
 _PAIR_SHIMS = {
     "virtualmin": r"""#!/bin/bash
@@ -38,11 +39,22 @@ cmd=$1; shift
 case $cmd in
   list-domains)
     mode=name
-    for a in "$@"; do case $a in --id-only) mode=id ;; --disabled) mode=disabled ;; --multiline) mode=multi ;; esac; done
+    for a in "$@"; do case $a in --id-only) mode=id ;; --disabled) mode=disabled ;; --multiline) mode=multi ;; --parent) mode=children ;; esac; done
     case $mode in
       id) echo "$FAKE_DOMAIN_ID" ;;
-      disabled) if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi ;;
+      children) if [[ -n ${FAKE_CHILD:-} ]]; then echo "$FAKE_CHILD"; fi ;;
+      disabled)
+        if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi
+        if [[ -n ${FAKE_CHILD:-} && -e $state/child_disabled ]]; then echo "$FAKE_CHILD"; fi
+        ;;
       multi)
+        want=""; prev=""; for a in "$@"; do [[ $prev != --domain ]] || want=$a; prev=$a; done
+        if [[ -n ${FAKE_CHILD:-} && $want == "$FAKE_CHILD" ]]; then
+          # The account name's own virtual host: its document root is the link, its names its own.
+          echo "    HTML directory: /home/node/domains/$FAKE_CHILD/public_html"
+          echo "    Website hostnames: $FAKE_CHILD www.$FAKE_CHILD webmail.$FAKE_CHILD admin.$FAKE_CHILD"
+          exit 0
+        fi
         # What a restore rewrote (state/docroot, state/hostnames) wins over the environment defaults.
         if [[ -e $state/listing_broken ]]; then echo "list-domains: cannot read the domain" >&2; exit 1; fi
         docroot=${FAKE_DOCROOT:-/home/node/public_html}; [[ ! -e $state/docroot ]] || docroot=$(<"$state/docroot")
@@ -54,10 +66,17 @@ case $cmd in
       name) if [[ ${FAKE_DOMAIN_GONE:-0} != 1 ]]; then echo "$FAKE_DOMAIN"; fi ;;
     esac
     ;;
-  disable-domain) echo disable >>"$state/calls"; : >"$state/disabled" ;;
+  disable-domain)
+    echo disable >>"$state/calls"; : >"$state/disabled"
+    # The account name (a sub-server) follows only with --subservers, as on Virtualmin 8.3.
+    if [[ " $* " == *" --subservers "* && ${FAKE_CHILD_IGNORES_DISABLE:-0} != 1 ]]; then : >"$state/child_disabled"; fi
+    ;;
   enable-domain)
     echo enable >>"$state/calls"
-    if [[ ${FAKE_ENABLE_FAILS:-0} != 1 ]]; then rm -f "$state/disabled"; fi
+    if [[ ${FAKE_ENABLE_FAILS:-0} != 1 ]]; then
+      rm -f "$state/disabled"
+      if [[ " $* " == *" --subservers "* ]]; then rm -f "$state/child_disabled"; fi
+    fi
     ;;
   restore-domain)
     source=""
@@ -357,6 +376,37 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(self.restores(), [])
         self.assertTrue(self.disabled(), "the node really is left disabled")
         self.assertFalse(self.maint.exists(), "the maintenance section was taken down")
+
+    def test_the_barrier_covers_the_account_names_virtual_host_too(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD)
+        self.assertEqual(result.outcome, "ok")
+        conf = self.maintenance_conf()  # the 503 section as the base restore began
+        escaped = CHILD.replace(".", "\\.")
+        self.assertIn(f"RewriteCond %{{DOCUMENT_ROOT}} ^/home/node/domains/{escaped}/public_html", conf)
+        for name in (CHILD, f"www.{CHILD}", f"webmail.{CHILD}", f"admin.{CHILD}"):
+            self.assertIn(name.replace(".", "\\."), conf, name)
+        probed = set((self.state / "probed").read_text().split())
+        self.assertIn(CHILD, probed)
+        self.assertIn(f"webmail.{CHILD}", probed)
+
+    def test_the_account_name_is_disabled_with_the_domain_and_stays_disabled(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD)
+        self.assertEqual((result.outcome, result.ran), ("ok", True))
+        self.assertTrue(self.disabled())
+        self.assertTrue((self.state / "child_disabled").exists(), "the account name must not keep serving")
+
+    def test_an_account_name_left_serving_fails_the_barrier_before_anything_destructive(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD, FAKE_CHILD_IGNORES_DISABLE="1")
+        self.assertEqual((result.outcome, result.reason, result.ran), ("refused", "barrier_not_verified", False))
+        self.assertEqual(self.restores(), [])
+
+    def test_a_refusal_never_enables_a_suspended_account_whose_name_still_serves(self) -> None:
+        # Suspended before sub-servers were cascaded: the domain is disabled, its account name is not.
+        (self.state / "disabled").touch()
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NO_503="1")
+        self.assertEqual((result.outcome, result.reason), ("refused", "barrier_not_verified"))
+        self.assertNotIn("enable", self.calls(), "a refused restore must not unsuspend the customer")
+        self.assertTrue(self.disabled())
 
     def test_an_archive_that_does_not_match_its_checksum_is_refused_before_the_barrier(self) -> None:
         (self.staging / DIFF).write_bytes(b"tampered")

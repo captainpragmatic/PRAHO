@@ -144,6 +144,14 @@
                             <dd class="mt-1 text-sm text-slate-100">{{ server.hostname }}</dd>
                         </div>
                         <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Public IPv4" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100 font-mono">{{ server.ipv4_address|default:_("Not set: account names cannot point here") }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Public IPv6" %}</dt>
+                            <dd class="mt-1 text-sm text-slate-100 font-mono">{{ server.ipv6_address|default:_("Not set") }}</dd>
+                        </div>
+                        <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "API Port" %}</dt>
                             <dd class="mt-1 text-sm text-slate-100">{{ server.api_port }}</dd>
                         </div>
