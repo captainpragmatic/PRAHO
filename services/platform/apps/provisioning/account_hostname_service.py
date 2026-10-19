@@ -42,7 +42,9 @@ from .virtualmin_gateway import (
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 if TYPE_CHECKING:
-    from apps.infrastructure.dns_gateway import DnsRecordType
+    from uuid import UUID
+
+    from apps.infrastructure.dns_gateway import DnsRecordSpec
 
 logger = logging.getLogger(__name__)
 
@@ -453,53 +455,130 @@ def _prove_zone(gateway: Any, zone_id: str, zone: str) -> Result[None, str]:
     return Ok(None)
 
 
-def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
-    """Converge the name's A and AAAA records to its target server. Ok(reason) says what was done."""
+def lock_for_publication(pk: UUID, *, skip_locked: bool = False) -> AccountHostname | None:
+    """The name's row, locked for a change to its records and read afresh. Call inside `atomic()`.
+
+    Every publisher of the name's A and AAAA records (sync, withdraw, retire, and the cutover's
+    commit) changes the provider only while holding this lock, deciding on what the row says under
+    it, so a caller holding an older copy never publishes a node the name has left nor a name retired
+    meanwhile (ADR-0061 Phase 2, invariant 3). The certificate's challenge TXT records are not
+    routing and stay under the order's own claim. Nothing takes the account's lock while holding this
+    one: the cutover's commit takes the account's first.
+
+    The row is locked first and read with its relations after: on PostgreSQL a locking query that
+    waited re-reads only the locked row, so a join in it would pair the new `target_server_id` with
+    the server row seen before the wait, which reads as no target at all.
+    """
+    locked = AccountHostname.objects.select_for_update(skip_locked=skip_locked).filter(pk=pk)
+    if not list(locked.values_list("pk", flat=True)):
+        return None
+    return AccountHostname.objects.select_related("account", "account__server", "target_server").get(pk=pk)
+
+
+def sync_account_hostname(hostname: AccountHostname, *, skip_locked: bool = False) -> Result[str, str]:
+    """Converge the name's A and AAAA records to its target server. Ok(reason) says what was done.
+
+    Only the row's id is used: everything is decided again under the name's lock. `skip_locked`
+    (the sweep) passes over a name being published instead of waiting for it.
+    """
     if not config.account_hostnames_enabled():
         return Ok("disabled")
+    # Twice under the lock. The intent is committed first, alone, so a worker killed during the
+    # provider call still leaves the name marked as published, and so withdrawn or retired later.
+    planned = _publication_step(hostname.pk, skip_locked=skip_locked)
+    if planned is not None:
+        return planned
+    zone_id = config.account_zone_id()
+    gateway = _dns_gateway()
+    proven = _prove_zone(gateway, zone_id, hostname.zone)  # A read: outside the lock, to keep it short
+    if proven.is_err():
+        return Err(proven.unwrap_err(), retriability=retriability_of(proven))
+    return _publish(hostname.pk, gateway, zone_id)
+
+
+def _publication_step(pk: UUID, *, skip_locked: bool) -> Result[str, str] | None:
+    """Record the intent under the lock, or say why nothing is published (None: go on to publish)."""
+    with transaction.atomic():
+        hostname = lock_for_publication(pk, skip_locked=skip_locked)
+        if hostname is None:
+            return Ok("skipped:busy" if skip_locked else "skipped:retired")
+        decided = _decide(hostname)
+        if decided is None:
+            _store_intent(hostname, _specs(hostname))
+        return decided
+
+
+def _decide(hostname: AccountHostname) -> Result[str, str] | None:
+    """On the locked row: withdraw, skip with a reason, or None when the name is to be published."""
     reason = _syncable(hostname)
     if reason == "certificate_not_ready" and hostname.records:
         return _withdraw(hostname)
     if reason is not None:
         return Ok(f"skipped:{reason}")
-    server = hostname.target_server
-    ipv4 = server.ipv4_address if server is not None else None
-    if server is None or not ipv4:
-        return Ok("skipped:no_target_address")
-    zone_id = config.account_zone_id()
-    gateway = _dns_gateway()
+    return None
 
-    proven = _prove_zone(gateway, zone_id, hostname.zone)
-    if proven.is_err():
-        return Err(proven.unwrap_err(), retriability=retriability_of(proven))
 
+def _specs(hostname: AccountHostname) -> list[DnsRecordSpec]:
     from apps.infrastructure.dns_gateway import DnsRecordSpec  # noqa: PLC0415  # Deferred: see _dns_gateway
 
+    server = hostname.target_server
+    if server is None or not server.ipv4_address:  # _syncable refused these; kept for the type
+        return []
     ttl = config.account_record_ttl_seconds()
-    specs = [DnsRecordSpec(record_type="A", name=hostname.fqdn, content=ipv4, owner_tag=owner_tag(hostname), ttl=ttl)]
+    tag = owner_tag(hostname)
+    specs = [DnsRecordSpec(record_type="A", name=hostname.fqdn, content=server.ipv4_address, owner_tag=tag, ttl=ttl)]
     if server.ipv6_address:
         specs.append(
-            DnsRecordSpec(
-                record_type="AAAA",
-                name=hostname.fqdn,
-                content=server.ipv6_address,
-                owner_tag=owner_tag(hostname),
-                ttl=ttl,
-            )
+            DnsRecordSpec(record_type="AAAA", name=hostname.fqdn, content=server.ipv6_address, owner_tag=tag, ttl=ttl)
         )
-    # The intent first: a crash after the provider call still leaves what was meant on record.
-    intended = {spec.record_type: {"intended": spec.content, "ttl": spec.ttl} for spec in specs}
-    AccountHostname.objects.filter(pk=hostname.pk).update(records=intended, updated_at=timezone.now())
+    return specs
 
-    outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
-    return _record_outcome(gateway, zone_id, hostname, intended, outcome)
+
+def _merged(previous: Mapping[str, Any], intended: Mapping[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    """Each intended record keeps what was learned about it while its content is unchanged.
+
+    A record whose content changes starts again, and a type no longer intended is dropped: the
+    provider deletes it, and an entry left behind would read as published.
+    """
+    merged: dict[str, dict[str, object]] = {}
+    for record_type, entry in intended.items():
+        before = previous.get(record_type) or {}
+        kept = before if before.get("intended") == entry.get("intended") else {}
+        merged[record_type] = {**kept, **entry}
+    return merged
+
+
+def _store_intent(hostname: AccountHostname, specs: list[DnsRecordSpec]) -> dict[str, dict[str, object]]:
+    intended: dict[str, dict[str, object]] = {
+        spec.record_type: {"intended": spec.content, "ttl": spec.ttl} for spec in specs
+    }
+    merged = _merged(hostname.records or {}, intended)
+    AccountHostname.objects.filter(pk=hostname.pk).update(records=merged, updated_at=timezone.now())
+    hostname.records = merged
+    return merged
+
+
+def _publish(pk: UUID, gateway: Any, zone_id: str) -> Result[str, str]:
+    """The provider call, under the lock, for what the row says now: a commit since may have moved it."""
+    with transaction.atomic():
+        hostname = lock_for_publication(pk)
+        if hostname is None:
+            return Ok("skipped:retired")
+        decided = _decide(hostname)
+        if decided is not None:
+            return decided
+        specs = _specs(hostname)
+        intended = _store_intent(hostname, specs)
+        outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
+        # An Err from here commits what was stored, on purpose: a partial apply is still what exists.
+        return _record_outcome(gateway, zone_id, hostname, intended, outcome)
 
 
 def _withdraw(hostname: AccountHostname) -> Result[str, str]:
     """A published name whose certificate is gone stops being published, and is due again at every sweep.
 
     Publishing means only a name with an unexpired certificate installed on its node is in DNS; a name
-    that lost it would send customers to a node that cannot serve it.
+    that lost it would send customers to a node that cannot serve it. Called under the name's lock.
     """
     deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
     if deleted.is_err():
@@ -515,7 +594,7 @@ def _record_outcome(
     gateway: Any,
     zone_id: str,
     hostname: AccountHostname,
-    intended: Mapping[DnsRecordType, dict[str, object]],
+    intended: Mapping[str, dict[str, object]],
     outcome: Any,
 ) -> Result[str, str]:
     """Store what the provider applied; a name retired meanwhile has its records deleted again."""
@@ -547,16 +626,20 @@ def _record_outcome(
 
 
 def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
-    """Delete the name's records and retire it. The label stays taken for ever."""
+    """Delete the name's records and retire it, under the name's lock. The label stays taken for ever."""
     if hostname.retired_at is not None:
         return Ok(None)
-    if config.account_hostnames_enabled() or hostname.records:
-        deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
-        if deleted.is_err():
-            return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
-    # A save, not a queryset update: the retirement is audited by the row's own signals.
-    hostname.retired_at = timezone.now()
-    hostname.records = {}
-    hostname.target_server = None  # A retired name holds no node, so the node can be unregistered
-    hostname.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None or locked.retired_at is not None:
+            return Ok(None)
+        if config.account_hostnames_enabled() or locked.records:
+            deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(locked))
+            if deleted.is_err():
+                return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+        # A save of the locked row, not a queryset update: the retirement is audited by its own signals.
+        locked.retired_at = timezone.now()
+        locked.records = {}
+        locked.target_server = None  # A retired name holds no node, so the node can be unregistered
+        locked.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
     return Ok(None)

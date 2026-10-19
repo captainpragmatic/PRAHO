@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
@@ -99,7 +99,9 @@ class FakeNode:
         return Ok(FakeResponse(True, {"status": "success"}))
 
 
-class AccountNameTestCase(TestCase):
+class AccountNameTransactionCase(TransactionTestCase):
+    """The account-name fixture; `AccountNameTestCase` is the same in a transaction rolled back per test."""
+
     def setUp(self) -> None:
         self.server = VirtualminServer.objects.create(
             name="Node", hostname="node1.example.com", ipv4_address="95.217.0.10", ipv6_address="2a01:4f8::1"
@@ -164,6 +166,10 @@ class AccountNameTestCase(TestCase):
 
     def _psl_shipped(self) -> None:
         SettingsService.update_setting("dns.account_zone_psl_shipped", True).unwrap()
+
+
+class AccountNameTestCase(AccountNameTransactionCase, TestCase):
+    pass
 
 
 class EnsureTests(AccountNameTestCase):
