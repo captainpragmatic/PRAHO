@@ -508,16 +508,14 @@ class MigrationTests(MigrationTestBase):
                     )
                     self.assertEqual(len(self.events), before)
                 else:
-                    self.assertTrue(
-                        migration.transition(
-                            token,
-                            "pending",
-                            status,
-                            restore_issued=status in {"restoring", "verifying"},
-                            lease_token=None,
-                            worker_lease_expires_at=None,
-                        )
+                    # fsm-bypass: place the row in the interrupted phase under test, past the graph's edges.
+                    placed = VirtualminMigration.objects.filter(pk=migration.pk, lease_token=token).update(
+                        status=status,
+                        restore_issued=status in {"restoring", "verifying"},
+                        lease_token=None,
+                        worker_lease_expires_at=None,
                     )
+                    self.assertEqual(placed, 1)
                     self.source_gateway.domain_state_of(self.account.domain).enabled = False
                     if status == "verifying":
                         self.target_gateway._domains[self.account.domain] = deepcopy(

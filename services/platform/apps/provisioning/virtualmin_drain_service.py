@@ -184,7 +184,29 @@ class NodeDrainService:
         return Ok(drain)
 
     @classmethod
+    def wake(cls, drain_id: UUID) -> None:
+        """A migration of the drain finished: a drain that checkpointed to wait for it runs again."""
+        drain = NodeDrain.objects.filter(pk=drain_id, status="pending").first()
+        if drain is not None:
+            cls._enqueue(drain.pk, drain.task_token)
+
+    @staticmethod
+    def _checkpoint(drain: NodeDrain) -> None:
+        """Wait for the current migration: pending again, under a fresh token its finish wakes."""
+        # fsm-bypass: persist a checkpoint under the drain row lock; the token fences old deliveries.
+        drain.status, drain.task_token = "pending", uuid4()
+        drain.save(update_fields=["status", "task_token", "updated_at"])
+
+    @classmethod
     def _next(cls, drain: NodeDrain, deadline: float) -> VirtualminAccount | None:
+        current = drain.current_migration
+        if current is not None and current.status not in _TERMINAL_STATUSES:
+            # A deferred migration is still running, only not here: wait for it, never start another.
+            if current.status == "needs_review":
+                cls._close(drain, "paused_needs_review", f"Migration {current.pk}: needs_review")
+            else:
+                cls._checkpoint(drain)
+            return None
         if drain.cancel_requested:
             cls._close(drain, "cancelled")
             return None
@@ -213,13 +235,14 @@ class NodeDrainService:
         return account
 
     @classmethod
-    def _migrate(cls, drain: NodeDrain, account: VirtualminAccount) -> str:
+    def _migrate(cls, drain: NodeDrain, account: VirtualminAccount) -> str | None:
+        """Run one account's migration: "" when it completed, None while it waits, else the error."""
         service = VirtualminMigrationService()
         targets = service.eligible_targets(account, preferred_region=drain.server.region)
         if not targets:
             return "No eligible migration target"
         result = service.start_migration(
-            account, targets[0], initiated_by=drain.initiated_by, reason="drain", enqueue=False
+            account, targets[0], initiated_by=drain.initiated_by, reason="drain", enqueue=False, drain=drain
         )
         if result.is_err():
             return result.unwrap_err()
@@ -231,6 +254,8 @@ class NodeDrainService:
         migration.refresh_from_db()
         if execution.is_err():
             return execution.unwrap_err()
+        if migration.status not in _TERMINAL_STATUSES and migration.resume_after is not None:
+            return None
         return "" if migration.status == "completed" else f"Migration {migration.pk}: {migration.status}"
 
     @classmethod
@@ -266,15 +291,27 @@ class NodeDrainService:
             except Exception as exc:
                 logger.exception("🔥 [NodeDrain] Migration interrupted: %s", drain.pk)
                 error = str(exc)
-            with transaction.atomic():
-                drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
-                if drain.status != "running" or drain.task_token != token:
-                    return Ok(drain)
-                if error:
-                    cls._close(drain, "paused_needs_review", error)
-                    return Ok(drain)
-                drain.accounts_migrated += 1
-                drain.save(update_fields=["accounts_migrated", "updated_at"])
+            stopped = cls._after_account(drain_id, token, error)
+            if stopped is not None:
+                return Ok(stopped)
+
+    @classmethod
+    def _after_account(cls, drain_id: UUID, token: UUID, error: str | None) -> NodeDrain | None:
+        """After one account's migration: the drain to return if the run stops here, else None.
+
+        A completed migration is counted by its own finish, which also wakes a drain that waited.
+        """
+        with transaction.atomic():
+            drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
+            if drain.status != "running" or drain.task_token != token:
+                return drain
+            if error is None:
+                cls._checkpoint(drain)
+                return drain
+            if error:
+                cls._close(drain, "paused_needs_review", error)
+                return drain
+        return None
 
 
 def coordinate_health_failure(server: VirtualminServer) -> None:
