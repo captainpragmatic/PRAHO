@@ -33,4 +33,5 @@ class ScheduledTaskCatalogTests(TestCase):
     def test_chain_schedule_is_installed_only_for_enabled_chaining(self) -> None:
         call_command("setup_scheduled_tasks", stdout=StringIO())
         self.assertEqual(Schedule.objects.filter(name="audit-chain-anchor-hourly").count(), 1)
-        self.assertEqual(Schedule.objects.count(), len(CATALOG) + 1)
+        self.assertEqual(Schedule.objects.filter(name="audit-chain-recovery-every-minute").count(), 1)
+        self.assertEqual(Schedule.objects.count(), len(CATALOG) + 2)

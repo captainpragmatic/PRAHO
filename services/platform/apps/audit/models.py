@@ -121,7 +121,7 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
             event.user_agent = (event.user_agent or "")[:USER_AGENT_MAX_LENGTH]
             stamp_audit_event_integrity_hash(sender=AuditEvent, instance=event)
         created = super().bulk_create(events, batch_size=batch_size)
-        # One transaction, so the chain head is locked once for the whole batch.
+        # Register callbacks without taking the chain head inside the business transaction.
         with transaction.atomic():
             for event in created:
                 append_audit_event_chain_link(sender=AuditEvent, instance=event, created=True)
