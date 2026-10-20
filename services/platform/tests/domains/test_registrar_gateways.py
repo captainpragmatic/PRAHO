@@ -54,7 +54,10 @@ def _make_registrar(name: str = "gandi", **kwargs: Any) -> Registrar:
         "status": "active",
     }
     defaults.update(kwargs)
-    return Registrar(name=name, **defaults)
+    secret = str(defaults.pop("api_key"))
+    registrar = Registrar(name=name, **defaults)
+    registrar.set_encrypted_credentials(api_key=secret)
+    return registrar
 
 
 def _mock_response(
@@ -246,9 +249,7 @@ class GandiGatewayRenewTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
-    def test_renewal_sends_sharing_id_when_configured(
-        self, mock_cache: MagicMock, mock_request: MagicMock
-    ) -> None:
+    def test_renewal_sends_sharing_id_when_configured(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         self.registrar.api_username = "reseller-org-id"
@@ -261,9 +262,7 @@ class GandiGatewayRenewTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
-    def test_renewal_omits_sharing_id_when_not_configured(
-        self, mock_cache: MagicMock, mock_request: MagicMock
-    ) -> None:
+    def test_renewal_omits_sharing_id_when_not_configured(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         mock_request.return_value = _mock_response(202, {"message": "Accepted"})
@@ -275,9 +274,7 @@ class GandiGatewayRenewTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
-    def test_accepted_renewal_without_expiry_is_pending(
-        self, mock_cache: MagicMock, mock_request: MagicMock
-    ) -> None:
+    def test_accepted_renewal_without_expiry_is_pending(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = [None]
         mock_cache.add.return_value = True
         operation_url = "https://api.gandi.net/v5/domain/domains/example.com/renew/operations/42"
@@ -409,9 +406,11 @@ class ROTLDGatewayRegisterTests(TestCase):
         mock_cache.get.side_effect = [None]
         mock_request.return_value = _mock_response(
             200,
-            {"error": 0, "result_code": "00200", "data": {
-                "domain": "exemplu.ro", "expiration_date": "2027-04-06T00:00:00Z"
-            }},
+            {
+                "error": 0,
+                "result_code": "00200",
+                "data": {"domain": "exemplu.ro", "expiration_date": "2027-04-06T00:00:00Z"},
+            },
         )
 
         result = self.gateway.register_domain("exemplu.ro", 1, self.registrant)
@@ -447,7 +446,8 @@ class ROTLDGatewayRegistrantMappingTests(TestCase):
             "entity_type": "company",
             "company_name": "SC Exemplu SRL",
             "cui": "RO12345678",
-            "email": "ion@example.com", "phone": "+40721000000",
+            "email": "ion@example.com",
+            "phone": "+40721000000",
         }
         mapped = self.gateway._map_registrant_to_rotld(data)
 
@@ -461,7 +461,8 @@ class ROTLDGatewayRegistrantMappingTests(TestCase):
             "last_name": "Popescu",
             "entity_type": "individual",
             "cnp": "1234567890123",
-            "email": "ion@example.com", "phone": "+40721000000",
+            "email": "ion@example.com",
+            "phone": "+40721000000",
         }
         mapped = self.gateway._map_registrant_to_rotld(data)
 
@@ -490,7 +491,9 @@ class CircuitBreakerTests(TestCase):
             for _ in range(CIRCUIT_BREAKER_THRESHOLD):
                 self.assertTrue(self.gateway.check_availability("example.com").is_err())
 
-        with patch("apps.domains.gateways.base.safe_request", side_effect=AssertionError("Open breaker called registrar")):
+        with patch(
+            "apps.domains.gateways.base.safe_request", side_effect=AssertionError("Open breaker called registrar")
+        ):
             result = self.gateway.check_availability("example.com")
 
         self.assertTrue(result.is_err())
@@ -782,9 +785,7 @@ class GandiInvalidResponseTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
-    def test_malformed_price_does_not_break_availability(
-        self, mock_cache: MagicMock, mock_request: MagicMock
-    ) -> None:
+    def test_malformed_price_does_not_break_availability(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.return_value = 0  # circuit breaker OK
         mock_request.return_value = _mock_response(
             200,
@@ -844,9 +845,15 @@ class RetryHonorsRetriabilityTests(TestCase):
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
         self.registrant = {
-            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
-            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
-            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+            "first_name": "Ion",
+            "last_name": "Pop",
+            "email": "ion@example.ro",
+            "phone": "+40712345678",
+            "address": "Str. Test 1",
+            "city": "Bucuresti",
+            "postal_code": "010101",
+            "country_code": "RO",
+            "entity_type": "individual",
         }
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
@@ -889,9 +896,15 @@ class IdempotencyCacheSecretRedactionTests(TestCase):
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
         self.registrant = {
-            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
-            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
-            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+            "first_name": "Ion",
+            "last_name": "Pop",
+            "email": "ion@example.ro",
+            "phone": "+40712345678",
+            "address": "Str. Test 1",
+            "city": "Bucuresti",
+            "postal_code": "010101",
+            "country_code": "RO",
+            "entity_type": "individual",
         }
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
@@ -926,9 +939,15 @@ class UnverifiedAdapterGuardTests(TestCase):
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
         self.registrant = {
-            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
-            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
-            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+            "first_name": "Ion",
+            "last_name": "Pop",
+            "email": "ion@example.ro",
+            "phone": "+40712345678",
+            "address": "Str. Test 1",
+            "city": "Bucuresti",
+            "postal_code": "010101",
+            "country_code": "RO",
+            "entity_type": "individual",
         }
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
@@ -985,9 +1004,15 @@ class GatewayHardeningTests(TestCase):
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
         self.registrant = {
-            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
-            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
-            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+            "first_name": "Ion",
+            "last_name": "Pop",
+            "email": "ion@example.ro",
+            "phone": "+40712345678",
+            "address": "Str. Test 1",
+            "city": "Bucuresti",
+            "postal_code": "010101",
+            "country_code": "RO",
+            "entity_type": "individual",
         }
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_register")

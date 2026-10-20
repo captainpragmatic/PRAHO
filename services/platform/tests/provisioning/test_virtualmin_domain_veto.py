@@ -132,6 +132,8 @@ class UnsuspendRetryDomainVetoTests(_DomainVetoBase):
 
 
 class DivergenceSweepDomainVetoTests(_DomainVetoBase):
+    account_uuid = uuid.UUID(int=10**6)
+
     def _blocked_service(self, index: int) -> Service:
         name = f"blocked{index}.example.com"
         service = Service.objects.create(
@@ -158,7 +160,6 @@ class DivergenceSweepDomainVetoTests(_DomainVetoBase):
 
     def test_domain_blocked_accounts_are_filtered_before_the_cap(self) -> None:
         blocked = [self._blocked_service(i) for i in range(50)]
-        VirtualminAccount.objects.filter(pk=self.account.pk).update(id=uuid.UUID(int=10**6))
 
         with patch(
             "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1"

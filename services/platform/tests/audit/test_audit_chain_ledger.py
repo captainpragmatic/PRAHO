@@ -71,7 +71,10 @@ class AuditChainLedgerTestCase(TestCase):
             "ip_address": "192.168.1.1",
         }
         fields.update(overrides)
-        return AuditEvent.objects.create(**fields)
+        with self.captureOnCommitCallbacks(execute=True):
+            event = AuditEvent.objects.create(**fields)
+        event.refresh_from_db()
+        return event
 
     def _verify(self) -> list[dict[str, Any]]:
         """Run the ledger verifier over a window wide enough to cover the fixture."""
@@ -204,7 +207,8 @@ class ChainTamperDetectionTests(AuditChainLedgerTestCase):
     def test_unlinked_event_is_informational_until_chain_is_required(self) -> None:
         """Pre-cutover, an unlinked event is an expected artifact — not a forgery signal."""
         AuditChainHead.objects.filter(pk=1).update(backfill_complete=False)
-        self._event(description="predates the backfill")
+        with override_settings(AUDIT_CHAIN_ENABLED=False):
+            self._event(description="predates the backfill")
 
         with override_settings(AUDIT_CHAIN_REQUIRE=False):
             findings = self._verify()
@@ -309,16 +313,19 @@ class ChainBackfillTests(TestCase):
         self.content_type = ContentType.objects.get_for_model(User)
 
     def _event(self, description: str) -> AuditEvent:
-        return AuditEvent.objects.create(
-            user=self.user,
-            action="login_success",
-            category="authentication",
-            severity="low",
-            content_type=self.content_type,
-            object_id=str(self.user.id),
-            description=description,
-            ip_address="192.168.1.1",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            event = AuditEvent.objects.create(
+                user=self.user,
+                action="login_success",
+                category="authentication",
+                severity="low",
+                content_type=self.content_type,
+                object_id=str(self.user.id),
+                description=description,
+                ip_address="192.168.1.1",
+            )
+        event.refresh_from_db()
+        return event
 
     def _verify(self) -> list[dict[str, Any]]:
         now = timezone.now()
@@ -660,15 +667,14 @@ class ChainAdversarialReviewRegressionTests(AuditChainLedgerTestCase):
         The append path is fail-open by design, so the marker is the only remaining signal —
         and nothing read it, despite the verifier docstring claiming otherwise.
         """
-        event = self._event()
+        event = self._event(timestamp=timezone.now() - timezone.timedelta(minutes=6))
         with audit_mutation_allowed("test"):
             AuditEvent.objects.filter(pk=event.pk).update(metadata={**event.metadata, "chain_link_pending": True})
 
         findings = self._verify()
         pending = [f for f in findings if f["type"] == "chain_link_pending"]
         self.assertEqual(len(pending), 1)
-        # Always critical: unlike an unlinked event, this marker only appears when a live
-        # append actually broke, so it is never a benign cutover artifact.
+        # Work still pending beyond the grace period requires intervention.
         self.assertEqual(pending[0]["severity"], "critical")
 
     def test_forced_append_failure_surfaces_as_a_finding(self) -> None:

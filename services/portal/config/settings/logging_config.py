@@ -17,6 +17,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from apps.common.secret_urls import secure_logging_config
+
 DEFAULT_LOG_DIR = "/var/log/praho/portal"
 
 
@@ -52,7 +54,7 @@ def portal_logging(log_dir: str, *, apps_level: str = "INFO") -> dict[str, Any]:
             "filters": ["add_request_id"],
             "level": "ERROR",
         }
-    return {
+    config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
@@ -98,3 +100,5 @@ def portal_logging(log_dir: str, *, apps_level: str = "INFO") -> dict[str, Any]:
             },
         },
     }
+
+    return secure_logging_config(config)

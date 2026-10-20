@@ -7,9 +7,9 @@
 
 The chain ledger closes that: every event gets an `AuditChainLink` carrying the previous
 link's MAC and a monotonic `sequence`, so an insert, a reorder, or a mid-chain deletion
-breaks the walk. The walk also re-derives each live event's MAC and compares it to what its
-link committed to, so editing a row after it was chained is caught with no time window
-involved.
+breaks the walk. Per-row MAC verification detects changes to live evidence. The ledger preserves the MAC
+recorded when it linked each event; legitimate anonymization can restamp the live row without
+rewriting historical links.
 
 Chaining alone still cannot detect **tail truncation**: lop off the last N links and the
 survivors remain internally consistent. Two things catch it. The chain head is compared
@@ -22,6 +22,24 @@ link count)` to a sink outside the database, MAC'd under a separate key.
 the same database an attacker would own, and they can delete it alongside the links. The
 evidence is what the **sink** holds. Verification compares the sink's highest anchor against
 the live chain: a chain that no longer reaches an anchored sequence has been truncated.
+
+## Commit-time linking and recovery
+
+When chaining is enabled, each event INSERT includes a durable `chain_link_pending` marker.
+Live and bulk-created events register commit callbacks; the business transaction does not
+acquire the global chain-head lock. Rollback discards both the event and its callback.
+The callback serializes chain assignment only after commit, verifies the freshly loaded
+per-row MAC, appends once, and clears the pending marker in the same transaction. Ledger
+sequence reflects append order and does not claim global business-transaction commit order.
+
+`setup_audit_scheduled_tasks` also installs `audit-chain-recovery-every-minute`. It repairs
+at most 100 pending events per run (configurable up to 1000 through the task argument), using
+the same idempotent executor as callbacks. A failed callback leaves its original marker for
+recovery; tampered evidence is refused and remains visible. Review task errors and integrity
+findings when recovery cannot proceed. Normal pending latency is informational for five
+minutes, only for verified MACs with bounded timestamps; other pending work is critical.
+Required-chain checks still flag unmarked missing
+links. Retention records tombstones before deleting evidence, preserving that guarantee.
 
 ## Threat model
 

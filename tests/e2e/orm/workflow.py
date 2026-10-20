@@ -6,7 +6,7 @@ from io import StringIO
 from django.core.management import call_command
 from django.test import TestCase
 
-from apps.billing.models import Currency
+from apps.billing.models import Currency, InvoiceSequence
 from apps.billing.proforma_service import ProformaPaymentService
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
@@ -18,6 +18,8 @@ from apps.users.models import User
 class WorkflowCase(TestCase):
     def setUp(self):
         call_command("setup_email_templates", stdout=StringIO())
+        InvoiceSequence.objects.get_or_create(scope="default")
+        InvoiceSequence.objects.get_or_create(scope="subscription")
         self.admin = User.objects.create_user(
             email="workflow@e2e.test", password="test123", is_staff=True, is_superuser=True, staff_role="admin"
         )

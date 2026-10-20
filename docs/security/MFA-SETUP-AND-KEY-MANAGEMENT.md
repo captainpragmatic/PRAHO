@@ -6,6 +6,41 @@ Operational guide for MFA setup, encryption key management, and backup code admi
 
 PRAHO Platform implements enterprise-grade Multi-Factor Authentication (MFA) with encrypted storage of sensitive data. This guide covers setup, configuration, and operational procedures for development, testing, and production environments.
 
+## Strict persistent-secret cutover
+
+Persistent credentials now require AES-GCM context binding to the owning table, immutable
+row UUID and field. Integer-keyed rows receive a separate immutable UUID in new migrations.
+The migrations preserve all ciphertext and MFA flags; they do not decrypt, delete or upgrade
+existing secrets. Legacy unbound ciphertext and plaintext fail closed on access immediately.
+AAD prevents ciphertext substitution; the prior encryption itself was not broken.
+
+Before adopting this release, inventory and arrange replacement of existing TOTP enrolments,
+registrar API/webhook credentials, domain and order transfer codes, server/Virtualmin passwords,
+ANAF OAuth tokens, sensitive system-setting values/defaults, and vault credentials. Re-enter
+credentials through their normal forms/services, renew ANAF authorization, or reset the
+upstream password and store its replacement. Vault data uses its existing separate master key.
+Do not copy raw ciphertext between rows, fields or tables, or change context UUIDs. Key rotation
+still uses the configured keyring, with the current key for writes and previous keys for reads.
+
+A user with an old TOTP secret can sign in with an existing eight-digit backup code, then
+replace their enrolment. If no valid backup code or administrator session remains, an authorized
+operator can use the audited recovery command:
+
+```bash
+python manage.py reset_two_factor --email person@example.ro --reason "Strict secret cutover recovery"
+```
+
+This explicit command ends the person's sessions and permits fresh MFA enrolment. The release
+never automatically disables MFA. Verify identity through the established recovery process.
+
+Email bodies and suppression-address ciphertext are also bound to their row and field. New
+email bodies cannot fall back to plaintext if encryption fails. Historical email-body reads
+reject unbound/plaintext content; retain backups under normal retention rules. The explicit
+`reencrypt_email_logs` repair command can bind known plaintext email bodies; it skips existing
+ciphertext and is not an automatic migration. Queued secret provisioning parameters bind their
+payload hash and creation timestamp; recreate old queued parameter bundles through the normal
+provisioning workflow.
+
 ## Quick Start
 
 ### 1. Generate Encryption Key

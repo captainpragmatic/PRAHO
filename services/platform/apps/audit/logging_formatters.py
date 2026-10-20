@@ -22,6 +22,8 @@ from typing import Any, ClassVar
 
 from django.conf import settings
 
+from apps.common.secret_urls import redact_text, redact_urls
+
 
 def _detect_environment() -> str:
     """Derive environment name from DJANGO_SETTINGS_MODULE."""
@@ -142,7 +144,7 @@ class SIEMJSONFormatter(logging.Formatter):
         # Add extra fields from record
         log_entry.update(self._extract_extra_fields(record))
 
-        return json.dumps(log_entry, default=str, ensure_ascii=False)
+        return redact_text(json.dumps(log_entry, default=str, ensure_ascii=False))
 
     def _build_base_entry(self, record: logging.LogRecord) -> dict[str, Any]:
         """Build base log entry structure"""
@@ -367,11 +369,13 @@ class AuditLogFormatter(logging.Formatter):
             },
         }
 
+        audit_entry = redact_urls(audit_entry)
+
         # Compute hash for integrity chain
         entry_json = json.dumps(audit_entry, sort_keys=True, default=str)
         entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
 
-        audit_entry["integrity"]["hash"] = entry_hash  # type: ignore[index]
+        audit_entry["integrity"]["hash"] = entry_hash
         self.previous_hash = entry_hash
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)

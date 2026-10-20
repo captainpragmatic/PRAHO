@@ -27,10 +27,13 @@ def portal_environment(root: Path, profile: str) -> dict[str, str]:
         "django_settings_module": f"config.settings.{profile}",
         "deployed_env": {"PORTAL_DOMAIN": "portal.example.test", "PORTAL_DJANGO_SECRET_KEY": PORTAL_KEY,
                          "DJANGO_SECRET_KEY": "s" * 60, "DB_PASSWORD": "private-platform-password",
-                         "HMAC_SECRET": API_KEY},
+                         "HMAC_SECRET": API_KEY, "PORTAL_HMAC_SECRET": API_KEY},
     }
-    return {key: template.from_string(str(value)).render(context)
+    base = {key: template.from_string(str(value)).render(context)
             for key, value in task["vars"]["praho_portal_env_base"].items()}
+    passthrough = {key: value for key, value in context["deployed_env"].items()
+                   if key in task["vars"]["praho_passthrough"]}
+    return {**base, **passthrough}
 
 
 @pytest.mark.parametrize("profile", ["prod", "staging"])

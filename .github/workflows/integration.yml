@@ -69,6 +69,8 @@ jobs:
       run: make lint
 
     - name: Check migration state
+      env:
+        MIGRATION_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
       run: make check-migrations
 
     - name: Component parity check (portal ↔ platform)

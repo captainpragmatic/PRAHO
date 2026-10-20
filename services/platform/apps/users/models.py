@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -21,6 +22,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.identity_fields import validate_international_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 from apps.common.transactions import best_effort_atomic
 
 if TYPE_CHECKING:
@@ -28,8 +30,6 @@ if TYPE_CHECKING:
 
 # Cross-app imports for core functionality
 from apps.common.encryption import (  # Core encryption needed for user model
-    decrypt_sensitive_data,
-    encrypt_sensitive_data,
     generate_backup_codes,
     hash_backup_code,
 )
@@ -83,6 +83,8 @@ class User(AbstractUser):
     Extended user model for Romanian hosting provider.
     Supports both system users (staff) and customer users with hybrid approach.
     """
+
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     # Staff roles for internal staff (nullable for customer users)
     STAFF_ROLE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -408,13 +410,13 @@ class User(AbstractUser):
         if not self._two_factor_secret:
             return ""
 
-        return decrypt_sensitive_data(self._two_factor_secret)
+        return decrypt_model_secret(self, "_two_factor_secret", self._two_factor_secret)
 
     @two_factor_secret.setter
     def two_factor_secret(self, value: str) -> None:
         """Set encrypted 2FA secret"""
         if value:
-            self._two_factor_secret = encrypt_sensitive_data(value)
+            self._two_factor_secret = encrypt_model_secret(self, "_two_factor_secret", value)
         else:
             self._two_factor_secret = ""  # nosec B105
 

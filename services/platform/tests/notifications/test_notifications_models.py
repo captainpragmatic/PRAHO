@@ -4,11 +4,12 @@ Tests security features integrated into Django models.
 """
 
 from unittest.mock import patch
-from django.test import TestCase
-from django.core.exceptions import ValidationError
-from django.contrib.auth import get_user_model
 
-from apps.notifications.models import EmailTemplate, EmailLog, EmailCampaign
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.test import TestCase
+
+from apps.notifications.models import EmailCampaign, EmailLog, EmailTemplate
 
 User = get_user_model()
 
@@ -24,7 +25,7 @@ class EmailTemplateSecurityTests(TestCase):
             subject="Test Subject",
             body_html="{% debug %}{{ dangerous_content }}",
             body_text="Safe text",
-            category="system"
+            category="system",
         )
 
         with self.assertRaises(ValidationError):
@@ -39,7 +40,7 @@ class EmailTemplateSecurityTests(TestCase):
             body_html="<p>Safe content</p>",
             body_text="Safe content",
             category="system",
-            variables={"data": "x" * 15000}  # Too large
+            variables={"data": "x" * 15000},  # Too large
         )
 
         with self.assertRaises(ValidationError):
@@ -54,7 +55,7 @@ class EmailTemplateSecurityTests(TestCase):
             body_html="<p>Hello {{ customer_name }}!</p>",
             body_text="Hello {{ customer_name }}!",
             category="system",
-            variables={"customer_name": "Customer name variable"}
+            variables={"customer_name": "Customer name variable"},
         )
 
         try:
@@ -70,7 +71,7 @@ class EmailTemplateSecurityTests(TestCase):
             subject="Test Subject",
             body_html="<p>Hello <script>alert('xss')</script>{{ name }}!</p>",
             body_text="Hello {{ name }}!",
-            category="system"
+            category="system",
         )
 
         safe_html, safe_text = template.get_sanitized_content()
@@ -84,9 +85,9 @@ class EmailTemplateSecurityTests(TestCase):
 class EmailLogSecurityTests(TestCase):
     """🔒 Tests for EmailLog model security"""
 
-    @patch('apps.notifications.models.ENCRYPTION_AVAILABLE', True)
-    @patch('apps.notifications.models.encrypt_value', return_value="aes:encrypted")
-    @patch('apps.notifications.models.is_encrypted', return_value=False)
+    @patch("apps.notifications.models.ENCRYPTION_AVAILABLE", True)
+    @patch("apps.notifications.models.encrypt_model_secret", return_value="aes:encrypted")
+    @patch("apps.notifications.models.is_encrypted", return_value=False)
     def test_email_content_encryption_on_save(self, mock_is_encrypted, mock_encrypt):
 
         email_log = EmailLog(
@@ -95,7 +96,7 @@ class EmailLogSecurityTests(TestCase):
             body_html="<p>Sensitive content</p>",
             body_text="Sensitive content",
             template_key="test.template",
-            status="sent"
+            status="sent",
         )
 
         email_log.save()
@@ -112,7 +113,7 @@ class EmailLogSecurityTests(TestCase):
             subject="Subject\nBcc: evil@test.com",
             body_html="<p>Content</p>",
             template_key="test.template",
-            status="sent"
+            status="sent",
         )
 
         with self.assertRaises(ValidationError):
@@ -125,14 +126,14 @@ class EmailLogSecurityTests(TestCase):
             subject="Test Subject",
             template_key="test.template",
             status="sent",
-            meta={"data": "x" * 15000}  # Too large
+            meta={"data": "x" * 15000},  # Too large
         )
 
         with self.assertRaises(ValidationError):
             email_log.clean()
 
-    @patch('apps.notifications.models.ENCRYPTION_AVAILABLE', True)
-    @patch('apps.notifications.models.decrypt_if_needed', return_value="Very long email content " * 100)
+    @patch("apps.notifications.models.ENCRYPTION_AVAILABLE", True)
+    @patch("apps.notifications.models.decrypt_model_secret", return_value="Very long email content " * 100)
     def test_safe_content_preview(self, mock_decrypt):
 
         email_log = EmailLog(
@@ -140,7 +141,7 @@ class EmailLogSecurityTests(TestCase):
             subject="Test Email",
             body_text="enc:v1:encrypted",
             template_key="test.template",
-            status="sent"
+            status="sent",
         )
 
         preview = email_log.get_safe_content_preview()
@@ -154,11 +155,7 @@ class EmailCampaignSecurityTests(TestCase):
     """🔒 Tests for EmailCampaign model security"""
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="admin@test.com", password="testpass123", is_staff=True)
 
         self.template = EmailTemplate.objects.create(
             key="test.template",
@@ -166,7 +163,7 @@ class EmailCampaignSecurityTests(TestCase):
             subject="Test Template",
             body_html="<p>Test content</p>",
             body_text="Test content",
-            category="marketing"
+            category="marketing",
         )
 
     def test_campaign_json_field_validation(self):
@@ -176,7 +173,7 @@ class EmailCampaignSecurityTests(TestCase):
             template=self.template,
             audience="custom_filter",
             audience_filter={"data": "x" * 15000},  # Too large
-            created_by=self.user
+            created_by=self.user,
         )
 
         with self.assertRaises(ValidationError):
@@ -188,13 +185,13 @@ class EmailCampaignSecurityTests(TestCase):
             name="x" * 201,  # Too long
             template=self.template,
             audience="all_customers",
-            created_by=self.user
+            created_by=self.user,
         )
 
         with self.assertRaises(ValidationError):
             campaign.clean()
 
-    @patch('apps.notifications.models.logger')
+    @patch("apps.notifications.models.logger")
     def test_gdpr_compliance_warning(self, mock_logger):
         """🔒 Test that GDPR non-compliance triggers warning"""
         campaign = EmailCampaign(
@@ -203,7 +200,7 @@ class EmailCampaignSecurityTests(TestCase):
             audience="all_customers",
             is_transactional=False,  # Marketing campaign
             requires_consent=False,  # No consent required - should warn
-            created_by=self.user
+            created_by=self.user,
         )
 
         campaign.clean()
@@ -222,7 +219,7 @@ class EmailCampaignSecurityTests(TestCase):
             audience_filter={"status": "active", "consent": True},
             is_transactional=False,
             requires_consent=True,  # GDPR compliant
-            created_by=self.user
+            created_by=self.user,
         )
 
         try:
@@ -235,13 +232,9 @@ class SecurityLoggingIntegrationTests(TestCase):
     """🔒 Tests for security logging in model operations"""
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="admin@test.com", password="testpass123", is_staff=True)
 
-    @patch('apps.notifications.models.logger')
+    @patch("apps.notifications.models.logger")
     def test_template_modification_logging(self, mock_logger):
         """🔒 Test that template modifications are logged"""
         template = EmailTemplate(
@@ -250,7 +243,7 @@ class SecurityLoggingIntegrationTests(TestCase):
             subject="Test Subject",
             body_html="<p>Modified content</p>",
             body_text="Modified content",
-            category="system"
+            category="system",
         )
 
         template.clean()
@@ -260,7 +253,7 @@ class SecurityLoggingIntegrationTests(TestCase):
         call_args = str(mock_logger.info.call_args)
         self.assertIn("Template modified", call_args)
 
-    @patch('apps.notifications.models.logger')
+    @patch("apps.notifications.models.logger")
     def test_email_sending_logging(self, mock_logger):
         """🔒 Test that email sending is logged"""
         email_log = EmailLog(
@@ -268,7 +261,7 @@ class SecurityLoggingIntegrationTests(TestCase):
             subject="Test Email",
             body_text="Test content",
             template_key="test.template",
-            status="sent"  # This should trigger logging
+            status="sent",  # This should trigger logging
         )
 
         email_log.clean()

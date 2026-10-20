@@ -242,6 +242,7 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
         self.assertEqual(FiscalCorrection.objects.filter(state=STATE_MANUAL_REQUIRED).count(), 2)
 
     def test_a_builtin_invoices_correction_never_reaches_a_provider_reversal(self) -> None:
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
         invoice = h.issued_invoice(self.customer, number="INV-000901")
         payment = h.paid(invoice)
         refund = h.complete(h.pending_refund(invoice=invoice, payment=payment))

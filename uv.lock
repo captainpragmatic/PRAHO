@@ -721,6 +721,26 @@ wheels = [
 ]
 
 [[package]]
+name = "django-anymail"
+version = "15.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "idna" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f9/69/c4e075a39e69efc928ad63e2cad9b720c6414d9faf9b90d2342207a8feb8/django_anymail-15.1.tar.gz", hash = "sha256:299fb12a21ac4101e9706c2ade461d18deacbb6bc3750cfa6ca08aeea1fc9442", size = 107700, upload-time = "2026-07-30T22:30:27.794Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/bb/3fbac63312c87620986ac00c7b27d11ef1a7c07ffb5718ca5bd5c60e2f5f/django_anymail-15.1-py3-none-any.whl", hash = "sha256:cb482b0e2b0aea665c83d49e3f13bb0673210aa0de285b1748a3b5e6277fc826", size = 147352, upload-time = "2026-07-30T22:30:26.359Z" },
+]
+
+[package.optional-dependencies]
+amazon-ses = [
+    { name = "boto3" },
+]
+
+[[package]]
 name = "django-cachalot"
 version = "2.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1895,6 +1915,7 @@ dev = [
     { name = "factory-boy" },
     { name = "faker" },
     { name = "freezegun" },
+    { name = "gunicorn" },
     { name = "ipython" },
     { name = "isort" },
     { name = "lxml-stubs" },
@@ -1914,6 +1935,7 @@ dev = [
     { name = "sphinx-rtd-theme" },
     { name = "tblib" },
     { name = "types-bleach" },
+    { name = "types-gunicorn" },
     { name = "types-markdown" },
     { name = "types-paramiko" },
     { name = "types-psutil" },
@@ -1935,6 +1957,7 @@ platform = [
     { name = "cryptography" },
     { name = "dj-database-url" },
     { name = "django-allauth" },
+    { name = "django-anymail", extra = ["amazon-ses"] },
     { name = "django-cors-headers" },
     { name = "django-crispy-forms" },
     { name = "django-filter" },
@@ -2013,6 +2036,7 @@ dev = [
     { name = "factory-boy", specifier = ">=3.3.0" },
     { name = "faker", specifier = ">=19.3.0" },
     { name = "freezegun", specifier = ">=1.2.0" },
+    { name = "gunicorn", specifier = ">=26.2.0" },
     { name = "ipython", specifier = ">=8.15.0" },
     { name = "isort", specifier = ">=5.12.0" },
     { name = "lxml-stubs", specifier = ">=0.5.0" },
@@ -2032,6 +2056,7 @@ dev = [
     { name = "sphinx-rtd-theme", specifier = ">=1.3.0" },
     { name = "tblib", specifier = ">=3.1.0" },
     { name = "types-bleach", specifier = ">=6.0.0" },
+    { name = "types-gunicorn", specifier = ">=23.0.0" },
     { name = "types-markdown", specifier = ">=3.5.0" },
     { name = "types-paramiko", specifier = ">=3.4.0" },
     { name = "types-psutil", specifier = ">=5.9.0" },
@@ -2053,6 +2078,7 @@ platform = [
     { name = "cryptography", specifier = ">=46.0.5" },
     { name = "dj-database-url", specifier = ">=2.1.0" },
     { name = "django-allauth", specifier = ">=65.0.0" },
+    { name = "django-anymail", extras = ["amazon-ses"], specifier = ">=14.0" },
     { name = "django-cors-headers", specifier = ">=4.3.0" },
     { name = "django-crispy-forms", specifier = ">=2.1.0" },
     { name = "django-filter", specifier = ">=23.0" },
@@ -3039,6 +3065,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5f/54/3e0d9e2e0d7a00cf9b1a2c35160038c8bf5cb7ad80003c5d7e4e5af1e9dd/types_bleach-6.3.0.20251115.tar.gz", hash = "sha256:96911b20f169a18524d03b61fa7e98a08c411292f7cdb5dc191057f55dad9ae3", size = 11452, upload-time = "2025-11-15T03:00:28.919Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ee/fb/9f016a969603ef949a573158a58dd293948ed187c1f9f76c7cfe1bb96705/types_bleach-6.3.0.20251115-py3-none-any.whl", hash = "sha256:f81e7cf4ebac3f3d60b66b3fd5236c324e65037d1b28d22c94d5b457f0b98f42", size = 12015, upload-time = "2025-11-15T03:00:27.785Z" },
+]
+
+[[package]]
+name = "types-gunicorn"
+version = "26.2.0.20261008"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/f6/6a7e21a80514e7ea5a1b218cfdcf4088a292a9a2d52a7ae92c2973064cbc/types_gunicorn-26.2.0.20261008.tar.gz", hash = "sha256:8472f71129be5b90527b948cfbff643a6e8f887ea5b5dffacc446df0ba664ccb", size = 36182, upload-time = "2026-10-08T08:06:26.782Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/14/78e2b07d1e30402f355e90f92c1d704212a76c08b6e372bf1b36a37075e4/types_gunicorn-26.2.0.20261008-py3-none-any.whl", hash = "sha256:88f43f742983c259ad0be5505f8c2778feaeae25a4824efc9069b83fc056f672", size = 54422, upload-time = "2026-10-08T08:06:25.857Z" },
 ]
 
 [[package]]

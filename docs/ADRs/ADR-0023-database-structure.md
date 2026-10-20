@@ -38,6 +38,16 @@ All Django models **must** declare an explicit `Meta.db_table`. The value follow
    (e.g. `customers`, `users`, `orders`, `products`, `tickets`, `domains`)
 4. **All models** — every concrete model sets `db_table` explicitly; no implicit Django names
 
+### Forward schema review
+
+`make check-migrations` checks new `CreateModel` migrations against the naming convention
+and requires a non-empty `db_table_comment` describing the table's purpose. It reads literal
+options from the migration AST, without evaluating querysets or importing models. Proxy
+models are excluded. Existing table names are preserved; in particular, names used in
+encryption AAD must not be changed as a cosmetic cleanup. Add useful `db_comment` descriptions
+to important columns incrementally. Delivery-attempt and webhook-alert state document their
+durable meanings in the database; broad renames and comment-only retrofits are not required.
+
 ### Examples
 
 | Model | App | db_table |

@@ -110,6 +110,7 @@ dev = [
     "mixer>=7.2.0",
     "tblib>=3.1.0",
     "pytest-playwright>=0.4.0",
+    "gunicorn>=26.2.0",  # Exercise the real access logger in platform-only CI environments
     # Code quality
     "ruff>=0.8.0",
     "black>=23.7.0",
@@ -117,6 +118,7 @@ dev = [
     "mypy>=1.5.0",
     "django-stubs[compatible-mypy]>=4.2.0",
     "types-requests>=2.31.0",
+    "types-gunicorn>=23.0.0",
     "types-python-dateutil>=2.8.0",
     "lxml-stubs>=0.5.0",
     "types-bleach>=6.0.0",
@@ -199,6 +201,7 @@ platform = [
 
     # Email
     "django-ses>=3.5.0",
+    "django-anymail[amazon-ses]>=14.0",
 
     # Background task processing
     "django-q2>=1.8.0",

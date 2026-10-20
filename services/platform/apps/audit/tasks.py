@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_FILES_DISPLAYED = 5
 MAX_FILES_DISPLAYED = _DEFAULT_MAX_FILES_DISPLAYED
+MAX_CHAIN_RECOVERY_BATCH = 1000
 
 
 def get_max_files_displayed() -> int:
@@ -309,6 +310,30 @@ def run_retention_policies() -> dict[str, Any]:
     return {"error": result.error}
 
 
+def recover_pending_chain_links(batch_size: int = 100) -> dict[str, int]:
+    """Repair a bounded batch; head serialization makes overlapping workers idempotent."""
+    from apps.audit.models import AuditEvent  # noqa: PLC0415
+    from apps.audit.signals import _link_committed_event  # noqa: PLC0415
+
+    if (
+        isinstance(batch_size, bool)
+        or not isinstance(batch_size, int)
+        or not 1 <= batch_size <= MAX_CHAIN_RECOVERY_BATCH
+    ):
+        raise ValueError("Audit chain recovery batch_size must be between 1 and 1000")
+    result = {"linked": 0, "pending": 0}
+    if not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        return result
+    event_ids = list(
+        AuditEvent.objects.filter(metadata__chain_link_pending=True)
+        .order_by("timestamp", "pk")
+        .values_list("pk", flat=True)[:batch_size]
+    )
+    for event_id in event_ids:
+        result["linked" if _link_committed_event(event_id) else "pending"] += 1
+    return result
+
+
 def publish_chain_anchor() -> dict[str, Any]:
     """Publish the audit chain head to the external sink (#313).
 
@@ -466,6 +491,12 @@ def setup_audit_scheduled_tasks() -> dict[str, str]:
     # a stale schedule is harmless, but keeping it out of `desired` until cutover means the
     # entry appears exactly when it starts being meaningful.
     if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        desired["audit-chain-recovery-every-minute"] = {
+            "func": "apps.audit.tasks.recover_pending_chain_links",
+            "schedule_type": Schedule.MINUTES,
+            "minutes": 1,
+            "repeats": -1,
+        }
         desired["audit-chain-anchor-hourly"] = {
             "func": "apps.audit.tasks.publish_chain_anchor",
             "schedule_type": Schedule.HOURLY,

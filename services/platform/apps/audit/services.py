@@ -3594,6 +3594,8 @@ class AuditIntegrityService:
     )
     # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
     CHAIN_VERSION = 1
+    CHAIN_PENDING_GRACE_SECONDS = 300
+    CHAIN_PENDING_FUTURE_SKEW_SECONDS = 2
 
     @classmethod
     def verify_audit_integrity(
@@ -3862,15 +3864,24 @@ class AuditIntegrityService:
         """
         from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
 
-        event_v2_mac = ""
-        if isinstance(event.metadata, dict):
-            event_v2_mac = str(event.metadata.get("integrity_hash", ""))
-
-        with transaction.atomic():
-            head, _created = AuditChainHead.objects.select_for_update().get_or_create(pk=1)
+        alias = event._state.db or "default"
+        with transaction.atomic(using=alias):
+            head, _created = AuditChainHead.objects.using(alias).select_for_update().get_or_create(pk=1)
             if not head.backfill_complete:
-                # Historical rows are not yet sequenced; appending now would race the backfill.
                 return
+            # Head first, then reload evidence: this agrees with retention's lock order.
+            current = AuditEvent.objects.using(alias).filter(pk=event.pk).first()
+            if current is None:
+                return
+            event = current
+            if cls._verify_hash_chain([event]) or event.metadata.get("integrity_hash_version") != cls.HASH_VERSION:
+                raise ValueError(f"Refusing to chain unverifiable audit event {event.pk}")
+            pending_metadata = {**event.metadata, "chain_link_pending": False}
+            if AuditChainLink.objects.using(alias).filter(event=event, is_tombstone=False).exists():
+                with audit_mutation_allowed("chain_append"):
+                    AuditEvent.objects.using(alias).filter(pk=event.pk).update(metadata=pending_metadata)
+                return
+            event_v2_mac = str(event.metadata["integrity_hash"])
             sequence = head.last_sequence + 1
             prev = head.last_chain_mac
             key_id, key = cls._chain_keys()[0]
@@ -3886,7 +3897,7 @@ class AuditIntegrityService:
                 is_tombstone=False,
             )
             mac = cls._compute_chain_mac(payload=payload, key=key)
-            AuditChainLink.objects.create(
+            AuditChainLink.objects.using(alias).create(
                 sequence=sequence,
                 event=event,
                 event_id_str=str(event.id),
@@ -3900,7 +3911,9 @@ class AuditIntegrityService:
                 key_id=key_id,
                 is_tombstone=False,
             )
-            AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=mac)
+            AuditChainHead.objects.using(alias).filter(pk=1).update(last_sequence=sequence, last_chain_mac=mac)
+            with audit_mutation_allowed("chain_append"):
+                AuditEvent.objects.using(alias).filter(pk=event.pk).update(metadata=pending_metadata)
 
     @classmethod
     def append_tombstone_links(cls, events: list[AuditEvent]) -> int:
@@ -4473,21 +4486,29 @@ class AuditIntegrityService:
             if link.event_id_str not in tombstoned_ids
         )
 
-        # Events whose chain append failed and left a pending marker. The append path is
-        # fail-open by design (an audit event without a link beats a lost financial
-        # transaction), but a failure an attacker can induce must not stay invisible: this is
-        # always critical, independent of AUDIT_CHAIN_REQUIRE, because the marker only ever
-        # appears when a live append actually broke.
+        # Commit callbacks and the one-minute recovery schedule normally complete quickly.
+        # A short grace period distinguishes that latency from work requiring intervention.
+        pending_now = timezone.now()
+        pending_cutoff = pending_now - timedelta(seconds=cls.CHAIN_PENDING_GRACE_SECONDS)
+        pending_future_limit = pending_now + timedelta(seconds=cls.CHAIN_PENDING_FUTURE_SKEW_SECONDS)
+        pending_events = list(AuditEvent.objects.filter(metadata__chain_link_pending=True))
+        # An attacker cannot obtain latency grace by flagging a forged or future-dated
+        # INSERT as pending. The required-chain sweep remains global for those rows.
+        invalid_pending_ids = {issue.get("event_id") for issue in cls._verify_hash_chain(pending_events)}
+        recent_pending_ids = {
+            event.pk
+            for event in pending_events
+            if pending_cutoff <= event.timestamp <= pending_future_limit
+            and str(event.pk) not in invalid_pending_ids
+            and event.metadata.get("integrity_hash_version") == cls.HASH_VERSION
+        }
         findings.extend(
             {
                 "type": "chain_link_pending",
-                "severity": "critical",
-                "description": (
-                    f"Audit event {event.id} is marked chain_link_pending - its chain append "
-                    f"failed and was never retried"
-                ),
+                "severity": "info" if event.pk in recent_pending_ids else "critical",
+                "description": (f"Audit event {event.id} is waiting for chain linking"),
             }
-            for event in AuditEvent.objects.filter(metadata__chain_link_pending=True).iterator()
+            for event in pending_events
         )
 
         # Events in the window with no chain link (forged INSERT, or a failed/pending append).
@@ -4515,6 +4536,7 @@ class AuditIntegrityService:
                 "description": f"Audit event {event.id} has no chain link (forged insert or failed append)",
             }
             for event in unlinked.iterator()
+            if event.pk not in recent_pending_ids
         )
         return findings
 

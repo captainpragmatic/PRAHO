@@ -583,6 +583,27 @@ def _ownership_table(name: str) -> Iterator[tuple[str, str, str, str]]:
 
 @pytest.mark.docker
 @pytest.mark.parametrize("name", CONFIGS)
+@pytest.mark.parametrize("encoded", [False, True], ids=["plain", "encoded"])
+def test_live_secret_links_and_referrers_are_redacted(
+    name: str, encoded: bool, tmp_path: Path, docker_daemon: None
+) -> None:
+    host = PLATFORM_HOST if name == "platform" else PORTAL_HOST
+    link = "/notifications/unsubscribe/request-link-credential/"
+    referrer = "https://portal.example.test/password-reset/confirm/uid/referrer-link-credential/"
+    if encoded:
+        link = "/%6eotifications/unsubscribe/request-link-credential/"
+        referrer = "https://portal.example.test/%70assword%2dreset/confirm/uid/referrer-link-credential/"
+    with _running_edge(name, tmp_path) as (edge, peer, _published):
+        status, body, _remote = _request(peer, edge, host, link, headers=(f"Referer: {referrer}",), edge=edge)
+        assert status == 200
+        assert "request-link-credential" in body  # Only the log is changed.
+        logs = _docker("logs", edge)
+        assert "request-link-credential" not in logs.stdout + logs.stderr
+        assert "referrer-link-credential" not in logs.stdout + logs.stderr
+
+
+@pytest.mark.docker
+@pytest.mark.parametrize("name", CONFIGS)
 def test_live_routing_spoofed_headers_and_published_port(name: str, tmp_path: Path, docker_daemon: None) -> None:
     _assert_contract(name, _config(name))
     with _running_edge(name, tmp_path) as (edge, peer, published):

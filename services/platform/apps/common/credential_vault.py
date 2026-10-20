@@ -33,12 +33,14 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.model_secrets import secret_aad
 from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
 
 # Fixed vault configuration constants
 CREDENTIAL_EXPIRY_DAYS = 30  # Default credential expiration
+MIN_VAULT_CIPHERTEXT_BYTES = 28  # 12-byte nonce plus 16-byte authentication tag
 ACCESS_LOG_RETENTION_DAYS = 365  # Keep access logs for 1 year
 
 
@@ -273,17 +275,19 @@ class CredentialVault:
 
         return key_bytes
 
-    def _encrypt_data(self, data: bytes) -> bytes:
-        """Encrypt data using AES-256-GCM. Returns nonce + ciphertext + tag."""
+    def _encrypt_data(self, data: bytes, *, aad: bytes | None = None) -> bytes:
         nonce = os.urandom(12)
-        return nonce + self._aesgcm.encrypt(nonce, data, None)
+        encrypted = nonce + self._aesgcm.encrypt(nonce, data, aad)
+        return b"vault:v2:" + encrypted if aad is not None else encrypted
 
-    def _decrypt_data(self, data: bytes) -> bytes:
-        """Decrypt AES-256-GCM encrypted data. Expects nonce + ciphertext + tag."""
-        min_encrypted_length = 28  # 12 (nonce) + 16 (minimum tag)
-        if len(data) < min_encrypted_length:
-            raise CredentialVaultError("Encrypted data too short")
-        return self._aesgcm.decrypt(data[:12], data[12:], None)
+    def _decrypt_data(self, data: bytes, *, aad: bytes | None = None) -> bytes:
+        if aad is not None:
+            if not data.startswith(b"vault:v2:"):
+                raise CredentialVaultError("Stored credential requires context-bound encryption; replace it")
+            data = data[len(b"vault:v2:") :]
+        if len(data) < MIN_VAULT_CIPHERTEXT_BYTES:
+            raise CredentialVaultError("Invalid encrypted credential")
+        return self._aesgcm.decrypt(data[:12], data[12:], aad)
 
     def _verify_vault_integrity(self) -> None:
         """Verify vault encryption is working correctly."""
@@ -313,47 +317,41 @@ class CredentialVault:
         """
         try:
             with transaction.atomic():
-                # Encrypt credential data
-                encrypted_username = self._encrypt_data(credential_data.username.encode())
-                encrypted_password = self._encrypt_data(credential_data.password.encode())
-                encrypted_metadata = None
-
-                if credential_data.metadata:
-                    metadata_json = json.dumps(credential_data.metadata)
-                    encrypted_metadata = self._encrypt_data(metadata_json.encode())
-
-                # Calculate expiration
                 expires_at = timezone.now() + timedelta(days=credential_data.expires_in_days)
-
-                values = {
-                    "encrypted_username": encrypted_username,
-                    "encrypted_password": encrypted_password,
-                    "encrypted_metadata": encrypted_metadata,
-                    "expires_at": expires_at,
-                    "is_active": True,
-                    "rotation_in_progress": False,
-                    "rotation_failure_count": 0,
+                identity = {
+                    "service_type": credential_data.service_type,
+                    "service_identifier": credential_data.service_identifier,
                 }
+                initial = {"encrypted_username": b"", "encrypted_password": b"", "expires_at": expires_at}
                 if credential_data.create_only:
-                    # The (type, identifier) unique constraint makes this an insert-if-absent: a second
-                    # writer gets an IntegrityError, reported below, and the stored secret stands.
-                    credential = EncryptedCredential.objects.create(
-                        service_type=credential_data.service_type,
-                        service_identifier=credential_data.service_identifier,
-                        **values,
-                    )
+                    credential = EncryptedCredential.objects.create(**identity, **initial)
                     created = True
                 else:
-                    # Store or update credential
-                    credential, created = EncryptedCredential.objects.update_or_create(
-                        service_type=credential_data.service_type,
-                        service_identifier=credential_data.service_identifier,
-                        defaults=values,
+                    # Resolve and lock the owning row before encryption. A concurrent creator
+                    # uses the winner's UUID, never a discarded candidate's context.
+                    credential, created = EncryptedCredential.objects.select_for_update().get_or_create(
+                        **identity, defaults=initial
                     )
-
+                credential.encrypted_username = self._encrypt_data(
+                    credential_data.username.encode(), aad=secret_aad(credential, "encrypted_username")
+                )
+                credential.encrypted_password = self._encrypt_data(
+                    credential_data.password.encode(), aad=secret_aad(credential, "encrypted_password")
+                )
+                credential.encrypted_metadata = (
+                    self._encrypt_data(
+                        json.dumps(credential_data.metadata).encode(), aad=secret_aad(credential, "encrypted_metadata")
+                    )
+                    if credential_data.metadata
+                    else None
+                )
+                credential.expires_at = expires_at
+                credential.is_active = True
+                credential.rotation_in_progress = False
+                credential.rotation_failure_count = 0
                 if not created:
                     credential.rotation_count += 1
-                    credential.save()
+                credential.save()
 
                 # Log storage event
                 access_data = AccessLogData(
@@ -458,12 +456,18 @@ class CredentialVault:
                 return Err("Access denied to credential")
 
             # Decrypt credential data
-            username = self._decrypt_data(bytes(credential.encrypted_username)).decode()
-            password = self._decrypt_data(bytes(credential.encrypted_password)).decode()
+            username = self._decrypt_data(
+                bytes(credential.encrypted_username), aad=secret_aad(credential, "encrypted_username")
+            ).decode()
+            password = self._decrypt_data(
+                bytes(credential.encrypted_password), aad=secret_aad(credential, "encrypted_password")
+            ).decode()
 
             metadata = None
             if credential.encrypted_metadata:
-                metadata_json = self._decrypt_data(bytes(credential.encrypted_metadata)).decode()
+                metadata_json = self._decrypt_data(
+                    bytes(credential.encrypted_metadata), aad=secret_aad(credential, "encrypted_metadata")
+                ).decode()
                 metadata = json.loads(metadata_json)
 
             # Update access tracking
@@ -518,7 +522,9 @@ class CredentialVault:
 
                 # Get current username if new one not provided
                 if not rotation_data.new_username:
-                    current_username = self._decrypt_data(bytes(credential.encrypted_username)).decode()
+                    current_username = self._decrypt_data(
+                        bytes(credential.encrypted_username), aad=secret_aad(credential, "encrypted_username")
+                    ).decode()
                     rotation_data.new_username = current_username
 
                 # Test new credential works (implement service-specific testing)

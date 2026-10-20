@@ -23,6 +23,7 @@ ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --workers {{ gunicorn_workers_platform }} \
     --timeout {{ gunicorn_timeout_platform }} \
     --no-control-socket \
+    --logger-class apps.common.gunicorn_logging.RedactingLogger \
     --access-logfile - \
     --error-logfile - \
     config.wsgi:application

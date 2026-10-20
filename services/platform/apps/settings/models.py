@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 import json
+import uuid
 from decimal import Decimal
 from typing import Any, ClassVar, Literal, cast
 
@@ -14,6 +15,9 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.db_functions import RandomContextUUID
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
 # Valid data types for system settings
 SettingDataType = Literal["string", "integer", "boolean", "decimal", "list", "json"]
@@ -23,6 +27,10 @@ SettingDataType = Literal["string", "integer", "boolean", "decimal", "list", "js
 
 class SystemSetting(models.Model):
     """⚙️ System setting with type validation and caching support"""
+
+    encryption_context_id = models.UUIDField(
+        default=uuid.uuid4, db_default=RandomContextUUID(), unique=True, editable=False
+    )
 
     # Transient audit context attached by SettingsService writes just before save;
     # consumed (and cleared) by the post_save signal to attribute the audit event.
@@ -126,11 +134,14 @@ class SystemSetting(models.Model):
             get_selling_currency_policy(lock=True)
         # Encrypt sensitive values; an empty value means "cleared / not configured"
         # and is stored plain — encrypting the empty string is rejected upstream.
-        if self.is_sensitive and self.value:
-            from apps.common.encryption import encrypt_value, is_encrypted  # noqa: PLC0415
+        if self.is_sensitive:
+            from apps.common.encryption import is_encrypted  # noqa: PLC0415
 
-            if not is_encrypted(str(self.value)):
-                self.value = encrypt_value(str(self.value))
+            for field in ("value", "default_value"):
+                value = getattr(self, field)
+                if value is not None and value != "" and not is_encrypted(str(value)):
+                    payload = str(value) if self.data_type == "string" else json.dumps(value, default=str)
+                    setattr(self, field, encrypt_model_secret(self, field, payload))
 
         super().save(*args, **kwargs)
         if sync_whois_price:
@@ -164,6 +175,9 @@ class SystemSetting(models.Model):
         if value is None:
             return
 
+        if self.is_sensitive and isinstance(value, str) and value.startswith("aes:"):
+            value = self._read_sensitive_value(field_name, value)
+
         try:
             if self.data_type == "string":
                 if not isinstance(value, str):
@@ -192,6 +206,10 @@ class SystemSetting(models.Model):
                 }
             ) from e
 
+    def _read_sensitive_value(self, field: str, value: Any) -> Any:
+        decrypted = decrypt_model_secret(self, field, str(value))
+        return decrypted if self.data_type == "string" or decrypted == "" else json.loads(decrypted)
+
     def get_typed_value(self) -> str | int | bool | Decimal | list[Any] | dict[str, Any] | None:
         """Get the setting value converted to its proper Python type"""
         if self.value is None:
@@ -200,10 +218,7 @@ class SystemSetting(models.Model):
         # Handle decryption for sensitive settings
         raw_value = self.value
         if self.is_sensitive and raw_value is not None:
-            from apps.common.encryption import decrypt_value, is_encrypted  # noqa: PLC0415
-
-            if is_encrypted(str(raw_value)):
-                raw_value = decrypt_value(str(raw_value))
+            raw_value = self._read_sensitive_value("value", raw_value)
 
         if self.data_type == "decimal" and raw_value is not None:
             return Decimal(str(raw_value))
@@ -214,21 +229,21 @@ class SystemSetting(models.Model):
         """Get the default value converted to its proper Python type"""
         if self.default_value is None:
             return None
-
-        if self.data_type == "decimal" and self.default_value is not None:
-            return Decimal(str(self.default_value))
-
-        return cast("str | int | bool | Decimal | list[Any] | dict[str, Any] | None", self.default_value)
+        raw_value = self.default_value
+        if self.is_sensitive:
+            raw_value = self._read_sensitive_value("default_value", raw_value)
+        if self.data_type == "decimal":
+            return Decimal(str(raw_value))
+        return cast("str | int | bool | Decimal | list[Any] | dict[str, Any] | None", raw_value)
 
     def get_display_value(self) -> str:
         """Get a human-readable representation of the current value"""
+        if self.is_sensitive:
+            return cast(str, _("(hidden)"))
         typed_value = self.get_typed_value()
 
         if typed_value is None:
             return cast(str, _("(not set)"))
-
-        if self.is_sensitive:
-            return cast(str, _("(hidden)"))
 
         if self.data_type == "boolean":
             return cast(str, _("Yes") if typed_value else _("No"))

@@ -16,6 +16,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.encryption import is_encrypted
+from apps.common.model_secrets import decrypt_model_secret
 from apps.settings.catalog import CATALOG, SettingDef
 from apps.settings.models import SettingActivation, SystemSetting
 
@@ -131,17 +133,19 @@ def _row_defaults(definition: SettingDef) -> dict[str, object]:
 def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewrite: bool) -> list[str]:
     defaults = _row_defaults(definition)
     dirty_fields: list[str] = []
-    if setting.is_sensitive and not definition.sensitive:
-        from apps.common.encryption import decrypt_value, is_encrypted  # noqa: PLC0415  # ADR-0007
-
-        if setting.value is not None and is_encrypted(str(setting.value)):
-            setting.value = decrypt_value(str(setting.value))
-            dirty_fields.append("value")
+    if (
+        setting.is_sensitive
+        and not definition.sensitive
+        and setting.value is not None
+        and is_encrypted(str(setting.value))
+    ):
+        setting.value = decrypt_model_secret(setting, "value", str(setting.value))
+        dirty_fields.append("value")
     for field_name in _METADATA_FIELDS:
         if getattr(setting, field_name) != defaults[field_name]:
             setattr(setting, field_name, defaults[field_name])
             dirty_fields.append(field_name)
-    if setting.default_value != definition.default:
+    if setting.get_typed_default_value() != definition.default:
         setting.default_value = definition.default
         dirty_fields.append("default_value")
     if (force or rewrite) and setting.value != definition.default:

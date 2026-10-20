@@ -6,6 +6,8 @@ Security-first configuration for Romanian hosting provider.
 import logging
 import os
 
+from apps.common.secret_urls import secure_logging_config
+
 # Optional Sentry integration
 try:
     import sentry_sdk
@@ -725,3 +727,10 @@ COMPLIANCE_REPORTING = {
         "E_FACTURA",
     ],
 }
+
+# Handler filters cover Django request and exception logging as well as app logs.
+
+LOGGING = secure_logging_config(LOGGING)
+
+PORTAL_HMAC_REQUIRE_ISOLATION = True
+PORTAL_HMAC_MODE = os.environ.get("PORTAL_HMAC_MODE", "enforce")

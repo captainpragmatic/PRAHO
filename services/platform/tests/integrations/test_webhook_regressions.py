@@ -135,7 +135,7 @@ class StripeCustomerIdentityTests(TestCase):
         customer.refresh_from_db()
         self.assertEqual(customer.meta["stripe_customer_id"], "cus_shared")
 
-    def test_customer_created_acknowledges_ambiguous_email_without_linking_either_customer(self) -> None:
+    def test_customer_created_retries_ambiguous_email_without_linking_either_customer(self) -> None:
         first = self._customer("First SRL", "shared@example.com")
         second = self._customer("Second SRL", "shared@example.com")
 
@@ -143,7 +143,7 @@ class StripeCustomerIdentityTests(TestCase):
             "customer.created", self._payload("shared@example.com")
         )
 
-        self.assertTrue(accepted, message)
+        self.assertFalse(accepted, message)
         self.assertIn("ambiguous", message.lower())
         first.refresh_from_db()
         second.refresh_from_db()

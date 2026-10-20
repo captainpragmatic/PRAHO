@@ -44,7 +44,10 @@ def _make_registrar(name: str = "gandi", **kwargs: Any) -> Registrar:
         "status": "active",
     }
     defaults.update(kwargs)
-    return Registrar(name=name, **defaults)
+    secret = str(defaults.pop("api_key"))
+    registrar = Registrar(name=name, **defaults)
+    registrar.set_encrypted_credentials(api_key=secret)
+    return registrar
 
 
 def _cache_get_stub(key: str, default: object = None) -> object:
@@ -56,6 +59,7 @@ def _cache_get_stub(key: str, default: object = None) -> object:
     StopIteration the moment one is added.
     """
     return 0 if str(key).startswith("cb:") else default
+
 
 def _mock_response(
     status_code: int, json_data: dict | None = None, text: str = "", headers: dict | None = None
@@ -194,9 +198,7 @@ class TransferIdempotencyClaimTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
     @patch("apps.domains.gateways.base.cache")
-    def test_transfer_claims_slot_with_sentinel_before_posting(
-        self, mock_cache: MagicMock, mock_do: MagicMock
-    ) -> None:
+    def test_transfer_claims_slot_with_sentinel_before_posting(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
         # circuit breaker closed (0), idempotency slot free (None), claim wins.
         mock_cache.get.side_effect = _cache_get_stub
         mock_cache.add.return_value = True
@@ -212,9 +214,7 @@ class TransferIdempotencyClaimTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
     @patch("apps.domains.gateways.base.cache")
-    def test_concurrent_transfer_loses_claim_and_does_not_post(
-        self, mock_cache: MagicMock, mock_do: MagicMock
-    ) -> None:
+    def test_concurrent_transfer_loses_claim_and_does_not_post(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
         # slot free on first look, but the atomic add loses the race (another request
         # already claimed it) and the recheck finds no completed result yet.
         mock_cache.get.side_effect = [None, None]
@@ -253,9 +253,7 @@ class TransferIdempotencyClaimTests(TestCase):
         failure."""
         mock_cache.get.side_effect = _cache_get_stub
         mock_cache.add.return_value = True
-        mock_do.return_value = Err(
-            RegistrarAPIError("epp code rejected"), retriability=Retriability.NOT_RETRIABLE
-        )
+        mock_do.return_value = Err(RegistrarAPIError("epp code rejected"), retriability=Retriability.NOT_RETRIABLE)
 
         result = self.gateway.initiate_transfer("example.com", "EPP")
 
@@ -377,7 +375,8 @@ class ROTLDTransferTests(TestCase):
     def test_successful_transfer(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = _cache_get_stub
         mock_request.return_value = _mock_response(
-            200, {"error": 0, "result_code": "00200", "data": {}},
+            200,
+            {"error": 0, "result_code": "00200", "data": {}},
         )
 
         result = self.gateway.initiate_transfer("exemplu.ro", "EPP-CODE")
@@ -399,10 +398,16 @@ class ROTLDDomainInfoTests(TestCase):
         mock_cache.get.return_value = 0
         mock_request.return_value = _mock_response(
             200,
-            {"error": 0, "result_code": "00200", "data": {
-                "domain": "exemplu.ro", "expiration_date": "2028-01-01T00:00:00Z",
-                "statuses": ["OK", "TransferProhibited"], "nameservers": ["ns1.rotld.ro", "ns2.rotld.ro"],
-            }},
+            {
+                "error": 0,
+                "result_code": "00200",
+                "data": {
+                    "domain": "exemplu.ro",
+                    "expiration_date": "2028-01-01T00:00:00Z",
+                    "statuses": ["OK", "TransferProhibited"],
+                    "nameservers": ["ns1.rotld.ro", "ns2.rotld.ro"],
+                },
+            },
         )
 
         result = self.gateway.get_domain_info("exemplu.ro")
@@ -539,12 +544,18 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
     def setUp(self) -> None:
         Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.registrar = Registrar.objects.create(
-            name="gandi", display_name="Gandi", website_url="https://gandi.net",
-            api_endpoint="https://api.gandi.net/v5", status="active",
+            name="gandi",
+            display_name="Gandi",
+            website_url="https://gandi.net",
+            api_endpoint="https://api.gandi.net/v5",
+            status="active",
         )
         self.tld = TLD.objects.create(
-            extension="com", description="Commercial",
-            registration_price_cents=1200, renewal_price_cents=1200, transfer_price_cents=1200,
+            extension="com",
+            description="Commercial",
+            registration_price_cents=1200,
+            renewal_price_cents=1200,
+            transfer_price_cents=1200,
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -565,8 +576,13 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         )
         CustomerTaxProfile.objects.create(customer=self.customer, cnp="1900101123456")
         self.domain = Domain.objects.create(
-            name="active.com", tld=self.tld, registrar=self.registrar, customer=self.customer,
-            status="active", nameservers=["ns1.old.com"], locked=False,
+            name="active.com",
+            tld=self.tld,
+            registrar=self.registrar,
+            customer=self.customer,
+            status="active",
+            nameservers=["ns1.old.com"],
+            locked=False,
         )
         self.Domain = Domain
 
@@ -581,7 +597,9 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         return Err(RegistrarAPIError("boom", code=code, registrar_name="gandi"), retriability=retriability)
 
     def test_transfer_definite_rejection_deletes_row(self) -> None:
-        with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.INVALID_REGISTRANT_DATA, Retriability.NOT_RETRIABLE)):
+        with self._mock_gateway(
+            initiate_transfer=self._err(RegistrarErrorCode.INVALID_REGISTRANT_DATA, Retriability.NOT_RETRIABLE)
+        ):
             result = DomainLifecycleService.initiate_transfer("transfer.com", "BAD-EPP", self.customer, self.registrar)
 
         self.assertTrue(result.is_err(), result)
@@ -724,8 +742,13 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
 
     def test_sync_dry_run_does_not_persist_but_reports_drift(self) -> None:
         info = DomainInfoResult(
-            registrar_domain_id="g-1", domain_name="active.com", status="active",
-            expires_at=datetime(2028, 1, 1, tzinfo=UTC), nameservers=["ns1.new.com"], locked=True, whois_privacy=False,
+            registrar_domain_id="g-1",
+            domain_name="active.com",
+            status="active",
+            expires_at=datetime(2028, 1, 1, tzinfo=UTC),
+            nameservers=["ns1.new.com"],
+            locked=True,
+            whois_privacy=False,
         )
         with self._mock_gateway(get_domain_info=Ok(info)):
             result = DomainLifecycleService.sync_domain_info(self.domain, persist=False)
