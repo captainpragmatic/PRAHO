@@ -751,7 +751,10 @@ migrate:
 	@$(PYTHON_PORTAL_MANAGE) migrate sessions --noinput --settings=config.settings.dev
 	@$(PYTHON_PORTAL_MANAGE) migrate common --noinput --settings=config.settings.dev
 
+MIGRATION_BASE_REF ?= origin/master
+
 check-migrations:
+	@$(PYTHON_SHARED) scripts/migration_checksums.py --base-ref "$(MIGRATION_BASE_REF)"
 	@echo "🔎 [Platform] Checking model and migration state..."
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --check --dry-run --settings=config.settings.test
 	@echo "🔎 [Portal] Checking model and migration state..."

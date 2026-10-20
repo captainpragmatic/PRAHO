@@ -68,6 +68,23 @@ index, a changed field default, a missing seed, and a dropped CHECK constraint.
 - Another reset is allowed, under the same rule: carry forward every object that only a
   migration creates, and prove equivalence with the comparator.
 
+### Repository checksum baseline
+
+The reliability hardening work records a conservative repository baseline in
+`scripts/migration_checksums.json`. Its `baseline_commit` identifies the reviewed repository
+snapshot; it is not evidence that any production database applied those migrations and does
+not assert that the disposable phase has ended. This change set preserves migration history
+and uses new migrations for its schema and seed changes.
+
+`make check-migrations` verifies hashes and model/migration consistency. After reviewing a
+new migration, run `scripts/run_project_python scripts/migration_checksums.py --extend` and
+review the added manifest entries. The extension refuses modified or deleted frozen files.
+CI supplies its trusted base revision through `MIGRATION_BASE_REF` and also compares the old
+manifest, so replacing hashes or removing entries cannot conceal edits. The initial baseline
+is checked against migration blobs at the base revision when that revision has no manifest.
+An intentional future migration reset requires a separately reviewed change to this policy
+and its guard; regenerating the manifest is not a permitted shortcut.
+
 ### Once a database must be preserved
 
 The first production or staging database, or any database whose rows cannot be
