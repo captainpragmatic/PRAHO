@@ -29,6 +29,7 @@ from django.utils.translation import gettext as _
 from apps.common import counters, portal_hmac
 from apps.common.constants import (
     HMAC_MAX_BODY_BYTES,
+    HMAC_NONCE_RETENTION_SECONDS,
     HMAC_NTP_SKEW_SECONDS,
     HMAC_TIMESTAMP_WINDOW_SECONDS,
     HTTP_CLIENT_ERROR_THRESHOLD,
@@ -635,16 +636,27 @@ class PortalServiceHMACMiddleware:
 
             # Reserve the nonce replay slot LAST — only a fully authenticated request may burn
             # a nonce, so a bad signature / unregistered portal cannot pollute the nonce cache.
+            # Reading a body or resolving a key may have outlived the early timestamp check.
+            if not error_msg and not (
+                -HMAC_NTP_SKEW_SECONDS <= int(time.time()) - request_time <= HMAC_TIMESTAMP_WINDOW_SECONDS
+            ):
+                error_msg = "Request timestamp outside allowed window"
             if not error_msg:
                 nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
                 # An atomic claim in the counter table, not a cache entry: a cache can evict a live
-                # nonce under load and reopen a replay. +30s keeps it past the timestamp window.
+                # nonce under load and reopen a replay.
                 try:
-                    claimed = counters.claim(nonce_key, HMAC_TIMESTAMP_WINDOW_SECONDS + 30, "nonce")
+                    claimed = counters.claim(nonce_key, HMAC_NONCE_RETENTION_SECONDS, "nonce")
                 except (DatabaseError, InterfaceError) as error:
                     raise HMACStoreUnavailable from error
                 if not claimed:
                     error_msg = "Nonce already used (replay attack)"
+
+            # The database claim can itself block; stale signatures must never reach a view.
+            if not error_msg and not (
+                -HMAC_NTP_SKEW_SECONDS <= int(time.time()) - request_time <= HMAC_TIMESTAMP_WINDOW_SECONDS
+            ):
+                error_msg = "Request timestamp outside allowed window"
 
             if not error_msg:
                 return True, portal_id, ""
