@@ -55,6 +55,7 @@ from apps.users.models import CustomerMembership, User
 from apps.users.services import SecureCustomerUserService
 
 from .serializers import (
+    CustomerAddressFlagsSerializer,
     CustomerBillingAddressUpdateSerializer,
     CustomerCreationSerializer,
     CustomerDetailSerializer,
@@ -1571,30 +1572,28 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
 
     address_line1 = data.get("address_line1", "").strip() if isinstance(data.get("address_line1"), str) else ""
     city = data.get("city", "").strip() if isinstance(data.get("city"), str) else ""
-    if not address_line1:
-        return Response(
-            {"success": False, "error": "address_line1 is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if not city:
-        return Response(
-            {"success": False, "error": "city is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    for field, value in (("address_line1", address_line1), ("city", city)):
+        if not value:
+            return Response(
+                {"success": False, "error": f"{field} is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    is_primary_raw = data.get("is_primary", False)
-    is_billing_raw = data.get("is_billing", False)
-    is_primary = bool(is_primary_raw)
-    is_billing = bool(is_billing_raw)
+    flags = CustomerAddressFlagsSerializer(data=data)
+    if not flags.is_valid():
+        return Response(
+            {"success": False, "error": "Validation failed", "errors": flags.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     label_raw = data.get("label", "")
     label = str(label_raw).strip() if label_raw else ""
 
     address = CustomerAddress.objects.create(
         customer=customer,
-        is_primary=is_primary,
-        is_billing=is_billing,
+        is_primary=flags.validated_data["is_primary"],
+        is_billing=flags.validated_data["is_billing"],
         label=label,
-        is_current=data.get("is_current", True),
+        is_current=flags.validated_data["is_current"],
         address_line1=address_line1,
         address_line2=data.get("address_line2", ""),
         city=city,
@@ -1632,6 +1631,14 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
         address = CustomerAddress.objects.get(id=address_id, customer=customer)
     except CustomerAddress.DoesNotExist:
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    flags = CustomerAddressFlagsSerializer(data=data, partial=True)
+    if not flags.is_valid():
+        return Response(
+            {"success": False, "error": "Validation failed", "errors": flags.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    data = {**data, **flags.validated_data}
 
     updatable = {
         "is_primary",
