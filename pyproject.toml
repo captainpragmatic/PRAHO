@@ -110,6 +110,7 @@ dev = [
     "mixer>=7.2.0",
     "tblib>=3.1.0",
     "pytest-playwright>=0.4.0",
+    "gunicorn>=26.2.0",  # Exercise the real access logger in platform-only CI environments
     # Code quality
     "ruff>=0.8.0",
     "black>=23.7.0",
