@@ -24,6 +24,8 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
 
+from apps.common.secret_urls import secure_logging_config
+
 from .base import *  # noqa: F403  # Django settings pattern
 from .log_files import place_log_files, platform_log_dir
 from .storage import media_storage
@@ -403,3 +405,7 @@ STAGING_FEATURES = {
     "allow_staff_impersonation": True,
     "show_debug_info": False,
 }
+
+# Handler filters cover Django request and exception logging as well as app logs.
+
+LOGGING = secure_logging_config(LOGGING)

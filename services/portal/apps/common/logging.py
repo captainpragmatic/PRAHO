@@ -12,6 +12,8 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from apps.common.secret_urls import redact_text
+
 
 class PortalJSONFormatter(logging.Formatter):
     """Structured JSON log formatter for portal prod/staging environments."""
@@ -27,4 +29,4 @@ class PortalJSONFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[1] is not None:
             log_entry["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_entry, default=str)
+        return redact_text(json.dumps(log_entry, default=str))

@@ -33,4 +33,5 @@ exec gunicorn \
     --workers "${GUNICORN_WORKERS:-4}" \
     --timeout 120 \
     --no-control-socket \
+    --logger-class apps.common.gunicorn_logging.RedactingLogger \
     config.wsgi:application

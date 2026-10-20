@@ -10,6 +10,8 @@ from typing import Any
 
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.secret_urls import secure_logging_config
+
 # ===============================================================================
 # CORE DJANGO SETTINGS
 # ===============================================================================
@@ -457,3 +459,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 IPWARE_TRUSTED_PROXY_LIST: list[str] = [
     cidr.strip() for cidr in os.environ.get("PORTAL_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
 ]
+
+# Handler filters cover Django request and exception logging as well as app logs.
+
+LOGGING = secure_logging_config(LOGGING)
