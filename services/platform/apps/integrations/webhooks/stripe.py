@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 import requests
 from django.conf import settings
@@ -46,6 +47,14 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     """
 
     source_name = "stripe"
+
+    @staticmethod
+    def _missing_local(reason: str) -> tuple[bool, str]:
+        return False, f"Missing local Stripe object: {reason}"
+
+    def on_failure(self, event: WebhookEvent, message: str) -> None:
+        if message.startswith("Missing local Stripe object:") or "not found" in message.lower():
+            transaction.on_commit(lambda: _alert_missing_stripe_object(event.pk), robust=True)
 
     def extract_event_id(self, payload: dict[str, Any]) -> str:
         """🔍 Extract Stripe event ID"""
@@ -171,7 +180,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     )
                     return False, error
                 logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
-                return True, f"Payment not found (external): {stripe_payment_id}"
+                return self._missing_local(f"Payment not found for PaymentIntent: {stripe_payment_id}")
             logger.critical("Stripe success convergence rejected for %s: %s", stripe_payment_id, error)
             return False, error
         payment = convergence.unwrap()
@@ -298,9 +307,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                         return False, error
                     payment = recovery.unwrap()
                 else:
-                    # The PaymentIntent may have been created outside PRAHO.
+                    # This endpoint owns PRAHO events; a missing row must remain replayable.
                     logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
-                    return True, f"Payment not found (external): {stripe_payment_id}"
+                    return self._missing_local(f"Payment not found for PaymentIntent: {stripe_payment_id}")
 
             if event_type == "payment_intent.payment_failed":
                 failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
@@ -411,7 +420,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     )
                     if not customers:
                         logger.warning(f"⚠️ Customer not found for Stripe customer: {customer_email}")
-                        return True, f"Customer not found: {customer_email}"
+                        return self._missing_local(f"Customer not found for Stripe customer: {stripe_customer_id}")
                     if len(customers) > 1:
                         logger.critical(
                             "🔥 [Stripe] Ambiguous customer.created email %s for Stripe customer %s; "
@@ -419,7 +428,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                             customer_email,
                             stripe_customer_id,
                         )
-                        return True, f"Ambiguous customer email; not linked: {customer_email}"
+                        return self._missing_local(
+                            f"Ambiguous local customer for Stripe customer: {stripe_customer_id}"
+                        )
 
                     customer = customers[0]
                     customer_meta = dict(customer.meta or {})
@@ -510,7 +521,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             return False, error
         refund = result.unwrap()
         if refund is None:
-            return True, f"Refund not found (external): {refund_object.get('id')}"
+            return self._missing_local(f"Payment not found for Refund: {refund_object.get('id')}")
         return True, f"Refund {refund.gateway_refund_id} converged to {refund.status}"
 
     def _handle_charge_refunded(
@@ -571,6 +582,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 payment = (
                     Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
                 )
+                if payment is None and not gift_dispute:
+                    return StripeWebhookProcessor._missing_local(f"Payment not found for dispute: {dispute_id}")
                 if payment is not None and payment.status != "disputed" and not gift_dispute:
                     changed = payment.apply_gateway_event(
                         "disputed",
@@ -592,7 +605,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                         )
                         return False, f"Payment {payment.id} cannot transition to disputed"
         else:
-            logger.critical("Stripe dispute %s did not identify a PaymentIntent", dispute_id)
+            return StripeWebhookProcessor._missing_local(f"PaymentIntent not found for dispute: {dispute_id}")
 
         try:
             from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -601,7 +614,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             NotificationService.send_admin_alert(
                 subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
-                message=f"A dispute has been created for PaymentIntent {payment_intent_id or 'unknown'}.\n"
+                message=f"A dispute has been created for PaymentIntent {payment_intent_id}.\n"
                 f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
                 f"Reason: {charge.get('reason', 'Unknown')}\n"
                 f"Please review immediately.",
@@ -747,3 +760,22 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             logger.error(f"🔥 Portal notification request failed: {e}")
         except Exception as e:
             logger.error(f"🔥 Unexpected error sending Portal notification: {e}")
+
+
+def _alert_missing_stripe_object(event_id: UUID | str) -> None:
+    """Serialize alert delivery per event; failed sends remain eligible on redelivery."""
+    from apps.notifications.services import NotificationService  # noqa: PLC0415  # Cross-app notification boundary.
+
+    with transaction.atomic():
+        event = WebhookEvent.objects.select_for_update().get(pk=event_id)
+        if event.staff_alerted_at is not None or event.status != "failed":
+            return
+        sent = NotificationService.send_admin_alert(
+            subject="Stripe event requires local-record recovery",
+            message=event.error_message,
+            alert_type="critical",
+            metadata={"stripe_event_id": event.event_id, "event_type": event.event_type},
+        )
+        if sent:
+            event.staff_alerted_at = timezone.now()
+            event.save(update_fields=["staff_alerted_at", "updated_at"])

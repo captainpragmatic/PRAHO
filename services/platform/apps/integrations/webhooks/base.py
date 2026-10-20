@@ -299,11 +299,20 @@ class BaseWebhookProcessor(ABC):
             event.refresh_from_db()
             message = str(error) if isinstance(error, WebhookHandlerError) else "Processing error: internal failure"
             event.mark_failed(message)
+            try:
+                with transaction.atomic():
+                    self.on_failure(event, message)
+            except Exception:
+                logger.exception("Could not schedule failure follow-up for webhook %s", event.pk)
             if not isinstance(error, WebhookHandlerError):
                 logger.exception("Webhook handler failed for event %s", event.pk)
             return WebhookProcessingResult.error_result(message, event)
         event.mark_processed()
         return WebhookProcessingResult.success_result(message, event)
+
+    def on_failure(self, event: WebhookEvent, message: str) -> None:
+        """Schedule source-specific follow-up after the failed state is persisted."""
+        return None
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""
