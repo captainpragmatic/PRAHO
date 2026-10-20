@@ -199,6 +199,7 @@ platform = [
 
     # Email
     "django-ses>=3.5.0",
+    "django-anymail[amazon-ses]>=14.0",
 
     # Background task processing
     "django-q2>=1.8.0",

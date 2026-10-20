@@ -38,6 +38,7 @@ THIRD_PARTY_APPS: list[str] = [
     "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
+    "anymail",  # Production ESP adapters and provider status handling
 ]
 
 LOCAL_APPS: list[str] = [
@@ -378,7 +379,7 @@ ANYMAIL = {
         "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
         "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
     },
-    "AMAZON_SES_CONFIGURATION_SET": os.environ.get("AWS_SES_CONFIGURATION_SET"),
+    "AMAZON_SES_CONFIGURATION_SET_NAME": os.environ.get("AWS_SES_CONFIGURATION_SET"),
     # SendGrid configuration
     "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY"),
     # Mailgun configuration
