@@ -45,6 +45,17 @@ def _services(name: str) -> dict[str, Any]:
 
 class TestStandaloneComposeDeliversProductionKeys:
     @pytest.mark.integration
+    @pytest.mark.parametrize("name", STANDALONE)
+    def test_deployed_services_require_isolated_portal_credentials(self, name: str) -> None:
+        services = _services(name)
+        if "platform" in services:
+            environment = _environment(services["platform"])
+            assert environment["PORTAL_HMAC_MODE"] == "${PORTAL_HMAC_MODE:-enforce}"
+            assert environment["PORTAL_HMAC_CREDENTIALS"].startswith("${PORTAL_HMAC_CREDENTIALS:?")
+        if "portal" in services:
+            assert _environment(services["portal"])["PORTAL_HMAC_SECRET"].startswith("${PORTAL_HMAC_SECRET:?")
+
+    @pytest.mark.integration
     @pytest.mark.parametrize("name", [n for n in STANDALONE if "platform" in _services(n)])
     def test_the_platform_gets_both_keys(self, name: str) -> None:
         # Forwarded, not required by Compose: production settings refuse to start without them and say
@@ -133,6 +144,8 @@ NATIVE_BASE_ENV = {
     "PORTAL_DJANGO_SECRET_KEY": "portal-s",
     "DB_PASSWORD": "d",
     "HMAC_SECRET": "h",
+    "PORTAL_HMAC_CREDENTIALS": '{"portal-001": "portal-key"}',
+    "PORTAL_HMAC_SECRET": "portal-key",
 }
 # What production settings require beyond that, and staging settings don't.
 PRODUCTION_KEY_VALUES = {
@@ -320,6 +333,8 @@ class TestNativeMigrateEnvironment:
             "PORTAL_DJANGO_SECRET_KEY": secrets.token_urlsafe(60),
             "DB_PASSWORD": secrets.token_urlsafe(24),
             "HMAC_SECRET": secrets.token_urlsafe(40),
+            "PORTAL_HMAC_CREDENTIALS": '{"portal-001": "portal-key-for-local-validation"}',
+            "PORTAL_HMAC_SECRET": "portal-key-for-local-validation",
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_urlsafe(40),
             "DJANGO_ENCRYPTION_KEY": key,
             "CREDENTIAL_VAULT_MASTER_KEY": key,

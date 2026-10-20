@@ -28,6 +28,8 @@ REQUIRED_ENV = (
     "DJANGO_SECRET_KEY=s\nPORTAL_DJANGO_SECRET_KEY=p\nDB_PASSWORD=d\nPLATFORM_API_SECRET=h\n"
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n"
     "PORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
+    "PORTAL_HMAC_SECRET=portal-signing-key\n"
+    "PORTAL_HMAC_CREDENTIALS='{\"portal-001\":\"portal-signing-key\"}'\n"
 )
 APP_PORTS = {"platform-only": ("platform", 8700, "PLATFORM_BIND"), "portal-only": ("portal", 8701, "PORTAL_BIND")}
 

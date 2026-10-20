@@ -731,3 +731,6 @@ COMPLIANCE_REPORTING = {
 # Handler filters cover Django request and exception logging as well as app logs.
 
 LOGGING = secure_logging_config(LOGGING)
+
+PORTAL_HMAC_REQUIRE_ISOLATION = True
+PORTAL_HMAC_MODE = os.environ.get("PORTAL_HMAC_MODE", "enforce")

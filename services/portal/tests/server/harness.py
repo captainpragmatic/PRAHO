@@ -159,6 +159,7 @@ def _portal_env(directory: Path, platform_url: str, server: dict[str, str]) -> d
             "PLATFORM_API_BASE_URL": platform_url,
             "PLATFORM_API_ALLOW_INSECURE_HTTP": "true",
             "PLATFORM_API_SECRET": secrets.token_hex(32),
+            "PORTAL_HMAC_SECRET": secrets.token_hex(32),
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_hex(32),
             "SESSION_DB_PATH": str(directory / "portal.sqlite3"),
             "STATIC_ROOT": str(directory / "static"),

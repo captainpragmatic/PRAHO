@@ -154,6 +154,25 @@ class PortalRegistryLegacyAndAuditTests(TestCase):  # nonce claims live in the c
 
 
 class PortalHmacStartupValidationTests(TestCase):  # nonce claims live in the counter table
+    @override_settings(PORTAL_HMAC_REQUIRE_ISOLATION=True, PORTAL_HMAC_MODE="legacy")
+    def test_deployed_platform_refuses_shared_secret_mode(self):
+        with self.assertRaises(ImproperlyConfigured):
+            portal_hmac.validate_at_startup()
+
+    @override_settings(PORTAL_HMAC_MODE="enforce", PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": "   "}))
+    def test_whitespace_registry_secret_is_invalid(self):
+        with self.assertRaises(ImproperlyConfigured):
+            portal_hmac.validate_at_startup()
+
+    @override_settings(
+        PORTAL_HMAC_REQUIRE_ISOLATION=True,
+        PORTAL_HMAC_MODE="enforce",
+        PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": "same-key", "portal-b": "same-key"}),
+    )
+    def test_deployed_registry_refuses_keys_shared_between_portals(self):
+        with self.assertRaises(ImproperlyConfigured):
+            portal_hmac.validate_at_startup()
+
     @override_settings(PORTAL_HMAC_MODE="bogus")
     def test_invalid_mode_rejected(self):
         with self.assertRaises(ImproperlyConfigured):

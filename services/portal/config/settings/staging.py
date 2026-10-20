@@ -154,3 +154,5 @@ CACHES = {
 
 # Structured JSON logging; files only when PORTAL_LOG_DIR is set (config/settings/logging_config.py)
 LOGGING = portal_logging(portal_log_dir(), apps_level="DEBUG")
+
+PORTAL_HMAC_REQUIRE_ISOLATION = True

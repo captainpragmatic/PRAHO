@@ -13,4 +13,10 @@ class CommonConfig(AppConfig):
     verbose_name = "Portal Common"
 
     def ready(self) -> None:
+        from django.conf import settings  # noqa: PLC0415
+
         import apps.common.checks  # noqa: F401, PLC0415
+        from apps.common.signing import resolve_signing_secret  # noqa: PLC0415
+
+        if getattr(settings, "PORTAL_HMAC_REQUIRE_ISOLATION", False):
+            resolve_signing_secret()

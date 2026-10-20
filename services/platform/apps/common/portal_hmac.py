@@ -85,7 +85,7 @@ def _parse(raw: str) -> dict[str, tuple[str, ...]]:
                 f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] has more than {MAX_KEYRING_SECRETS} secrets"
             )
         for secret in secrets:
-            if not isinstance(secret, str) or not secret:
+            if not isinstance(secret, str) or not secret.strip():
                 raise ImproperlyConfigured(
                     f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] contains an empty/non-string secret"
                 )
@@ -115,7 +115,18 @@ def validate_at_startup() -> None:
     if mode not in VALID_MODES:
         raise ImproperlyConfigured(f"PORTAL_HMAC_MODE must be one of {VALID_MODES}, got {mode!r}")
 
+    if getattr(settings, "PORTAL_HMAC_REQUIRE_ISOLATION", False) and mode != "enforce":
+        raise ImproperlyConfigured("Deployed Platform services require PORTAL_HMAC_MODE='enforce'")
+
     registry = get_registry()  # raises on malformed JSON / shape
+
+    if getattr(settings, "PORTAL_HMAC_REQUIRE_ISOLATION", False):
+        owners: dict[str, str] = {}
+        for portal_id, keyring in registry.items():
+            for secret in keyring:
+                if secret in owners and owners[secret] != portal_id:
+                    raise ImproperlyConfigured("PORTAL_HMAC_CREDENTIALS must use distinct keys for each Portal")
+                owners[secret] = portal_id
 
     if mode == "enforce" and not registry:
         raise ImproperlyConfigured(

@@ -463,3 +463,6 @@ IPWARE_TRUSTED_PROXY_LIST: list[str] = [
 # Handler filters cover Django request and exception logging as well as app logs.
 
 LOGGING = secure_logging_config(LOGGING)
+
+# Production and staging require an isolated credential for each Portal.
+PORTAL_HMAC_REQUIRE_ISOLATION = False

@@ -942,3 +942,6 @@ INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
 # See apps/common/portal_hmac.py and docs/security/portal-hmac-registry.md for the rollout.
 PORTAL_HMAC_MODE: str = os.environ.get("PORTAL_HMAC_MODE", "legacy")
 PORTAL_HMAC_CREDENTIALS: str | None = os.environ.get("PORTAL_HMAC_CREDENTIALS")
+
+# Production and staging require an isolated credential for each Portal.
+PORTAL_HMAC_REQUIRE_ISOLATION = False

@@ -45,7 +45,8 @@ DB_PW = "DB_" + "PASSWORD"
 LEAK = "leak-marker"
 PORTAL_KEY = "PORTAL_DJANGO_SECRET_KEY=dummy-portal-secret-key\n"
 PORTAL_ONLY_ENV = (
-    "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n" + PORTAL_KEY
+    "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+    "PORTAL_HMAC_SECRET=portal-signing-key\n" + PORTAL_KEY
 )
 # A full file with every variable the portal-only stack requires, for the helper.
 FULL_FOR_PORTAL = PORTAL_ONLY_ENV + (
@@ -59,6 +60,8 @@ SHARED_HOST_ENV = (
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
     "ACME_EMAIL=ops@example.com\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
     "PLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+    "PORTAL_HMAC_SECRET=portal-signing-key\n"
+    'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n'
 )
 
 DOCKER_STUB = """#!{python}
@@ -585,7 +588,9 @@ class TestComposeReadsTheChosenFile:
             PROD_ENV + "DB_HOST=db.example.com\nDB_NAME=praho\nDB_USER=praho\nDB_PASSWORD=p\nDJANGO_SECRET_KEY=s\n"
             "PLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
             "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
-            "PLATFORM_API_BASE_URL=https://platform.example.com/api\n",
+            "PLATFORM_API_BASE_URL=https://platform.example.com/api\n"
+            "PORTAL_HMAC_SECRET=portal-signing-key\n"
+            'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n',
         )
         services = _compose_config(env_file, project.compose_file("container-service"))
         platform, portal = services["platform"]["environment"], services["portal"]["environment"]
@@ -600,6 +605,8 @@ class TestComposeReadsTheChosenFile:
         common = (
             "DJANGO_SECRET_KEY=s\nDB_PASSWORD=p\nPLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\n"
             "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\nACME_EMAIL=ops@example.com\n"
+            "PORTAL_HMAC_SECRET=portal-signing-key\n"
+            'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n'
         )
         project.write_env(".env.prod", PROD_ENV + common + "SENTINEL_SETTING=from-prod\n")
         staging = project.write_env(
