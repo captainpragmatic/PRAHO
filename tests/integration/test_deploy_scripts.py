@@ -39,6 +39,8 @@ RECORDED_ENV = (
     "VERSION",
     "DJANGO_SETTINGS_MODULE",
     "PORTAL_DJANGO_SECRET_KEY",
+    "PORTAL_ID",
+    "PORTAL_HMAC_SECRET",
 )
 # Built at runtime, so the source holds no password-like assignment for secret scanners to flag.
 DB_PW = "DB_" + "PASSWORD"
@@ -46,7 +48,7 @@ LEAK = "leak-marker"
 PORTAL_KEY = "PORTAL_DJANGO_SECRET_KEY=dummy-portal-secret-key\n"
 PORTAL_ONLY_ENV = (
     "DJANGO_SETTINGS_MODULE=config.settings.prod\nPLATFORM_API_BASE_URL=https://platform.example.com/api\n"
-    "PORTAL_HMAC_SECRET=portal-signing-key\n" + PORTAL_KEY
+    "PORTAL_ID=portal-001\nPORTAL_HMAC_SECRET=portal-signing-key\n" + PORTAL_KEY
 )
 # A full file with every variable the portal-only stack requires, for the helper.
 FULL_FOR_PORTAL = PORTAL_ONLY_ENV + (
@@ -60,7 +62,7 @@ SHARED_HOST_ENV = (
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
     "ACME_EMAIL=ops@example.com\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
     "PLATFORM_API_BASE_URL=https://platform.example.com/api\n"
-    "PORTAL_HMAC_SECRET=portal-signing-key\n"
+    "PORTAL_ID=portal-001\nPORTAL_HMAC_SECRET=portal-signing-key\n"
     'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n'
 )
 
@@ -570,6 +572,15 @@ class TestComposeReadsTheChosenFile:
     """Real `docker compose config` (no daemon needed): the platform gets the chosen file's values."""
 
     @pytest.mark.integration
+    @pytest.mark.parametrize("name", ["portal-only", "single-server", "container-service"])
+    def test_nondefault_portal_identity_reaches_the_container(self, project: Project, name: str) -> None:
+        env_file = project.write_env(
+            ".env.prod", SHARED_HOST_ENV + PORTAL_KEY + PROD_ENV + "PORTAL_ID=portal-secondary\n"
+        )
+        services = _compose_config(env_file, project.compose_file(name))
+        assert services["portal"]["environment"].get("PORTAL_ID") == "portal-secondary"
+
+    @pytest.mark.integration
     def test_the_single_server_stack_keeps_its_own_database_and_proxy_settings(self, project: Project) -> None:
         # An operator copies .env.example.prod, which is shared with native deploys: its DB_SSLMODE and
         # PORTAL_TRUSTED_PROXY_CIDRS describe a host database and a host Caddy, not this stack's own.
@@ -589,7 +600,7 @@ class TestComposeReadsTheChosenFile:
             "PLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\nPORTAL_TRUSTED_PROXY_CIDRS=10.0.0.0/8\n"
             "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\n"
             "PLATFORM_API_BASE_URL=https://platform.example.com/api\n"
-            "PORTAL_HMAC_SECRET=portal-signing-key\n"
+            "PORTAL_ID=portal-001\nPORTAL_HMAC_SECRET=portal-signing-key\n"
             'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n',
         )
         services = _compose_config(env_file, project.compose_file("container-service"))
@@ -605,7 +616,7 @@ class TestComposeReadsTheChosenFile:
         common = (
             "DJANGO_SECRET_KEY=s\nDB_PASSWORD=p\nPLATFORM_API_SECRET=h\nPLATFORM_TO_PORTAL_WEBHOOK_SECRET=w\n"
             "PLATFORM_DOMAIN=platform.example.com\nPORTAL_DOMAIN=portal.example.com\nACME_EMAIL=ops@example.com\n"
-            "PORTAL_HMAC_SECRET=portal-signing-key\n"
+            "PORTAL_ID=portal-001\nPORTAL_HMAC_SECRET=portal-signing-key\n"
             'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n'
         )
         project.write_env(".env.prod", PROD_ENV + common + "SENTINEL_SETTING=from-prod\n")
@@ -731,19 +742,22 @@ class TestPortalHostEnv:
         assert "dummy-" not in output
 
     @pytest.mark.integration
-    def test_stop_and_logs_work_before_the_portal_key_exists(self, project: Project) -> None:
+    @pytest.mark.parametrize("flag", ["--stop", "--logs"])
+    def test_stop_and_logs_work_before_the_portal_key_exists(self, project: Project, flag: str) -> None:
         # An upgraded portal host still has its old file; Compose interpolates the new required key
         # for `down` and `logs` too, so they get a throwaway value that no container ever uses.
         old = "".join(
             line + "\n"
             for line in _filled_example(".env.example.prod").splitlines()
-            if not line.startswith("PORTAL_DJANGO_SECRET_KEY=")
+            if not line.startswith(("PORTAL_DJANGO_SECRET_KEY=", "PORTAL_ID=", "PORTAL_HMAC_SECRET="))
         )
         project.write_env(".env.prod", old)
-        result = project.run("deploy.sh", "portal-only", "--stop")
+        result = project.run("deploy.sh", "portal-only", flag)
         assert result.returncode == 0, result.stdout + result.stderr
         (call,) = project.compose_calls()
         assert call["env"]["PORTAL_DJANGO_SECRET_KEY"]
+        assert call["env"]["PORTAL_ID"]
+        assert call["env"]["PORTAL_HMAC_SECRET"]
 
     @pytest.mark.integration
     def test_stop_keeps_a_real_portal_key(self, project: Project) -> None:
@@ -751,6 +765,8 @@ class TestPortalHostEnv:
         assert project.run("deploy.sh", "portal-only", "--stop").returncode == 0
         (call,) = project.compose_calls()
         assert call["env"]["PORTAL_DJANGO_SECRET_KEY"] is None
+        assert call["env"]["PORTAL_ID"] is None
+        assert call["env"]["PORTAL_HMAC_SECRET"] is None
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
@@ -775,6 +791,7 @@ class TestPortalHostEnv:
     def test_the_helper_writes_only_what_the_portal_stack_uses(self, project: Project) -> None:
         extra = (
             PORTAL_KEY
+            + "PORTAL_ID=portal-secondary\n"
             + "PLATFORM_API_SECRET='a$b#c'\nHSTS_POLICY=\"max-age=1; includeSubDomains\"\nPORTAL_HMAC_SECRET=x # note\n"
         )
         source = _filled_example(".env.example.prod", extra)
@@ -793,6 +810,7 @@ class TestPortalHostEnv:
             if key != "DJANGO_SETTINGS_MODULE":
                 assert line == expected[key], key
         assert "PORTAL_DJANGO_SECRET_KEY" in written
+        assert written.get("PORTAL_ID") == "PORTAL_ID=portal-secondary"
         for key in set(expected) - allowed:
             assert f"dummy-{key}" not in text, key
         assert "dummy-" not in result.stdout + result.stderr

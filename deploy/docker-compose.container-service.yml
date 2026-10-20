@@ -12,7 +12,7 @@
 #   - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD (managed PostgreSQL)
 #   - DJANGO_SECRET_KEY
 #   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
-#   - PORTAL_HMAC_CREDENTIALS (Platform registry), PORTAL_HMAC_SECRET (Portal's own signing key)
+#   - PORTAL_HMAC_CREDENTIALS (Platform registry), PORTAL_ID and PORTAL_HMAC_SECRET (Portal credentials)
 #   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings)
 #   - PLATFORM_DOMAIN, PORTAL_DOMAIN, PORTAL_TRUSTED_PROXY_CIDRS
 #   - PLATFORM_API_BASE_URL (for portal -> platform communication)
@@ -116,6 +116,7 @@ services:
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Isolated signing secret matching PORTAL_HMAC_CREDENTIALS[PORTAL_ID].
+      - PORTAL_ID=${PORTAL_ID:?PORTAL_ID required (matching its Platform registry entry)}
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:?PORTAL_HMAC_SECRET required}
       # Login timing floor in seconds (empty = the production default, 1.0).
       - PLATFORM_API_AUTH_MIN_DURATION_SECONDS=${PLATFORM_API_AUTH_MIN_DURATION_SECONDS:-}

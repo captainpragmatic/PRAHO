@@ -15,7 +15,7 @@
 #   - PLATFORM_API_BASE_URL (e.g., https://platform.example.com/api)
 #   - PORTAL_DJANGO_SECRET_KEY (the portal's own Django key; never the platform's DJANGO_SECRET_KEY)
 #   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
-#   - PORTAL_HMAC_SECRET (this Portal's own signing key, matching its Platform registry entry)
+#   - PORTAL_ID and PORTAL_HMAC_SECRET (this Portal's registered identity and signing key)
 #   - PORTAL_TRUSTED_PROXY_CIDRS (the proxy in front of the portal)
 #   - PORTAL_DOMAIN and PLATFORM_DOMAIN (distinct hostnames; DOMAIN is a Portal fallback)
 
@@ -36,6 +36,7 @@ services:
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:?PLATFORM_API_BASE_URL required}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Isolated signing secret matching PORTAL_HMAC_CREDENTIALS[PORTAL_ID].
+      - PORTAL_ID=${PORTAL_ID:?PORTAL_ID required (matching its Platform registry entry)}
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:?PORTAL_HMAC_SECRET required}
       # Login timing floor in seconds (empty = the production default, 1.0).
       - PLATFORM_API_AUTH_MIN_DURATION_SECONDS=${PLATFORM_API_AUTH_MIN_DURATION_SECONDS:-}

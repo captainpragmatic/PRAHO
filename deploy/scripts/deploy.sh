@@ -227,11 +227,13 @@ if [ "$DEPLOYMENT_TYPE" = portal-only ] && [ "$ACTION" != deploy ]; then
     if [ -n "$PORTAL_OFFENDERS" ]; then
         log_warn "This portal host's env file holds more than the portal stack uses: ${PORTAL_OFFENDERS}. Regenerate it with deploy/scripts/portal-env.sh."
     fi
-    # Compose interpolates the required portal key for `down` and `logs` too. A host still on its old
-    # file lacks it, so these two get a throwaway value; neither creates a container that would use it.
-    if [ -z "${PORTAL_DJANGO_SECRET_KEY:-}" ] && [ -z "$(praho_env_value PORTAL_DJANGO_SECRET_KEY)" ]; then
-        export PORTAL_DJANGO_SECRET_KEY="unused-by-${ACTION}"
-    fi
+    # Compose interpolates required Portal credentials for `down` and `logs` too. An old host file
+    # may lack them; placeholders let these actions work without starting any container.
+    for portal_credential in PORTAL_DJANGO_SECRET_KEY PORTAL_ID PORTAL_HMAC_SECRET; do
+        if [ -z "${!portal_credential:-}" ] && [ -z "$(praho_env_value "$portal_credential")" ]; then
+            export "${portal_credential}=unused-by-${ACTION}"
+        fi
+    done
 fi
 
 case "$ACTION" in
