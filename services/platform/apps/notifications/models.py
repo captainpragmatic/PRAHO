@@ -24,6 +24,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
 from apps.common.encryption import EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
@@ -408,37 +409,19 @@ class EmailLog(models.Model):
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Encrypt body fields at rest when available."""
-        if ENCRYPTION_AVAILABLE:
-            original_text, original_html = self.body_text, self.body_html
-            try:
-                if self.body_text and not is_encrypted(self.body_text):
-                    encrypted = encrypt_value(self.body_text)
-                    if encrypted is None:
-                        raise EncryptionError("encrypt_value returned None for non-None input")
-                    self.body_text = encrypted
-                if self.body_html and not is_encrypted(self.body_html):
-                    encrypted = encrypt_value(self.body_html)
-                    if encrypted is None:
-                        raise EncryptionError("encrypt_value returned None for non-None input")
-                    self.body_html = encrypted
-                self.body_encrypted = True
-            except Exception as e:
-                # Restore both to prevent partial encryption (one encrypted, one plaintext)
-                self.body_text = original_text
-                self.body_html = original_html
-                self.body_encrypted = False
-                # Per ADR-0017: fail-open for infra failures with safeguards
-                logger.error("EmailLog encryption failed; saving with body_encrypted=False: %s", e)
-                logger.critical(
-                    "ENCRYPTION_FAILURE_ALERT: EmailLog body will contain plaintext. "
-                    "Run `manage.py reencrypt_email_logs` after resolving. to=%s subject=%s",
-                    self.to_addr,
-                    (self.subject or "")[:50],
-                )
-        else:
-            logger.warning("ENCRYPTION_AVAILABLE is False; EmailLog saved without encryption")
-            self.body_encrypted = False
+        """Encrypt new bodies; encryption failures never persist plaintext."""
+        if not ENCRYPTION_AVAILABLE and (self.body_text or self.body_html):
+            raise EncryptionError("Email body encryption is unavailable")
+        original_text, original_html = self.body_text, self.body_html
+        try:
+            for field in ("body_text", "body_html"):
+                value = getattr(self, field)
+                if value and not is_encrypted(value):
+                    setattr(self, field, encrypt_model_secret(self, field, value))
+            self.body_encrypted = True
+        except Exception:
+            self.body_text, self.body_html = original_text, original_html
+            raise
         super().save(*args, **kwargs)
 
     def get_status_display_color(self) -> str:
@@ -484,31 +467,17 @@ class EmailLog(models.Model):
 
     def get_safe_content_preview(self) -> str:
         """Return a short, decrypted preview suitable for logs/UI."""
-        content = self.body_text or ""
-        try:
-            content = decrypt_if_needed(content)
-        except Exception as e:  # pragma: no cover
-            logger.warning("Decryption failed, using original content: %s", e)
+        content = self.get_decrypted_body_text()
         preview = content[:CONTENT_PREVIEW_LENGTH]
         return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 
     def get_decrypted_body_html(self) -> str:
-        """Return decrypted HTML body, handling missing encryption gracefully."""
-        content = self.body_html or ""
-        try:
-            return str(decrypt_if_needed(content))
-        except Exception as e:  # pragma: no cover
-            logger.warning("Decryption of body_html failed: %s", e)
-            return content
+        """Read only authenticated ciphertext belonging to this row and field."""
+        return decrypt_model_secret(self, "body_html", self.body_html or "")
 
     def get_decrypted_body_text(self) -> str:
-        """Return decrypted text body, handling missing encryption gracefully."""
-        content = self.body_text or ""
-        try:
-            return str(decrypt_if_needed(content))
-        except Exception as e:  # pragma: no cover
-            logger.warning("Decryption of body_text failed: %s", e)
-            return content
+        """Read only authenticated ciphertext belonging to this row and field."""
+        return decrypt_model_secret(self, "body_text", self.body_text or "")
 
 
 # ===============================================================================
@@ -714,6 +683,14 @@ class EmailSuppression(models.Model):
 
     def __str__(self) -> str:
         return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display()})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.email_encrypted and not is_encrypted(self.email_encrypted):
+            self.email_encrypted = encrypt_model_secret(self, "email_encrypted", self.email_encrypted)
+        super().save(*args, **kwargs)
+
+    def get_decrypted_email(self) -> str:
+        return decrypt_model_secret(self, "email_encrypted", self.email_encrypted)
 
     @classmethod
     def suppress(

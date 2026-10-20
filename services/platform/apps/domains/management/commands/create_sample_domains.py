@@ -11,7 +11,6 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from apps.billing.models import Currency
-from apps.common.encryption import encrypt_sensitive_data
 from apps.customers.models import Customer
 from apps.domains.domain_names import canonicalize_domain_name, longest_matching_tld_suffix
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
@@ -135,7 +134,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.namecheap.com/",
                 "api_endpoint": "https://api.namecheap.com/xml.response",
                 "api_username": "test_user",
-                "api_key": encrypt_sensitive_data("test_key_123"),
+                "api_key": "test_key_123",
                 "status": "active",
                 "currency": "USD",
                 "default_nameservers": ["ns1.example.com", "ns2.example.com"],
@@ -147,7 +146,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.rotld.ro/",
                 "api_endpoint": "https://api.rotld.ro/",
                 "api_username": "praho_test",
-                "api_key": encrypt_sensitive_data("rotld_key_456"),
+                "api_key": "rotld_key_456",
                 "status": "active",
                 "currency": "RON",
                 "default_nameservers": ["ns1.rotld.ro", "ns2.rotld.ro"],
@@ -159,7 +158,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.godaddy.com/",
                 "api_endpoint": "https://api.godaddy.com/v1/",
                 "api_username": "godaddy_user",
-                "api_key": encrypt_sensitive_data("godaddy_secret_789"),
+                "api_key": "godaddy_secret_789",
                 "status": "active",
                 "currency": "USD",
                 "default_nameservers": ["ns01.domaincontrol.com", "ns02.domaincontrol.com"],
@@ -169,7 +168,11 @@ class Command(BaseCommand):
 
         created_count = 0
         for registrar_data in registrars_data:
+            sample_key = str(registrar_data.pop("api_key"))
             registrar, created = Registrar.objects.get_or_create(name=registrar_data["name"], defaults=registrar_data)
+            if created:
+                registrar.set_encrypted_credentials(api_key=sample_key)
+                registrar.save(update_fields=["api_key"])
             if created:
                 created_count += 1
                 self.stdout.write(f"   🏢 Created registrar: {registrar.display_name}")
@@ -352,9 +355,6 @@ class Command(BaseCommand):
                     "registered_at": registered_at,
                     "expires_at": expires_at,
                     "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # Sample data generation  # Safe: sample data generation, not security  # noqa: S311  # Safe: non-cryptographic usage
-                    "epp_code": encrypt_sensitive_data(
-                        f"EPP{random.randint(100000, 999999)}"  # noqa: S311
-                    ),
                     "auto_renew": random.choice(  # noqa: S311  # Safe: non-cryptographic usage
                         [True, True, False]
                     ),  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
@@ -370,6 +370,8 @@ class Command(BaseCommand):
 
             if created:
                 created_count += 1
+                domain.set_encrypted_epp_code(f"EPP{domain.pk.hex[:12]}")
+                domain.save(update_fields=["epp_code"])
                 # Update registrar domain count
                 registrar.total_domains += 1
                 registrar.save(update_fields=["total_domains"])

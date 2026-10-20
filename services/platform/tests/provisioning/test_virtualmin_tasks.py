@@ -10,6 +10,7 @@ re-dispatched create_domain with an obsolete signature that stranded jobs in
 
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -93,6 +94,7 @@ class VirtualminTaskTestBase(TestCase):
         self.server.set_api_password("test_password")
         self.server.save()
         self.account = VirtualminAccount.objects.create(
+            id=getattr(self, "account_uuid", uuid.uuid4()),
             domain="test.example.com",
             service=self.service,
             server=self.server,

@@ -8,6 +8,7 @@ Provides automatic refresh and expiration handling.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +21,8 @@ if TYPE_CHECKING:
 
 from django.core.cache import cache
 
-from apps.common.encryption import decrypt_value, encrypt_value, is_encrypted
+from apps.common.encryption import is_encrypted
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
 from .settings import efactura_settings
 
@@ -73,6 +75,8 @@ class OAuthToken(models.Model):
 
     Tokens are encrypted at rest using the settings app encryption service.
     """
+
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     cui = models.CharField(
         max_length=20,
@@ -165,29 +169,18 @@ class OAuthToken(models.Model):
         """Save with automatic encryption."""
         # Encrypt tokens before saving
         if self.access_token and not self._is_encrypted(self.access_token):
-            self.access_token = self._encrypt(self.access_token)
+            self.access_token = self._encrypt(self.access_token, "access_token")
 
         if self.refresh_token and not self._is_encrypted(self.refresh_token):
-            self.refresh_token = self._encrypt(self.refresh_token)
+            self.refresh_token = self._encrypt(self.refresh_token, "refresh_token")
 
         super().save(*args, **kwargs)
 
-    def _encrypt(self, value: str) -> str:
-        """Encrypt a value using AES-256-GCM.
+    def _encrypt(self, value: str, field: str = "access_token") -> str:
+        return encrypt_model_secret(self, field, value)
 
-        Raises on failure — never stores plaintext as fallback.
-        """
-        encrypted = encrypt_value(value)
-        if encrypted is None:
-            raise ValueError("Encryption returned None for non-None input")
-        return encrypted
-
-    def _decrypt(self, value: str) -> str:
-        """Decrypt a value using AES-256-GCM.
-
-        Raises on failure — never returns unverified plaintext.
-        """
-        return decrypt_value(value)
+    def _decrypt(self, value: str, field: str = "access_token") -> str:
+        return decrypt_model_secret(self, field, value)
 
     def _is_encrypted(self, value: str) -> bool:
         """Check if a value is encrypted."""
@@ -201,7 +194,7 @@ class OAuthToken(models.Model):
     @property
     def decrypted_refresh_token(self) -> str:
         """Get decrypted refresh token."""
-        return self._decrypt(self.refresh_token) if self.refresh_token else ""
+        return self._decrypt(self.refresh_token, "refresh_token") if self.refresh_token else ""
 
     @property
     def is_expired(self) -> bool:

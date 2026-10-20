@@ -283,7 +283,7 @@ class CachingSecurityTests(TestCase):
         self.assertEqual(value2, 30)
 
         # Change the sensitive setting in database
-        self.sensitive_setting.value = encrypt_value("new_secret_key")
+        self.sensitive_setting.value = "new_secret_key"
         self.sensitive_setting.save()
 
         # Should get new value immediately (not cached)

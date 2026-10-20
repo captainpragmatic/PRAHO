@@ -19,7 +19,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
@@ -201,23 +201,11 @@ class VirtualminServer(models.Model):
         Raises DecryptionError on key rotation / corrupted ciphertext
         so callers can handle it explicitly instead of silently getting "".
         """
-        from apps.common.encryption import DecryptionError  # noqa: PLC0415
-
-        try:
-            # Convert memoryview to bytes if needed
-            encrypted_data = self.encrypted_api_password
-            if isinstance(encrypted_data, memoryview):
-                encrypted_data = encrypted_data.tobytes()
-            return decrypt_sensitive_data(encrypted_data.decode())
-        except DecryptionError:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to decrypt API password for server {self.name}: {e}")
-            return ""
+        return decrypt_model_secret(self, "encrypted_api_password", bytes(self.encrypted_api_password).decode())
 
     def set_api_password(self, password: str) -> None:
         """Encrypt and store API password"""
-        encrypted = encrypt_sensitive_data(password)
+        encrypted = encrypt_model_secret(self, "encrypted_api_password", password)
         self.encrypted_api_password = encrypted.encode()
 
     def can_host_domain(self) -> bool:
@@ -434,19 +422,11 @@ class VirtualminAccount(models.Model):
 
     def get_password(self) -> str:
         """Decrypt and return account password"""
-        try:
-            # Convert memoryview to bytes if needed
-            encrypted_data = self.encrypted_password
-            if isinstance(encrypted_data, memoryview):
-                encrypted_data = encrypted_data.tobytes()
-            return decrypt_sensitive_data(encrypted_data.decode())
-        except Exception as e:
-            logger.error(f"Failed to decrypt password for account {self.domain}: {e}")
-            return ""
+        return decrypt_model_secret(self, "encrypted_password", bytes(self.encrypted_password).decode())
 
     def set_password(self, password: str) -> None:
         """Encrypt and store account password"""
-        encrypted = encrypt_sensitive_data(password)
+        encrypted = encrypt_model_secret(self, "encrypted_password", password)
         self.encrypted_password = encrypted.encode()
 
     def get_recovery_seed(self) -> str:

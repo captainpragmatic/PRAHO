@@ -13,7 +13,8 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Q
 
-from apps.common.encryption import encrypt_value, is_encrypted
+from apps.common.encryption import is_encrypted
+from apps.common.model_secrets import encrypt_model_secret
 from apps.notifications.models import EmailLog
 
 logger = logging.getLogger(__name__)
@@ -26,13 +27,13 @@ def _build_row_updates(email_log: EmailLog) -> dict[str, Any]:
     updates: dict[str, Any] = {}
 
     if email_log.body_text and not is_encrypted(email_log.body_text):
-        encrypted_text = encrypt_value(email_log.body_text)
+        encrypted_text = encrypt_model_secret(email_log, "body_text", email_log.body_text)
         if not encrypted_text:
             raise ValueError(f"Encryption returned empty body_text value for log {email_log.id}")
         updates["body_text"] = encrypted_text
 
     if email_log.body_html and not is_encrypted(email_log.body_html):
-        encrypted_html = encrypt_value(email_log.body_html)
+        encrypted_html = encrypt_model_secret(email_log, "body_html", email_log.body_html)
         if not encrypted_html:
             raise ValueError(f"Encryption returned empty body_html value for log {email_log.id}")
         updates["body_html"] = encrypted_html
