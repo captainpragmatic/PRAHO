@@ -379,7 +379,9 @@ class EmailLog(models.Model):
         help_text=_("Email priority level"),
     )
 
-    delivery_attempts = models.PositiveIntegerField(default=0)
+    delivery_attempts = models.PositiveIntegerField(
+        default=0, db_comment="Durable count of claimed provider sends, shared by retries and recovery."
+    )
 
     # User context
     sent_by = models.ForeignKey(

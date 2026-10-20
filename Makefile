@@ -755,6 +755,7 @@ MIGRATION_BASE_REF ?= origin/master
 
 check-migrations:
 	@$(PYTHON_SHARED) scripts/migration_checksums.py --base-ref "$(MIGRATION_BASE_REF)"
+	@$(PYTHON_SHARED) -m scripts.check_new_model_schema --base-ref "$(MIGRATION_BASE_REF)"
 	@echo "🔎 [Platform] Checking model and migration state..."
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --check --dry-run --settings=config.settings.test
 	@echo "🔎 [Portal] Checking model and migration state..."
