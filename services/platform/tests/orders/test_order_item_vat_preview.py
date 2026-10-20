@@ -71,7 +71,7 @@ class OrderItemVATPreviewTests(TestCase):
             vat_number="RO12345678",
             is_vat_payer=True,
             vat_rate=Decimal("11.00"),
-            vat_rate_reason="Reduced rate for this activity",
+            vat_rate_reason=CustomerTaxProfile.VATRateReason.OTHER,
         )
         preview = self._form(order).context["vat_preview"]
         # A fraction, the unit OrderItem.tax_rate uses: 100 net becomes 11.00 VAT, not 1100.
