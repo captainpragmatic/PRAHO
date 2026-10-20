@@ -21,6 +21,7 @@ from .base import (
     SetupIntentResult,
     SetupIntentStatusResult,
 )
+from .stripe_contract import STRIPE_API_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class StripeGateway(BasePaymentGateway):
             self._stripe = stripe
 
             # Set API version for consistency
-            stripe.api_version = "2023-10-16"
+            stripe.api_version = STRIPE_API_VERSION
 
             self.logger.info("✅ Stripe SDK initialized successfully from settings system")
 
