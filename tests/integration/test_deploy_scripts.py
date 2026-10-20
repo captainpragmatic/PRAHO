@@ -27,7 +27,9 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = PROJECT_ROOT / "deploy/scripts"
 FISCAL_KEYS = "COMPANY_NAME=Test Hosting SRL\nCOMPANY_CUI=RO12345674\nCOMPANY_COUNTRY_CODE=RO\n"
-PRODUCTION_KEYS = "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n" + FISCAL_KEYS
+PRODUCTION_KEYS = (
+    "DJANGO_ENCRYPTION_KEY=test-encryption-key\nCREDENTIAL_VAULT_MASTER_KEY=test-vault-key\n" + FISCAL_KEYS
+)
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
 RECORDED_ENV = (
@@ -85,6 +87,8 @@ elif argv[:1] == ["inspect"]:
 elif argv[:1] == ["start"] and os.environ.get("DOCKER_START_FAILS"):
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_PAUSE_FAILS") and any("media_sweep" in a for a in argv):
+    sys.exit(1)
+elif argv[:1] == ["exec"] and os.environ.get("DOCKER_SETUP_FAILS") and "setup_initial_data" in argv:
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
@@ -193,6 +197,13 @@ def _subcommand(call: dict[str, Any]) -> list[str]:
 
 class TestDeployScript:
     @pytest.mark.integration
+    def test_required_setup_failure_fails_deployment(self, project: Project) -> None:
+        project.write_env(".env.prod", PROD_ENV)
+        result = project.run("deploy.sh", "single-server", DOCKER_SETUP_FAILS="1")
+        assert result.returncode != 0, result.stdout
+        assert any("setup_initial_data" in call["argv"] for call in project.calls())
+
+    @pytest.mark.integration
     @pytest.mark.parametrize("args", [("--help",), ("single-server", "--help")])
     def test_help_needs_no_env_file(self, project: Project, args: tuple[str, ...]) -> None:
         result = project.run("deploy.sh", *args)
@@ -265,7 +276,9 @@ class TestDeployScript:
     def test_production_refuses_to_deploy_without_its_keys(self, project: Project, encryption_line: str) -> None:
         project.write_env(
             ".env.prod",
-            "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n" + FISCAL_KEYS + encryption_line,
+            "DJANGO_SETTINGS_MODULE=config.settings.prod\nCREDENTIAL_VAULT_MASTER_KEY=k\n"
+            + FISCAL_KEYS
+            + encryption_line,
         )
         result = project.run("deploy.sh", "single-server")
         assert result.returncode != 0

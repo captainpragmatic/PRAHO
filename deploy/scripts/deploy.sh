@@ -124,7 +124,7 @@ deploy_single_server() {
     docker exec praho_platform python manage.py collectstatic --noinput || true
 
     log_info "Running initial data setup..."
-    docker exec praho_platform python manage.py setup_initial_data || log_warn "setup_initial_data failed"
+    docker exec praho_platform python manage.py setup_initial_data
 
     verify_deployment single-server
 }
