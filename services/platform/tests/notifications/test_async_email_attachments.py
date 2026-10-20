@@ -105,7 +105,7 @@ class RetryPathAttachmentTestCase(TestCase):
             "the retry must carry the attachments or the redelivered email arrives without its PDF",
         )
 
-    @patch("django_q.tasks.async_task")
+    @patch("django_q.tasks.schedule")
     def test_schedule_email_retry_forwards_attachments_to_the_task(self, mock_async) -> None:
         result = EmailService.send_email(to="customer@example.ro", subject="seed", body_text="seed", async_send=False)
         self.assertTrue(result.success)

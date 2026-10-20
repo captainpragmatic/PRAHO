@@ -378,6 +378,8 @@ class EmailLog(models.Model):
         help_text=_("Email priority level"),
     )
 
+    delivery_attempts = models.PositiveIntegerField(default=0)
+
     # User context
     sent_by = models.ForeignKey(
         "users.User",
