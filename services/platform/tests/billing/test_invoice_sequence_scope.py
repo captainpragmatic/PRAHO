@@ -127,6 +127,8 @@ class BuiltinIssuanceGatewaySequenceScopeTests(TransactionTestCase):
     def test_a_builtin_document_finalised_through_the_gateway_records_the_default_family(self) -> None:
         from apps.billing.issuers.service import issue_invoice_externally  # noqa: PLC0415
 
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
+
         draft = Invoice.objects.create(
             customer=h.customer(),
             currency=h.ron(),

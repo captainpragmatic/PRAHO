@@ -9,7 +9,7 @@ from django.db import connections
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice, ProformaLine
+from apps.billing.models import Currency, Invoice, InvoiceSequence, Payment, ProformaInvoice, ProformaLine
 from apps.billing.proforma_service import ProformaPaymentService
 from apps.customers.models import Customer
 
@@ -17,6 +17,7 @@ from apps.customers.models import Customer
 class ManualPaymentConcurrencyTests(TransactionTestCase):
     @skipUnlessDBFeature("has_select_for_update")
     def test_simultaneous_bank_submissions_create_one_payment_and_invoice(self):
+        InvoiceSequence.objects.get_or_create(scope="default")
         currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         customer = Customer.objects.create(name="Concurrent payment", primary_email="race@example.test")
         proforma = ProformaInvoice.objects.create(

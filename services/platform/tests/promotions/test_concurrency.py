@@ -11,7 +11,7 @@ from django.db import close_old_connections, connection, connections, transactio
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-from apps.billing.invoice_models import Invoice
+from apps.billing.invoice_models import Invoice, InvoiceSequence
 from apps.billing.metering_models import BillingCycle
 from apps.billing.models import Currency
 from apps.billing.payment_models import Payment
@@ -124,6 +124,10 @@ class PromotionConcurrencyTests(TransactionTestCase):
 
 @skipUnless(connection.vendor == "postgresql", "Row-lock races require PostgreSQL")
 class RenewalPaymentConcurrencyTests(_SubscriptionInvoicePaymentFixture, TransactionTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
+
     def test_previous_renewal_refund_does_not_deadlock_current_payment_failure(self):
         card = GiftCard.objects.create(
             code="REFUND-DUNNING",

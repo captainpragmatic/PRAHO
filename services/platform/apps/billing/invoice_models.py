@@ -113,9 +113,9 @@ SEQUENCE_FAMILIES: frozenset[str] = frozenset({SEQUENCE_SCOPE_DEFAULT, SEQUENCE_
 def sequence_family_of(scope: str) -> str:
     """The live family a recorded scope belongs to; an archived series answers to `default`.
 
-    Only known families are returned. `InvoiceNumberingService` creates a sequence for any scope
-    it is handed, so an unrecognised value must never reach it; and a scope is never inferred from
-    a number's prefix, which would route a document onto another family's counter.
+    Only known families are returned. Allocation requires a configured family; a scope is
+    never inferred from a number's prefix, which would route a document onto another
+    family's counter.
     """
     if scope in SEQUENCE_FAMILIES:
         return scope
