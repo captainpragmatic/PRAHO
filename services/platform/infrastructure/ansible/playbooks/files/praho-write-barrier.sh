@@ -411,11 +411,21 @@ case $action in
       if [[ $locked == 1 ]]; then mode=LOCK; else mode=UNLOCK; fi
       sql "ALTER USER '$user'@'$host' ACCOUNT $mode" >/dev/null || stop failed unlock_failed
     done <<<"$(unb64 <<<"$accounts_b64")"
+    # The domain first, its sub-servers following it as every call does (--subservers); then each
+    # sub-server is put back to its own recorded state, so one disabled before stays disabled.
+    read_disabled || stop failed domain_unreadable
     while IFS=$'\t' read -r name was_enabled; do
       [[ -n $name ]] || continue
       [[ $name =~ $host_ok && $was_enabled =~ ^[01]$ ]] || stop failed enabled_record_invalid
-      if [[ $was_enabled == 1 ]]; then
-        virtualmin enable-domain --domain "$name" >/dev/null 2>&1 || true
+      if [[ $name == "$domain" ]]; then
+        if [[ $was_enabled == 1 ]]; then
+          virtualmin enable-domain --domain "$name" --subservers >/dev/null 2>&1 || true
+          read_disabled || stop failed domain_unreadable
+        fi
+      elif [[ $was_enabled == 1 ]] && is_disabled "$name"; then
+        virtualmin enable-domain --domain "$name" --subservers >/dev/null 2>&1 || true
+      elif [[ $was_enabled == 0 ]] && ! is_disabled "$name"; then
+        virtualmin disable-domain --domain "$name" --subservers >/dev/null 2>&1 || true
       fi
     done <<<"$(unb64 <<<"$enabled_b64")"
     [[ -n $crontab_active_sha ]] || stop failed crontab_record_missing
