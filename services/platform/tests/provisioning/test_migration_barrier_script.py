@@ -74,8 +74,11 @@ case $cmd in
     fi ;;
   enable-domain)
     echo "enable $want" >>"$state/calls"
-    rm -f "$state/disabled.$want"
-    grep -v AliasMatch "$PRAHO_APACHE_SITES/$want.conf" >"$PRAHO_APACHE_SITES/$want.new"; mv "$PRAHO_APACHE_SITES/$want.new" "$PRAHO_APACHE_SITES/$want.conf"
+    targets=("$want"); if [[ " $* " == *" --subservers "* && $want == "$FAKE_DOMAIN" && -n ${FAKE_CHILD:-} ]]; then targets+=("$FAKE_CHILD"); fi
+    for t in "${targets[@]}"; do
+      rm -f "$state/disabled.$t"
+      grep -v AliasMatch "$PRAHO_APACHE_SITES/$t.conf" >"$PRAHO_APACHE_SITES/$t.new"; mv "$PRAHO_APACHE_SITES/$t.new" "$PRAHO_APACHE_SITES/$t.conf"
+    done
     if [[ $want == "$FAKE_DOMAIN" && -e $state/crontab && ${FAKE_ENABLE_STRANDS_CRON:-0} != 1 ]]; then
       sed -E 's/^# (.*) # VIRTUALMIN DISABLE$/\1/' "$state/crontab" >"$state/crontab.new" && mv "$state/crontab.new" "$state/crontab"
     fi ;;
@@ -257,6 +260,20 @@ class BarrierScriptCase(SimpleTestCase):
     def apply(self, recorded: dict[str, Any], **overrides: str) -> dict[str, Any]:
         return self.step("apply", **{**self.inputs(recorded), **overrides})
 
+    def _suspend(self, name: str) -> None:
+        """Leave `name` as Virtualmin's disable does: marked, each vhost on the disabled page, jobs commented."""
+        (self.state / f"disabled.{name}").touch()
+        conf = self.sites / f"{name}.conf"
+        alias = f"    AliasMatch ^/.*$ {self.page}/disabled_by_virtualmin.html\n"
+        conf.write_text(conf.read_text() + alias * 2)
+        if name == DOMAIN:
+            (self.state / "crontab").write_text(
+                "".join(
+                    f"# {line} # VIRTUALMIN DISABLE\n" if line and not line.startswith("#") else f"{line}\n"
+                    for line in CRONTAB.splitlines()
+                )
+            )
+
     def locked(self) -> set[str]:
         return {path.name.removeprefix("locked.") for path in self.state.glob("locked.*")}
 
@@ -332,7 +349,7 @@ class ApplyTests(BarrierScriptCase):
     def test_the_fence_on_administration_comes_before_the_accounts_are_counted_and_locked(self) -> None:
         recorded = self.record()
 
-        self.apply(recorded)
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
 
         calls = self.calls()
         disable = next(i for i, call in enumerate(calls) if call.startswith("disable "))
@@ -486,7 +503,7 @@ class ReleaseTests(BarrierScriptCase):
 
     def test_jobs_stranded_by_a_failed_enable_are_put_back_from_the_kept_copy(self) -> None:
         recorded = self.record()
-        self.apply(recorded)
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
 
         released = self.release(recorded, FAKE_ENABLE_STRANDS_CRON="1")
 
@@ -496,11 +513,7 @@ class ReleaseTests(BarrierScriptCase):
 
     def test_a_suspended_domain_stays_suspended_and_its_owner_refused(self) -> None:
         for name in (DOMAIN, CHILD):
-            (self.state / f"disabled.{name}").touch()
-        # A suspended domain's jobs are already commented by Virtualmin, as the lab showed.
-        (self.state / "crontab").write_text(
-            "".join(f"# {line} # VIRTUALMIN DISABLE\n" if line and not line.startswith("#") else f"{line}\n" for line in CRONTAB.splitlines())
-        )
+            self._suspend(name)
         recorded = self.record()
         self.assertEqual(self.apply(recorded)["outcome"], "ok")
 
@@ -512,17 +525,17 @@ class ReleaseTests(BarrierScriptCase):
         self.assertFalse([call for call in self.calls() if call.startswith("login ")], "no probe write while suspended")
 
     def test_a_child_recorded_disabled_is_not_enabled_with_its_parent(self) -> None:
-        (self.state / f"disabled.{CHILD}").touch()
+        self._suspend(CHILD)
         recorded = self.record()
-        self.apply(recorded)
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
 
-        self.release(recorded)
+        self.assertEqual(self.release(recorded)["outcome"], "ok")
 
         self.assertEqual(self.disabled(), {CHILD})
 
     def test_a_probe_write_that_fails_fails_the_release(self) -> None:
         recorded = self.record()
-        self.apply(recorded)
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
 
         released = self.release(recorded, FAKE_PROBE_FAILS="1")
 
