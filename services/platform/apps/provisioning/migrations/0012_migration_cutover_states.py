@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('provisioning', '0010_account_name_leases_and_rotation'),
+        ('provisioning', '0011_persistent_secret_contexts'),
     ]
 
     operations = [
