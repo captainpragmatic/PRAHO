@@ -21,6 +21,7 @@ import hashlib
 import html
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,7 @@ from apps.notifications.models import (
     EmailLog,
     EmailSuppression,
     EmailTemplate,
+    PendingDeliveryEvent,
     validate_email_subject,
     validate_template_content,
 )
@@ -308,6 +310,53 @@ class EmailRateLimiter:
 # ===============================================================================
 # EMAIL SERVICE
 # ===============================================================================
+
+
+# Delivery callbacks that change a message's status, and the statuses each may replace. A status never
+# moves backwards: a bounce or a complaint is final, and a late "delivered" never overwrites it.
+DELIVERY_STATUS_EVENTS: dict[str, frozenset[str]] = {
+    "delivered": frozenset({"sent", "soft_bounced"}),
+    "soft_bounced": frozenset({"sent"}),
+    "bounced": frozenset({"sent", "delivered", "soft_bounced"}),
+    "complained": frozenset({"sent", "delivered", "soft_bounced", "bounced"}),
+}
+PENDING_DELIVERY_EVENT_WINDOW = timedelta(days=2)
+
+
+def apply_delivery_event(email_log: EmailLog, event_type: str, metadata: dict[str, Any] | None, now: Any) -> list[str]:
+    """Apply one callback to a locked row; the fields changed (empty: nothing to write)."""
+    fields: list[str] = []
+    replaces = DELIVERY_STATUS_EVENTS.get(event_type)
+    if replaces is not None and email_log.status in replaces:
+        email_log.status = event_type
+        fields.append("status")
+        if event_type == "delivered":
+            email_log.delivered_at = now
+            fields.append("delivered_at")
+    elif event_type == "opened" and not email_log.opened_at:
+        email_log.opened_at = now
+        fields.append("opened_at")
+    elif event_type == "clicked" and not email_log.clicked_at:
+        email_log.clicked_at = now
+        fields.append("clicked_at")
+    if metadata:
+        current = email_log.provider_response if isinstance(email_log.provider_response, dict) else {}
+        email_log.provider_response = {**current, f"{event_type}_event": metadata}
+        fields.append("provider_response")
+    return fields
+
+
+def apply_pending_delivery_events(email_log: EmailLog) -> None:
+    """Apply the callbacks that arrived before this row's provider id was recorded. The caller holds the lock."""
+    pending = list(PendingDeliveryEvent.objects.filter(provider_id=email_log.provider_id).order_by("created_at"))
+    if not pending:
+        return
+    fields: set[str] = set()
+    for event in pending:
+        fields.update(apply_delivery_event(email_log, event.event_type, event.metadata, event.created_at))
+    if fields:
+        email_log.save(update_fields=sorted(fields))
+    PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
 
 
 def validate_email_log_subject(email_log: EmailLog, subject: str) -> str | None:
@@ -625,24 +674,22 @@ class EmailService:
             maximum = getattr(settings, "EMAIL_RATE_LIMIT", {}).get("MAX_PER_MINUTE", 50)
             if count > maximum:
                 raise DjangoValidationError(_("Rate limit exceeded"))
+            from apps.notifications.delivery import record_success, renew_claim  # noqa: PLC0415  # Circular
+
+            if not renew_claim(str(email_log.id), email_log.claim_token):
+                raise RuntimeError("Claim lost before sending")
             msg.send(fail_silently=False)
             reserved = False
 
-            # Update log with success
-            email_log.status = "sent"
-            email_log.sent_at = timezone.now()
-
-            # Try to get message ID from anymail
             message_id = None
+            response: dict[str, Any] = {}
             if hasattr(msg, "anymail_status"):
                 message_id = msg.anymail_status.message_id
-                email_log.provider_id = message_id or ""
-                email_log.provider_response = {
+                response = {
                     "status": str(msg.anymail_status.status),
                     "esp_response": getattr(msg.anymail_status, "esp_response", {}),
                 }
-
-            email_log.save()
+            record_success(str(email_log.id), email_log.claim_token, provider_id=message_id or "", response=response)
 
             logger.info(f"Email sent successfully: {subject[:50]}... to {to[0][:3]}***")
 
@@ -658,10 +705,9 @@ class EmailService:
                 # The reservation was taken but nothing was delivered.
                 with contextlib.suppress(Error):
                     EmailRateLimiter.release_counter()
-            # Update log with failure
-            email_log.status = "failed"
-            email_log.provider_response = {"error": str(e)}
-            email_log.save()
+            from apps.notifications.delivery import record_sync_failure  # noqa: PLC0415  # Circular
+
+            record_sync_failure(str(email_log.id), e, email_log.claim_token)
 
             logger.error(f"Email sending failed: {e}")
 
@@ -869,7 +915,12 @@ class EmailService:
         provider: str,
         status: str = "sending",
     ) -> EmailLog:
-        """Create an email log entry."""
+        """Create an email log entry. A row created `sending` (the synchronous path) holds its claim."""
+        claim: dict[str, Any] = {}
+        if status == "sending":
+            from apps.notifications.delivery import CLAIM_LEASE  # noqa: PLC0415  # Circular
+
+            claim = {"claim_token": uuid.uuid4(), "lease_until": timezone.now() + CLAIM_LEASE, "delivery_attempts": 1}
         return EmailLog.objects.create(
             to_addr=to,
             from_addr=from_addr,
@@ -883,6 +934,7 @@ class EmailService:
             priority=priority,
             provider=provider,
             status=status,
+            **claim,
         )
 
     # ===============================================================================
@@ -1237,7 +1289,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def handle_delivery_event(  # Complexity: multi-step workflow  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    def handle_delivery_event(
         cls,
         event_type: str,
         message_id: str,
@@ -1259,29 +1311,29 @@ class EmailService:
             True if event was processed successfully
         """
         try:
-            # Find the email log
-            email_log = EmailLog.objects.filter(provider_id=message_id).first()
-            if not email_log:
-                email_log = EmailLog.objects.filter(to_addr=recipient).order_by("-sent_at").first()
-
-            if not email_log:
-                logger.warning(f"No email log found for delivery event: {message_id}")
-                return False
-
             now = timezone.now()
-
-            if event_type == "delivered":
-                email_log.status = "delivered"
-                email_log.delivered_at = now
-
-            elif event_type == "bounced":
-                email_log.status = "bounced"
-                # Suppress the email address for hard bounces
+            # Suppression is about the address, so it applies whether or not the message is known yet.
+            if event_type == "bounced":
                 EmailSuppressionService.suppress_email(recipient, "hard_bounce")
-
-            elif event_type == "soft_bounced":
-                email_log.status = "soft_bounced"
-                # Check soft bounce threshold
+            elif event_type == "complained":
+                EmailSuppressionService.suppress_email(recipient, "complaint")
+            with transaction.atomic():
+                # Matched by provider id ONLY: matching by address put one message's bounce on another.
+                email_log = (
+                    EmailLog.objects.select_for_update().filter(provider_id=message_id).first() if message_id else None
+                )
+                if email_log is None:
+                    if message_id and event_type in DELIVERY_STATUS_EVENTS:
+                        # The send may not have recorded its provider id yet: applied when it does.
+                        PendingDeliveryEvent.objects.create(
+                            provider_id=message_id, event_type=event_type, metadata=metadata or {}
+                        )
+                    logger.warning(f"No email log yet for delivery event: {message_id}")
+                    return False
+                fields = apply_delivery_event(email_log, event_type, metadata, now)
+                if fields:
+                    email_log.save(update_fields=fields)
+            if event_type == "soft_bounced" and email_log.status == "soft_bounced":
                 soft_bounce_count = EmailLog.objects.filter(
                     to_addr=recipient,
                     status="soft_bounced",
@@ -1290,28 +1342,6 @@ class EmailService:
                 threshold = getattr(settings, "EMAIL_DELIVERABILITY", {}).get("SOFT_BOUNCE_THRESHOLD", 3)
                 if soft_bounce_count >= threshold:
                     EmailSuppressionService.suppress_email(recipient, "soft_bounce_threshold", duration_days=30)
-
-            elif event_type == "complained":
-                email_log.status = "complained"
-                # Always suppress complained addresses
-                EmailSuppressionService.suppress_email(recipient, "complaint")
-
-            elif event_type == "opened":
-                if not email_log.opened_at:
-                    email_log.opened_at = now
-
-            elif event_type == "clicked":
-                if not email_log.clicked_at:
-                    email_log.clicked_at = now
-
-            # Store metadata
-            if metadata:
-                email_log.provider_response = {
-                    **(email_log.provider_response or {}),
-                    f"{event_type}_event": metadata,
-                }
-
-            email_log.save()
 
             logger.info(f"Processed {event_type} event for {recipient[:3]}***")
             return True

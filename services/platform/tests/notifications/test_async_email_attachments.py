@@ -13,6 +13,7 @@ from unittest.mock import patch
 from django.core import mail
 from django.test import TestCase
 
+from apps.notifications.models import EmailLog
 from apps.notifications.services import EmailService
 from apps.notifications.tasks import _schedule_email_retry, send_email_task
 
@@ -43,15 +44,8 @@ class SendEmailTaskAttachmentTestCase(TestCase):
     """The worker task must actually attach the files to the outgoing message."""
 
     def _email_log_id(self) -> str:
-        # send_email(async_send=False) creates a log and sends synchronously; reuse its log id.
-        result = EmailService.send_email(
-            to="customer@example.ro",
-            subject="seed",
-            body_text="seed",
-            async_send=False,
-        )
-        mail.outbox.clear()
-        return str(result.email_log_id)
+        # A queued row, as _send_async leaves it: a row a real send already finished is never sent again.
+        return str(EmailLog.objects.create(to_addr="customer@example.ro", subject="seed", body_text="seed").pk)
 
     def test_task_attaches_the_file_to_the_message(self) -> None:
         send_email_task(
@@ -83,9 +77,8 @@ class RetryPathAttachmentTestCase(TestCase):
     attachments — a retried proforma email must not arrive without its PDF."""
 
     def _email_log_id(self) -> str:
-        result = EmailService.send_email(to="customer@example.ro", subject="seed", body_text="seed", async_send=False)
-        mail.outbox.clear()
-        return str(result.email_log_id)
+        # A queued row, as _send_async leaves it: a row a real send already finished is never sent again.
+        return str(EmailLog.objects.create(to_addr="customer@example.ro", subject="seed", body_text="seed").pk)
 
     @patch("apps.notifications.tasks._schedule_email_retry")
     def test_failed_send_schedules_retry_with_attachments(self, mock_retry) -> None:

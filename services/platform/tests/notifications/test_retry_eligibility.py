@@ -42,7 +42,8 @@ class RetryEligibilityTests(TestCase):
             payload = cast("dict[str, object]", package["kwargs"])
             self.assertEqual(payload["body_text"], "Original body")
             self.assertEqual(payload["from_email"], "original@example.test")
-            self.assertEqual(payload["retry_count"], 1)
+            # The row's own attempt count (the claim takes the larger of it and the row): no +1 inflation.
+            self.assertEqual(payload["retry_count"], 0)
             ids.add(cast("str", payload["email_log_id"]))
         return ids
 

@@ -58,6 +58,7 @@
     "services/platform/apps/notifications/migrations/0003_emaillog_delivery_attempts.py": "bd3ef79bdcd2c14b407df72cf81308d49a02f3f1fdd2db222747be986872b325",
     "services/platform/apps/notifications/migrations/0004_persistent_secret_contexts.py": "8e5fefdbe8d6112ec94209d7f0389773f26321100977e0536891643a25a0e477",
     "services/platform/apps/notifications/migrations/0005_document_processing_state.py": "5b367343fe3fd768531f3b1f254f8a7b59fd1d1b6cc4c436ac2adb7d961dd91e",
+    "services/platform/apps/notifications/migrations/0006_email_claim_and_pending_events.py": "85b5ed753dd3dc3237940fc152b0710b6c788e3a7d293486ac713f4d1923f938",
     "services/platform/apps/orders/migrations/0001_initial.py": "c0aa3c345a26160c5e0e8b9aa78811bb1fe3f639024bcfc7f61e6e935e3351ae",
     "services/platform/apps/orders/migrations/0002_initial.py": "73d1086e73b002c2ccb2214ad05f6c7d08bf5277d0dc37cc1727281ee88deca2",
     "services/platform/apps/orders/migrations/0003_initial.py": "fec346767247cb02032dc35cf39e1b514ed4ca72eed4e27bef45563f3c472051",

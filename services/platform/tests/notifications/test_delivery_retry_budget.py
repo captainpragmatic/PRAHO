@@ -108,7 +108,9 @@ class DeliveryRetryBudgetTests(TestCase):
             ),
         ):
             self.send(row)
+            EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)  # The scheduled retry is due
             self.send(row)
+            EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)
             final = self.send(row)
         self.assertEqual(send.call_count, 2)
         self.assertFalse(final["retry_scheduled"])
@@ -175,9 +177,12 @@ class EmailRetryLimitSettingsTests(TestCase):
                     claimed, refused = claim_delivery(str(row.pk), row.subject, None, supplied_retry=0)
                     self.assertIsNone(refused)
                     self.assertEqual(claimed.delivery_attempts, attempt + 1)
-                    failed, retry = record_failure(str(row.pk), TimeoutError("provider unavailable"))
+                    failed, retry = record_failure(
+                        str(row.pk), TimeoutError("provider unavailable"), claimed.claim_token
+                    )
                     self.assertEqual(retry, attempt < maximum)
                     self.assertEqual(failed.status, "queued" if retry else "failed")
+                    EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)  # The retry is due
                 _, refused = claim_delivery(str(row.pk), row.subject, None, supplied_retry=0)
                 self.assertFalse(refused["retry_scheduled"])
                 # A stale queue row cannot obtain a new budget from recovery.

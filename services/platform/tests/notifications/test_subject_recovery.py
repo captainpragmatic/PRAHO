@@ -158,7 +158,8 @@ class SubjectRecoveryTests(TestCase):
             self.set_limit(20)
             repeated = send_email_task(str(log.pk), [log.to_addr], log.subject, "Body")
         self.assertFalse(repeated["success"])
-        self.assertEqual(repeated["error"], "Subject too long")
+        # The row is terminal, so the claim refuses it before the subject is even read.
+        self.assertEqual(repeated["error"], "Not claimable: failed")
         self.assert_permanent_failure(log)
 
     def test_scheduled_retry_refuses_invalid_subject_before_enqueue(self) -> None:

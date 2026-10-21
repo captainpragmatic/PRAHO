@@ -383,6 +383,18 @@ class EmailLog(models.Model):
         default=0, db_comment="Durable count of claimed provider sends, shared by retries and recovery."
     )
 
+    # One worker at a time (apps/notifications/delivery.py): the claim it holds, until when, and when a
+    # scheduled retry is due. Nullable additions, so SQLite adds columns without a table rebuild.
+    claim_token = models.UUIDField(
+        null=True, blank=True, db_comment="The claim the sending worker holds; every completion compares it."
+    )
+    lease_until = models.DateTimeField(
+        null=True, blank=True, db_comment="Until when the claim holds; past it the row may be reclaimed."
+    )
+    next_attempt_at = models.DateTimeField(
+        null=True, blank=True, db_comment="When the next attempt is due; recovery waits for it."
+    )
+
     # User context
     sent_by = models.ForeignKey(
         "users.User",
@@ -480,6 +492,32 @@ class EmailLog(models.Model):
     def get_decrypted_body_text(self) -> str:
         """Read only authenticated ciphertext belonging to this row and field."""
         return decrypt_model_secret(self, "body_text", self.body_text or "")
+
+
+class PendingDeliveryEvent(models.Model):
+    """A verified provider callback for a message whose provider id is not recorded yet.
+
+    The provider id is known only once the send returns, so a fast bounce or complaint can arrive
+    first. It waits here, matched by provider id alone (never by address), and the send's success
+    write applies it under the same row lock. Unmatched events expire after a window.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider_id = models.CharField(max_length=255, db_index=True, help_text=_("Provider's message ID"))
+    event_type = models.CharField(max_length=20, help_text=_("delivered, bounced, soft_bounced or complained"))
+    metadata = models.JSONField(default=dict, blank=True, help_text=_("The callback's event data"))
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_pending_delivery_events"
+        db_table_comment = "Verified delivery callbacks waiting for their message's provider id to be recorded."
+        verbose_name = _("Pending Delivery Event")
+        verbose_name_plural = _("Pending Delivery Events")
+        ordering: ClassVar[tuple[str, ...]] = ("created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.event_type} for {self.provider_id}"
 
 
 # ===============================================================================
