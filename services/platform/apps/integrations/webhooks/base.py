@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 EXPECTED_KEY_VALUE_PARTS = 2  # Expected parts when splitting key=value format
 
 
+class WebhookHandlerError(Exception):
+    """A refused handler must roll back its database effects."""
+
+
 class SecurityError(Exception):
     """🔒 Security-related errors in webhook processing"""
 
@@ -209,7 +213,7 @@ class BaseWebhookProcessor(ABC):
 
         return Ok(context)
 
-    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:  # noqa: PLR0911  # Each return is a distinct dedup/race/failure outcome
+    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:
         """Step 5: Create webhook event record and process it.
 
         Uses database unique constraint (source, event_id) to prevent race conditions.
@@ -264,25 +268,7 @@ class BaseWebhookProcessor(ABC):
                         )
                     )
 
-                try:
-                    success, message = self.handle_event(webhook_event)
-
-                    if success:
-                        webhook_event.mark_processed()
-                        verb = "Processed" if created else "Reprocessed"
-                        logger.info(f"✅ {verb} {self.source_name} webhook {event_id}: {message}")
-                        return Ok(WebhookProcessingResult.success_result(message, webhook_event))
-                    else:
-                        webhook_event.mark_failed(message)
-                        logger.error(f"❌ Failed {self.source_name} webhook {event_id}: {message}")
-                        return Ok(WebhookProcessingResult.error_result(message, webhook_event))
-
-                except Exception:
-                    # SECURITY: Log full details internally but don't expose to caller
-                    error_msg = "Processing error: internal failure"
-                    webhook_event.mark_failed(error_msg)
-                    logger.exception(f"💥 Exception processing {self.source_name} webhook {event_id}")
-                    return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
+                return Ok(self._execute_locked(webhook_event))
 
         except IntegrityError:
             # get_or_create handles the (source, event_id) race internally, so this backstop is
@@ -300,6 +286,33 @@ class BaseWebhookProcessor(ABC):
             if existing.status == "processed":
                 return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
             return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
+
+    def _execute_locked(self, event: WebhookEvent) -> WebhookProcessingResult:
+        """Run effects in a savepoint while the caller retains the event claim."""
+        try:
+            with transaction.atomic():
+                success, message = self.handle_event(event)
+                if not success:
+                    raise WebhookHandlerError(message)
+        except Exception as error:
+            # A database error must roll back before failure-recording SQL can run.
+            event.refresh_from_db()
+            message = str(error) if isinstance(error, WebhookHandlerError) else "Processing error: internal failure"
+            event.mark_failed(message)
+            try:
+                with transaction.atomic():
+                    self.on_failure(event, message)
+            except Exception:
+                logger.exception("Could not schedule failure follow-up for webhook %s", event.pk)
+            if not isinstance(error, WebhookHandlerError):
+                logger.exception("Webhook handler failed for event %s", event.pk)
+            return WebhookProcessingResult.error_result(message, event)
+        event.mark_processed()
+        return WebhookProcessingResult.success_result(message, event)
+
+    def on_failure(self, event: WebhookEvent, message: str) -> None:
+        """Schedule source-specific follow-up after the failed state is persisted."""
+        return None
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""
@@ -506,79 +519,46 @@ def process_pending_webhooks(source: str | None = None, limit: int = 100) -> dic
     """
     stats = {"processed": 0, "failed": 0, "skipped": 0}
 
-    pending_webhooks = WebhookEvent.get_pending_webhooks(source=source, limit=limit)
-
-    for webhook_event in pending_webhooks:
-        try:
-            # Dynamically get processor for this source
-            processor = get_webhook_processor(webhook_event.source)
-
-            if not processor:
-                webhook_event.mark_failed(f"No processor found for source: {webhook_event.source}")
+    for _attempt in range(max(0, limit)):
+        with transaction.atomic():
+            candidates = WebhookEvent.objects.filter(status="pending")
+            if source:
+                candidates = candidates.filter(source=source)
+            event = candidates.order_by("received_at", "pk").select_for_update(skip_locked=True).first()
+            if event is None:
+                break
+            processor = get_webhook_processor(event.source)
+            if processor is None:
+                event.mark_failed(f"No processor found for source: {event.source}")
                 stats["failed"] += 1
                 continue
-
-            # Process the webhook
-            success, message = processor.handle_event(webhook_event)
-
-            if success:
-                webhook_event.mark_processed()
-                stats["processed"] += 1
-            else:
-                webhook_event.mark_failed(message)
-                stats["failed"] += 1
-
-        except Exception as e:
-            webhook_event.mark_failed(f"Processing exception: {e!s}")
-            stats["failed"] += 1
-            logger.exception(f"💥 Error processing webhook {webhook_event.id}")
-
+            result = processor._execute_locked(event)
+            stats["processed" if result.success else "failed"] += 1
     return stats
 
 
 def retry_failed_webhooks(source: str | None = None) -> dict[str, int]:
-    """
-    🔄 Retry failed webhooks that are ready for retry
-
-    Returns stats: {retried: int, failed: int, abandoned: int}
-    """
+    """Claim each due retry once, retaining the claim through status persistence."""
     stats = {"retried": 0, "failed": 0, "abandoned": 0}
-
-    failed_webhooks = WebhookEvent.get_failed_webhooks_for_retry(source=source)
-
-    for webhook_event in failed_webhooks:
-        if not should_retry_webhook(webhook_event):
-            webhook_event.mark_skipped("Max retries exceeded or too old")
-            stats["abandoned"] += 1
-            continue
-
-        try:
-            # Reset to pending for retry
-            webhook_event.status = "pending"
-            webhook_event.next_retry_at = None
-            webhook_event.save(update_fields=["status", "next_retry_at", "updated_at"])
-
-            # Process the webhook
-            processor = get_webhook_processor(webhook_event.source)
-            if not processor:
-                webhook_event.mark_failed(f"No processor found for source: {webhook_event.source}")
+    attempted: set[object] = set()
+    while True:
+        with transaction.atomic():
+            candidates = WebhookEvent.get_failed_webhooks_for_retry(source=source).exclude(pk__in=attempted)
+            event = candidates.order_by("received_at", "pk").select_for_update(skip_locked=True).first()
+            if event is None:
+                break
+            attempted.add(event.pk)
+            if not should_retry_webhook(event):
+                event.mark_skipped("Max retries exceeded or too old")
+                stats["abandoned"] += 1
+                continue
+            processor = get_webhook_processor(event.source)
+            if processor is None:
+                event.mark_failed(f"No processor found for source: {event.source}")
                 stats["failed"] += 1
                 continue
-
-            success, message = processor.handle_event(webhook_event)
-
-            if success:
-                webhook_event.mark_processed()
-                stats["retried"] += 1
-            else:
-                webhook_event.mark_failed(message)
-                stats["failed"] += 1
-
-        except Exception as e:
-            webhook_event.mark_failed(f"Retry exception: {e!s}")
-            stats["failed"] += 1
-            logger.exception(f"💥 Error retrying webhook {webhook_event.id}")
-
+            result = processor._execute_locked(event)
+            stats["retried" if result.success else "failed"] += 1
     return stats
 
 

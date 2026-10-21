@@ -88,6 +88,10 @@ class WebhookEvent(models.Model):
         null=True, blank=True, help_text=_("When to retry processing (for failed webhooks)")
     )
 
+    staff_alerted_at = models.DateTimeField(
+        null=True, blank=True, db_comment="First committed staff alert for a missing expected local provider object."
+    )
+
     # Metadata
     ip_address = models.GenericIPAddressField(
         null=True, blank=True, help_text=_("IP address webhook was received from")

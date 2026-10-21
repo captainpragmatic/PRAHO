@@ -1,0 +1,596 @@
+[
+  {
+    "name": "Check All Usage Thresholds",
+    "func": "apps.billing.metering_tasks.check_all_usage_thresholds",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "Collect Service Usage",
+    "func": "apps.billing.metering_tasks.collect_service_usage",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "Collect Virtualmin Usage",
+    "func": "apps.billing.metering_tasks.collect_virtualmin_usage",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "Process Pending Usage Events",
+    "func": "apps.billing.metering_tasks.process_pending_usage_events",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "Run Billing Cycle Workflow",
+    "func": "apps.billing.metering_tasks.run_billing_cycle_workflow",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "account-name-certificate-renewal",
+    "func": "apps.provisioning.virtualmin_tasks.renew_account_name_certificates",
+    "schedule_type": "I",
+    "minutes": 1440,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "account-names-reconcile",
+    "func": "apps.provisioning.account_hostname_lifecycle.reconcile_account_names",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "audit-expired-exports-daily",
+    "func": "apps.audit.tasks.delete_expired_data_exports",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "audit-file-integrity-daily",
+    "func": "apps.audit.tasks.run_file_integrity_check",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "audit-integrity-cleanup-weekly",
+    "func": "apps.audit.tasks.cleanup_old_integrity_checks",
+    "schedule_type": "W",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "audit-integrity-daily",
+    "func": "apps.audit.tasks.run_integrity_check",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "audit-pending-exports-every-15-min",
+    "func": "apps.audit.tasks.process_pending_data_exports",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "audit-retention-weekly",
+    "func": "apps.audit.tasks.run_retention_policies",
+    "schedule_type": "W",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-abandoned-claims",
+    "func": "apps.billing.issuers.tasks.sweep_abandoned_claims",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "5,35 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-currency-transition-notices",
+    "func": "apps.billing.tasks.reconcile_currency_transition_notices",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 1 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-expired-trials",
+    "func": "apps.billing.tasks.process_expired_trials",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "30 0 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-fiscal-correction-issuance-sweep",
+    "func": "apps.billing.fiscal_correction_worker.sweep_fiscal_correction_issuance",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "50 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-fiscal-correction-sweep",
+    "func": "apps.billing.fiscal_correction_service.sweep_fiscal_corrections",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "40 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-grace-expirations",
+    "func": "apps.billing.tasks.process_grace_period_expirations",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 1 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-issuance-sweep",
+    "func": "apps.billing.issuers.tasks.sweep_pending_issuances",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/10 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-issued-settlement-sweep",
+    "func": "apps.billing.issuers.tasks.sweep_issued_settlements",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-payment-retries",
+    "func": "apps.billing.tasks.run_payment_collection",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/15 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-recurring-orchestrator",
+    "func": "apps.billing.tasks.run_daily_billing",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "15 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-recurring-payment-reconciliation",
+    "func": "apps.billing.tasks.reconcile_recurring_payment_submissions",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/10 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-refund-reconciliation",
+    "func": "apps.billing.tasks.reconcile_stripe_refunds",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "45 2 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-vies-reverification",
+    "func": "apps.billing.tasks.reverify_expired_vat_validations",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "15 2 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "counter_cull",
+    "func": "apps.common.tasks.cull_counters",
+    "schedule_type": "D",
+    "minutes": 0,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "domains-reconcile-pending",
+    "func": "apps.domains.tasks.reconcile_pending_domain_operations",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "domains-renewal-notices",
+    "func": "apps.domains.tasks.process_domain_renewal_notices",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "efactura_archive_missing_responses",
+    "func": "apps.billing.efactura.tasks.archive_missing_efactura_responses_task",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "efactura_check_deadlines",
+    "func": "apps.billing.efactura.tasks.check_efactura_deadlines_task",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "efactura_poll_status",
+    "func": "apps.billing.efactura.tasks.poll_all_pending_status_task",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "efactura_process_pending",
+    "func": "apps.billing.efactura.tasks.process_pending_submissions_task",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "efactura_process_retries",
+    "func": "apps.billing.efactura.tasks.process_efactura_retries_task",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "efactura_reconcile_documents",
+    "func": "apps.billing.efactura.tasks.reconcile_efactura_documents",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "fx-bnr-daily-fetch",
+    "func": "apps.billing.tasks.fetch_bnr_exchange_rates",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 14 * * 1-5",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "gift-delivery-reconciliation",
+    "func": "apps.promotions.tasks.reconcile_gift_delivery",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/10 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "gift-funding-reconciliation",
+    "func": "apps.promotions.tasks.reconcile_gift_funding",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/10 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "gift-refund-reconciliation",
+    "func": "apps.promotions.tasks.reconcile_gift_refunds",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/10 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_bulk_validate_nodes",
+    "func": "apps.infrastructure.tasks.bulk_validate_nodes_task",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_calculate_daily_costs",
+    "func": "apps.infrastructure.tasks.calculate_daily_costs_task",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_cleanup_failed_deployments",
+    "func": "apps.infrastructure.tasks.cleanup_failed_deployments_task",
+    "schedule_type": "I",
+    "minutes": 360,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_cleanup_snapshots",
+    "func": "apps.infrastructure.tasks.cleanup_old_snapshots_task",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_drift_scan",
+    "func": "apps.infrastructure.tasks.run_drift_scan_task",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_recover_stale_remediations",
+    "func": "apps.infrastructure.tasks.recover_stale_remediations_task",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_recover_stuck_deployments",
+    "func": "apps.infrastructure.tasks.recover_stuck_deployments_task",
+    "schedule_type": "I",
+    "minutes": 30,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_remediation_health",
+    "func": "apps.infrastructure.tasks.check_remediation_health_task",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_scheduled_remediations",
+    "func": "apps.infrastructure.tasks.apply_scheduled_remediations_task",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "infra_sync_providers",
+    "func": "apps.infrastructure.tasks.sync_providers_task",
+    "schedule_type": "W",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "media-sweep-orphaned",
+    "func": "apps.common.media_sweep.sweep_orphaned_media",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "order-process-pending",
+    "func": "apps.orders.tasks.process_pending_orders",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "order-recover-hosting-lines",
+    "func": "apps.orders.tasks.recover_hosting_order_lines",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "order-sync-payment-status",
+    "func": "apps.orders.tasks.sync_order_payment_status",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "system_status_check",
+    "func": "apps.common.tasks.system_status_check",
+    "schedule_type": "D",
+    "minutes": 0,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "tickets-auto-close-inactive",
+    "func": "apps.tickets.tasks.auto_close_inactive_tickets",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-2fa-cleanup",
+    "func": "apps.users.tasks.cleanup_expired_2fa_sessions",
+    "schedule_type": "I",
+    "minutes": 30,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-api-token-purge",
+    "func": "apps.users.tasks.purge_expired_api_tokens",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 3 * * *",
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-login-tracking-rotation",
+    "func": "apps.users.tasks.rotate_failed_login_tracking",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 2 * * *",
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-password-reset-cleanup",
+    "func": "apps.users.tasks.cleanup_expired_password_reset_tokens",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-pending-registration-cleanup",
+    "func": "apps.users.tasks.cleanup_pending_registrations",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "user-suspicious-pattern-audit",
+    "func": "apps.users.tasks.audit_suspicious_login_patterns",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 */6 * * *",
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-chain-backups",
+    "func": "apps.provisioning.virtualmin_tasks.schedule_virtualmin_chain_backups",
+    "schedule_type": "I",
+    "minutes": 60,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-health-check",
+    "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
+    "schedule_type": "I",
+    "minutes": 10,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-reconcile-divergence",
+    "func": "apps.provisioning.virtualmin_tasks.reconcile_divergent_services_task",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-retry-failed-jobs",
+    "func": "apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-statistics",
+    "func": "apps.provisioning.virtualmin_tasks.update_virtualmin_server_statistics",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "0 */6 * * *",
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  }
+]

@@ -24,12 +24,22 @@ class CommonConfig(AppConfig):
     verbose_name = "Common Utilities"
 
     def ready(self) -> None:
+        _validate_account_lockout_at_startup()
         _validate_internal_service_domains()
         _validate_throttle_rates_at_startup()
         _validate_hmac_rate_limits_at_startup()
         _validate_encryption_keyring_at_startup()
         _validate_portal_hmac_registry_at_startup()
         _validate_media_sweep_at_startup()
+
+
+def _validate_account_lockout_at_startup() -> None:
+    """Run the settings-only guard even when WSGI or qcluster skips system checks."""
+    from apps.common.checks import check_account_lockout  # Avoid settings-time app imports.
+
+    errors = check_account_lockout(None)
+    if errors:
+        raise ImproperlyConfigured(errors[0].msg)
 
 
 def _validate_media_sweep_at_startup() -> None:

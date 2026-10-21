@@ -16,7 +16,7 @@ from django.db.models.signals import post_save, pre_delete, pre_save
 # django.db.transaction.atomic through their own module's reference, which mutates the
 # SHARED module attribute — this signal's savepoint must not be swept into assertions
 # about other apps' transaction behavior.
-from django.db.transaction import atomic
+from django.db.transaction import atomic, on_commit
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
@@ -25,7 +25,7 @@ from apps.common.transactions import best_effort_atomic, swallow_application_err
 from apps.users.models import CustomerMembership, User, UserProfile
 
 from .actor_context import current_actor
-from .models import AuditEvent, ComplianceLog, audit_mutation_allowed
+from .models import AuditEvent, ComplianceLog
 from .person_events import note_erasure_write
 from .services import AuditContext, AuditEventData, AuditService
 from .switches import audit_signals_disabled
@@ -750,7 +750,9 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, **kwargs
 
     from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
-    base_metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
+    base_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
+    if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        base_metadata["chain_link_pending"] = True
     try:
         metadata = dict(base_metadata)
         metadata.update(AuditIntegrityService.integrity_stamp_marker(instance))
@@ -778,41 +780,27 @@ def note_erasure_writes(sender: Any, instance: AuditEvent | ComplianceLog, creat
 
 @receiver(post_save, sender=AuditEvent)
 def append_audit_event_chain_link(sender: Any, instance: AuditEvent, created: bool, **kwargs: Any) -> None:
-    """Append the event to the hash-chain ledger (#313).
-
-    Stays on post_save, unlike the stamp above: a link references the event row by FK, so the
-    row has to exist first. The link commits the final integrity_hash, which pre_save has
-    already written into instance.metadata.
-
-    Gated behind AUDIT_CHAIN_ENABLED, in its own savepoint, and fail-open: an append failure
-    must never roll back the caller's (money-moving) transaction — an audit event without a
-    chain link is far better than a lost financial transaction. A nested atomic() is essential,
-    not decorative: a DB error here marks the CALLER's connection needs_rollback, and this
-    fires inside money-moving atomic blocks (order confirmation). Without the savepoint,
-    swallowing the exception would let the caller "commit" a transaction Django then silently
-    rolls back — the exact SFH-3 failure mode. A failure lands a chain_link_pending marker.
-    """
-    if not created:
+    """Link committed events; the INSERT already carries its durable pending marker."""
+    if not created or not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
         return
+    alias = kwargs.get("using") or instance._state.db
+    on_commit(partial(_link_committed_event, instance.pk, alias), using=alias, robust=True)
 
-    if not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
-        return
 
+def _link_committed_event(event_id: Any, alias: str | None = None) -> bool:
     from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
     try:
-        with atomic():
-            AuditIntegrityService.append_chain_link(instance)
-    except Exception as e:
-        logger.error(f"🔥 [Audit Chain] Failed to append chain link for event {instance.pk}: {e}")
-        try:
-            pending_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
-            pending_metadata["chain_link_pending"] = True
-            with atomic(), audit_mutation_allowed("chain_append"):
-                AuditEvent.objects.filter(pk=instance.pk).update(metadata=pending_metadata)
-            instance.metadata = pending_metadata
-        except Exception:
-            logger.error(f"🔥 [Audit Chain] Could not mark event {instance.pk} chain_link_pending")
+        with atomic(using=alias):
+            event = AuditEvent.objects.using(alias).filter(pk=event_id).first()
+            if event is None:
+                return True  # Rolled back or legitimately deleted; never resurrect evidence.
+            AuditIntegrityService.append_chain_link(event)
+            event.refresh_from_db()
+            return not bool(event.metadata.get("chain_link_pending"))
+    except Exception:
+        logger.exception("[Audit Chain] Post-commit linking failed for event %s; recovery remains pending", event_id)
+        return False
 
 
 # ===============================================================================

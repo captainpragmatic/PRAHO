@@ -146,7 +146,7 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
 
     def test_invoice_sequence_default_scope(self):
         """Test InvoiceSequence default scope"""
-        sequence = InvoiceSequence.objects.create()
+        sequence = InvoiceSequence()
         self.assertEqual(sequence.scope, 'default')
         self.assertEqual(sequence.last_value, 0)
 

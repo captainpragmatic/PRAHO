@@ -33,7 +33,6 @@ from typing import Any, cast
 
 import requests
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
 from django.utils.encoding import escape_uri_path, repercent_broken_unicode
 from urllib3.util import parse_url
 
@@ -210,19 +209,10 @@ def _client_ip_payload(client_ip: str) -> dict[str, str]:
 
 
 def _resolve_portal_signing_secret() -> str:
-    """Return the secret this portal signs Platform requests with (#277).
+    """Resolve the isolated credential, allowing explicit development compatibility."""
+    from apps.common.signing import resolve_signing_secret  # noqa: PLC0415
 
-    Prefers the per-portal ``PORTAL_HMAC_SECRET``; falls back to the shared
-    ``PLATFORM_API_SECRET`` only when the per-portal setting is ABSENT (backward-compat).
-    An explicitly-empty ``PORTAL_HMAC_SECRET`` is a provisioning error and raises rather
-    than silently degrading to the shared secret.
-    """
-    per_portal: str | None = getattr(settings, "PORTAL_HMAC_SECRET", None)
-    if per_portal is None:
-        return str(settings.PLATFORM_API_SECRET)
-    if not per_portal:
-        raise ImproperlyConfigured("PORTAL_HMAC_SECRET is set but empty; unset it to use PLATFORM_API_SECRET")
-    return per_portal
+    return resolve_signing_secret()
 
 
 class PlatformAPIError(Exception):
@@ -344,7 +334,9 @@ class PlatformAPIClient:
         )
 
         # Generate HMAC signature
-        secret = self.portal_secret or ""
+        from apps.common.signing import validate_secret  # noqa: PLC0415
+
+        secret = validate_secret(self.portal_secret, "PORTAL_HMAC_SECRET")
         signature = hmac.new(secret.encode(), canonical_string.encode(), hashlib.sha256).hexdigest()
 
         return {

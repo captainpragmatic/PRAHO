@@ -2,9 +2,9 @@
 # BILLING SEQUENCES TESTS (Django TestCase Format)
 # ===============================================================================
 
-from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
@@ -16,6 +16,9 @@ User = get_user_model()
 
 class InvoiceSequenceTestCase(TestCase):
     """Test InvoiceSequence model functionality"""
+
+    def setUp(self) -> None:
+        InvoiceSequence.objects.all().delete()
 
     def test_create_invoice_sequence(self):
         """Test basic invoice sequence creation"""
@@ -218,6 +221,9 @@ class ProformaSequenceTestCase(TestCase):
 class SequenceIntegrationTestCase(TestCase):
     """Test sequence integration scenarios"""
 
+    def setUp(self) -> None:
+        InvoiceSequence.objects.all().delete()
+
     def test_multiple_sequence_types(self):
         """Test creating both invoice and proforma sequences"""
         invoice_seq = InvoiceSequence.objects.create(
@@ -391,12 +397,7 @@ class InvoiceSequenceConcurrencyMigratedTests(TestCase):
         self.assertTrue(number.startswith('PAD-'))
         self.assertTrue(number.endswith('001000'))
 
-    def test_numbering_service_recovers_when_another_worker_creates_the_scope(self) -> None:
-        sequence = InvoiceSequence.objects.create(scope="default", prefix="INV", last_value=0)
-        locked_queryset = MagicMock()
-        locked_queryset.get.side_effect = [InvoiceSequence.DoesNotExist, sequence]
-
-        with patch.object(InvoiceSequence.objects, "select_for_update", return_value=locked_queryset):
-            number = InvoiceNumberingService.get_next_number()
-
-        self.assertEqual(number, "INV-000001")
+    def test_numbering_service_requires_existing_configuration(self) -> None:
+        InvoiceSequence.objects.filter(scope="default").delete()
+        with self.assertRaises(ImproperlyConfigured):
+            InvoiceNumberingService.get_next_number()

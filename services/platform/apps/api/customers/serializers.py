@@ -37,6 +37,14 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
+class CustomerAddressFlagsSerializer(serializers.Serializer):
+    """Normalize address flags before saving can transfer their designations."""
+
+    is_primary = serializers.BooleanField(default=False)
+    is_billing = serializers.BooleanField(default=False)
+    is_current = serializers.BooleanField(default=True)
+
+
 class CustomerSearchSerializer(serializers.ModelSerializer):
     """
     Serializer for customer search API results.

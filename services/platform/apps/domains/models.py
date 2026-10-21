@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
-from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 from apps.domains.domain_names import canonicalize_domain_name
 
 from .currency_models import (
@@ -217,6 +217,8 @@ class Registrar(models.Model):
     - ROTLD: Romanian .ro domains
     """
 
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("active", _("🟢 Active")),
         ("suspended", _("🟡 Suspended")),
@@ -289,24 +291,24 @@ class Registrar(models.Model):
 
     def get_api_credentials(self) -> tuple[str, str]:
         """Get decrypted API credentials (username, key) for this registrar."""
-        return (self.api_username or "", decrypt_value(self.api_key) if self.api_key else "")
+        return (self.api_username or "", decrypt_model_secret(self, "api_key", self.api_key) if self.api_key else "")
 
     def get_decrypted_api_secret(self) -> str:
         """Get decrypted API secret."""
-        return decrypt_value(self.api_secret) if self.api_secret else ""
+        return decrypt_model_secret(self, "api_secret", self.api_secret) if self.api_secret else ""
 
     def get_decrypted_webhook_secret(self) -> str:
         """Get decrypted webhook secret for signature verification."""
-        return decrypt_value(self.webhook_secret) if self.webhook_secret else ""
+        return decrypt_model_secret(self, "webhook_secret", self.webhook_secret) if self.webhook_secret else ""
 
     def set_encrypted_credentials(self, *, api_key: str = "", api_secret: str = "", webhook_secret: str = "") -> None:
         """Encrypt and store API credentials."""
         if api_key:
-            self.api_key = encrypt_sensitive_data(api_key)
+            self.api_key = encrypt_model_secret(self, "api_key", api_key)
         if api_secret:
-            self.api_secret = encrypt_sensitive_data(api_secret)
+            self.api_secret = encrypt_model_secret(self, "api_secret", api_secret)
         if webhook_secret:
-            self.webhook_secret = encrypt_sensitive_data(webhook_secret)
+            self.webhook_secret = encrypt_model_secret(self, "webhook_secret", webhook_secret)
 
     # Signal-related attributes for change tracking
     _original_registrar_values: dict[str, str | None] | None = None
@@ -581,11 +583,11 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
     def get_decrypted_epp_code(self) -> str:
         """Get decrypted EPP/Auth code for domain transfers."""
-        return decrypt_value(self.epp_code) if self.epp_code else ""
+        return decrypt_model_secret(self, "epp_code", self.epp_code) if self.epp_code else ""
 
     def set_encrypted_epp_code(self, code: str) -> None:
         """Encrypt and store EPP/Auth code."""
-        self.epp_code = encrypt_sensitive_data(code) if code else ""
+        self.epp_code = encrypt_model_secret(self, "epp_code", code) if code else ""
 
     def refresh_from_db(
         self,
@@ -838,6 +840,8 @@ class DomainOrderItem(models.Model):
     - Multi-year purchases
     """
 
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
     ACTION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("register", _("🆕 Register")),
         ("renew", _("🔄 Renew")),
@@ -954,8 +958,8 @@ class DomainOrderItem(models.Model):
 
     def get_decrypted_epp_code(self) -> str:
         """Get decrypted EPP/Auth code for domain transfer."""
-        return decrypt_value(self.epp_code) if self.epp_code else ""
+        return decrypt_model_secret(self, "epp_code", self.epp_code) if self.epp_code else ""
 
     def set_encrypted_epp_code(self, code: str) -> None:
         """Encrypt and store EPP/Auth code."""
-        self.epp_code = encrypt_sensitive_data(code) if code else ""
+        self.epp_code = encrypt_model_secret(self, "epp_code", code) if code else ""

@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
-from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 from apps.common.utils import operator_local_date
 
 
@@ -205,6 +205,8 @@ class ServicePlanPrice(models.Model):
 class Server(models.Model):
     """Physical/virtual servers for hosting services"""
 
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
     SERVER_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("shared", _("Shared Server")),
         ("vps_host", _("VPS Host")),
@@ -305,11 +307,17 @@ class Server(models.Model):
 
     def get_api_password(self) -> str:
         """Return decrypted Virtualmin API password."""
-        return decrypt_value(self._api_password_encrypted) if self._api_password_encrypted else ""
+        return (
+            decrypt_model_secret(self, "_api_password_encrypted", self._api_password_encrypted)
+            if self._api_password_encrypted
+            else ""
+        )
 
     def set_api_password(self, password: str) -> None:
         """Encrypt and store Virtualmin API password."""
-        self._api_password_encrypted = encrypt_sensitive_data(password) if password else ""
+        self._api_password_encrypted = (
+            encrypt_model_secret(self, "_api_password_encrypted", password) if password else ""
+        )
 
     @property
     def active_services_count(self) -> int:

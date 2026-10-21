@@ -19,7 +19,7 @@ import re
 from uuid import uuid4
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 
 # Import shared utilities
 from tests.e2e.helpers import (
@@ -309,6 +309,43 @@ def test_product_search_and_filtering(monitored_staff_page: Page, e2e_scenario) 
     page.locator('select[name="is_active"]').select_option("false")
     page.get_by_role("button", name="Filter", exact=True).click()
     expect(page.locator("table tbody tr")).to_have_count(0)
+
+
+def test_filter_waits_for_slow_initial_table_load(monitored_staff_page: Page, e2e_scenario) -> None:
+    """A late unfiltered response must never overwrite the user's filtered results."""
+    page = monitored_staff_page
+    product = e2e_scenario("pricing")
+    held: list[Route] = []
+
+    def hold_initial_load(route: Route) -> None:
+        if "search=&" in route.request.url and not held:
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/products/htmx/**", hold_initial_load)
+    try:
+        with page.expect_request(lambda request: "/products/htmx/" in request.url and "search=&" in request.url):
+            page.goto(f"{PLATFORM_BASE_URL}/products/")
+        page.evaluate("""() => {
+            window.productFilterRequests = 0;
+            document.body.addEventListener('htmx:beforeRequest', event => {
+                if (event.detail.elt.matches('form[hx-target="#product-results"]')) {
+                    window.productFilterRequests += 1;
+                }
+            });
+        }""")
+        page.locator('input[name="search"]').fill(product["name"])
+        page.get_by_role("button", name="Filter", exact=True).click()
+        assert page.evaluate("window.productFilterRequests") == 0, "Filter raced the initial table load"
+        held[0].continue_()
+        held.clear()
+        expect(page.locator("table tbody tr")).to_have_count(1)
+        expect(page.locator("table tbody tr")).to_contain_text(product["name"])
+    finally:
+        for route in held:
+            if not route.request.failure:
+                route.continue_()
 
 
 # ===============================================================================

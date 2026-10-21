@@ -42,10 +42,40 @@ TRIGGERS: dict[str, str] = {
     "customer_tax_profile_encryption_context_immutable": "customer_tax_profiles",
     "billing_invoice_encryption_context_immutable": "billing_invoices",
     "billing_proforma_encryption_context_immutable": "billing_proforma_invoices",
+    "secret_ctx_users_user": "users",
+    "secret_ctx_domains_registrar": "domain_registrars",
+    "secret_ctx_domains_domainorderitem": "domain_order_items",
+    "secret_ctx_domains_domain": "domains",
+    "secret_ctx_provisioning_server": "provisioning_servers",
+    "secret_ctx_provisioning_virtualminserver": "provisioning_virtualmin_servers",
+    "secret_ctx_provisioning_virtualminaccount": "provisioning_virtualmin_accounts",
+    "secret_ctx_settings_systemsetting": "setting_entries",
+    "secret_ctx_billing_oauthtoken": "billing_efactura_oauth_tokens",
+    "secret_ctx_notifications_emaillog": "notification_email_logs",
+    "secret_ctx_notifications_emailsuppression": "notification_email_suppressions",
+    "secret_ctx_common_encryptedcredential": "common_credentials",
 }
 
 
 class MigrationOnlyDatabaseObjectsTests(TestCase):
+    def test_processing_state_comments_are_installed_on_postgresql(self) -> None:
+        if connection.vendor != "postgresql":
+            return  # SQLite has no database column-comment feature.
+        with connection.cursor() as cursor:
+            for table, column, expected in (
+                ("notification_email_logs", "delivery_attempts", "Durable count of claimed provider sends"),
+                ("integration_webhook_events", "staff_alerted_at", "First committed staff alert"),
+            ):
+                with self.subTest(column=column):
+                    cursor.execute(
+                        "SELECT col_description(c.oid, a.attnum) FROM pg_class c "
+                        "JOIN pg_attribute a ON a.attrelid = c.oid "
+                        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        "WHERE c.relname = %s AND a.attname = %s AND n.nspname = current_schema()",
+                        [table, column],
+                    )
+                    self.assertIn(expected, cursor.fetchone()[0])
+
     def _index_names(self, table: str) -> set[str]:
         with connection.cursor() as cursor:
             return set(connection.introspection.get_constraints(cursor, table))

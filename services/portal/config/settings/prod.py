@@ -165,3 +165,5 @@ SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurren
 
 # Structured JSON logging; files only when PORTAL_LOG_DIR is set (config/settings/logging_config.py)
 LOGGING = portal_logging(portal_log_dir())
+
+PORTAL_HMAC_REQUIRE_ISOLATION = True

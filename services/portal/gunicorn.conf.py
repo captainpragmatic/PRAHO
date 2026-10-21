@@ -44,6 +44,7 @@ graceful_timeout = _settings["graceful_timeout"]
 if os.access("/dev/shm", os.W_OK):  # noqa: S108  # a RAM-backed heartbeat file, as gunicorn recommends
     worker_tmp_dir = "/dev/shm"  # noqa: S108
 # Access and error logs on stdout/stderr, for journald and docker logs alike.
+logger_class = "apps.common.gunicorn_logging.RedactingLogger"
 accesslog = "-"
 errorlog = "-"
 # gunicorn's default line, plus the duration (%(D)s, microseconds), worker pid and request id. The

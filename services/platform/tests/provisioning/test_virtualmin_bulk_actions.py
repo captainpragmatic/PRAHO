@@ -15,6 +15,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db import connections
 from django.http import HttpResponse
 from django.urls import reverse
 
@@ -227,7 +228,7 @@ class BulkBackupAndHealthCheckTests(_BulkBase):
         """FAILS on master. Each pool thread's own database connection is closed."""
         with (
             patch("apps.provisioning.virtualmin_views.VirtualminGateway.ping_server", side_effect=[True, False]),
-            patch("apps.provisioning.virtualmin_views.connections.close_all") as close_all,
+            patch("apps.provisioning.virtualmin_views.connections.close_all", wraps=connections.close_all) as close_all,
         ):
             response, _gateway, _queued = self._post("health_check", [self.account, self.second])
 

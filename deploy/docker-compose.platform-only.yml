@@ -19,6 +19,7 @@
 #   - PRAHO_ENV_FILE: the env file's own path
 #   - DB_PASSWORD, DJANGO_SECRET_KEY
 #   - PLATFORM_API_SECRET (same value as HMAC_SECRET), PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+#   - PORTAL_HMAC_CREDENTIALS (per-Portal signing-key registry)
 #   - DJANGO_ENCRYPTION_KEY, CREDENTIAL_VAULT_MASTER_KEY (production settings; deploy.sh checks them)
 #   - DB_HOST without the with-db/full profiles
 
@@ -91,8 +92,8 @@ services:
       - BRAND_DIR=/app/brand
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
-      - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
-      - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
+      - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-enforce}
+      - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:?PORTAL_HMAC_CREDENTIALS required}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       # Production settings refuse to start without these two and name the missing one; staging doesn't
       # need them, so Compose doesn't require them. The portal never gets them.

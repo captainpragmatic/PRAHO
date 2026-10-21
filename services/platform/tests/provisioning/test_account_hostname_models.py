@@ -7,7 +7,7 @@ from decimal import Decimal
 from itertools import count
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import DataError, IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -60,7 +60,7 @@ class AccountHostnameLabelTests(TestCase):
 
     def test_a_label_is_eight_lowercase_letters_or_digits(self) -> None:
         for bad in ("H7K3P2Q9", "h7k3p2q", "h7k3p2q9x", "h7k3-2q9", "h7k3p2q_"):
-            with self.subTest(label=bad), self.assertRaises(IntegrityError), transaction.atomic():
+            with self.subTest(label=bad), self.assertRaises((IntegrityError, DataError)), transaction.atomic():
                 AccountHostname.objects.create(label=bad, zone=ZONE)
         AccountHostname.objects.create(label="h7k3p2q9", zone=ZONE)
 

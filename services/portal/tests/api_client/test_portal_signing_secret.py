@@ -17,6 +17,28 @@ PER_PORTAL = "this-portals-own-secret-abcdefghij"
 
 @override_settings(PLATFORM_API_SECRET=SHARED)
 class PortalSigningSecretTests(SimpleTestCase):
+    @override_settings(PORTAL_HMAC_REQUIRE_ISOLATION=True, PORTAL_HMAC_SECRET=None)
+    def test_deployed_portal_refuses_shared_secret_fallback(self):
+        with self.assertRaises(ImproperlyConfigured):
+            _resolve_portal_signing_secret()
+
+    @override_settings(PORTAL_HMAC_SECRET=None)
+    def test_development_fallback_must_be_a_real_secret(self):
+        for secret in (None, "", "   ", 42):
+            with (
+                self.subTest(secret=secret),
+                override_settings(PLATFORM_API_SECRET=secret),
+                self.assertRaises(ImproperlyConfigured),
+            ):
+                _resolve_portal_signing_secret()
+
+    @override_settings(PORTAL_HMAC_SECRET=PER_PORTAL)
+    def test_signing_refuses_corrupted_cached_credentials(self):
+        client = PlatformAPIClient()
+        client.portal_secret = ""
+        with self.assertRaises(ImproperlyConfigured):
+            client._generate_hmac_headers("POST", "/api/x/", b"{}")
+
     def test_falls_back_to_shared_secret_when_per_portal_absent(self):
         with override_settings(PORTAL_HMAC_SECRET=None):
             self.assertEqual(_resolve_portal_signing_secret(), SHARED)

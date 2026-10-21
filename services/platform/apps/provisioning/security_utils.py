@@ -73,22 +73,23 @@ class SecureTaskParameters:
         # Create JSON payload
         payload = json.dumps(parameters, sort_keys=True, default=str)
 
-        # Encrypt the payload
-        encrypted_data = encrypt_sensitive_data(payload)
-        encrypted_b64 = encrypted_data  # encrypt_sensitive_data already returns base64 string
-
-        # Create hash for integrity verification
         parameter_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
+        created_at = timezone.now().isoformat()
+        context = cls(encrypted_payload="", parameter_hash=parameter_hash, created_at=created_at)
         return cls(
-            encrypted_payload=encrypted_b64, parameter_hash=parameter_hash, created_at=timezone.now().isoformat()
+            encrypted_payload=encrypt_sensitive_data(payload, aad=context._aad()),
+            parameter_hash=parameter_hash,
+            created_at=created_at,
         )
+
+    def _aad(self) -> bytes:
+        return json.dumps(["provisioning-task-parameters", self.parameter_hash, self.created_at]).encode()
 
     def decrypt(self) -> dict[str, Any]:
         """Decrypt parameters and verify integrity."""
         try:
             # Decrypt (decrypt_sensitive_data expects base64 string)
-            decrypted_payload = decrypt_sensitive_data(self.encrypted_payload)
+            decrypted_payload = decrypt_sensitive_data(self.encrypted_payload, aad=self._aad())
 
             # Verify hash integrity
             computed_hash = hashlib.sha256(decrypted_payload.encode("utf-8")).hexdigest()

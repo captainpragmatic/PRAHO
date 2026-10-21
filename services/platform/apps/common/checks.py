@@ -20,6 +20,14 @@ _DEFAULT_MAX_SESSION_AGE_SECONDS = 86400  # 24 hours
 MAX_SESSION_AGE_SECONDS = _DEFAULT_MAX_SESSION_AGE_SECONDS
 
 
+@register(Tags.security)
+def check_account_lockout(app_configs: Any, **kwargs: Any) -> list[Error]:
+    """The development escape hatch must never disable deployed account protection."""
+    if not settings.DEBUG and getattr(settings, "DISABLE_ACCOUNT_LOCKOUT", False):
+        return [Error("DISABLE_ACCOUNT_LOCKOUT must be False outside DEBUG.", id="security.E080")]
+    return []
+
+
 def get_max_session_age_seconds() -> int:
     """Max allowed session age (seconds) from SettingsService, safe pre-migrate."""
     from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415

@@ -48,10 +48,11 @@ class ProvisioningSecurityParameterTests(SimpleTestCase):
     def test_decrypted_json_must_be_an_object(self) -> None:
         for plaintext, error in (("[]", "Invalid parameter format"), ("{", "Parameter decryption failed")):
             secure = SecureTaskParameters(
-                encrypted_payload=encrypt_sensitive_data(plaintext),
+                encrypted_payload="",
                 parameter_hash=hashlib.sha256(plaintext.encode()).hexdigest(),
                 created_at="2026-10-07T00:00:00+00:00",
             )
+            secure = replace(secure, encrypted_payload=encrypt_sensitive_data(plaintext, aad=secure._aad()))
             with self.subTest(plaintext=plaintext), self.assertRaisesMessage(ValidationError, error):
                 secure.decrypt()
 

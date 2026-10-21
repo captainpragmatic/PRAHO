@@ -85,6 +85,7 @@ class InvoiceNumberingServiceTests(TestCase):
         """InvoiceNumberingService uses real InvoiceSequence — test via DB"""
         # Ensure clean state
         InvoiceSequence.objects.all().delete()
+        InvoiceSequence.objects.create(scope="default", prefix="INV")
         result = InvoiceNumberingService.get_next_number()
         self.assertTrue(result.startswith("INV-"))
 
@@ -170,7 +171,9 @@ class SchedulePaymentRemindersTests(TestCase):
     @patch("apps.billing.tasks.Invoice")
     def test_schedules_reminders(self, mock_inv_cls, mock_audit, mock_async):
         mock_inv = MagicMock(
-            id="i1", number="INV-1", status="issued",
+            id="i1",
+            number="INV-1",
+            status="issued",
             due_at=timezone.now() + timedelta(days=14),
         )
         mock_inv.customer = MagicMock(id="c1")
@@ -279,7 +282,9 @@ class PaymentCollectionRetryTests(TestCase):
         mock_run_cls.objects.create.return_value = mock_run
 
         mock_retry = MagicMock(id="r1", payment_id="p1", attempt_number=1, status="pending")
-        mock_retry.payment = MagicMock(gateway_txn_id="pi_1", payment_method="stripe", amount_cents=5000, status="failed")
+        mock_retry.payment = MagicMock(
+            gateway_txn_id="pi_1", payment_method="stripe", amount_cents=5000, status="failed"
+        )
         mock_retry.policy = MagicMock(max_attempts=3)
         mock_retry.policy.get_next_retry_date.return_value = timezone.now() + timedelta(days=1)
 
@@ -354,11 +359,14 @@ class InvoiceRefundViewTests(TestCase):
         mock_refund.return_value = mock_result
 
         factory = RequestFactory()
-        request = factory.post("/billing/invoices/x/refund/", {
-            "refund_type": "full",
-            "refund_reason": "customer_request",
-            "refund_notes": "Test",
-        })
+        request = factory.post(
+            "/billing/invoices/x/refund/",
+            {
+                "refund_type": "full",
+                "refund_reason": "customer_request",
+                "refund_notes": "Test",
+            },
+        )
         mock_user = MagicMock(spec=User)
         mock_user.can_access_customer.return_value = True
         mock_user.id = "u1"
@@ -459,15 +467,18 @@ class UsageAlertEmailTests(TestCase):
     @patch("apps.billing.metering_models.UsageAlert")
     def test_sends_alert_email(self, mock_alert_cls, mock_send):
         mock_alert = MagicMock(
-            id="a1", status="pending",
+            id="a1",
+            status="pending",
             customer=MagicMock(name="Test", primary_email="test@test.com"),
             usage_value=Decimal("95"),
             usage_percentage=Decimal("95"),
         )
         mock_threshold = MagicMock(
-            notify_customer=True, action_on_breach=None,
+            notify_customer=True,
+            action_on_breach=None,
             meter=MagicMock(display_name="Storage"),
-            threshold_value=Decimal("100"), threshold_type="percentage",
+            threshold_value=Decimal("100"),
+            threshold_type="percentage",
         )
         mock_alert.threshold = mock_threshold
         mock_alert_cls.objects.select_related.return_value.get.return_value = mock_alert

@@ -139,7 +139,8 @@ class BulkCreateIsAuditedLikeSaveTests(TestCase):
 
     def test_bulk_create_stamps_chains_and_refuses_conflict_modes(self) -> None:
         raw_keys = [f"{index:02d}" + "k" * 30 for index in range(3)]
-        created = AuditEvent.objects.bulk_create([self._unsaved(raw) for raw in raw_keys])
+        with self.captureOnCommitCallbacks(execute=True):
+            created = AuditEvent.objects.bulk_create([self._unsaved(raw) for raw in raw_keys])
 
         for event, raw in zip(created, raw_keys, strict=True):
             stored = AuditEvent.objects.get(pk=event.pk)

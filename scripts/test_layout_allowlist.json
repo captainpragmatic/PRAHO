@@ -2,6 +2,9 @@
   "allowed_duplicate_names": [
     "NotificationSettingsQueryTests.test_warm_cache_enforces_limits_without_queries",
     "ProductSettingsQueryTests.test_warm_cache_enforces_limits_without_queries",
+    "SecretURLLoggingTests.test_actual_json_formatter_scrubs_messages_extras_and_exceptions",
+    "SecretURLLoggingTests.test_gunicorn_scrubs_request_and_referrer_without_changing_environ",
+    "SecretURLLoggingTests.test_ordinary_identifiers_are_preserved",
     "test_click_activates_tab_and_syncs_both_tablists",
     "test_first_render_labels_the_panel",
     "test_hover_styling_follows_selection",
@@ -40,5 +43,10 @@
     "^TestStagingLoggingConfiguration\\.test_",
     "^TicketPaginationQueryTests\\.test_",
     "^UnknownArgumentTests\\.test_"
-  ]
+  ],
+  "duplicate_name_reasons": {
+    "SecretURLLoggingTests.test_actual_json_formatter_scrubs_messages_extras_and_exceptions": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLLoggingTests.test_gunicorn_scrubs_request_and_referrer_without_changing_environ": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLLoggingTests.test_ordinary_identifiers_are_preserved": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute."
+  }
 }

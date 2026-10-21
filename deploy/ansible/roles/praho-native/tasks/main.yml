@@ -415,6 +415,8 @@
     django_env: "{{ praho_django_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
   vars:
     praho_passthrough:
+      - PORTAL_HMAC_MODE
+      - PORTAL_HMAC_CREDENTIALS
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
       - DJANGO_ENCRYPTION_KEY
       - DJANGO_ENCRYPTION_KEY_PREVIOUS

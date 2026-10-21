@@ -38,6 +38,7 @@ THIRD_PARTY_APPS: list[str] = [
     "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
+    "anymail",  # Production ESP adapters and provider status handling
 ]
 
 LOCAL_APPS: list[str] = [
@@ -378,7 +379,7 @@ ANYMAIL = {
         "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
         "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
     },
-    "AMAZON_SES_CONFIGURATION_SET": os.environ.get("AWS_SES_CONFIGURATION_SET"),
+    "AMAZON_SES_CONFIGURATION_SET_NAME": os.environ.get("AWS_SES_CONFIGURATION_SET"),
     # SendGrid configuration
     "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY"),
     # Mailgun configuration
@@ -941,3 +942,6 @@ INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
 # See apps/common/portal_hmac.py and docs/security/portal-hmac-registry.md for the rollout.
 PORTAL_HMAC_MODE: str = os.environ.get("PORTAL_HMAC_MODE", "legacy")
 PORTAL_HMAC_CREDENTIALS: str | None = os.environ.get("PORTAL_HMAC_CREDENTIALS")
+
+# Production and staging require an isolated credential for each Portal.
+PORTAL_HMAC_REQUIRE_ISOLATION = False

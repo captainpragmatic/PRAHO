@@ -38,6 +38,7 @@ class BuiltinStornoPostgresConcurrencyTests(TransactionTestCase):
     def setUp(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("row-lock waits require PostgreSQL")
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
         owner = h.customer()
         self.original = Invoice.objects.create(
             customer=owner,

@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-533 actions, in 9 categories.
+555 actions, in 9 categories.
 
 ## Account management
 
@@ -356,6 +356,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `registrar_webhook_processing_error` | low | no | no | domains |
 | `registration_system_error` | low | no | no | users |
 | `restore_domain_failed` | low | no | no | provisioning |
+| `restore_domain_success` | low | no | no | provisioning |
 | `review_gate_cancel_unauthorized` | low | no | no | orders |
 | `review_gate_unauthorized_attempt` | low | no | no | orders |
 | `server_registered` | low | no | no | provisioning |
@@ -377,6 +378,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `sessions_revoked_password_reset` | low | no | no | users |
 | `setting_override_cleared` | low | no | yes | settings |
 | `setting_update_failed` | low | no | no | settings |
+| `setting_update_success` | low | no | no | settings |
 | `settings_cache_refresh` | low | no | no | settings |
 | `settings_export` | low | no | no | settings |
 | `settings_export_full` | low | no | no | settings |
@@ -429,37 +431,54 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `validation_failed` | low | no | no | common |
 | `vies_evidence_refused` | low | no | no | billing |
 | `virtualmin_account_activate_failed` | low | no | no | provisioning |
+| `virtualmin_account_activate_success` | low | no | no | provisioning |
 | `virtualmin_account_created` | low | no | no | provisioning |
 | `virtualmin_account_delete_failed` | low | no | no | provisioning |
+| `virtualmin_account_delete_success` | low | no | no | provisioning |
 | `virtualmin_account_deleted` | low | no | no | provisioning |
 | `virtualmin_account_hold_reenable_failed` | low | no | no | provisioning |
+| `virtualmin_account_hold_reenable_success` | low | no | no | provisioning |
 | `virtualmin_account_hold_restore_safety_failed` | low | no | no | provisioning |
+| `virtualmin_account_hold_restore_safety_success` | low | no | no | provisioning |
 | `virtualmin_account_provisioned_successfully` | low | no | no | provisioning |
 | `virtualmin_account_repair_dns_failed` | low | no | no | provisioning |
+| `virtualmin_account_repair_dns_success` | low | no | no | provisioning |
 | `virtualmin_account_server_migrated` | low | no | no | provisioning |
 | `virtualmin_account_status_changed` | low | no | no | provisioning |
 | `virtualmin_account_suspend_failed` | low | no | no | provisioning |
+| `virtualmin_account_suspend_success` | low | no | no | provisioning |
 | `virtualmin_account_toggle_protection_failed` | low | no | no | provisioning |
+| `virtualmin_account_toggle_protection_success` | low | no | no | provisioning |
 | `virtualmin_account_updated` | low | no | no | provisioning |
 | `virtualmin_accounts_sync_failed` | low | no | no | provisioning |
+| `virtualmin_accounts_sync_success` | low | no | no | provisioning |
 | `virtualmin_activation_refused_untrusted_cert` | low | no | no | infrastructure |
 | `virtualmin_auto_provisioning_critical_error` | low | no | no | provisioning |
 | `virtualmin_auto_provisioning_scheduled` | low | no | no | provisioning |
 | `virtualmin_backup_form_failed` | low | no | no | provisioning |
+| `virtualmin_backup_form_success` | low | no | no | provisioning |
 | `virtualmin_cert_pin_set_manually` | low | no | no | infrastructure |
 | `virtualmin_chain_backup_alert` | high | yes | no | provisioning |
 | `virtualmin_chain_backup_failed` | low | no | no | provisioning |
+| `virtualmin_chain_backup_success` | low | no | no | provisioning |
 | `virtualmin_chain_schedule_deferred` | high | yes | no | provisioning |
 | `virtualmin_connection_test_failed` | low | no | no | provisioning |
+| `virtualmin_connection_test_success` | low | no | no | provisioning |
 | `virtualmin_health_check_failed` | low | no | no | provisioning |
+| `virtualmin_health_check_success` | low | no | no | provisioning |
 | `virtualmin_job_node_lost_failed` | low | no | no | provisioning |
+| `virtualmin_job_node_lost_success` | low | no | no | provisioning |
 | `virtualmin_job_resolve_failed` | low | no | no | provisioning |
+| `virtualmin_job_resolve_success` | low | no | no | provisioning |
 | `virtualmin_job_retry_failed` | low | no | no | provisioning |
+| `virtualmin_job_retry_success` | low | no | no | provisioning |
 | `virtualmin_migrate_form_failed` | low | no | no | provisioning |
+| `virtualmin_migrate_form_success` | low | no | no | provisioning |
 | `virtualmin_migration_completed` | low | no | no | provisioning |
 | `virtualmin_migration_failed` | low | no | no | provisioning |
 | `virtualmin_migration_needs_review` | low | yes | no | provisioning |
 | `virtualmin_migration_resolve_failed` | low | no | no | provisioning |
+| `virtualmin_migration_resolve_success` | low | no | no | provisioning |
 | `virtualmin_migration_rolled_back` | low | no | no | provisioning |
 | `virtualmin_migration_started` | low | no | no | provisioning |
 | `virtualmin_pair_release_abandoned` | high | yes | no | provisioning |
@@ -476,8 +495,10 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `virtualmin_provisioning_job_pending` | low | no | no | provisioning |
 | `virtualmin_provisioning_job_running` | low | no | no | provisioning |
 | `virtualmin_restore_form_failed` | low | no | no | provisioning |
+| `virtualmin_restore_form_success` | low | no | no | provisioning |
 | `virtualmin_restore_hold_decision` | low | no | no | provisioning |
 | `virtualmin_restore_pair_form_failed` | low | no | no | provisioning |
+| `virtualmin_restore_pair_form_success` | low | no | no | provisioning |
 | `virtualmin_server_autofail_deferred` | high | yes | no | provisioning |
 | `virtualmin_server_capacity_exceeded` | low | no | no | provisioning |
 | `virtualmin_server_health_alert` | high | yes | no | provisioning |
@@ -544,6 +565,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | Action | Severity | Review | Sensitive | Written by |
 |---|---|---|---|---|
 | `backup_domain_failed` | low | no | no | provisioning |
+| `backup_domain_success` | low | no | no | provisioning |
 | `cloud_provider_created` | low | no | no | infrastructure |
 | `cloud_provider_updated` | low | no | no | infrastructure |
 | `configuration_changed` | high | yes | no | billing, domains, settings |

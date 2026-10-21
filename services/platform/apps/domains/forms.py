@@ -5,7 +5,7 @@ from typing import Any, ClassVar, cast
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.encryption import encrypt_value
+from apps.common.model_secrets import encrypt_model_secret
 
 from .models import TLD, Registrar
 
@@ -80,7 +80,7 @@ class RegistrarForm(forms.ModelForm):
         for secret_field, existing_secret in self._existing_secrets.items():
             submitted = cast(str, self.cleaned_data.get(secret_field, ""))
             if submitted:
-                setattr(instance, secret_field, encrypt_value(submitted) or "")
+                setattr(instance, secret_field, encrypt_model_secret(instance, secret_field, submitted))
             else:
                 setattr(instance, secret_field, existing_secret)
         if commit:

@@ -73,7 +73,7 @@ class SettingsImportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
-        self.assertEqual(data["imported"], 1)
+        self.assertEqual(data["imported"], 1, data)
 
     def test_import_settings_file_upload(self) -> None:
         """POST multipart file upload should update settings."""
@@ -94,13 +94,15 @@ class SettingsImportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
-        self.assertEqual(data["imported"], 1)
+        self.assertEqual(data["imported"], 1, data)
 
     def test_import_rejects_sensitive_without_flag(self) -> None:
         """Sensitive settings should be skipped by default."""
         self.client.force_login(self.admin_user)
         # Mark the setting as sensitive
-        SystemSetting.objects.filter(key="billing.proforma_validity_days").update(is_sensitive=True)
+        row = SystemSetting.objects.get(key="billing.proforma_validity_days")
+        row.is_sensitive = True
+        row.save()
 
         payload = self._make_payload(
             [
@@ -123,7 +125,9 @@ class SettingsImportTests(TestCase):
     def test_import_allows_sensitive_with_flag(self) -> None:
         """Sensitive settings should be imported when ?include_sensitive=true."""
         self.client.force_login(self.admin_user)
-        SystemSetting.objects.filter(key="billing.proforma_validity_days").update(is_sensitive=True)
+        row = SystemSetting.objects.get(key="billing.proforma_validity_days")
+        row.is_sensitive = True
+        row.save()
 
         payload = self._make_payload(
             [
@@ -139,7 +143,7 @@ class SettingsImportTests(TestCase):
 
         data = response.json()
         self.assertTrue(data["success"])
-        self.assertEqual(data["imported"], 1)
+        self.assertEqual(data["imported"], 1, data)
         self.assertEqual(len(data["skipped"]), 0)
 
     def test_import_rejects_unknown_keys(self) -> None:

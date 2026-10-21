@@ -242,7 +242,9 @@ class PaymentRetryPolicyEditorTests(TestCase):
 class InvoiceSeriesControlTests(TestCase):
     def setUp(self) -> None:
         self.user = create_admin_user(username="series_editor")
-        self.current = InvoiceSequence.objects.create(scope="default", prefix="INV", last_value=42)
+        self.current, _ = InvoiceSequence.objects.update_or_create(
+            scope="default", defaults={"prefix": "INV", "last_value": 42}
+        )
         self.client.force_login(self.user)
 
     def _post(self, **overrides: str):
@@ -370,7 +372,9 @@ class InvoiceSeriesControlTests(TestCase):
         self.assertContains(response, "last value")
 
     def test_controls_preview_each_active_series_without_advancing_counters(self) -> None:
-        subscription = InvoiceSequence.objects.create(scope="subscription", prefix="SUB", last_value=9)
+        subscription, _ = InvoiceSequence.objects.update_or_create(
+            scope="subscription", defaults={"prefix": "SUB", "last_value": 9}
+        )
 
         response = self.client.get(reverse("billing:operator_controls"))
 
