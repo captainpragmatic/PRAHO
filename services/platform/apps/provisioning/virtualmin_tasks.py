@@ -797,6 +797,27 @@ def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, An
     }
 
 
+def schedule_migration_wake(migration_id: UUID, until: datetime) -> bool:
+    """Wake a deferred migration at `until` (ADR-0061 P2.1). Never raises: the reclaim sweep is the fallback.
+
+    The name carries the wake time, so a later deferral of the same row never collides with this one.
+    """
+    try:
+        schedule(
+            "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
+            str(migration_id),
+            name=f"migration-wake-{migration_id}-{int(until.timestamp())}",
+            schedule_type=ScheduleModel.ONCE,
+            next_run=until,
+        )
+    except Exception:
+        logger.exception(
+            "🔥 [VirtualminTask] Wake not scheduled; the reclaim sweep runs it: migration=%s", migration_id
+        )
+        return False
+    return True
+
+
 def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:
     return async_task(
         "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
@@ -1250,6 +1271,7 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
         .filter(updated_at__lt=stale)
         .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .exclude(resume_after__gt=timezone.now())  # Waiting on a deferral; its wake, or this sweep once due
         .order_by("updated_at")
         .values_list("pk", flat=True)[:_RECLAIM_BATCH]
     )

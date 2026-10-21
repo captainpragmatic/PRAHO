@@ -1986,7 +1986,7 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="dns.account_hostnames_enabled",
         data_type="boolean",
-        default=False,
+        default=True,
         group="hosting-dns",
         section=_("Account names"),
         label=_("Account names enabled"),

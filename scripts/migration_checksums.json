@@ -81,6 +81,7 @@
     "services/platform/apps/provisioning/migrations/0009_account_name_certificate_installs.py": "93edb354ed1c80ecc8617609d13cd4b712f3194862045015631a9de641b5d69e",
     "services/platform/apps/provisioning/migrations/0010_account_name_leases_and_rotation.py": "37221429c80dca13674f46d3227cad475c6580b3bd6d7d0e69396706a2f33a9f",
     "services/platform/apps/provisioning/migrations/0011_persistent_secret_contexts.py": "99d99c4cd57d45c3872223c3dd1371990056a8fbb9214414019b824163dfb52b",
+    "services/platform/apps/provisioning/migrations/0012_migration_cutover_states.py": "a0f29c7c81d7abefc3c952fadbf1518e68f1059227fa11cbf77fdc94f0a654aa",
     "services/platform/apps/settings/migrations/0001_initial.py": "871979fab3cd12b6043a52acee99bef62a7007e2bf90ed6430411d6082cb2f24",
     "services/platform/apps/settings/migrations/0002_seed_selling_currency.py": "77f062e980f5edc970631b944dd0f0561c9fa059611c3f11f7c803c53a6bc16a",
     "services/platform/apps/settings/migrations/0003_setting_activation.py": "495c17809a3fb388e088f7c03cf4fc80508d38fde6040b963c92496dfe6d034c",

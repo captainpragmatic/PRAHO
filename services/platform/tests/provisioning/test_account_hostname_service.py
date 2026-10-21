@@ -7,11 +7,12 @@ against the in-memory DNS provider. Certificates (P1.10) are patched where a tes
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
@@ -98,7 +99,9 @@ class FakeNode:
         return Ok(FakeResponse(True, {"status": "success"}))
 
 
-class AccountNameTestCase(TestCase):
+class AccountNameTransactionCase(TransactionTestCase):
+    """The account-name fixture; `AccountNameTestCase` is the same in a transaction rolled back per test."""
+
     def setUp(self) -> None:
         self.server = VirtualminServer.objects.create(
             name="Node", hostname="node1.example.com", ipv4_address="95.217.0.10", ipv6_address="2a01:4f8::1"
@@ -134,6 +137,11 @@ class AccountNameTestCase(TestCase):
             ("dns.account_zone_api_token", "token-value"),
         ):
             SettingsService.update_setting(key, value).unwrap()
+        # The feature is on once configured, so DNS calls are real unless faked: never reach a provider.
+        previous_dns = _DNS_PROVIDER_REGISTRY.get(service.DNS_PROVIDER)
+        register_dns_gateway(service.DNS_PROVIDER, FakeDnsGateway)
+        self.addCleanup(lambda: register_dns_gateway(service.DNS_PROVIDER, previous_dns) if previous_dns else None)
+        FakeDnsGateway.reset({ZONE_ID: ZONE})
         self.hostname = service.allocate_account_hostname(self.account)
         self.node = FakeNode()
         gateway = patch.object(service, "_gateway", lambda server: self.node)
@@ -158,6 +166,10 @@ class AccountNameTestCase(TestCase):
 
     def _psl_shipped(self) -> None:
         SettingsService.update_setting("dns.account_zone_psl_shipped", True).unwrap()
+
+
+class AccountNameTestCase(AccountNameTransactionCase, TestCase):
+    pass
 
 
 class EnsureTests(AccountNameTestCase):
@@ -323,6 +335,8 @@ class SyncTests(AccountNameTestCase):
         SettingsService.update_setting("dns.account_hostnames_enabled", True).unwrap()
 
     def test_nothing_happens_while_the_feature_is_off(self) -> None:
+        SettingsService.update_setting("dns.account_hostnames_enabled", False).unwrap()  # on by default
+
         self.assertEqual(service.sync_account_hostname(self.hostname), Ok("disabled"))
         self.assertEqual(FakeDnsGateway.calls, [])
 
@@ -339,6 +353,25 @@ class SyncTests(AccountNameTestCase):
         self.hostname.refresh_from_db()
         self.assertEqual(self.hostname.records["A"]["applied"], "95.217.0.10")
         self.assertIsNotNone(self.hostname.last_reconciled_at)
+
+    def test_the_ttl_the_provider_reports_is_stored_beside_the_one_asked_for(self) -> None:
+        self._enable()
+        original = FakeDnsGateway.reconcile_records
+
+        def provider_keeps_its_own_ttl(gateway: FakeDnsGateway, *args: Any, **kwargs: Any) -> Any:
+            outcome = original(gateway, *args, **kwargs)
+            outcome.applied = [dataclasses.replace(record, ttl=3600) for record in outcome.applied]
+            return outcome
+
+        with (
+            patch.object(service, "certificate_ready_on", return_value=True),
+            patch.object(FakeDnsGateway, "reconcile_records", provider_keeps_its_own_ttl),
+        ):
+            service.sync_account_hostname(self.hostname).unwrap()
+
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records["A"]["applied_ttl"], 3600)
+        self.assertNotEqual(self.hostname.records["A"]["ttl"], 3600, "the asked-for TTL must stay distinguishable")
 
     def test_a_published_name_whose_certificate_is_gone_is_withdrawn(self) -> None:
         self._enable()

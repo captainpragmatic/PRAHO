@@ -15,6 +15,44 @@ if TYPE_CHECKING:
     from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 _TERMINAL_STATUSES = ("completed", "failed", "rolled_back")
+# Before the point of no return (ADR-0061 Phase 2): only A holds the writable copy, so a failure here
+# compensates. From `activating` on, B does, and only keep-target actions exist.
+PRE_COMMIT_STATUSES = (
+    "lowering_ttl",
+    "quiescing",
+    "backing_up",
+    "fetching",
+    "pushing",
+    "restoring",
+    "verifying",
+)
+# The forward graph. Any live row may also park for review, and any write may keep its state (a
+# lease release); a terminal row never moves.
+TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"lowering_ttl", "quiescing", "failed"}),
+    "lowering_ttl": frozenset({"quiescing", "compensating", "rolled_back"}),
+    "quiescing": frozenset({"backing_up", "compensating", "rolled_back"}),
+    "backing_up": frozenset({"fetching", "compensating", "rolled_back"}),
+    "fetching": frozenset({"pushing", "compensating", "rolled_back"}),
+    "pushing": frozenset({"restoring", "compensating", "rolled_back"}),
+    "restoring": frozenset({"verifying", "compensating", "rolled_back"}),
+    "verifying": frozenset({"activating", "compensating"}),
+    "activating": frozenset({"bridging", "repointing"}),
+    "bridging": frozenset({"repointing"}),
+    "repointing": frozenset({"completed"}),
+    "compensating": frozenset({"rolled_back"}),
+    "fencing": frozenset(),
+    "needs_review": frozenset({"failed", "compensating"}),
+}
+
+
+def migration_transition_allowed(from_status: str, to_status: str) -> bool:
+    """Whether the graph allows the move; the commit time is checked by `transition` itself."""
+    if from_status == to_status:
+        return True
+    if from_status in _TERMINAL_STATUSES:
+        return False
+    return to_status == "needs_review" or to_status in TRANSITIONS.get(from_status, frozenset())
 
 
 class VirtualminMigration(models.Model):
@@ -28,6 +66,10 @@ class VirtualminMigration(models.Model):
         VERIFYING = "verifying", _("Verifying")
         ACTIVATING = "activating", _("Activating")
         REPOINTING = "repointing", _("Repointing")
+        LOWERING_TTL = "lowering_ttl", _("Lowering TTL")
+        BRIDGING = "bridging", _("Bridging")
+        COMPENSATING = "compensating", _("Compensating")
+        FENCING = "fencing", _("Fencing")
         COMPLETED = "completed", _("Completed")
         FAILED = "failed", _("Failed")
         NEEDS_REVIEW = "needs_review", _("Needs Review")
@@ -59,6 +101,22 @@ class VirtualminMigration(models.Model):
     restore_issued = models.BooleanField(default=False)
     routing_note_shown = models.BooleanField(default=False)
     pre_migration_snapshot = models.JSONField(default=dict, blank=True)
+
+    class Contract(models.TextChoices):
+        CUTOVER = "cutover", _("Cutover")  # The account has a live published name: DNS and bridge steps run
+        LEGACY = "legacy", _("Legacy")
+
+    # ADR-0061 Phase 2: the cutover's own evidence.
+    contract = models.CharField(max_length=10, choices=Contract.choices, blank=True)
+    drain = models.ForeignKey(
+        "provisioning.NodeDrain", on_delete=models.SET_NULL, null=True, blank=True, related_name="migrations"
+    )
+    cutover_committed_at = models.DateTimeField(null=True, blank=True)  # The point of no return
+    dns_converged_at = models.DateTimeField(null=True, blank=True)
+    resume_after = models.DateTimeField(null=True, blank=True)  # A deferred step waits until then
+    parked_phase = models.CharField(max_length=20, blank=True)
+    barrier_state = models.JSONField(default=dict, blank=True)
+    cancel_requested = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -105,14 +163,30 @@ class VirtualminMigration(models.Model):
         )
 
     def transition(self, token: uuid.UUID, from_status: str, to_status: str, **fields: object) -> bool:
-        """Persist state and evidence only for the matching token and state."""
+        """Persist state and evidence only for the matching token and state, along the graph.
+
+        An edge outside the graph is refused (False), and so is compensation once the commit is
+        recorded: after the point of no return only keep-target actions exist.
+        """
+        if not migration_transition_allowed(from_status, to_status):
+            return False
+        rows = type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status)
+        if to_status == "compensating":
+            rows = rows.filter(cutover_committed_at__isnull=True)
         fields.update(status=to_status, updated_at=timezone.now())
-        return bool(type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status).update(**fields))
+        return bool(rows.update(**fields))
 
     @classmethod
     def active_reservations(cls, server: VirtualminServer) -> int:
-        """Reservation rows are authoritative; needs_review retains capacity."""
-        return cls.objects.filter(target_server=server).exclude(status__in=_TERMINAL_STATUSES).count()
+        """Reservation rows are authoritative; needs_review retains capacity.
+
+        A committed row's domain is already counted on the target, so it no longer reserves it.
+        """
+        return (
+            cls.objects.filter(target_server=server, cutover_committed_at__isnull=True)
+            .exclude(status__in=_TERMINAL_STATUSES)
+            .count()
+        )
 
 
 class NodeDrain(models.Model):

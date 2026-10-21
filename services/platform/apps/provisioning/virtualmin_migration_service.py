@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 from uuid import UUID, uuid4
@@ -36,7 +36,12 @@ from .virtualmin_gateway import (
     listing_enabled,
 )
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
-from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
+from .virtualmin_migration_models import (
+    _TERMINAL_STATUSES,
+    NodeDrain,
+    VirtualminMigration,
+    account_has_active_operation,
+)
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
@@ -51,6 +56,12 @@ def _reconcile_after_migration(service_id: str) -> None:
     from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415  # Circular: same-app
 
     reconcile_virtualmin_service_state_async(service_id)
+
+
+def _wake_drain(drain_id: UUID) -> None:
+    from .virtualmin_drain_service import NodeDrainService  # noqa: PLC0415  # Circular
+
+    NodeDrainService.wake(drain_id)
 
 
 def migration_backup_params(archive_name: str) -> dict[str, str]:
@@ -98,6 +109,19 @@ class MigrationLeaseLostError(RuntimeError):
 
 class DefiniteMigrationFailureError(RuntimeError):
     pass
+
+
+class MigrationDeferredError(Exception):
+    """A step that must wait (ADR-0061 P2.1): the row keeps its state and is woken at `until`.
+
+    Raised by a handler only once everything it did is persisted, so the wait is a clean checkpoint:
+    the step runs again from its state when it is due, whatever an interruption there would mean.
+    """
+
+    def __init__(self, until: datetime, reason: str) -> None:
+        super().__init__(reason)
+        self.until = until
+        self.reason = reason
 
 
 def AnsibleService() -> AnsibleRunner:  # noqa: N802  # Lazy constructor preserves the requested mock seam.
@@ -301,6 +325,15 @@ class VirtualminMigrationService:
             )
             if service_id is not None:
                 transaction.on_commit(lambda: _reconcile_after_migration(str(service_id)), robust=True)
+            if migration.drain_id is not None:
+                # The one place a drain's migration is counted, however it ran (inline, or woken
+                # after a deferral); a drain that checkpointed to wait for it is woken.
+                if status == "completed":
+                    NodeDrain.objects.filter(pk=migration.drain_id).update(
+                        accounts_migrated=F("accounts_migrated") + 1, updated_at=timezone.now()
+                    )
+                drain_id = migration.drain_id
+                transaction.on_commit(lambda: _wake_drain(drain_id), robust=True)
 
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
         if not self.enabled:
@@ -335,7 +368,7 @@ class VirtualminMigrationService:
         if self.task_timeout + 60 >= int(str(settings.Q_CLUSTER.get("retry", 0))):
             raise ValueError("Migration budget must fit below the Django-Q broker visibility timeout")
 
-    def start_migration(
+    def start_migration(  # noqa: PLR0913  # Admission carries its whole context, the drain included
         self,
         account: VirtualminAccount,
         target_server: VirtualminServer,
@@ -343,6 +376,7 @@ class VirtualminMigrationService:
         initiated_by: User | None,
         reason: str = "manual",
         enqueue: bool = True,
+        drain: NodeDrain | None = None,
     ) -> Result[VirtualminMigration, str]:
         try:
             with transaction.atomic():
@@ -369,6 +403,7 @@ class VirtualminMigrationService:
                     target_server=target,
                     initiated_by=initiated_by,
                     reason=reason,
+                    drain=drain,
                 )
                 token = uuid4()
                 if not migration.acquire_lease(token, self.lease_ttl):
@@ -645,11 +680,15 @@ class VirtualminMigrationService:
             "repointing": self._repoint,
         }
         try:
+            if migration.resume_after is not None:
+                self._move(migration, lease_token, migration.status, resume_after=None)
             while migration.status in handlers:
                 if not migration.renew_lease(lease_token, self.lease_ttl):
                     raise MigrationLeaseLostError("Migration lease expired or ownership changed")
                 logger.info("🚀 [VirtualminMigration] migration=%s phase=%s", migration.pk, migration.status)
                 handlers[migration.status](migration, lease_token)
+        except MigrationDeferredError as deferral:
+            self._defer(migration, lease_token, deferral)
         except Exception as error:
             logger.exception("🔥 [VirtualminMigration] Migration interrupted: %s", migration.pk)
             migration.refresh_from_db()
@@ -657,6 +696,20 @@ class VirtualminMigrationService:
                 return Err("Migration lease lost; current owner must resolve the phase")
             self._finish(migration, lease_token, "needs_review", str(error))
         return Ok(migration)
+
+    def _defer(self, migration: VirtualminMigration, token: UUID, deferral: MigrationDeferredError) -> None:
+        from .virtualmin_tasks import schedule_migration_wake  # noqa: PLC0415  # Circular
+
+        migration.refresh_from_db()
+        self._move(migration, token, migration.status, resume_after=deferral.until)
+        logger.info(
+            "🐢 [VirtualminMigration] migration=%s waits in %s until %s: %s",
+            migration.pk,
+            migration.status,
+            deferral.until.isoformat(),
+            deferral.reason,
+        )
+        schedule_migration_wake(migration.pk, deferral.until)
 
     def run(self, migration_id: UUID) -> Result[MigrationResumeOutcome, str]:
         try:
@@ -673,6 +726,10 @@ class VirtualminMigrationService:
         try:
             migration.refresh_from_db()
             policy = RESUME_POLICY.get(migration.status, "review")
+            if migration.resume_after is not None and migration.status not in _TERMINAL_STATUSES:
+                if migration.resume_after > timezone.now():
+                    return Ok({"action": "waiting", "migration_id": str(migration_id), "lease_acquired": True})
+                policy = "continue"  # A deferral is a checkpoint, not an interruption
             if policy == "review":
                 self._finish(migration, token, "needs_review", f"Interrupted phase: {migration.status}")
             elif policy == "continue":

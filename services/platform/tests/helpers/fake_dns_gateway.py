@@ -92,6 +92,7 @@ class FakeDnsGateway(DnsProviderGateway):
                     name=name,
                     content=spec.content,
                     owner_tag=owner_tag,
+                    ttl=spec.ttl,
                 )
             )
         return outcome
@@ -135,6 +136,7 @@ class FakeDnsGateway(DnsProviderGateway):
                     name=name,
                     content=value,
                     owner_tag=owner_tag,
+                    ttl=ttl,
                 )
             )
         return outcome

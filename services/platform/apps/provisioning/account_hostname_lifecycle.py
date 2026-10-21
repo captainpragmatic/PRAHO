@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
@@ -29,6 +30,9 @@ from . import account_hostname_config as config
 from .account_hostname_models import AccountHostname
 from .account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+
+if TYPE_CHECKING:
+    from .account_hostname_service import EnsureOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +108,12 @@ def ensure_account_name(account_id: str) -> dict[str, str]:
 
 def ensure_on_recreated_node(
     account: VirtualminAccount, server: VirtualminServer, *, enabled: bool
-) -> Result[None, str]:
-    """A customer domain was recreated from nothing on `server`: put its account name back there."""
+) -> Result[EnsureOutcome | None, str]:
+    """A customer domain was recreated from nothing on `server`: put its account name back there.
+
+    Ok(None) means there was nothing to put back (the feature is off, or the account has no name
+    yet); otherwise the outcome says what the node now serves, which the cutover gates on.
+    """
     from . import account_hostname_service as service  # noqa: PLC0415  # Deferred: imports the gateway
 
     if not config.account_hostnames_enabled():
@@ -116,7 +124,7 @@ def ensure_on_recreated_node(
     ensured = service.ensure_node_account_name(account, server, enabled=enabled, operation_owner=True)
     if ensured.is_err():
         return Err(ensured.unwrap_err(), retriability=retriability_of(ensured))
-    return Ok(None)
+    return Ok(ensured.unwrap())
 
 
 def on_account_terminated(account: VirtualminAccount) -> None:
@@ -231,13 +239,8 @@ def _sweep_one(pk: UUID) -> str:
     from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
     with transaction.atomic():
-        hostname = (
-            AccountHostname.objects.select_for_update(skip_locked=True, of=("self",))
-            .select_related("account", "account__server", "target_server")
-            .filter(pk=pk, retired_at__isnull=True)
-            .first()
-        )
-        if hostname is None:
+        hostname = service.lock_for_publication(pk, skip_locked=True)
+        if hostname is None or hostname.retired_at is not None:
             return "skipped"
         previous_sweep = hostname.last_swept_at
         AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
@@ -256,7 +259,7 @@ def _sweep_one(pk: UUID) -> str:
             return "skipped"
         async_task(ENSURE_TASK, str(account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
         return "enqueued"
-    synced = service.sync_account_hostname(hostname)
+    synced = service.sync_account_hostname(hostname, skip_locked=True)  # A name being published is next pass's
     if synced.is_err():
         logger.warning("⚠️ [AccountName] Sweep: DNS for %s: %s", hostname.fqdn, synced.unwrap_err())
         return "failed"
