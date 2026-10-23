@@ -26,7 +26,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
-from apps.common.encryption import EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
+from apps.common.encryption import DecryptionError, EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
 from apps.common.key_derivation import get_key_hex
 from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
@@ -536,9 +536,23 @@ class EmailLog(models.Model):
             except Exception as e:  # pragma: no cover - logging shouldn't break
                 logger.debug(f"Failed to log email sent: {e}")
 
+    def body_text_matches(self, expected: str) -> bool:
+        """Whether the stored text body is exactly `expected`. A body no key can decrypt matches nothing.
+
+        Notices are accepted only on an email whose body is the exact offer; one stored under a superseded
+        format, or garbled, is simply not that email.
+        """
+        try:
+            return self.get_decrypted_body_text() == expected
+        except DecryptionError:
+            return False
+
     def get_safe_content_preview(self) -> str:
         """Return a short, decrypted preview suitable for logs/UI."""
-        content = self.get_decrypted_body_text()
+        try:
+            content = self.get_decrypted_body_text()
+        except DecryptionError:
+            return str(_("[unreadable]"))
         preview = content[:CONTENT_PREVIEW_LENGTH]
         return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 

@@ -73,6 +73,20 @@ class CurrencyNoticeLedgerTests(TestCase):
         self.offer.preparation_not_before = timezone.now() - timedelta(days=60)
         return log
 
+    def test_an_unreadable_proof_email_is_no_proof(self) -> None:
+        log = self.email_proof()
+        EmailLog.objects.filter(pk=log.pk).update(body_text="aes:v1:bm90LXJlYWRhYmxl")  # A superseded format
+        self.offer.notice_email = EmailLog.objects.get(pk=log.pk)
+
+        try:
+            self.offer.accept_notice()
+        except ValidationError:
+            pass
+        except Exception as error:
+            self.fail(f"an unreadable proof must be refused as a mismatch, not raise {type(error).__name__}")
+        else:
+            self.fail("an unreadable email was accepted as proof")
+
     def test_queued_email_cannot_start_notice_period(self) -> None:
         self.email_proof(status="queued")
         with self.assertRaises(ValidationError):
