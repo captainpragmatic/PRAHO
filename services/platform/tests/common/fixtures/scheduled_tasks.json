@@ -628,5 +628,23 @@
     "cron": "0 */6 * * *",
     "repeats": -1,
     "cluster": "praho-cluster"
+  },
+  {
+    "name": "webhooks-process-pending",
+    "func": "apps.integrations.webhooks.base.process_pending_webhooks",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "webhooks-retry-failed",
+    "func": "apps.integrations.webhooks.base.retry_failed_webhooks",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
   }
 ]
