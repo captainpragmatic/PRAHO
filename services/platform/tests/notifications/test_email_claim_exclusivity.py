@@ -21,7 +21,7 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.notifications.models import EmailLog
+from apps.notifications.models import EmailLog, PendingDeliveryEvent
 from apps.notifications.services import EmailService
 from apps.notifications.tasks import process_email_queue, retry_failed_emails, send_email_task
 
@@ -241,6 +241,63 @@ class DeliveryCallbackTests(TestCase):
 
         row.refresh_from_db()
         self.assertEqual((row.provider_id, row.status), ("pid-early", "bounced"))
+
+
+
+class BufferedCallbackTests(TestCase):
+    """A callback buffered while the success write commits is still applied, and soft bounces still count."""
+
+    def test_a_callback_buffered_after_the_provider_id_was_recorded_is_applied_by_the_sweep(self) -> None:
+        # The race: the callback found no row, then the success write committed, then the callback buffered.
+        row = _log(status="sent", provider_id="pid-raced")
+        PendingDeliveryEvent.objects.create(provider_id="pid-raced", event_type="bounced", metadata={})
+
+        process_email_queue()
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "bounced", "a buffered callback must not wait forever")
+        self.assertFalse(PendingDeliveryEvent.objects.filter(provider_id="pid-raced").exists())
+
+    def test_an_unmatched_callback_expires_after_the_window_and_a_recent_one_waits(self) -> None:
+        from apps.notifications.services import PENDING_DELIVERY_EVENT_WINDOW  # noqa: PLC0415
+
+        old = PendingDeliveryEvent.objects.create(provider_id="pid-never", event_type="bounced", metadata={})
+        recent = PendingDeliveryEvent.objects.create(provider_id="pid-soon", event_type="bounced", metadata={})
+        PendingDeliveryEvent.objects.filter(pk=old.pk).update(
+            created_at=timezone.now() - PENDING_DELIVERY_EVENT_WINDOW - timedelta(minutes=1)
+        )
+
+        process_email_queue()
+
+        self.assertEqual(set(PendingDeliveryEvent.objects.values_list("pk", flat=True)), {recent.pk})
+
+    def test_a_buffered_soft_bounce_still_counts_towards_suppression(self) -> None:
+        from apps.notifications.services import EmailSuppressionService  # noqa: PLC0415
+
+        for _ in range(2):
+            _log(status="soft_bounced")
+        row = _log()
+
+        def accepted_then_soft_bounced(message: object, *args: object, **kwargs: object) -> int:
+            message.anymail_status = SimpleNamespace(message_id="pid-soft", status={"sent"}, esp_response={})
+            EmailService.handle_delivery_event("soft_bounced", "pid-soft", row.to_addr)
+            return 1
+
+        with patch("django.core.mail.EmailMessage.send", accepted_then_soft_bounced):
+            _send(row)
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "soft_bounced")
+        self.assertTrue(
+            EmailSuppressionService.is_suppressed(row.to_addr), "the third soft bounce in the window suppresses"
+        )
+
+    def test_the_buffered_recipient_is_not_stored_in_plain_text(self) -> None:
+        EmailService.handle_delivery_event("soft_bounced", "pid-unknown", "private@example.com")
+
+        stored = PendingDeliveryEvent.objects.values().get()
+        self.assertTrue(stored.get("recipient"), "the recipient is kept for the replay")
+        self.assertNotIn("private@example.com", repr(stored))
 
 
 class ConcurrentClaimTests(TransactionTestCase):

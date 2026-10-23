@@ -551,6 +551,9 @@ class PendingDeliveryEvent(models.Model):
     provider_id = models.CharField(max_length=255, db_index=True, help_text=_("Provider's message ID"))
     event_type = models.CharField(max_length=20, help_text=_("delivered, bounced, soft_bounced or complained"))
     metadata = models.JSONField(default=dict, blank=True, help_text=_("The callback's event data"))
+    recipient = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True, blank=True, help_text=_("The callback's recipient, encrypted; the soft-bounce count needs it")
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -563,6 +566,14 @@ class PendingDeliveryEvent(models.Model):
 
     def __str__(self) -> str:
         return f"{self.event_type} for {self.provider_id}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.recipient and not is_encrypted(self.recipient):
+            self.recipient = encrypt_model_secret(self, "recipient", self.recipient)
+        super().save(*args, **kwargs)
+
+    def get_recipient(self) -> str:
+        return decrypt_model_secret(self, "recipient", self.recipient) if self.recipient else ""
 
 
 # ===============================================================================

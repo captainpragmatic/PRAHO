@@ -100,7 +100,9 @@ class RomanianDocumentPDFGenerator:
         _register_fonts()  # lazy: surface a missing font asset here, not at module import
         self.document = document
         self.buffer = BytesIO()
-        self.canvas = canvas.Canvas(self.buffer, pagesize=A4)
+        # Invariant: no render time in the bytes, so a document rendered again is byte-identical. A queued
+        # email hashes its first render and refuses a later one that differs.
+        self.canvas = canvas.Canvas(self.buffer, pagesize=A4, invariant=True)
         self.width, self.height = A4
         self._table_end_y: float = 0.0
 

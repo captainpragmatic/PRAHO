@@ -10,14 +10,18 @@ no source to regenerate it from is sent at once, never queued, and never resent 
 from __future__ import annotations
 
 import datetime
+from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
 from django.core import mail
 from django.test import TestCase
 from django.utils import timezone
+from freezegun import freeze_time
 
+from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine
 from apps.common.legal import LegalDocument
+from apps.customers.models import Customer
 from apps.notifications import attachments as sources
 from apps.notifications.attachments import AttachmentRef
 from apps.notifications.models import EmailLog
@@ -231,3 +235,66 @@ class LegalDocumentSourceTests(DurableMessageCase):
         # Django decodes a text/* attachment into str when attaching; the bytes are the release's.
         as_bytes = content.encode() if isinstance(content, str) else content
         self.assertEqual((filename, as_bytes, mimetype), document.attachment())
+
+
+class RealDocumentSourceTests(DurableMessageCase):
+    """The real ReportLab generators render the same bytes for the same document at any time.
+
+    The first render is hashed when the message is queued; the worker renders again later. A PDF that
+    stamps the render time into its bytes would fail that check on every unchanged document.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        self.customer = Customer.objects.create(
+            customer_type="company", company_name="Render Twice SRL", primary_email="render@example.ro", status="active"
+        )
+
+    def send_then_work_later(self, ref: AttachmentRef) -> None:
+        with freeze_time("2026-10-23 10:00:00"):
+            self.send(attachments=[ref])
+        with freeze_time("2026-10-23 10:05:00"):
+            self.tasks.run_last()
+
+    def test_a_queued_proforma_is_sent_with_its_pdf(self) -> None:
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="PRO-RENDER-001",
+            subtotal_cents=5000,
+            tax_cents=1050,
+            total_cents=6050,
+            valid_until=timezone.now() + datetime.timedelta(days=30),
+            bill_to_name="Render Twice SRL",
+        )
+        ProformaLine.objects.create(
+            proforma=proforma, kind="service", description="Hosting", quantity=1, unit_price_cents=5000,
+            tax_rate=Decimal("0.21"), line_total_cents=5000,
+        )
+
+        self.send_then_work_later(AttachmentRef("proforma_pdf", str(proforma.pk)))
+
+        self.assertEqual(len(mail.outbox), 1, "an unchanged proforma must not be refused as changed")
+        self.assertEqual(mail.outbox[0].attachments[0][0], "proforma_PRO-RENDER-001.pdf")
+
+    def test_a_queued_built_in_invoice_is_sent_with_its_pdf(self) -> None:
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-RENDER-001",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            status="issued",
+            bill_to_name="Render Twice SRL",
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice, kind="service", description="Hosting", quantity=1, unit_price_cents=10000,
+            tax_rate=Decimal("0.21"), line_total_cents=10000,
+        )
+
+        self.send_then_work_later(AttachmentRef("invoice_pdf", str(invoice.pk)))
+
+        self.assertEqual(len(mail.outbox), 1, "an unchanged invoice must not be refused as changed")
+        self.assertEqual(mail.outbox[0].attachments[0][0], "invoice_INV-RENDER-001.pdf")

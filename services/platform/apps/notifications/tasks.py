@@ -30,8 +30,12 @@ from apps.notifications.delivery import (
     retry_delay,
     retry_index,
 )
-from apps.notifications.models import EmailLog
-from apps.notifications.services import validate_email_log_subject
+from apps.notifications.models import EmailLog, PendingDeliveryEvent
+from apps.notifications.services import (
+    PENDING_DELIVERY_EVENT_WINDOW,
+    apply_pending_delivery_events,
+    validate_email_log_subject,
+)
 from apps.settings.services import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -287,8 +291,36 @@ def process_email_queue() -> dict[str, Any]:
             logger.exception(f"Failed to requeue email {pk}: {e}")
             failed += 1
 
-    logger.info(f"Email queue processed: {processed} requeued, {failed} failed")
+    callbacks = reconcile_pending_delivery_events()
+    logger.info(
+        f"Email queue processed: {processed} requeued, {failed} failed, "
+        f"{callbacks['callbacks_applied']} buffered callbacks applied, {callbacks['callbacks_expired']} expired"
+    )
     return {"processed": processed, "failed": failed}
+
+
+def reconcile_pending_delivery_events() -> dict[str, int]:
+    """Apply buffered callbacks whose message now carries their provider id; drop the unmatched past the window.
+
+    A callback that missed the row can be buffered just after the send's success write committed, so the
+    success write never sees it. This pass applies it under the row lock, one sweep interval later.
+    """
+    provider_ids = set(PendingDeliveryEvent.objects.values_list("provider_id", flat=True)[: _batch()])
+    matched = list(EmailLog.objects.filter(provider_id__in=provider_ids).values_list("pk", flat=True))
+    applied = 0
+    for pk in matched:
+        try:
+            with transaction.atomic():
+                email_log = EmailLog.objects.select_for_update().filter(pk=pk).first()
+                if email_log is not None and email_log.provider_id:
+                    apply_pending_delivery_events(email_log)
+                    applied += 1
+        except Exception as e:
+            logger.exception(f"🔥 [Email] Failed to apply buffered callbacks for {pk}: {e}")
+    expired, _ = PendingDeliveryEvent.objects.filter(
+        created_at__lt=timezone.now() - PENDING_DELIVERY_EVENT_WINDOW
+    ).delete()
+    return {"callbacks_applied": applied, "callbacks_expired": expired}
 
 
 def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:

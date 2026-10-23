@@ -24,7 +24,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
@@ -349,6 +349,18 @@ def apply_delivery_event(email_log: EmailLog, event_type: str, metadata: dict[st
     return fields
 
 
+def suppress_after_soft_bounce(recipient: str, now: datetime) -> None:
+    """Suppress an address for 30 days once its soft bounces in the last week reach the threshold."""
+    soft_bounce_count = EmailLog.objects.filter(
+        to_addr=recipient,
+        status="soft_bounced",
+        sent_at__gte=now - timedelta(days=7),
+    ).count()
+    threshold = getattr(settings, "EMAIL_DELIVERABILITY", {}).get("SOFT_BOUNCE_THRESHOLD", 3)
+    if soft_bounce_count >= threshold:
+        EmailSuppressionService.suppress_email(recipient, "soft_bounce_threshold", duration_days=30)
+
+
 def apply_pending_delivery_events(email_log: EmailLog) -> None:
     """Apply the callbacks that arrived before this row's provider id was recorded. The caller holds the lock."""
     pending = list(PendingDeliveryEvent.objects.filter(provider_id=email_log.provider_id).order_by("created_at"))
@@ -360,6 +372,19 @@ def apply_pending_delivery_events(email_log: EmailLog) -> None:
     if fields:
         email_log.save(update_fields=sorted(fields))
     PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
+    if email_log.status != "soft_bounced":
+        return
+    for event in pending:
+        if event.event_type != "soft_bounced":
+            continue
+        try:
+            # Its own savepoint: a suppression that fails must not undo the status just recorded.
+            with transaction.atomic():
+                recipient = event.get_recipient()
+                if recipient:
+                    suppress_after_soft_bounce(recipient, timezone.now())
+        except Exception:
+            logger.exception(f"🔥 [Email] Soft-bounce suppression failed for replayed event {event.pk}")
 
 
 @dataclass
@@ -1174,7 +1199,7 @@ class EmailService:
                     if message_id and event_type in DELIVERY_STATUS_EVENTS:
                         # The send may not have recorded its provider id yet: applied when it does.
                         PendingDeliveryEvent.objects.create(
-                            provider_id=message_id, event_type=event_type, metadata=metadata or {}
+                            provider_id=message_id, event_type=event_type, metadata=metadata or {}, recipient=recipient
                         )
                     logger.warning(f"No email log yet for delivery event: {message_id}")
                     return False
@@ -1182,14 +1207,7 @@ class EmailService:
                 if fields:
                     email_log.save(update_fields=fields)
             if event_type == "soft_bounced" and email_log.status == "soft_bounced":
-                soft_bounce_count = EmailLog.objects.filter(
-                    to_addr=recipient,
-                    status="soft_bounced",
-                    sent_at__gte=now - timedelta(days=7),
-                ).count()
-                threshold = getattr(settings, "EMAIL_DELIVERABILITY", {}).get("SOFT_BOUNCE_THRESHOLD", 3)
-                if soft_bounce_count >= threshold:
-                    EmailSuppressionService.suppress_email(recipient, "soft_bounce_threshold", duration_days=30)
+                suppress_after_soft_bounce(recipient, now)
 
             logger.info(f"Processed {event_type} event for {recipient[:3]}***")
             return True
