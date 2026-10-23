@@ -1189,6 +1189,7 @@ class GDPRExportService:
             "customers": [],
             "billing_data": [],
             "support_tickets": [],
+            "emails": [],
             "audit_summary": {},
         }
 
@@ -1236,6 +1237,9 @@ class GDPRExportService:
             data["billing_data"] = cls._collect_billing_data(user)
 
         # Support tickets
+        if scope.get("include_emails", True):
+            data["emails"] = cls._collect_email_data(user)
+
         if scope.get("include_tickets", True):
             try:
                 tickets = Ticket.objects.filter(created_by=user)
@@ -1272,6 +1276,31 @@ class GDPRExportService:
             }
 
         return data
+
+    @staticmethod
+    def _collect_email_data(user: User) -> list[dict[str, Any]]:
+        """The messages PRAHO sent the person: when, what about, and what became of them.
+
+        Only the person's own address is named; another recipient's cc or bcc is theirs, not the person's.
+        """
+        from apps.notifications.models import EmailLog, recipient_digest_term  # noqa: PLC0415  # Deferred
+
+        if not user.email:
+            return []
+        rows = EmailLog.objects.filter(
+            Q(recipient_hashes__contains=recipient_digest_term(user.email)) | Q(to_addr__iexact=user.email)
+        ).order_by("sent_at")
+        return [
+            {
+                "recipient": user.email,
+                "subject": row.subject,
+                "template": row.template_key,
+                "status": row.status,
+                "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def _collect_billing_data(user: User) -> list[dict[str, Any]]:
@@ -1460,6 +1489,8 @@ class GDPRDeletionService:
             with transaction.atomic(), erasure_in_progress() as writes:
                 # Tickets first, while every reply still names its author: deletion sets authors to NULL.
                 cls._erase_tickets(subject)
+                # Emails while the account still carries its address.
+                cls._erase_emails(subject)
                 if deletion_type == "anonymize":
                     result = cls._anonymize_user_data(user)
                     action_taken = "anonymized"
@@ -1729,27 +1760,16 @@ class GDPRDeletionService:
     ERASED_TICKET_TEXT = "[Removed at the person's request]"
 
     @classmethod
-    def _erase_tickets(cls, subject: ErasureSubject) -> None:
-        """Remove the person from support tickets (row 74, owner decision OF4).
+    def _persons_addresses(cls, subject: ErasureSubject) -> tuple[set[str], set[int]]:
+        """The person's email addresses, and the customers the erasure leaves to staff.
 
-        A ticket the person raised with no other member's reply on it is theirs: its text, contact
-        details and comments are replaced, and its attachments deleted (their files once this
-        commits). Any other ticket that names them keeps its content, including the person's own
-        replies, and loses only the person's name and email: it may be another member's evidence.
-        A customer reply with no author is the person's when its email is one of theirs, and
-        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        A customer the erasure leaves to staff may be another owner's record (shared, or reached only
+        through an inactive owner link): its email is not the person's. The person's own address
+        always counts.
         """
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
-        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
-            Ticket,
-            TicketAttachment,
-            TicketComment,
-        )
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        # A customer the erasure leaves to staff may be another owner's record (shared, or reached
-        # only through an inactive owner link): its email is not the person's, and its tickets are
-        # never the person's alone. The person's own address always counts.
         user = User.objects.filter(pk=subject.user_pk).first()
         owned_ids = CustomerMembership.objects.filter(
             user_id=subject.user_pk, role="owner", customer__customer_type="individual"
@@ -1764,6 +1784,89 @@ class GDPRDeletionService:
         emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier} - others
         if user is not None and user.email:
             emails.add(user.email.lower())
+        return emails, left_for_staff
+
+    ERASED_EMAIL_ADDRESS = "erased@erased.invalid"
+    ERASED_EMAIL_SUBJECT = "[erased]"
+    ERASED_ATTACHMENT_NAME = "erased"
+
+    @classmethod
+    def _erase_emails(cls, subject: ErasureSubject) -> None:
+        """Remove the person from every stored email that names them (#751 follow-up).
+
+        A message naming the person in to, cc or bcc is found by the keyed digests of its recipients
+        and scrubbed in place: recipients, subject, bodies, the provider's response and attachment
+        names. Rows are never deleted, since notices reference them. A message not yet delivered is
+        cancelled: it fails permanently and its claim is cleared, so a worker that claimed it earlier
+        records nothing, and its provider id goes, so a late callback attaches to nothing. Buffered
+        callbacks for the person's addresses are deleted. Only counts and row ids are logged.
+        """
+        from apps.notifications.models import (  # noqa: PLC0415  # Deferred: import cycle
+            EmailAttachment,
+            EmailLog,
+            PendingDeliveryEvent,
+            recipient_digest,
+            recipient_digest_term,
+        )
+
+        emails, _left_for_staff = cls._persons_addresses(subject)
+        if not emails:
+            return
+        names = Q()
+        for email in emails:
+            names |= Q(recipient_hashes__contains=recipient_digest_term(email)) | Q(to_addr__iexact=email)
+        ids = list(EmailLog.objects.filter(names).values_list("pk", flat=True))
+        # Locked in pk order, as a worker locks one row at a time: its claim and record writes then wait.
+        locked = list(
+            EmailLog.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", "status")
+        )
+        undelivered = [pk for pk, status in locked if status in ("queued", "sending", "failed")]
+        EmailLog.objects.filter(pk__in=undelivered).update(
+            status="failed",
+            claim_token=None,
+            lease_until=None,
+            next_attempt_at=None,
+            provider_response={"erased": True, "permanent_failure": True, "error": "Recipient erased (GDPR)"},
+        )
+        EmailLog.objects.filter(pk__in=ids).exclude(pk__in=undelivered).update(provider_response={"erased": True})
+        EmailLog.objects.filter(pk__in=ids).update(
+            to_addr=cls.ERASED_EMAIL_ADDRESS,
+            reply_to="",
+            subject=cls.ERASED_EMAIL_SUBJECT,
+            body_text="",
+            body_html="",
+            envelope=None,
+            recipient_hashes=None,
+            provider_id="",
+            meta={"erased": True},
+        )
+        EmailAttachment.objects.filter(email_log_id__in=ids).update(filename=cls.ERASED_ATTACHMENT_NAME)
+        buffered, _ = PendingDeliveryEvent.objects.filter(
+            recipient_hash__in=[recipient_digest(email) for email in emails]
+        ).delete()
+        logger.info(
+            f"🔒 [GDPR Deletion] Scrubbed {len(ids)} stored emails ({len(undelivered)} cancelled), "
+            f"{buffered} buffered callbacks deleted"
+        )
+
+    @classmethod
+    def _erase_tickets(cls, subject: ErasureSubject) -> None:
+        """Remove the person from support tickets (row 74, owner decision OF4).
+
+        A ticket the person raised with no other member's reply on it is theirs: its text, contact
+        details and comments are replaced, and its attachments deleted (their files once this
+        commits). Any other ticket that names them keeps its content, including the person's own
+        replies, and loses only the person's name and email: it may be another member's evidence.
+        A customer reply with no author is the person's when its email is one of theirs, and
+        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        """
+        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
+            Ticket,
+            TicketAttachment,
+            TicketComment,
+        )
+
+        emails, left_for_staff = cls._persons_addresses(subject)
 
         def is_persons(author_id: int | None, author_email: str) -> bool:
             if author_id is not None:

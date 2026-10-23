@@ -84,6 +84,7 @@ Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys
 | `unsubscribe` | Unsubscribe token generation | `UNSUBSCRIBE_TOKEN_SECRET` |
 | `siem-hash-chain` | SIEM audit log hash chain | `SIEM_HASH_CHAIN_SECRET` (recommended for production) |
 | `sensitive-data-hash` | HMAC for sensitive data hashing | `SENSITIVE_DATA_HASH_KEY` |
+| `email-recipient-digest` | Keyed digests of stored email recipients, for GDPR erasure and export | `EMAIL_RECIPIENT_DIGEST_SECRET` |
 
 **How it works**: `apps/common/key_derivation.py` uses `HKDF(SHA256, length=32, info=f"praho-{domain}")` with `settings.SECRET_KEY` as input key material. If a domain-specific env var is set (>= 32 chars), it is used directly instead of HKDF derivation.
 

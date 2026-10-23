@@ -14,7 +14,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -385,6 +385,17 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     return {"retried": retried, "skipped": skipped}
 
 
+def _protected_email_logs() -> Q:
+    """Logs another model references with on_delete=PROTECT; deleting one raises and stops the batch."""
+    protected = Q()
+    for relation in EmailLog._meta.related_objects:
+        if relation.on_delete is models.PROTECT:
+            name = relation.field.name
+            referenced = relation.related_model._base_manager.filter(**{f"{name}__isnull": False}).values(name)
+            protected |= Q(pk__in=referenced)
+    return protected
+
+
 def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
     """
     Clean up old email log entries.
@@ -396,9 +407,11 @@ def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
         Dict with cleanup results
     """
     cutoff = timezone.now() - timedelta(days=retention_days)
+    # A log a record points at with PROTECT (a currency notice's proof of notice) stays.
+    old = EmailLog.objects.filter(sent_at__lt=cutoff).exclude(_protected_email_logs())
 
     # Count before deletion
-    total_to_delete = EmailLog.objects.filter(sent_at__lt=cutoff).count()
+    total_to_delete = old.count()
 
     if total_to_delete == 0:
         return {"deleted": 0, "message": "No old email logs to clean up"}
@@ -408,7 +421,7 @@ def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
     deleted = 0
 
     while True:
-        batch = EmailLog.objects.filter(sent_at__lt=cutoff).values_list("id", flat=True)[:batch_size]
+        batch = old.values_list("id", flat=True)[:batch_size]
         batch_ids = list(batch)
 
         if not batch_ids:

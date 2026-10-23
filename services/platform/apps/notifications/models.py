@@ -10,11 +10,13 @@ Security hardening:
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import re
 import uuid
 from datetime import timedelta
+from email.utils import parseaddr
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -25,6 +27,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
 from apps.common.encryption import EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
+from apps.common.key_derivation import get_key_hex
 from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
 # Module-level logger and encryption flag (patched in tests)
@@ -148,6 +151,22 @@ def validate_email_subject(subject: str) -> None:
     # Check for dangerous patterns
     if re.search(r"<script", subject, flags=re.IGNORECASE):
         raise ValidationError(_("Subject contains dangerous content"))
+
+
+def recipient_digest(address: str) -> str:
+    """A keyed digest of one recipient address, normalised: erasure finds a person's messages by it.
+
+    The address itself is never stored for this; `Name <Address@Example.com>` and `address@example.com`
+    give the same digest.
+    """
+    _name, bare = parseaddr(address)
+    normalised = (bare or address).strip().lower()
+    return hmac.new(get_key_hex("email-recipient-digest").encode(), normalised.encode(), "sha256").hexdigest()
+
+
+def recipient_digest_term(address: str) -> str:
+    """The `recipient_hashes` substring that names `address` (digests are space-delimited)."""
+    return f" {recipient_digest(address)} "
 
 
 def encrypt_sensitive_content(content: str) -> str:
@@ -397,6 +416,11 @@ class EmailLog(models.Model):
     )
     # The whole message beyond its first recipient (all of to, cc, bcc, tags), encrypted like the bodies:
     # every send rebuilds the message from the row, never from task arguments. Nullable: no table rebuild.
+    recipient_hashes = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True,
+        blank=True,
+        help_text=_("Keyed digests of every to, cc and bcc address, space-delimited; never the addresses"),
+    )
     envelope = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
         null=True, blank=True, db_comment="Encrypted JSON: to, cc, bcc and tags. Rebuilt into every send."
     )
@@ -433,6 +457,11 @@ class EmailLog(models.Model):
         if not ENCRYPTION_AVAILABLE and (self.body_text or self.body_html):
             raise EncryptionError("Email body encryption is unavailable")
         original_text, original_html = self.body_text, self.body_html
+        if kwargs.get("update_fields") is None and (
+            not self.recipient_hashes or (self.envelope and not is_encrypted(self.envelope))
+        ):
+            digests = {recipient_digest(address) for address in self._recipient_addresses() if address}
+            self.recipient_hashes = f" {' '.join(sorted(digests))} " if digests else None
         try:
             for field in ("body_text", "body_html", "envelope"):
                 value = getattr(self, field)
@@ -443,6 +472,16 @@ class EmailLog(models.Model):
             self.body_text, self.body_html = original_text, original_html
             raise
         super().save(*args, **kwargs)
+
+    def _recipient_addresses(self) -> list[str]:
+        """Every address the message names, read from the plaintext envelope before it is encrypted."""
+        addresses = [self.to_addr]
+        if self.envelope and not is_encrypted(self.envelope):
+            data = json.loads(self.envelope)
+            if isinstance(data, dict):
+                for key in ("to", "cc", "bcc"):
+                    addresses.extend(str(address) for address in data.get(key) or [])
+        return addresses
 
     def get_envelope(self) -> dict[str, Any]:
         """The decrypted envelope; a row written before envelopes existed has only its first recipient."""
@@ -557,6 +596,9 @@ class PendingDeliveryEvent(models.Model):
     recipient = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
         null=True, blank=True, help_text=_("The callback's recipient, encrypted; the soft-bounce count needs it")
     )
+    recipient_hash = models.CharField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        max_length=64, null=True, blank=True, db_index=True, help_text=_("Keyed digest of the recipient, for erasure")
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -572,6 +614,7 @@ class PendingDeliveryEvent(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self.recipient and not is_encrypted(self.recipient):
+            self.recipient_hash = recipient_digest(self.recipient)
             self.recipient = encrypt_model_secret(self, "recipient", self.recipient)
         super().save(*args, **kwargs)
 

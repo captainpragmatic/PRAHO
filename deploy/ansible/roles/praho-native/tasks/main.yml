@@ -431,6 +431,8 @@
       - ANAF_TRANSPORT_ENABLED
       # Deploy-time commands write audit rows too; their session digests must use the same key.
       - AUDIT_SESSION_DIGEST_SECRET
+      # Deploy-time commands can store an email; its recipient digests must use the same key.
+      - EMAIL_RECIPIENT_DIGEST_SECRET
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
