@@ -144,13 +144,17 @@ praho_stack_required() {
         }' "${DEPLOY_DIR}/docker-compose.$1.yml" | sort -u
 }
 
-# The variables stack TYPE requires that neither the shell nor the env file sets (Compose takes either).
+# The variables stack TYPE requires whose value, as Compose resolves it, is empty. An exported shell
+# variable wins over the env file even when it is empty; only an unexported name falls back to the file.
 praho_stack_missing() {
-    local name
+    local name value
     while read -r name; do
-        if [[ -z "${!name:-}" && -z "$(praho_env_value "$name")" ]]; then
-            printf '%s\n' "$name"
+        if printenv "$name" > /dev/null; then
+            value="$(printenv "$name")"
+        else
+            value="$(praho_env_value "$name")"
         fi
+        [[ -n "$value" ]] || printf '%s\n' "$name"
     done < <(praho_stack_required "$1")
 }
 

@@ -441,6 +441,16 @@ class TestStopAndLogsWithAnOlderFile:
                 assert call["env"][name], f"{name} is set for {flag}"
         assert call["env"]["PRAHO_ENV_FILE"]
 
+    @pytest.mark.integration
+    @pytest.mark.parametrize("flag", ["--stop", "--logs"])
+    def test_an_empty_shell_value_is_no_value(self, project: Project, flag: str) -> None:
+        # Compose takes an exported shell variable over the env file even when it is empty.
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("deploy.sh", "single-server", flag, PORTAL_ID="")
+        assert result.returncode == 0, result.stdout + result.stderr
+        (call,) = project.compose_calls()
+        assert call["env"]["PORTAL_ID"]
+
 
 class TestRollbackAndRestore:
     @pytest.mark.integration
@@ -518,6 +528,14 @@ class TestRollbackAndRestore:
         for name in ("PORTAL_HMAC_CREDENTIALS", "PORTAL_HMAC_SECRET", "PORTAL_ID"):
             assert name in result.stderr
         assert "Continue?" not in result.stdout
+        assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
+
+    @pytest.mark.integration
+    def test_rollback_treats_an_empty_shell_value_as_missing(self, project: Project) -> None:
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("rollback.sh", "version", "v1.2.3", stdin="yes\n", PORTAL_ID="")
+        assert result.returncode != 0
+        assert "PORTAL_ID" in result.stderr
         assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
 
     @pytest.mark.integration
