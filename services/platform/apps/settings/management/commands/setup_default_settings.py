@@ -145,9 +145,9 @@ def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewr
             dirty_fields.append("value")
         except DecryptionError:
             # One unreadable secret must not stop setup (and every deploy with it). Kept sensitive, since
-            # its value is still ciphertext; re-entering it lets the next run finish the downgrade.
+            # its value is still ciphertext; once it is replaced, the next run finishes the downgrade.
             unreadable = True
-            logger.warning(f"⚠️ [Settings] {setting.key}: stored value cannot be decrypted; kept sensitive, re-enter it")
+            logger.warning(f"⚠️ [Settings] {setting.key}: stored value cannot be decrypted; kept sensitive, replace it")
     for field_name in _METADATA_FIELDS:
         if unreadable and field_name == "is_sensitive":
             continue
@@ -187,8 +187,8 @@ def _retained_value_is_effective(setting: SystemSetting, definition: SettingDef)
         if definition.data_type == "list":
             return isinstance(value, list | str)
         validator._validate_value(value, "value")
-    except (ValidationError, ValueError, TypeError, DecimalException):
-        return False
+    except (ValidationError, ValueError, TypeError, DecimalException, DecryptionError):
+        return False  # An unreadable value takes no effect
     return True
 
 
