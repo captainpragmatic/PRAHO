@@ -38,6 +38,7 @@ from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
 
 from apps.common import counters, validators
+from apps.common.encryption import EncryptionError
 from apps.notifications.attachments import AttachmentInput, ResolvedAttachment, resolve_attachments
 from apps.notifications.models import (
     EmailAttachment,
@@ -546,7 +547,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(  # noqa: PLR0911, PLR0913  # One public entry: its parameters, and one exit per route or refusal
+    def send_email(  # noqa: PLR0913  # One public entry: its parameters
         cls,
         to: str | list[str],
         subject: str,
@@ -648,14 +649,21 @@ class EmailService:
             if cap > 0 and sum(len(part.content) for part in parts) > cap:
                 async_send = False
 
-        # Check rate limit
+        try:
+            return cls._dispatch(message, async_send=async_send)
+        except EncryptionError as refused:
+            # The message could not be stored sealed (a body that looks like ciphertext): nothing was kept.
+            logger.error(f"🔥 [Email] Message refused, not stored: {refused}")
+            return EmailResult(success=False, error=f"Message refused: {refused}")
+
+    @classmethod
+    def _dispatch(cls, message: OutgoingEmail, *, async_send: bool) -> EmailResult:
         allowed, _remaining = EmailRateLimiter.check_rate_limit()
         if not allowed:
             logger.warning("Email rate limit exceeded")
             if async_send:
                 return cls._queue_email_for_retry(message)
             return EmailResult(success=False, error="Rate limit exceeded")
-
         if async_send:
             return cls._send_async(message)
         return cls._send_now(message)

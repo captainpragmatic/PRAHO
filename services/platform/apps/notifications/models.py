@@ -35,7 +35,7 @@ from apps.common.encryption import (
     is_encrypted,
 )
 from apps.common.key_derivation import get_key_hex
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import decrypt_model_secret, seal_model_secret, written_fields
 
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
@@ -464,35 +464,45 @@ class EmailLog(models.Model):
     def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
+    _SECRET_FIELDS = ("body_text", "body_html", "envelope")
+
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Encrypt new bodies; encryption failures never persist plaintext."""
+        """Seal the secret fields being written for this row; refuse anything that is not.
+
+        Every field is sealed before any is changed, so a refusal leaves the instance as it was. The
+        recipient digests are written with the envelope or the first recipient they are made from.
+        """
         if not ENCRYPTION_AVAILABLE and (self.body_text or self.body_html):
             raise EncryptionError("Email body encryption is unavailable")
-        original_text, original_html = self.body_text, self.body_html
-        if kwargs.get("update_fields") is None and (
-            not self.recipient_hashes or (self.envelope and not is_encrypted(self.envelope))
-        ):
+        update_fields, written = written_fields(kwargs, self._SECRET_FIELDS)
+        sealed = {field: seal_model_secret(self, field, getattr(self, field) or "") for field in written}
+        if update_fields is None:
+            recompute = not self.recipient_hashes or bool(self.envelope and not is_encrypted(self.envelope))
+        else:
+            recompute = bool({"envelope", "to_addr"} & set(update_fields))
+        if recompute:
             digests = {recipient_digest(address) for address in self._recipient_addresses() if address}
             self.recipient_hashes = f" {' '.join(sorted(digests))} " if digests else None
-        try:
-            for field in ("body_text", "body_html", "envelope"):
-                value = getattr(self, field)
-                if value and not is_encrypted(value):
-                    setattr(self, field, encrypt_model_secret(self, field, value))
-            self.body_encrypted = True
-        except Exception:
-            self.body_text, self.body_html = original_text, original_html
-            raise
+            if update_fields is not None and "recipient_hashes" not in update_fields:
+                update_fields.append("recipient_hashes")
+        for field, value in sealed.items():
+            if value:
+                setattr(self, field, value)
+        self.body_encrypted = True
+        bodies_written = {"body_text", "body_html"} & set(written)
+        if update_fields is not None and bodies_written and "body_encrypted" not in update_fields:
+            update_fields.append("body_encrypted")
         super().save(*args, **kwargs)
 
     def _recipient_addresses(self) -> list[str]:
-        """Every address the message names, read from the plaintext envelope before it is encrypted."""
+        """Every address the message names: from the plaintext envelope, or the one already sealed for this row."""
         addresses = [self.to_addr]
-        if self.envelope and not is_encrypted(self.envelope):
-            data = json.loads(self.envelope)
-            if isinstance(data, dict):
-                for key in ("to", "cc", "bcc"):
-                    addresses.extend(str(address) for address in data.get(key) or [])
+        if not self.envelope:
+            return addresses
+        data = json.loads(self.envelope) if not is_encrypted(self.envelope) else self.get_envelope()
+        if isinstance(data, dict):
+            for key in ("to", "cc", "bcc"):
+                addresses.extend(str(address) for address in data.get(key) or [])
         return addresses
 
     def get_envelope(self) -> dict[str, Any]:
@@ -656,9 +666,15 @@ class PendingDeliveryEvent(models.Model):
         return f"{self.event_type} for {self.provider_id}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if self.recipient and not is_encrypted(self.recipient):
-            self.recipient_hash = recipient_digest(self.recipient)
-            self.recipient = encrypt_model_secret(self, "recipient", self.recipient)
+        """Seal the recipient for this row and write its digest with it."""
+        update_fields, written = written_fields(kwargs, ("recipient",))
+        if written and self.recipient:
+            sealed = seal_model_secret(self, "recipient", self.recipient)
+            plain = self.recipient if sealed != self.recipient else decrypt_model_secret(self, "recipient", sealed)
+            self.recipient_hash = recipient_digest(plain)
+            self.recipient = sealed
+            if update_fields is not None and "recipient_hash" not in update_fields:
+                update_fields.append("recipient_hash")
         super().save(*args, **kwargs)
 
     def get_recipient(self) -> str:
@@ -870,8 +886,9 @@ class EmailSuppression(models.Model):
         return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display()})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if self.email_encrypted and not is_encrypted(self.email_encrypted):
-            self.email_encrypted = encrypt_model_secret(self, "email_encrypted", self.email_encrypted)
+        _update_fields, written = written_fields(kwargs, ("email_encrypted",))
+        if written and self.email_encrypted:
+            self.email_encrypted = seal_model_secret(self, "email_encrypted", self.email_encrypted)
         super().save(*args, **kwargs)
 
     def get_decrypted_email(self) -> str:
@@ -913,7 +930,8 @@ class EmailSuppression(models.Model):
                 existing.expires_at = expires_at
                 existing.bounce_count = models.F("bounce_count") + 1
                 existing.last_bounce_at = now
-                existing.save()
+                # Only what a bounce changes: the stored address is never rewritten (or re-checked) here.
+                existing.save(update_fields=["reason", "provider", "expires_at", "bounce_count", "last_bounce_at"])
                 # Refresh to get actual bounce_count value after F() expression
                 existing.refresh_from_db()
                 return existing
