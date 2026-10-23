@@ -12,7 +12,7 @@ from django.test import SimpleTestCase
 
 from apps.audit.logging_formatters import SIEMJSONFormatter
 from apps.common.gunicorn_logging import RedactingLogger
-from apps.common.secret_urls import SecretURLFilter, redact_text
+from apps.common.secret_urls import SecretURLFilter, redact_text, redact_urls
 from config.settings.sentry import sentry_options
 
 LINKS = (
@@ -169,3 +169,12 @@ class JSONFormatterRedactionTests(SimpleTestCase):
         except ValueError:
             self.fail(f"the formatter must write valid JSON: {line}")
         self.assertNotIn("unsubscribe-secret", line)
+
+    def test_a_secret_used_as_a_dictionary_key_is_redacted(self) -> None:
+        record = logging.LogRecord("app", logging.INFO, __file__, 1, "results", (), None)
+        record.results = {"/notifications/unsubscribe/unsubscribe-secret/": "failed"}
+
+        line = SIEMJSONFormatter().format(record)
+
+        self.assertNotIn("unsubscribe-secret", line)
+        self.assertNotIn("unsubscribe-secret", str(redact_urls({"/notifications/unsubscribe/unsubscribe-secret/": 1})))

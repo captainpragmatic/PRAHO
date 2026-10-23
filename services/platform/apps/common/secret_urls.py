@@ -54,8 +54,11 @@ def redact_urls(value: Any, _path: frozenset[int] = frozenset(), _depth: int = 0
     if id(value) in _path or _depth >= _MAX_DEPTH:
         return _CYCLE
     path = _path | {id(value)}
-    if isinstance(value, dict):
-        return {key: redact_urls(item, path, _depth + 1) for key, item in value.items()}
+    if isinstance(value, dict):  # Keys too: a link can be a key (results keyed by URL)
+        return {
+            (redact_text(key) if isinstance(key, str) else key): redact_urls(item, path, _depth + 1)
+            for key, item in value.items()
+        }
     items = [redact_urls(item, path, _depth + 1) for item in value]
     return tuple(items) if isinstance(value, tuple) else items
 
