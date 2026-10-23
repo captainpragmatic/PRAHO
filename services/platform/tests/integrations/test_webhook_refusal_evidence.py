@@ -1,8 +1,8 @@
 """The evidence of a refused gateway fact survives the refusal's rollback (#751 follow-up, M9b).
 
-A payment_intent.succeeded whose amount does not match the local payment is refused, and the webhook
-executor rolls its savepoint back. The structured payment_gateway_fact_mismatch audit row was written
-inside that savepoint and rolled back with it. Refusal evidence is now written after the rollback; the
+A payment_intent.succeeded whose amount does not match the local payment is refused (and, since no
+redelivery can fix it, acknowledged). The structured payment_gateway_fact_mismatch audit row was written
+inside the webhook executor's savepoint and rolled back with it whenever the handler refused. Refusal evidence is now written after the rollback; the
 state-change audits of the refused work stay transaction-bound.
 """
 
@@ -41,7 +41,7 @@ class RefusalEvidenceTests(TestCase):
 
         result = StripeWebhookProcessor()._execute_locked(event)
 
-        self.assertFalse(result.success)
+        self.assertTrue(result.success, "acknowledged: no redelivery can fix a mismatch")
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.status, "pending", "the refused fact is not applied")
         evidence = AuditEvent.objects.filter(

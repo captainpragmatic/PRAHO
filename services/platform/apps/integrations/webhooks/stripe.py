@@ -189,6 +189,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     return False, error
                 logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
                 return self._missing_local(f"Payment not found for PaymentIntent: {stripe_payment_id}")
+            if retriability_of(convergence) is Retriability.NOT_RETRIABLE:
+                # The gateway's facts contradict the local payment: no redelivery can change that. Recorded
+                # (the mismatch evidence row and a critical log) and acknowledged instead of retried.
+                return self._acknowledge_permanent_rejection(f"Gateway facts refused for {stripe_payment_id}: {error}")
             logger.critical("Stripe success convergence rejected for %s: %s", stripe_payment_id, error)
             return False, error
         payment = convergence.unwrap()
@@ -582,6 +586,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             payment_intent_id,
         )
 
+        # What no redelivery can change is recorded here and escalated with the dispute, never retried.
+        note = ""
         if payment_intent_id:
             from apps.promotions.gift_refunds import freeze_purchase_for_dispute  # noqa: PLC0415
 
@@ -591,8 +597,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
                 )
                 if payment is None and not gift_dispute:
-                    return StripeWebhookProcessor._missing_local(f"Payment not found for dispute: {dispute_id}")
-                if payment is not None and payment.status != "disputed" and not gift_dispute:
+                    note = "PRAHO has no payment for this PaymentIntent"
+                elif payment is not None and payment.status != "disputed" and not gift_dispute:
                     changed = payment.apply_gateway_event(
                         "disputed",
                         {
@@ -611,9 +617,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                             payment.id,
                             payment.status,
                         )
-                        return False, f"Payment {payment.id} cannot transition to disputed"
+                        note = f"Its payment {payment.id} is {payment.status} and was not marked disputed"
         else:
-            return StripeWebhookProcessor._missing_local(f"PaymentIntent not found for dispute: {dispute_id}")
+            note = "The dispute names no PaymentIntent"
 
         try:
             from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -625,7 +631,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 message=f"A dispute has been created for PaymentIntent {payment_intent_id}.\n"
                 f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
                 f"Reason: {charge.get('reason', 'Unknown')}\n"
-                f"Please review immediately.",
+                + (f"Note: {note}\n" if note else "")
+                + "Please review immediately.",
                 alert_type="dispute",
                 metadata={
                     "dispute_id": dispute_id,
@@ -636,7 +643,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as notify_error:
             logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
 
-        return True, f"Dispute created: {dispute_id}"
+        return True, f"Dispute created: {dispute_id}" + (f" ({note})" if note else "")
 
     def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💰 Handle Stripe Charge events"""

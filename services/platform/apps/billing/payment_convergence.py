@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 from apps.common.validators import record_refusal_evidence
 
 from .metering_models import BillingCycle, UsageAggregation
@@ -143,7 +143,8 @@ class PaymentSuccessService:
                 validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
                 if validation_error:
                     PaymentSuccessService._log_validation_failure(payment, validation_error, gateway_facts)
-                    return Err(validation_error)
+                    # No replay can fix a mismatch: permanent, so a webhook acknowledges it instead of retrying.
+                    return Err(validation_error, retriability=Retriability.NOT_RETRIABLE)
 
                 if payment.status not in {"pending", "succeeded"}:
                     return Err(f"Payment state mismatch: cannot succeed a payment in '{payment.status}'")
@@ -267,7 +268,8 @@ class PaymentSuccessService:
         validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
         if validation_error:
             PaymentSuccessService._log_validation_failure(payment, validation_error, gateway_facts)
-            return Err(validation_error)
+            # No replay can fix a mismatch: permanent, so a webhook acknowledges it instead of retrying.
+            return Err(validation_error, retriability=Retriability.NOT_RETRIABLE)
 
         payment.gateway_txn_id = gateway_txn_id
         payment.save(update_fields=["gateway_txn_id", "updated_at"])
