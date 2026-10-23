@@ -96,6 +96,29 @@ class ChainPendingIndexTests(TransactionTestCase):
 
         self.assertIn("audit_events_chain_pending_idx", plan)
 
+    def test_a_retry_rebuilds_an_index_an_interrupted_build_left_invalid(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("a PostgreSQL-only partial index")
+        from importlib import import_module  # noqa: PLC0415
+
+        migration = import_module("apps.audit.migrations.0015_audit_chain_pending_index")
+        validity = (
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = 'audit_events_chain_pending_idx'::regclass"
+        )
+        with connection.cursor() as cursor:
+            # What a cancelled CREATE INDEX CONCURRENTLY leaves behind: the catalog entry, marked invalid
+            cursor.execute(
+                "UPDATE pg_index SET indisvalid = false "
+                "WHERE indexrelid = 'audit_events_chain_pending_idx'::regclass"
+            )
+        with connection.schema_editor(atomic=False) as schema_editor:
+            migration.apply_chain_pending_index(None, schema_editor)
+        with connection.cursor() as cursor:
+            cursor.execute(validity)
+            (valid,) = cursor.fetchone()
+
+        self.assertTrue(valid, "the retry rebuilt the index instead of keeping the invalid one")
+
 
 @override_settings(AUDIT_CHAIN_ENABLED=True)
 class RestampRaceTests(TransactionTestCase):
