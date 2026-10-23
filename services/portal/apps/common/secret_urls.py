@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import re
@@ -35,15 +36,28 @@ def redact_text(value: str) -> str:
     return SECRET_URL_PATTERN.sub(lambda match: match["prefix"] + "[REDACTED]", value)
 
 
-def redact_urls(value: Any) -> Any:
-    """Return a scrubbed copy; never change a request used for authentication."""
+# How deep redaction walks nested containers; deeper (or cyclic) values are replaced, never recursed into.
+_MAX_DEPTH = 32
+_CYCLE = "[cycle]"
+
+
+def redact_urls(value: Any, _path: frozenset[int] = frozenset(), _depth: int = 0) -> Any:
+    """Return a scrubbed copy; never change a request used for authentication.
+
+    Tuples stay tuples. A container met again on its own path (a cycle), or nested past the depth bound,
+    is replaced by a placeholder rather than recursed into.
+    """
     if isinstance(value, str):
         return redact_text(value)
+    if not isinstance(value, (dict, list, tuple)):
+        return value
+    if id(value) in _path or _depth >= _MAX_DEPTH:
+        return _CYCLE
+    path = _path | {id(value)}
     if isinstance(value, dict):
-        return {key: redact_urls(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [redact_urls(item) for item in value]
-    return value
+        return {key: redact_urls(item, path, _depth + 1) for key, item in value.items()}
+    items = [redact_urls(item, path, _depth + 1) for item in value]
+    return tuple(items) if isinstance(value, tuple) else items
 
 
 def scrub_sentry_event(event: Any, hint: Any) -> Any:
@@ -52,15 +66,40 @@ def scrub_sentry_event(event: Any, hint: Any) -> Any:
 
 
 class SecretURLFilter(logging.Filter):
+    """Redact secrets in a record before any handler formats it.
+
+    Filters run outside the handler's error handling, so this never raises: a record it cannot process is
+    passed on as it is (logging itself reports a bad format later). The message is rendered once, and
+    the lazy message and arguments are replaced only when redaction changed the text.
+    """
+
+    _SKIPPED = frozenset({"msg", "args", "exc_info"})
+
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = redact_text(record.getMessage())
-        record.args = ()
+        with contextlib.suppress(Exception):  # A logging filter must never raise into the code that logs
+            self._redact(record)
+        return True
+
+    def _redact(self, record: logging.LogRecord) -> None:
+        try:
+            rendered: str | None = record.getMessage()
+        except Exception:  # Bad format arguments: left for the formatter to report
+            rendered = None
+        if rendered is not None:
+            redacted = redact_text(rendered)
+            if redacted != rendered:
+                record.msg, record.args = redacted, ()
         for name, value in tuple(vars(record).items()):
-            if isinstance(value, (str, dict, list)):
-                setattr(record, name, redact_urls(value))
+            if name in self._SKIPPED:
+                continue
+            if isinstance(value, str):
+                cleaned = redact_text(value)
+                if cleaned != value:
+                    setattr(record, name, cleaned)
+            elif isinstance(value, (dict, list, tuple)):
+                setattr(record, name, redact_urls(value))  # A copy: never compared, it may be cyclic
         if record.exc_info:
             record.exc_text = redact_text(logging.Formatter().formatException(record.exc_info))
-        return True
 
 
 class RedactingFormatter(logging.Formatter):

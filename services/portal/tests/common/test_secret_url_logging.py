@@ -9,7 +9,7 @@ from django.test import SimpleTestCase
 
 from apps.common.gunicorn_logging import RedactingLogger
 from apps.common.logging import PortalJSONFormatter
-from apps.common.secret_urls import redact_text
+from apps.common.secret_urls import SecretURLFilter, redact_text
 
 LINKS = (
     "/%61uth/password-reset-confirm/uid/reset-secret/",
@@ -58,3 +58,60 @@ class SecretURLLoggingTests(SimpleTestCase):
     def test_ordinary_identifiers_are_preserved(self) -> None:
         path = "/customers/01234567/settings/api_key/"
         self.assertEqual(redact_text(path), path)
+
+
+class SecretURLFilterRobustnessTests(SimpleTestCase):
+    """The filter runs outside any handler's try (#751 follow-up, M4): it must never raise, and must change
+    a record only where a secret is redacted, keeping the lazy message and arguments otherwise."""
+
+    SECRET_LINK = "/notifications/unsubscribe/unsubscribe-secret/"
+
+    def _record(self, msg: str, args: tuple[object, ...], **extra: object) -> logging.LogRecord:
+        record = logging.LogRecord("app", logging.INFO, __file__, 1, msg, args, None)
+        for name, value in extra.items():
+            setattr(record, name, value)
+        return record
+
+    def test_a_record_with_bad_format_arguments_is_kept_not_raised(self) -> None:
+        record = self._record("%s %s", ("only-one",))
+
+        try:
+            kept = SecretURLFilter().filter(record)
+        except Exception as error:
+            self.fail(f"a logging filter must never raise into the caller ({type(error).__name__})")
+
+        self.assertTrue(kept)
+
+    def test_a_record_with_nothing_to_redact_keeps_its_message_and_arguments(self) -> None:
+        record = self._record("user %s logged in", ("bob",))
+
+        SecretURLFilter().filter(record)
+
+        self.assertEqual((record.msg, record.args), ("user %s logged in", ("bob",)))
+
+    def test_a_secret_in_an_argument_is_redacted(self) -> None:
+        record = self._record("visited %s", (self.SECRET_LINK,))
+
+        SecretURLFilter().filter(record)
+
+        self.assertNotIn("unsubscribe-secret", record.getMessage())
+
+    def test_a_cyclic_extra_does_not_raise(self) -> None:
+        cyclic: dict[str, object] = {"url": self.SECRET_LINK}
+        cyclic["self"] = cyclic
+        record = self._record("event", (), context=cyclic)
+
+        try:
+            SecretURLFilter().filter(record)
+        except RecursionError:
+            self.fail("a cyclic extra must not recurse forever")
+
+        self.assertNotIn("unsubscribe-secret", str(record.context["url"]))
+
+    def test_a_tuple_extra_is_redacted_and_stays_a_tuple(self) -> None:
+        record = self._record("event", (), parts=("kept", self.SECRET_LINK))
+
+        SecretURLFilter().filter(record)
+
+        self.assertIsInstance(record.parts, tuple)
+        self.assertNotIn("unsubscribe-secret", str(record.parts))
