@@ -43,6 +43,15 @@ class ChainQuarantineTests(TestCase):
             "the refused event is still reported",
         )
 
+    def test_an_event_that_verifies_again_is_not_quarantined(self) -> None:
+        from apps.audit.signals import _quarantine_chain_link  # noqa: PLC0415
+
+        event = self._pending()  # Re-stamped since the refusal: it verifies when the quarantine looks
+
+        _quarantine_chain_link(event.pk, None)
+
+        self.assertNotIn("chain_link_quarantined", AuditEvent.objects.get(pk=event.pk).metadata)
+
     def test_a_caller_cannot_quarantine_an_event_by_supplying_the_marker(self) -> None:
         with self.captureOnCommitCallbacks(execute=False):
             forged = AuditEvent.objects.create(

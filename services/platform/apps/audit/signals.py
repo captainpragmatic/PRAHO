@@ -818,12 +818,21 @@ def _quarantine_chain_link(event_id: Any, alias: str | None) -> None:
     The marker is a reserved key, outside the MAC. The event stays pending, so the verifier keeps reporting
     it unlinked; only the recovery batch stops retrying it ahead of everything behind it.
     """
+    from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+
     try:
         with atomic(using=alias):
             event = AuditEvent.objects.using(alias).select_for_update().filter(pk=event_id).first()
-            if event is None:
+            if event is None or not (event.metadata or {}).get("chain_link_pending"):
                 return
-            metadata = {**(event.metadata or {}), "chain_link_quarantined": True}
+            # Checked again under the lock: the refusal may be stale (re-stamped since), and a quarantine is
+            # permanent for recovery.
+            if (
+                not AuditIntegrityService._verify_hash_chain([event])
+                and event.metadata.get("integrity_hash_version") == AuditIntegrityService.HASH_VERSION
+            ):
+                return
+            metadata = {**event.metadata, "chain_link_quarantined": True}
             with audit_mutation_allowed("chain_quarantine"):
                 AuditEvent.objects.using(alias).filter(pk=event_id).update(metadata=metadata)
         logger.critical("[Audit Chain] Event %s does not verify; quarantined, recovery skips it", event_id)
