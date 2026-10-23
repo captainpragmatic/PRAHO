@@ -1,5 +1,6 @@
 """Bearer links must not survive formatting or telemetry callbacks."""
 
+import json
 import logging
 import sys
 from datetime import timedelta
@@ -115,3 +116,24 @@ class SecretURLFilterRobustnessTests(SimpleTestCase):
 
         self.assertIsInstance(record.parts, tuple)
         self.assertNotIn("unsubscribe-secret", str(record.parts))
+
+
+class JSONFormatterRedactionTests(SimpleTestCase):
+    """The JSON line is redacted as data, then encoded (#751 follow-up, M5).
+
+    Redacting the encoded text could swallow the backslash of an escaped quote right after a secret,
+    leaving a line that is no longer JSON.
+    """
+
+    def test_a_secret_next_to_a_quote_is_redacted_and_the_line_stays_json(self) -> None:
+        record = logging.LogRecord(
+            "app", logging.INFO, __file__, 1, 'opened %s"quoted"', ("/notifications/unsubscribe/unsubscribe-secret",), None
+        )
+
+        line = PortalJSONFormatter().format(record)
+
+        try:
+            json.loads(line)
+        except ValueError:
+            self.fail(f"the formatter must write valid JSON: {line}")
+        self.assertNotIn("unsubscribe-secret", line)

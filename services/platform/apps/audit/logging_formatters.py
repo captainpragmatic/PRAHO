@@ -107,6 +107,11 @@ class AuditContextFilter(logging.Filter):
 # =============================================================================
 
 
+def _redacted_text(value: object) -> str:
+    """A value json cannot encode (a Decimal, a datetime, an object), written as redacted text."""
+    return redact_text(str(value))
+
+
 class SIEMJSONFormatter(logging.Formatter):
     """
     SIEM-compatible JSON log formatter.
@@ -144,7 +149,9 @@ class SIEMJSONFormatter(logging.Formatter):
         # Add extra fields from record
         log_entry.update(self._extract_extra_fields(record))
 
-        return redact_text(json.dumps(log_entry, default=str, ensure_ascii=False))
+        # Redacted as data, then encoded: redacting the encoded text could swallow the backslash of an
+        # escaped quote after a secret and break the JSON. Values json cannot encode are redacted as text.
+        return json.dumps(redact_urls(log_entry), default=_redacted_text, ensure_ascii=False)
 
     def _build_base_entry(self, record: logging.LogRecord) -> dict[str, Any]:
         """Build base log entry structure"""
