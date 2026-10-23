@@ -416,6 +416,11 @@ class EmailLog(models.Model):
     )
     # The whole message beyond its first recipient (all of to, cc, bcc, tags), encrypted like the bodies:
     # every send rebuilds the message from the row, never from task arguments. Nullable: no table rebuild.
+    operator_blocked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the provider last refused for a reason the operator must fix; cleared on success"),
+    )
     recipient_hashes = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
         null=True,
         blank=True,

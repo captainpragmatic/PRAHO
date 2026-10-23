@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import smtplib
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -20,9 +21,12 @@ from django.core.mail import BadHeaderError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.transactions import best_effort_atomic
 from apps.notifications.models import EmailLog
 from apps.notifications.services import validate_email_log_subject
 from apps.settings.services import SettingsService, get_default_from_email
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RETRIES = 3
 # How long a claim holds. The provider send is bounded well below it (EMAIL_TIMEOUT), and the worker
@@ -96,6 +100,109 @@ def mark_permanent(row: EmailLog, reason: str) -> None:
     row.provider_response = {**response, "final_error": reason, "permanent_failure": True}
     row.next_attempt_at = None
     row.save(update_fields=["status", "provider_response", "next_attempt_at", *_release(row)])
+
+
+# Errors the operator must fix (credentials, configuration, the provider account) block sending instead of
+# failing the message: it waits queued with this backoff, its attempt given back, until the fix lands. A
+# message older than the block limit is given up, so a block never keeps one forever.
+OPERATOR_BACKOFF = timedelta(minutes=30)
+OPERATOR_BLOCK_LIMIT = timedelta(days=3)
+OPERATOR_ALERT_WINDOW = timedelta(hours=6)
+OPERATOR_ALERT_ACTION = "email_provider_blocked"
+SMTP_OPERATOR_CODES = frozenset({530, 534, 535})  # Authentication required, mechanism refused, credentials refused
+AWS_OPERATOR_ERROR_CODES = frozenset(
+    {
+        "MailFromDomainNotVerifiedException",
+        "ConfigurationSetDoesNotExistException",
+        "AccountSuspendedException",
+        "SendingPausedException",
+    }
+)
+API_OPERATOR_STATUSES = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+
+
+def _aws_error_code(error: Exception) -> str | None:
+    response = getattr(error, "response", None)
+    if not isinstance(response, dict):
+        response = getattr(error.__cause__, "response", None)
+    details = response.get("Error") if isinstance(response, dict) else None
+    code = details.get("Code") if isinstance(details, dict) else None
+    return code if isinstance(code, str) else None
+
+
+def operator_provider_error(error: Exception) -> str | None:
+    """A key naming the provider error when the operator must fix the provider, else None.
+
+    The key groups alerts: one per key per window. It names the error class, never a recipient.
+    """
+    if isinstance(error, AnymailConfigurationError):
+        return "configuration"
+    if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code in SMTP_OPERATOR_CODES:
+        return f"smtp-{error.smtp_code}"
+    code = _aws_error_code(error)
+    if code in AWS_OPERATOR_ERROR_CODES:
+        return f"ses-{code}"
+    status = getattr(error, "status_code", None)
+    if isinstance(error, AnymailAPIError) and status in API_OPERATOR_STATUSES:
+        return f"api-{status}"
+    return None
+
+
+def _block(row: EmailLog, key: str) -> bool:
+    """The provider refuses for a reason the operator must fix. The caller holds the row lock; True: retry.
+
+    The message waits queued with a long backoff and its attempt given back, so an outage longer than the
+    retry budget still delivers once fixed. One staff alert per provider error per window.
+    """
+    now = timezone.now()
+    if row.sent_at < now - OPERATOR_BLOCK_LIMIT:
+        mark_exhausted(row)
+        return False
+    response = row.provider_response if isinstance(row.provider_response, dict) else {}
+    row.status = "queued"
+    row.delivery_attempts = max(row.delivery_attempts - 1, 0)
+    row.operator_blocked_at = now
+    row.next_attempt_at = now + OPERATOR_BACKOFF
+    row.provider_response = {**response, "operator_error": key, "final_error": f"Provider blocked: {key}"}
+    row.save(
+        update_fields=[
+            "status",
+            "delivery_attempts",
+            "operator_blocked_at",
+            "next_attempt_at",
+            "provider_response",
+            *_release(row),
+        ]
+    )
+    alert_operator(key)
+    return True
+
+
+def alert_operator(key: str) -> None:
+    """Flag staff through the audit trail, once per provider error per window.
+
+    The window is read from the audit trail itself, so every worker sees the same one. The write has its
+    own savepoint: a failed alert never undoes the block just recorded.
+    """
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: app registry
+    from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415  # Circular
+
+    since = timezone.now() - OPERATOR_ALERT_WINDOW
+    if AuditEvent.objects.filter(action=OPERATOR_ALERT_ACTION, metadata__error_key=key, timestamp__gte=since).exists():
+        return
+    description = (
+        f"The email provider refuses to send ({key}): its credentials, configuration or account need "
+        "fixing. Messages wait queued and are sent once it works."
+    )
+    logger.error(f"🔥 [Email] {description}")
+    with best_effort_atomic(logger=logger, scope="Email", message="Provider alert failed"):
+        AuditService.log_event(
+            AuditEventData(event_type=OPERATOR_ALERT_ACTION, description=description),
+            AuditContext(
+                actor_type="system",
+                metadata={"source_app": "notifications", "operational_event": True, "error_key": key},
+            ),
+        )
 
 
 def mark_exhausted(row: EmailLog) -> None:
@@ -190,7 +297,8 @@ def record_success(email_log_id: str, token: UUID | None, *, provider_id: str, r
             return False
         row.status = "sent"
         row.sent_at = timezone.now()
-        fields = ["status", "sent_at", *_release(row)]
+        row.operator_blocked_at = None  # The provider works again
+        fields = ["status", "sent_at", "operator_blocked_at", *_release(row)]
         if provider_id:
             row.provider_id = provider_id
             fields.append("provider_id")
@@ -227,9 +335,7 @@ def permanent_provider_error(error: Exception) -> bool:
     response = getattr(error, "response", None)
     if not isinstance(response, dict):
         response = getattr(error.__cause__, "response", None)
-    details = response.get("Error") if isinstance(response, dict) else None
-    code = details.get("Code") if isinstance(details, dict) else None
-    code = code if isinstance(code, str) else None
+    code = _aws_error_code(error)
     # SES can throttle with HTTP 400, so provider semantics take precedence.
     if code in AWS_TRANSIENT_ERROR_CODES:
         return False
@@ -260,6 +366,10 @@ def record_sync_failure(email_log_id: str, error: Exception, token: UUID | None)
         row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
         if row is None or token is None or row.status != "sending" or row.claim_token != token:
             return
+        blocked = operator_provider_error(error)
+        if blocked is not None:
+            _block(row, blocked)  # The queue sweep sends it once its backoff is over
+            return
         if permanent_provider_error(error):
             mark_permanent(row, str(error))
             return
@@ -278,6 +388,9 @@ def record_failure(email_log_id: str, error: Exception, token: UUID | None) -> t
             return None, False
         if token is None or row.status != "sending" or row.claim_token != token:
             return row, False
+        blocked = operator_provider_error(error)
+        if blocked is not None:
+            return row, _block(row, blocked)
         if permanent_provider_error(error):
             mark_permanent(row, str(error))
             return row, False

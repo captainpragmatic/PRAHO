@@ -54,7 +54,8 @@ class DeliveryRetryBudgetTests(TestCase):
         self.assertIs(row.provider_response["permanent_failure"], True)
 
     def test_permanent_api_rejections_end_the_row_without_scheduling(self) -> None:
-        errors = [self.api_error(status) for status in (400, 401, 403, 422)]
+        # 401 and 403 are the operator's to fix: they block sending instead (test_email_operator_blocked).
+        errors = [self.api_error(status) for status in (400, 422)]
         errors.append(
             AnymailAPIError(
                 "SES configuration set missing",
