@@ -119,6 +119,11 @@ AWS_OPERATOR_ERROR_CODES = frozenset(
     }
 )
 API_OPERATOR_STATUSES = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+# botocore's own errors when AWS credentials or the region are missing: raised before any request, so they
+# carry no response or status. Matched by name, so this module does not import botocore.
+AWS_SETUP_ERRORS = frozenset(
+    {"NoCredentialsError", "PartialCredentialsError", "CredentialRetrievalError", "NoRegionError"}
+)
 
 
 def _aws_error_code(error: Exception) -> str | None:
@@ -135,13 +140,29 @@ def operator_provider_error(error: Exception) -> str | None:
 
     The key groups alerts: one per key per window. It names the error class, never a recipient.
     """
-    if isinstance(error, AnymailConfigurationError):
-        return "configuration"
-    if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code in SMTP_OPERATOR_CODES:
-        return f"smtp-{error.smtp_code}"
     code = _aws_error_code(error)
     if code in AWS_TRANSIENT_ERROR_CODES:
         return None  # Throttling and the like: retried as usual
+    return _local_operator_error(error) or _provider_operator_error(error, code)
+
+
+def _local_operator_error(error: Exception) -> str | None:
+    """Refused before or at the provider's door: configuration, AWS credentials, SMTP authentication."""
+    if isinstance(error, AnymailConfigurationError):
+        return "configuration"
+    for candidate in (error, error.__cause__):  # Anymail wraps botocore's error in an AnymailAPIError
+        if candidate is not None and any(
+            cls.__module__.startswith("botocore") and cls.__name__ in AWS_SETUP_ERRORS
+            for cls in type(candidate).__mro__
+        ):
+            return "ses-credentials"
+    if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code in SMTP_OPERATOR_CODES:
+        return f"smtp-{error.smtp_code}"
+    return None
+
+
+def _provider_operator_error(error: Exception, code: str | None) -> str | None:
+    """Refused by the provider's API for the account or its configuration."""
     if code in AWS_OPERATOR_ERROR_CODES:
         return f"ses-{code}"
     status = _http_status(error)

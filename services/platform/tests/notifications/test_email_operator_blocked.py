@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import patch
 
 from anymail.exceptions import AnymailAPIError, AnymailConfigurationError
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -40,6 +41,12 @@ def _api_error(status: int) -> AnymailAPIError:
     return AnymailAPIError(f"HTTP {status}", status_code=status, response=response)
 
 
+def _wrapped(cause: Exception) -> AnymailAPIError:
+    error = AnymailAPIError(str(cause))
+    error.__cause__ = cause
+    return error
+
+
 def _ses_api_error(code: str, status: int) -> AnymailAPIError:
     return AnymailAPIError(code, response={"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}})
 
@@ -55,6 +62,9 @@ OPERATOR_ERRORS: dict[str, Any] = {
     # As Anymail's SES backend raises them: the HTTP status only in the boto response, none on the error.
     "ses missing configuration set": lambda: _ses_api_error("NotFoundException", 404),
     "ses credentials": lambda: _ses_api_error("AccessDeniedException", 403),
+    # No AWS credentials at all: Anymail wraps botocore's error, with no response or status.
+    "ses no credentials": lambda: _wrapped(NoCredentialsError()),
+    "ses partial credentials": lambda: PartialCredentialsError(provider="env", cred_var="AWS_SECRET_ACCESS_KEY"),
 }
 
 
