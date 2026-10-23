@@ -54,3 +54,27 @@ class ChainQuarantineTests(TestCase):
 
         self.assertNotIn("chain_link_quarantined", AuditEvent.objects.get(pk=forged.pk).metadata)
         self.assertTrue(AuditChainLink.objects.filter(event=forged).exists(), "a caller cannot hide an event")
+
+
+@override_settings(AUDIT_CHAIN_ENABLED=True)
+class AnonymizedPendingEventTests(TestCase):
+    """Anonymizing an event keeps its chain markers (#751 follow-up, M15).
+
+    The anonymization rebuilt metadata from its allowlist, dropping chain_link_pending: an event anonymized
+    before its link was appended was never linked at all.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        AuditChainHead.objects.update_or_create(pk=1, defaults={"backfill_complete": True})
+
+    def test_an_event_anonymized_while_pending_is_still_linked(self) -> None:
+        from apps.audit.services import AuditRetentionService  # noqa: PLC0415
+
+        with self.captureOnCommitCallbacks(execute=False):
+            event = AuditEvent.objects.create(action="login_success", category="authentication", severity="low")
+
+        AuditRetentionService._anonymize_events([AuditEvent.objects.get(pk=event.pk)])
+        tasks.recover_pending_chain_links(batch_size=1)
+
+        self.assertTrue(AuditChainLink.objects.filter(event_id=event.pk).exists(), "the anonymized event is linked")

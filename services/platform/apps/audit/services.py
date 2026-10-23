@@ -3712,6 +3712,9 @@ class AuditIntegrityService:
             "chain_link_quarantined",
         }
     )
+    # The chain's own state on an event: carried through anything that rewrites metadata (anonymization,
+    # identity removal), or the event would never be linked (#751 follow-up, M15).
+    CHAIN_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset({"chain_link_pending", "chain_link_quarantined"})
     # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
     CHAIN_VERSION = 1
     CHAIN_PENDING_GRACE_SECONDS = 300
@@ -5294,8 +5297,9 @@ class AuditRetentionService:
                 event.description = cls.ANONYMIZED_DESCRIPTION
                 event.old_values = {"anonymized": True}
                 event.new_values = {"anonymized": True}
+                chain_keys = AuditIntegrityService.CHAIN_METADATA_KEYS
                 event.metadata = {
-                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST},
+                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST or k in chain_keys},
                     "anonymized": True,
                     "anonymized_at": anonymized_at,
                 }
