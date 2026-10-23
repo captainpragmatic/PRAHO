@@ -43,16 +43,22 @@ class ChainAnonymizationRaceTests(TransactionTestCase):
                 resume.wait(10)
             return verify(events)
 
+        errors: list[BaseException] = []
+
         def link() -> None:
             try:
                 with patch.object(AuditIntegrityService, "_verify_hash_chain", side_effect=pause_after_the_read):
                     AuditIntegrityService.append_chain_link(AuditEvent.objects.get(pk=event.pk))
+            except BaseException as error:  # Surfaced below: a failed link must not pass for a correct one
+                errors.append(error)
             finally:
                 connection.close()
 
         def anonymize() -> None:
             try:
                 AuditRetentionService._anonymize_events([AuditEvent.objects.get(pk=event.pk)])
+            except BaseException as error:
+                errors.append(error)
             finally:
                 connection.close()
 
@@ -66,9 +72,13 @@ class ChainAnonymizationRaceTests(TransactionTestCase):
         linker.join(10)
         scrubber.join(10)
 
+        self.assertFalse(linker.is_alive() or scrubber.is_alive(), "both writers finished")
+        self.assertEqual(errors, [])
         stored = AuditEvent.objects.get(pk=event.pk)
         self.assertNotIn("user_email", stored.metadata, "the anonymization's scrub stands")
         self.assertEqual(AuditIntegrityService._verify_hash_chain([stored]), [], "the row's MAC still verifies")
+        self.assertEqual(AuditChainLink.objects.filter(event=event, is_tombstone=False).count(), 1)
+        self.assertFalse(stored.metadata.get("chain_link_pending"), "the link was recorded")
 
 
 class ChainPendingIndexTests(TransactionTestCase):
@@ -85,3 +95,65 @@ class ChainPendingIndexTests(TransactionTestCase):
             plan = query.explain()
 
         self.assertIn("audit_events_chain_pending_idx", plan)
+
+
+@override_settings(AUDIT_CHAIN_ENABLED=True)
+class RestampRaceTests(TransactionTestCase):
+    """Restamping rewrites an event from its locked state, never from the batch it read earlier."""
+
+    def test_an_anonymization_during_a_restamp_keeps_its_scrub(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("row locks need PostgreSQL")
+        from io import StringIO  # noqa: PLC0415
+
+        from django.core.management import call_command  # noqa: PLC0415
+
+        AuditChainHead.objects.update_or_create(pk=1, defaults={"backfill_complete": False})
+        event = AuditEvent.objects.create(
+            action="login_success",
+            category="authentication",
+            severity="low",
+            metadata={"user_email": "person@example.com"},
+        )
+        read_done, resume = threading.Event(), threading.Event()
+        stamp = AuditIntegrityService.integrity_stamp_marker
+        errors: list[BaseException] = []
+
+        def pause_after_the_read(target: AuditEvent) -> dict[str, object]:
+            if not read_done.is_set():
+                read_done.set()
+                resume.wait(10)
+            return stamp(target)
+
+        def restamp() -> None:
+            try:
+                with patch.object(AuditIntegrityService, "integrity_stamp_marker", side_effect=pause_after_the_read):
+                    call_command("restamp_audit_integrity", "--all", stdout=StringIO())
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                connection.close()
+
+        def anonymize() -> None:
+            try:
+                AuditRetentionService._anonymize_events([AuditEvent.objects.get(pk=event.pk)])
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                connection.close()
+
+        restamper = threading.Thread(target=restamp)
+        restamper.start()
+        self.assertTrue(read_done.wait(10))
+        scrubber = threading.Thread(target=anonymize)
+        scrubber.start()
+        time.sleep(0.5)  # Unlocked, the anonymization commits here, before the restamp writes
+        resume.set()
+        restamper.join(10)
+        scrubber.join(10)
+
+        self.assertFalse(restamper.is_alive() or scrubber.is_alive(), "both writers finished")
+        self.assertEqual(errors, [])
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertNotIn("user_email", stored.metadata, "the anonymization's scrub stands")
+        self.assertEqual(AuditIntegrityService._verify_hash_chain([stored]), [], "the row's MAC still verifies")

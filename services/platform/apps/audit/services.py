@@ -3995,7 +3995,9 @@ class AuditIntegrityService:
         from apps.audit.models import AuditChainHead  # noqa: PLC0415  # avoid app-load cycle
 
         db = alias or "default"
-        list(AuditChainHead.objects.using(db).select_for_update().filter(pk=1).values_list("pk", flat=True))
+        # Created if missing (before the first backfill): a head that does not exist locks nothing, and an
+        # event lock taken first would invert the order against the backfill.
+        AuditChainHead.objects.using(db).select_for_update().get_or_create(pk=1)
         return AuditEvent.objects.using(db).select_for_update().filter(pk=event_pk).first()
 
     @classmethod

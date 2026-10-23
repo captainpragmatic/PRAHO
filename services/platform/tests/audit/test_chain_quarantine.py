@@ -8,6 +8,7 @@ reports it as unlinked.
 
 from __future__ import annotations
 
+from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -89,3 +90,14 @@ class AnonymizedPendingEventTests(TestCase):
         tasks.recover_pending_chain_links(batch_size=1)
 
         self.assertTrue(AuditChainLink.objects.filter(event_id=event.pk).exists(), "the anonymized event is linked")
+
+
+class EvidenceLockOrderTests(TestCase):
+    def test_the_chain_head_exists_before_an_event_is_locked(self) -> None:
+        AuditChainHead.objects.all().delete()
+        event = AuditEvent.objects.create(action="login_success", category="authentication", severity="low")
+
+        with transaction.atomic():
+            AuditIntegrityService.lock_for_evidence_write(event.pk)
+
+        self.assertTrue(AuditChainHead.objects.filter(pk=1).exists(), "a head that does not exist locks nothing")
