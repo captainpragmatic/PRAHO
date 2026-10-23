@@ -216,6 +216,8 @@ class NoReplyAddressPrecedenceTests(TestCase):
 
         # Delivery must retain the queued sender after the live setting changes.
         self.configure_sender("changed-after-queue@example.test")
+        if rate_limited:
+            EmailLog.objects.filter(pk=log.pk).update(next_attempt_at=None)  # Its scheduled retry is due
         mail.outbox.clear()
         delivered = send_email_task(str(log.pk))
         self.assertTrue(delivered["success"], delivered)
