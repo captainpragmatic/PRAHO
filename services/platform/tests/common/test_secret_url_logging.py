@@ -186,3 +186,22 @@ class JSONFormatterRedactionTests(SimpleTestCase):
 
         self.assertEqual(sorted(redacted.values()), ["failed", "sent"], "no entry is lost to a key collision")
         self.assertNotIn("secret", "".join(redacted).replace("[REDACTED]", ""))
+
+
+class AuditLogFormatterRedactionTests(SimpleTestCase):
+    """The audit JSON formatter writes values JSON cannot encode as redacted text too (#751 follow-up, M5)."""
+
+    def test_a_secret_in_a_value_json_cannot_encode_is_redacted(self) -> None:
+        from apps.audit.logging_formatters import AuditLogFormatter  # noqa: PLC0415
+
+        class Opaque:
+            def __str__(self) -> str:
+                return "visited /notifications/unsubscribe/unsubscribe-secret/"
+
+        record = logging.LogRecord("apps.audit", logging.INFO, __file__, 1, "audit", (), None)
+        record.user_id = Opaque()
+
+        line = AuditLogFormatter().format(record)
+
+        self.assertNotIn("unsubscribe-secret", line)
+        json.loads(line)

@@ -379,13 +379,13 @@ class AuditLogFormatter(logging.Formatter):
         audit_entry = redact_urls(audit_entry)
 
         # Compute hash for integrity chain
-        entry_json = json.dumps(audit_entry, sort_keys=True, default=str)
+        entry_json = json.dumps(audit_entry, sort_keys=True, default=_redacted_text)
         entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
 
         audit_entry["integrity"]["hash"] = entry_hash
         self.previous_hash = entry_hash
 
-        return json.dumps(audit_entry, default=str, ensure_ascii=False)
+        return json.dumps(audit_entry, default=_redacted_text, ensure_ascii=False)
 
     def _determine_category(  # noqa: PLR0911  # Complexity: multi-step business logic
         self, record: logging.LogRecord
