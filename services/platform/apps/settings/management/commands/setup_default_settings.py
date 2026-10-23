@@ -148,6 +148,13 @@ def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewr
             # its value is still ciphertext; once it is replaced, the next run finishes the downgrade.
             unreadable = True
             logger.warning(f"⚠️ [Settings] {setting.key}: stored value cannot be decrypted; kept sensitive, replace it")
+    if (
+        setting.is_sensitive
+        and definition.sensitive
+        and setting.value not in (None, "")
+        and not (isinstance(setting.value, str) and is_encrypted(setting.value))
+    ):
+        dirty_fields.append("value")  # Left in plaintext by an earlier hook: the save seals it
     for field_name in _METADATA_FIELDS:
         if unreadable and field_name == "is_sensitive":
             continue
@@ -170,7 +177,8 @@ def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewr
             # not stop it (or the deploy that runs it). The row is left as it was.
             with transaction.atomic():
                 setting.save(update_fields=[*dict.fromkeys(dirty_fields), "updated_at"])
-        except EncryptionError as refused:
+        except (EncryptionError, DecryptionError) as refused:
+            # DecryptionError includes a keyring that lacks the key: the row waits for the right keys.
             logger.warning(f"⚠️ [Settings] {setting.key}: left as it was, its value cannot be sealed: {refused}")
             return []
     return dirty_fields

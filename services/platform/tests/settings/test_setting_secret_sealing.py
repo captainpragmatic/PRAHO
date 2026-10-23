@@ -9,6 +9,9 @@ settings setup carries on past one that cannot be sealed.
 
 from __future__ import annotations
 
+import os
+from unittest.mock import patch
+
 from django.test import TestCase
 
 from apps.common.encryption import EncryptionError
@@ -78,3 +81,28 @@ class SettingSealTests(TestCase):
                 key=KEY, name=KEY, data_type="string", category="integrations", value=_raw(other.key),
                 default_value="", is_sensitive=True,
             ).save()
+
+    def test_reconcile_seals_a_sensitive_row_left_in_plaintext(self) -> None:
+        # As the old hook left a row it made sensitive: the flag set, the value still plaintext on disk.
+        setting = self._plain_row("sk_live_left_plain")
+        SystemSetting.objects.filter(key=KEY).update(is_sensitive=True)
+        setting = SystemSetting.objects.get(key=KEY)
+
+        _reconcile(setting, self.definition, force=False, rewrite=False)
+
+        self.assertTrue(str(_raw(KEY)).startswith("aes:v2:"), "a reconcile repairs it")
+        self.assertEqual(SystemSetting.objects.get(key=KEY).get_typed_value(), "sk_live_left_plain")
+
+    def test_setup_goes_on_past_a_key_missing_from_the_keyring(self) -> None:
+        sealed = SystemSetting.objects.create(
+            key=KEY, name=KEY, data_type="string", category="integrations", value="sk_live", default_value="",
+            is_sensitive=True,
+        )
+        SystemSetting.objects.filter(pk=sealed.pk).update(is_sensitive=False)  # Its ciphertext is bound here
+        setting = SystemSetting.objects.get(key=KEY)
+
+        with patch("apps.common.encryption.get_encryption_keys", return_value=[os.urandom(32)]):
+            try:
+                _reconcile(setting, self.definition, force=False, rewrite=False)
+            except Exception as error:
+                self.fail(f"a key missing here must not stop settings setup ({type(error).__name__})")
