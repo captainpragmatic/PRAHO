@@ -27,6 +27,16 @@ class SecurityError(Exception):
     """🔒 Security-related errors in webhook processing"""
 
 
+class WebhookConfigurationError(Exception):
+    """The endpoint cannot verify deliveries (its secret is unreadable): the operator's fault to fix.
+
+    It is not a forged request, so the sender is told to try again (503), not that its signature is bad.
+    """
+
+
+WEBHOOK_CONFIGURATION_ERROR = "Webhook endpoint unavailable; try again later"
+
+
 # ===============================================================================
 # WEBHOOK PROCESSING RESULT TYPES
 # ===============================================================================
@@ -209,7 +219,15 @@ class BaseWebhookProcessor(ABC):
 
     def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
         """Step 3: Verify webhook signature using context."""
-        if not self.verify_signature(context.payload, context.signature, context.headers, context.raw_body):
+        try:
+            verified = self.verify_signature(context.payload, context.signature, context.headers, context.raw_body)
+        except WebhookConfigurationError as error:
+            # Logged here, once per delivery: the self-test at construction swallows it silently.
+            logger.critical(
+                f"🔥 [Webhooks] {self.source_name} webhook secret cannot be read, deliveries get 503: {error}"
+            )
+            return Err(WEBHOOK_CONFIGURATION_ERROR)
+        if not verified:
             return Err("❌ Invalid webhook signature")
 
         return Ok(context)

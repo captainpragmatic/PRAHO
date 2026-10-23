@@ -16,7 +16,13 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
 
 from .models import WebhookEvent
-from .webhooks.base import WEBHOOK_BUSY, WEBHOOK_NO_LONGER_FAILED, get_webhook_processor, reprocess_failed_event
+from .webhooks.base import (
+    WEBHOOK_BUSY,
+    WEBHOOK_CONFIGURATION_ERROR,
+    WEBHOOK_NO_LONGER_FAILED,
+    get_webhook_processor,
+    reprocess_failed_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +159,10 @@ class WebhookView(View):
         if success:
             logger.info(f"✅ {self.source_name} webhook processed: {message}")
             return Ok(JsonResponse({"status": "success", "message": message, "webhook_id": webhook_id}))
-        else:
-            logger.error(f"❌ {self.source_name} webhook failed: {message}")
-            return Ok(JsonResponse({"status": "error", "message": message, "webhook_id": webhook_id}, status=400))
+        if message == WEBHOOK_CONFIGURATION_ERROR:
+            return Ok(JsonResponse({"status": "error", "message": message}, status=503))
+        logger.error(f"❌ {self.source_name} webhook failed: {message}")
+        return Ok(JsonResponse({"status": "error", "message": message, "webhook_id": webhook_id}, status=400))
 
     def _create_error_response(self, error_message: str) -> HttpResponse:
         """Create a standardized error response."""

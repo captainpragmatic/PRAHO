@@ -14,11 +14,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.models import Payment
+from apps.common.encryption import DecryptionError
 from apps.common.types import Retriability, retriability_of
 from apps.customers.models import Customer
 from apps.integrations.models import WebhookEvent
 
-from .base import BaseWebhookProcessor, verify_stripe_signature
+from .base import BaseWebhookProcessor, WebhookConfigurationError, verify_stripe_signature
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            # Get encrypted webhook secret from settings system
-            webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
+            # Get encrypted webhook secret from settings system. A stored secret no key can decrypt is a
+            # configuration error, with no fallback to the environment's secret: it is a fault to fix,
+            # not a reason to verify against something else.
+            try:
+                webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
+            except DecryptionError as error:
+                raise WebhookConfigurationError("the stored Stripe webhook secret cannot be decrypted") from error
 
             if not webhook_secret:
                 # Fallback to Django settings
@@ -104,6 +110,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             return verify_stripe_signature(
                 payload_body=payload_body, stripe_signature=signature, webhook_secret=str(webhook_secret)
             )
+        except WebhookConfigurationError:
+            raise
         except Exception as e:
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
