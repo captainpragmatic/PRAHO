@@ -12,7 +12,7 @@ import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 from django.core.cache import cache
 
 from apps.common.encryption import is_encrypted
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret, seal_model_secret, written_fields
 
 from .settings import efactura_settings
 
@@ -166,14 +166,12 @@ class OAuthToken(models.Model):
         return f"OAuth Token for {self.cui} ({status})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save with automatic encryption."""
-        # Encrypt tokens before saving
-        if self.access_token and not self._is_encrypted(self.access_token):
-            self.access_token = self._encrypt(self.access_token, "access_token")
-
-        if self.refresh_token and not self._is_encrypted(self.refresh_token):
-            self.refresh_token = self._encrypt(self.refresh_token, "refresh_token")
-
+        """Seal the tokens being written for this row; refuse anything that only looks like ciphertext."""
+        _update_fields, written = written_fields(kwargs, ("access_token", "refresh_token"))
+        sealed = {field: seal_model_secret(self, field, getattr(self, field) or "") for field in written}
+        for field, value in sealed.items():
+            if value:
+                setattr(self, field, value)
         super().save(*args, **kwargs)
 
     def _encrypt(self, value: str, field: str = "access_token") -> str:
@@ -260,7 +258,24 @@ class OAuthToken(models.Model):
         Returns:
             Created OAuthToken instance
         """
-        # Deactivate existing tokens
+        # One transaction: a replacement that is refused leaves the tokens it would replace active.
+        with transaction.atomic():
+            return cls._replace_tokens(
+                cui, access_token, expires_in, refresh_token, token_type, scope, environment, refresh_expires_in
+            )
+
+    @classmethod
+    def _replace_tokens(  # noqa: PLR0913  # The token fields store_token takes
+        cls,
+        cui: str,
+        access_token: str,
+        expires_in: int,
+        refresh_token: str,
+        token_type: str,
+        scope: str,
+        environment: str,
+        refresh_expires_in: int | None,
+    ) -> OAuthToken:
         cls.objects.deactivate_all(cui)
 
         # Calculate expiration
