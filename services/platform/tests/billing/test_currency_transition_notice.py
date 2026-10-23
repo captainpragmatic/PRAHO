@@ -87,6 +87,40 @@ class CurrencyNoticeLedgerTests(TestCase):
         else:
             self.fail("an unreadable email was accepted as proof")
 
+    def _logged(self, *, readable: bool, age: timedelta) -> EmailLog:
+        log = EmailLog.objects.create(
+            customer=self.customer, to_addr=self.offer.notice_recipient, subject=self.offer.notice_subject,
+            body_text=self.offer.notice_body, status="sent",
+            template_key=f"subscription_currency_notice:{self.offer.pk}",
+        )
+        fields: dict[str, object] = {"sent_at": timezone.now() - age}
+        if not readable:
+            fields["body_text"] = "aes:v1:bm90LXJlYWRhYmxl"
+        EmailLog.objects.filter(pk=log.pk).update(**fields)
+        return log
+
+    def _recover(self) -> bool:
+        from apps.billing.currency_transitions import _accept_logged_notice  # noqa: PLC0415
+
+        try:
+            return _accept_logged_notice(self.offer)
+        except Exception as error:
+            self.fail(f"an unreadable logged email must not stop recovery ({type(error).__name__})")
+
+    def test_recovery_skips_an_unreadable_log_and_accepts_the_readable_proof(self) -> None:
+        self._logged(readable=False, age=timedelta(hours=2))
+        proof = self._logged(readable=True, age=timedelta(hours=1))
+
+        self.assertTrue(self._recover())
+
+        self.assertEqual(SubscriptionCurrencyTransition.objects.get(pk=self.offer.pk).notice_email_id, proof.pk)
+
+    def test_recovery_with_only_an_unreadable_log_leaves_the_notice_to_be_sent(self) -> None:
+        self._logged(readable=False, age=timedelta(hours=1))
+
+        self.assertFalse(self._recover())
+        self.assertEqual(SubscriptionCurrencyTransition.objects.get(pk=self.offer.pk).status, "pending")
+
     def test_queued_email_cannot_start_notice_period(self) -> None:
         self.email_proof(status="queued")
         with self.assertRaises(ValidationError):

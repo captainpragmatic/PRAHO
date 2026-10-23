@@ -547,6 +547,14 @@ class EmailLog(models.Model):
         except DecryptionError:
             return False
 
+    def body_text_readable(self) -> bool:
+        """Whether some key in the keyring decrypts the stored text body."""
+        try:
+            self.get_decrypted_body_text()
+        except DecryptionError:
+            return False
+        return True
+
     def get_safe_content_preview(self) -> str:
         """Return a short, decrypted preview suitable for logs/UI."""
         try:
