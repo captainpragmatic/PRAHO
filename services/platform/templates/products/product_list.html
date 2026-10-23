@@ -79,7 +79,7 @@
     <form method="GET" class="space-y-4 sm:space-y-0 sm:flex sm:flex-wrap sm:items-end sm:gap-4"
           hx-get="{% url 'products:product_list_htmx' %}"
           hx-target="#product-results"
-          hx-sync="#product-results:queue last"
+          hx-sync="#product-results:replace"
           hx-trigger="submit, change from:select">
       <!-- Search -->
       <div class="flex-1 sm:min-w-64">
@@ -145,7 +145,6 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <!-- HTMX Content Container -->
     <div id="product-results"
-         hx-sync="this:drop"
          hx-get="{% url 'products:product_list_htmx' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"
          hx-trigger="load"
          hx-target="#product-results"

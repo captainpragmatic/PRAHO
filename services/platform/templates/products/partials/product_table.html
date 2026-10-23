@@ -78,7 +78,7 @@
                 <!-- Active Status Toggle -->
                 {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
                 <button class="toggle-switch"
-                        hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
+                        hx-post="{% url 'products:product_toggle_active' slug=product.slug %}" hx-sync="this:drop"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                         hx-target="this"
                         hx-swap="outerHTML"
@@ -93,7 +93,7 @@
                 <!-- Public Status Toggle -->
                 {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
                 <button class="toggle-switch"
-                        hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
+                        hx-post="{% url 'products:product_toggle_public' slug=product.slug %}" hx-sync="this:drop"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                         hx-target="this"
                         hx-swap="outerHTML"
@@ -193,7 +193,7 @@
           <!-- Active Status Toggle -->
           {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
           <button class="toggle-switch"
-                  hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
+                  hx-post="{% url 'products:product_toggle_active' slug=product.slug %}" hx-sync="this:drop"
                   hx-target="this"
                   hx-swap="outerHTML"
                   title="{% trans 'Toggle Active Status' %}">
@@ -207,7 +207,7 @@
           <!-- Public Status Toggle -->
           {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
           <button class="toggle-switch"
-                  hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
+                  hx-post="{% url 'products:product_toggle_public' slug=product.slug %}" hx-sync="this:drop"
                   hx-target="this"
                   hx-swap="outerHTML"
                   title="{% trans 'Toggle Public Visibility' %}">
@@ -292,9 +292,10 @@
 
         <div class="flex items-center space-x-2">
           {% if products.has_previous %}
-            <a href="?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
-               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+            <a href="?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search|urlencode }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type|urlencode }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active|urlencode }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public|urlencode }}{% endif %}"
+               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search|urlencode }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type|urlencode }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active|urlencode }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public|urlencode }}{% endif %}"
                hx-target="#product-results"
+               hx-sync="#product-results:replace"
                hx-swap="innerHTML"
                class="px-3 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 transition-colors">
               ← {% trans 'Previous' %}
@@ -306,9 +307,10 @@
           </span>
 
           {% if products.has_next %}
-            <a href="?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
-               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
+            <a href="?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search|urlencode }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type|urlencode }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active|urlencode }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public|urlencode }}{% endif %}"
+               hx-get="{% url 'products:product_list_htmx' %}?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search|urlencode }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type|urlencode }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active|urlencode }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public|urlencode }}{% endif %}"
                hx-target="#product-results"
+               hx-sync="#product-results:replace"
                hx-swap="innerHTML"
                class="px-3 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 transition-colors">
               {% trans 'Next' %} →
