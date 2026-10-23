@@ -1281,26 +1281,35 @@ class GDPRExportService:
     def _collect_email_data(user: User) -> list[dict[str, Any]]:
         """The messages PRAHO sent the person: when, what about, and what became of them.
 
-        Only the person's own address is named; another recipient's cc or bcc is theirs, not the person's.
+        The person's addresses are the ones erasure removes: the account's, earlier ones, and those of
+        the individual customers they own alone. Only those are named; another recipient's cc or bcc is
+        theirs, not the person's.
         """
         from apps.notifications.models import EmailLog, recipient_digest_term  # noqa: PLC0415  # Deferred
 
-        if not user.email:
+        addresses, _left_for_staff = GDPRDeletionService._persons_addresses(capture_subject(user))
+        terms = {address: recipient_digest_term(address) for address in sorted(addresses)}
+        if not terms:
             return []
-        rows = EmailLog.objects.filter(
-            Q(recipient_hashes__contains=recipient_digest_term(user.email)) | Q(to_addr__iexact=user.email)
-        ).order_by("sent_at")
-        return [
-            {
-                "recipient": user.email,
-                "subject": row.subject,
-                "template": row.template_key,
-                "status": row.status,
-                "sent_at": row.sent_at.isoformat() if row.sent_at else None,
-                "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
-            }
-            for row in rows
-        ]
+        names = Q()
+        for address, term in terms.items():
+            names |= Q(recipient_hashes__contains=term) | Q(to_addr__iexact=address)
+        messages = []
+        for row in EmailLog.objects.filter(names).order_by("sent_at"):
+            hashes = row.recipient_hashes or ""
+            messages.append(
+                {
+                    "recipients": [
+                        address for address, term in terms.items() if term in hashes or row.to_addr.lower() == address
+                    ],
+                    "subject": row.subject,
+                    "template": row.template_key,
+                    "status": row.status,
+                    "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                    "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+                }
+            )
+        return messages
 
     @staticmethod
     def _collect_billing_data(user: User) -> list[dict[str, Any]]:
@@ -1380,6 +1389,7 @@ class GDPRExportService:
         for entry in user_data.get("billing_data", []):
             count += (1 if entry.get("tax_profile") else 0) + len(entry["invoices"]) + len(entry["proformas"])
         count += len(user_data.get("support_tickets", []))
+        count += len(user_data.get("emails", []))
         count += len(user_data.get("audit_summary", {}).get("recent_activities", []))
         return count
 
@@ -1798,8 +1808,9 @@ class GDPRDeletionService:
         and scrubbed in place: recipients, subject, bodies, the provider's response and attachment
         names. Rows are never deleted, since notices reference them. A message not yet delivered is
         cancelled: it fails permanently and its claim is cleared, so a worker that claimed it earlier
-        records nothing, and its provider id goes, so a late callback attaches to nothing. Buffered
-        callbacks for the person's addresses are deleted. Only counts and row ids are logged.
+        records nothing. The provider id stays as a tombstone: a late callback finds the erased row and
+        writes nothing, instead of being buffered with the address. Buffered callbacks for the person's
+        addresses are deleted. Only counts are logged.
         """
         from apps.notifications.models import (  # noqa: PLC0415  # Deferred: import cycle
             EmailAttachment,
@@ -1837,7 +1848,6 @@ class GDPRDeletionService:
             body_html="",
             envelope=None,
             recipient_hashes=None,
-            provider_id="",
             meta={"erased": True},
         )
         EmailAttachment.objects.filter(email_log_id__in=ids).update(filename=cls.ERASED_ATTACHMENT_NAME)

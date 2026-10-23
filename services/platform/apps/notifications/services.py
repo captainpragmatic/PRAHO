@@ -328,6 +328,8 @@ PENDING_DELIVERY_EVENT_WINDOW = timedelta(days=2)
 
 def apply_delivery_event(email_log: EmailLog, event_type: str, metadata: dict[str, Any] | None, now: Any) -> list[str]:
     """Apply one callback to a locked row; the fields changed (empty: nothing to write)."""
+    if isinstance(email_log.provider_response, dict) and email_log.provider_response.get("erased"):
+        return []  # Its recipient was erased: a late callback writes nothing about them
     fields: list[str] = []
     replaces = DELIVERY_STATUS_EVENTS.get(event_type)
     if replaces is not None and email_log.status in replaces:

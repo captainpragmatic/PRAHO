@@ -17,11 +17,12 @@ from django.core import mail
 from django.test import TestCase
 
 from apps.audit.services import GDPRDeletionService, GDPRExportService
+from apps.customers.models import Customer
 from apps.notifications.delivery import claim_delivery, record_success
 from apps.notifications.models import EmailLog, PendingDeliveryEvent
 from apps.notifications.services import EmailService
 from apps.notifications.tasks import process_email_queue, retry_failed_emails, send_email_task
-from apps.users.models import User
+from apps.users.models import CustomerMembership, User
 
 EMAIL = "ioana.rowe@example.test"
 OTHER_EMAIL = "mihai.dobre@example.test"
@@ -113,6 +114,18 @@ class ScrubTests(EmailErasureCase):
         self.assertEqual(list(PendingDeliveryEvent.objects.values_list("provider_id", flat=True)), ["pid-theirs"])
 
 
+class LateCallbackTests(EmailErasureCase):
+    def test_a_late_callback_for_an_erased_message_stores_nothing(self) -> None:
+        sent = self.send()
+        EmailLog.objects.filter(pk=sent.pk).update(status="sent", provider_id="pid-sent")
+
+        self.erase()
+        EmailService.handle_delivery_event("bounced", "pid-sent", EMAIL, metadata={"recipient": EMAIL})
+
+        self.assertFalse(PendingDeliveryEvent.objects.exists(), "the callback is not buffered with the address")
+        self.assert_scrubbed(sent)
+
+
 class UndeliveredTests(EmailErasureCase):
     def test_a_queued_message_is_cancelled_and_never_sent(self) -> None:
         queued = self.send(async_send=True)
@@ -153,3 +166,25 @@ class ExportTests(EmailErasureCase):
         messages = data.get("emails", [])
         self.assertEqual([message["subject"] for message in messages], ["Your invoice, Ioana Rowe"])
         self.assertNotIn(OTHER_EMAIL, repr(messages), "another recipient's address is theirs, not the person's")
+
+    def test_the_export_includes_messages_to_the_persons_other_addresses(self) -> None:
+        home = "ioana.home@example.test"
+        customer = Customer.objects.create(
+            name="Ioana Rowe", customer_type="individual", primary_email=home, status="active"
+        )
+        CustomerMembership.objects.create(user=self.person, customer=customer, role="owner", is_active=True)
+        self.send(to=[home], subject="Your hosting renewal")
+
+        data = GDPRExportService._collect_user_data(self.person, {})
+
+        messages = data.get("emails", [])
+        self.assertEqual([message["subject"] for message in messages], ["Your hosting renewal"])
+
+    def test_the_export_counts_each_message(self) -> None:
+        self.send()
+        self.send(subject="Your second invoice")
+
+        data = GDPRExportService._collect_user_data(self.person, {})
+
+        without = GDPRExportService._count_records({**data, "emails": []})
+        self.assertEqual(GDPRExportService._count_records(data), without + 2)
