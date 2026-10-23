@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result
+from apps.common.validators import record_refusal_evidence
 
 from .metering_models import BillingCycle, UsageAggregation
 from .payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
@@ -404,7 +405,8 @@ class PaymentSuccessService:
         gateway_facts: Mapping[str, Any],
     ) -> None:
         logger.critical("Gateway success rejected for payment %s: %s", payment.id, error)
-        log_security_event(
+        # Refusal evidence: it outlives the rollback of the refused work (a webhook's savepoint).
+        record_refusal_evidence(
             "payment_gateway_fact_mismatch",
             {
                 "payment_id": str(payment.id),

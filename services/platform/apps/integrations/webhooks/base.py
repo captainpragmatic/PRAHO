@@ -289,7 +289,22 @@ class BaseWebhookProcessor(ABC):
             return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
 
     def _execute_locked(self, event: WebhookEvent) -> WebhookProcessingResult:
-        """Run effects in a savepoint while the caller retains the event claim."""
+        """Run effects in a savepoint while the caller retains the event claim.
+
+        Refusal evidence recorded by the handler is written once the savepoint is settled, so it survives a
+        refusal's rollback (record_refusal_evidence).
+        """
+        from apps.common.validators import (  # noqa: PLC0415  # Deferred: common imports users at module level
+            refusal_evidence_kept,
+            write_refusal_evidence,
+        )
+
+        with refusal_evidence_kept() as evidence:
+            result = self._run_locked(event)
+        write_refusal_evidence(evidence)
+        return result
+
+    def _run_locked(self, event: WebhookEvent) -> WebhookProcessingResult:
         try:
             with transaction.atomic():
                 success, message = self.handle_event(event)
