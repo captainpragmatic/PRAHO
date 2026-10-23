@@ -69,3 +69,19 @@ class ChainAnonymizationRaceTests(TransactionTestCase):
         stored = AuditEvent.objects.get(pk=event.pk)
         self.assertNotIn("user_email", stored.metadata, "the anonymization's scrub stands")
         self.assertEqual(AuditIntegrityService._verify_hash_chain([stored]), [], "the row's MAC still verifies")
+
+
+class ChainPendingIndexTests(TransactionTestCase):
+    """Chain recovery's scan of pending events uses its partial index on PostgreSQL (#751 follow-up, M16)."""
+
+    def test_the_recovery_scan_can_use_the_pending_index(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("a PostgreSQL-only partial index")
+        from django.db import transaction  # noqa: PLC0415
+
+        query = AuditEvent.objects.filter(metadata__chain_link_pending=True).order_by("timestamp", "pk")
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SET LOCAL enable_seqscan = off")  # A tiny test table would otherwise be scanned
+            plan = query.explain()
+
+        self.assertIn("audit_events_chain_pending_idx", plan)

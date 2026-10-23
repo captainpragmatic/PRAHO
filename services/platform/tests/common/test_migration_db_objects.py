@@ -21,6 +21,8 @@ POSTGRES_INDEXES: dict[str, dict[str, str]] = {
     "audit_events": {
         "audit_events_dashboard_cover_idx": "INCLUDE (user_id, action, category",
         "audit_events_timestamp_brin": "USING brin",
+        # Chain recovery's pending scan (#751 follow-up, M16); the predicate matches the ORM's lookup.
+        "audit_events_chain_pending_idx": "WHERE ((metadata -> 'chain_link_pending'::text) = 'true'::jsonb)",
     },
     "billing_usage_events": {
         "billing_usage_events_properties_gin": "USING gin (properties)",
@@ -81,7 +83,7 @@ class MigrationOnlyDatabaseObjectsTests(TestCase):
             return set(connection.introspection.get_constraints(cursor, table))
 
     def test_postgresql_indexes_match_the_backend(self) -> None:
-        self.assertEqual(sum(len(indexes) for indexes in POSTGRES_INDEXES.values()), 9)
+        self.assertEqual(sum(len(indexes) for indexes in POSTGRES_INDEXES.values()), 10)
         if connection.vendor == "postgresql":
             with connection.cursor() as cursor:
                 for table, indexes in POSTGRES_INDEXES.items():
