@@ -299,6 +299,28 @@ class BufferedCallbackTests(TestCase):
             EmailSuppressionService.is_suppressed(row.to_addr), "the third soft bounce in the window suppresses"
         )
 
+    def test_a_repeated_buffered_soft_bounce_is_counted_once(self) -> None:
+        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
+
+        for _ in range(2):
+            _log(status="soft_bounced")
+        row = _log()
+
+        def accepted_then_bounced_twice(message: object, *args: object, **kwargs: object) -> int:
+            message.anymail_status = SimpleNamespace(message_id="pid-twice", status={"sent"}, esp_response={})
+            for _ in range(2):  # The provider delivered the same callback twice
+                EmailService.handle_delivery_event("soft_bounced", "pid-twice", row.to_addr)
+            return 1
+
+        with (
+            patch("django.core.mail.EmailMessage.send", accepted_then_bounced_twice),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            _send(row)
+
+        (suppression,) = EmailSuppression.objects.all()
+        self.assertEqual(suppression.bounce_count, 1, "one bounce, delivered twice, is one bounce")
+
     def test_an_unreadable_buffered_recipient_never_undoes_the_recorded_send(self) -> None:
         from apps.common.encryption import DecryptionError  # noqa: PLC0415
 
