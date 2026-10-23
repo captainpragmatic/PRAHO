@@ -19,9 +19,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.notifications.delivery import (
+    CLAIM_LEASE,
+    UNLEASED_SENDING_GRACE,
     InvalidRetryMetadataError,
     budget_spent,
     claim_delivery,
+    claimable,
     mark_exhausted,
     mark_permanent,
     record_failure,
@@ -297,6 +300,62 @@ def process_email_queue() -> dict[str, Any]:
         f"{callbacks['callbacks_applied']} buffered callbacks applied, {callbacks['callbacks_expired']} expired"
     )
     return {"processed": processed, "failed": failed}
+
+
+def recover_sending_emails() -> dict[str, int]:
+    """Re-enqueue messages a dead worker left `sending`: lease expired, or unleased past the grace.
+
+    The enqueued task takes the row over through its claim. The row is stamped (next_attempt_at) under its
+    lock first, so the next pass leaves it alone for a lease period, unless that task is lost too.
+    """
+    now = timezone.now()
+    candidates = list(
+        EmailLog.objects.filter(status="sending")
+        .filter(Q(lease_until__lt=now) | Q(lease_until__isnull=True, sent_at__lt=now - UNLEASED_SENDING_GRACE))
+        .filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now - CLAIM_LEASE))
+        .order_by("sent_at")
+        .values_list("pk", flat=True)[: _batch()]
+    )
+    recovered = 0
+    for pk in candidates:
+        try:
+            with transaction.atomic():
+                email_log = EmailLog.objects.select_for_update().filter(pk=pk).first()
+                if email_log is None or email_log.status != "sending" or not claimable(email_log, timezone.now()):
+                    continue  # Finished, or a worker holds it again
+                email_log.next_attempt_at = timezone.now()
+                email_log.save(update_fields=["next_attempt_at"])
+            _enqueue_send(email_log, f"recover:{email_log.id}")
+            recovered += 1
+        except Exception as e:
+            logger.exception(f"🔥 [Email] Failed to recover sending email {pk}: {e}")
+    if recovered:
+        logger.warning(f"⚠️ [Email] Re-enqueued {recovered} emails a worker left sending")
+    return {"recovered": recovered}
+
+
+# The email recovery drains (#751 follow-up, M3): (result key, schedule name, function, type, minutes).
+_DRAIN_SCHEDULES: tuple[tuple[str, str, str, str, int | None], ...] = (
+    ("queue_sweep", "email-queue-sweep", "apps.notifications.tasks.process_email_queue", "I", 5),
+    ("failed_retry", "email-failed-retry", "apps.notifications.tasks.retry_failed_emails", "I", 5),
+    ("sending_recovery", "email-sending-recovery", "apps.notifications.tasks.recover_sending_emails", "I", 5),
+    ("log_cleanup", "email-log-cleanup", "apps.notifications.tasks.cleanup_old_email_logs", "D", None),
+)
+
+
+def setup_notification_scheduled_tasks() -> dict[str, str]:
+    """Register the email recovery drains idempotently: every five minutes, and the log cleanup daily."""
+    from django_q.models import Schedule  # noqa: PLC0415  # Deferred scheduler boundary.
+    from django_q.tasks import schedule  # noqa: PLC0415  # Deferred scheduler boundary.
+
+    results = {}
+    for result_key, name, func, schedule_type, minutes in _DRAIN_SCHEDULES:
+        if Schedule.objects.filter(name=name).exists():
+            results[result_key] = "already_exists"
+            continue
+        schedule(func, schedule_type=schedule_type, minutes=minutes, repeats=-1, name=name)
+        results[result_key] = "created"
+    return results
 
 
 def reconcile_pending_delivery_events() -> dict[str, int]:
