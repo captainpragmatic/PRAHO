@@ -16,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.encryption import DecryptionError, is_encrypted
+from apps.common.encryption import DecryptionError, EncryptionError, is_encrypted
 from apps.common.model_secrets import decrypt_model_secret
 from apps.settings.catalog import CATALOG, SettingDef
 from apps.settings.models import SettingActivation, SystemSetting
@@ -165,7 +165,14 @@ def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewr
         setting.value = definition.default
         dirty_fields.append("value")
     if dirty_fields:
-        setting.save(update_fields=[*dict.fromkeys(dirty_fields), "updated_at"])
+        try:
+            # Its own savepoint: setup runs as one transaction, and one value that cannot be sealed must
+            # not stop it (or the deploy that runs it). The row is left as it was.
+            with transaction.atomic():
+                setting.save(update_fields=[*dict.fromkeys(dirty_fields), "updated_at"])
+        except EncryptionError as refused:
+            logger.warning(f"⚠️ [Settings] {setting.key}: left as it was, its value cannot be sealed: {refused}")
+            return []
     return dirty_fields
 
 
