@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "deploy/ansible/roles/praho-native"
 PORTAL_KEY = secrets.token_urlsafe(64)
 API_KEY = secrets.token_urlsafe(48)
+PORTAL_SIGNING_KEY = secrets.token_urlsafe(48)  # A portal's own key, never the platform secret
 
 
 def portal_environment(root: Path, profile: str) -> dict[str, str]:
@@ -27,7 +28,8 @@ def portal_environment(root: Path, profile: str) -> dict[str, str]:
         "django_settings_module": f"config.settings.{profile}",
         "deployed_env": {"PORTAL_DOMAIN": "portal.example.test", "PORTAL_DJANGO_SECRET_KEY": PORTAL_KEY,
                          "DJANGO_SECRET_KEY": "s" * 60, "DB_PASSWORD": "private-platform-password",
-                         "HMAC_SECRET": API_KEY, "PORTAL_HMAC_SECRET": API_KEY},
+                         "HMAC_SECRET": API_KEY, "PORTAL_HMAC_SECRET": PORTAL_SIGNING_KEY,
+                         "PORTAL_ID": "portal-001"},
     }
     base = {key: template.from_string(str(value)).render(context)
             for key, value in task["vars"]["praho_portal_env_base"].items()}
