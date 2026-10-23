@@ -374,17 +374,16 @@ def apply_pending_delivery_events(email_log: EmailLog) -> None:
     PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
     if email_log.status != "soft_bounced":
         return
-    for event in pending:
-        if event.event_type != "soft_bounced":
-            continue
-        try:
-            # Its own savepoint: a suppression that fails must not undo the status just recorded.
-            with transaction.atomic():
-                recipient = event.get_recipient()
-                if recipient:
-                    suppress_after_soft_bounce(recipient, timezone.now())
-        except Exception:
-            logger.exception(f"🔥 [Email] Soft-bounce suppression failed for replayed event {event.pk}")
+    recipients = {
+        recipient for event in pending if event.event_type == "soft_bounced" and (recipient := event.get_recipient())
+    }
+    for recipient in recipients:
+        # Counted once this commits, like a live callback: two replays for one address, each in its own
+        # transaction, would otherwise each miss the other's bounce. Robust: a failed suppression never
+        # undoes the status just recorded.
+        transaction.on_commit(
+            lambda recipient=recipient: suppress_after_soft_bounce(recipient, timezone.now()), robust=True
+        )
 
 
 @dataclass
@@ -803,6 +802,7 @@ class EmailService:
                         filename=part.filename,
                         sha256=part.sha256,
                         size=len(part.content),
+                        language=part.language,
                     )
                     for position, part in enumerate(message.attachments)
                     if part.ref is not None

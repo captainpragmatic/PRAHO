@@ -12,6 +12,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from django.conf import settings
+from django.utils import translation
+
 if TYPE_CHECKING:
     from apps.notifications.models import EmailLog
 
@@ -77,6 +80,7 @@ class ResolvedAttachment:
     filename: str
     content: bytes
     mimetype: str
+    language: str = ""
 
     @property
     def sha256(self) -> str:
@@ -101,13 +105,22 @@ def _generate(ref: AttachmentRef) -> tuple[str, bytes, str]:
     return source(ref.source_id)
 
 
+def render_language() -> str:
+    """The language a document renders in now: the active one, else the site default."""
+    return translation.get_language() or settings.LANGUAGE_CODE
+
+
 def resolve_attachments(items: Sequence[AttachmentInput] | None) -> list[ResolvedAttachment]:
-    """The attachments of a new message, each with its bytes. A source that fails raises."""
+    """The attachments of a new message, each with its bytes. A source that fails raises.
+
+    A document's text follows the active language, so the language is kept with the reference: the
+    worker renders again in it, whatever language the worker runs in.
+    """
     resolved: list[ResolvedAttachment] = []
     for item in items or []:
         if isinstance(item, AttachmentRef):
             filename, content, mimetype = _generate(item)
-            resolved.append(ResolvedAttachment(item, filename, content, mimetype))
+            resolved.append(ResolvedAttachment(item, filename, content, mimetype, render_language()))
         else:
             filename, content, mimetype = item
             resolved.append(ResolvedAttachment(None, filename, content, mimetype))
@@ -126,7 +139,8 @@ def regenerate_attachments(email_log: EmailLog) -> list[tuple[str, bytes, str]]:
     total = 0
     for stored in email_log.attachment_refs.order_by("position"):
         try:
-            _filename, content, mimetype = _generate(AttachmentRef(stored.source_type, stored.source_id))
+            with translation.override(stored.language or settings.LANGUAGE_CODE):
+                _filename, content, mimetype = _generate(AttachmentRef(stored.source_type, stored.source_id))
         except AttachmentRefusedError:
             raise
         except Exception as error:

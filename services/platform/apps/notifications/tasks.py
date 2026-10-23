@@ -305,8 +305,12 @@ def reconcile_pending_delivery_events() -> dict[str, int]:
     A callback that missed the row can be buffered just after the send's success write committed, so the
     success write never sees it. This pass applies it under the row lock, one sweep interval later.
     """
-    provider_ids = set(PendingDeliveryEvent.objects.values_list("provider_id", flat=True)[: _batch()])
-    matched = list(EmailLog.objects.filter(provider_id__in=provider_ids).values_list("pk", flat=True))
+    # Matched before the batch is cut, so unmatched callbacks never hold back one that can be applied.
+    matched = list(
+        EmailLog.objects.filter(provider_id__in=PendingDeliveryEvent.objects.values("provider_id"))
+        .order_by("sent_at")
+        .values_list("pk", flat=True)[: _batch()]
+    )
     applied = 0
     for pk in matched:
         try:
@@ -317,9 +321,12 @@ def reconcile_pending_delivery_events() -> dict[str, int]:
                     applied += 1
         except Exception as e:
             logger.exception(f"🔥 [Email] Failed to apply buffered callbacks for {pk}: {e}")
-    expired, _ = PendingDeliveryEvent.objects.filter(
-        created_at__lt=timezone.now() - PENDING_DELIVERY_EVENT_WINDOW
-    ).delete()
+    # Only callbacks no message claims expire; a matched one waits for a later batch, however old.
+    expired, _ = (
+        PendingDeliveryEvent.objects.filter(created_at__lt=timezone.now() - PENDING_DELIVERY_EVENT_WINDOW)
+        .exclude(provider_id__in=EmailLog.objects.exclude(provider_id="").values("provider_id"))
+        .delete()
+    )
     return {"callbacks_applied": applied, "callbacks_expired": expired}
 
 

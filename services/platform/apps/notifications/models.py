@@ -522,6 +522,9 @@ class EmailAttachment(models.Model):
     filename = models.CharField(max_length=255, help_text=_("File name as first sent"))
     sha256 = models.CharField(max_length=64, help_text=_("SHA-256 of the bytes first sent"))
     size = models.PositiveIntegerField(help_text=_("Size in bytes as first sent"))
+    language = models.CharField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        max_length=10, null=True, blank=True, help_text=_("Language of the first render; every render uses it")
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

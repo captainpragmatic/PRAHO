@@ -283,14 +283,51 @@ class BufferedCallbackTests(TestCase):
             EmailService.handle_delivery_event("soft_bounced", "pid-soft", row.to_addr)
             return 1
 
-        with patch("django.core.mail.EmailMessage.send", accepted_then_soft_bounced):
+        with (
+            patch("django.core.mail.EmailMessage.send", accepted_then_soft_bounced),
+            self.captureOnCommitCallbacks(execute=False) as after_commit,
+        ):
             _send(row)
 
         row.refresh_from_db()
         self.assertEqual(row.status, "soft_bounced")
+        # Counted once the replay commits: two replays for one address then see each other's bounce.
+        self.assertFalse(EmailSuppressionService.is_suppressed(row.to_addr), "not counted before the commit")
+        for callback in after_commit:
+            callback()
         self.assertTrue(
             EmailSuppressionService.is_suppressed(row.to_addr), "the third soft bounce in the window suppresses"
         )
+
+    def _buffer(self, provider_id: str, *, expired: bool = False) -> None:
+        from apps.notifications.services import PENDING_DELIVERY_EVENT_WINDOW  # noqa: PLC0415
+
+        event = PendingDeliveryEvent.objects.create(provider_id=provider_id, event_type="bounced", metadata={})
+        age = PENDING_DELIVERY_EVENT_WINDOW + timedelta(minutes=1) if expired else timedelta(minutes=1)
+        PendingDeliveryEvent.objects.filter(pk=event.pk).update(created_at=timezone.now() - age)
+
+    def test_a_matched_callback_past_the_window_is_applied_not_dropped(self) -> None:
+        rows = [_log(status="sent", provider_id=f"pid-old-{index}") for index in range(2)]
+        for row in rows:
+            self._buffer(row.provider_id, expired=True)
+
+        with patch("apps.notifications.tasks._batch", return_value=1):
+            process_email_queue()
+            process_email_queue()
+
+        statuses = sorted(EmailLog.objects.filter(pk__in=[row.pk for row in rows]).values_list("status", flat=True))
+        self.assertEqual(statuses, ["bounced", "bounced"], "a callback whose message exists is never dropped")
+
+    def test_unmatched_callbacks_do_not_hold_back_a_matched_one(self) -> None:
+        self._buffer("pid-unknown", expired=False)
+        row = _log(status="sent", provider_id="pid-known")
+        PendingDeliveryEvent.objects.create(provider_id="pid-known", event_type="bounced", metadata={})
+
+        with patch("apps.notifications.tasks._batch", return_value=1):
+            process_email_queue()
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "bounced")
 
     def test_the_buffered_recipient_is_not_stored_in_plain_text(self) -> None:
         EmailService.handle_delivery_event("soft_bounced", "pid-unknown", "private@example.com")

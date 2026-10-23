@@ -61,6 +61,7 @@
     "services/platform/apps/notifications/migrations/0006_email_claim_and_pending_events.py": "85b5ed753dd3dc3237940fc152b0710b6c788e3a7d293486ac713f4d1923f938",
     "services/platform/apps/notifications/migrations/0007_email_envelope_and_attachments.py": "eaba7a0175b2508c49b51ab4c618f56e5e2f40a645b9c541af385822df13bb90",
     "services/platform/apps/notifications/migrations/0008_pending_event_recipient.py": "6b3bb85da8e777faefe43ff2c1b5867b3939c8715f6a05c83a13f4dfde11b573",
+    "services/platform/apps/notifications/migrations/0009_attachment_render_language.py": "57b079ee505d2ee720fc04187f5ed86045a58d8e9efff3c5235f5f70d30c7a54",
     "services/platform/apps/orders/migrations/0001_initial.py": "c0aa3c345a26160c5e0e8b9aa78811bb1fe3f639024bcfc7f61e6e935e3351ae",
     "services/platform/apps/orders/migrations/0002_initial.py": "73d1086e73b002c2ccb2214ad05f6c7d08bf5277d0dc37cc1727281ee88deca2",
     "services/platform/apps/orders/migrations/0003_initial.py": "fec346767247cb02032dc35cf39e1b514ed4ca72eed4e27bef45563f3c472051",

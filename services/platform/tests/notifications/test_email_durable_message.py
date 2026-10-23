@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from django.core import mail
 from django.test import TestCase
-from django.utils import timezone
+from django.utils import timezone, translation
 from freezegun import freeze_time
 
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine
@@ -257,7 +257,7 @@ class RealDocumentSourceTests(DurableMessageCase):
         with freeze_time("2026-10-23 10:05:00"):
             self.tasks.run_last()
 
-    def test_a_queued_proforma_is_sent_with_its_pdf(self) -> None:
+    def _proforma(self) -> ProformaInvoice:
         proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -272,6 +272,10 @@ class RealDocumentSourceTests(DurableMessageCase):
             proforma=proforma, kind="service", description="Hosting", quantity=1, unit_price_cents=5000,
             tax_rate=Decimal("0.21"), line_total_cents=5000,
         )
+        return proforma
+
+    def test_a_queued_proforma_is_sent_with_its_pdf(self) -> None:
+        proforma = self._proforma()
 
         self.send_then_work_later(AttachmentRef("proforma_pdf", str(proforma.pk)))
 
@@ -298,3 +302,13 @@ class RealDocumentSourceTests(DurableMessageCase):
 
         self.assertEqual(len(mail.outbox), 1, "an unchanged invoice must not be refused as changed")
         self.assertEqual(mail.outbox[0].attachments[0][0], "invoice_INV-RENDER-001.pdf")
+
+    def test_a_proforma_queued_in_romanian_is_rebuilt_in_romanian(self) -> None:
+        proforma = self._proforma()
+
+        with translation.override("ro"), freeze_time("2026-10-23 10:00:00"):
+            self.send(attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))])
+        with translation.override("en"), freeze_time("2026-10-23 10:05:00"):
+            self.tasks.run_last()
+
+        self.assertEqual(len(mail.outbox), 1, "the worker renders in the language of the first render")
