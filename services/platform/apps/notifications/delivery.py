@@ -140,12 +140,27 @@ def operator_provider_error(error: Exception) -> str | None:
     if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code in SMTP_OPERATOR_CODES:
         return f"smtp-{error.smtp_code}"
     code = _aws_error_code(error)
+    if code in AWS_TRANSIENT_ERROR_CODES:
+        return None  # Throttling and the like: retried as usual
     if code in AWS_OPERATOR_ERROR_CODES:
         return f"ses-{code}"
-    status = getattr(error, "status_code", None)
+    status = _http_status(error)
     if isinstance(error, AnymailAPIError) and status in API_OPERATOR_STATUSES:
-        return f"api-{status}"
+        return f"ses-{code}" if code else f"api-{status}"
     return None
+
+
+def _http_status(error: Exception) -> object:
+    """The provider's HTTP status: on the error, or (Anymail's SES backend) only in the boto response."""
+    status: object = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        if not isinstance(response, dict):
+            response = getattr(error.__cause__, "response", None)
+        metadata = response.get("ResponseMetadata") if isinstance(response, dict) else None
+        if isinstance(metadata, dict):
+            status = metadata.get("HTTPStatusCode")
+    return status
 
 
 def _block(row: EmailLog, key: str) -> bool:

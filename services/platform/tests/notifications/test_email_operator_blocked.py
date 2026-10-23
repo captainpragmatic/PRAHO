@@ -40,6 +40,10 @@ def _api_error(status: int) -> AnymailAPIError:
     return AnymailAPIError(f"HTTP {status}", status_code=status, response=response)
 
 
+def _ses_api_error(code: str, status: int) -> AnymailAPIError:
+    return AnymailAPIError(code, response={"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}})
+
+
 OPERATOR_ERRORS: dict[str, Any] = {
     "anymail 401": lambda: _api_error(401),
     "anymail 403": lambda: _api_error(403),
@@ -48,6 +52,9 @@ OPERATOR_ERRORS: dict[str, Any] = {
     "configuration": lambda: AnymailConfigurationError("Missing API key"),
     "ses suspended": lambda: SESError("AccountSuspendedException"),
     "ses paused": lambda: SESError("SendingPausedException"),
+    # As Anymail's SES backend raises them: the HTTP status only in the boto response, none on the error.
+    "ses missing configuration set": lambda: _ses_api_error("NotFoundException", 404),
+    "ses credentials": lambda: _ses_api_error("AccessDeniedException", 403),
 }
 
 
