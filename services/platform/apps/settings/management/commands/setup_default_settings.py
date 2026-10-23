@@ -16,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.encryption import is_encrypted
+from apps.common.encryption import DecryptionError, is_encrypted
 from apps.common.model_secrets import decrypt_model_secret
 from apps.settings.catalog import CATALOG, SettingDef
 from apps.settings.models import SettingActivation, SystemSetting
@@ -133,19 +133,32 @@ def _row_defaults(definition: SettingDef) -> dict[str, object]:
 def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewrite: bool) -> list[str]:
     defaults = _row_defaults(definition)
     dirty_fields: list[str] = []
+    unreadable = False
     if (
         setting.is_sensitive
         and not definition.sensitive
         and setting.value is not None
         and is_encrypted(str(setting.value))
     ):
-        setting.value = decrypt_model_secret(setting, "value", str(setting.value))
-        dirty_fields.append("value")
+        try:
+            setting.value = decrypt_model_secret(setting, "value", str(setting.value))
+            dirty_fields.append("value")
+        except DecryptionError:
+            # One unreadable secret must not stop setup (and every deploy with it). Kept sensitive, since
+            # its value is still ciphertext; re-entering it lets the next run finish the downgrade.
+            unreadable = True
+            logger.warning(f"⚠️ [Settings] {setting.key}: stored value cannot be decrypted; kept sensitive, re-enter it")
     for field_name in _METADATA_FIELDS:
+        if unreadable and field_name == "is_sensitive":
+            continue
         if getattr(setting, field_name) != defaults[field_name]:
             setattr(setting, field_name, defaults[field_name])
             dirty_fields.append(field_name)
-    if setting.get_typed_default_value() != definition.default:
+    try:
+        default_differs = setting.get_typed_default_value() != definition.default
+    except DecryptionError:
+        default_differs = True  # Unreadable: the catalogue default replaces it
+    if default_differs:
         setting.default_value = definition.default
         dirty_fields.append("default_value")
     if (force or rewrite) and setting.value != definition.default:
