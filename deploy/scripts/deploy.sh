@@ -222,18 +222,19 @@ praho_load_env
 log_info "Env file: ${PRAHO_ENV_FILE} (${PRAHO_SETTINGS_MODULE})"
 
 # Stopping or reading logs is never blocked, even on a portal host that holds too much.
-if [ "$DEPLOYMENT_TYPE" = portal-only ] && [ "$ACTION" != deploy ]; then
-    PORTAL_OFFENDERS="$(praho_portal_env_offenders "$PRAHO_ENV_FILE")"
-    if [ -n "$PORTAL_OFFENDERS" ]; then
-        log_warn "This portal host's env file holds more than the portal stack uses: ${PORTAL_OFFENDERS}. Regenerate it with deploy/scripts/portal-env.sh."
-    fi
-    # Compose interpolates required Portal credentials for `down` and `logs` too. An old host file
-    # may lack them; placeholders let these actions work without starting any container.
-    for portal_credential in PORTAL_DJANGO_SECRET_KEY PORTAL_ID PORTAL_HMAC_SECRET; do
-        if [ -z "${!portal_credential:-}" ] && [ -z "$(praho_env_value "$portal_credential")" ]; then
-            export "${portal_credential}=unused-by-${ACTION}"
+if [ "$ACTION" != deploy ]; then
+    if [ "$DEPLOYMENT_TYPE" = portal-only ]; then
+        PORTAL_OFFENDERS="$(praho_portal_env_offenders "$PRAHO_ENV_FILE")"
+        if [ -n "$PORTAL_OFFENDERS" ]; then
+            log_warn "This portal host's env file holds more than the portal stack uses: ${PORTAL_OFFENDERS}. Regenerate it with deploy/scripts/portal-env.sh."
         fi
-    done
+    fi
+    # Compose interpolates every required variable for `down` and `logs` too, and an older file may
+    # lack one a newer stack requires. These actions start no container, so a placeholder is safe;
+    # a value the shell or the file sets is kept.
+    while read -r required; do
+        export "${required}=unused-by-${ACTION}"
+    done < <(praho_stack_missing "$DEPLOYMENT_TYPE")
 fi
 
 case "$ACTION" in

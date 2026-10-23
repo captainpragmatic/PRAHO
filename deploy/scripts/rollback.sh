@@ -62,11 +62,13 @@ rollback_version() {
     # replace the running version with one that cannot start.
     praho_load_env
     praho_require_production_keys
+    # Rollback starts containers, so a missing variable is refused rather than given a placeholder.
+    praho_require_stack_vars single-server
 
     log_info "Rolling back to version: ${VERSION}"
 
     echo -e "${YELLOW}WARNING: This will restart services with version ${VERSION}${NC}"
-    read -p "Continue? (yes/no): " CONFIRM
+    read -r -p "Continue? (yes/no): " CONFIRM
 
     if [ "$CONFIRM" != "yes" ]; then
         log_info "Rollback cancelled"
@@ -115,6 +117,7 @@ rollback_full() {
     done
     [ -n "$backup" ] || praho_die 'Full rollback requires --backup PATH and its media/metadata companions; --latest is not a compatibility decision'
     case "$topology" in single-server) portal_flag=(--portal) ;; platform-only) ;; *) praho_die 'Full rollback topology must be single-server or platform-only' ;; esac
+    praho_require_stack_vars "$topology"
     if ! names=$(docker ps -a --format '{{.Names}}'); then praho_die 'Cannot determine local topology'; fi
     printf '%s\n' "$names" | grep -Fxq praho_platform || praho_die 'Local Platform container required'
     printf '%s\n' "$names" | grep -Fxq praho_db || praho_die 'Full rollback requires the bundled local database'
