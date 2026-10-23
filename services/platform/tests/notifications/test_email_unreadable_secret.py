@@ -7,6 +7,7 @@ and every sweep picked it up again to fail the same way. It can never be sent as
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
+from apps.notifications.services import EmailService
 from apps.notifications.tasks import process_email_queue, retry_failed_emails, send_email_task
 
 LEGACY_CIPHERTEXT = "aes:v1:bm90LXJlYWRhYmxlLWFueS1tb3Jl"
@@ -43,3 +45,25 @@ class UnreadableStoredMessageTests(TestCase):
                 schedule.assert_not_called()
                 enqueue.assert_not_called()
                 self.assertEqual(mail.outbox, [])
+
+
+class StaleKeyringTests(TestCase):
+    """A worker whose keyring lacks the key a message was written with (a key rotation still rolling out)."""
+
+    def test_a_message_the_worker_cannot_open_yet_waits_for_the_right_keys(self) -> None:
+        with patch("django_q.tasks.async_task", return_value="task-id"), self.captureOnCommitCallbacks(execute=True):
+            result = EmailService.send_email(
+                to=["rotated@example.com"], subject="Rotated", body_text="Body", async_send=True
+            )
+
+        with patch("apps.common.encryption.get_encryption_keys", return_value=[os.urandom(32)]):
+            send_email_task(result.email_log_id)
+
+        row = EmailLog.objects.get(pk=result.email_log_id)
+        self.assertEqual(row.status, "queued", "a stale keyring is the operator's to fix, not the message's")
+        self.assertIsNot(row.provider_response.get("permanent_failure"), True)
+
+        EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)  # The rollout completed; it is due
+        send_email_task(result.email_log_id)
+
+        self.assertEqual(len(mail.outbox), 1, "the original message is delivered once the keys are right")

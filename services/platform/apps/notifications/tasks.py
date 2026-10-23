@@ -18,11 +18,12 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.common.encryption import DecryptionError
+from apps.common.encryption import DecryptionError, KeyringDecryptionError
 from apps.notifications.delivery import (
     CLAIM_LEASE,
     UNLEASED_SENDING_GRACE,
     InvalidRetryMetadataError,
+    block_for_operator,
     budget_spent,
     claim_delivery,
     claimable,
@@ -124,6 +125,15 @@ def _rebuild(email_log: EmailLog, token: Any) -> tuple[Any, dict[str, Any] | Non
         return None, _refuse_permanently(email_log_id, token, str(refused))
     try:
         message = stored_message(email_log)
+    except KeyringDecryptionError:
+        # Well formed, but no key here opens it: a key rotation still rolling out is the operator's to fix.
+        retry = block_for_operator(email_log_id, token, "encryption-keys")
+        scheduled = _schedule_email_retry(email_log_id, email_log.delivery_attempts - 1) if retry else False
+        return None, {
+            "success": False,
+            "error": "Encryption keys cannot open the message",
+            "retry_scheduled": scheduled,
+        }
     except DecryptionError as unreadable:
         # A superseded or garbled ciphertext never becomes readable on a retry.
         return None, _refuse_permanently(email_log_id, token, f"Stored message unreadable: {unreadable}")

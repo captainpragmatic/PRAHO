@@ -50,6 +50,15 @@ class DecryptionError(Exception):
     """Raised when decryption fails due to invalid key, corrupted data, or tampering."""
 
 
+class KeyringDecryptionError(DecryptionError):
+    """No key in this process's keyring opened a well-formed ciphertext.
+
+    Either the keyring is stale (a key rotation still rolling out: another process wrote with a key this one
+    lacks) or the data was tampered with. Unlike a malformed or superseded ciphertext, the first can recover
+    once the configuration is right.
+    """
+
+
 # --- Internal state (lazy-init) ---
 _aesgcm_cache: OrderedDict[bytes, AESGCM] = OrderedDict()
 _aesgcm_cache_lock = Lock()
@@ -279,7 +288,9 @@ def _decrypt_with_keyring(nonce: bytes, ciphertext_and_tag: bytes, aad: bytes | 
             continue
 
     logger.error("Failed to decrypt with any key in keyring (%d keys tried)", len(keys))
-    raise DecryptionError(f"Decryption failed with all {len(keys)} keys: {type(last_error).__name__}") from last_error
+    raise KeyringDecryptionError(
+        f"Decryption failed with all {len(keys)} keys: {type(last_error).__name__}"
+    ) from last_error
 
 
 def decrypts_under_current_key(encrypted_data: str, *, aad: bytes | None = None) -> bool:

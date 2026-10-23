@@ -214,6 +214,15 @@ def _block(row: EmailLog, key: str) -> bool:
     return True
 
 
+def block_for_operator(email_log_id: str, token: UUID | None, key: str) -> bool:
+    """Block this claim's message for a reason the operator must fix; True: a retry is due later."""
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is None or token is None or row.status != "sending" or row.claim_token != token:
+            return False
+        return _block(row, key)
+
+
 def alert_operator(key: str) -> None:
     """Flag staff through the audit trail, once per provider error per window.
 
@@ -227,8 +236,8 @@ def alert_operator(key: str) -> None:
     if AuditEvent.objects.filter(action=OPERATOR_ALERT_ACTION, metadata__error_key=key, timestamp__gte=since).exists():
         return
     description = (
-        f"The email provider refuses to send ({key}): its credentials, configuration or account need "
-        "fixing. Messages wait queued and are sent once it works."
+        f"Email sending is blocked ({key}): the provider's credentials, configuration or account, or this "
+        "server's encryption keys, need fixing. Messages wait queued and are sent once it works."
     )
     logger.error(f"🔥 [Email] {description}")
     with best_effort_atomic(logger=logger, scope="Email", message="Provider alert failed"):
