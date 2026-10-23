@@ -1,6 +1,8 @@
 """The notice promises an exact price and thirty days before document preparation."""
 
+import os
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
@@ -120,6 +122,18 @@ class CurrencyNoticeLedgerTests(TestCase):
 
         self.assertFalse(self._recover())
         self.assertEqual(SubscriptionCurrencyTransition.objects.get(pk=self.offer.pk).status, "pending")
+
+    def test_recovery_waits_for_the_keys_instead_of_resending_an_accepted_notice(self) -> None:
+        from apps.billing.currency_transitions import _accept_logged_notice  # noqa: PLC0415
+        from apps.common.encryption import KeyringDecryptionError  # noqa: PLC0415
+
+        self._logged(readable=True, age=timedelta(hours=1))  # Written with a key this worker lacks (below)
+
+        with (
+            patch("apps.common.encryption.get_encryption_keys", return_value=[os.urandom(32)]),
+            self.assertRaises(KeyringDecryptionError, msg="a key rotation mid-rollout is not a missing proof"),
+        ):
+            _accept_logged_notice(self.offer)
 
     def test_queued_email_cannot_start_notice_period(self) -> None:
         self.email_proof(status="queued")

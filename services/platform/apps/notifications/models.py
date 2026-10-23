@@ -26,7 +26,14 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
-from apps.common.encryption import DecryptionError, EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
+from apps.common.encryption import (
+    DecryptionError,
+    EncryptionError,
+    KeyringDecryptionError,
+    decrypt_if_needed,
+    encrypt_value,
+    is_encrypted,
+)
 from apps.common.key_derivation import get_key_hex
 from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
 
@@ -540,17 +547,26 @@ class EmailLog(models.Model):
         """Whether the stored text body is exactly `expected`. A body no key can decrypt matches nothing.
 
         Notices are accepted only on an email whose body is the exact offer; one stored under a superseded
-        format, or garbled, is simply not that email.
+        format, or garbled, is simply not that email. A keyring that lacks the key (a rotation still rolling
+        out) raises: the email may well be the proof, and treating it as missing would send a second notice.
         """
         try:
             return self.get_decrypted_body_text() == expected
+        except KeyringDecryptionError:
+            raise
         except DecryptionError:
             return False
 
     def body_text_readable(self) -> bool:
-        """Whether some key in the keyring decrypts the stored text body."""
+        """Whether the stored text body can ever be read: False for a superseded or malformed ciphertext.
+
+        A keyring that lacks the key (a rotation still rolling out) raises KeyringDecryptionError instead:
+        the body is readable once the configuration is right.
+        """
         try:
             self.get_decrypted_body_text()
+        except KeyringDecryptionError:
+            raise
         except DecryptionError:
             return False
         return True
