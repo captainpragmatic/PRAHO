@@ -56,3 +56,26 @@ class SendingRecoveryTests(TestCase):
         self.assertEqual(enqueued, [str(dead.pk)], "only the dead worker's message, and once until its new lease ends")
         held.refresh_from_db()
         self.assertEqual(held.status, "sending")
+
+    def test_two_overlapping_passes_enqueue_a_message_once(self) -> None:
+        from apps.notifications import tasks  # noqa: PLC0415
+
+        first = self._sending(lease_until=timezone.now() - timedelta(minutes=2))
+        second = self._sending(lease_until=timezone.now() - timedelta(minutes=1))
+        EmailLog.objects.filter(pk=first.pk).update(sent_at=timezone.now() - timedelta(hours=2))
+        enqueued: list[str] = []
+        original = tasks._enqueue_send
+
+        def enqueue_while_another_pass_runs(email_log: EmailLog, name: str) -> None:
+            enqueued.append(str(email_log.pk))
+            if len(enqueued) == 1:
+                recover_sending_emails()  # A second pass, from the same stale selection's point of view
+            original(email_log, name)
+
+        with (
+            patch.object(tasks, "_enqueue_send", side_effect=enqueue_while_another_pass_runs),
+            patch("django_q.tasks.async_task", return_value="task-id"),
+        ):
+            recover_sending_emails()
+
+        self.assertEqual(sorted(enqueued), sorted([str(first.pk), str(second.pk)]), "each message once")

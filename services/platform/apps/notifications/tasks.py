@@ -323,6 +323,9 @@ def recover_sending_emails() -> dict[str, int]:
                 email_log = EmailLog.objects.select_for_update().filter(pk=pk).first()
                 if email_log is None or email_log.status != "sending" or not claimable(email_log, timezone.now()):
                     continue  # Finished, or a worker holds it again
+                stamped = email_log.next_attempt_at
+                if stamped is not None and stamped > timezone.now() - CLAIM_LEASE:
+                    continue  # Another pass recovered it since this one read its candidates
                 email_log.next_attempt_at = timezone.now()
                 email_log.save(update_fields=["next_attempt_at"])
             _enqueue_send(email_log, f"recover:{email_log.id}")
@@ -466,8 +469,13 @@ def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
         Dict with cleanup results
     """
     cutoff = timezone.now() - timedelta(days=retention_days)
-    # A log a record points at with PROTECT (a currency notice's proof of notice) stays.
-    old = EmailLog.objects.filter(sent_at__lt=cutoff).exclude(_protected_email_logs())
+    # A message not yet delivered stays, whatever its age: a worker or a drain may still send it. A log a
+    # record points at with PROTECT (a currency notice's proof of notice) stays too.
+    old = (
+        EmailLog.objects.filter(sent_at__lt=cutoff)
+        .exclude(status__in=("queued", "sending"))
+        .exclude(_protected_email_logs())
+    )
 
     # Count before deletion
     total_to_delete = old.count()
@@ -486,7 +494,7 @@ def cleanup_old_email_logs(retention_days: int = 90) -> dict[str, Any]:
         if not batch_ids:
             break
 
-        EmailLog.objects.filter(id__in=batch_ids).delete()
+        old.filter(id__in=batch_ids).delete()  # Rechecked as it deletes: a row reopened since stays
         deleted += len(batch_ids)
 
         logger.info(f"Deleted {len(batch_ids)} old email logs (total: {deleted})")

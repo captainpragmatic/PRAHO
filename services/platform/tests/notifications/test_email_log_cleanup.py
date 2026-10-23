@@ -62,3 +62,17 @@ class EmailLogCleanupTests(TestCase):
         self.assertEqual(result["deleted"], 1)
         self.assertTrue(EmailLog.objects.filter(pk=referenced.pk).exists())
         self.assertFalse(EmailLog.objects.filter(pk=unreferenced.pk).exists())
+
+
+class UndeliveredRetentionTests(TestCase):
+    def test_a_message_not_yet_delivered_is_never_cleaned_up(self) -> None:
+        outstanding = [_old_log(f"Outstanding {status}") for status in ("queued", "sending")]
+        for row, status in zip(outstanding, ("queued", "sending"), strict=True):
+            EmailLog.objects.filter(pk=row.pk).update(status=status)
+        finished = _old_log("Delivered long ago")
+
+        cleanup_old_email_logs(retention_days=90)
+
+        remaining = set(EmailLog.objects.values_list("pk", flat=True))
+        self.assertEqual(remaining, {row.pk for row in outstanding}, "only finished messages age out")
+        self.assertNotIn(finished.pk, remaining)
