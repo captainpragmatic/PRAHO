@@ -14,7 +14,7 @@ other backend fails, as the trigger migration itself does.
 from __future__ import annotations
 
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 # table -> {index name: a fragment its definition must contain}
 POSTGRES_INDEXES: dict[str, dict[str, str]] = {
@@ -121,3 +121,21 @@ class MigrationOnlyDatabaseObjectsTests(TestCase):
                         self.assertEqual(cursor.fetchone()[0], 1)
                     else:
                         self.fail(f"unsupported database backend: {connection.vendor}")
+
+
+class NonBlockingIndexTests(SimpleTestCase):
+    """The chain pending index is built without blocking audit writes (#751 follow-up, M16).
+
+    A plain CREATE INDEX blocks inserts and updates for the whole table scan; a native deploy migrates with
+    the services running, so every transaction that writes an audit event would stall behind it.
+    """
+
+    def test_the_chain_pending_index_is_built_concurrently_outside_a_transaction(self) -> None:
+        import importlib  # noqa: PLC0415
+        import inspect  # noqa: PLC0415
+
+        module = importlib.import_module("apps.audit.migrations.0015_audit_chain_pending_index")
+
+        self.assertIs(module.Migration.atomic, False, "CONCURRENTLY cannot run inside a transaction")
+        self.assertIn("CREATE INDEX CONCURRENTLY", inspect.getsource(module.apply_chain_pending_index))
+        self.assertIn("DROP INDEX CONCURRENTLY", inspect.getsource(module.reverse_chain_pending_index))
