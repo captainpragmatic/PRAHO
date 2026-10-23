@@ -55,7 +55,9 @@ class ChainQuarantineTests(TestCase):
     def test_a_caller_cannot_quarantine_an_event_by_supplying_the_marker(self) -> None:
         with self.captureOnCommitCallbacks(execute=False):
             forged = AuditEvent.objects.create(
-                action="login_success", category="authentication", severity="low",
+                action="login_success",
+                category="authentication",
+                severity="low",
                 metadata={"chain_link_quarantined": True},
             )
 

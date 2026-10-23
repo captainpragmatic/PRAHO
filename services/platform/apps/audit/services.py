@@ -3970,6 +3970,34 @@ class AuditIntegrityService:
             }
         )
 
+    # The fields an evidence rewrite (anonymization, identity removal) may change; nothing else is written.
+    EVIDENCE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "user",
+        "ip_address",
+        "user_agent",
+        "request_id",
+        "session_key",
+        "object_id",
+        "description",
+        "old_values",
+        "new_values",
+        "metadata",
+    )
+
+    @classmethod
+    def lock_for_evidence_write(cls, event_pk: Any, alias: str | None = None) -> AuditEvent | None:
+        """Lock the chain head, then the event, and return the event as it stands under the lock.
+
+        Every read-modify-write of an event's evidence goes through here, in this order (the chain linker
+        takes the head first too), so no writer saves over another's change from a stale read (#751
+        follow-up, M14). The caller runs inside a transaction.
+        """
+        from apps.audit.models import AuditChainHead  # noqa: PLC0415  # avoid app-load cycle
+
+        db = alias or "default"
+        list(AuditChainHead.objects.using(db).select_for_update().filter(pk=1).values_list("pk", flat=True))
+        return AuditEvent.objects.using(db).select_for_update().filter(pk=event_pk).first()
+
     @classmethod
     def _compute_chain_mac(cls, *, payload: str, key: bytes) -> str:
         return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
@@ -3992,8 +4020,9 @@ class AuditIntegrityService:
             head, _created = AuditChainHead.objects.using(alias).select_for_update().get_or_create(pk=1)
             if not head.backfill_complete:
                 return
-            # Head first, then reload evidence: this agrees with retention's lock order.
-            current = AuditEvent.objects.using(alias).filter(pk=event.pk).first()
+            # Head first, then the event, locked: an evidence rewrite takes the same order, so neither writes
+            # over the other from a stale read.
+            current = AuditEvent.objects.using(alias).select_for_update().filter(pk=event.pk).first()
             if current is None:
                 return
             event = current
@@ -5266,6 +5295,37 @@ class AuditRetentionService:
         return deleted_count
 
     @classmethod
+    def _anonymize_locked(cls, event: AuditEvent, anonymized_at: str) -> bool:
+        """Anonymize one event the caller has locked; False when it already is anonymized."""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        if cls._in_anonymized_post_state(event):
+            return False
+        event.user = None
+        event.ip_address = None
+        event.user_agent = ""
+        event.request_id = ""
+        event.session_key = ""
+        if (
+            event.content_type is not None
+            and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
+        ):
+            event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
+        event.description = cls.ANONYMIZED_DESCRIPTION
+        event.old_values = {"anonymized": True}
+        event.new_values = {"anonymized": True}
+        chain_keys = AuditIntegrityService.CHAIN_METADATA_KEYS
+        event.metadata = {
+            **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST or k in chain_keys},
+            "anonymized": True,
+            "anonymized_at": anonymized_at,
+        }
+        # Fresh v2 stamp over the anonymized content - without it the scrub
+        # itself would read as tampering on the next verification sweep.
+        event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
+        event.save(update_fields=list(AuditIntegrityService.EVIDENCE_FIELDS))
+        return True
+
+    @classmethod
     def _anonymize_events(cls, events: list[AuditEvent]) -> int:
         """Anonymize events to an explicit post-state, then re-stamp (Codex C3).
 
@@ -5279,34 +5339,13 @@ class AuditRetentionService:
         anonymized_at = timezone.now().isoformat()
 
         with audit_mutation_allowed("retention_anonymize"):
-            for event in events:
-                metadata = event.metadata if isinstance(event.metadata, dict) else {}
-                if cls._in_anonymized_post_state(event):
-                    continue
-
-                event.user = None
-                event.ip_address = None
-                event.user_agent = ""
-                event.request_id = ""
-                event.session_key = ""
-                if (
-                    event.content_type is not None
-                    and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
-                ):
-                    event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
-                event.description = cls.ANONYMIZED_DESCRIPTION
-                event.old_values = {"anonymized": True}
-                event.new_values = {"anonymized": True}
-                chain_keys = AuditIntegrityService.CHAIN_METADATA_KEYS
-                event.metadata = {
-                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST or k in chain_keys},
-                    "anonymized": True,
-                    "anonymized_at": anonymized_at,
-                }
-                # Fresh v2 stamp over the anonymized content - without it the scrub
-                # itself would read as tampering on the next verification sweep.
-                event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
-                event.save()
+            for stale in events:
+                with transaction.atomic():
+                    # Rewritten from the event as it stands under the chain head and event locks, never from
+                    # the caller's earlier read: a link appended since keeps its chain state.
+                    event = AuditIntegrityService.lock_for_evidence_write(stale.pk, stale._state.db)
+                    if event is None or not cls._anonymize_locked(event, anonymized_at):
+                        continue
                 anonymized_count += 1
 
         if anonymized_count:
