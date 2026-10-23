@@ -68,9 +68,9 @@ def scrub_sentry_event(event: Any, hint: Any) -> Any:
 class SecretURLFilter(logging.Filter):
     """Redact secrets in a record before any handler formats it.
 
-    Filters run outside the handler's error handling, so this never raises: a record it cannot process is
-    passed on as it is (logging itself reports a bad format later). The message is rendered once, and
-    the lazy message and arguments are replaced only when redaction changed the text.
+    Filters run outside the handler's error handling, so this never raises. The message is rendered once,
+    and the lazy message and arguments are replaced only when redaction changed the text, or when the
+    arguments do not fit the message (logging would otherwise print them raw).
     """
 
     _SKIPPED = frozenset({"msg", "args", "exc_info"})
@@ -82,10 +82,13 @@ class SecretURLFilter(logging.Filter):
 
     def _redact(self, record: logging.LogRecord) -> None:
         try:
-            rendered: str | None = record.getMessage()
-        except Exception:  # Bad format arguments: left for the formatter to report
-            rendered = None
-        if rendered is not None:
+            rendered = record.getMessage()
+        except Exception:
+            # Arguments the message cannot format: logging would print them raw to stderr. The record
+            # carries a redacted, already formatted message instead, its arguments listed after it.
+            record.msg = redact_text(f"{record.msg} (arguments: {redact_urls(record.args)!r})")
+            record.args = ()
+        else:
             redacted = redact_text(rendered)
             if redacted != rendered:
                 record.msg, record.args = redacted, ()

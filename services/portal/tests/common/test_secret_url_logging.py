@@ -1,10 +1,12 @@
 """Bearer links must not survive formatting or telemetry callbacks."""
 
+import io
 import json
 import logging
 import sys
 from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -108,6 +110,23 @@ class SecretURLFilterRobustnessTests(SimpleTestCase):
             self.fail("a cyclic extra must not recurse forever")
 
         self.assertNotIn("unsubscribe-secret", str(record.context["url"]))
+
+    def test_unformattable_arguments_never_reach_stderr_unredacted(self) -> None:
+        logger = logging.getLogger(f"tests.secret_urls.unformattable.{id(self)}")
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.addFilter(SecretURLFilter())
+        logger.addHandler(handler)
+        logger.propagate = False
+        logger.setLevel(logging.DEBUG)  # Whatever the settings' root level, this record is handled
+        self.addCleanup(logger.removeHandler, handler)
+
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            logger.error("%s %s", self.SECRET_LINK)  # noqa: PLE1206  # Deliberate: one argument for two placeholders
+
+        written = stream.getvalue() + stderr.getvalue()
+        self.assertTrue(written, "the record reached the handler")
+        self.assertNotIn("unsubscribe-secret", written)
 
     def test_a_tuple_extra_is_redacted_and_stays_a_tuple(self) -> None:
         record = self._record("event", (), parts=("kept", self.SECRET_LINK))
