@@ -1,224 +1,160 @@
-"""
-Tests for async email attachments (#228).
+"""Tests for async email attachments (#228, #358), under the stored-message contract.
 
-`_send_async` accepted an `attachments` argument but never forwarded it to `send_email_task`, and
-the task had no `attachments` parameter at all. So an email queued for async delivery — e.g. a
-proforma email carrying its PDF — arrived with no attachment.
+#228: `_send_async` accepted attachments but never forwarded them to the task, so a proforma email queued
+for async delivery arrived with no PDF. Attachments now travel by reference: the row keeps where each one
+comes from, and every send (first, retry, rate-limited, recovered) makes it again. Each path below must
+deliver the attachment.
+
+#358: attachment bytes must not bloat the task broker. They never enter it now (tasks carry only the
+message id); a set of referenced attachments over `notifications.max_async_attachment_kb` is still sent
+synchronously, and raw bytes with no source are always sent synchronously.
 """
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 from django.core import mail
 from django.test import TestCase
+from django_q.models import Schedule
 
+from apps.notifications import attachments as sources
+from apps.notifications.attachments import AttachmentRef
 from apps.notifications.models import EmailLog
 from apps.notifications.services import EmailService
 from apps.notifications.tasks import _schedule_email_retry, send_email_task
 
 _PDF = ("proforma_PRO-001.pdf", b"%PDF-1.4 fake pdf bytes", "application/pdf")
+_REF = AttachmentRef("test_proforma", "PRO-001")
 
 
-class AsyncEmailAttachmentForwardingTestCase(TestCase):
-    """#228: the attachment must reach the async task, not be silently dropped."""
+class ReferencedAttachmentCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        registered = patch.dict(sources.ATTACHMENT_SOURCES, {"test_proforma": lambda source_id: _PDF})
+        registered.start()
+        self.addCleanup(registered.stop)
 
-    @patch("django_q.tasks.async_task")
-    def test_send_async_forwards_attachments_to_the_task(self, mock_async_task) -> None:
-        mock_async_task.return_value = "task-123"
-
-        EmailService.send_email(
-            to="customer@example.ro",
-            subject="Your proforma",
-            body_text="Attached.",
-            attachments=[_PDF],
-            async_send=True,
-        )
-
-        self.assertTrue(mock_async_task.called, "async path must enqueue a task")
-        _args, kwargs = mock_async_task.call_args
-        self.assertEqual(kwargs.get("attachments"), [_PDF], "attachments must be forwarded to the task")
+    def send(self, **overrides: Any) -> str:
+        arguments: dict[str, Any] = {
+            "to": "customer@example.ro",
+            "subject": "Your proforma",
+            "body_text": "Attached.",
+            "attachments": [_REF],
+            "async_send": True,
+            **overrides,
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            result = EmailService.send_email(**arguments)
+        self.assertTrue(result.success, result.error)
+        return str(result.email_log_id)
 
 
-class SendEmailTaskAttachmentTestCase(TestCase):
-    """The worker task must actually attach the files to the outgoing message."""
+class AsyncAttachmentTestCase(ReferencedAttachmentCase):
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_the_queued_email_keeps_its_attachment_and_the_task_carries_no_bytes(self, enqueue) -> None:
+        email_log_id = self.send()
 
-    def _email_log_id(self) -> str:
-        # A queued row, as _send_async leaves it: a row a real send already finished is never sent again.
-        return str(EmailLog.objects.create(to_addr="customer@example.ro", subject="seed", body_text="seed").pk)
+        self.assertEqual(set(enqueue.call_args.kwargs) - {"task_name"}, {"email_log_id"})
+        filenames = list(EmailLog.objects.get(pk=email_log_id).attachment_refs.values_list("filename", flat=True))
+        self.assertEqual(filenames, [_PDF[0]])
 
-    def test_task_attaches_the_file_to_the_message(self) -> None:
-        send_email_task(
-            email_log_id=self._email_log_id(),
-            to=["customer@example.ro"],
-            subject="Your proforma",
-            body_text="Attached.",
-            attachments=[_PDF],
-        )
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_the_worker_attaches_the_file(self, _enqueue) -> None:
+        email_log_id = self.send()
 
-        self.assertEqual(len(mail.outbox), 1)
+        send_email_task(email_log_id)
+
         self.assertEqual(mail.outbox[0].attachments, [_PDF])
 
-    def test_task_without_attachments_sends_a_plain_message(self) -> None:
-        """Non-regression: a task with no attachments still sends, with none attached."""
-        send_email_task(
-            email_log_id=self._email_log_id(),
-            to=["customer@example.ro"],
-            subject="Plain",
-            body_text="No attachment.",
-        )
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_a_message_without_attachments_sends_a_plain_message(self, _enqueue) -> None:
+        email_log_id = self.send(attachments=None)
 
-        self.assertEqual(len(mail.outbox), 1)
+        send_email_task(email_log_id)
+
         self.assertEqual(mail.outbox[0].attachments, [])
 
 
-class RetryPathAttachmentTestCase(TestCase):
-    """Siblings of #228: every re-enqueue of send_email_task must carry the
-    attachments — a retried proforma email must not arrive without its PDF."""
+class RetryPathAttachmentTestCase(ReferencedAttachmentCase):
+    """Siblings of #228: a retried email must not arrive without its PDF."""
 
-    def _email_log_id(self) -> str:
-        # A queued row, as _send_async leaves it: a row a real send already finished is never sent again.
-        return str(EmailLog.objects.create(to_addr="customer@example.ro", subject="seed", body_text="seed").pk)
-
-    @patch("apps.notifications.tasks._schedule_email_retry")
-    def test_failed_send_schedules_retry_with_attachments(self, mock_retry) -> None:
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_a_retried_email_still_carries_its_attachment(self, _enqueue) -> None:
+        email_log_id = self.send()
         with patch("django.core.mail.EmailMessage.send", side_effect=OSError("smtp down")):
-            send_email_task(
-                email_log_id=self._email_log_id(),
-                to=["customer@example.ro"],
-                subject="Your proforma",
-                body_text="Attached.",
-                attachments=[_PDF],
-            )
+            failed = send_email_task(email_log_id)
+        self.assertTrue(failed["retry_scheduled"], "a transient failure must schedule a retry")
+        schedule = Schedule.objects.get(func="apps.notifications.tasks.send_email_task")
+        self.assertEqual(schedule.kwargs, f"{{'email_log_id': '{email_log_id}'}}")
+        EmailLog.objects.filter(pk=email_log_id).update(next_attempt_at=None)  # The retry is due
 
-        self.assertTrue(mock_retry.called, "a transient failure must schedule a retry")
-        self.assertEqual(
-            mock_retry.call_args.kwargs.get("attachments"),
-            [_PDF],
-            "the retry must carry the attachments or the redelivered email arrives without its PDF",
-        )
+        send_email_task(email_log_id)
+
+        self.assertEqual(mail.outbox[-1].attachments, [_PDF])
 
     @patch("django_q.tasks.schedule")
-    def test_schedule_email_retry_forwards_attachments_to_the_task(self, mock_async) -> None:
-        result = EmailService.send_email(to="customer@example.ro", subject="seed", body_text="seed", async_send=False)
-        self.assertTrue(result.success)
-        _schedule_email_retry(
-            email_log_id=str(result.email_log_id),
-            to=["customer@example.ro"],
-            subject="s",
-            body_text="b",
-            body_html=None,
-            from_email=None,
-            reply_to=None,
-            cc=None,
-            bcc=None,
-            attachments=[_PDF],
-            tags=None,
-            track_opens=True,
-            track_clicks=True,
-            retry_count=1,
-        )
+    def test_schedule_email_retry_carries_only_the_id(self, schedule) -> None:
+        email_log_id = str(EmailLog.objects.create(to_addr="customer@example.ro", subject="s", body_text="b").pk)
 
-        self.assertEqual(mock_async.call_args.kwargs.get("attachments"), [_PDF])
+        _schedule_email_retry(email_log_id, 1)
+
+        extra = set(schedule.call_args.kwargs) - {"next_run", "schedule_type", "repeats", "name"}
+        self.assertEqual(extra, {"email_log_id"})
 
 
-class RateLimitedQueueTestCase(TestCase):
-    """The rate-limiter queue path re-enqueues the task too — it must not
-    silently degrade the email (attachments, cc, bcc, tags all dropped)."""
+class RateLimitedQueueTestCase(ReferencedAttachmentCase):
+    """The rate-limiter queue path must not degrade the email (attachments, cc, bcc, tags)."""
 
-    @patch("django_q.tasks.async_task")
+    @patch("django_q.tasks.async_task", return_value="task-1")
     @patch("apps.notifications.services.EmailRateLimiter.check_rate_limit", return_value=(False, 0))
-    def test_rate_limited_queue_preserves_the_full_email(self, _mock_rl, mock_async) -> None:
-        EmailService.send_email(
-            to="customer@example.ro",
-            subject="Your proforma",
-            body_text="Attached.",
-            cc=["cc@example.ro"],
-            bcc=["bcc@example.ro"],
-            attachments=[_PDF],
-            tags={"kind": "proforma"},
-            async_send=True,
+    def test_rate_limited_queue_preserves_the_full_email(self, _limit, enqueue) -> None:
+        email_log_id = self.send(cc=["cc@example.ro"], bcc=["bcc@example.ro"], tags={"kind": "proforma"})
+
+        self.assertTrue(enqueue.called, "rate-limited async send must queue the task")
+        row = EmailLog.objects.get(pk=email_log_id)
+        envelope = row.get_envelope()
+        self.assertEqual(
+            (envelope["cc"], envelope["bcc"], envelope["tags"]),
+            (["cc@example.ro"], ["bcc@example.ro"], {"kind": "proforma"}),
         )
-
-        self.assertTrue(mock_async.called, "rate-limited async send must queue the task")
-        kwargs = mock_async.call_args.kwargs
-        self.assertEqual(kwargs.get("attachments"), [_PDF])
-        self.assertEqual(kwargs.get("cc"), ["cc@example.ro"])
-        self.assertEqual(kwargs.get("bcc"), ["bcc@example.ro"])
-        self.assertEqual(kwargs.get("tags"), {"kind": "proforma"})
+        self.assertEqual(row.attachment_refs.count(), 1)
 
 
-class AttachmentSizeGuardTestCase(TestCase):
-    """#358: oversized async attachments are sent synchronously, not through the broker.
+class AttachmentSizeGuardTestCase(ReferencedAttachmentCase):
+    """#358: large attachment sets are sent synchronously; raw bytes never go through the broker."""
 
-    Full attachment bytes travel by value through the django-q2 Postgres ORM broker
-    (base64-inflated ~1.33x, re-persisted on retry). Above a configurable cap the send
-    downgrades to synchronous so the bytes never bloat the queue table.
-    """
-
-    def _get_int_setting(self, cap_kb: int):
-        """Return a get_integer_setting stub honouring the #358 cap, defaults otherwise."""
-
+    def _cap(self, cap_kb: int) -> Any:
         def _stub(key: str, default: int = 0) -> int:
-            if key == "notifications.max_async_attachment_kb":
-                return cap_kb
-            return default
+            return cap_kb if key == "notifications.max_async_attachment_kb" else default
 
-        return _stub
+        return patch("apps.notifications.services.SettingsService.get_integer_setting", side_effect=_stub)
 
-    @patch("django_q.tasks.async_task")
-    def test_small_attachment_still_goes_async(self, mock_async_task) -> None:
-        mock_async_task.return_value = "task-1"
-        with patch(
-            "apps.notifications.services.SettingsService.get_integer_setting",
-            side_effect=self._get_int_setting(5120),
-        ):
-            EmailService.send_email(
-                to="customer@example.ro",
-                subject="Small",
-                body_text="ok",
-                attachments=[_PDF],  # a few bytes, well under 5 MB
-                async_send=True,
-            )
-        self.assertTrue(mock_async_task.called, "a small attachment must still be queued async")
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_a_small_referenced_attachment_still_goes_async(self, enqueue) -> None:
+        with self._cap(5120):
+            self.send()
+        self.assertTrue(enqueue.called)
 
-    @patch("django_q.tasks.async_task")
-    def test_oversized_attachment_downgrades_to_sync(self, mock_async_task) -> None:
-        mock_async_task.return_value = "task-2"
-        big = ("big.pdf", b"x" * 4096, "application/pdf")  # 4 KB
-        mail.outbox.clear()
-        with patch(
-            "apps.notifications.services.SettingsService.get_integer_setting",
-            side_effect=self._get_int_setting(1),  # 1 KB cap → 4 KB attachment is over
-        ):
-            EmailService.send_email(
-                to="customer@example.ro",
-                subject="Big",
-                body_text="over cap",
-                attachments=[big],
-                async_send=True,
-            )
-        self.assertFalse(
-            mock_async_task.called,
-            "an oversized attachment must NOT be enqueued to the broker",
-        )
-        # It was sent synchronously in-process instead.
-        self.assertEqual(len(mail.outbox), 1)
+    @patch("django_q.tasks.async_task", return_value="task-2")
+    def test_a_referenced_set_over_the_cap_is_sent_synchronously(self, enqueue) -> None:
+        big = ("big.pdf", b"x" * 4096, "application/pdf")
+        with patch.dict(sources.ATTACHMENT_SOURCES, {"test_proforma": lambda source_id: big}), self._cap(1):
+            self.send()
+        self.assertFalse(enqueue.called)
         self.assertEqual(mail.outbox[0].attachments, [big])
 
-    @patch("django_q.tasks.async_task")
-    def test_cap_zero_always_allows_async(self, mock_async_task) -> None:
-        mock_async_task.return_value = "task-3"
+    @patch("django_q.tasks.async_task", return_value="task-3")
+    def test_cap_zero_always_allows_async_for_references(self, enqueue) -> None:
         big = ("big.pdf", b"x" * 100_000, "application/pdf")
-        with patch(
-            "apps.notifications.services.SettingsService.get_integer_setting",
-            side_effect=self._get_int_setting(0),  # 0 disables the guard
-        ):
-            EmailService.send_email(
-                to="customer@example.ro",
-                subject="Big but allowed",
-                body_text="cap disabled",
-                attachments=[big],
-                async_send=True,
-            )
-        self.assertTrue(mock_async_task.called, "cap=0 must always allow async")
+        with patch.dict(sources.ATTACHMENT_SOURCES, {"test_proforma": lambda source_id: big}), self._cap(0):
+            self.send()
+        self.assertTrue(enqueue.called)
+
+    @patch("django_q.tasks.async_task", return_value="task-4")
+    def test_raw_bytes_are_always_sent_synchronously(self, enqueue) -> None:
+        with self._cap(0):
+            self.send(attachments=[_PDF])
+        self.assertFalse(enqueue.called, "raw bytes never travel through the task broker")
+        self.assertEqual(mail.outbox[0].attachments, [_PDF])

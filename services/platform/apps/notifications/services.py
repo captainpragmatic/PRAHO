@@ -19,12 +19,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import html
+import json
 import logging
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -37,7 +38,9 @@ from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
 
 from apps.common import counters, validators
+from apps.notifications.attachments import AttachmentInput, ResolvedAttachment, resolve_attachments
 from apps.notifications.models import (
+    EmailAttachment,
     EmailCampaign,
     EmailLog,
     EmailSuppression,
@@ -359,6 +362,84 @@ def apply_pending_delivery_events(email_log: EmailLog) -> None:
     PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
 
 
+@dataclass
+class OutgoingEmail:
+    """One message as written: what the row stores and what every send rebuilds."""
+
+    to: list[str]
+    subject: str
+    body_text: str
+    body_html: str | None = None
+    from_email: str = ""
+    reply_to: str | None = None
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
+    attachments: list[ResolvedAttachment] = field(default_factory=list)
+    tags: dict[str, str] = field(default_factory=dict)
+    track_opens: bool = True
+    track_clicks: bool = True
+    customer: Customer | None = None
+    sent_by: User | None = None
+    template_key: str = ""
+    priority: str = "normal"
+
+
+def compose_message(message: OutgoingEmail, attachments: list[tuple[str, bytes, str]]) -> EmailMessage:
+    """The one place a message is built, for the synchronous send and the worker alike."""
+    msg: Any
+    if message.body_html:
+        msg = EmailMultiAlternatives(
+            subject=message.subject,
+            body=message.body_text,
+            from_email=message.from_email,
+            to=message.to,
+            cc=message.cc,
+            bcc=message.bcc,
+            reply_to=[message.reply_to] if message.reply_to else None,
+        )
+        msg.attach_alternative(message.body_html, "text/html")
+    else:
+        msg = EmailMessage(
+            subject=message.subject,
+            body=message.body_text,
+            from_email=message.from_email,
+            to=message.to,
+            cc=message.cc,
+            bcc=message.bcc,
+            reply_to=[message.reply_to] if message.reply_to else None,
+        )
+    for filename, content, mimetype in attachments:
+        msg.attach(filename, content, mimetype)
+    # ESP metadata Anymail backends read; a plain Django backend ignores these attributes.
+    if message.tags:
+        msg.tags = list(message.tags.keys())
+        msg.metadata = message.tags
+    msg.track_opens = message.track_opens
+    msg.track_clicks = message.track_clicks
+    return cast("EmailMessage", msg)
+
+
+def stored_message(email_log: EmailLog) -> OutgoingEmail:
+    """The message a row holds, decrypted: what a worker sends."""
+    envelope = email_log.get_envelope()
+    meta = email_log.meta or {}
+    return OutgoingEmail(
+        to=list(envelope.get("to") or [email_log.to_addr]),
+        subject=email_log.subject,
+        body_text=email_log.get_decrypted_body_text(),
+        body_html=email_log.get_decrypted_body_html() or None,
+        from_email=email_log.from_addr,
+        reply_to=email_log.reply_to or None,
+        cc=list(envelope.get("cc") or []),
+        bcc=list(envelope.get("bcc") or []),
+        tags=dict(envelope.get("tags") or {}),
+        track_opens=bool(meta.get("track_opens", True)),
+        track_clicks=bool(meta.get("track_clicks", True)),
+        template_key=email_log.template_key,
+        priority=email_log.priority,
+    )
+
+
 def validate_email_log_subject(email_log: EmailLog, subject: str) -> str | None:
     """Reject invalid queued subjects permanently; return the persisted failure reason."""
     response = email_log.provider_response or {}
@@ -427,7 +508,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
+    def send_email(  # noqa: PLR0911, PLR0913  # One public entry: its parameters, and one exit per route or refusal
         cls,
         to: str | list[str],
         subject: str,
@@ -437,7 +518,7 @@ class EmailService:
         reply_to: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
+        attachments: list[AttachmentInput] | None = None,
         customer: Customer | None = None,
         sent_by: User | None = None,
         template_key: str | None = None,
@@ -496,177 +577,59 @@ class EmailService:
                 error="All recipients are suppressed",
             )
 
+        # Every attachment with its bytes: a reference is made from its source now, so its hash can be kept.
+        try:
+            parts = resolve_attachments(attachments)
+        except Exception as exc:
+            logger.warning("⚠️ [Email] Attachment could not be made: %s", exc)
+            return EmailResult(success=False, error=f"Attachment could not be made: {exc}")
+        message = OutgoingEmail(
+            to=active_recipients,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            from_email=get_default_from_email() if from_email is None else from_email,
+            reply_to=reply_to,
+            cc=list(cc or []),
+            bcc=list(bcc or []),
+            attachments=parts,
+            tags=dict(tags or {}),
+            track_opens=track_opens,
+            track_clicks=track_clicks,
+            customer=customer,
+            sent_by=sent_by,
+            template_key=template_key or "",
+            priority=priority,
+        )
+        # Raw bytes have no source to make them again, so they never travel through the task tables: such a
+        # message is sent at once. References over the async cap are sent at once too (#358).
+        if async_send and any(part.ref is None for part in parts):
+            async_send = False
+        if async_send and parts:
+            cap = SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
+            if cap > 0 and sum(len(part.content) for part in parts) > cap:
+                async_send = False
+
         # Check rate limit
         allowed, _remaining = EmailRateLimiter.check_rate_limit()
         if not allowed:
             logger.warning("Email rate limit exceeded")
             if async_send:
-                # Queue for later sending
-                return cls._queue_email_for_retry(
-                    to=active_recipients,
-                    subject=subject,
-                    body_text=body_text,
-                    body_html=body_html,
-                    from_email=from_email,
-                    reply_to=reply_to,
-                    cc=cc,
-                    bcc=bcc,
-                    attachments=attachments,
-                    tags=tags,
-                    track_opens=track_opens,
-                    track_clicks=track_clicks,
-                    customer=customer,
-                    sent_by=sent_by,
-                    template_key=template_key,
-                    priority=priority,
-                )
-            return EmailResult(
-                success=False,
-                error="Rate limit exceeded",
-            )
+                return cls._queue_email_for_retry(message)
+            return EmailResult(success=False, error="Rate limit exceeded")
 
-        # #358: async tasks travel by value through the django-q2 Postgres ORM broker, so full
-        # attachment bytes (base64-inflated ~1.33x) would be persisted in django_q_ormq and
-        # re-persisted on retry. Above a configurable cap, send synchronously instead: the bytes
-        # are handled in-process and never bloat the broker table. Delivery is preserved.
-        if async_send and attachments:
-            total_attachment_bytes = sum(len(content) for _name, content, _mimetype in attachments)
-            max_async_attachment_bytes = (
-                SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
-            )
-            if max_async_attachment_bytes > 0 and total_attachment_bytes > max_async_attachment_bytes:
-                logger.warning(
-                    "Email attachments total %d bytes exceed the async cap (%d bytes); "
-                    "sending synchronously to avoid bloating the task broker (#358)",
-                    total_attachment_bytes,
-                    max_async_attachment_bytes,
-                )
-                async_send = False
-
-        # Send asynchronously if requested
         if async_send:
-            return cls._send_async(
-                to=active_recipients,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                customer=customer,
-                sent_by=sent_by,
-                template_key=template_key,
-                priority=priority,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-            )
-
-        # Synchronous sending
-        return cls._send_now(
-            to=active_recipients,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            from_email=from_email,
-            reply_to=reply_to,
-            cc=cc,
-            bcc=bcc,
-            attachments=attachments,
-            customer=customer,
-            sent_by=sent_by,
-            template_key=template_key,
-            priority=priority,
-            tags=tags,
-            track_opens=track_opens,
-            track_clicks=track_clicks,
-        )
+            return cls._send_async(message)
+        return cls._send_now(message)
 
     @classmethod
-    def _send_now(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-    ) -> EmailResult:
-        """Send email synchronously."""
-        from_email = get_default_from_email() if from_email is None else from_email
+    def _send_now(cls, message: OutgoingEmail) -> EmailResult:
+        """Send at once; the row holds its claim from creation, as a worker's does."""
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        # Create email log entry
-        email_log = cls._create_email_log(
-            to=to[0],  # Primary recipient
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-        )
-
+        email_log = cls._create_email_log(message, provider=provider, status="sending")
+        reserved = False
         try:
-            # Build email message
-            msg: EmailMessage
-            if body_html:
-                msg = EmailMultiAlternatives(
-                    subject=subject,
-                    body=body_text,
-                    from_email=from_email,
-                    to=to,
-                    cc=cc,
-                    bcc=bcc,
-                    reply_to=[reply_to] if reply_to else None,
-                )
-                msg.attach_alternative(body_html, "text/html")
-            else:
-                msg = EmailMessage(
-                    subject=subject,
-                    body=body_text,
-                    from_email=from_email,
-                    to=to,
-                    cc=cc,
-                    bcc=bcc,
-                    reply_to=[reply_to] if reply_to else None,
-                )
-
-            # Add attachments
-            if attachments:
-                for filename, content, mimetype in attachments:
-                    msg.attach(filename, content, mimetype)
-
-            # Add ESP-specific metadata for Anymail
-            # These attributes are supported when using Anymail backends
-            # and silently ignored with standard Django email backends
-            try:
-                if tags:
-                    msg.tags = list(tags.keys())  # type: ignore[attr-defined]
-                    msg.metadata = tags  # type: ignore[attr-defined]
-                msg.track_opens = track_opens  # type: ignore[attr-defined]
-                msg.track_clicks = track_clicks  # type: ignore[attr-defined]
-            except AttributeError:
-                # Standard Django EmailMessage doesn't support these
-                pass
-
-            reserved = False
+            msg = compose_message(message, [part.as_tuple() for part in message.attachments])
             # Reserve before delivery so a failed store or exhausted budget
             # cannot send an uncounted email.
             count = EmailRateLimiter.increment_counter()
@@ -691,7 +654,7 @@ class EmailService:
                 }
             record_success(str(email_log.id), email_log.claim_token, provider_id=message_id or "", response=response)
 
-            logger.info(f"Email sent successfully: {subject[:50]}... to {to[0][:3]}***")
+            logger.info(f"Email sent successfully: {message.subject[:50]}... to {message.to[0][:3]}***")
 
             return EmailResult(
                 success=True,
@@ -719,223 +682,108 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-    ) -> EmailResult:
-        """Queue email for async sending via Django-Q2."""
-        from_email = get_default_from_email() if from_email is None else from_email
+    def _send_async(cls, message: OutgoingEmail) -> EmailResult:
+        """Store the whole message, then queue its id once the row has committed (never the content)."""
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        # Create email log entry with queued status
-        email_log = cls._create_email_log(
-            to=to[0],
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status="queued",
-        )
-
+        email_log = cls._create_email_log(message, provider=provider, status="queued")
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
-            )
-
-            # Queue the email task
-            task_id = async_task(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=str(email_log.id),
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                task_name=f"email:{template_key or 'direct'}:{to[0][:10]}",
-            )
-
-            logger.info(f"Email queued for async sending: {subject[:50]}... (task: {task_id})")
-
-            return EmailResult(
-                success=True,
-                email_log_id=str(email_log.id),
-                provider=provider,
-            )
-
+            from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
         except ImportError:
             # Django-Q2 not available, fall back to sync sending
             logger.warning("Django-Q2 not available, falling back to sync email sending")
             email_log.delete()
-            return cls._send_now(
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                customer=customer,
-                sent_by=sent_by,
-                template_key=template_key,
-                priority=priority,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-            )
+            return cls._send_now(message)
+
+        email_log_id = str(email_log.id)
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.notifications.tasks.send_email_task",
+                email_log_id=email_log_id,
+                task_name=f"email:{message.template_key or 'direct'}:{email_log_id}",
+            ),
+            # The caller's work has committed: an enqueue that fails must not be reported as its failure.
+            # The row stays queued, and the queue sweep sends it once it is overdue.
+            robust=True,
+        )
+        logger.info(f"Email queued for async sending: {message.subject[:50]}...")
+        return EmailResult(success=True, email_log_id=email_log_id, provider=provider)
 
     @classmethod
-    def _queue_email_for_retry(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-    ) -> EmailResult:
-        """Queue email for later retry due to rate limiting.
-
-        Forwards the FULL email — cc, bcc, attachments, tags, tracking — to the
-        queued task; the rate-limited path previously degraded the email
-        silently (#228 sibling).
-        """
-        from_email = get_default_from_email() if from_email is None else from_email
+    def _queue_email_for_retry(cls, message: OutgoingEmail) -> EmailResult:
+        """Rate limited: store the whole message and queue its id for later (#228: nothing is degraded)."""
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        email_log = cls._create_email_log(
-            to=to[0],
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status="queued",
-        )
-
+        email_log = cls._create_email_log(message, provider=provider, status="queued")
+        validation_error = validate_email_log_subject(email_log, message.subject)
+        if validation_error is not None:
+            return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
-            )
-
-            validation_error = validate_email_log_subject(email_log, subject)
-            if validation_error is not None:
-                return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
-
-            retry_config = getattr(settings, "EMAIL_RETRY", {})
-            retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
-
-            async_task(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=str(email_log.id),
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                schedule=timedelta(seconds=retry_delay),
-                task_name=f"email_retry:{template_key or 'direct'}:{to[0][:10]}",
-            )
-
-            return EmailResult(
-                success=True,
-                email_log_id=str(email_log.id),
-                provider=provider,
-            )
-
+            from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
         except ImportError:
-            return EmailResult(
-                success=False,
-                error="Cannot queue email - Django-Q2 not available",
-            )
+            return EmailResult(success=False, error="Cannot queue email - Django-Q2 not available")
+
+        retry_delay = getattr(settings, "EMAIL_RETRY", {}).get("RETRY_DELAY_SECONDS", 60)
+        email_log_id = str(email_log.id)
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.notifications.tasks.send_email_task",
+                email_log_id=email_log_id,
+                schedule=timedelta(seconds=retry_delay),
+                task_name=f"email_retry:{message.template_key or 'direct'}:{email_log_id}",
+            ),
+            robust=True,  # As in _send_async: a failed enqueue is recovered by the queue sweep
+        )
+        return EmailResult(success=True, email_log_id=email_log_id, provider=provider)
 
     @staticmethod
-    def _create_email_log(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        to: str,
-        from_addr: str,
-        reply_to: str,
-        subject: str,
-        body_text: str,
-        body_html: str,
-        template_key: str,
-        customer: Customer | None,
-        sent_by: User | None,
-        priority: str,
-        provider: str,
-        status: str = "sending",
-    ) -> EmailLog:
-        """Create an email log entry. A row created `sending` (the synchronous path) holds its claim."""
+    def _create_email_log(message: OutgoingEmail, *, provider: str, status: str) -> EmailLog:
+        """Store the whole message, with its attachments by reference, in one transaction.
+
+        A row created `sending` (the synchronous path) holds its claim from creation. Attachments with no
+        source are marked: such a message is never resent, because it could not be resent whole.
+        """
         claim: dict[str, Any] = {}
         if status == "sending":
             from apps.notifications.delivery import CLAIM_LEASE  # noqa: PLC0415  # Circular
 
             claim = {"claim_token": uuid.uuid4(), "lease_until": timezone.now() + CLAIM_LEASE, "delivery_attempts": 1}
-        return EmailLog.objects.create(
-            to_addr=to,
-            from_addr=from_addr,
-            reply_to=reply_to,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            template_key=template_key,
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status=status,
-            **claim,
-        )
+        meta: dict[str, Any] = {"track_opens": message.track_opens, "track_clicks": message.track_clicks}
+        if any(part.ref is None for part in message.attachments):
+            meta["attachments_unrecoverable"] = True
+        envelope = {"to": message.to, "cc": message.cc, "bcc": message.bcc, "tags": message.tags}
+        with transaction.atomic():
+            email_log = EmailLog.objects.create(
+                to_addr=message.to[0],
+                from_addr=message.from_email,
+                reply_to=message.reply_to or "",
+                subject=message.subject,
+                body_text=message.body_text,
+                body_html=message.body_html or "",
+                envelope=json.dumps(envelope),
+                meta=meta,
+                template_key=message.template_key,
+                customer=message.customer,
+                sent_by=message.sent_by,
+                priority=message.priority,
+                provider=provider,
+                status=status,
+                **claim,
+            )
+            EmailAttachment.objects.bulk_create(
+                [
+                    EmailAttachment(
+                        email_log=email_log,
+                        position=position,
+                        source_type=part.ref.source_type,
+                        source_id=part.ref.source_id,
+                        filename=part.filename,
+                        sha256=part.sha256,
+                        size=len(part.content),
+                    )
+                    for position, part in enumerate(message.attachments)
+                    if part.ref is not None
+                ]
+            )
+        return email_log
 
     # ===============================================================================
     # TEMPLATE-BASED EMAIL SENDING
@@ -954,7 +802,7 @@ class EmailService:
         reply_to: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
+        attachments: list[AttachmentInput] | None = None,
         async_send: bool = True,
         **kwargs: Any,
     ) -> EmailResult:

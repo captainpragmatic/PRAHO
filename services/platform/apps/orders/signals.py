@@ -695,6 +695,7 @@ def _send_order_confirmation_email(order: Order) -> None:
     It attaches the Terms of Service release the order names and states an early-start request.
     """
     from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007
+    from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415  # ADR-0007 cross-app import
     from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
         EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
     )
@@ -707,7 +708,9 @@ def _send_order_confirmation_email(order: Order) -> None:
             context=_order_email_context(order),
             locale=get_customer_locale(order.customer),
             priority="high",
-            attachments=[order.terms_document.attachment()] if order.terms_document else None,
+            attachments=[AttachmentRef("legal_document", str(order.terms_document.pk))]
+            if order.terms_document
+            else None,
         )
 
 

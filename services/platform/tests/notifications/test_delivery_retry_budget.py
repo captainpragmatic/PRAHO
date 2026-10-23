@@ -38,12 +38,12 @@ class DeliveryRetryBudgetTests(TestCase):
         return row
 
     def send(self, row: EmailLog):
-        return send_email_task(str(row.pk), [row.to_addr], row.subject, "Body", from_email=row.from_addr)
+        return send_email_task(str(row.pk))
 
     def test_permanent_provider_rejection_is_not_retried(self) -> None:
         row = self.log()
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")),
+            patch("django.core.mail.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")),
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
         ):
             result = self.send(row)
@@ -65,7 +65,7 @@ class DeliveryRetryBudgetTests(TestCase):
             with self.subTest(error=str(error)):
                 row = self.log()
                 with (
-                    patch("apps.notifications.tasks.EmailMessage.send", side_effect=error),
+                    patch("django.core.mail.EmailMessage.send", side_effect=error),
                     patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
                 ):
                     result = self.send(row)
@@ -88,7 +88,7 @@ class DeliveryRetryBudgetTests(TestCase):
             with self.subTest(error=str(error)):
                 row = self.log()
                 with (
-                    patch("apps.notifications.tasks.EmailMessage.send", side_effect=error),
+                    patch("django.core.mail.EmailMessage.send", side_effect=error),
                     patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
                 ):
                     result = self.send(row)
@@ -100,7 +100,7 @@ class DeliveryRetryBudgetTests(TestCase):
     def test_stale_task_arguments_cannot_reset_delivery_attempts(self) -> None:
         row = self.log()
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", side_effect=TimeoutError("temporary")) as send,
+            patch("django.core.mail.EmailMessage.send", side_effect=TimeoutError("temporary")) as send,
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True),
             patch(
                 "apps.notifications.tasks.SettingsService.get_integer_setting",
@@ -127,36 +127,27 @@ class DeliveryRetryBudgetTests(TestCase):
         self.assertEqual(enqueue.call_args.kwargs["email_log_id"], str(second.pk))
 
     def test_queue_recovery_keeps_persisted_retry_count(self) -> None:
-        self.log(provider_response={"retry_count": 2})
+        # The task carries only the id; the claim reads the persisted count from the row.
+        row = self.log(provider_response={"retry_count": 2})
         with patch("django_q.tasks.async_task", return_value="queued") as enqueue:
             process_email_queue()
-        self.assertEqual(enqueue.call_args.kwargs["retry_count"], 2)
+        self.assertEqual(set(enqueue.call_args.kwargs) - {"task_name"}, {"email_log_id"})
+        claimed, refused = claim_delivery(str(row.pk))
+        self.assertIsNone(refused)
+        self.assertEqual(claimed.delivery_attempts, 3, "the row's count, not a fresh budget")
 
     def test_retry_is_a_future_schedule_with_valid_worker_arguments(self) -> None:
         row = self.log()
         started = timezone.now()
         self.assertTrue(
-            _schedule_email_retry(
-                email_log_id=str(row.pk),
-                to=[row.to_addr],
-                subject=row.subject,
-                body_text="Body",
-                body_html=None,
-                from_email=row.from_addr,
-                reply_to=None,
-                cc=None,
-                bcc=None,
-                tags=None,
-                track_opens=True,
-                track_clicks=True,
-                retry_count=1,
-            )
+            _schedule_email_retry(str(row.pk), 1)
         )
         schedule = Schedule.objects.filter(func="apps.notifications.tasks.send_email_task").first()
         self.assertIsNotNone(schedule)
         self.assertGreater(schedule.next_run, started)
         self.assertEqual(schedule.schedule_type, Schedule.ONCE)
         self.assertNotIn("'schedule':", schedule.kwargs)
+        self.assertEqual(schedule.kwargs, f"{{'email_log_id': '{row.pk}'}}", "a schedule carries only the id")
 
 
 class EmailRetryLimitSettingsTests(TestCase):

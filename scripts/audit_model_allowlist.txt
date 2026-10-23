@@ -36,6 +36,7 @@ billing.RefundStatusHistory     # refund status change log
 integrations.WebhookDelivery    # append-only delivery attempt records
 integrations.WebhookEvent       # append-only inbound webhook records
 notifications.EmailLog          # append-only email delivery records
+notifications.EmailAttachment     # a reference (source type, id, hash) owned by its EmailLog, which is audited
 notifications.PendingDeliveryEvent  # short-lived buffer of verified provider callbacks; applied to its EmailLog (audited there) or expired
 notifications.UnsubscribeToken  # ephemeral GDPR unsubscribe tokens (short-lived, append-only)
 orders.OrderStatusHistory       # order status change log

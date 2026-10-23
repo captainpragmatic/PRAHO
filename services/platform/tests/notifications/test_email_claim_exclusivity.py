@@ -42,7 +42,7 @@ def _log(**kwargs: object) -> EmailLog:
 
 
 def _send(row: EmailLog) -> dict:
-    return send_email_task(str(row.pk), [row.to_addr], row.subject, "Body", from_email=row.from_addr)
+    return send_email_task(str(row.pk))
 
 
 class TerminalRowsAreNeverSentAgainTests(TestCase):
@@ -107,7 +107,7 @@ class StaleWritesUndoNothingTests(TestCase):
             raise TimeoutError("provider timed out")
 
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", finished_elsewhere),
+            patch("django.core.mail.EmailMessage.send", finished_elsewhere),
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
         ):
             _send(row)
@@ -123,7 +123,7 @@ class StaleWritesUndoNothingTests(TestCase):
             EmailLog.objects.filter(pk=row.pk).update(status="bounced", delivery_attempts=5)
             return 1
 
-        with patch("apps.notifications.tasks.EmailMessage.send", changed_elsewhere):
+        with patch("django.core.mail.EmailMessage.send", changed_elsewhere):
             _send(row)
 
         row.refresh_from_db()
@@ -133,7 +133,7 @@ class StaleWritesUndoNothingTests(TestCase):
         row = _log()
 
         with patch(
-            "apps.notifications.tasks.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")
+            "django.core.mail.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")
         ):
             _send(row)
 
@@ -146,10 +146,10 @@ class OwnershipBeforeSendingTests(TestCase):
 
         row = _log()
 
-        def reclaimed_elsewhere(*args: object, **kwargs: object) -> None:
+        def reclaimed_elsewhere() -> None:
             EmailLog.objects.filter(pk=row.pk).update(claim_token=uuid.uuid4())
 
-        with patch("apps.notifications.tasks._decorate", side_effect=reclaimed_elsewhere):
+        with patch("apps.notifications.attachments.regenerate_attachments", side_effect=lambda row: reclaimed_elsewhere() or []):
             _send(row)
 
         self.assertEqual(mail.outbox, [], "a worker that lost its claim must not send")
@@ -157,7 +157,7 @@ class OwnershipBeforeSendingTests(TestCase):
     def test_a_failed_send_is_not_re_enqueued_by_the_sweep_before_its_retry_is_due(self) -> None:
         row = _log()
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", side_effect=TimeoutError("provider timed out")),
+            patch("django.core.mail.EmailMessage.send", side_effect=TimeoutError("provider timed out")),
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True),
         ):
             _send(row)
@@ -196,21 +196,7 @@ class SweepTests(TestCase):
         from apps.notifications.tasks import _schedule_email_retry  # noqa: PLC0415
 
         row = _log(delivery_attempts=1, provider_response={"retry_count": 1})
-        _schedule_email_retry(
-            email_log_id=str(row.pk),
-            to=[row.to_addr],
-            subject=row.subject,
-            body_text="Body",
-            body_html=None,
-            from_email=row.from_addr,
-            reply_to=None,
-            cc=None,
-            bcc=None,
-            tags=None,
-            track_opens=True,
-            track_clicks=True,
-            retry_count=3,
-        )
+        _schedule_email_retry(str(row.pk), 3)
 
         with patch("django_q.tasks.async_task", return_value="task-id") as enqueue:
             process_email_queue()
@@ -250,7 +236,7 @@ class DeliveryCallbackTests(TestCase):
             EmailService.handle_delivery_event("bounced", "pid-early", row.to_addr)
             return 1
 
-        with patch("apps.notifications.tasks.EmailMessage.send", accepted_then_bounced):
+        with patch("django.core.mail.EmailMessage.send", accepted_then_bounced):
             _send(row)
 
         row.refresh_from_db()
@@ -279,7 +265,7 @@ class ConcurrentClaimTests(TransactionTestCase):
             finally:
                 connection.close()
 
-        with patch("apps.notifications.tasks.EmailMessage.send", slow_send):
+        with patch("django.core.mail.EmailMessage.send", slow_send):
             threads = [threading.Thread(target=worker, name=f"w{i}") for i in range(2)]
             for thread in threads:
                 thread.start()

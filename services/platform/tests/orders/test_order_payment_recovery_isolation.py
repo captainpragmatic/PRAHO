@@ -28,6 +28,7 @@ from apps.billing.services import ProformaConversionService
 from apps.common.types import Err, Result
 from apps.common.utils import format_document_date
 from apps.customers.models import Customer
+from apps.notifications.attachments import resolve_attachments
 from apps.notifications.services import EmailResult
 from apps.orders import signals
 from apps.orders.models import Order, OrderItem
@@ -565,9 +566,10 @@ class BankTransferDeadlineTests(TestCase):
                 ) as send,
             ):
                 self.assertTrue(send_proforma_email(proforma))
-        attachments = cast(list[tuple[str, bytes, str]], send.call_args.kwargs["attachments"])
+                # The PDF travels by reference: make it as the worker will (uncompressed, so its text is readable).
+                attachments = resolve_attachments(send.call_args.kwargs["attachments"])
         self.assertIn(expected_date, html)
-        self.assertIn(f"Valid until: {expected_date}".encode(), attachments[0][1])
+        self.assertIn(f"Valid until: {expected_date}".encode(), attachments[0].content)
         self.assertEqual(proforma.valid_until, deadline)
         self.assertEqual(_order_timeout_deadline(order)[0], deadline)
 

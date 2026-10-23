@@ -10,6 +10,7 @@ Security hardening:
 """
 
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -394,6 +395,11 @@ class EmailLog(models.Model):
     next_attempt_at = models.DateTimeField(
         null=True, blank=True, db_comment="When the next attempt is due; recovery waits for it."
     )
+    # The whole message beyond its first recipient (all of to, cc, bcc, tags), encrypted like the bodies:
+    # every send rebuilds the message from the row, never from task arguments. Nullable: no table rebuild.
+    envelope = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True, blank=True, db_comment="Encrypted JSON: to, cc, bcc and tags. Rebuilt into every send."
+    )
 
     # User context
     sent_by = models.ForeignKey(
@@ -428,7 +434,7 @@ class EmailLog(models.Model):
             raise EncryptionError("Email body encryption is unavailable")
         original_text, original_html = self.body_text, self.body_html
         try:
-            for field in ("body_text", "body_html"):
+            for field in ("body_text", "body_html", "envelope"):
                 value = getattr(self, field)
                 if value and not is_encrypted(value):
                     setattr(self, field, encrypt_model_secret(self, field, value))
@@ -437,6 +443,13 @@ class EmailLog(models.Model):
             self.body_text, self.body_html = original_text, original_html
             raise
         super().save(*args, **kwargs)
+
+    def get_envelope(self) -> dict[str, Any]:
+        """The decrypted envelope; a row written before envelopes existed has only its first recipient."""
+        if not self.envelope:
+            return {"to": [self.to_addr], "cc": [], "bcc": [], "tags": {}}
+        data = json.loads(decrypt_model_secret(self, "envelope", self.envelope))
+        return data if isinstance(data, dict) else {"to": [self.to_addr], "cc": [], "bcc": [], "tags": {}}
 
     def get_status_display_color(self) -> str:
         """Get color for status display in admin"""
@@ -492,6 +505,38 @@ class EmailLog(models.Model):
     def get_decrypted_body_text(self) -> str:
         """Read only authenticated ciphertext belonging to this row and field."""
         return decrypt_model_secret(self, "body_text", self.body_text or "")
+
+
+class EmailAttachment(models.Model):
+    """One attachment of a queued email, by reference: no bytes are stored (#751 follow-up, H4).
+
+    Every send regenerates the bytes from `source_type`/`source_id` (apps/notifications/attachments.py)
+    and refuses if their SHA-256 is not the one first sent, so a retry never carries a different document.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email_log = models.ForeignKey(EmailLog, on_delete=models.CASCADE, related_name="attachment_refs")
+    position = models.PositiveSmallIntegerField(help_text=_("Order of the attachment in the message"))
+    source_type = models.CharField(max_length=40, help_text=_("Registered source the bytes are made from"))
+    source_id = models.CharField(max_length=64, help_text=_("The source object's id"))
+    filename = models.CharField(max_length=255, help_text=_("File name as first sent"))
+    sha256 = models.CharField(max_length=64, help_text=_("SHA-256 of the bytes first sent"))
+    size = models.PositiveIntegerField(help_text=_("Size in bytes as first sent"))
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_email_attachments"
+        db_table_comment = "Attachments of queued emails by reference; the bytes are regenerated at send time."
+        verbose_name = _("Email Attachment")
+        verbose_name_plural = _("Email Attachments")
+        ordering: ClassVar[tuple[str, ...]] = ("email_log", "position")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("email_log", "position"), name="email_attachment_position_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.filename} ({self.source_type})"
 
 
 class PendingDeliveryEvent(models.Model):

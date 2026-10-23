@@ -18,14 +18,9 @@ from apps.settings.services import SettingsService
 
 
 class QueuedEmail(TypedDict):
+    """What a queued send carries: only the message id."""
+
     email_log_id: str
-    to: list[str]
-    subject: str
-    body_text: str
-    body_html: str | None
-    from_email: str | None
-    reply_to: str | None
-    retry_count: int
     task_name: str
 
 
@@ -73,16 +68,8 @@ class EmailRecoverySenderTests(TestCase):
                 self.assertEqual(len(pending), 1)
                 payload = pending[0]
                 # Run the worker after recovery returns, as the real queue does.
-                delivered = send_email_task(
-                    email_log_id=payload["email_log_id"],
-                    to=payload["to"],
-                    subject=payload["subject"],
-                    body_text=payload["body_text"],
-                    body_html=payload["body_html"],
-                    from_email=payload["from_email"],
-                    reply_to=payload["reply_to"],
-                    retry_count=payload["retry_count"],
-                )
+                self.assertEqual(set(payload) - {"task_name"}, {"email_log_id"}, "a task carries only the id")
+                delivered = send_email_task(payload["email_log_id"])
                 self.assertTrue(delivered["success"], delivered)
                 self.assertEqual(len(mail.outbox), 1)
                 self.assertEqual(mail.outbox[0].from_email, expected_sender)

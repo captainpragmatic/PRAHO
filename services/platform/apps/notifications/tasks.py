@@ -14,7 +14,6 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -43,101 +42,34 @@ _DEFAULT_MAX_RETRIES = 3  # Fallback — authoritative source is SettingsService
 RETRY_DELAY_MINUTES = 5
 
 
-def _decorate(
-    msg: Any,  # Anymail adds tags/metadata/tracking attributes Django's EmailMessage does not declare
-    attachments: list[tuple[str, bytes, str]] | None,
-    tags: dict[str, str] | None,
-    *,
-    track_opens: bool,
-    track_clicks: bool,
-) -> None:
-    """Attachments and the ESP metadata Anymail backends read (a plain Django backend ignores them)."""
-    # _send_async accepted attachments but never forwarded them to this task, so a proforma email
-    # queued for async delivery arrived with no PDF (#228).
-    for filename, content, mimetype in attachments or []:
-        msg.attach(filename, content, mimetype)
-    try:
-        if tags:
-            msg.tags = list(tags.keys())
-            msg.metadata = tags
-        msg.track_opens = track_opens
-        msg.track_clicks = track_clicks
-    except AttributeError:
-        pass  # Standard Django EmailMessage doesn't support these
+def send_email_task(email_log_id: str) -> dict[str, Any]:
+    """Send one stored email. The task carries only its id: the message is rebuilt from the row.
 
-
-def send_email_task(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-    email_log_id: str,
-    to: list[str],
-    subject: str,
-    body_text: str,
-    body_html: str | None = None,
-    from_email: str | None = None,
-    reply_to: str | None = None,
-    cc: list[str] | None = None,
-    bcc: list[str] | None = None,
-    attachments: list[tuple[str, bytes, str]] | None = None,
-    tags: dict[str, str] | None = None,
-    track_opens: bool = True,
-    track_clicks: bool = True,
-    retry_count: int = 0,
-) -> dict[str, Any]:
+    Claim, rebuild (attachments made again from their sources and checked against the first send),
+    re-check the claim immediately before the provider call, send, then record the outcome for this
+    claim only. A message that can never be sent as written is a permanent failure.
     """
-    Send an email asynchronously.
+    from apps.notifications.attachments import (  # noqa: PLC0415  # Deferred: attachment sources import billing
+        AttachmentRefusedError,
+        regenerate_attachments,
+    )
+    from apps.notifications.services import compose_message, stored_message  # noqa: PLC0415  # Circular
 
-    This task is queued by EmailService._send_async() and executed by Django-Q2 workers.
-
-    Args:
-        email_log_id: UUID of the EmailLog entry
-        to: List of recipient emails
-        subject: Email subject
-        body_text: Plain text body
-        body_html: HTML body (optional)
-        from_email: Sender email
-        reply_to: Reply-to address
-        cc: CC recipients
-        bcc: BCC recipients
-        tags: ESP metadata tags
-        track_opens: Enable open tracking
-        track_clicks: Enable click tracking
-        retry_count: Current retry attempt number
-
-    Returns:
-        Dict with success status and message details
-    """
     token = None
     try:
-        email_log, refusal = claim_delivery(email_log_id, subject, from_email, retry_count)
+        email_log, refusal = claim_delivery(email_log_id)
         if refusal is not None:
             return refusal
         assert email_log is not None
         token = email_log.claim_token
-        from_email = email_log.from_addr
-
-        # Build the email message
-        if body_html:
-            msg = EmailMultiAlternatives(
-                subject=subject,
-                body=body_text,
-                from_email=from_email,
-                to=to,
-                cc=cc,
-                bcc=bcc,
-                reply_to=[reply_to] if reply_to else None,
-            )
-            msg.attach_alternative(body_html, "text/html")
-        else:
-            msg = EmailMessage(  # type: ignore[assignment]
-                subject=subject,
-                body=body_text,
-                from_email=from_email,
-                to=to,
-                cc=cc,
-                bcc=bcc,
-                reply_to=[reply_to] if reply_to else None,
-            )
-
-        _decorate(msg, attachments, tags, track_opens=track_opens, track_clicks=track_clicks)
+        try:
+            attachments = regenerate_attachments(email_log)
+        except AttachmentRefusedError as refused:
+            if not refused.permanent:
+                raise
+            return _refuse_permanently(email_log_id, token, str(refused))
+        message = stored_message(email_log)
+        msg = compose_message(message, attachments)
 
         # Immediately before the provider call: the claim is still ours (a worker that lost it sends nothing).
         if not renew_claim(email_log_id, token):
@@ -155,39 +87,15 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
             }
         # Written only for the claim this worker holds; a reclaimed row is left to its new owner.
         record_success(email_log_id, token, provider_id=message_id or "", response=response)
-
-        logger.info(f"Email sent successfully via async task: {subject[:50]}... to {to[0][:3]}***")
-
-        return {
-            "success": True,
-            "message_id": message_id,
-            "email_log_id": email_log_id,
-        }
+        logger.info(f"Email sent successfully via async task: {message.subject[:50]}...")
+        return {"success": True, "message_id": message_id, "email_log_id": email_log_id}
 
     except Exception as e:
         logger.exception(f"Async email sending failed: {e}")
-
         email_log, retry = record_failure(email_log_id, e, token)
         if email_log is None:
             return {"success": False, "error": str(e), "retry_scheduled": False}
-        retry_scheduled = False
-        if retry:
-            retry_scheduled = _schedule_email_retry(
-                email_log_id=email_log_id,
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                retry_count=email_log.delivery_attempts,
-            )
+        retry_scheduled = _schedule_email_retry(email_log_id, email_log.delivery_attempts) if retry else False
         return {
             "success": False,
             "error": str(e),
@@ -197,77 +105,49 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
         }
 
 
-def _schedule_email_retry(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-    email_log_id: str,
-    to: list[str],
-    subject: str,
-    body_text: str,
-    body_html: str | None,
-    from_email: str | None,
-    reply_to: str | None,
-    cc: list[str] | None,
-    bcc: list[str] | None,
-    tags: dict[str, str] | None,
-    track_opens: bool,
-    track_clicks: bool,
-    retry_count: int,
-    attachments: list[tuple[str, bytes, str]] | None = None,
-) -> bool:
-    """Schedule an email retry with exponential backoff.
+def _refuse_permanently(email_log_id: str, token: Any, reason: str) -> dict[str, Any]:
+    """A message that can never be sent as written: permanent, for the claim this worker holds."""
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is not None and row.status == "sending" and row.claim_token == token:
+            mark_permanent(row, reason)
+    logger.error(f"🔥 [Email] {email_log_id} refused permanently: {reason}")
+    return {"success": False, "error": reason, "retry_scheduled": False}
 
-    Carries the attachments through the re-enqueue: a retried proforma email
-    must not arrive without its PDF (#228 sibling).
-    """
+
+def _schedule_email_retry(email_log_id: str, retry_count: int) -> bool:
+    """Schedule the row's next attempt at its due time. The schedule carries only the id."""
     with transaction.atomic():
         email_log = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
-        if email_log is None or validate_email_log_subject(email_log, subject) is not None:
+        if email_log is None or validate_email_log_subject(email_log, email_log.subject) is not None:
             return False
 
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                schedule,  # Deferred: django-q task  # Deferred: avoids circular import
-            )
-
-            # The due time the failure write recorded (one backoff rule, delivery.retry_delay).
-            due = email_log.next_attempt_at or timezone.now() + retry_delay(retry_count)
-            if email_log.next_attempt_at is None:
-                email_log.next_attempt_at = due
-                email_log.save(update_fields=["next_attempt_at"])
-            delay = max(0, int((due - timezone.now()).total_seconds()))
-
             from django_q.models import Schedule  # noqa: PLC0415  # Deferred scheduler boundary.
-
-            name = f"email-retry:{email_log_id}:{retry_count}"
-            if Schedule.objects.filter(name=name).exists():
-                return True
-            schedule(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=email_log_id,
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                retry_count=retry_count,
-                next_run=due,
-                schedule_type="O",
-                repeats=1,
-                name=name,
-            )
-
-            logger.info(f"Scheduled email retry {retry_count} for {email_log_id} in {delay}s")
-            return True
-
+            from django_q.tasks import schedule  # noqa: PLC0415  # Deferred: avoids circular import
         except ImportError:
             logger.error("Cannot schedule email retry - Django-Q2 not available")
             return False
+
+        # The due time the failure write recorded (one backoff rule, delivery.retry_delay).
+        due = email_log.next_attempt_at or timezone.now() + retry_delay(retry_count)
+        if email_log.next_attempt_at is None:
+            email_log.next_attempt_at = due
+            email_log.save(update_fields=["next_attempt_at"])
+
+        name = f"email-retry:{email_log_id}:{retry_count}"
+        if Schedule.objects.filter(name=name).exists():
+            return True
+        schedule(
+            "apps.notifications.tasks.send_email_task",
+            email_log_id=email_log_id,
+            next_run=due,
+            schedule_type="O",
+            repeats=1,
+            name=name,
+        )
+        logger.info(f"Scheduled email retry {retry_count} for {email_log_id} at {due.isoformat()}")
+        return True
 
 
 def send_bulk_emails_task(
@@ -357,21 +237,11 @@ def _batch() -> int:
     return min(500, max(1, SettingsService.get_integer_setting("notifications.email_batch_size", 50)))
 
 
-def _enqueue_send(email_log: EmailLog, task_name: str, retry_count: int) -> None:
+def _enqueue_send(email_log: EmailLog, task_name: str) -> None:
+    """Queue a stored email by id: the worker rebuilds it from the row."""
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
-    async_task(
-        "apps.notifications.tasks.send_email_task",
-        email_log_id=str(email_log.id),
-        to=[email_log.to_addr],
-        subject=email_log.subject,
-        body_text=email_log.get_decrypted_body_text(),
-        body_html=email_log.get_decrypted_body_html(),
-        from_email=email_log.from_addr or None,
-        reply_to=email_log.reply_to,
-        retry_count=retry_count,
-        task_name=task_name,
-    )
+    async_task("apps.notifications.tasks.send_email_task", email_log_id=str(email_log.id), task_name=task_name)
 
 
 def process_email_queue() -> dict[str, Any]:
@@ -395,7 +265,7 @@ def process_email_queue() -> dict[str, Any]:
                 email_log = EmailLog.objects.select_for_update().filter(pk=pk, status="queued").first()
                 if email_log is None or (email_log.next_attempt_at or email_log.sent_at) > overdue:
                     continue  # Claimed, finished or rescheduled since the batch was read
-                index = retry_index(email_log)
+                retry_index(email_log)  # Raises on corrupt retry metadata (marked permanent below)
                 if budget_spent(email_log):
                     mark_exhausted(email_log)
                     failed += 1
@@ -405,7 +275,7 @@ def process_email_queue() -> dict[str, Any]:
                     continue
                 email_log.next_attempt_at = timezone.now()
                 email_log.save(update_fields=["next_attempt_at"])
-            _enqueue_send(email_log, f"requeue:{email_log.id}", index)
+            _enqueue_send(email_log, f"requeue:{email_log.id}")
             processed += 1
         except InvalidRetryMetadataError as e:
             with transaction.atomic():
@@ -452,7 +322,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
                 if validate_email_log_subject(email_log, email_log.subject) is not None:
                     skipped += 1
                     continue
-                index = retry_index(email_log)
+                retry_index(email_log)  # Raises on corrupt retry metadata (marked permanent below)
                 if budget_spent(email_log):
                     mark_exhausted(email_log)
                     skipped += 1
@@ -460,7 +330,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
                 email_log.status = "queued"
                 email_log.next_attempt_at = timezone.now()
                 email_log.save(update_fields=["status", "next_attempt_at"])
-            _enqueue_send(email_log, f"retry_failed:{email_log.id}", index)
+            _enqueue_send(email_log, f"retry_failed:{email_log.id}")
             retried += 1
         except InvalidRetryMetadataError as e:
             with transaction.atomic():

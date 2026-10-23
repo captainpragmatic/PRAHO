@@ -120,9 +120,9 @@ def claimable(row: EmailLog, now: datetime) -> bool:
 
 def claim_delivery(
     email_log_id: str,
-    subject: str,
-    sender: str | None,
-    supplied_retry: int,
+    subject: str | None = None,
+    sender: str | None = None,
+    supplied_retry: int = 0,
 ) -> tuple[EmailLog | None, dict[str, Any] | None]:
     """Claim the row for one send, or refuse. A claim writes a fresh `claim_token` and a lease.
 
@@ -144,7 +144,7 @@ def claim_delivery(
         except InvalidRetryMetadataError as error:
             mark_permanent(row, str(error))
             return row, {"success": False, "error": str(error), "retry_scheduled": False}
-        if (subject_error := validate_email_log_subject(row, subject)) is not None:
+        if (subject_error := validate_email_log_subject(row, row.subject if subject is None else subject)) is not None:
             return row, {"success": False, "error": subject_error, "retry_scheduled": False}
         if index >= maximum + 1:
             mark_exhausted(row)

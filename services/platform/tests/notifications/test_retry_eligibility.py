@@ -40,10 +40,8 @@ class RetryEligibilityTests(TestCase):
         for package in packages:
             self.assertEqual(package["func"], "apps.notifications.tasks.send_email_task")
             payload = cast("dict[str, object]", package["kwargs"])
-            self.assertEqual(payload["body_text"], "Original body")
-            self.assertEqual(payload["from_email"], "original@example.test")
-            # The row's own attempt count (the claim takes the larger of it and the row): no +1 inflation.
-            self.assertEqual(payload["retry_count"], 0)
+            # A task carries only the id: the body, sender and attempt count stay on the row.
+            self.assertEqual(set(payload), {"email_log_id"})
             ids.add(cast("str", payload["email_log_id"]))
         return ids
 
