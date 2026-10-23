@@ -76,6 +76,19 @@ class DisputeTests(UnfixableOutcomeCase):
 
         self._assert_urgent(alert)
 
+    def test_an_escalation_that_was_not_delivered_is_retried(self) -> None:
+        processor = StripeWebhookProcessor()
+        payload = {"id": "evt_d4", "type": "charge.dispute.created", "created": 100, "data": {"object": self._dispute()}}
+        with (
+            patch.object(processor, "verify_signature", return_value=True),
+            patch("apps.notifications.services.NotificationService.send_admin_alert", return_value=False),
+        ):
+            success, _message, event = processor.process_webhook(payload, signature="ok")
+
+        event.refresh_from_db()
+        self.assertEqual((success, event.status), (False, "failed"), "the urgent alert must reach staff")
+        self.assertIsNotNone(event.next_retry_at)
+
     def test_a_dispute_for_a_payment_praho_does_not_have_is_escalated(self) -> None:
         _success, alert = self._deliver("charge.dispute.created", self._dispute(payment_intent="pi_unknown"), "evt_d3")
 
@@ -95,3 +108,13 @@ class MismatchTests(UnfixableOutcomeCase):
         self.assertTrue(
             AuditEvent.objects.filter(action="payment_gateway_fact_mismatch", metadata__payment_id=str(payment.id)).exists()
         )
+
+    def test_a_mismatch_found_while_recovering_an_unlinked_attempt_stays_permanent(self) -> None:
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+        from apps.common.types import Err, Retriability, retriability_of  # noqa: PLC0415
+
+        refused = Err("Gateway amount mismatch", retriability=Retriability.NOT_RETRIABLE)
+        with patch.object(PaymentSuccessService, "recover_unlinked_recurring_attempt", return_value=refused):
+            result = PaymentSuccessService.converge_gateway_success("pi_unlinked", {"amount_received": 1})
+
+        self.assertIs(retriability_of(result), Retriability.NOT_RETRIABLE, "a webhook acknowledges it, not retries")

@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import record_refusal_evidence
 
 from .metering_models import BillingCycle, UsageAggregation
@@ -138,7 +138,7 @@ class PaymentSuccessService:
                         gateway_facts,
                     )
                     if recovery.is_err():
-                        return Err(recovery.unwrap_err())
+                        return Err(recovery.unwrap_err(), retriability=retriability_of(recovery))
                     payment = recovery.unwrap()
                 validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
                 if validation_error:

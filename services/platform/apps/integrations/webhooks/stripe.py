@@ -621,12 +621,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         else:
             note = "The dispute names no PaymentIntent"
 
+        alerted = False
         try:
             from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
                 NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            NotificationService.send_admin_alert(
+            alerted = NotificationService.send_admin_alert(
                 subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
                 message=f"A dispute has been created for PaymentIntent {payment_intent_id}.\n"
                 f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
@@ -643,6 +644,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as notify_error:
             logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
 
+        if note and not alerted:
+            # Acknowledging would end it: staff would never hear of a dispute nothing local records. Nothing
+            # was written for it, so failing leaves it to the retry drain until the alert gets through.
+            return False, f"Dispute {dispute_id} escalation not delivered; retrying ({note})"
         return True, f"Dispute created: {dispute_id}" + (f" ({note})" if note else "")
 
     def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
