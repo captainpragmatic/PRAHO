@@ -4,8 +4,9 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import UUID
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from apps.common.constants import DAYS_PER_WEEK
@@ -560,6 +561,33 @@ def retry_failed_webhooks(source: str | None = None) -> dict[str, int]:
             result = processor._execute_locked(event)
             stats["retried" if result.success else "failed"] += 1
     return stats
+
+
+WEBHOOK_BUSY = "Webhook is being processed; try again shortly"
+WEBHOOK_NO_LONGER_FAILED = "Webhook is no longer failed; nothing to retry"
+
+
+def reprocess_failed_event(event_pk: UUID | str) -> Result[WebhookProcessingResult, str]:
+    """Retry one failed event as any other processing runs it (#751 follow-up, M8).
+
+    The event is claimed under its row lock without waiting (a redelivery or a drain holding it means it is
+    being processed now), re-checked under the lock, and run in the executor's savepoint, so a refusal keeps
+    nothing and the failure follow-up runs.
+    """
+    with transaction.atomic():
+        try:
+            with transaction.atomic():  # Its own savepoint: a lock refusal must not poison the transaction
+                event = WebhookEvent.objects.select_for_update(nowait=True).get(pk=event_pk)
+        except WebhookEvent.DoesNotExist:
+            return Err("Webhook not found")
+        except DatabaseError:
+            return Err(WEBHOOK_BUSY)
+        if event.status != "failed":
+            return Err(WEBHOOK_NO_LONGER_FAILED)
+        processor = get_webhook_processor(event.source)
+        if processor is None:
+            return Err(f"No processor found for source: {event.source}")
+        return Ok(processor._execute_locked(event))
 
 
 def get_webhook_processor(source: str) -> BaseWebhookProcessor | None:
