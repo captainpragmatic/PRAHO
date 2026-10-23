@@ -374,16 +374,19 @@ def apply_pending_delivery_events(email_log: EmailLog) -> None:
     PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
     if email_log.status != "soft_bounced":
         return
-    recipients = {
-        recipient for event in pending if event.event_type == "soft_bounced" and (recipient := event.get_recipient())
-    }
-    for recipient in recipients:
-        # Counted once this commits, like a live callback: two replays for one address, each in its own
-        # transaction, would otherwise each miss the other's bounce. Robust: a failed suppression never
-        # undoes the status just recorded.
-        transaction.on_commit(
-            lambda recipient=recipient: suppress_after_soft_bounce(recipient, timezone.now()), robust=True
-        )
+    for event in pending:
+        if event.event_type == "soft_bounced" and event.recipient:
+            # Counted once this commits, like a live callback: two replays for one address, each in its
+            # own transaction, would otherwise each miss the other's bounce. The recipient is decrypted
+            # there too, and robust: an unreadable recipient or a failed suppression never undoes the
+            # status just recorded.
+            transaction.on_commit(lambda event=event: _suppress_replayed_soft_bounce(event), robust=True)
+
+
+def _suppress_replayed_soft_bounce(event: PendingDeliveryEvent) -> None:
+    recipient = event.get_recipient()
+    if recipient:
+        suppress_after_soft_bounce(recipient, timezone.now())
 
 
 @dataclass

@@ -299,6 +299,26 @@ class BufferedCallbackTests(TestCase):
             EmailSuppressionService.is_suppressed(row.to_addr), "the third soft bounce in the window suppresses"
         )
 
+    def test_an_unreadable_buffered_recipient_never_undoes_the_recorded_send(self) -> None:
+        from apps.common.encryption import DecryptionError  # noqa: PLC0415
+
+        row = _log()
+
+        def accepted_then_soft_bounced(message: object, *args: object, **kwargs: object) -> int:
+            message.anymail_status = SimpleNamespace(message_id="pid-garbled", status={"sent"}, esp_response={})
+            EmailService.handle_delivery_event("soft_bounced", "pid-garbled", row.to_addr)
+            return 1
+
+        with (
+            patch("django.core.mail.EmailMessage.send", accepted_then_soft_bounced),
+            patch.object(PendingDeliveryEvent, "get_recipient", side_effect=DecryptionError("garbled")),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            _send(row)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.provider_id), ("soft_bounced", "pid-garbled"), "the send stays recorded")
+
     def _buffer(self, provider_id: str, *, expired: bool = False) -> None:
         from apps.notifications.services import PENDING_DELIVERY_EVENT_WINDOW  # noqa: PLC0415
 
