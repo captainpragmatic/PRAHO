@@ -29,6 +29,7 @@ from django.views.decorators.http import require_http_methods
 from django_q.models import OrmQ, Schedule, Task
 
 from apps.common.decorators import admin_required
+from apps.common.encryption import ENCRYPTED_PREFIX
 from apps.common.http import mark_download
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Err, Ok
@@ -394,6 +395,12 @@ def _build_import_updates(
         key_known = key in SettingsService.DEFAULT_SETTINGS or SystemSetting.objects.filter(key=key).exists()
         if not key_known:
             skipped.append({"key": key, "reason": "unknown setting key"})
+            continue
+
+        # An exported secret is ciphertext bound to the row it came from: it never decrypts on a recreated
+        # row, and taking it as is would hide that. The operator types the secret again instead.
+        if isinstance(entry["value"], str) and entry["value"].startswith(ENCRYPTED_PREFIX):
+            skipped.append({"key": key, "reason": "encrypted value: re-enter this secret in Settings"})
             continue
 
         if not include_sensitive and SystemSetting.objects.filter(key=key, is_sensitive=True).exists():
