@@ -208,3 +208,16 @@ class TestStagingLoggingConfiguration(_LoggingStructureMixin, SimpleTestCase):
                 self.assertEqual(handler["class"], "logging.handlers.WatchedFileHandler")
                 self.assertNotIn("maxBytes", handler)
                 self.assertNotIn("backupCount", handler)
+
+
+class SecretURLFilterWiringTests(SimpleTestCase):
+    """Production and staging install the secret-URL filter on every handler (#751 follow-up, M6b)."""
+
+    def test_every_deployed_handler_redacts_secret_urls(self) -> None:
+        for module in ("config.settings.prod", "config.settings.staging"):
+            with self.subTest(module=module):
+                config = _get_logging(module)
+                self.assertEqual(config["filters"]["secret_urls"]["()"], "apps.common.secret_urls.SecretURLFilter")
+                self.assertTrue(config["handlers"], "handlers are configured")
+                for name, handler in config["handlers"].items():
+                    self.assertIn("secret_urls", handler.get("filters", []), f"{module}: handler {name}")
