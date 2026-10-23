@@ -18,6 +18,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.encryption import DecryptionError
 from apps.notifications.delivery import (
     CLAIM_LEASE,
     UNLEASED_SENDING_GRACE,
@@ -56,12 +57,6 @@ def send_email_task(email_log_id: str) -> dict[str, Any]:
     re-check the claim immediately before the provider call, send, then record the outcome for this
     claim only. A message that can never be sent as written is a permanent failure.
     """
-    from apps.notifications.attachments import (  # noqa: PLC0415  # Deferred: attachment sources import billing
-        AttachmentRefusedError,
-        regenerate_attachments,
-    )
-    from apps.notifications.services import compose_message, stored_message  # noqa: PLC0415  # Circular
-
     token = None
     try:
         email_log, refusal = claim_delivery(email_log_id)
@@ -69,14 +64,10 @@ def send_email_task(email_log_id: str) -> dict[str, Any]:
             return refusal
         assert email_log is not None
         token = email_log.claim_token
-        try:
-            attachments = regenerate_attachments(email_log)
-        except AttachmentRefusedError as refused:
-            if not refused.permanent:
-                raise
-            return _refuse_permanently(email_log_id, token, str(refused))
-        message = stored_message(email_log)
-        msg = compose_message(message, attachments)
+        rebuilt, refusal = _rebuild(email_log, token)
+        if refusal is not None:
+            return refusal
+        message, msg = rebuilt
 
         # Immediately before the provider call: the claim is still ours (a worker that lost it sends nothing).
         if not renew_claim(email_log_id, token):
@@ -110,6 +101,33 @@ def send_email_task(email_log_id: str) -> dict[str, Any]:
             "retry_count": email_log.delivery_attempts,
             "max_retries_exceeded": bool((email_log.provider_response or {}).get("retry_exhausted")),
         }
+
+
+def _rebuild(email_log: EmailLog, token: Any) -> tuple[Any, dict[str, Any] | None]:
+    """The stored message and its provider message, or the refusal to return when it can never be sent.
+
+    Attachments are made again from their sources and checked against the first send. A source that fails
+    for now raises (retried); a changed document, or a body or envelope no key can decrypt, is permanent.
+    """
+    from apps.notifications.attachments import (  # noqa: PLC0415  # Deferred: attachment sources import billing
+        AttachmentRefusedError,
+        regenerate_attachments,
+    )
+    from apps.notifications.services import compose_message, stored_message  # noqa: PLC0415  # Circular
+
+    email_log_id = str(email_log.pk)
+    try:
+        attachments = regenerate_attachments(email_log)
+    except AttachmentRefusedError as refused:
+        if not refused.permanent:
+            raise
+        return None, _refuse_permanently(email_log_id, token, str(refused))
+    try:
+        message = stored_message(email_log)
+    except DecryptionError as unreadable:
+        # A superseded or garbled ciphertext never becomes readable on a retry.
+        return None, _refuse_permanently(email_log_id, token, f"Stored message unreadable: {unreadable}")
+    return (message, compose_message(message, attachments)), None
 
 
 def _refuse_permanently(email_log_id: str, token: Any, reason: str) -> dict[str, Any]:
