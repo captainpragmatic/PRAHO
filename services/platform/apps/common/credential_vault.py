@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 import base64
 import os
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -510,10 +511,11 @@ class CredentialVault:
             except EncryptedCredential.DoesNotExist:
                 return Err(f"Credential not found: {rotation_data.service_type}:{rotation_data.service_identifier}")
 
-            # Mark rotation in progress
+            # Mark rotation in progress. Only these fields: a full save would write the ciphertext this
+            # instance loaded back over a value the store path wrote meanwhile.
             credential.rotation_in_progress = True
             credential.last_rotation_attempt = timezone.now()
-            credential.save()
+            credential.save(update_fields=["rotation_in_progress", "last_rotation_attempt"])
 
             try:
                 # Generate new password if not provided
@@ -522,9 +524,16 @@ class CredentialVault:
 
                 # Get current username if new one not provided
                 if not rotation_data.new_username:
-                    current_username = self._decrypt_data(
-                        bytes(credential.encrypted_username), aad=secret_aad(credential, "encrypted_username")
-                    ).decode()
+                    try:
+                        current_username = self._decrypt_data(
+                            bytes(credential.encrypted_username), aad=secret_aad(credential, "encrypted_username")
+                        ).decode()
+                    except (CredentialVaultError, InvalidTag, ValueError):
+                        # Stored under a superseded format or garbled: not a failure of the service. A
+                        # rotation with a new username replaces it (the store path writes v2 ciphertext).
+                        credential.rotation_in_progress = False
+                        credential.save(update_fields=["rotation_in_progress"])
+                        return Err("The stored username cannot be read: rotate with a new username to replace it")
                     rotation_data.new_username = current_username
 
                 # Test new credential works (implement service-specific testing)
@@ -537,7 +546,7 @@ class CredentialVault:
                 if test_result.is_err():
                     credential.rotation_failure_count += 1
                     credential.rotation_in_progress = False
-                    credential.save()
+                    credential.save(update_fields=["rotation_failure_count", "rotation_in_progress"])
                     return Err(f"Credential test failed: {test_result.unwrap_err()}")
 
                 # Store new credential (keeps old version for rollback)
@@ -575,7 +584,7 @@ class CredentialVault:
                 # Mark rotation failed
                 credential.rotation_failure_count += 1
                 credential.rotation_in_progress = False
-                credential.save()
+                credential.save(update_fields=["rotation_failure_count", "rotation_in_progress"])
                 raise
 
         except Exception as e:
