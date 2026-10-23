@@ -25,7 +25,7 @@ from apps.common.transactions import best_effort_atomic, swallow_application_err
 from apps.users.models import CustomerMembership, User, UserProfile
 
 from .actor_context import current_actor
-from .models import AuditEvent, ComplianceLog
+from .models import AuditEvent, ComplianceLog, audit_mutation_allowed
 from .person_events import note_erasure_write
 from .services import AuditContext, AuditEventData, AuditService
 from .switches import audit_signals_disabled
@@ -750,7 +750,13 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, **kwargs
 
     from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
-    base_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
+    # Reserved keys are the integrity and chain machinery's own: a caller cannot supply them (a forged
+    # chain_link_quarantined would hide the event from chaining).
+    base_metadata = (
+        {k: v for k, v in instance.metadata.items() if k not in AuditIntegrityService.RESERVED_METADATA_KEYS}
+        if isinstance(instance.metadata, dict)
+        else {}
+    )
     if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
         base_metadata["chain_link_pending"] = True
     try:
@@ -788,7 +794,7 @@ def append_audit_event_chain_link(sender: Any, instance: AuditEvent, created: bo
 
 
 def _link_committed_event(event_id: Any, alias: str | None = None) -> bool:
-    from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+    from .services import AuditIntegrityService, UnverifiableAuditEventError  # noqa: PLC0415  # Circular
 
     try:
         with atomic(using=alias):
@@ -798,9 +804,31 @@ def _link_committed_event(event_id: Any, alias: str | None = None) -> bool:
             AuditIntegrityService.append_chain_link(event)
             event.refresh_from_db()
             return not bool(event.metadata.get("chain_link_pending"))
+    except UnverifiableAuditEventError:
+        _quarantine_chain_link(event_id, alias)
+        return False
     except Exception:
         logger.exception("[Audit Chain] Post-commit linking failed for event %s; recovery remains pending", event_id)
         return False
+
+
+def _quarantine_chain_link(event_id: Any, alias: str | None) -> None:
+    """Mark an event the chain refused, after the refusal rolled back: recovery skips it from now on.
+
+    The marker is a reserved key, outside the MAC. The event stays pending, so the verifier keeps reporting
+    it unlinked; only the recovery batch stops retrying it ahead of everything behind it.
+    """
+    try:
+        with atomic(using=alias):
+            event = AuditEvent.objects.using(alias).select_for_update().filter(pk=event_id).first()
+            if event is None:
+                return
+            metadata = {**(event.metadata or {}), "chain_link_quarantined": True}
+            with audit_mutation_allowed("chain_quarantine"):
+                AuditEvent.objects.using(alias).filter(pk=event_id).update(metadata=metadata)
+        logger.critical("[Audit Chain] Event %s does not verify; quarantined, recovery skips it", event_id)
+    except Exception:
+        logger.exception("[Audit Chain] Could not quarantine unverifiable event %s", event_id)
 
 
 # ===============================================================================

@@ -3680,6 +3680,10 @@ provisioning_audit_service = ProvisioningAuditService()
 # ===============================================================================
 
 
+class UnverifiableAuditEventError(ValueError):
+    """The chain refuses an event whose MAC no longer verifies: it is quarantined, not retried."""
+
+
 class AuditIntegrityService:
     """
     🔒 Enterprise audit data integrity monitoring service
@@ -3703,6 +3707,9 @@ class AuditIntegrityService:
             # excluded from the covered payload or a failed append would flip the row to
             # "MAC mismatch" — reporting a ledger problem as evidence tampering.
             "chain_link_pending",
+            # Written when the chain refuses an event (its MAC no longer verifies): recovery skips it so
+            # it cannot hold the queue head, and the verifier still reports it unlinked (#751 follow-up).
+            "chain_link_quarantined",
         }
     )
     # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
@@ -3988,7 +3995,7 @@ class AuditIntegrityService:
                 return
             event = current
             if cls._verify_hash_chain([event]) or event.metadata.get("integrity_hash_version") != cls.HASH_VERSION:
-                raise ValueError(f"Refusing to chain unverifiable audit event {event.pk}")
+                raise UnverifiableAuditEventError(f"Refusing to chain unverifiable audit event {event.pk}")
             pending_metadata = {**event.metadata, "chain_link_pending": False}
             if AuditChainLink.objects.using(alias).filter(event=event, is_tombstone=False).exists():
                 with audit_mutation_allowed("chain_append"):
