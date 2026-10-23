@@ -748,28 +748,27 @@ class EmailService:
 
     @classmethod
     def _queue_email_for_retry(cls, message: OutgoingEmail) -> EmailResult:
-        """Rate limited: store the whole message and queue its id for later (#228: nothing is degraded)."""
-        provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-        email_log = cls._create_email_log(message, provider=provider, status="queued")
-        validation_error = validate_email_log_subject(email_log, message.subject)
-        if validation_error is not None:
-            return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
-        try:
-            from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
-        except ImportError:
-            return EmailResult(success=False, error="Cannot queue email - Django-Q2 not available")
+        """Rate limited: store the whole message and schedule its id for later (#228: nothing is degraded).
 
+        The retry is a one-off schedule at the due time, written in the message's transaction: the
+        scheduler sees both once they commit, and neither without the other. (`async_task` has no delay:
+        a `schedule=` argument is handed to the task itself.)
+        """
+        from apps.notifications.tasks import _schedule_email_retry  # noqa: PLC0415  # Circular
+
+        provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
         retry_delay = getattr(settings, "EMAIL_RETRY", {}).get("RETRY_DELAY_SECONDS", 60)
-        email_log_id = str(email_log.id)
-        transaction.on_commit(
-            lambda: async_task(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=email_log_id,
-                schedule=timedelta(seconds=retry_delay),
-                task_name=f"email_retry:{message.template_key or 'direct'}:{email_log_id}",
-            ),
-            robust=True,  # As in _send_async: a failed enqueue is recovered by the queue sweep
-        )
+        with transaction.atomic():
+            email_log = cls._create_email_log(message, provider=provider, status="queued")
+            validation_error = validate_email_log_subject(email_log, message.subject)
+            if validation_error is not None:
+                return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
+            email_log_id = str(email_log.id)
+            EmailLog.objects.filter(pk=email_log_id).update(
+                next_attempt_at=timezone.now() + timedelta(seconds=retry_delay)
+            )
+            if not _schedule_email_retry(email_log_id, 0):
+                logger.warning(f"⚠️ [Email] Retry for {email_log_id} not scheduled; the queue sweep sends it")
         return EmailResult(success=True, email_log_id=email_log_id, provider=provider)
 
     @staticmethod

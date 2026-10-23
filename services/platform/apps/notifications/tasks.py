@@ -147,7 +147,7 @@ def _schedule_email_retry(email_log_id: str, retry_count: int) -> bool:
             email_log_id=email_log_id,
             next_run=due,
             schedule_type="O",
-            repeats=1,
+            repeats=-1,  # django-q2 deletes a one-off schedule with a negative repeat count once it ran
             name=name,
         )
         logger.info(f"Scheduled email retry {retry_count} for {email_log_id} at {due.isoformat()}")

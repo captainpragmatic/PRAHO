@@ -107,12 +107,12 @@ class RetryPathAttachmentTestCase(ReferencedAttachmentCase):
 class RateLimitedQueueTestCase(ReferencedAttachmentCase):
     """The rate-limiter queue path must not degrade the email (attachments, cc, bcc, tags)."""
 
-    @patch("django_q.tasks.async_task", return_value="task-1")
     @patch("apps.notifications.services.EmailRateLimiter.check_rate_limit", return_value=(False, 0))
-    def test_rate_limited_queue_preserves_the_full_email(self, _limit, enqueue) -> None:
+    def test_rate_limited_queue_preserves_the_full_email(self, _limit) -> None:
         email_log_id = self.send(cc=["cc@example.ro"], bcc=["bcc@example.ro"], tags={"kind": "proforma"})
 
-        self.assertTrue(enqueue.called, "rate-limited async send must queue the task")
+        retry = Schedule.objects.get(func="apps.notifications.tasks.send_email_task")
+        self.assertEqual(retry.kwargs, f"{{'email_log_id': '{email_log_id}'}}", "the retry carries only the id")
         row = EmailLog.objects.get(pk=email_log_id)
         envelope = row.get_envelope()
         self.assertEqual(
