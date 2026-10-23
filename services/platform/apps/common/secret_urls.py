@@ -55,10 +55,16 @@ def redact_urls(value: Any, _path: frozenset[int] = frozenset(), _depth: int = 0
         return _CYCLE
     path = _path | {id(value)}
     if isinstance(value, dict):  # Keys too: a link can be a key (results keyed by URL)
-        return {
-            (redact_text(key) if isinstance(key, str) else key): redact_urls(item, path, _depth + 1)
-            for key, item in value.items()
-        }
+        scrubbed: dict[Any, Any] = {}
+        for key, item in value.items():
+            new_key = redact_text(key) if isinstance(key, str) else key
+            if new_key != key and new_key in scrubbed:  # Two links redacted alike: keep both entries
+                count = 2
+                while f"{new_key} ({count})" in scrubbed:
+                    count += 1
+                new_key = f"{new_key} ({count})"
+            scrubbed[new_key] = redact_urls(item, path, _depth + 1)
+        return scrubbed
     items = [redact_urls(item, path, _depth + 1) for item in value]
     return tuple(items) if isinstance(value, tuple) else items
 

@@ -165,3 +165,11 @@ class JSONFormatterRedactionTests(SimpleTestCase):
 
         self.assertNotIn("unsubscribe-secret", line)
         self.assertNotIn("unsubscribe-secret", str(redact_urls({"/notifications/unsubscribe/unsubscribe-secret/": 1})))
+
+    def test_two_secrets_redacted_to_the_same_key_both_keep_their_values(self) -> None:
+        redacted = redact_urls(
+            {"/notifications/unsubscribe/first-secret/": "failed", "/notifications/unsubscribe/second-secret/": "sent"}
+        )
+
+        self.assertEqual(sorted(redacted.values()), ["failed", "sent"], "no entry is lost to a key collision")
+        self.assertNotIn("secret", "".join(redacted).replace("[REDACTED]", ""))
