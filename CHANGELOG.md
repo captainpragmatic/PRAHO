@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Upgrading: what an operator must do first** (the #751 hardening and its follow-up).
+  - **Portal keys.** Deployed Platform and Portal services refuse a portal signing key shorter than 32 characters, or equal to `PLATFORM_API_SECRET`. This covers every key in a `PORTAL_HMAC_CREDENTIALS` keyring, rotation keys included. Replace short or shared keys before upgrading.
+  - **Portal identity.** Production and staging run `PORTAL_HMAC_MODE=enforce` by default, and the compose stacks require `PORTAL_HMAC_CREDENTIALS` (Platform), `PORTAL_ID` and `PORTAL_HMAC_SECRET` (Portal). A deployed portal no longer falls back to `portal-001`. Its `PORTAL_ID` must be set, and must match the Platform's id pattern; an inline comment in a native `.env` makes it invalid. See `docs/security/portal-hmac-registry.md`.
+  - **Stored secrets.** Every stored secret must be bound to its table, row and field; older ciphertext and plaintext are refused when read. Before upgrading, arrange to re-enter TOTP enrolments, registrar credentials, transfer codes, server passwords, ANAF authorization, sensitive settings and vault credentials. `manage.py post_encryption_upgrade` reports what needs it, and `docs/security/MFA-SETUP-AND-KEY-MANAGEMENT.md` covers MFA recovery with backup codes.
+  - **Secret binding migrations.** Migrations `common 0005` and `provisioning 0012` re-encrypt vault credentials and server API passwords so they are also bound to the name that finds them. `deploy.sh` and the native role then run `manage.py rebind_secrets` once every service is on the new release. A manual upgrade stops the platform and its workers before `migrate`, or runs that command after restarting them. Both abort with nothing changed on a secret that opens under neither binding, which is what a wrong `CREDENTIAL_VAULT_MASTER_KEY` looks like.
+  - **Settings exports.** An exported secret can no longer be imported: the import skips it and asks for it to be entered again in Settings.
+- **A secret follows the name that finds it.** A vault credential is bound to its service and identifier, and a server's API password to its hostname. A row renamed in the database no longer serves its secret under the new name, and renaming a node in the server form re-binds its password. The global master and SSH credentials are sent only to a node whose own credential resolves. Bulk updates of these names are refused.
+- **The e-Factura token cache holds a row id, never the token.** It is scoped to the company and the ANAF environment, checked against the database on every read, and never outlives the token. Test and production tokens for one company no longer replace each other.
+- **Secrets stay out of logs.** Bearer links are redacted in log messages, in their arguments (including dictionary keys and values that are not text), in JSON log lines, in the audit formatter and in Caddy's `Location` access-log field. A log call whose arguments do not fit its message no longer reaches stderr unredacted.
+- **Webhooks.** An unreadable webhook secret answers 503, not "invalid signature". A staff retry runs under the event's lock. The evidence of a refused gateway fact survives the refusal. Stripe outcomes that no redelivery can fix are acknowledged and escalated to staff, and an undelivered dispute escalation is retried.
+- **Audit chain.** An event the chain cannot verify is quarantined instead of blocking the events behind it. Linking, anonymization and restamping lock in one order and write from a locked read, so none undoes another's change. Chain recovery uses a partial index, built without blocking audit writes.
+- **GDPR.** Erasure and export reach the emails PRAHO stored for the person, through keyed recipient digests (`EMAIL_RECIPIENT_DIGEST_SECRET` overrides the derived key). An erased message ignores late provider callbacks.
+
+### Fixed
+
+- **Email delivery.**
+  - One worker sends each email, and a stale copy never undoes another worker's result.
+  - A retry waits for its due time and runs once.
+  - A provider error the operator must fix (rejected credentials, missing AWS credentials, SES configuration) blocks sending and alerts staff, instead of using up every message's retries.
+  - A stored message no key can decrypt fails permanently, once, while one a stale keyring cannot open waits for the right keys.
+  - The recovery drains run on a schedule, and the scheduled cleanup keeps undelivered mail.
+- **Deploy scripts.** `deploy.sh --stop` and `--logs` work with an older env file on every stack. Rollback names the variables a stack needs before it prompts, backs up or pulls.
+- **Settings.** One stored secret no key can decrypt no longer stops `setup_default_settings`. A setting that becomes sensitive is sealed on disk.
+- **Lists.** Filters, searches and page links on the product, billing, audit, GDPR and settings pages replace the region's in-flight request instead of racing it. Product toggles no longer drop a click made during a filter request. A product search containing `&` keeps its page links working.
+- **CI** checks a PR's migrations with the base branch's validators as well as its own.
+
 ### Added
 
 - **Every hosting account can get a provider hostname that follows it** (ADR-0061 Phase 1). Off by default behind `dns.account_hostnames_enabled`; with it off nothing new happens.
