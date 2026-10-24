@@ -19,14 +19,15 @@ def _rebind(apps, schema_editor, *, forward):
     alias = schema_editor.connection.alias
     virtualmin = apps.get_model("provisioning", "VirtualminServer")
     server = apps.get_model("provisioning", "Server")
+    # Each row stays locked from its read to its write: a password stored meanwhile is not overwritten
     for counts in (
         rebind_hostname_passwords(
-            HostnamePassword(virtualmin, "encrypted_api_password", lambda row: row.pk, binary=True), alias, forward=forward
+            HostnamePassword(virtualmin, "encrypted_api_password", lambda row: row.pk, binary=True), alias, forward=forward, lock=True
         ),
         rebind_hostname_passwords(
             HostnamePassword(server, "_api_password_encrypted", lambda row: row.encryption_context_id, binary=False),
             alias,
-            forward=forward,
+            forward=forward, lock=True,
         ),
     ):
         if counts.superseded:

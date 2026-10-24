@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 def _rebind(apps, schema_editor, *, forward):
     model = apps.get_model("common", "EncryptedCredential")
     key = getattr(settings, "CREDENTIAL_VAULT_MASTER_KEY", None)
-    counts = rebind_vault(model, schema_editor.connection.alias, key, forward=forward)
+    # Each row stays locked from its read to its write: a credential stored meanwhile is not overwritten
+    counts = rebind_vault(model, schema_editor.connection.alias, key, forward=forward, lock=True)
     if counts.superseded:
         logger.warning("⚠️ [Vault] %s credential values are in a superseded format: store them again", counts.superseded)
 

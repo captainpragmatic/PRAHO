@@ -79,6 +79,14 @@ class VaultNaturalKeyTests(TestCase):
             row.save()
         self.assertEqual(_read("partial.example.com").unwrap()[1], "kept")
 
+    def test_a_rename_after_a_load_that_deferred_the_identifier_is_refused(self) -> None:
+        _store("unloaded.example.com", "kept")
+        row = EncryptedCredential.objects.only("id", "service_type").get(service_identifier="unloaded.example.com")
+        row.service_identifier = "renamed.example.com"
+        with self.assertRaisesRegex(ValueError, "never renamed"):
+            row.save(update_fields=["service_identifier"])
+        self.assertEqual(_read("unloaded.example.com").unwrap()[1], "kept")
+
     def test_a_rename_kept_across_a_partial_refresh_is_refused(self) -> None:
         row = EncryptedCredential.objects.get(pk=_store("refresh.example.com", "kept").pk)
         row.service_identifier = "renamed.example.com"

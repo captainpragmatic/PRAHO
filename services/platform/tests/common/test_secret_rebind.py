@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
+import time
 from importlib import import_module
 from io import StringIO
 from types import SimpleNamespace
@@ -20,7 +22,7 @@ from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from apps.common.credential_vault import CredentialData, EncryptedCredential, get_credential_vault
 from apps.common.encryption import DecryptionError, KeyringDecryptionError, encrypt_sensitive_data
@@ -177,3 +179,58 @@ class RebindCommandTests(TestCase):
         with self.assertRaisesRegex(CommandError, "Nothing was changed"):
             call_command("rebind_secrets", stdout=StringIO())
         self.assertEqual(bytes(EncryptedCredential.objects.get(pk=row.pk).encrypted_password), before)
+
+
+class MigrationLockTests(TransactionTestCase):
+    """A credential stored while the migration re-binds its row is not overwritten by the migration's copy."""
+
+    def test_a_rotation_during_the_migration_keeps_the_new_secret(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("row locks need PostgreSQL")
+        _credential("node.example.com", "old-secret")
+        rebound, resume = threading.Event(), threading.Event()
+        rebind = import_module("apps.common.secret_rebind").rebind_vault_value
+        errors: list[BaseException] = []
+
+        def pause_after_reading(*args: Any, **kwargs: Any) -> Any:
+            value = rebind(*args, **kwargs)
+            if not rebound.is_set():
+                rebound.set()
+                resume.wait(10)
+            return value
+
+        def migrate() -> None:
+            try:
+                with patch("apps.common.secret_rebind.rebind_vault_value", side_effect=pause_after_reading):
+                    VAULT_MIGRATION.bind_natural_key(apps, EDITOR)
+            except BaseException as error:  # Surfaced below
+                errors.append(error)
+            finally:
+                connection.close()
+
+        def rotate() -> None:
+            try:
+                get_credential_vault().store_credential(
+                    CredentialData(
+                        service_type="virtualmin", service_identifier="node.example.com",
+                        username="user", password="new-secret",
+                    )
+                ).unwrap()
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                connection.close()
+
+        migration = threading.Thread(target=migrate)
+        migration.start()
+        self.assertTrue(rebound.wait(10))
+        rotation = threading.Thread(target=rotate)
+        rotation.start()
+        time.sleep(0.5)  # Unlocked, the rotation commits here, before the migration writes its copy
+        resume.set()
+        migration.join(10)
+        rotation.join(10)
+
+        self.assertFalse(migration.is_alive() or rotation.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(_read("node.example.com").unwrap()[1], "new-secret")

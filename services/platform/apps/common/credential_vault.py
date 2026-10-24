@@ -182,6 +182,10 @@ class EncryptedCredential(models.Model):
             update_fields = kwargs["update_fields"] = list(update_fields)  # Any iterable: read it once
         written = [n for n in self.SECRET_NATURAL_KEY if update_fields is None or n in update_fields]
         stored = self._stored_key or {}
+        unread = [name for name in written if name not in stored]
+        if unread and not self._state.adding:  # Deferred when loaded: compare with what the row holds
+            row = type(self)._base_manager.filter(pk=self.pk).values(*unread).first() or {}
+            stored = {**stored, **{name: str(value) for name, value in row.items()}}
         if any(name in stored and str(getattr(self, name)) != stored[name] for name in written):
             raise NaturalKeyChangeError("A stored credential is never renamed: store one under the new name")
         super().save(*args, **kwargs)
