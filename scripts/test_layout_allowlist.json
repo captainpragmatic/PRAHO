@@ -1,7 +1,16 @@
 {
   "allowed_duplicate_names": [
+    "JSONFormatterRedactionTests.test_a_secret_next_to_a_quote_is_redacted_and_the_line_stays_json",
+    "JSONFormatterRedactionTests.test_a_secret_used_as_a_dictionary_key_is_redacted",
+    "JSONFormatterRedactionTests.test_two_secrets_redacted_to_the_same_key_both_keep_their_values",
     "NotificationSettingsQueryTests.test_warm_cache_enforces_limits_without_queries",
     "ProductSettingsQueryTests.test_warm_cache_enforces_limits_without_queries",
+    "SecretURLFilterRobustnessTests.test_a_cyclic_extra_does_not_raise",
+    "SecretURLFilterRobustnessTests.test_a_record_with_bad_format_arguments_is_kept_not_raised",
+    "SecretURLFilterRobustnessTests.test_a_record_with_nothing_to_redact_keeps_its_message_and_arguments",
+    "SecretURLFilterRobustnessTests.test_a_secret_in_an_argument_is_redacted",
+    "SecretURLFilterRobustnessTests.test_a_tuple_extra_is_redacted_and_stays_a_tuple",
+    "SecretURLFilterRobustnessTests.test_unformattable_arguments_never_reach_stderr_unredacted",
     "SecretURLLoggingTests.test_actual_json_formatter_scrubs_messages_extras_and_exceptions",
     "SecretURLLoggingTests.test_gunicorn_scrubs_request_and_referrer_without_changing_environ",
     "SecretURLLoggingTests.test_ordinary_identifiers_are_preserved",
@@ -45,6 +54,15 @@
     "^UnknownArgumentTests\\.test_"
   ],
   "duplicate_name_reasons": {
+    "JSONFormatterRedactionTests.test_a_secret_next_to_a_quote_is_redacted_and_the_line_stays_json": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "JSONFormatterRedactionTests.test_a_secret_used_as_a_dictionary_key_is_redacted": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "JSONFormatterRedactionTests.test_two_secrets_redacted_to_the_same_key_both_keep_their_values": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_a_cyclic_extra_does_not_raise": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_a_record_with_bad_format_arguments_is_kept_not_raised": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_a_record_with_nothing_to_redact_keeps_its_message_and_arguments": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_a_secret_in_an_argument_is_redacted": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_a_tuple_extra_is_redacted_and_stays_a_tuple": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
+    "SecretURLFilterRobustnessTests.test_unformattable_arguments_never_reach_stderr_unredacted": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
     "SecretURLLoggingTests.test_actual_json_formatter_scrubs_messages_extras_and_exceptions": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
     "SecretURLLoggingTests.test_gunicorn_scrubs_request_and_referrer_without_changing_environ": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute.",
     "SecretURLLoggingTests.test_ordinary_identifiers_are_preserved": "Intentional Platform/Portal copies: each isolated service tests its own logging adapter; both suites execute."

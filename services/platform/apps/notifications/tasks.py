@@ -479,9 +479,10 @@ def _protected_email_logs() -> Q:
     """Logs another model references with on_delete=PROTECT; deleting one raises and stops the batch."""
     protected = Q()
     for relation in EmailLog._meta.related_objects:
-        if relation.on_delete is models.PROTECT:
+        related = relation.related_model
+        if relation.on_delete is models.PROTECT and not isinstance(related, str):  # Never "self" on a reverse relation
             name = relation.field.name
-            referenced = relation.related_model._base_manager.filter(**{f"{name}__isnull": False}).values(name)
+            referenced = related._base_manager.filter(**{f"{name}__isnull": False}).values(name)
             protected |= Q(pk__in=referenced)
     return protected
 

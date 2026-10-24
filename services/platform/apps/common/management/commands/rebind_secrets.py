@@ -14,7 +14,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import DEFAULT_DB_ALIAS, transaction
-from django.db.utils import DatabaseError
+from django.db.utils import DatabaseError, InterfaceError
 
 from apps.common.encryption import KeyringDecryptionError
 from apps.common.secret_rebind import HostnamePassword, RebindAbortedError, rebind_hostname_passwords, rebind_vault
@@ -28,7 +28,7 @@ class Command(BaseCommand):
         try:
             with transaction.atomic(using=alias):  # All three or none
                 results = self._rebind(alias)
-        except (RebindAbortedError, KeyringDecryptionError, DatabaseError) as error:
+        except (RebindAbortedError, KeyringDecryptionError, DatabaseError, InterfaceError) as error:
             raise CommandError(f"Nothing was changed: {error}") from error
         for name, counts in results.items():
             self.stdout.write(f"{name}: {counts}")

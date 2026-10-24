@@ -613,7 +613,7 @@ def reprocess_failed_event(event_pk: UUID | str) -> Result[WebhookProcessingResu
                 event = WebhookEvent.objects.select_for_update(nowait=True).get(pk=event_pk)
         except WebhookEvent.DoesNotExist:
             return Err("Webhook not found")
-        except DatabaseError:
+        except DatabaseError:  # narrow-db-catch: only a nowait lock refusal is busy; a dead connection propagates
             return Err(WEBHOOK_BUSY)
         if event.status != "failed":
             return Err(WEBHOOK_NO_LONGER_FAILED)

@@ -12,7 +12,7 @@ a row renamed in the database no longer serves its secret under the new name.
 import json
 import uuid
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from django.db import models, transaction
 from django.db.models import Model
@@ -100,7 +100,10 @@ def written_fields(kwargs: dict[str, Any], fields: tuple[str, ...]) -> tuple[lis
     return listed, [field for field in fields if field in listed]
 
 
-class NaturalKeyQuerySet(models.QuerySet[Any]):
+_ModelT = TypeVar("_ModelT", bound=Model)
+
+
+class NaturalKeyQuerySet(models.QuerySet[_ModelT]):
     """Refuses a bulk write of a SECRET_NATURAL_KEY field: it skips save(), so nothing would re-bind the secret."""
 
     def _refuse(self, fields: Iterable[str]) -> None:
@@ -116,7 +119,7 @@ class NaturalKeyQuerySet(models.QuerySet[Any]):
         self._refuse(kwargs)
         return super().update(**kwargs)
 
-    def bulk_update(self, objs: Iterable[Model], fields: Iterable[str], *args: Any, **kwargs: Any) -> int:
+    def bulk_update(self, objs: Iterable[_ModelT], fields: Iterable[str], *args: Any, **kwargs: Any) -> int:
         fields = list(fields)  # Django accepts any iterable: read it once
         self._refuse(fields)
         return super().bulk_update(objs, fields, *args, **kwargs)
