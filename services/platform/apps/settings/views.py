@@ -900,7 +900,7 @@ def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
             from apps.billing.efactura.token_storage import OAuthToken  # noqa: PLC0415  # ADR-0007
 
             cui = efactura_settings.company_cui
-            token = OAuthToken.objects.get_valid_token(cui) if cui else None
+            token = OAuthToken.objects.get_valid_token(cui, efactura_settings.environment) if cui else None
             ok = token is not None
             message = _("Active ANAF OAuth token present") if ok else _("No valid ANAF OAuth token — authorize first")
         else:
