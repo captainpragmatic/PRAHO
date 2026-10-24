@@ -146,6 +146,14 @@ class PaginationSyncTests(TestCase):
         self.assertGreaterEqual(len(links), 3)
         self.assertEqual({r["own"] for r in links}, {"#r:replace"})
 
+    def test_gdpr_pages_pass_the_regions_sync(self) -> None:
+        from pathlib import Path  # noqa: PLC0415
+
+        from django.conf import settings  # noqa: PLC0415
+
+        source = (Path(settings.BASE_DIR) / "templates/audit/partials/gdpr_export_requests_list.html").read_text()
+        self.assertIn("htmx_sync='#gdpr-results:replace'", source)
+
     def test_billing_pages_pass_the_regions_sync(self) -> None:
         from pathlib import Path  # noqa: PLC0415
 
