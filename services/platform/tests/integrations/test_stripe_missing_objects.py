@@ -32,10 +32,8 @@ class StripeMissingObjectTests(TestCase):
                 },
             ),
             ("customer.created", {"id": "cus_missing", "email": "missing@example.com"}),
-            (
-                "charge.dispute.created",
-                {"id": "dp_missing", "payment_intent": "pi_missing", "amount": 100, "currency": "ron"},
-            ),
+            # A dispute for a missing payment is not here: no redelivery can fix it, so it is acknowledged
+            # and escalated (test_stripe_unfixable_outcomes).
         )
         for index, (kind, data) in enumerate(cases):
             with self.subTest(kind=kind):

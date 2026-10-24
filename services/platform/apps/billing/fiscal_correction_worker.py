@@ -598,6 +598,7 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
     of a provider note. A provider fetch the rate gate defers raises, and is retried like a failed send.
     """
     from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import
+    from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415  # ADR-0007 cross-app import
     from apps.notifications.services import EmailService  # noqa: PLC0415  # ADR-0007 cross-app import
 
     from .issuers.documents import get_invoice_pdf_bytes  # noqa: PLC0415
@@ -629,7 +630,8 @@ def _send_credit_note_email(note: Invoice) -> tuple[bool, str]:
         locale=get_customer_locale(customer),
         customer=customer,
         priority="high",
-        attachments=[(f"storno_{note.number}.pdf", pdf.unwrap(), "application/pdf")],
+        # By reference, so a retry of a failed send can make the same PDF again (checked against the first).
+        attachments=[AttachmentRef("invoice_pdf", str(note.pk))],
         async_send=False,
     )
     return bool(result.success), str(result.error or "")

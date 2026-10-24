@@ -32,7 +32,18 @@ PRODUCTION_KEYS = (
 )
 PROD_ENV = "DJANGO_SETTINGS_MODULE=config.settings.prod\n" + PRODUCTION_KEYS
 STAGING_ENV = "DJANGO_SETTINGS_MODULE=config.settings.staging\n"
+STACKS = ("single-server", "platform-only", "portal-only", "container-service")
+
+
+def _required(stack: str) -> set[str]:
+    """What a stack's compose file requires (${NAME:?...} or ${NAME?...}); $$ is a literal dollar."""
+    text = (PROJECT_ROOT / f"deploy/docker-compose.{stack}.yml").read_text()
+    lines = [line.replace("$$", "") for line in text.splitlines() if not line.lstrip().startswith("#")]
+    return set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?\?", "\n".join(lines)))
+
+
 RECORDED_ENV = (
+    *sorted(set().union(*map(_required, STACKS)) - {"PRAHO_ENV_FILE"}),
     "PRAHO_ENV_FILE",
     "DB_HOST",
     "DB_SSLMODE",
@@ -65,6 +76,14 @@ SHARED_HOST_ENV = (
     "PORTAL_ID=portal-001\nPORTAL_HMAC_SECRET=portal-signing-key\n"
     'PORTAL_HMAC_CREDENTIALS=\'{"portal-001":"portal-signing-key"}\'\n'
 )
+# A production file holding everything every stack requires.
+PROD_STACK_ENV = SHARED_HOST_ENV + PRODUCTION_KEYS
+# The portal credentials the stacks started requiring with #751.
+NEWER_PORTAL_KEYS = ("PORTAL_HMAC_CREDENTIALS=", "PORTAL_ID=", "PORTAL_HMAC_SECRET=", "PORTAL_DJANGO_SECRET_KEY=")
+
+
+def _without(text: str, prefixes: tuple[str, ...]) -> str:
+    return "".join(line + "\n" for line in text.splitlines() if not line.startswith(prefixes))
 
 DOCKER_STUB = """#!{python}
 import json, os, sys
@@ -374,6 +393,22 @@ class TestDeployScript:
         assert any(_subcommand(c)[:1] == ["up"] for c in project.compose_calls())
 
     @pytest.mark.integration
+    @pytest.mark.parametrize("stack", ["single-server", "platform-only"])
+    def test_secrets_are_rebound_after_every_container_runs_the_new_release(self, project: Project, stack: str) -> None:
+        # A container of the previous release can write a secret under the previous binding while the new one
+        # migrates; rebind_secrets runs once `up --wait` has every service on the new release (#751, M19).
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("deploy.sh", stack)
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = project.compose_calls()
+        subcommands = [_subcommand(c) for c in calls]
+        up = next(i for i, sub in enumerate(subcommands) if sub[:1] == ["up"])
+        rebind = [i for i, sub in enumerate(subcommands) if "rebind_secrets" in sub]
+        assert len(rebind) == 1, subcommands
+        assert up < rebind[0]
+        assert subcommands[rebind[0]][:3] == ["exec", "-T", "platform"]
+
+    @pytest.mark.integration
     @pytest.mark.parametrize(("flag", "subcommand"), [("--stop", "down"), ("--logs", "logs")])
     def test_stop_and_logs_read_the_env_file_without_the_key_check(
         self, project: Project, flag: str, subcommand: str
@@ -386,10 +421,57 @@ class TestDeployScript:
         assert _subcommand(call)[0] == subcommand
 
 
+class TestStopAndLogsWithAnOlderFile:
+    """Compose interpolates every required variable for `down` and `logs` too. An env file from before a
+    stack started requiring a variable must still stop it and show its logs; no container starts."""
+
+    def test_each_stacks_required_list_is_pinned(self) -> None:
+        assert {stack: len(_required(stack)) for stack in STACKS} == {
+            "single-server": 8,
+            "platform-only": 6,
+            "portal-only": 7,
+            "container-service": 14,
+        }
+        assert "PORTAL_HMAC_CREDENTIALS" in _required("single-server")
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("contents", ["older example", "settings only"])
+    @pytest.mark.parametrize("flag", ["--stop", "--logs"])
+    @pytest.mark.parametrize("stack", STACKS)
+    def test_every_required_variable_is_set_and_no_real_value_is_replaced(
+        self, project: Project, stack: str, flag: str, contents: str
+    ) -> None:
+        if contents == "older example":
+            text = _without(_filled_example(".env.example.prod"), NEWER_PORTAL_KEYS)
+        else:
+            text = "DJANGO_SETTINGS_MODULE=config.settings.prod\n"
+        project.write_env(".env.prod", text)
+        result = project.run("deploy.sh", stack, flag)
+        assert result.returncode == 0, result.stdout + result.stderr
+        (call,) = project.compose_calls()
+        declared = {key: line.split("=", 1)[1] for key, line in _declarations(text).items()}
+        for name in sorted(_required(stack) - {"PRAHO_ENV_FILE"}):
+            if declared.get(name):
+                assert call["env"][name] is None, f"{name}: the file's own value is kept"
+            else:
+                assert call["env"][name], f"{name} is set for {flag}"
+        assert call["env"]["PRAHO_ENV_FILE"]
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("flag", ["--stop", "--logs"])
+    def test_an_empty_shell_value_is_no_value(self, project: Project, flag: str) -> None:
+        # Compose takes an exported shell variable over the env file even when it is empty.
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("deploy.sh", "single-server", flag, PORTAL_ID="")
+        assert result.returncode == 0, result.stdout + result.stderr
+        (call,) = project.compose_calls()
+        assert call["env"]["PORTAL_ID"]
+
+
 class TestRollbackAndRestore:
     @pytest.mark.integration
     def test_rollback_pins_the_version_without_editing_the_env_file(self, project: Project) -> None:
-        env_file = project.write_env(".env.prod", PROD_ENV + "VERSION=v1.0.0\n")
+        env_file = project.write_env(".env.prod", PROD_STACK_ENV + "VERSION=v1.0.0\n")
         before = env_file.read_bytes()
         result = project.run("rollback.sh", "version", "v1.2.3", stdin="yes\n")
         assert result.returncode == 0, result.stdout + result.stderr
@@ -448,6 +530,28 @@ class TestRollbackAndRestore:
         assert result.returncode != 0
         assert "DJANGO_ENCRYPTION_KEY" in result.stderr
         # Nothing stopped, dropped, pulled or replaced.
+        assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
+
+    @pytest.mark.integration
+    def test_rollback_refuses_a_file_the_stack_cannot_interpolate_before_touching_anything(
+        self, project: Project
+    ) -> None:
+        # Rollback starts containers, so a placeholder would reach them: a pre-#751 platform parses any
+        # PORTAL_HMAC_CREDENTIALS value as JSON and would refuse to boot. It names what is missing instead.
+        project.write_env(".env.prod", _without(PROD_STACK_ENV, NEWER_PORTAL_KEYS))
+        result = project.run("rollback.sh", "version", "v1.2.3", stdin="yes\n")
+        assert result.returncode != 0
+        for name in ("PORTAL_HMAC_CREDENTIALS", "PORTAL_HMAC_SECRET", "PORTAL_ID"):
+            assert name in result.stderr
+        assert "Continue?" not in result.stdout
+        assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
+
+    @pytest.mark.integration
+    def test_rollback_treats_an_empty_shell_value_as_missing(self, project: Project) -> None:
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("rollback.sh", "version", "v1.2.3", stdin="yes\n", PORTAL_ID="")
+        assert result.returncode != 0
+        assert "PORTAL_ID" in result.stderr
         assert [c["argv"][0] for c in project.calls() if c["argv"][0] in ("compose", "exec", "stop")] == []
 
     @pytest.mark.integration

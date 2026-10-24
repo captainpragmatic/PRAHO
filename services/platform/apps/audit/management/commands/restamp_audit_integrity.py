@@ -76,7 +76,12 @@ class Command(BaseCommand):
                 break
 
             with transaction.atomic(), audit_mutation_allowed("integrity_restamp"):
-                for event in batch:
+                for stale in batch:
+                    # Stamped from the row as it stands under the chain head and event locks, never from the
+                    # batch read: an anonymization committed since keeps its scrub.
+                    event = AuditIntegrityService.lock_for_evidence_write(stale.pk)
+                    if event is None:
+                        continue
                     metadata = dict(event.metadata) if isinstance(event.metadata, dict) else {}
                     metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
                     AuditEvent.objects.filter(pk=event.pk).update(metadata=metadata)

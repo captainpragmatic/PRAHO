@@ -124,7 +124,7 @@ class Command(BaseCommand):
         """Migrate environment variables to vault"""
         self.stdout.write("🔄 Migrating environment variables to vault...")
 
-        migrated_count = 0
+        outcomes = {"migrated": 0, "skipped": 0, "failed": 0}
 
         # Migrate global Virtualmin credentials
         global_username = getattr(settings, "VIRTUALMIN_USERNAME", None)
@@ -140,8 +140,7 @@ class Command(BaseCommand):
                 description="Global Virtualmin credentials",
                 force=force,
             )
-            self._migrate_credential(migration_cred)
-            migrated_count += 1
+            outcomes[self._migrate_credential(migration_cred)] += 1
 
         # Migrate multi-path auth credentials
         master_username = getattr(settings, "VIRTUALMIN_MASTER_USERNAME", None)
@@ -157,8 +156,7 @@ class Command(BaseCommand):
                 description="Virtualmin master admin credentials",
                 force=force,
             )
-            self._migrate_credential(migration_cred)
-            migrated_count += 1
+            outcomes[self._migrate_credential(migration_cred)] += 1
 
         # Migrate SSH credentials
         ssh_username = getattr(settings, "VIRTUALMIN_SSH_USERNAME", None)
@@ -174,8 +172,7 @@ class Command(BaseCommand):
                 description="Virtualmin SSH credentials",
                 force=force,
             )
-            self._migrate_credential(migration_cred)
-            migrated_count += 1
+            outcomes[self._migrate_credential(migration_cred)] += 1
 
         # Migrate per-server credentials
         for server in VirtualminServer.objects.all():
@@ -192,48 +189,57 @@ class Command(BaseCommand):
                             description=f"Server {server.hostname} credentials",
                             force=force,
                         )
-                        self._migrate_credential(migration_cred)
-                        migrated_count += 1
+                        outcomes[self._migrate_credential(migration_cred)] += 1
                 except Exception as e:
+                    outcomes["failed"] += 1
                     self.stdout.write(self.style.WARNING(f"⚠️ Failed to migrate {server.hostname}: {e}"))
 
-        self.stdout.write(self.style.SUCCESS(f"✅ Migrated {migrated_count} credentials to vault"))
+        self.stdout.write(self.style.SUCCESS(f"✅ Migrated {outcomes['migrated']} credentials to vault"))
 
-        if migrated_count > 0:
+        if outcomes["migrated"] > 0:
             self.stdout.write(
                 self.style.WARNING("⚠️ Remember to remove environment variables after testing vault integration!")
             )
+        if outcomes["failed"]:
+            raise CommandError(f"{outcomes['failed']} credential(s) were not migrated; see the messages above")
 
-    def _migrate_credential(self, migration_cred: MigrationCredential) -> None:
-        """Migrate a single credential to vault"""
+    def _migrate_credential(self, migration_cred: MigrationCredential) -> str:
+        """Migrate a single credential to vault: "migrated", "skipped" (already there) or "failed".
 
-        # Check if credential already exists
-        existing = migration_cred.vault.get_credential(
-            service_type=migration_cred.service_type,
-            service_identifier=migration_cred.identifier,
-            reason="Migration check",
-        )
+        A stored credential that cannot be read is never taken as absent: without --force it is refused, not
+        overwritten from the environment (it may be newer than the bootstrap value, or bound to another name).
+        """
+        identity = {"service_type": migration_cred.service_type, "service_identifier": migration_cred.identifier}
+        exists = EncryptedCredential.objects.filter(**identity).exists()
+        if exists and not migration_cred.force:
+            existing = migration_cred.vault.get_credential(**identity, reason="Migration check")
+            if existing.is_ok():
+                self.stdout.write(self.style.WARNING(f"⚠️ Credential already exists: {migration_cred.description}"))
+                return "skipped"
+            self.stdout.write(
+                self.style.ERROR(
+                    f"❌ {migration_cred.description}: a stored credential cannot be read; "
+                    "rerun with --force to replace it"
+                )
+            )
+            return "failed"
 
-        if existing.is_ok() and not migration_cred.force:
-            self.stdout.write(self.style.WARNING(f"⚠️ Credential already exists: {migration_cred.description}"))
-            return
-
-        # Store credential in vault
+        # Without --force only a new row is written: one created meanwhile is not overwritten
         credential_data = CredentialData(
             service_type=migration_cred.service_type,
             service_identifier=migration_cred.identifier,
             username=migration_cred.username,
             password=migration_cred.password,
             reason="Environment variable migration",
+            create_only=not migration_cred.force,
         )
         result = migration_cred.vault.store_credential(credential_data)
 
         if result.is_ok():
             self.stdout.write(self.style.SUCCESS(f"✅ Migrated: {migration_cred.description}"))
-        else:
-            self.stdout.write(
-                self.style.ERROR(f"❌ Failed to migrate {migration_cred.description}: {result.unwrap_err()}")
-            )
+            return "migrated"
+        self.stdout.write(self.style.ERROR(f"❌ Failed to migrate {migration_cred.description}: {result.unwrap_err()}"))
+        return "failed"
 
     def _show_vault_status(self, vault: CredentialVault) -> None:
         """Show current vault status"""

@@ -118,7 +118,7 @@ class PersistentSecretStorageTests(TestCase):
     def test_email_encryption_failure_cannot_persist_plaintext(self) -> None:
         before = EmailLog.objects.count()
         with (
-            patch("apps.notifications.models.encrypt_model_secret", side_effect=EncryptionError("unavailable")),
+            patch("apps.notifications.models.seal_model_secret", side_effect=EncryptionError("unavailable")),
             self.assertRaises(EncryptionError),
         ):
             EmailLog.objects.create(to_addr="test@example.com", subject="test", body_text="secret")

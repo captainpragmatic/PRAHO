@@ -41,7 +41,7 @@ class CollectedAmountContractTests(TestCase):
         success, message = StripeWebhookProcessor().handle_payment_intent_event(
             "payment_intent.succeeded", {"data": {"object": facts}}
         )
-        self.assertFalse(success)
+        self.assertTrue(success, "acknowledged: no redelivery can fix a collected-amount mismatch")
         self.assertIn("amount mismatch", message)
         self.payment.refresh_from_db()
         self.invoice.refresh_from_db()

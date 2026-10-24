@@ -40,7 +40,9 @@ from django.core.exceptions import ImproperlyConfigured
 # Reject anything outside this charset BEFORE the value reaches a cache key (nonce/rate-limit
 # keys embed portal_id). fullmatch (not a ``$``-anchored search) so a trailing newline can't
 # slip through — Python's ``$`` matches before a final ``\n``.
-PORTAL_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+PORTAL_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")  # The portal keeps a copy: apps/common/signing.py
+# A deployed portal key's minimum length (the platform secret's rule); the portal applies the same.
+MIN_DEPLOYED_SECRET_LENGTH = 32
 NONCE_CHARSET_RE = re.compile(r"[A-Za-z0-9._-]+")
 SIGNATURE_RE = re.compile(r"[0-9a-f]{64}")  # lowercase hex sha256 hexdigest
 
@@ -121,9 +123,20 @@ def validate_at_startup() -> None:
     registry = get_registry()  # raises on malformed JSON / shape
 
     if getattr(settings, "PORTAL_HMAC_REQUIRE_ISOLATION", False):
+        platform_secret = getattr(settings, "PLATFORM_API_SECRET", None)
         owners: dict[str, str] = {}
         for portal_id, keyring in registry.items():
             for secret in keyring:
+                # Every key in a keyring, rotation entries included: a weak or reused key is as good as any.
+                if len(secret) < MIN_DEPLOYED_SECRET_LENGTH:
+                    raise ImproperlyConfigured(
+                        f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] keys must be at least "
+                        f"{MIN_DEPLOYED_SECRET_LENGTH} characters"
+                    )
+                if platform_secret and secret == platform_secret:
+                    raise ImproperlyConfigured(
+                        f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] must not reuse PLATFORM_API_SECRET"
+                    )
                 if secret in owners and owners[secret] != portal_id:
                     raise ImproperlyConfigured("PORTAL_HMAC_CREDENTIALS must use distinct keys for each Portal")
                 owners[secret] = portal_id

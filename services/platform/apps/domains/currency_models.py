@@ -117,7 +117,7 @@ class DomainCurrencyTransition(models.Model):
             email.to_addr != self.notice_recipient
             or email.subject != self.notice_subject
             or email.customer_id != self.domain.customer_id
-            or email.get_decrypted_body_text() != self.notice_body
+            or not email.body_text_matches(self.notice_body)
             or email.template_key != f"domain_currency_notice:{self.pk}"
             or self.notice_attempted_at is None
             or email.sent_at < self.notice_attempted_at

@@ -330,6 +330,30 @@ class VirtualminAuthenticationManager:
         except Exception as e:
             return Err(VirtualminAPIError(f"ACL request failed: {e!s}", self.server.hostname, program))
 
+    def _node_credential_resolves(self, method: AuthMethod, program: str) -> Result[None, AuthFailure]:
+        """A privileged method runs only for a node whose own credential resolves (#751 follow-up, M19).
+
+        The node's credential is bound to its hostname: a hostname changed in the database leaves it
+        unreadable. Checking it first keeps the global master and SSH credentials from going to such a host,
+        whatever order the methods are tried in (a cached ordering, the health check).
+        """
+        from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_credential_vault,
+        )
+
+        try:
+            vault = get_credential_vault()
+        except Exception:
+            vault = None  # As the ACL path: the server field alone
+        creds = resolve_server_credentials(self.server, vault=vault, reason=f"{method.value} gate: {program}")
+        if creds.is_err():
+            return Err(
+                ACLCredentialResolutionError(
+                    f"No usable credential for {self.server.hostname}; refusing {method.value}: {creds.unwrap_err()}"
+                )
+            )
+        return Ok(None)
+
     def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using master admin credentials via proxy service"""
         try:
@@ -339,6 +363,9 @@ class VirtualminAuthenticationManager:
 
             if not master_username or not master_password:
                 return Err(AuthMethodUnavailableError("Master admin credentials not configured"))
+            gate = self._node_credential_resolves(AuthMethod.MASTER_PROXY, program)
+            if gate.is_err():
+                return Err(gate.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
 
             # Use master credentials with same gateway
             config = VirtualminConfig.from_credentials(
@@ -370,6 +397,9 @@ class VirtualminAuthenticationManager:
     def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using SSH + sudo to virtualmin CLI"""
         try:
+            gate = self._node_credential_resolves(AuthMethod.SSH_SUDO, program)
+            if gate.is_err():
+                return Err(gate.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
             # Build virtualmin CLI command
             cmd_parts = ["/usr/sbin/virtualmin", program]
 

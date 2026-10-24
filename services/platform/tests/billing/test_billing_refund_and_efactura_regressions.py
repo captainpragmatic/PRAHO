@@ -168,7 +168,10 @@ class ProformaEmailTests(TestCase):
             call_kwargs = mock_send.call_args
             attachments = call_kwargs.kwargs.get("attachments") or call_kwargs[1].get("attachments")
             self.assertEqual(len(attachments), 1)
-            self.assertIn("proforma_PF-002.pdf", attachments[0][0])
+            # By reference: the PDF is made at send time (and again on a retry), from this proforma.
+            self.assertEqual(
+                (attachments[0].source_type, attachments[0].source_id), ("proforma_pdf", str(mock_proforma.pk))
+            )
 
     def test_send_email_pdf_failure_returns_false(self):
         """PDF generation failure → returns False, doesn't raise"""

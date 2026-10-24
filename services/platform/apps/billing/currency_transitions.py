@@ -279,19 +279,21 @@ def _accept_logged_notice(offer: SubscriptionCurrencyTransition) -> bool:
     """Recover accepted delivery even if the process died before linking the log."""
     from apps.notifications.models import EmailLog  # noqa: PLC0415  # ADR-0007
 
-    log = offer.notice_email
-    if log is None or log.status not in {"sent", "delivered"}:
-        log = (
-            EmailLog.objects.filter(
-                template_key=f"subscription_currency_notice:{offer.pk}",
-                status__in=["sent", "delivered"],
-                customer_id=offer.subscription.customer_id,
-                to_addr=offer.notice_recipient,
-                subject=offer.notice_subject,
-            )
-            .order_by("sent_at")
-            .first()
-        )
+    # The linked email first, then every accepted one logged for this offer. One no key can decrypt is
+    # skipped, so it never hides a later proof; the first readable one decides, and a readable one with a
+    # different body is still refused below (a second notice must not follow a different promise).
+    linked = offer.notice_email
+    candidates = [linked] if linked is not None and linked.status in {"sent", "delivered"} else []
+    candidates.extend(
+        EmailLog.objects.filter(
+            template_key=f"subscription_currency_notice:{offer.pk}",
+            status__in=["sent", "delivered"],
+            customer_id=offer.subscription.customer_id,
+            to_addr=offer.notice_recipient,
+            subject=offer.notice_subject,
+        ).order_by("sent_at")
+    )
+    log = next((candidate for candidate in candidates if candidate.body_text_readable()), None)
     if log is None:
         return False
     offer.notice_email = log

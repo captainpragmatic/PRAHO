@@ -1,0 +1,52 @@
+"""A partial index for chain recovery's scan of pending events, PostgreSQL only (#751 follow-up, M16).
+
+Recovery runs every minute and selects events whose metadata marks them pending a chain link, oldest
+first. Without this index every run scanned the whole audit table. The predicate matches the ORM's
+``metadata__chain_link_pending=True`` lookup so the planner can use it. Vendor-gated like 0003: the models
+also run on SQLite, which gets nothing. Built CONCURRENTLY, outside a transaction: a native deploy migrates
+with the services running, and a plain CREATE INDEX would block every audit write for the table scan.
+A cancelled or failed concurrent build leaves an invalid index behind, which IF NOT EXISTS would accept;
+a retry drops it and builds it again.
+"""
+
+from typing import Any
+
+from django.db import migrations
+
+
+def apply_chain_pending_index(apps: Any, schema_editor: Any) -> None:
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass('audit_events_chain_pending_idx')"
+        )
+        existing = cursor.fetchone()
+        if existing is not None and not existing[0]:
+            cursor.execute("DROP INDEX CONCURRENTLY audit_events_chain_pending_idx;")
+        cursor.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS audit_events_chain_pending_idx
+            ON audit_events (timestamp, id)
+            WHERE (metadata -> 'chain_link_pending') = 'true'::jsonb;
+            """
+        )
+
+
+def reverse_chain_pending_index(apps: Any, schema_editor: Any) -> None:
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("DROP INDEX CONCURRENTLY IF EXISTS audit_events_chain_pending_idx;")
+
+
+class Migration(migrations.Migration):
+    atomic = False  # CONCURRENTLY cannot run inside a transaction
+
+    dependencies = [
+        ("audit", "0014_email_provider_blocked_action"),
+    ]
+
+    operations = [
+        migrations.RunPython(apply_chain_pending_index, reverse_chain_pending_index),
+    ]

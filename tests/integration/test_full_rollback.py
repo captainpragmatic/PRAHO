@@ -14,11 +14,13 @@ from deploy.scripts.backup_manifest import create, manifest_path
 from tests.integration.test_deploy_scripts import (
     DOCKER_STUB,
     MEDIA_GZIP,
-    PROD_ENV,
+    NEWER_PORTAL_KEYS,
+    PROD_STACK_ENV,
     RECORDED_ENV,
     SQL_DUMP,
     Project,
     _subcommand,
+    _without,
 )
 
 EXTRA = """if argv[:2] == ["image", "inspect"]:
@@ -51,7 +53,7 @@ elif argv[:1] == ["exec"] and "SHOW server_version_num" in argv:
 elif argv[:1] == ["inspect"]:""",
     )
     (tmp_path / "bin/docker").write_text(source)
-    project.write_env(".env.prod", PROD_ENV)
+    project.write_env(".env.prod", PROD_STACK_ENV)
     backups = tmp_path / "backups"
     backups.mkdir()
     dump = backups / "praho_backup_selected.sql.gz"
@@ -161,3 +163,14 @@ def test_compose_parser_emits_only_image_references() -> None:
     )
     assert completed.stdout.splitlines() == ["platform=praho-platform:v1.0.0", "portal=praho-portal:v1.0.0"]
     assert "must-stay-in-process" not in completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize("topology", ["single-server", "platform-only"])
+def test_a_file_the_stack_cannot_interpolate_is_refused_before_anything_runs(tmp_path: Path, topology: str) -> None:
+    project, dump = scenario(tmp_path)
+    project.write_env(".env.prod", _without(PROD_STACK_ENV, NEWER_PORTAL_KEYS))
+    host = {"DOCKER_ABSENT_PORTAL": "1"} if topology == "platform-only" else {}
+    completed = run(project, dump, "--topology", topology, **host)
+    assert completed.returncode != 0
+    assert "PORTAL_HMAC_CREDENTIALS" in completed.stderr
+    assert project.calls() == []

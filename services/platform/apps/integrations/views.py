@@ -16,7 +16,13 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
 
 from .models import WebhookEvent
-from .webhooks.base import get_webhook_processor
+from .webhooks.base import (
+    WEBHOOK_BUSY,
+    WEBHOOK_CONFIGURATION_ERROR,
+    WEBHOOK_NO_LONGER_FAILED,
+    get_webhook_processor,
+    reprocess_failed_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +159,10 @@ class WebhookView(View):
         if success:
             logger.info(f"✅ {self.source_name} webhook processed: {message}")
             return Ok(JsonResponse({"status": "success", "message": message, "webhook_id": webhook_id}))
-        else:
-            logger.error(f"❌ {self.source_name} webhook failed: {message}")
-            return Ok(JsonResponse({"status": "error", "message": message, "webhook_id": webhook_id}, status=400))
+        if message == WEBHOOK_CONFIGURATION_ERROR:
+            return Ok(JsonResponse({"status": "error", "message": message}, status=503))
+        logger.error(f"❌ {self.source_name} webhook failed: {message}")
+        return Ok(JsonResponse({"status": "error", "message": message, "webhook_id": webhook_id}, status=400))
 
     def _create_error_response(self, error_message: str) -> HttpResponse:
         """Create a standardized error response."""
@@ -369,23 +376,24 @@ def _get_webhook_processor(webhook_event: WebhookEvent) -> Result[tuple[WebhookE
 
 
 def _process_webhook_retry(context: tuple[WebhookEvent, Any]) -> Result[JsonResponse, str]:
-    """Process the webhook retry and update status."""
-    webhook_event, processor = context
+    """Retry the event under its lock, in the executor's savepoint (reprocess_failed_event)."""
+    webhook_event, _processor = context
 
-    success, message = processor.handle_event(webhook_event)
-
-    if success:
-        webhook_event.mark_processed()
-        return Ok(JsonResponse({"status": "success", "message": f"Webhook retried successfully: {message}"}))
-    else:
-        webhook_event.mark_failed(message)
-        return Ok(JsonResponse({"status": "error", "message": f"Webhook retry failed: {message}"}, status=400))
+    outcome = reprocess_failed_event(webhook_event.pk)
+    if outcome.is_err():
+        return Err(outcome.unwrap_err())
+    result = outcome.unwrap()
+    if result.success:
+        return Ok(JsonResponse({"status": "success", "message": f"Webhook retried successfully: {result.message}"}))
+    return Ok(JsonResponse({"status": "error", "message": f"Webhook retry failed: {result.message}"}, status=400))
 
 
 def _create_retry_error_response(error_message: str) -> JsonResponse:
     """Create appropriate error response for webhook retry failures."""
     if error_message == "Webhook not found":
         return JsonResponse({"error": error_message}, status=404)
+    if error_message in (WEBHOOK_BUSY, WEBHOOK_NO_LONGER_FAILED):
+        return JsonResponse({"error": error_message}, status=409)
     elif error_message.startswith(("Cannot retry webhook", "No processor found")):
         return JsonResponse({"error": error_message}, status=400)
     else:

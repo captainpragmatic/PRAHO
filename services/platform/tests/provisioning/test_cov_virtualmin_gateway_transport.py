@@ -277,8 +277,10 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
                 self.assertEqual(explicit_rejection(raw), expected)
 
     def test_corrupt_server_ciphertext_returns_sanitized_auth_error(self) -> None:
-        self.gateway.server.encrypted_api_password = b"invalid-ciphertext"
-        self.gateway.server.save(update_fields=["encrypted_api_password"])
+        # Corrupted in the database: save() refuses to store ciphertext that does not read (#751 follow-up)
+        type(self.gateway.server)._base_manager.filter(pk=self.gateway.server.pk).update(
+            encrypted_api_password=b"invalid-ciphertext"
+        )
         self.gateway.server.refresh_from_db()
         result = self.gateway.call("info")
         self.assertIsInstance(result, Err)

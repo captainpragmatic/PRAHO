@@ -19,7 +19,12 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import (
+    NaturalKeyQuerySet,
+    NaturalKeySecretsMixin,
+    decrypt_model_secret,
+    encrypt_model_secret,
+)
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
@@ -55,7 +60,7 @@ def without_secrets(value: Any) -> Any:
     return value
 
 
-class VirtualminServer(models.Model):
+class VirtualminServer(NaturalKeySecretsMixin, models.Model):
     """
     Virtualmin server instance for hosting services.
 
@@ -69,6 +74,11 @@ class VirtualminServer(models.Model):
         ("disabled", _("Disabled")),
         ("failed", _("Failed")),
     )
+
+    # The API password is bound to the hostname it authenticates to: a hostname changed in the database
+    # leaves it unreadable instead of sending it to another host (#751 follow-up, M19).
+    SECRET_NATURAL_KEY: ClassVar[tuple[str, ...]] = ("hostname",)
+    BOUND_SECRET_FIELDS: ClassVar[tuple[str, ...]] = ("encrypted_api_password",)
 
     # Server identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -122,6 +132,8 @@ class VirtualminServer(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = models.Manager.from_queryset(NaturalKeyQuerySet)()
 
     class Meta:
         db_table = "provisioning_virtualmin_servers"

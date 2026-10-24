@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import smtplib
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID, uuid4
 
 from anymail.exceptions import (
     AnymailAPIError,
@@ -16,12 +19,22 @@ from anymail.exceptions import (
 )
 from django.core.mail import BadHeaderError
 from django.db import transaction
+from django.utils import timezone
 
+from apps.common.transactions import best_effort_atomic
 from apps.notifications.models import EmailLog
 from apps.notifications.services import validate_email_log_subject
 from apps.settings.services import SettingsService, get_default_from_email
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_MAX_RETRIES = 3
+# How long a claim holds. The provider send is bounded well below it (EMAIL_TIMEOUT), and the worker
+# renews it immediately before the provider call, so a live sender is never reclaimed.
+CLAIM_LEASE = timedelta(minutes=10)
+# A row left `sending` before claims had leases (or by a crash before its lease was written) counts as
+# abandoned only this long after it was created.
+UNLEASED_SENDING_GRACE = timedelta(minutes=15)
 SMTP_PERMANENT_FAILURE = 500
 RETRYABLE_CLIENT_STATUSES = {
     HTTPStatus.REQUEST_TIMEOUT,
@@ -56,24 +69,226 @@ def retry_index(row: EmailLog) -> int:
     return max(index, row.delivery_attempts)
 
 
+def max_retries() -> int:
+    """The one retry budget: a message may be attempted `max_retries() + 1` times in all."""
+    return max(0, SettingsService.get_integer_setting("notifications.email_max_retries", DEFAULT_MAX_RETRIES))
+
+
+def retry_delay(attempts: int) -> timedelta:
+    """The backoff before the next attempt, from settings.EMAIL_RETRY (the one place it is computed)."""
+    from django.conf import settings  # noqa: PLC0415  # Read at call time; tests override it
+
+    config = getattr(settings, "EMAIL_RETRY", {})
+    base = config.get("RETRY_DELAY_SECONDS", 60)
+    return timedelta(seconds=base * (2**attempts) if config.get("EXPONENTIAL_BACKOFF", True) else base)
+
+
+def budget_spent(row: EmailLog) -> bool:
+    return retry_index(row) >= max_retries() + 1
+
+
+def _release(row: EmailLog) -> list[str]:
+    row.claim_token = None
+    row.lease_until = None
+    return ["claim_token", "lease_until"]
+
+
 def mark_permanent(row: EmailLog, reason: str) -> None:
+    """A terminal failure. The caller holds the row lock (a status save keeps the audit signal)."""
     response = row.provider_response if isinstance(row.provider_response, dict) else {}
     row.status = "failed"
     row.provider_response = {**response, "final_error": reason, "permanent_failure": True}
-    row.save(update_fields=["status", "provider_response"])
+    row.next_attempt_at = None
+    row.save(update_fields=["status", "provider_response", "next_attempt_at", *_release(row)])
+
+
+# Errors the operator must fix (credentials, configuration, the provider account) block sending instead of
+# failing the message: it waits queued with this backoff, its attempt given back, until the fix lands. A
+# message older than the block limit is given up, so a block never keeps one forever.
+OPERATOR_BACKOFF = timedelta(minutes=30)
+OPERATOR_BLOCK_LIMIT = timedelta(days=3)
+OPERATOR_ALERT_WINDOW = timedelta(hours=6)
+OPERATOR_ALERT_ACTION = "email_provider_blocked"
+SMTP_OPERATOR_CODES = frozenset({530, 534, 535})  # Authentication required, mechanism refused, credentials refused
+AWS_OPERATOR_ERROR_CODES = frozenset(
+    {
+        "MailFromDomainNotVerifiedException",
+        "ConfigurationSetDoesNotExistException",
+        "AccountSuspendedException",
+        "SendingPausedException",
+    }
+)
+API_OPERATOR_STATUSES = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+# botocore's own errors when AWS credentials or the region are missing: raised before any request, so they
+# carry no response or status. Matched by name, so this module does not import botocore.
+AWS_SETUP_ERRORS = frozenset(
+    {"NoCredentialsError", "PartialCredentialsError", "CredentialRetrievalError", "NoRegionError"}
+)
+
+
+def _aws_error_code(error: Exception) -> str | None:
+    response = getattr(error, "response", None)
+    if not isinstance(response, dict):
+        response = getattr(error.__cause__, "response", None)
+    details = response.get("Error") if isinstance(response, dict) else None
+    code = details.get("Code") if isinstance(details, dict) else None
+    return code if isinstance(code, str) else None
+
+
+def operator_provider_error(error: Exception) -> str | None:
+    """A key naming the provider error when the operator must fix the provider, else None.
+
+    The key groups alerts: one per key per window. It names the error class, never a recipient.
+    """
+    code = _aws_error_code(error)
+    if code in AWS_TRANSIENT_ERROR_CODES:
+        return None  # Throttling and the like: retried as usual
+    return _local_operator_error(error) or _provider_operator_error(error, code)
+
+
+def _local_operator_error(error: Exception) -> str | None:
+    """Refused before or at the provider's door: configuration, AWS credentials, SMTP authentication."""
+    if isinstance(error, AnymailConfigurationError):
+        return "configuration"
+    for candidate in (error, error.__cause__):  # Anymail wraps botocore's error in an AnymailAPIError
+        if candidate is not None and any(
+            cls.__module__.startswith("botocore") and cls.__name__ in AWS_SETUP_ERRORS
+            for cls in type(candidate).__mro__
+        ):
+            return "ses-credentials"
+    if isinstance(error, smtplib.SMTPResponseException) and error.smtp_code in SMTP_OPERATOR_CODES:
+        return f"smtp-{error.smtp_code}"
+    return None
+
+
+def _provider_operator_error(error: Exception, code: str | None) -> str | None:
+    """Refused by the provider's API for the account or its configuration."""
+    if code in AWS_OPERATOR_ERROR_CODES:
+        return f"ses-{code}"
+    status = _http_status(error)
+    if isinstance(error, AnymailAPIError) and status in API_OPERATOR_STATUSES:
+        return f"ses-{code}" if code else f"api-{status}"
+    return None
+
+
+def _http_status(error: Exception) -> object:
+    """The provider's HTTP status: on the error, or (Anymail's SES backend) only in the boto response."""
+    status: object = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        if not isinstance(response, dict):
+            response = getattr(error.__cause__, "response", None)
+        metadata = response.get("ResponseMetadata") if isinstance(response, dict) else None
+        if isinstance(metadata, dict):
+            status = metadata.get("HTTPStatusCode")
+    return status
+
+
+def _block(row: EmailLog, key: str) -> bool:
+    """The provider refuses for a reason the operator must fix. The caller holds the row lock; True: retry.
+
+    The message waits queued with a long backoff and its attempt given back, so an outage longer than the
+    retry budget still delivers once fixed. One staff alert per provider error per window.
+    """
+    now = timezone.now()
+    if row.sent_at < now - OPERATOR_BLOCK_LIMIT:
+        mark_exhausted(row)
+        return False
+    response = row.provider_response if isinstance(row.provider_response, dict) else {}
+    row.status = "queued"
+    row.delivery_attempts = max(row.delivery_attempts - 1, 0)
+    row.operator_blocked_at = now
+    row.next_attempt_at = now + OPERATOR_BACKOFF
+    row.provider_response = {**response, "operator_error": key, "final_error": f"Provider blocked: {key}"}
+    row.save(
+        update_fields=[
+            "status",
+            "delivery_attempts",
+            "operator_blocked_at",
+            "next_attempt_at",
+            "provider_response",
+            *_release(row),
+        ]
+    )
+    alert_operator(key)
+    return True
+
+
+def block_for_operator(email_log_id: str, token: UUID | None, key: str) -> bool:
+    """Block this claim's message for a reason the operator must fix; True: a retry is due later."""
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is None or token is None or row.status != "sending" or row.claim_token != token:
+            return False
+        return _block(row, key)
+
+
+def alert_operator(key: str) -> None:
+    """Flag staff through the audit trail, once per provider error per window.
+
+    The window is read from the audit trail itself, so every worker sees the same one. The write has its
+    own savepoint: a failed alert never undoes the block just recorded.
+    """
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: app registry
+    from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415  # Circular
+
+    since = timezone.now() - OPERATOR_ALERT_WINDOW
+    if AuditEvent.objects.filter(action=OPERATOR_ALERT_ACTION, metadata__error_key=key, timestamp__gte=since).exists():
+        return
+    description = (
+        f"Email sending is blocked ({key}): the provider's credentials, configuration or account, or this "
+        "server's encryption keys, need fixing. Messages wait queued and are sent once it works."
+    )
+    logger.error(f"🔥 [Email] {description}")
+    with best_effort_atomic(logger=logger, scope="Email", message="Provider alert failed"):
+        AuditService.log_event(
+            AuditEventData(event_type=OPERATOR_ALERT_ACTION, description=description),
+            AuditContext(
+                actor_type="system",
+                metadata={"source_app": "notifications", "operational_event": True, "error_key": key},
+            ),
+        )
+
+
+def mark_exhausted(row: EmailLog) -> None:
+    """The retry budget is spent. The caller holds the row lock."""
+    response = row.provider_response if isinstance(row.provider_response, dict) else {}
+    row.status = "failed"
+    row.provider_response = {**response, "final_error": "Email retry budget exhausted", "retry_exhausted": True}
+    row.next_attempt_at = None
+    row.save(update_fields=["status", "provider_response", "next_attempt_at", *_release(row)])
+
+
+def claimable(row: EmailLog, now: datetime) -> bool:
+    """Whether a worker may claim the row now: a due `queued` row, or a `sending` row nobody holds."""
+    if row.status == "queued":
+        return row.next_attempt_at is None or row.next_attempt_at <= now
+    if row.status == "sending":
+        if row.lease_until is not None:
+            return row.lease_until < now
+        return row.sent_at < now - UNLEASED_SENDING_GRACE
+    return False  # sent, delivered, bounced, complained, failed: never sent again by a claim
 
 
 def claim_delivery(
     email_log_id: str,
-    subject: str,
-    sender: str | None,
-    supplied_retry: int,
+    subject: str | None = None,
+    sender: str | None = None,
+    supplied_retry: int = 0,
 ) -> tuple[EmailLog | None, dict[str, Any] | None]:
-    maximum = max(0, SettingsService.get_integer_setting("notifications.email_max_retries", DEFAULT_MAX_RETRIES))
+    """Claim the row for one send, or refuse. A claim writes a fresh `claim_token` and a lease.
+
+    Every later write about this send (renewal, success, failure) must present that token: a worker
+    whose lease expired and whose row another worker reclaimed writes nothing.
+    """
+    maximum = max_retries()
     with transaction.atomic():
         row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
         if row is None:
             return None, {"success": False, "error": "EmailLog not found", "retry_scheduled": False}
+        now = timezone.now()
+        if not claimable(row, now):
+            return row, {"success": False, "error": f"Not claimable: {row.status}", "retry_scheduled": False}
         try:
             if isinstance(supplied_retry, bool) or not isinstance(supplied_retry, int) or supplied_retry < 0:
                 raise InvalidRetryMetadataError("Invalid email task retry counter")
@@ -81,16 +296,10 @@ def claim_delivery(
         except InvalidRetryMetadataError as error:
             mark_permanent(row, str(error))
             return row, {"success": False, "error": str(error), "retry_scheduled": False}
-        if (subject_error := validate_email_log_subject(row, subject)) is not None:
+        if (subject_error := validate_email_log_subject(row, row.subject if subject is None else subject)) is not None:
             return row, {"success": False, "error": subject_error, "retry_scheduled": False}
         if index >= maximum + 1:
-            row.status = "failed"
-            row.provider_response = {
-                **(row.provider_response or {}),
-                "final_error": "Email retry budget exhausted",
-                "retry_exhausted": True,
-            }
-            row.save(update_fields=["status", "provider_response"])
+            mark_exhausted(row)
             return row, {
                 "success": False,
                 "error": "Email retry budget exhausted",
@@ -100,8 +309,52 @@ def claim_delivery(
         row.from_addr = sender if sender is not None else row.from_addr or get_default_from_email()
         row.status = "sending"
         row.delivery_attempts = index + 1
-        row.save(update_fields=["status", "from_addr", "delivery_attempts"])
+        row.claim_token = uuid4()
+        row.lease_until = now + CLAIM_LEASE
+        row.next_attempt_at = None
+        row.save(
+            update_fields=["status", "from_addr", "delivery_attempts", "claim_token", "lease_until", "next_attempt_at"]
+        )
         return row, None
+
+
+def renew_claim(email_log_id: str, token: UUID | None) -> bool:
+    """Immediately before the provider call: the claim is still ours, renewed. False: send nothing."""
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is None or token is None or row.status != "sending" or row.claim_token != token:
+            return False
+        row.lease_until = timezone.now() + CLAIM_LEASE
+        row.save(update_fields=["lease_until"])
+        return True
+
+
+def record_success(email_log_id: str, token: UUID | None, *, provider_id: str, response: dict[str, Any]) -> bool:
+    """The send this claim made was accepted. Nothing is written for a claim that is no longer ours.
+
+    Delivery callbacks that arrived before the provider id was known are applied here, under the same lock.
+    """
+    from apps.notifications.services import apply_pending_delivery_events  # noqa: PLC0415  # Circular
+
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is None or token is None or row.status != "sending" or row.claim_token != token:
+            return False
+        row.status = "sent"
+        row.sent_at = timezone.now()
+        row.operator_blocked_at = None  # The provider works again
+        fields = ["status", "sent_at", "operator_blocked_at", *_release(row)]
+        if provider_id:
+            row.provider_id = provider_id
+            fields.append("provider_id")
+        if response:
+            current = row.provider_response if isinstance(row.provider_response, dict) else {}
+            row.provider_response = {**current, **response}
+            fields.append("provider_response")
+        row.save(update_fields=fields)
+        if provider_id:
+            apply_pending_delivery_events(row)
+        return True
 
 
 def permanent_provider_error(error: Exception) -> bool:
@@ -127,9 +380,7 @@ def permanent_provider_error(error: Exception) -> bool:
     response = getattr(error, "response", None)
     if not isinstance(response, dict):
         response = getattr(error.__cause__, "response", None)
-    details = response.get("Error") if isinstance(response, dict) else None
-    code = details.get("Code") if isinstance(details, dict) else None
-    code = code if isinstance(code, str) else None
+    code = _aws_error_code(error)
     # SES can throttle with HTTP 400, so provider semantics take precedence.
     if code in AWS_TRANSIENT_ERROR_CODES:
         return False
@@ -153,23 +404,51 @@ def permanent_provider_error(error: Exception) -> bool:
     )
 
 
-def record_failure(email_log_id: str, error: Exception) -> tuple[EmailLog | None, bool]:
-    maximum = max(0, SettingsService.get_integer_setting("notifications.email_max_retries", DEFAULT_MAX_RETRIES))
+def record_sync_failure(email_log_id: str, error: Exception, token: UUID | None) -> None:
+    """A synchronous send failed. It is not retried here: a retryable failure is left `failed`
+    (the failed-email sweep may retry it asynchronously); a permanent one is marked permanent."""
+    with transaction.atomic():
+        row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
+        if row is None or token is None or row.status != "sending" or row.claim_token != token:
+            return
+        blocked = operator_provider_error(error)
+        if blocked is not None:
+            _block(row, blocked)  # The queue sweep sends it once its backoff is over
+            return
+        if permanent_provider_error(error):
+            mark_permanent(row, str(error))
+            return
+        response = row.provider_response if isinstance(row.provider_response, dict) else {}
+        row.status = "failed"
+        row.provider_response = {**response, "error": str(error), "final_error": str(error)}
+        row.save(update_fields=["status", "provider_response", *_release(row)])
+
+
+def record_failure(email_log_id: str, error: Exception, token: UUID | None) -> tuple[EmailLog | None, bool]:
+    """The send this claim made failed. (row, retry): nothing is written for a claim no longer ours."""
+    maximum = max_retries()
     with transaction.atomic():
         row = EmailLog.objects.select_for_update().filter(pk=email_log_id).first()
         if row is None:
             return None, False
+        if token is None or row.status != "sending" or row.claim_token != token:
+            return row, False
+        blocked = operator_provider_error(error)
+        if blocked is not None:
+            return row, _block(row, blocked)
         if permanent_provider_error(error):
             mark_permanent(row, str(error))
             return row, False
         response = row.provider_response if isinstance(row.provider_response, dict) else {}
         retry = row.delivery_attempts <= maximum
         row.status = "queued" if retry else "failed"
+        # The due time is set in the same write, so no sweep sees a retryable row without one.
+        row.next_attempt_at = timezone.now() + retry_delay(row.delivery_attempts) if retry else None
         row.provider_response = {
             **response,
             "retry_count": row.delivery_attempts,
             "final_error": str(error),
             "retry_exhausted": not retry,
         }
-        row.save(update_fields=["status", "provider_response"])
+        row.save(update_fields=["status", "provider_response", "next_attempt_at", *_release(row)])
         return row, retry

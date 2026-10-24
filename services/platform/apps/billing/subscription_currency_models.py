@@ -98,7 +98,7 @@ class SubscriptionCurrencyTransition(models.Model):
             log.to_addr != self.notice_recipient
             or log.subject != self.notice_subject
             or log.customer_id != self.subscription.customer_id
-            or log.get_decrypted_body_text() != self.notice_body
+            or not log.body_text_matches(self.notice_body)
         ):
             raise ValidationError(_("The accepted email does not match the exact currency offer"))
         self.notice_accepted_at = log.sent_at

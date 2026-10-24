@@ -431,6 +431,8 @@
       - ANAF_TRANSPORT_ENABLED
       # Deploy-time commands write audit rows too; their session digests must use the same key.
       - AUDIT_SESSION_DIGEST_SECRET
+      # Deploy-time commands can store an email; its recipient digests must use the same key.
+      - EMAIL_RECIPIENT_DIGEST_SECRET
     praho_django_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
@@ -798,6 +800,19 @@
 # could be writing to a backup that the next task compresses and unlinks.
 - name: Restart the services on the new code before touching their log backups
   meta: flush_handlers
+
+# Every Platform process runs the new release now. One on the previous release could have written a secret
+# under the previous binding while the migrations ran: re-bind it (idempotent; it aborts with nothing changed
+# on a secret it cannot open).
+- name: Re-bind stored secrets written during the deploy
+  no_log: true
+  command: >
+    {{ project_root }}/.venv-linux/bin/python manage.py rebind_secrets
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  changed_when: false
 
 # The rotation policies, the handover of old backups and the hourly timer come only now, once
 # every writer runs the new handlers: logrotate moving a file under a process that still rotates

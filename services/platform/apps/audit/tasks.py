@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -324,8 +325,11 @@ def recover_pending_chain_links(batch_size: int = 100) -> dict[str, int]:
     result = {"linked": 0, "pending": 0}
     if not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
         return result
+    # A quarantined event (one the chain refuses) is skipped: it would hold the head of every batch. The
+    # null arm keeps events without the key (a bare negation drops them: SQL NULL).
     event_ids = list(
         AuditEvent.objects.filter(metadata__chain_link_pending=True)
+        .filter(Q(metadata__chain_link_quarantined__isnull=True) | ~Q(metadata__chain_link_quarantined=True))
         .order_by("timestamp", "pk")
         .values_list("pk", flat=True)[:batch_size]
     )

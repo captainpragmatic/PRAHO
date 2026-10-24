@@ -160,6 +160,8 @@ def _portal_env(directory: Path, platform_url: str, server: dict[str, str]) -> d
             "PLATFORM_API_ALLOW_INSECURE_HTTP": "true",
             "PLATFORM_API_SECRET": secrets.token_hex(32),
             "PORTAL_HMAC_SECRET": secrets.token_hex(32),
+            # As every deploy sets it (compose requires it): a deployed portal refuses to start without one.
+            "PORTAL_ID": "portal-001",
             "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": secrets.token_hex(32),
             "SESSION_DB_PATH": str(directory / "portal.sqlite3"),
             "STATIC_ROOT": str(directory / "static"),

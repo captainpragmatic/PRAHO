@@ -2414,7 +2414,9 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
                     "payment_intent.succeeded",
                     payload,
                 )
-                self.assertFalse(success)
+                # A gateway fact that contradicts the payment is acknowledged (no redelivery can fix it), and
+                # nothing below advances.
+                self.assertTrue(success)
                 self.assertIn("mismatch", message.lower())
                 payment.refresh_from_db()
                 self.invoice.refresh_from_db()

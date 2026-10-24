@@ -1189,6 +1189,7 @@ class GDPRExportService:
             "customers": [],
             "billing_data": [],
             "support_tickets": [],
+            "emails": [],
             "audit_summary": {},
         }
 
@@ -1236,6 +1237,9 @@ class GDPRExportService:
             data["billing_data"] = cls._collect_billing_data(user)
 
         # Support tickets
+        if scope.get("include_emails", True):
+            data["emails"] = cls._collect_email_data(user)
+
         if scope.get("include_tickets", True):
             try:
                 tickets = Ticket.objects.filter(created_by=user)
@@ -1272,6 +1276,40 @@ class GDPRExportService:
             }
 
         return data
+
+    @staticmethod
+    def _collect_email_data(user: User) -> list[dict[str, Any]]:
+        """The messages PRAHO sent the person: when, what about, and what became of them.
+
+        The person's addresses are the ones erasure removes: the account's, earlier ones, and those of
+        the individual customers they own alone. Only those are named; another recipient's cc or bcc is
+        theirs, not the person's.
+        """
+        from apps.notifications.models import EmailLog, recipient_digest_term  # noqa: PLC0415  # Deferred
+
+        addresses, _left_for_staff = GDPRDeletionService._persons_addresses(capture_subject(user))
+        terms = {address: recipient_digest_term(address) for address in sorted(addresses)}
+        if not terms:
+            return []
+        names = Q()
+        for address, term in terms.items():
+            names |= Q(recipient_hashes__contains=term) | Q(to_addr__iexact=address)
+        messages = []
+        for row in EmailLog.objects.filter(names).order_by("sent_at"):
+            hashes = row.recipient_hashes or ""
+            messages.append(
+                {
+                    "recipients": [
+                        address for address, term in terms.items() if term in hashes or row.to_addr.lower() == address
+                    ],
+                    "subject": row.subject,
+                    "template": row.template_key,
+                    "status": row.status,
+                    "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                    "delivered_at": row.delivered_at.isoformat() if row.delivered_at else None,
+                }
+            )
+        return messages
 
     @staticmethod
     def _collect_billing_data(user: User) -> list[dict[str, Any]]:
@@ -1351,6 +1389,7 @@ class GDPRExportService:
         for entry in user_data.get("billing_data", []):
             count += (1 if entry.get("tax_profile") else 0) + len(entry["invoices"]) + len(entry["proformas"])
         count += len(user_data.get("support_tickets", []))
+        count += len(user_data.get("emails", []))
         count += len(user_data.get("audit_summary", {}).get("recent_activities", []))
         return count
 
@@ -1460,6 +1499,8 @@ class GDPRDeletionService:
             with transaction.atomic(), erasure_in_progress() as writes:
                 # Tickets first, while every reply still names its author: deletion sets authors to NULL.
                 cls._erase_tickets(subject)
+                # Emails while the account still carries its address.
+                cls._erase_emails(subject)
                 if deletion_type == "anonymize":
                     result = cls._anonymize_user_data(user)
                     action_taken = "anonymized"
@@ -1729,27 +1770,16 @@ class GDPRDeletionService:
     ERASED_TICKET_TEXT = "[Removed at the person's request]"
 
     @classmethod
-    def _erase_tickets(cls, subject: ErasureSubject) -> None:
-        """Remove the person from support tickets (row 74, owner decision OF4).
+    def _persons_addresses(cls, subject: ErasureSubject) -> tuple[set[str], set[int]]:
+        """The person's email addresses, and the customers the erasure leaves to staff.
 
-        A ticket the person raised with no other member's reply on it is theirs: its text, contact
-        details and comments are replaced, and its attachments deleted (their files once this
-        commits). Any other ticket that names them keeps its content, including the person's own
-        replies, and loses only the person's name and email: it may be another member's evidence.
-        A customer reply with no author is the person's when its email is one of theirs, and
-        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        A customer the erasure leaves to staff may be another owner's record (shared, or reached only
+        through an inactive owner link): its email is not the person's. The person's own address
+        always counts.
         """
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
-        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
-            Ticket,
-            TicketAttachment,
-            TicketComment,
-        )
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        # A customer the erasure leaves to staff may be another owner's record (shared, or reached
-        # only through an inactive owner link): its email is not the person's, and its tickets are
-        # never the person's alone. The person's own address always counts.
         user = User.objects.filter(pk=subject.user_pk).first()
         owned_ids = CustomerMembership.objects.filter(
             user_id=subject.user_pk, role="owner", customer__customer_type="individual"
@@ -1764,6 +1794,89 @@ class GDPRDeletionService:
         emails = {identifier.lower() for identifier in subject.identifiers if "@" in identifier} - others
         if user is not None and user.email:
             emails.add(user.email.lower())
+        return emails, left_for_staff
+
+    ERASED_EMAIL_ADDRESS = "erased@erased.invalid"
+    ERASED_EMAIL_SUBJECT = "[erased]"
+    ERASED_ATTACHMENT_NAME = "erased"
+
+    @classmethod
+    def _erase_emails(cls, subject: ErasureSubject) -> None:
+        """Remove the person from every stored email that names them (#751 follow-up).
+
+        A message naming the person in to, cc or bcc is found by the keyed digests of its recipients
+        and scrubbed in place: recipients, subject, bodies, the provider's response and attachment
+        names. Rows are never deleted, since notices reference them. A message not yet delivered is
+        cancelled: it fails permanently and its claim is cleared, so a worker that claimed it earlier
+        records nothing. The provider id stays as a tombstone: a late callback finds the erased row and
+        writes nothing, instead of being buffered with the address. Buffered callbacks for the person's
+        addresses are deleted. Only counts are logged.
+        """
+        from apps.notifications.models import (  # noqa: PLC0415  # Deferred: import cycle
+            EmailAttachment,
+            EmailLog,
+            PendingDeliveryEvent,
+            recipient_digest,
+            recipient_digest_term,
+        )
+
+        emails, _left_for_staff = cls._persons_addresses(subject)
+        if not emails:
+            return
+        names = Q()
+        for email in emails:
+            names |= Q(recipient_hashes__contains=recipient_digest_term(email)) | Q(to_addr__iexact=email)
+        ids = list(EmailLog.objects.filter(names).values_list("pk", flat=True))
+        # Locked in pk order, as a worker locks one row at a time: its claim and record writes then wait.
+        locked = list(
+            EmailLog.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", "status")
+        )
+        undelivered = [pk for pk, status in locked if status in ("queued", "sending", "failed")]
+        EmailLog.objects.filter(pk__in=undelivered).update(
+            status="failed",
+            claim_token=None,
+            lease_until=None,
+            next_attempt_at=None,
+            provider_response={"erased": True, "permanent_failure": True, "error": "Recipient erased (GDPR)"},
+        )
+        EmailLog.objects.filter(pk__in=ids).exclude(pk__in=undelivered).update(provider_response={"erased": True})
+        EmailLog.objects.filter(pk__in=ids).update(
+            to_addr=cls.ERASED_EMAIL_ADDRESS,
+            reply_to="",
+            subject=cls.ERASED_EMAIL_SUBJECT,
+            body_text="",
+            body_html="",
+            envelope=None,
+            recipient_hashes=None,
+            meta={"erased": True},
+        )
+        EmailAttachment.objects.filter(email_log_id__in=ids).update(filename=cls.ERASED_ATTACHMENT_NAME)
+        buffered, _ = PendingDeliveryEvent.objects.filter(
+            recipient_hash__in=[recipient_digest(email) for email in emails]
+        ).delete()
+        logger.info(
+            f"🔒 [GDPR Deletion] Scrubbed {len(ids)} stored emails ({len(undelivered)} cancelled), "
+            f"{buffered} buffered callbacks deleted"
+        )
+
+    @classmethod
+    def _erase_tickets(cls, subject: ErasureSubject) -> None:
+        """Remove the person from support tickets (row 74, owner decision OF4).
+
+        A ticket the person raised with no other member's reply on it is theirs: its text, contact
+        details and comments are replaced, and its attachments deleted (their files once this
+        commits). Any other ticket that names them keeps its content, including the person's own
+        replies, and loses only the person's name and email: it may be another member's evidence.
+        A customer reply with no author is the person's when its email is one of theirs, and
+        another member's otherwise. The tickets are locked in pk order, as replies lock them.
+        """
+        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: import cycle
+            Ticket,
+            TicketAttachment,
+            TicketComment,
+        )
+
+        emails, left_for_staff = cls._persons_addresses(subject)
 
         def is_persons(author_id: int | None, author_email: str) -> bool:
             if author_id is not None:
@@ -3567,6 +3680,10 @@ provisioning_audit_service = ProvisioningAuditService()
 # ===============================================================================
 
 
+class UnverifiableAuditEventError(ValueError):
+    """The chain refuses an event whose MAC no longer verifies: it is quarantined, not retried."""
+
+
 class AuditIntegrityService:
     """
     🔒 Enterprise audit data integrity monitoring service
@@ -3590,8 +3707,14 @@ class AuditIntegrityService:
             # excluded from the covered payload or a failed append would flip the row to
             # "MAC mismatch" — reporting a ledger problem as evidence tampering.
             "chain_link_pending",
+            # Written when the chain refuses an event (its MAC no longer verifies): recovery skips it so
+            # it cannot hold the queue head, and the verifier still reports it unlinked (#751 follow-up).
+            "chain_link_quarantined",
         }
     )
+    # The chain's own state on an event: carried through anything that rewrites metadata (anonymization,
+    # identity removal), or the event would never be linked (#751 follow-up, M15).
+    CHAIN_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset({"chain_link_pending", "chain_link_quarantined"})
     # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
     CHAIN_VERSION = 1
     CHAIN_PENDING_GRACE_SECONDS = 300
@@ -3847,6 +3970,36 @@ class AuditIntegrityService:
             }
         )
 
+    # The fields an evidence rewrite (anonymization, identity removal) may change; nothing else is written.
+    EVIDENCE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "user",
+        "ip_address",
+        "user_agent",
+        "request_id",
+        "session_key",
+        "object_id",
+        "description",
+        "old_values",
+        "new_values",
+        "metadata",
+    )
+
+    @classmethod
+    def lock_for_evidence_write(cls, event_pk: Any, alias: str | None = None) -> AuditEvent | None:
+        """Lock the chain head, then the event, and return the event as it stands under the lock.
+
+        Every read-modify-write of an event's evidence goes through here, in this order (the chain linker
+        takes the head first too), so no writer saves over another's change from a stale read (#751
+        follow-up, M14). The caller runs inside a transaction.
+        """
+        from apps.audit.models import AuditChainHead  # noqa: PLC0415  # avoid app-load cycle
+
+        db = alias or "default"
+        # Created if missing (before the first backfill): a head that does not exist locks nothing, and an
+        # event lock taken first would invert the order against the backfill.
+        AuditChainHead.objects.using(db).select_for_update().get_or_create(pk=1)
+        return AuditEvent.objects.using(db).select_for_update().filter(pk=event_pk).first()
+
     @classmethod
     def _compute_chain_mac(cls, *, payload: str, key: bytes) -> str:
         return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
@@ -3869,13 +4022,14 @@ class AuditIntegrityService:
             head, _created = AuditChainHead.objects.using(alias).select_for_update().get_or_create(pk=1)
             if not head.backfill_complete:
                 return
-            # Head first, then reload evidence: this agrees with retention's lock order.
-            current = AuditEvent.objects.using(alias).filter(pk=event.pk).first()
+            # Head first, then the event, locked: an evidence rewrite takes the same order, so neither writes
+            # over the other from a stale read.
+            current = AuditEvent.objects.using(alias).select_for_update().filter(pk=event.pk).first()
             if current is None:
                 return
             event = current
             if cls._verify_hash_chain([event]) or event.metadata.get("integrity_hash_version") != cls.HASH_VERSION:
-                raise ValueError(f"Refusing to chain unverifiable audit event {event.pk}")
+                raise UnverifiableAuditEventError(f"Refusing to chain unverifiable audit event {event.pk}")
             pending_metadata = {**event.metadata, "chain_link_pending": False}
             if AuditChainLink.objects.using(alias).filter(event=event, is_tombstone=False).exists():
                 with audit_mutation_allowed("chain_append"):
@@ -5143,6 +5297,37 @@ class AuditRetentionService:
         return deleted_count
 
     @classmethod
+    def _anonymize_locked(cls, event: AuditEvent, anonymized_at: str) -> bool:
+        """Anonymize one event the caller has locked; False when it already is anonymized."""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        if cls._in_anonymized_post_state(event):
+            return False
+        event.user = None
+        event.ip_address = None
+        event.user_agent = ""
+        event.request_id = ""
+        event.session_key = ""
+        if (
+            event.content_type is not None
+            and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
+        ):
+            event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
+        event.description = cls.ANONYMIZED_DESCRIPTION
+        event.old_values = {"anonymized": True}
+        event.new_values = {"anonymized": True}
+        chain_keys = AuditIntegrityService.CHAIN_METADATA_KEYS
+        event.metadata = {
+            **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST or k in chain_keys},
+            "anonymized": True,
+            "anonymized_at": anonymized_at,
+        }
+        # Fresh v2 stamp over the anonymized content - without it the scrub
+        # itself would read as tampering on the next verification sweep.
+        event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
+        event.save(update_fields=list(AuditIntegrityService.EVIDENCE_FIELDS))
+        return True
+
+    @classmethod
     def _anonymize_events(cls, events: list[AuditEvent]) -> int:
         """Anonymize events to an explicit post-state, then re-stamp (Codex C3).
 
@@ -5156,33 +5341,13 @@ class AuditRetentionService:
         anonymized_at = timezone.now().isoformat()
 
         with audit_mutation_allowed("retention_anonymize"):
-            for event in events:
-                metadata = event.metadata if isinstance(event.metadata, dict) else {}
-                if cls._in_anonymized_post_state(event):
-                    continue
-
-                event.user = None
-                event.ip_address = None
-                event.user_agent = ""
-                event.request_id = ""
-                event.session_key = ""
-                if (
-                    event.content_type is not None
-                    and (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS
-                ):
-                    event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
-                event.description = cls.ANONYMIZED_DESCRIPTION
-                event.old_values = {"anonymized": True}
-                event.new_values = {"anonymized": True}
-                event.metadata = {
-                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST},
-                    "anonymized": True,
-                    "anonymized_at": anonymized_at,
-                }
-                # Fresh v2 stamp over the anonymized content - without it the scrub
-                # itself would read as tampering on the next verification sweep.
-                event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
-                event.save()
+            for stale in events:
+                with transaction.atomic():
+                    # Rewritten from the event as it stands under the chain head and event locks, never from
+                    # the caller's earlier read: a link appended since keeps its chain state.
+                    event = AuditIntegrityService.lock_for_evidence_write(stale.pk, stale._state.db)
+                    if event is None or not cls._anonymize_locked(event, anonymized_at):
+                        continue
                 anonymized_count += 1
 
         if anonymized_count:

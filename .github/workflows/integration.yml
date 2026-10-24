@@ -68,6 +68,31 @@ jobs:
     - name: Lint all services (every make lint phase)
       run: make lint
 
+    # The PR's own validators could be weakened by the PR itself: the base revision's copies check its tree.
+    # They are written under scripts/ so that their ROOT is this checkout. This raises the bar only (a PR can
+    # also edit this workflow); code-owner review of these files is the gate.
+    - name: Check migrations with the base branch's validators
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+      run: |
+        set -euo pipefail
+        base="${BASE_REF:-}"
+        if [ -z "$base" ] || [ -z "${base//0/}" ]; then
+          base="$(git merge-base HEAD origin/master)"  # A first push has no previous commit
+        fi
+        py="${PYTHON:-.venv-$(uname -s | tr '[:upper:]' '[:lower:]')/bin/python}"
+        trap 'rm -f scripts/_trusted_migration_checksums.py scripts/_trusted_check_new_model_schema.py' EXIT
+        git show "$base:scripts/migration_checksums.py" > scripts/_trusted_migration_checksums.py
+        git show "$base:scripts/check_new_model_schema.py" \
+          | sed 's/^from scripts\.migration_checksums import /from scripts._trusted_migration_checksums import /' \
+          > scripts/_trusted_check_new_model_schema.py
+        if grep -q 'scripts\.migration_checksums' scripts/_trusted_check_new_model_schema.py; then
+          echo "The base schema check imports the PR's checksum module" >&2
+          exit 1
+        fi
+        "$py" scripts/_trusted_migration_checksums.py --base-ref "$base"
+        "$py" -m scripts._trusted_check_new_model_schema --base-ref "$base"
+
     - name: Check migration state
       env:
         MIGRATION_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}

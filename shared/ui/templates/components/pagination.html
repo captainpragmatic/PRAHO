@@ -19,6 +19,7 @@ Optional Parameters:
 - show_info: Show results info above pagination (default: True)
 - htmx_target: HTMX target selector for dynamic loading
 - htmx_url: Base URL for HTMX requests (defaults to current page if not provided)
+- htmx_sync: hx-sync for the HTMX links, e.g. "#results:replace" so a page change replaces a filter request
 - push_url: Base full-page URL for browser history; page and extra_params are appended (default: request URL)
 
 Features:
@@ -68,6 +69,7 @@ Features:
            {% if htmx_target %}
            hx-get="{{ htmx_url|default:'' }}?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}"
            hx-target="{{ htmx_target }}"
+           {% if htmx_sync %}hx-sync="{{ htmx_sync }}"{% endif %}
            {% if push_url %}
            hx-push-url="{{ push_url }}?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}"
            {% else %}
@@ -99,6 +101,7 @@ Features:
              {% if htmx_target %}
              hx-get="{{ htmx_url|default:'' }}?page=1{{ extra_params|default:'' }}"
              hx-target="{{ htmx_target }}"
+             {% if htmx_sync %}hx-sync="{{ htmx_sync }}"{% endif %}
              {% if push_url %}
              hx-push-url="{{ push_url }}?page=1{{ extra_params|default:'' }}"
              {% else %}
@@ -138,6 +141,7 @@ Features:
                  {% if htmx_target %}
                  hx-get="{{ htmx_url|default:'' }}?page={{ page_num }}{{ extra_params|default:'' }}"
                  hx-target="{{ htmx_target }}"
+                 {% if htmx_sync %}hx-sync="{{ htmx_sync }}"{% endif %}
                  {% if push_url %}
                  hx-push-url="{{ push_url }}?page={{ page_num }}{{ extra_params|default:'' }}"
                  {% else %}
@@ -169,6 +173,7 @@ Features:
              {% if htmx_target %}
              hx-get="{{ htmx_url|default:'' }}?page={{ total_pages }}{{ extra_params|default:'' }}"
              hx-target="{{ htmx_target }}"
+             {% if htmx_sync %}hx-sync="{{ htmx_sync }}"{% endif %}
              {% if push_url %}
              hx-push-url="{{ push_url }}?page={{ total_pages }}{{ extra_params|default:'' }}"
              {% else %}
@@ -192,6 +197,7 @@ Features:
            {% if htmx_target %}
            hx-get="{{ htmx_url|default:'' }}?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}"
            hx-target="{{ htmx_target }}"
+           {% if htmx_sync %}hx-sync="{{ htmx_sync }}"{% endif %}
            {% if push_url %}
            hx-push-url="{{ push_url }}?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}"
            {% else %}

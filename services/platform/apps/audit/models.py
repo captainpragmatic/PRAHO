@@ -709,6 +709,7 @@ class AuditEvent(models.Model):
         ("email_bounced", "Email bounced"),
         ("email_complained", "Email complained"),
         ("email_failed", "Email failed"),
+        ("email_provider_blocked", "Email provider blocked"),
         ("email_sent", "Email sent"),
         ("email_suppressed", "Email suppressed"),
         ("email_suppression_added", "Email suppression added"),

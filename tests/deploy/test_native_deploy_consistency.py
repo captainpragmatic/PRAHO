@@ -399,3 +399,19 @@ def test_platform_passthrough_carries_the_audit_session_digest_secret() -> None:
     tasks = yaml.safe_load(NATIVE_TASKS.read_text())
     task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
     assert "AUDIT_SESSION_DIGEST_SECRET" in task["vars"]["praho_passthrough"]
+
+
+def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
+    """Migrations run while the previous release still serves; one of its processes can write a secret under the
+    previous binding meanwhile. rebind_secrets (idempotent) runs after the restart that moves every writer onto
+    the new release (#751 follow-up, M19)."""
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    names = [task.get("name", "") for task in tasks]
+    migrate = names.index("Run database migrations")
+    restart = next(i for i, task in enumerate(tasks) if task.get("meta") == "flush_handlers")
+    rebind = [i for i, task in enumerate(tasks) if "rebind_secrets" in str(task.get("command", ""))]
+    assert len(rebind) == 1
+    assert migrate < restart < rebind[0]
+    task = tasks[rebind[0]]
+    assert task["environment"] == "{{ django_env }}"
+    assert task.get("no_log") is True

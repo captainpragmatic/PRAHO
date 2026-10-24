@@ -178,3 +178,16 @@ class TestStagingLoggingConfiguration:
                 assert handler["class"] == "logging.handlers.WatchedFileHandler"
                 assert "maxBytes" not in handler
                 assert "backupCount" not in handler
+
+
+class TestSecretURLFilterWiring:
+    """Every portal environment installs the secret-URL filter on every handler (#751 follow-up, M6b)."""
+
+    @pytest.mark.parametrize("module", ["config.settings.base", "config.settings.prod", "config.settings.staging"])
+    def test_every_handler_redacts_secret_urls(self, module: str) -> None:
+        config = _get_logging(module)
+
+        assert config["filters"]["secret_urls"]["()"] == "apps.common.secret_urls.SecretURLFilter"
+        assert config["handlers"], "handlers are configured"
+        for name, handler in config["handlers"].items():
+            assert "secret_urls" in handler.get("filters", []), f"{module}: handler {name}"

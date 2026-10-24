@@ -105,6 +105,7 @@ Professional interface for staff to manage all user GDPR requests
                   hx-get="{% url 'audit:gdpr_export_requests_list' %}"
                   hx-trigger="change, keyup delay:500ms"
                   hx-target="#gdpr-results"
+                  hx-sync="#gdpr-results:replace"
                   hx-indicator="#loading-spinner">
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

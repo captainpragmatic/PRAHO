@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-555 actions, in 9 categories.
+556 actions, in 9 categories.
 
 ## Account management
 
@@ -150,6 +150,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `email_bounced` | low | no | yes | notifications |
 | `email_complained` | low | no | yes | notifications |
 | `email_failed` | low | no | yes | notifications |
+| `email_provider_blocked` | high | yes | yes | notifications |
 | `email_sent` | low | no | yes | notifications |
 | `email_suppressed` | low | no | yes | notifications |
 | `email_suppression_added` | low | no | yes | notifications |

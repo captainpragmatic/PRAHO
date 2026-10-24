@@ -12,7 +12,7 @@ import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -22,25 +22,46 @@ if TYPE_CHECKING:
 from django.core.cache import cache
 
 from apps.common.encryption import is_encrypted
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret, seal_model_secret, written_fields
 
-from .settings import efactura_settings
+from .settings import EFacturaEnvironment, efactura_settings
 
 logger = logging.getLogger(__name__)
+TOKEN_CACHE_PREFIX = "efactura_token"  # noqa: S105  # A cache key prefix, not a secret
 DEFAULT_TOKEN_TYPE = (
     "Bearer"  # Not a real secret: default token type string  # noqa: S105  # Not a real secret: config key name
 )
 
 
-class OAuthTokenManager(models.Manager["OAuthToken"]):
-    """Manager for OAuth tokens."""
+def token_environment(environment: object) -> EFacturaEnvironment:
+    """One ANAF environment, as OAuthToken stores it ("test" / "production"); anything else raises ValueError."""
+    if isinstance(environment, EFacturaEnvironment):
+        return environment
+    return EFacturaEnvironment(str(getattr(environment, "value", environment)))
 
-    def get_valid_token(self, cui: str) -> OAuthToken | None:
-        """Get a valid (non-expired) token for a CUI."""
+
+def token_cache_key(cui: str, environment: EFacturaEnvironment) -> str:
+    """Where TokenStorageService keeps a token's row id (never the token) for this company and environment."""
+    return f"{TOKEN_CACHE_PREFIX}:{environment.value}:{cui}"
+
+
+def forget_cached_token(cui: str, environment: EFacturaEnvironment) -> None:
+    """Drop the cached row id now and once the current transaction commits (a reader re-queries)."""
+    key = token_cache_key(cui, environment)
+    cache.delete(key)
+    transaction.on_commit(lambda: cache.delete(key))
+
+
+class OAuthTokenManager(models.Manager["OAuthToken"]):
+    """Manager for OAuth tokens. Every query is scoped to one company and one ANAF environment."""
+
+    def get_valid_token(self, cui: str, environment: EFacturaEnvironment) -> OAuthToken | None:
+        """Get a valid (non-expired) token for a CUI in this environment."""
         now = timezone.now()
         return (
             self.filter(
                 cui=cui,
+                environment=token_environment(environment).value,
                 is_active=True,
                 expires_at__gt=now,
             )
@@ -48,11 +69,12 @@ class OAuthTokenManager(models.Manager["OAuthToken"]):
             .first()
         )
 
-    def get_refreshable_token(self, cui: str) -> OAuthToken | None:
-        """Get a token that can be refreshed (has refresh token)."""
+    def get_refreshable_token(self, cui: str, environment: EFacturaEnvironment) -> OAuthToken | None:
+        """Get a token that can be refreshed (has refresh token) in this environment."""
         return (
             self.filter(
                 cui=cui,
+                environment=token_environment(environment).value,
                 is_active=True,
                 refresh_token__isnull=False,
             )
@@ -61,12 +83,15 @@ class OAuthTokenManager(models.Manager["OAuthToken"]):
             .first()
         )
 
-    def deactivate_all(self, cui: str) -> int:
-        """Deactivate all tokens for a CUI."""
-        return self.filter(cui=cui, is_active=True).update(
+    def deactivate_all(self, cui: str, environment: EFacturaEnvironment) -> int:
+        """Deactivate this environment's tokens for a CUI; the other environment's stay active."""
+        scope = token_environment(environment)
+        count = self.filter(cui=cui, environment=scope.value, is_active=True).update(
             is_active=False,
             updated_at=timezone.now(),
         )
+        forget_cached_token(cui, scope)
+        return count
 
 
 class OAuthToken(models.Model):
@@ -166,14 +191,12 @@ class OAuthToken(models.Model):
         return f"OAuth Token for {self.cui} ({status})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save with automatic encryption."""
-        # Encrypt tokens before saving
-        if self.access_token and not self._is_encrypted(self.access_token):
-            self.access_token = self._encrypt(self.access_token, "access_token")
-
-        if self.refresh_token and not self._is_encrypted(self.refresh_token):
-            self.refresh_token = self._encrypt(self.refresh_token, "refresh_token")
-
+        """Seal the tokens being written for this row; refuse anything that only looks like ciphertext."""
+        _update_fields, written = written_fields(kwargs, ("access_token", "refresh_token"))
+        sealed = {field: seal_model_secret(self, field, getattr(self, field) or "") for field in written}
+        for field, value in sealed.items():
+            if value:
+                setattr(self, field, value)
         super().save(*args, **kwargs)
 
     def _encrypt(self, value: str, field: str = "access_token") -> str:
@@ -239,13 +262,13 @@ class OAuthToken(models.Model):
         refresh_token: str = "",
         token_type: str = DEFAULT_TOKEN_TYPE,
         scope: str = "",
-        environment: str = "test",
+        environment: EFacturaEnvironment | str = EFacturaEnvironment.TEST,
         refresh_expires_in: int | None = None,
     ) -> OAuthToken:
         """
         Store a new OAuth token.
 
-        Deactivates any existing tokens for the CUI.
+        Deactivates the CUI's existing tokens for the same environment.
 
         Args:
             cui: Company CUI
@@ -260,8 +283,32 @@ class OAuthToken(models.Model):
         Returns:
             Created OAuthToken instance
         """
-        # Deactivate existing tokens
-        cls.objects.deactivate_all(cui)
+        # One transaction: a replacement that is refused leaves the tokens it would replace active.
+        with transaction.atomic():
+            return cls._replace_tokens(
+                cui,
+                access_token,
+                expires_in,
+                refresh_token,
+                token_type,
+                scope,
+                token_environment(environment),
+                refresh_expires_in,
+            )
+
+    @classmethod
+    def _replace_tokens(  # noqa: PLR0913  # The token fields store_token takes
+        cls,
+        cui: str,
+        access_token: str,
+        expires_in: int,
+        refresh_token: str,
+        token_type: str,
+        scope: str,
+        environment: EFacturaEnvironment,
+        refresh_expires_in: int | None,
+    ) -> OAuthToken:
+        cls.objects.deactivate_all(cui, environment)
 
         # Calculate expiration
         now = timezone.now()
@@ -279,25 +326,26 @@ class OAuthToken(models.Model):
             scope=scope,
             expires_at=expires_at,
             refresh_expires_at=refresh_expires_at,
-            environment=environment,
+            environment=environment.value,
         )
 
-        logger.info(f"Stored new OAuth token for {cui} (expires: {expires_at.isoformat()}, env: {environment})")
+        logger.info(f"Stored new OAuth token for {cui} (expires: {expires_at.isoformat()}, env: {environment.value})")
 
         return token
 
     @classmethod
-    def get_valid_access_token(cls, cui: str) -> str | None:
+    def get_valid_access_token(cls, cui: str, environment: EFacturaEnvironment | None = None) -> str | None:
         """
         Get a valid access token for a CUI.
 
         Args:
             cui: Company CUI
+            environment: ANAF environment (default: the configured one)
 
         Returns:
             Decrypted access token or None if not found/expired
         """
-        token = cls.objects.get_valid_token(cui)
+        token = cls.objects.get_valid_token(cui, environment or efactura_settings.environment)
         if token:
             token.mark_used()
             return token.decrypted_access_token
@@ -325,22 +373,26 @@ class TokenStorageService:
     Provides a high-level interface for token storage and retrieval.
     """
 
-    CACHE_PREFIX = "efactura_token"
-    CACHE_TIMEOUT = 300  # 5 minutes
+    CACHE_PREFIX = TOKEN_CACHE_PREFIX
+    CACHE_TIMEOUT = 300  # 5 minutes, and never past the token's own expiry
 
     def __init__(self, settings: Any = None):
         """Initialize with optional settings override."""
         self._settings = settings or efactura_settings
 
+    def _environment(self) -> EFacturaEnvironment:
+        return token_environment(self._settings.environment)
+
     def _get_cache_key(self, cui: str) -> str:
         """Generate cache key for token."""
-        return f"{self.CACHE_PREFIX}:{cui}"
+        return token_cache_key(cui, self._environment())
 
     def get_access_token(self, cui: str | None = None) -> str | None:
         """
         Get valid access token for a CUI.
 
-        Uses cache for performance, falls back to database.
+        The cache holds only the token's row id (never the token), checked on every read against the company,
+        the environment, the active flag and the expiry; anything else falls back to the database query.
 
         Args:
             cui: Company CUI. If None, uses company CUI from settings.
@@ -353,20 +405,28 @@ class TokenStorageService:
             logger.warning("No CUI provided and no company CUI in settings")
             return None
 
-        # Check cache first
-        cache_key = self._get_cache_key(cui)
-        cached_token: str | None = cache.get(cache_key)
-        if cached_token:
-            return cached_token
+        environment = self._environment()
+        cache_key = token_cache_key(cui, environment)
+        cached_id: str | None = cache.get(cache_key)
+        if cached_id:
+            cached = OAuthToken.objects.filter(
+                pk=cached_id,
+                cui=cui,
+                environment=environment.value,
+                is_active=True,
+                expires_at__gt=timezone.now(),
+            ).first()
+            if cached is not None:
+                return cached.decrypted_access_token
 
-        # Get from database
-        token = OAuthToken.get_valid_access_token(cui)
-        if token:
-            # Cache for shorter period than expiration
-            cache.set(cache_key, token, timeout=self.CACHE_TIMEOUT)
-            return token
-
-        return None
+        token = OAuthToken.objects.get_valid_token(cui, environment)
+        if token is None:
+            return None
+        token.mark_used()
+        lifetime = min(self.CACHE_TIMEOUT, token.expires_in_seconds)
+        if lifetime > 0:
+            cache.set(cache_key, str(token.pk), timeout=lifetime)
+        return token.decrypted_access_token
 
     def store_token(  # token storage fields  # noqa: PLR0913  # Business logic parameters
         self,
@@ -403,14 +463,9 @@ class TokenStorageService:
             refresh_token=refresh_token,
             token_type=token_type,
             scope=scope,
-            environment=self._settings.environment.value,
+            environment=self._environment(),
         )
-
-        # Update cache
-        cache_key = self._get_cache_key(cui)
-        cache.set(cache_key, token.decrypted_access_token, timeout=self.CACHE_TIMEOUT)
-
-        return token
+        return token  # Replacing deactivated the old tokens and dropped the cached id; the next read re-queries
 
     def invalidate_token(self, cui: str | None = None) -> None:
         """
@@ -423,12 +478,8 @@ class TokenStorageService:
         if not cui:
             return
 
-        # Deactivate in database
-        OAuthToken.objects.deactivate_all(cui)
-
-        # Clear cache
-        cache_key = self._get_cache_key(cui)
-        cache.delete(cache_key)
+        # Deactivate in database (which also drops the cached id)
+        OAuthToken.objects.deactivate_all(cui, self._environment())
 
         logger.info(f"Invalidated tokens for {cui}")
 
@@ -446,7 +497,7 @@ class TokenStorageService:
         if not cui:
             return None
 
-        return OAuthToken.objects.get_refreshable_token(cui)
+        return OAuthToken.objects.get_refreshable_token(cui, self._environment())
 
 
 # Module-level service instance

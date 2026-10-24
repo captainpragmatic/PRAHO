@@ -147,12 +147,15 @@ class CheckoutConsentTests(TestCase):
     def test_the_completion_email_names_the_order(self) -> None:
         from apps.orders.signals import _send_order_completed_email  # noqa: PLC0415
 
-        status, data = self.place(self.consumer, terms_document_id=str(self.terms.pk), early_start_requested=True)
+        # Email tasks are published when the row commits.
+        with self.captureOnCommitCallbacks(execute=True):
+            status, data = self.place(self.consumer, terms_document_id=str(self.terms.pk), early_start_requested=True)
         self.assertEqual(status, 201, data)
         order = Order.objects.get(pk=data["order"]["id"])
         run_queued("apps.notifications.tasks.send_email_task")  # The confirmation sent when it was placed
         mail.outbox.clear()
-        _send_order_completed_email(order)
+        with self.captureOnCommitCallbacks(execute=True):
+            _send_order_completed_email(order)
         run_queued("apps.notifications.tasks.send_email_task")
         [message] = mail.outbox
         self.assertIn(order.order_number, message.body)  # Blank before: the template's values were never passed

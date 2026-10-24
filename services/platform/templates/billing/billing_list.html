@@ -102,6 +102,7 @@
     <form method="GET" class="flex flex-wrap items-end gap-4"
           hx-get="{% url 'billing:billing_list_htmx' %}"
           hx-target="#billing-results"
+          hx-sync="#billing-results:replace"
           hx-trigger="submit, change from:select">
       <!-- Search -->
       <div class="flex-1 min-w-64">

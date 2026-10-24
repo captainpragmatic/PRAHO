@@ -17,7 +17,13 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.db_functions import RandomContextUUID
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.encryption import ENCRYPTED_PREFIX
+from apps.common.model_secrets import (
+    decrypt_model_secret,
+    encrypt_model_secret,
+    seal_model_secret,
+    written_fields,
+)
 
 # Valid data types for system settings
 SettingDataType = Literal["string", "integer", "boolean", "decimal", "list", "json"]
@@ -132,16 +138,11 @@ class SystemSetting(models.Model):
             from apps.billing.currency_policy import get_selling_currency_policy  # noqa: PLC0415  # ADR-0007
 
             get_selling_currency_policy(lock=True)
-        # Encrypt sensitive values; an empty value means "cleared / not configured"
-        # and is stored plain — encrypting the empty string is rejected upstream.
+        # Seal sensitive values for this row and field; an empty value means "cleared / not configured" and
+        # is stored plain. Only the fields being written are sealed, and a save that writes is_sensitive
+        # writes both values with it: a setting that becomes sensitive never keeps plaintext on disk.
         if self.is_sensitive:
-            from apps.common.encryption import is_encrypted  # noqa: PLC0415
-
-            for field in ("value", "default_value"):
-                value = getattr(self, field)
-                if value is not None and value != "" and not is_encrypted(str(value)):
-                    payload = str(value) if self.data_type == "string" else json.dumps(value, default=str)
-                    setattr(self, field, encrypt_model_secret(self, field, payload))
+            self._seal_sensitive_values(kwargs)
 
         super().save(*args, **kwargs)
         if sync_whois_price:
@@ -151,6 +152,24 @@ class SystemSetting(models.Model):
             for price in TLDRetailPrice.objects.filter(currency_id=default_selling_currency()):
                 price.whois_privacy_price_cents = int(self.value)
                 price.save(update_fields=["whois_privacy_price_cents", "updated_at"])
+
+    def _seal_sensitive_values(self, kwargs: dict[str, Any]) -> None:
+        update_fields, written = written_fields(kwargs, ("value", "default_value"))
+        if update_fields is not None and "is_sensitive" in update_fields:
+            written = ["value", "default_value"]
+            update_fields.extend(field for field in written if field not in update_fields)
+        sealed: dict[str, str] = {}
+        for field in written:  # Every field is sealed before any changes: a refusal leaves the row as it was
+            value = getattr(self, field)
+            if value is None or value == "":
+                continue
+            if isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX):
+                sealed[field] = seal_model_secret(self, field, value)  # Kept only if it is this field's
+            else:
+                payload = str(value) if self.data_type == "string" else json.dumps(value, default=str)
+                sealed[field] = encrypt_model_secret(self, field, payload)
+        for field, value in sealed.items():
+            setattr(self, field, value)
 
     def clean(self) -> None:
         """Validate setting data"""

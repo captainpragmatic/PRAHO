@@ -128,16 +128,41 @@ praho_portal_allowlist() {
         }' "${DEPLOY_DIR}/docker-compose.portal-only.yml" | sort -u
 }
 
-# The variables docker-compose.portal-only.yml requires (${NAME:?...}): Compose refuses to start without them.
-praho_portal_required() {
+# The variables a stack's compose file requires (${NAME:?...} or ${NAME?...}). Compose refuses to read
+# the file without them, for every command, `down` and `logs` included. $$ is a literal dollar.
+praho_stack_required() {
     awk '/^[[:space:]]*#/ { next }
         {
             line = $0
-            while (match(line, /[$][{][A-Za-z_][A-Za-z0-9_]*:[?]/)) {
-                print substr(line, RSTART + 2, RLENGTH - 4)
+            gsub(/[$][$]/, "", line)
+            while (match(line, /[$][{][A-Za-z_][A-Za-z0-9_]*:?[?]/)) {
+                name = substr(line, RSTART + 2, RLENGTH - 3)
+                sub(/:$/, "", name)
+                print name
                 line = substr(line, RSTART + RLENGTH)
             }
-        }' "${DEPLOY_DIR}/docker-compose.portal-only.yml" | sort -u
+        }' "${DEPLOY_DIR}/docker-compose.$1.yml" | sort -u
+}
+
+# The variables stack TYPE requires whose value, as Compose resolves it, is empty. An exported shell
+# variable wins over the env file even when it is empty; only an unexported name falls back to the file.
+praho_stack_missing() {
+    local name value
+    while read -r name; do
+        if printenv "$name" > /dev/null; then
+            value="$(printenv "$name")"
+        else
+            value="$(praho_env_value "$name")"
+        fi
+        [[ -n "$value" ]] || printf '%s\n' "$name"
+    done < <(praho_stack_required "$1")
+}
+
+# Refuse before anything runs when Compose could not read stack TYPE's file. Names only, never values.
+praho_require_stack_vars() {
+    local missing
+    missing="$(praho_stack_missing "$1" | tr '\n' ' ' | sed 's/ $//')"
+    [[ -z "$missing" ]] || praho_die "The $1 stack requires ${missing} in ${PRAHO_ENV_FILE}"
 }
 
 # Print what FILE declares beyond the portal allowlist, as key names or "line N", never values. Every

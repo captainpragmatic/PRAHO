@@ -13,27 +13,16 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.notifications.models import EmailLog
-from apps.notifications.services import EmailService
+from apps.notifications.services import EmailService, OutgoingEmail
 from apps.notifications.tasks import _schedule_email_retry, process_email_queue, retry_failed_emails, send_email_task
 from apps.settings.services import SettingsService
 
 
 class QueuedEmail(TypedDict, total=False):
+    """What a queued send carries: only the message id (the worker rebuilds the message from the row)."""
+
     email_log_id: str
-    to: list[str]
-    subject: str
-    body_text: str
-    body_html: str | None
-    from_email: str | None
-    reply_to: str | None
-    cc: list[str] | None
-    bcc: list[str] | None
-    attachments: list[tuple[str, bytes, str]] | None
-    tags: dict[str, str] | None
-    track_opens: bool
-    track_clicks: bool
-    retry_count: int
-    schedule: timedelta
+    schedule: timedelta  # Leaked into task kwargs by the rate-limited path (H2, fixed in its own change)
     task_name: str
 
 
@@ -71,19 +60,7 @@ class SubjectRecoveryTests(TestCase):
         return "queued-test-email"
 
     def run_pending(self) -> list[dict[str, object]]:
-        return [
-            send_email_task(
-                email_log_id=payload["email_log_id"],
-                to=payload["to"],
-                subject=payload["subject"],
-                body_text=payload["body_text"],
-                body_html=payload.get("body_html"),
-                from_email=payload.get("from_email"),
-                reply_to=payload.get("reply_to"),
-                retry_count=payload.get("retry_count", 0),
-            )
-            for payload in self.pending
-        ]
+        return [send_email_task(payload["email_log_id"]) for payload in self.pending]
 
     def assert_permanent_failure(self, log: EmailLog) -> None:
         log.refresh_from_db()
@@ -149,36 +126,23 @@ class SubjectRecoveryTests(TestCase):
     def test_already_queued_worker_rejects_invalid_subject_without_scheduling_a_retry(self) -> None:
         log = self.log("queued")
         with patch("django_q.tasks.async_task", side_effect=self.enqueue):
-            result = send_email_task(str(log.pk), [log.to_addr], log.subject, "Body")
+            result = send_email_task(str(log.pk))
             self.assertEqual(mail.outbox, [])
             self.assertFalse(result["success"])
             self.assertEqual(result["retry_scheduled"], False)
             self.assertEqual(self.pending, [])
             self.assert_permanent_failure(log)
             self.set_limit(20)
-            repeated = send_email_task(str(log.pk), [log.to_addr], log.subject, "Body")
+            repeated = send_email_task(str(log.pk))
         self.assertFalse(repeated["success"])
-        self.assertEqual(repeated["error"], "Subject too long")
+        # The row is terminal, so the claim refuses it before the subject is even read.
+        self.assertEqual(repeated["error"], "Not claimable: failed")
         self.assert_permanent_failure(log)
 
     def test_scheduled_retry_refuses_invalid_subject_before_enqueue(self) -> None:
         log = self.log("queued")
         with patch("django_q.tasks.async_task", side_effect=self.enqueue):
-            _schedule_email_retry(
-                email_log_id=str(log.pk),
-                to=[log.to_addr],
-                subject=log.subject,
-                body_text="Body",
-                body_html=None,
-                from_email=log.from_addr,
-                reply_to=None,
-                cc=None,
-                bcc=None,
-                tags=None,
-                track_opens=True,
-                track_clicks=True,
-                retry_count=1,
-            )
+            _schedule_email_retry(str(log.pk), 1)
             self.run_pending()
         self.assertEqual(mail.outbox, [])
         self.assertEqual(self.pending, [])
@@ -187,7 +151,7 @@ class SubjectRecoveryTests(TestCase):
     def test_rate_limited_retry_marks_invalid_email_failed_instead_of_enqueueing(self) -> None:
         with patch("django_q.tasks.async_task", side_effect=self.enqueue):
             result = EmailService._queue_email_for_retry(
-                to=["recipient@example.test"], subject="x" * 11, body_text="Body"
+                OutgoingEmail(to=["recipient@example.test"], subject="x" * 11, body_text="Body")
             )
             self.run_pending()
         self.assertEqual(mail.outbox, [])

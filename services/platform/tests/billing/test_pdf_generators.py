@@ -1532,7 +1532,7 @@ class PDFGeneratorMockingTestCase(TestCase):
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
         # Verify Canvas was initialized with correct parameters
-        mock_canvas_class.assert_called_once_with(generator.buffer, pagesize=A4)
+        mock_canvas_class.assert_called_once_with(generator.buffer, pagesize=A4, invariant=True)
         self.assertEqual(generator.canvas, mock_canvas)
 
     @patch('apps.billing.pdf_generators.canvas.Canvas')

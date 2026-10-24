@@ -169,7 +169,9 @@ def run_queued_now(func_path: str, *args: Any, **kwargs: Any) -> str:
     from importlib import import_module  # noqa: PLC0415
 
     module, name = func_path.rsplit(".", 1)
-    getattr(import_module(module), name)(*args)
+    # Django-Q's own options never reach the task; everything else does, as a worker passes it.
+    options = {"task_name", "timeout", "q_options", "group", "hook", "save", "sync", "cached", "broker", "cluster"}
+    getattr(import_module(module), name)(*args, **{key: value for key, value in kwargs.items() if key not in options})
     return "inline"
 
 
