@@ -34,7 +34,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.model_secrets import secret_aad
+from apps.common.model_secrets import NaturalKeyChangeError, NaturalKeyQuerySet, natural_key, secret_aad
 from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
@@ -126,6 +126,12 @@ class EncryptedCredential(models.Model):
         ("cloud_provider", "Cloud Provider API"),
     ]
 
+    # Each secret is bound to the service and identifier it is found by: a row renamed in the database no
+    # longer serves its secret under the new name (#751 follow-up, M19). No path renames a credential; one
+    # stored for a new name replaces it.
+    SECRET_NATURAL_KEY: ClassVar[tuple[str, ...]] = ("service_type", "service_identifier")
+    _loaded_natural_key: tuple[str, ...] | None = None  # As read from the database (None: not loaded)
+
     # Primary identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES)
@@ -156,6 +162,8 @@ class EncryptedCredential(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = models.Manager.from_queryset(NaturalKeyQuerySet)()
+
     class Meta:
         db_table = "common_credentials"
         unique_together: ClassVar[list[list[str]]] = [["service_type", "service_identifier"]]
@@ -167,6 +175,23 @@ class EncryptedCredential(models.Model):
 
     def __str__(self) -> str:
         return f"{self.service_type}:{self.service_identifier}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = kwargs["update_fields"] = list(update_fields)  # Any iterable: read it once
+        loaded = getattr(self, "_loaded_natural_key", None)
+        writes_key = update_fields is None or bool(set(update_fields) & set(self.SECRET_NATURAL_KEY))
+        if loaded is not None and writes_key and natural_key(self) != loaded:
+            raise NaturalKeyChangeError("A stored credential is never renamed: store one under the new name")
+        super().save(*args, **kwargs)
+        self._loaded_natural_key = natural_key(self)
+
+    @classmethod
+    def from_db(cls, db: str | None, field_names: Any, values: Any) -> EncryptedCredential:
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_natural_key = natural_key(instance) if not instance.get_deferred_fields() else None
+        return instance
 
     @property
     def is_expired(self) -> bool:
