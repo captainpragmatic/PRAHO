@@ -231,11 +231,15 @@ class NaturalKeySecretsMixin(_MixinBase):
 
     def refresh_from_db(self, *args: Any, **kwargs: Any) -> None:
         super().refresh_from_db(*args, **kwargs)
-        remember_secrets(self, self.BOUND_SECRET_FIELDS)
+        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)  # (using, fields, from_queryset)
+        # Only what was re-read: an unsaved value in another secret field stays this instance's own change
+        remember_secrets(self, [f for f in self.BOUND_SECRET_FIELDS if fields is None or f in fields])
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         with transaction.atomic(using=kwargs.get("using") or self._state.db or "default"):
             for field in self.BOUND_SECRET_FIELDS:
                 bind_secret_on_save(self, field, kwargs)
             super().save(*args, **kwargs)
-        remember_secrets(self, self.BOUND_SECRET_FIELDS)
+        update_fields = kwargs.get("update_fields")  # The list bind_secret_on_save may have extended
+        # Only what was written: an unsaved value in a field this save left out stays this instance's change
+        remember_secrets(self, [f for f in self.BOUND_SECRET_FIELDS if update_fields is None or f in update_fields])

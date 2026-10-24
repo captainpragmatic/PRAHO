@@ -393,6 +393,22 @@ class TestDeployScript:
         assert any(_subcommand(c)[:1] == ["up"] for c in project.compose_calls())
 
     @pytest.mark.integration
+    @pytest.mark.parametrize("stack", ["single-server", "platform-only"])
+    def test_secrets_are_rebound_after_every_container_runs_the_new_release(self, project: Project, stack: str) -> None:
+        # A container of the previous release can write a secret under the previous binding while the new one
+        # migrates; rebind_secrets runs once `up --wait` has every service on the new release (#751, M19).
+        project.write_env(".env.prod", PROD_STACK_ENV)
+        result = project.run("deploy.sh", stack)
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = project.compose_calls()
+        subcommands = [_subcommand(c) for c in calls]
+        up = next(i for i, sub in enumerate(subcommands) if sub[:1] == ["up"])
+        rebind = [i for i, sub in enumerate(subcommands) if "rebind_secrets" in sub]
+        assert len(rebind) == 1, subcommands
+        assert up < rebind[0]
+        assert subcommands[rebind[0]][:3] == ["exec", "-T", "platform"]
+
+    @pytest.mark.integration
     @pytest.mark.parametrize(("flag", "subcommand"), [("--stop", "down"), ("--logs", "logs")])
     def test_stop_and_logs_read_the_env_file_without_the_key_check(
         self, project: Project, flag: str, subcommand: str

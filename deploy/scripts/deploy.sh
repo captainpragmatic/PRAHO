@@ -111,6 +111,16 @@ compose_up() {
     fi
 }
 
+# Every platform container runs the new release once `up --wait` returns. One on the previous release could
+# have written a secret under the previous binding while the new one migrated: re-bind it now (idempotent; it
+# aborts with nothing changed on a secret it cannot open).
+rebind_secrets_after_restart() {
+    local type="$1"
+    shift
+    log_info "Re-binding stored secrets written during the deploy..."
+    praho_compose "$type" "$@" exec -T platform python manage.py rebind_secrets
+}
+
 deploy_single_server() {
     log_info "Deploying PRAHO - Single Server (all services)"
     compose_up single-server
@@ -126,6 +136,7 @@ deploy_single_server() {
     log_info "Running initial data setup..."
     docker exec praho_platform python manage.py setup_initial_data
 
+    rebind_secrets_after_restart single-server
     verify_deployment single-server
 }
 
@@ -139,6 +150,7 @@ deploy_platform_only() {
         export DB_HOST=db DB_SSLMODE=disable
     fi
     compose_up platform-only ${PROFILES[@]+"${PROFILES[@]}"}
+    rebind_secrets_after_restart platform-only ${PROFILES[@]+"${PROFILES[@]}"}
     verify_deployment platform-only ${PROFILES[@]+"${PROFILES[@]}"}
 }
 

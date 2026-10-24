@@ -83,10 +83,11 @@ decrypts. The global master and SSH credentials are only used for a node whose o
 - Never `UPDATE` a vault credential's `service_identifier` or a server's `hostname` in SQL, and never bulk-update
   them (the ORM refuses): store the credential again under the new name instead.
 - Upgrading to the release that adds this binding re-encrypts existing secrets (migrations `common 0005`,
-  `provisioning 0012`). Stop the platform and its workers before `migrate`; a process still running the previous
-  release writes the old binding. If anything ran meanwhile, run `manage.py rebind_secrets` once the new release
-  is up. Both abort with nothing changed on a secret that opens under neither binding (a wrong
-  `CREDENTIAL_VAULT_MASTER_KEY` looks the same).
+  `provisioning 0012`). A process still on the previous release writes the old binding, and cannot read the new
+  one, until it restarts: `deploy.sh` and the native role run `manage.py rebind_secrets` (idempotent) once every
+  service runs the new release. A manual upgrade stops the platform and its workers before `migrate`, or runs
+  `rebind_secrets` after restarting them. Both abort with nothing changed on a secret that opens under neither
+  binding (a wrong `CREDENTIAL_VAULT_MASTER_KEY` looks the same).
 
 ### 2.1 Key Isolation (HKDF Domain Separation)
 

@@ -185,13 +185,21 @@ class EncryptedCredential(models.Model):
         if loaded is not None and writes_key and natural_key(self) != loaded:
             raise NaturalKeyChangeError("A stored credential is never renamed: store one under the new name")
         super().save(*args, **kwargs)
-        self._loaded_natural_key = natural_key(self)
+        if writes_key:  # A save that left the key out stored the old one: keep comparing against it
+            self._loaded_natural_key = natural_key(self)
 
     @classmethod
     def from_db(cls, db: str | None, field_names: Any, values: Any) -> EncryptedCredential:
         instance = super().from_db(db, field_names, values)
-        instance._loaded_natural_key = natural_key(instance) if not instance.get_deferred_fields() else None
+        if not set(cls.SECRET_NATURAL_KEY) & instance.get_deferred_fields():  # Other fields may be deferred
+            instance._loaded_natural_key = natural_key(instance)
         return instance
+
+    def refresh_from_db(self, *args: Any, **kwargs: Any) -> None:
+        super().refresh_from_db(*args, **kwargs)
+        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)  # (using, fields, from_queryset)
+        if fields is None or set(self.SECRET_NATURAL_KEY) & set(fields):
+            self._loaded_natural_key = natural_key(self)
 
     @property
     def is_expired(self) -> bool:

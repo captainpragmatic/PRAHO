@@ -61,6 +61,24 @@ class VaultNaturalKeyTests(TestCase):
             row.save()
         self.assertEqual(_read("named.example.com").unwrap()[1], "kept")
 
+    def test_a_rename_after_a_deferred_load_is_refused(self) -> None:
+        _store("deferred.example.com", "kept")
+        row = EncryptedCredential.objects.only("id", "service_type", "service_identifier").get(
+            service_identifier="deferred.example.com"
+        )
+        row.service_identifier = "renamed.example.com"
+        with self.assertRaisesRegex(ValueError, "never renamed"):
+            row.save()
+
+    def test_a_rename_kept_across_a_partial_save_is_refused_on_the_full_save(self) -> None:
+        row = _store("partial.example.com", "kept")
+        row = EncryptedCredential.objects.get(pk=row.pk)
+        row.service_identifier = "renamed.example.com"
+        row.save(update_fields=["last_accessed"])
+        with self.assertRaisesRegex(ValueError, "never renamed"):
+            row.save()
+        self.assertEqual(_read("partial.example.com").unwrap()[1], "kept")
+
     def test_bulk_writes_of_the_natural_key_are_refused(self) -> None:
         row = _store("bulk.example.com")
         with self.assertRaisesRegex(ValueError, "natural key"):
@@ -156,6 +174,21 @@ class VirtualminServerHostnameTests(TestCase):
         other.save()
         server.hostname = "node-new.example.com"
         server.save()
+        self.assertEqual(_fresh(server).get_api_password(), "P2")
+
+    def test_a_password_set_before_a_partial_save_is_still_written_by_the_password_save(self) -> None:
+        server = _fresh(_server())
+        server.set_api_password("P2")
+        server.status = "maintenance"
+        server.save(update_fields=["status"])
+        server.save(update_fields=["encrypted_api_password"])
+        self.assertEqual(_fresh(server).get_api_password(), "P2")
+
+    def test_a_refresh_of_other_fields_keeps_a_pending_password(self) -> None:
+        server = _fresh(_server())
+        server.set_api_password("P2")
+        server.refresh_from_db(fields=["status"])
+        server.save(update_fields=["encrypted_api_password"])
         self.assertEqual(_fresh(server).get_api_password(), "P2")
 
     def test_bulk_writes_of_the_hostname_are_refused(self) -> None:
