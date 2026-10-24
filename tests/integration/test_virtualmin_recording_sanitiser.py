@@ -271,3 +271,24 @@ class TestInfoIsAMachineInventory:
     def test_a_refusal_from_info_keeps_its_text(self) -> None:
         refusal = json.dumps({"status": "failure", "error": "Permission denied", "output": None})
         assert sanitise_body(refusal, program="info") == {"status": "failure", "error": "Permission denied", "output": None}
+
+
+def test_the_stale_read_warning_is_run_to_run_noise() -> None:
+    """Virtualmin prints this when the domain file changed under its own restore steps, depending on timing.
+
+    It appeared in one scheduled lab run's restore-domain output and not in the next, with the same code, and
+    nothing classifies on it: the drift check must not read it as a contract change (#728).
+    """
+    with_warning = (
+        "Re-creating virtual server contract-restore.praho.test ..\n"
+        "    Saving server details ..\n"
+        "Domain /etc/webmin/virtual-server/domains/17612345678901 was modified since last read!\n"
+        "    .. done\n"
+    )
+    without = (
+        "Re-creating virtual server contract-restore.praho.test ..\n"
+        "    Saving server details ..\n"
+        "    .. done\n"
+    )
+    assert sanitise_text(with_warning) == sanitise_text(without)
+    assert sanitise_text(sanitise_text(with_warning)) == sanitise_text(with_warning)
