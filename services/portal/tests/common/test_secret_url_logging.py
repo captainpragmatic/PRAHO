@@ -75,6 +75,12 @@ class SecretURLFilterRobustnessTests(SimpleTestCase):
             setattr(record, name, value)
         return record
 
+    def test_a_redaction_that_fails_withholds_the_record_instead_of_emitting_it(self) -> None:
+        record = self._record("visit %s", (self.SECRET_LINK,))
+        with patch.object(SecretURLFilter, "_redact", side_effect=RuntimeError("redaction broke")):
+            self.assertTrue(SecretURLFilter().filter(record))
+        self.assertNotIn("unsubscribe-secret", record.getMessage())
+
     def test_a_record_with_bad_format_arguments_is_kept_not_raised(self) -> None:
         record = self._record("%s %s", ("only-one",))
 

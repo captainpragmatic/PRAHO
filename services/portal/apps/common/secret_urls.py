@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import copy
 import logging
 import re
@@ -85,8 +84,14 @@ class SecretURLFilter(logging.Filter):
     _SKIPPED = frozenset({"msg", "args", "exc_info"})
 
     def filter(self, record: logging.LogRecord) -> bool:
-        with contextlib.suppress(Exception):  # A logging filter must never raise into the code that logs
+        try:
             self._redact(record)
+        except Exception:  # A logging filter must never raise into the code that logs
+            # Redaction itself failed: withhold the record's text rather than emit what may hold a secret
+            record.msg = "[log record withheld: redaction failed]"
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
         return True
 
     def _redact(self, record: logging.LogRecord) -> None:
