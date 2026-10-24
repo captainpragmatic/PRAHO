@@ -79,6 +79,13 @@ class VaultNaturalKeyTests(TestCase):
             row.save()
         self.assertEqual(_read("partial.example.com").unwrap()[1], "kept")
 
+    def test_a_rename_kept_across_a_partial_refresh_is_refused(self) -> None:
+        row = EncryptedCredential.objects.get(pk=_store("refresh.example.com", "kept").pk)
+        row.service_identifier = "renamed.example.com"
+        row.refresh_from_db(fields=["service_type"])
+        with self.assertRaisesRegex(ValueError, "never renamed"):
+            row.save()
+
     def test_bulk_writes_of_the_natural_key_are_refused(self) -> None:
         row = _store("bulk.example.com")
         with self.assertRaisesRegex(ValueError, "natural key"):
@@ -190,6 +197,18 @@ class VirtualminServerHostnameTests(TestCase):
         server.refresh_from_db(fields=["status"])
         server.save(update_fields=["encrypted_api_password"])
         self.assertEqual(_fresh(server).get_api_password(), "P2")
+
+    def test_a_refresh_given_a_generator_still_moves_the_baseline(self) -> None:
+        server = _server()
+        stale = _fresh(server)
+        writer = _fresh(server)
+        writer.set_api_password("B")
+        writer.save()
+        stale.refresh_from_db(fields=(name for name in ["encrypted_api_password"]))
+        writer.set_api_password("C")
+        writer.save()
+        stale.save()  # Its password is what it read, not its own change: the newer one stays
+        self.assertEqual(_fresh(server).get_api_password(), "C")
 
     def test_bulk_writes_of_the_hostname_are_refused(self) -> None:
         server = _server()

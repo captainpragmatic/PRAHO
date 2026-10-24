@@ -21,7 +21,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Iterable
 
 import base64
 import os
@@ -34,7 +34,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.model_secrets import NaturalKeyChangeError, NaturalKeyQuerySet, natural_key, secret_aad
+from apps.common.model_secrets import NaturalKeyChangeError, NaturalKeyQuerySet, secret_aad
 from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ class EncryptedCredential(models.Model):
     # longer serves its secret under the new name (#751 follow-up, M19). No path renames a credential; one
     # stored for a new name replaces it.
     SECRET_NATURAL_KEY: ClassVar[tuple[str, ...]] = ("service_type", "service_identifier")
-    _loaded_natural_key: tuple[str, ...] | None = None  # As read from the database (None: not loaded)
+    _stored_key: dict[str, str] | None = None  # Each natural-key field as last read or written (None: none yet)
 
     # Primary identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -180,26 +180,29 @@ class EncryptedCredential(models.Model):
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
             update_fields = kwargs["update_fields"] = list(update_fields)  # Any iterable: read it once
-        loaded = getattr(self, "_loaded_natural_key", None)
-        writes_key = update_fields is None or bool(set(update_fields) & set(self.SECRET_NATURAL_KEY))
-        if loaded is not None and writes_key and natural_key(self) != loaded:
+        written = [n for n in self.SECRET_NATURAL_KEY if update_fields is None or n in update_fields]
+        stored = self._stored_key or {}
+        if any(name in stored and str(getattr(self, name)) != stored[name] for name in written):
             raise NaturalKeyChangeError("A stored credential is never renamed: store one under the new name")
         super().save(*args, **kwargs)
-        if writes_key:  # A save that left the key out stored the old one: keep comparing against it
-            self._loaded_natural_key = natural_key(self)
+        self._remember_key(written)
 
     @classmethod
     def from_db(cls, db: str | None, field_names: Any, values: Any) -> EncryptedCredential:
         instance = super().from_db(db, field_names, values)
-        if not set(cls.SECRET_NATURAL_KEY) & instance.get_deferred_fields():  # Other fields may be deferred
-            instance._loaded_natural_key = natural_key(instance)
+        instance._remember_key([n for n in cls.SECRET_NATURAL_KEY if n not in instance.get_deferred_fields()])
         return instance
 
-    def refresh_from_db(self, *args: Any, **kwargs: Any) -> None:
-        super().refresh_from_db(*args, **kwargs)
-        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)  # (using, fields, from_queryset)
-        if fields is None or set(self.SECRET_NATURAL_KEY) & set(fields):
-            self._loaded_natural_key = natural_key(self)
+    def refresh_from_db(
+        self, using: str | None = None, fields: Iterable[str] | None = None, from_queryset: Any = None
+    ) -> None:
+        refreshed = None if fields is None else list(fields)  # Django accepts any iterable: read it once
+        super().refresh_from_db(using=using, fields=refreshed, from_queryset=from_queryset)
+        self._remember_key([n for n in self.SECRET_NATURAL_KEY if refreshed is None or n in refreshed])
+
+    def _remember_key(self, names: Iterable[str]) -> None:
+        """Record these natural-key fields as stored; the others keep what was last read or written."""
+        self._stored_key = {**(self._stored_key or {}), **{name: str(getattr(self, name)) for name in names}}
 
     @property
     def is_expired(self) -> bool:

@@ -229,11 +229,13 @@ class NaturalKeySecretsMixin(_MixinBase):
         remember_secrets(instance, cls.BOUND_SECRET_FIELDS)
         return instance
 
-    def refresh_from_db(self, *args: Any, **kwargs: Any) -> None:
-        super().refresh_from_db(*args, **kwargs)
-        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)  # (using, fields, from_queryset)
+    def refresh_from_db(
+        self, using: str | None = None, fields: Iterable[str] | None = None, from_queryset: Any = None
+    ) -> None:
+        refreshed = None if fields is None else list(fields)  # Django accepts any iterable: read it once
+        super().refresh_from_db(using=using, fields=refreshed, from_queryset=from_queryset)
         # Only what was re-read: an unsaved value in another secret field stays this instance's own change
-        remember_secrets(self, [f for f in self.BOUND_SECRET_FIELDS if fields is None or f in fields])
+        remember_secrets(self, [f for f in self.BOUND_SECRET_FIELDS if refreshed is None or f in refreshed])
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         with transaction.atomic(using=kwargs.get("using") or self._state.db or "default"):
