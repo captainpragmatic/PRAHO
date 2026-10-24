@@ -90,7 +90,8 @@ decrypts. The global master and SSH credentials are only used for a node whose o
   binding (a wrong `CREDENTIAL_VAULT_MASTER_KEY` looks the same).
 - Rolling back: an older release ignores these applied migrations and cannot read re-bound secrets. Every released
   tag also predates the row binding itself, so roll back to one with a full rollback from a pre-upgrade backup
-  (`rollback.sh full`). Only a build that has the row binding but not the natural-key binding can be reached by
+  (`rollback.sh full`); take that backup with this checkout's `deploy/scripts/backup.sh` before upgrading, which
+  writes the media and metadata files the full rollback needs. Only a build that has the row binding but not the natural-key binding can be reached by
   reversing: stop the platform and its workers, run `manage.py migrate common 0004` and
   `manage.py migrate provisioning 0011` on this release, and keep the writers stopped until the target starts.
 
