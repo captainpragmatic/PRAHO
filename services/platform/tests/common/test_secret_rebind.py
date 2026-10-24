@@ -21,7 +21,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
+from django.db import DatabaseError, connection, transaction
 from django.test import TestCase, TransactionTestCase
 
 from apps.common.credential_vault import CredentialData, EncryptedCredential, get_credential_vault
@@ -224,6 +224,9 @@ class MigrationLockTests(TransactionTestCase):
         migration = threading.Thread(target=migrate)
         migration.start()
         self.assertTrue(rebound.wait(10))
+        # Deterministic: while the migration holds the row, another connection cannot take it
+        with self.assertRaises(DatabaseError), transaction.atomic():
+            EncryptedCredential.objects.select_for_update(nowait=True).filter(service_identifier="node.example.com").first()
         rotation = threading.Thread(target=rotate)
         rotation.start()
         time.sleep(0.5)  # Unlocked, the rotation commits here, before the migration writes its copy
