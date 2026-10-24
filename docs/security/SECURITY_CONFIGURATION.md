@@ -88,6 +88,10 @@ decrypts. The global master and SSH credentials are only used for a node whose o
   service runs the new release. A manual upgrade stops the platform and its workers before `migrate`, or runs
   `rebind_secrets` after restarting them. Both abort with nothing changed on a secret that opens under neither
   binding (a wrong `CREDENTIAL_VAULT_MASTER_KEY` looks the same).
+- Rolling back to a release older than this binding: first run `manage.py migrate common 0004` and
+  `manage.py migrate provisioning 0011` on this release (they re-encrypt to the previous binding). An older release
+  ignores the applied migrations and cannot read re-bound secrets. A full rollback from a pre-upgrade backup needs
+  neither.
 
 ### 2.1 Key Isolation (HKDF Domain Separation)
 
