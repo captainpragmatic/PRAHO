@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from apps.billing.models import Invoice
 from apps.billing.proforma_models import ProformaInvoice
+from apps.common.rate_limiting import rate_limit
 from apps.customers.models import Customer
 from apps.provisioning.models import Service
 from apps.tickets.models import Ticket
@@ -99,13 +100,14 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # System status (cached from daily Django-Q2 task, or empty on first boot)
     from apps.common.system_status import get_cached_status  # noqa: PLC0415
 
-    system_status = get_cached_status() if getattr(user, "is_staff_user", False) else []
+    system_status = get_cached_status() if getattr(user, "is_staff_user", False) else None
 
     context = {
         "stats": stats,
         "recent_documents": recent_documents,
         "recent_tickets": recent_tickets,
-        "system_status": system_status,
+        "system_status": system_status.results if system_status else [],
+        "status_snapshot": system_status,
         "current_time": timezone.now(),
         "app_version": "0.30.0",
     }
@@ -152,17 +154,19 @@ def _count_active_services(customers: QuerySet[Customer]) -> int:
 
 
 @require_POST
-@staff_member_required
+@staff_member_required(login_url="users:login")
+@rate_limit(key="user", rate="1/m", method="POST", block=False)
 def system_status_refresh(request: HttpRequest) -> HttpResponse:
     """
     HTMX endpoint: run system status checks on demand and return partial HTML.
     Staff-only. POST to prevent accidental crawling.
     """
-    from apps.common.system_status import refresh_and_cache_status  # noqa: PLC0415
+    from apps.common.system_status import get_cached_status, refresh_and_cache_status  # noqa: PLC0415
 
-    system_status = refresh_and_cache_status()
+    limited = getattr(request, "limited", False)
+    snapshot = get_cached_status() if limited else refresh_and_cache_status()
     return render(
         request,
         "dashboard_partials/system_status.html",
-        {"system_status": system_status, "current_time": timezone.now()},
+        {"system_status": snapshot.results, "status_snapshot": snapshot, "status_rate_limited": limited},
     )
