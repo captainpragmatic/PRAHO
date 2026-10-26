@@ -214,7 +214,7 @@ class AnsibleService:
                 raise ValueError("Malformed operator public keys")
             # Different operator keys can share an algorithm. Validate each separately.
             parse_ssh_host_keys(" ".join(parts[:PUBLIC_KEY_FIELDS]))
-        return keys
+        return tuple(" ".join(line.split()) for line in keys)
 
     def run_playbook(  # noqa: PLR0911, PLR0912, PLR0915, C901  # Fail-closed boundary checks, SSH-readiness + host-key pinning, guarded temp-file cleanup
         self,
@@ -276,7 +276,7 @@ class AnsibleService:
             if playbook != "ssh-hardening.yml" and (
                 playbook in self.SSH_POLICY_ENTRYPOINTS or connection_port != deployment.ssh_port
             ):
-                transition = self._ensure_ssh_policy(deployment)
+                transition = self._ensure_ssh_policy(deployment, operator_public_keys=operator_public_keys)
                 if transition.is_err():
                     return Err(transition.unwrap_err())
                 connection_port = deployment.ssh_port
@@ -406,9 +406,11 @@ class AnsibleService:
                     except OSError as _cleanup_err:
                         logger.warning(f"⚠️ [Ansible] Could not remove temp file {_tmp_path}: {_cleanup_err}")
 
-    def _ensure_ssh_policy(self, deployment: NodeDeployment) -> Result[bool, str]:
+    def _ensure_ssh_policy(
+        self, deployment: NodeDeployment, *, operator_public_keys: tuple[str, ...] | None = None
+    ) -> Result[bool, str]:
         """Shared initial/maintenance boundary; lab adapters override only this hook."""
-        result = self.run_playbook(deployment, "ssh-hardening.yml")
+        result = self.run_playbook(deployment, "ssh-hardening.yml", operator_public_keys=operator_public_keys)
         if result.is_err():
             return Err(result.unwrap_err())
         if not result.unwrap().success:

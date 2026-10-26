@@ -66,9 +66,10 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
                 patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
                 patch.object(service, "_build_vars", return_value={}),
             ):
-                result = service.run_playbook(deployment, "virtualmin_harden.yml")
+                result = service.run_playbook(deployment, "virtualmin_harden.yml", operator_public_keys=("snapshot",))
 
             self.assertTrue(result.is_ok())
+            service._ensure_ssh_policy.assert_called_once_with(deployment, operator_public_keys=("snapshot",))
             self.assertEqual(mock_run.call_args.kwargs["env"]["ANSIBLE_HOST_KEY_CHECKING"], "True")
             self.assertIn(
                 "UserKnownHostsFile=/",

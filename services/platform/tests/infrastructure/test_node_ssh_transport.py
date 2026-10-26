@@ -48,6 +48,18 @@ class NodeSSHPinTests(SimpleTestCase):
             path.write_text("\n".join(lines))
             with override_settings(PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE=str(path)):
                 self.assertEqual(AnsibleService.operator_public_keys(), tuple(lines))
+                path.write_text("\n".join(line.replace(" ", "\t  ") for line in lines))
+                self.assertEqual(AnsibleService.operator_public_keys(), tuple(lines))
+
+    def test_recursive_hardening_receives_the_validated_operator_snapshot(self) -> None:
+        from apps.common.types import Ok  # noqa: PLC0415 -- Ansible subprocess boundary fixture.
+
+        service = AnsibleService()
+        snapshot = ("approved-public-key-snapshot",)
+        deployment = NodeDeployment()
+        with patch.object(service, "run_playbook", return_value=Ok(MagicMock(success=True))) as run:
+            self.assertTrue(service._ensure_ssh_policy(deployment, operator_public_keys=snapshot).is_ok())
+        run.assert_called_once_with(deployment, "ssh-hardening.yml", operator_public_keys=snapshot)
 
     def test_a_preloaded_ambient_key_cannot_outrank_the_enrolled_pin(self) -> None:
         key = paramiko.RSAKey.generate(2048)

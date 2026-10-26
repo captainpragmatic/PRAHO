@@ -406,8 +406,10 @@ def lab_transport(state: LabState) -> Iterator[None]:
         del key_file, known_hosts
         return checked_lab_port(deployment)
 
-    def lab_ssh_policy(self: AnsibleService, deployment: NodeDeployment) -> Result[bool, str]:
-        del self
+    def lab_ssh_policy(
+        self: AnsibleService, deployment: NodeDeployment, *, operator_public_keys: tuple[str, ...] | None = None
+    ) -> Result[bool, str]:
+        del self, operator_public_keys
         checked_lab_port(deployment)
         # The Debian lab's key-only daemon stays on its published NAT endpoint.
         # The Ubuntu SSH transition itself is exercised by test-ssh-docker.
