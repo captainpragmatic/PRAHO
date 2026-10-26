@@ -61,7 +61,7 @@ class AuthHealthCommandCoverageTests(TestCase):
         self.assertIn("ssh_sudo:", output)
         self.assertIn("CRITICAL: No authentication methods working", output)
 
-    @override_settings(VIRTUALMIN_SSH_PASSWORD="health-test-password")
+    @override_settings(VIRTUALMIN_SSH_PRIVATE_KEY_PATH="/coverage/key")
     def test_ssh_fallback_renders_working_method_and_acl_warning(self) -> None:
         sent: list[str] = []
         stdout = MagicMock()

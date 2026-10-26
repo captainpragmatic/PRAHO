@@ -890,7 +890,7 @@ class DriftRemediationService:
         if health_result.is_err():
             return Ok(
                 f"Provider confirms the remediation of '{field_name}' but {deployment.hostname} "
-                "is unreachable on port 22 — manual check required"
+                f"is unreachable on port {deployment.ssh_port} — manual check required"
             )
 
         return Ok(None)
@@ -1012,7 +1012,7 @@ class DriftRemediationService:
         deployment: NodeDeployment,
         deadline: float,
     ) -> Result[bool, str]:
-        """TCP-probe port 22 until reachable or the verification deadline passes."""
+        """Probe the verified SSH port until reachable or the deadline passes."""
         if not deployment.ipv4_address:
             return Err("No IP address to verify")
 
@@ -1021,14 +1021,16 @@ class DriftRemediationService:
             probe_timeout = min(_get_health_check_timeout(), max(1.0, remaining))
             try:
                 with socket.create_connection(
-                    (str(deployment.ipv4_address), 22),
+                    (str(deployment.ipv4_address), deployment.ssh_port),
                     timeout=probe_timeout,
                 ):
                     pass
             except (OSError, TimeoutError):
                 remaining = deadline - _monotonic()
                 if remaining <= 0:
-                    return Err(f"Server {deployment.hostname} unreachable on port 22 after remediation")
+                    return Err(
+                        f"Server {deployment.hostname} unreachable on port {deployment.ssh_port} after remediation"
+                    )
                 _sleep(min(_get_verify_poll_interval(), remaining))
                 continue
 

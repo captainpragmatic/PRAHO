@@ -342,10 +342,12 @@ class ExecuteWithMethodDispatchTests(TestCase):
 
         self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
 
-    @override_settings(VIRTUALMIN_SSH_PASSWORD="test-password")
+    @override_settings(VIRTUALMIN_SSH_PRIVATE_KEY_PATH="/coverage/key")
     @patch("apps.provisioning.virtualmin_auth_manager.paramiko.SSHClient")
     def test_ssh_rejects_unknown_host_keys(self, mock_client_class: MagicMock) -> None:
         client = mock_client_class.return_value
+        self.mock_server.enrolled_ssh_host_keys = None
+        self.mock_server.effective_ssh_port = 9876
 
         self.manager._connect_ssh()
 

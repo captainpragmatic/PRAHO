@@ -12,7 +12,7 @@ import yaml
 from django.test import SimpleTestCase
 
 ROOT = Path(__file__).resolve().parents[2]
-type ComposeMount = str | dict[str, str | bool]
+type ComposeMount = str | dict[str, str | bool | dict[str, bool]]
 
 
 def _runtime_instructions(service: str) -> list[tuple[str, str]]:
@@ -161,6 +161,15 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
             "read_only": True,
         }
         expected_volumes: dict[str, dict[str, list[ComposeMount]]] = {
+            "docker-compose.node-ssh.yml": {
+                "platform": [{
+                    "type": "bind",
+                    "source": "${PRAHO_SSH_PUBLIC_KEYS_FILE:?Set an absolute path to the approved operator public-key file}",
+                    "target": "/etc/praho/operator_authorized_keys",
+                    "read_only": True,
+                    "bind": {"create_host_path": False},
+                }],
+            },
             "docker-compose.container-service.yml": {
                 "platform": [],
                 "portal": ["portal_sessions:/app/data"],
@@ -207,4 +216,4 @@ class DockerRepositoryLayoutTests(SimpleTestCase):
                         self.assertEqual(volumes, expected_volumes[path.name][service])
                         self.assertNotIn("entrypoint", config)
                         self.assertNotIn("command", config)
-        self.assertEqual(checked, 8)
+        self.assertEqual(checked, 9)

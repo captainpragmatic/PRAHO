@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import secrets
 import subprocess
@@ -44,7 +45,13 @@ def test_collectstatic_and_rendered_portal_use_the_caddy_directory(tmp_path: Pat
     assert environment["STATIC_ROOT"] == str(tmp_path / "portal-static")
     assert environment["DJANGO_SECRET_KEY"] == PORTAL_KEY
     assert not {"DB_PASSWORD", "CREDENTIAL_VAULT_MASTER_KEY", "DJANGO_ENCRYPTION_KEY", "HMAC_SECRET"} & environment.keys()
-    environment["PORTAL_LOG_DIR"] = ""
+    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    collect = next(task for task in tasks if task["name"] == "Collect Portal static files")
+    renderer = Environment(undefined=StrictUndefined)  # noqa: S701 -- Deployment environment, not HTML.
+    renderer.filters["combine"] = lambda left, right: {**left, **right}
+    environment = ast.literal_eval(renderer.from_string(collect["environment"]).render(portal_django_env=environment))
+    # The project user can write static assets but cannot enter Portal's private logs.
+    assert environment["PORTAL_LOG_DIR"] == ""
     environment["PLATFORM_TO_PORTAL_WEBHOOK_SECRET"] = "w" * 48
     code = '''
 import django

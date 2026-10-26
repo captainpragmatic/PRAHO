@@ -78,6 +78,21 @@ def test_passfile_escapes_libpq_separators() -> None:
     assert pgpass({PASSWORD_KEY: r"a:b\c"}) == "localhost:5432:praho:praho:a\\:b\\\\c\n"
 
 
+@pytest.mark.parametrize("cidrs", ["0.0.0.0/0", "::/0", "192.0.2.1/24", "192.0.2.1/32,::1/128", "invalid"])
+def test_staff_cidrs_reject_invalid_or_world_access(tmp_path: Path, cidrs: str) -> None:
+    path = tmp_path / "config"
+    path.write_text(f"PLATFORM_ALLOWED_CIDRS='{cidrs}'\n")
+    with pytest.raises(ValueError, match="PLATFORM_ALLOWED_CIDRS"):
+        read_env(path)
+
+
+def test_caddy_only_launcher_selects_only_caddy_tasks(tmp_path: Path) -> None:
+    with patch("deploy.scripts.native_env.subprocess.run") as run:
+        run.return_value.returncode = 0
+        assert run_native({}, tmp_path / "env", "staging", fetch_backup=None, version="", caddy_only=True) == 0
+    assert run.call_args.args[0][-2:] == ["--tags", "caddy"]
+
+
 def test_launcher_does_not_export_application_secrets(tmp_path: Path) -> None:
     marker = secrets.token_urlsafe(24)
     with patch.dict(os.environ, {}, clear=True), patch("deploy.scripts.native_env.subprocess.run") as run:
@@ -95,6 +110,42 @@ def test_launcher_does_not_export_application_secrets(tmp_path: Path) -> None:
     assert marker not in str(run.call_args)
     assert run.call_args.kwargs["env"] == {"PRAHO_SERVER_IP": "192.0.2.1"}
     assert "cli_version=v1.2.3" in run.call_args.args[0]
+
+
+def test_launcher_recovers_verified_new_port_after_interrupted_deployment(tmp_path: Path) -> None:
+    values = {"PRAHO_SERVER_IP": "192.0.2.1", "PRAHO_SSH_PORT": "22",
+              "PRAHO_DEPLOY_KNOWN_HOSTS_FILE": str(tmp_path / "known_hosts")}
+    with patch("deploy.scripts.native_env.socket.create_connection"), patch("deploy.scripts.native_env.subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "0\n"
+        assert run_native(values, tmp_path / "env", "staging", fetch_backup=None, version="", ssh_only=True) == 0
+    assert run.call_count == 2
+    proof = run.call_args_list[0].args[0]
+    assert "StrictHostKeyChecking=yes" in proof
+    assert "ControlPath=none" in proof
+    assert "PreferredAuthentications=publickey" in proof
+    assert run.call_args.kwargs["env"]["PRAHO_SSH_PORT"] == "9876"
+
+
+def test_launcher_does_not_fall_back_after_new_port_rejects_identity(tmp_path: Path) -> None:
+    values = {"PRAHO_SERVER_IP": "192.0.2.1", "PRAHO_SSH_PORT": "22",
+              "PRAHO_DEPLOY_KNOWN_HOSTS_FILE": str(tmp_path / "known_hosts")}
+    with patch("deploy.scripts.native_env.socket.create_connection"), patch("deploy.scripts.native_env.subprocess.run") as run:
+        run.return_value.returncode = 255
+        with pytest.raises(ValueError, match="9876"):
+            run_native(values, tmp_path / "env", "staging", fetch_backup=None, version="")
+    assert run.call_count == 1  # No Ansible invocation after a trust/authentication failure.
+
+
+def test_launcher_uses_explicit_bootstrap_port_only_when_new_listener_is_absent(tmp_path: Path) -> None:
+    values = {"PRAHO_SERVER_IP": "192.0.2.1", "PRAHO_SSH_PORT": "22"}
+    with patch("deploy.scripts.native_env.socket.create_connection", side_effect=ConnectionRefusedError), patch(
+        "deploy.scripts.native_env.subprocess.run"
+    ) as run:
+        run.return_value.returncode = 0
+        assert run_native(values, tmp_path / "env", "staging", fetch_backup=None, version="") == 0
+    assert run.call_count == 1
+    assert run.call_args.kwargs["env"]["PRAHO_SSH_PORT"] == "22"
 
 
 @pytest.mark.parametrize("copy_fails", [False, True])

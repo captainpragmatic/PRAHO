@@ -723,14 +723,16 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
         service._ansible_path = "/usr/bin/ansible-playbook"
         service._ssh_manager = MagicMock()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-migration-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.1", hostname="migration-node")
+        deployment = NodeDeployment(ipv4_address="203.0.113.1", hostname="migration-node", ssh_port=9876)
         with (
+            patch("apps.infrastructure.ansible_service.trusted_node_known_hosts", return_value=Path("nonexistent-migration-pins")),
+            patch("apps.infrastructure.ansible_service.recover_connection_port", return_value=9876),
             patch.object(service, "_wait_for_ssh", return_value=Ok(True)),
             patch.object(service, "_configured_known_hosts_covers", return_value=True),
             patch.object(service, "_generate_inventory", return_value=Path("nonexistent-migration-inventory")),
             patch.object(service, "_build_vars", return_value={}),
             patch.object(service, "_write_vars_file", return_value=Path("nonexistent-migration-vars")),
-            patch.object(service, "_build_ansible_env", return_value={}),
+            patch.object(service, "_build_ansible_env", return_value={"ANSIBLE_SSH_COMMON_ARGS": ""}),
             patch("apps.infrastructure.ansible_service.subprocess.run") as run,
         ):
             run.return_value = MagicMock(returncode=0, stdout="", stderr="")

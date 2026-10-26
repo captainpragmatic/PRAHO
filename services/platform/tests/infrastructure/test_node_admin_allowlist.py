@@ -56,7 +56,7 @@ class AllowlistReachesThePlaybooksTests(TestCase):
 
     @staticmethod
     def _deployment() -> Any:
-        return SimpleNamespace(id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=None, fqdn="")
+        return SimpleNamespace(id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=None, fqdn="", ssh_port=9876)
 
     def test_every_playbook_gets_the_entries_as_networks(self) -> None:
         SettingsService.update_setting(KEY, ["203.0.113.7", "198.51.100.0/24", "2001:DB8::/48"]).unwrap()

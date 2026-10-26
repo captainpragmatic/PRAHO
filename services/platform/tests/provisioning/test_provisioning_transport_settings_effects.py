@@ -161,42 +161,57 @@ class ProvisioningSettingsEffectTests(ProvisioningSettingsFixture, TestCase):
             clock.return_value = now + 7
             self.assertIsNone(cache.get(key))
 
-    def test_ssh_timeout_controls_both_credential_branches_at_dispatch(self) -> None:
+    @override_settings(VIRTUALMIN_SSH_PRIVATE_KEY_PATH="/fixture/ssh-key", PRAHO_SSH_KNOWN_HOSTS_PATH="")
+    def test_ssh_timeout_controls_private_key_dispatch(self) -> None:
         manager = VirtualminAuthenticationManager(self.server)
-        for private_key in ("fixture-key", None):
-            with self.subTest(private_key=private_key):
-                client = MagicMock(spec=paramiko.SSHClient)
-                stdout, stderr = MagicMock(), MagicMock()
-                stdout.read.return_value = b"completed"
-                stdout.channel.recv_exit_status.return_value = 0
-                stderr.read.return_value = b""
-                client.exec_command.return_value = (MagicMock(), stdout, stderr)
-                connected = False
+        client = MagicMock(spec=paramiko.SSHClient)
+        stdout, stderr = MagicMock(), MagicMock()
+        stdout.read.return_value = b"completed"
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr.read.return_value = b""
+        client.exec_command.return_value = (MagicMock(), stdout, stderr)
+        connected = False
 
-                def connect(*, timeout: float, **credentials: object) -> None:
-                    nonlocal connected
-                    if timeout < 2:
-                        raise TimeoutError("controlled connection timeout")
-                    connected = True
+        def connect(*, timeout: float, **credentials: object) -> None:
+            nonlocal connected
+            self.assertEqual(credentials["key_filename"], "/fixture/ssh-key")
+            self.assertNotIn("password", credentials)
+            if timeout < 2:
+                raise TimeoutError("controlled connection timeout")
+            connected = True
 
-                client.connect.side_effect = connect
-                with (
-                    override_settings(
-                        VIRTUALMIN_SSH_PRIVATE_KEY_PATH=private_key, VIRTUALMIN_SSH_PASSWORD="fixture-password"
-                    ),
-                    patch("apps.provisioning.virtualmin_auth_manager.paramiko.SSHClient", return_value=client),
-                ):
-                    self.set_value(SSH_KEY, 1)
+        client.connect.side_effect = connect
+        with patch("apps.provisioning.virtualmin_auth_manager.paramiko.SSHClient", return_value=client):
+            self.set_value(SSH_KEY, 1)
+            result = manager._execute_ssh_command("sudo true")
+            self.assertTrue(result.is_err(), result)
+            self.assertIn("controlled connection timeout", result.unwrap_err())
+            self.assertFalse(connected)
+            self.assertIsNone(manager._ssh_client)
+            self.set_value(SSH_KEY, 3)
+            manager._connect_ssh()
+            self.assertTrue(connected)
+            self.assertIs(manager._ssh_client, client)
+            manager._disconnect_ssh()
+
+    @override_settings(
+        VIRTUALMIN_SSH_PRIVATE_KEY_PATH=None,
+        VIRTUALMIN_SSH_PASSWORD="fixture-password",
+        PRAHO_SSH_KNOWN_HOSTS_PATH="",
+    )
+    def test_ssh_timeout_cannot_enable_password_only_login(self) -> None:
+        manager = VirtualminAuthenticationManager(self.server)
+        client = MagicMock(spec=paramiko.SSHClient)
+        with patch("apps.provisioning.virtualmin_auth_manager.paramiko.SSHClient", return_value=client):
+            for timeout in (1, 3):
+                with self.subTest(timeout=timeout):
+                    self.set_value(SSH_KEY, timeout)
                     result = manager._execute_ssh_command("sudo true")
                     self.assertTrue(result.is_err(), result)
-                    self.assertIn("controlled connection timeout", result.unwrap_err())
-                    self.assertFalse(connected)
+                    self.assertIn("password login is disabled", result.unwrap_err())
                     self.assertIsNone(manager._ssh_client)
-                    self.set_value(SSH_KEY, 3)
-                    manager._connect_ssh()
-                    self.assertTrue(connected)
-                    self.assertIs(manager._ssh_client, client)
-                    manager._disconnect_ssh()
+        client.connect.assert_not_called()
+        client.exec_command.assert_not_called()
 
     def test_sudo_command_timeout_changes_each_channel_dispatch(self) -> None:
         manager = VirtualminAuthenticationManager(self.server)

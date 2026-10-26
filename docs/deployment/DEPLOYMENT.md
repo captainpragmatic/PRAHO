@@ -409,7 +409,7 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 
 **What it installs:**
 - PostgreSQL 16 (from official APT repo)
-- Python 3.13 (from deadsnakes PPA)
+- Python 3.13 (managed by uv under `/opt/praho-python`, readable by both service users)
 - uv (Python package manager)
 - Caddy (automatic HTTPS via Let's Encrypt)
 - 3 systemd services: `praho-platform`, `praho-portal`, `praho-qcluster`
@@ -417,10 +417,10 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 
 #### Prerequisites
 
-1. **Ubuntu 24.04 LTS** server
+1. **Ubuntu 26.04 LTS** server (24.04 remains supported for existing hosts)
 2. **Ansible** installed on your local machine
 3. **Two DNS A records** pointing to the server IP — both must resolve before deploying (Caddy ACME will fail without them)
-4. **SSH access** to the server as root (or a user with passwordless sudo)
+4. **Root SSH key access**, approved operator public keys and a pinned server host key
 
 ```bash
 # Install Ansible and required collections
@@ -507,6 +507,47 @@ Before deploying, the playbook checks:
 3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, and for `prod` also `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
+The shared SSH role requires a verified server key in `PRAHO_DEPLOY_KNOWN_HOSTS_FILE`
+and approved operator public keys in `PRAHO_SSH_PUBLIC_KEYS_FILE`. Leave
+`PRAHO_SSH_KEY` empty to use the SSH agent, or provide an explicit identity file.
+For a first bootstrap set `PRAHO_SSH_PORT=22`; normal access uses 9876. Run
+`make ssh-harden ENV=staging` to establish SSH access independently of application
+configuration. It installs keys additively, disables password and keyboard-interactive
+authentication for everyone, allows root with keys, and verifies a fresh connection
+before removing the old listener. Timed rollback protects an incomplete handoff.
+A retry detects a completed cutover using the same pinned server identity.
+
+The common role prepares 2 GB of swap (`swap_size_mb: 2048`), verifies kernel
+activation, then records it in fstab. Existing files must already be valid swap
+with the requested size and root-only permissions; they are never reformatted or
+resized. New files require ext4/XFS and at least 1 GiB of free disk after allocation.
+Failed creation retains one protected, bounded candidate for retry. Staging uses
+one web worker per service; production defaults to two. Swap helps memory spikes
+but does not establish production load capacity.
+
+To deploy a reviewed revision without moving a branch:
+`make deploy-staging VERSION=<commit-or-tag>`. The application deploy still performs
+its environment/DNS checks and HTTP/HTTPS checks. The production service split
+is a separate rollout requirement.
+
+Native staging restricts **both entire sites** to `PLATFORM_ALLOWED_CIDRS`, including
+API, health, webhook and static routes. Supply space-separated canonical CIDRs in
+the ignored `.env.staging`; include loopback for local callers. Empty/unset defaults
+to loopback only. Internet-wide `/0` ranges are refused. Caddy checks the connection
+address, so forwarded headers cannot grant access. Automatic ACME challenges remain
+managed by Caddy. Keep staging DNS records DNS-only so Caddy sees the caller's IP.
+
+Apply an allowlist or Caddy configuration change with `make deploy-caddy ENV=staging`.
+This reads local configuration, validates and installs the Caddyfile, restarts Caddy
+only if changed, and checks both HTTPS endpoints from the controller. Run it from
+an approved source address. It skips SSH changes, packages, migrations and application
+restarts. The full deployment uses the same controller-side HTTPS checks.
+
+Production Portal remains public. Production Platform retains the staff restriction
+and its existing API/webhook routes; service-to-service and provider access must be
+configured separately before the production rollout. Staging's all-route guard is
+not automatically applied to production.
+
 #### Post-Deploy
 
 After deployment completes, the playbook verifies all services over HTTP and HTTPS.
@@ -517,7 +558,7 @@ The database starts empty — no users exist. Create a superuser on the server:
 
 ```bash
 # SSH to the server and create the admin user interactively
-ssh root@<server-ip>
+ssh -p 9876 root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
   source /opt/praho/.venv-linux/bin/activate && \
@@ -595,7 +636,7 @@ make deploy-staging   # or: make deploy-prod
 To rebuild a server from scratch (e.g., after an OS upgrade):
 ```bash
 # Hetzner example: rebuild the server image
-hcloud server rebuild praho-staging --image ubuntu-24.04
+hcloud server rebuild praho-staging --image ubuntu-26.04
 
 # Wait for server to come up, then deploy
 make deploy-staging
@@ -665,7 +706,7 @@ Access lines go to stdout on every deploy path. Each line is gunicorn's default 
    - Docker: `PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml logs portal | grep "Using worker"`.
 
 **Caveats:**
-- Ubuntu 24.04 LTS only (relies on deadsnakes PPA for Python 3.13)
+- Ubuntu 26.04 LTS is the new-server baseline; existing Ubuntu 24.04 hosts remain supported
 - Single-server only — no built-in horizontal scaling
 
 ---

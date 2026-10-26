@@ -1,0 +1,6 @@
+[Socket]
+ListenStream=
+{% for port in ssh_phase_ports | unique %}
+ListenStream=0.0.0.0:{{ port }}
+ListenStream=[::]:{{ port }}
+{% endfor %}

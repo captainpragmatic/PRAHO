@@ -41,9 +41,9 @@ variable "location" {
 }
 
 variable "server_image" {
-  description = "Server OS image (the native playbook requires Ubuntu 24.04 or later)"
+  description = "Server OS image (Ubuntu 26.04 LTS baseline; 24.04 retained for existing hosts)"
   type        = string
-  default     = "ubuntu-24.04"
+  default     = "ubuntu-26.04"
 }
 
 # Server type overrides per role (defaults sized per plan)

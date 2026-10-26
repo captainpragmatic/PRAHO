@@ -11,7 +11,7 @@ system_locale: "en_US.UTF-8"
 system_swap_size_mb: 2048
 
 # SSH configuration
-ssh_port: 22
+ssh_port: 9876
 ssh_permit_root_login: "prohibit-password"
 ssh_password_authentication: false
 ssh_use_dns: false
@@ -77,7 +77,7 @@ firewall_allowed_udp_ports:
 # admin networks, from the infrastructure.node_admin_allowed_cidrs setting).
 # virtualmin_harden.yml refuses to run while that list is empty (ADR-0060).
 firewall_admin_tcp_ports:
-  - "22"      # SSH (Ansible, archive transfer)
+  - "{{ ssh_port | string }}"  # Verified SSH port (Ansible, archive transfer)
   - "10000"   # Webmin and the Virtualmin remote API
 
 # PRAHO integration

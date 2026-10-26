@@ -55,6 +55,14 @@ resource "hcloud_firewall" "praho" {
   rule {
     direction   = "in"
     protocol    = "tcp"
+    port        = "9876"
+    source_ips  = var.firewall_ssh_sources
+    description = "Key-only SSH after verified bootstrap"
+  }
+
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
     port        = "80"
     source_ips  = ["0.0.0.0/0", "::/0"]
     description = "HTTP"

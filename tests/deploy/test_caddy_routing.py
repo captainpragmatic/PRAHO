@@ -282,7 +282,11 @@ def test_template_empty_list_stays_restricted_and_custom_list_is_preserved(name:
 @pytest.mark.parametrize("role", ["praho-native"])
 def test_role_defaults_restrict_staff(role: str) -> None:
     values = yaml.safe_load(_read(f"deploy/ansible/roles/{role}/defaults/main.yml"))
-    assert values["platform_allowed_ips"] == LOOPBACK
+    expression = values["platform_allowed_ips"]
+    env = Environment(undefined=StrictUndefined, autoescape=False)  # noqa: S701 -- Render Ansible data, not HTML.
+    for configured, expected in [("", LOOPBACK), ("198.51.100.10/32", ["198.51.100.10/32"])]:
+        result = env.from_string(expression).render(deployed_env={"PLATFORM_ALLOWED_CIDRS": configured})
+        assert ast.literal_eval(result) == expected
 
 
 @pytest.mark.parametrize("environment", ["dev", "prod", "staging"])
@@ -507,11 +511,13 @@ def _request(  # noqa: PLR0913  # Explicit transport, host, path and request dat
 
 
 @contextmanager
-def _running_edge(name: str, tmp_path: Path, *, upstream_reads_body: bool = False) -> Iterator[tuple[str, str, str]]:
+def _running_edge(
+    name: str, tmp_path: Path, *, upstream_reads_body: bool = False, praho_env: str = "prod"
+) -> Iterator[tuple[str, str, str]]:
     suffix = uuid4().hex[:12]
     network, edge, peer = (f"routing-{suffix}-{part}" for part in ("net", "edge", "peer"))
     config = tmp_path / "Caddyfile"
-    fixture = _http_fixture(_config(name))
+    fixture = _http_fixture(_config(name, praho_env=praho_env))
     if upstream_reads_body:
         # The default responder answers without reading the body, so the proxy never hits a
         # request_body cap. Django reads it; consuming it here is what makes the cap observable.
@@ -566,6 +572,22 @@ def _running_edge(name: str, tmp_path: Path, *, upstream_reads_body: bool = Fals
     finally:
         _docker("rm", "-f", "-v", peer, edge)
         _docker_ok("network", "rm", network)
+
+
+@pytest.mark.docker
+def test_staging_blocks_every_route_before_upstreams(tmp_path: Path, docker_daemon: None) -> None:
+    with _running_edge("native", tmp_path, praho_env="staging") as (edge, peer, published):
+        for host in (PORTAL_HOST, PLATFORM_HOST):
+            for path in ("/auth/login/", "/api/users/health/", "/status/", "/static/missing.css", "/integrations/webhooks/stripe/"):
+                denied, _, _ = _request(
+                    peer, edge, host, path, headers=("X-Forwarded-For: 127.0.0.1", "X-Real-IP: 127.0.0.1"), edge=edge
+                )
+                assert denied == 403, (host, path)
+            allowed, body, _ = _request(edge, "127.0.0.1", host, "/auth/login/", edge=edge)
+            assert allowed == 200
+            assert body.startswith("portal" if host == PORTAL_HOST else "platform")
+            denied, _, _ = _request(peer, published, host, "/api/users/health/", edge=edge)
+            assert denied == 403
 
 
 def _ownership_table(name: str) -> Iterator[tuple[str, str, str, str]]:

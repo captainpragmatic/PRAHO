@@ -21,6 +21,7 @@
 
   tasks:
     - name: Run backup script
+      become_user: "{{ project_user }}"
       command: "{{ project_root }}/scripts/backup.sh"
       register: backup_result
 

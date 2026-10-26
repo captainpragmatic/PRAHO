@@ -1,0 +1,20 @@
+---
+- name: Prove fresh key-only SSH access against the established host key
+  ansible.builtin.command:
+    argv: >-
+      {{ ['ssh', '-F', '/dev/null', '-p', ssh_proof_port | string,
+          '-o', 'BatchMode=yes', '-o', 'PreferredAuthentications=publickey',
+          '-o', 'PasswordAuthentication=no', '-o', 'KbdInteractiveAuthentication=no',
+          '-o', 'StrictHostKeyChecking=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
+          '-o', 'ConnectTimeout=10', '-o', 'ConnectionAttempts=1',
+          '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2',
+          '-o', 'HostKeyAlias=' ~ ansible_host,
+          '-o', 'UserKnownHostsFile=' ~ ssh_probe_known_hosts_file]
+          + (['-o', 'IdentitiesOnly=yes', '-i', ssh_probe_identity_file]
+             if ssh_probe_identity_file | length > 0 else [])
+          + ['root@' ~ ansible_host, '/usr/bin/id -u'] }}
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: ssh_fresh_proof
+  failed_when: ssh_fresh_proof.rc != 0 or ssh_fresh_proof.stdout | trim != '0'

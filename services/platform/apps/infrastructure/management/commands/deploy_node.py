@@ -103,8 +103,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--image",
             type=str,
-            default="ubuntu-22.04",
-            help="OS image (default: ubuntu-22.04)",
+            default="ubuntu-26.04",
+            help="OS image (default: ubuntu-26.04)",
         )
         parser.add_argument(
             "--hostname",

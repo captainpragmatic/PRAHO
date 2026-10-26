@@ -24,10 +24,10 @@ resource "digitalocean_ssh_key" "node" {
 
 # Create the Droplet
 resource "digitalocean_droplet" "node" {
-  name     = var.hostname
-  image    = var.server_image
-  size     = var.size
-  region   = var.region
+  name   = var.hostname
+  image  = var.server_image
+  size   = var.size
+  region = var.region
 
   ssh_keys = [digitalocean_ssh_key.node.fingerprint]
 
@@ -63,6 +63,12 @@ resource "digitalocean_firewall" "node" {
   }
 
   # HTTP
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "9876"
+    source_addresses = var.firewall_ssh_sources
+  }
+
   inbound_rule {
     protocol         = "tcp"
     port_range       = "80"

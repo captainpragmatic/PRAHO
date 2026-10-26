@@ -24,7 +24,7 @@ domain = "example.com"
 location = "fsn1"
 
 # Server OS image
-server_image = "ubuntu-24.04"
+server_image = "ubuntu-26.04"
 
 # Override server types (optional, defaults based on environment)
 # platform_server_type = "cpx31"

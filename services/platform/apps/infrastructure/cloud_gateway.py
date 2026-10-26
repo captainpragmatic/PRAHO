@@ -9,10 +9,11 @@ See ADR-0027 for the migration from Terraform to SDK-based provisioning.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from apps.common.types import Result
@@ -33,7 +34,7 @@ class ServerCreateRequest:
     server_type: str
     location: str
     ssh_keys: list[str]
-    image: str = "ubuntu-22.04"
+    image: str = "ubuntu-26.04"
     labels: dict[str, str] = field(default_factory=dict)
     firewall_ids: list[str] = field(default_factory=list)
 
@@ -235,10 +236,23 @@ def normalize_server_status(raw_status: str) -> str:
 
 STANDARD_FIREWALL_RULES: list[FirewallRule] = [
     FirewallRule(protocol="tcp", port="22", description="SSH"),
+    FirewallRule(protocol="tcp", port="9876", description="Key-only SSH"),
     FirewallRule(protocol="tcp", port="80", description="HTTP"),
     FirewallRule(protocol="tcp", port="443", description="HTTPS"),
     FirewallRule(protocol="tcp", port="10000", description="Webmin"),
 ]
+
+
+def node_firewall_rules(admin_sources: Sequence[str]) -> list[FirewallRule]:
+    """Bootstrap and hardened SSH share the explicit node administrator sources."""
+    networks = [ipaddress.ip_network(source, strict=True) for source in admin_sources]
+    if not networks or any(network.prefixlen == 0 for network in networks):
+        raise ValueError("Node provisioning requires explicit administrator CIDRs")
+    sources = [network.with_prefixlen for network in networks]
+    return [
+        replace(rule, source_ips=list(sources)) if rule.port in {"22", "9876", "10000"} else replace(rule)
+        for rule in STANDARD_FIREWALL_RULES
+    ]
 
 
 # =============================================================================

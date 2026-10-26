@@ -504,7 +504,22 @@ coverage-portal-union:
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 
-.PHONY: test-deploy test-deploy-docker
+.PHONY: test-deploy test-deploy-docker test-ssh test-ssh-docker ssh-harden
+test-ssh:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_ssh_hardening.py -q
+
+test-ssh-docker:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_ssh_hardening_docker.py -m docker -q
+
+ssh-harden:
+	@case "$(ENV)" in staging|prod|dev) ;; *) echo "Usage: make ssh-harden ENV=staging|prod|dev"; exit 1 ;; esac
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env "$(ENV)" --ssh-only
+
+.PHONY: deploy-caddy
+deploy-caddy:
+	@case "$(ENV)" in staging|prod|dev) ;; *) echo "Usage: make deploy-caddy ENV=staging|prod|dev"; exit 1 ;; esac
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env "$(ENV)" --caddy-only
+
 test-deploy:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/ tests/integration/test_deploy_scripts.py tests/integration/test_media_root.py tests/integration/test_restore_safety.py -m 'not docker' -q
 
@@ -1613,7 +1628,7 @@ deploy-staging:
 	@test -f .env.staging || (echo "❌ Missing .env.staging — run: cp .env.example.staging .env.staging"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env staging --env-file $(PWD)/.env.staging
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env staging --env-file $(PWD)/.env.staging $(if $(VERSION),--version $(VERSION),)
 
 deploy-prod:
 	@test -f .env.prod || (echo "❌ Missing .env.prod — run: cp .env.example.prod .env.prod"; exit 1)

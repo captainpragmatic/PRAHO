@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Provider catalog sync preserves saved API-token references and operator-owned provider settings, so refreshing regions and plans does not disconnect an encrypted credential.
+
 - **Email delivery.**
   - Complete original email tasks queued before the durable-envelope upgrade can send to their recorded primary recipient, including the exact original attachment. Recovery holds incomplete messages, ambiguous retries and additional recipients for staff reconciliation instead of sending a partial message.
   - One worker sends each email, and a stale copy never undoes another worker's result.
