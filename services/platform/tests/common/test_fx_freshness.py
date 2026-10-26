@@ -73,7 +73,7 @@ class FxFreshnessCheckTests(TestCase):
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
 class FxFreshnessAlertTests(TestCase):
     def _status(self, level: StatusLevel) -> list[SubsystemStatus]:
-        return [SubsystemStatus(name="FX rates", level=level, message="m", detail="d")]
+        return [SubsystemStatus(name="FX rates", level=level, message="m", detail="d", key="fx")]
 
     def setUp(self) -> None:
         cache.delete(_FX_FRESHNESS_ALERT_KEY)
@@ -90,6 +90,13 @@ class FxFreshnessAlertTests(TestCase):
         _alert_on_fx_freshness(self._status(StatusLevel.GREEN), 3600)  # recovery clears dedup
         _alert_on_fx_freshness(self._status(StatusLevel.RED), 3600)
         self.assertEqual(mock_alert.call_count, 2)
+
+    @patch(_ALERT, return_value=True)
+    def test_missing_result_is_not_recovery(self, mock_alert: object) -> None:
+        _alert_on_fx_freshness(self._status(StatusLevel.RED), 3600)
+        _alert_on_fx_freshness([], 3600)
+        _alert_on_fx_freshness(self._status(StatusLevel.RED), 3600)
+        mock_alert.assert_called_once()
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)

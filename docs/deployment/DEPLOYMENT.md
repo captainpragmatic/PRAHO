@@ -556,7 +556,7 @@ sudo nano /opt/praho/.env
 sudo systemctl restart praho-platform praho-portal praho-qcluster
 ```
 
-**System Status Dashboard:** After deployment, the Platform dashboard shows real-time status of all integrations (green/amber/red/grey). Staging automatically shows "Not required" (grey) for features that staging settings override (email, Stripe, e-Factura).
+**System Status Dashboard:** The staff dashboard displays the latest check snapshot (green/amber/red/grey), its actual check time, and a warning after 26 hours. Refresh runs bounded read-only checks; ordinary page loads only recompute date-sensitive FX freshness. Checks follow the effective runtime configuration in every environment. A local email backend or explicitly disabled integration is grey. See [System Status checks](SYSTEM_STATUS.md) for what each result proves and how to interpret warnings.
 
 > **Note about `.env.example.dev`:** That file is a **developer reference** for local `make dev` usage. For deployment, use `.env.example.prod` or `.env.example.staging`.
 
