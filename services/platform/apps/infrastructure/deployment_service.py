@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.types import Err, Ok, Result, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
@@ -120,6 +121,25 @@ class NodeDeploymentService:
         self._validation = get_validation_service()
         self._registration = get_registration_service()
 
+    def _deployment_preflight(self, deployment: NodeDeployment) -> Result[tuple[str, ...], str]:
+        """Reject unverified cloud image selectors before any deployment side effects."""
+        if deployment.provider.provider_type != "hetzner":
+            return Err(
+                _(
+                    "Automatic node deployment currently supports Hetzner Ubuntu 26.04 only. "
+                    "Other provider image selectors require Ubuntu 24.04/26.04 verification before deployment or retry."
+                )
+            )
+        try:
+            return Ok(self._ansible.operator_public_keys())
+        except (OSError, ValueError):
+            return Err(
+                _(
+                    "Approved operator public keys are missing or invalid. "
+                    "Configure PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE before deployment or retry."
+                )
+            )
+
     def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
@@ -141,6 +161,9 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
+        provider_result = self._deployment_preflight(deployment)
+        if provider_result.is_err():
+            return Err(provider_result.unwrap_err())
         fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
         if fqdn_result.is_err():
             return Err(fqdn_result.unwrap_err())
@@ -503,6 +526,7 @@ class NodeDeploymentService:
                     deployment=deployment,
                     playbook=playbook,
                     extra_vars=stage_extra_vars,
+                    operator_public_keys=provider_result.unwrap(),
                 )
 
                 if playbook_result.is_err():
@@ -858,6 +882,9 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
+        provider_result = self._deployment_preflight(deployment)
+        if provider_result.is_err():
+            return Err(provider_result.unwrap_err())
         if deployment.status != "failed":
             return Err(f"Can only retry failed deployments, current status: {deployment.status}")
 

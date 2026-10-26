@@ -8,6 +8,7 @@ import paramiko
 from django.test import SimpleTestCase, override_settings
 
 from apps.common.ssh import configure_strict_host_key_checking
+from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.cloud_gateway import node_firewall_rules
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.ssh_transport import recover_connection_port, resolve_node_host_keys, trusted_node_known_hosts
@@ -39,6 +40,15 @@ class NodeSSHStateTests(SimpleTestCase):
 
 
 class NodeSSHPinTests(SimpleTestCase):
+    def test_operator_bundle_preserves_multiple_keys_with_the_same_algorithm(self) -> None:
+        keys = [paramiko.RSAKey.generate(2048) for _ in range(2)]
+        lines = [f"{key.get_name()} {key.get_base64()} operator-{index}" for index, key in enumerate(keys)]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "operators"
+            path.write_text("\n".join(lines))
+            with override_settings(PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE=str(path)):
+                self.assertEqual(AnsibleService.operator_public_keys(), tuple(lines))
+
     def test_a_preloaded_ambient_key_cannot_outrank_the_enrolled_pin(self) -> None:
         key = paramiko.RSAKey.generate(2048)
         client = paramiko.SSHClient()

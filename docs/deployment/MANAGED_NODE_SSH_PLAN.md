@@ -105,3 +105,45 @@ Ubuntu 24.04/26.04 container drills and the staging host rollout.
    unit, Ubuntu SSH and native-runtime tests remain required.
 4. Both required plan reviews precede implementation. Review material auth,
    trust, concurrency and migration findings before a hosting-node rollout.
+# Supported node images
+
+Automatic node deployment and retry currently support Hetzner with the Ubuntu
+26.04 image only. AWS, DigitalOcean and Vultr provisioning is refused before
+bookkeeping, key generation or cloud mutations until their image selectors are
+verified against the supported Ubuntu 24.04/26.04 releases. Catalog refresh and
+credential storage remain available for those providers.
+
+Existing Ubuntu 22.04 nodes must be upgraded or migrated by the operator before
+running the mandatory SSH transition or panel maintenance. The SSH role rejects
+unsupported distributions in its first task, before changing SSH configuration.
+Keep the existing port and verified keys for the operator's OS migration. Do not
+retry provisioning to perform an OS upgrade.
+
+Legacy direct Terraform is outside the SDK deployment guard. Operators must
+explicitly select and verify an Ubuntu 24.04/26.04 image before applying it. Vultr
+uses `os_id`, not `server_image`; verify that effective OS identifier. The legacy
+defaults are not an approved supported-image selection.
+
+## Container operator keys
+
+Native deployment installs the approved public-key bundle automatically. Container
+operators who enable managed-node deployment must mount that public file into both
+Platform and Q-cluster. For example, from the repository root:
+
+```bash
+PRAHO_SSH_PUBLIC_KEYS_FILE=/absolute/path/operator_authorized_keys \
+  docker compose --env-file .env.staging \
+  -f deploy/docker-compose.single-server.yml \
+  -f deploy/docker-compose.node-ssh.yml up -d
+```
+
+The same overlay works with `docker-compose.platform-only.yml`, `docker-compose.dev.yml`
+and local `docker-compose.container-service.yml` execution. It requires an existing
+file, mounts it read-only, and fixes the application's key-file setting to that
+mount. Do not put private keys in this file. Managed container platforms must provide
+an equivalent read-only configuration-file mount for both services. The Portal does
+not receive these keys. Deployments that do not provision nodes need no overlay.
+
+Both node deployment entry points validate the approved bundle before changing
+bookkeeping or creating cloud resources. Missing, empty or malformed keys return an
+explicit prerequisite error. The SSH playbook receives the validated key snapshot.

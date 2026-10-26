@@ -444,3 +444,16 @@ def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
     task = tasks[rebind[0]]
     assert task["environment"] == "{{ django_env }}"
     assert task.get("no_log") is True
+
+
+def test_node_ssh_overlay_mounts_only_public_keys_in_both_platform_processes() -> None:
+    overlay = yaml.safe_load((PROJECT_ROOT / "deploy/docker-compose.node-ssh.yml").read_text())
+    assert set(overlay["services"]) == {"platform", "qcluster"}
+    for service in overlay["services"].values():
+        assert service["environment"]["PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE"] == "/etc/praho/operator_authorized_keys"
+        mount, = service["volumes"]
+        assert mount["type"] == "bind"
+        assert mount["source"].startswith("${PRAHO_SSH_PUBLIC_KEYS_FILE:?")
+        assert mount["target"] == "/etc/praho/operator_authorized_keys"
+        assert mount["read_only"] is True
+        assert mount["bind"]["create_host_path"] is False

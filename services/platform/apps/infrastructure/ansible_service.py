@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
 
+from apps.common.ssh import PUBLIC_KEY_FIELDS, parse_ssh_host_keys
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.ssh_transport import (
@@ -200,12 +201,29 @@ class AnsibleService:
         logger.info(f"📜 [Ansible] All {len(results)} playbooks completed successfully")
         return Ok(results)
 
+    @staticmethod
+    def operator_public_keys() -> tuple[str, ...]:
+        """Read a nonempty approved bundle without accepting authorized_keys options."""
+        path = Path(settings.PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE)
+        keys = tuple(line.strip() for line in path.read_text().splitlines() if line.strip())
+        if not keys:
+            raise ValueError("Approved operator public keys are empty")
+        for line in keys:
+            parts = line.split()
+            if len(parts) < PUBLIC_KEY_FIELDS:
+                raise ValueError("Malformed operator public keys")
+            # Different operator keys can share an algorithm. Validate each separately.
+            parse_ssh_host_keys(" ".join(parts[:PUBLIC_KEY_FIELDS]))
+        return keys
+
     def run_playbook(  # noqa: PLR0911, PLR0912, PLR0915, C901  # Fail-closed boundary checks, SSH-readiness + host-key pinning, guarded temp-file cleanup
         self,
         deployment: NodeDeployment,
         playbook: str,
         extra_vars: dict[str, Any] | None = None,
         timeout_seconds: int | None = None,
+        *,
+        operator_public_keys: tuple[str, ...] | None = None,
     ) -> Result[AnsibleResult, str]:
         """
         Run a single Ansible playbook.
@@ -272,19 +290,12 @@ class AnsibleService:
             # Build extra vars
             vars_dict = self._build_vars(deployment, extra_vars)
             if playbook == "ssh-hardening.yml":
-                operator_keys = Path(
-                    str(
-                        getattr(
-                            settings,
-                            "PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE",
-                            "/etc/praho/operator_authorized_keys",
-                        )
-                    )
-                )
                 vars_dict.update(
                     {
                         "ssh_target_port": TARGET_SSH_PORT,
-                        "ssh_operator_public_keys": operator_keys.read_text().splitlines(),
+                        "ssh_operator_public_keys": list(
+                            self.operator_public_keys() if operator_public_keys is None else operator_public_keys
+                        ),
                         "ssh_allowed_cidrs": node_admin_allowed_cidrs(),
                         "ssh_probe_known_hosts_file": str(known_hosts_file),
                         "ssh_probe_identity_file": str(key_file),

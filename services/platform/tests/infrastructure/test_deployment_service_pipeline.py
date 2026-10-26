@@ -20,9 +20,10 @@ from unittest.mock import MagicMock, patch
 
 import paramiko
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.common.types import Err, Ok, Retriability
+from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult
 from apps.infrastructure.deployment_service import NodeDeploymentService
@@ -225,6 +226,65 @@ class TestExistingServerSSHKeyPreservation(TestCase):
         service._ssh_manager.generate_deployment_key.assert_not_called()
         service._ssh_manager.get_master_key.assert_not_called()
         gateway.assert_not_called()
+
+
+class TestSupportedNodeImagePreflight(TestCase):
+    def test_missing_or_invalid_operator_keys_block_both_entrypoints_before_writes(self) -> None:
+        from apps.audit.models import AuditEvent  # noqa: PLC0415 -- Persisted side-effect assertion.
+
+        with TemporaryDirectory() as directory:
+            key_file = Path(directory) / "operator_keys"
+            for contents in (None, "", "not-a-public-key", 'command="echo unsafe" ssh-rsa AAAA'):
+                with self.subTest(contents=contents):
+                    if contents is not None:
+                        key_file.write_text(contents)
+                    deployment = _create_deployment("failed", external_node_id="existing-vm")
+                    service = _make_service()
+                    service._ansible = AnsibleService()
+                    before = NodeDeployment.objects.values().get(pk=deployment.pk)
+                    log_count, audit_count = NodeDeploymentLog.objects.count(), AuditEvent.objects.count()
+                    with (
+                        override_settings(PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE=str(key_file)),
+                        patch("apps.infrastructure.deployment_service.get_cloud_gateway") as gateway,
+                    ):
+                        for operation in (service.deploy_node, service.retry_deployment):
+                            result = operation(deployment, {"api_token": "fixture"})
+                            self.assertTrue(result.is_err())
+                            self.assertIn("operator public keys", result.unwrap_err())
+                        gateway.assert_not_called()
+                    self.assertEqual(NodeDeployment.objects.values().get(pk=deployment.pk), before)
+                    self.assertEqual(NodeDeploymentLog.objects.count(), log_count)
+                    self.assertEqual(AuditEvent.objects.count(), audit_count)
+                    self.assertEqual(service._ssh_manager.mock_calls, [])
+
+    def test_unsupported_providers_cannot_mutate_fresh_nodes_or_retries(self) -> None:
+        from apps.audit.models import AuditEvent  # noqa: PLC0415 -- Test assertion on persisted side effects.
+
+        for kind in ("aws", "digitalocean", "vultr"):
+            for status, external_id in (("pending", ""), ("failed", ""), ("failed", "existing-vm")):
+                with self.subTest(provider=kind, status=status, external_id=external_id):
+                    deployment = _create_deployment(status, external_node_id=external_id)
+                    deployment.provider.provider_type = kind
+                    deployment.provider.save(update_fields=["provider_type"])
+                    service = _make_service()
+                    before = NodeDeployment.objects.values().get(pk=deployment.pk)
+                    log_count = NodeDeploymentLog.objects.count()
+                    audit_count = AuditEvent.objects.count()
+                    progress = MagicMock()
+                    with patch("apps.infrastructure.deployment_service.get_cloud_gateway") as gateway:
+                        result = service.deploy_node(deployment, {"api_token": "fixture"}, progress_callback=progress)
+                        self.assertTrue(result.is_err())
+                        self.assertIn("Ubuntu", result.unwrap_err())
+                        if status == "failed":
+                            retry = service.retry_deployment(deployment, {"api_token": "fixture"})
+                            self.assertTrue(retry.is_err())
+                            self.assertIn("Ubuntu", retry.unwrap_err())
+                        gateway.assert_not_called()
+                    self.assertEqual(NodeDeployment.objects.values().get(pk=deployment.pk), before)
+                    self.assertEqual(NodeDeploymentLog.objects.count(), log_count)
+                    self.assertEqual(AuditEvent.objects.count(), audit_count)
+                    self.assertEqual(service._ssh_manager.mock_calls, [])
+                    progress.assert_not_called()
 
 
 # ===========================================================================
