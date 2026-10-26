@@ -1,0 +1,20 @@
+# PRAHO's cutover bridge (ADR-0061 Phase 2). Loaded from conf-enabled, so it is selected before the
+# disabled Virtualmin vhost in sites-enabled. Removed when the bridge is torn down.
+<VirtualHost *:80>
+    ServerName {{ bridge_domain }}
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://{{ bridge_target_ipv4 }}:{{ bridge_target_port }}/ retry=0
+    ProxyPassReverse / http://{{ bridge_target_ipv4 }}:{{ bridge_target_port }}/
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName {{ bridge_domain }}
+    SSLEngine on
+    SSLCertificateFile {{ bridge_certificate }}
+    SSLCertificateKeyFile {{ bridge_certificate_key }}
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://{{ bridge_target_ipv4 }}:{{ bridge_target_port }}/ retry=0
+    ProxyPassReverse / http://{{ bridge_target_ipv4 }}:{{ bridge_target_port }}/
+</VirtualHost>
