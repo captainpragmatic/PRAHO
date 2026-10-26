@@ -113,14 +113,16 @@ def trusted_node_known_hosts(
         aliases.extend(f"[{host}]:{port}" for host in hosts)
     fd, filename = tempfile.mkstemp(prefix="praho_node_pins_")
     path = Path(filename)
+    written = False
     try:
         with os.fdopen(fd, "w") as output:
             for key in keys:
                 output.write(f"{','.join(aliases)} {key.get_name()} {key.get_base64()}\n")
+        written = True
         return path
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
+    finally:
+        if not written:
+            path.unlink(missing_ok=True)
 
 
 def verify_idle_ssh(deployment: NodeDeployment, key_file: Path, known_hosts: Path, port: int) -> None:
