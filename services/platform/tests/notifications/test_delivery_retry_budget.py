@@ -1,5 +1,6 @@
 """Recovery must share the worker's durable budget and isolate terminal failures."""
 
+import json
 import smtplib
 from datetime import timedelta
 from unittest.mock import patch
@@ -27,6 +28,7 @@ class DeliveryRetryBudgetTests(TestCase):
 
     def log(self, **kwargs) -> EmailLog:
         row = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["recipient@example.com"]}),
             to_addr="recipient@example.com",
             from_addr="sender@example.com",
             subject="Delivery contract",
@@ -141,9 +143,7 @@ class DeliveryRetryBudgetTests(TestCase):
     def test_retry_is_a_future_schedule_with_valid_worker_arguments(self) -> None:
         row = self.log()
         started = timezone.now()
-        self.assertTrue(
-            _schedule_email_retry(str(row.pk), 1)
-        )
+        self.assertTrue(_schedule_email_retry(str(row.pk), 1))
         schedule = Schedule.objects.filter(func="apps.notifications.tasks.send_email_task").first()
         self.assertIsNotNone(schedule)
         self.assertGreater(schedule.next_run, started)
@@ -165,7 +165,12 @@ class EmailRetryLimitSettingsTests(TestCase):
                         "category": "notifications",
                     },
                 )
-                row = EmailLog.objects.create(to_addr="retry@example.com", subject="Budget", body_text="Body")
+                row = EmailLog.objects.create(
+                    envelope=json.dumps({"to": ["retry@example.com"]}),
+                    to_addr="retry@example.com",
+                    subject="Budget",
+                    body_text="Body",
+                )
                 for attempt in range(maximum + 1):
                     claimed, refused = claim_delivery(str(row.pk), row.subject, None, supplied_retry=0)
                     self.assertIsNone(refused)

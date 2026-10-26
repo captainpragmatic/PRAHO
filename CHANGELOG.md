@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Email delivery.**
+  - Complete original email tasks queued before the durable-envelope upgrade can send to their recorded primary recipient, including the exact original attachment. Recovery holds incomplete messages, ambiguous retries and additional recipients for staff reconciliation instead of sending a partial message.
   - One worker sends each email, and a stale copy never undoes another worker's result.
   - A retry waits for its due time and runs once.
   - A provider error the operator must fix (rejected credentials, missing AWS credentials, SES configuration) blocks sending and alerts staff, instead of using up every message's retries.

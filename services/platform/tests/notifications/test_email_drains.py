@@ -7,6 +7,7 @@ deploy runs, installs them.
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -40,7 +41,13 @@ class DrainScheduleTests(TestCase):
 
 class SendingRecoveryTests(TestCase):
     def _sending(self, **fields: object) -> EmailLog:
-        row = EmailLog.objects.create(to_addr="stuck@example.com", subject="Stuck", body_text="Body", status="queued")
+        row = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["stuck@example.com"]}),
+            to_addr="stuck@example.com",
+            subject="Stuck",
+            body_text="Body",
+            status="queued",
+        )
         EmailLog.objects.filter(pk=row.pk).update(status="sending", delivery_attempts=1, **fields)
         return row
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TypedDict, Unpack
@@ -44,6 +45,7 @@ class SubjectRecoveryTests(TestCase):
 
     def log(self, status: str, length: int = 11) -> EmailLog:
         log = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["recipient@example.test"]}),
             to_addr="recipient@example.test",
             from_addr="sender@example.test",
             subject="x" * length,

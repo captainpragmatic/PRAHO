@@ -460,18 +460,20 @@ def compose_message(message: OutgoingEmail, attachments: list[tuple[str, bytes, 
 
 def stored_message(email_log: EmailLog) -> OutgoingEmail:
     """The message a row holds, decrypted: what a worker sends."""
-    envelope = email_log.get_envelope()
+    from apps.notifications.legacy import delivery_envelope  # noqa: PLC0415  # Deferred delivery validation
+
+    envelope = delivery_envelope(email_log)
     meta = email_log.meta or {}
     return OutgoingEmail(
-        to=list(envelope.get("to") or [email_log.to_addr]),
+        to=list(envelope["to"]),
         subject=email_log.subject,
         body_text=email_log.get_decrypted_body_text(),
         body_html=email_log.get_decrypted_body_html() or None,
         from_email=email_log.from_addr,
         reply_to=email_log.reply_to or None,
-        cc=list(envelope.get("cc") or []),
-        bcc=list(envelope.get("bcc") or []),
-        tags=dict(envelope.get("tags") or {}),
+        cc=list(envelope["cc"]),
+        bcc=list(envelope["bcc"]),
+        tags=dict(envelope["tags"]),
         track_opens=bool(meta.get("track_opens", True)),
         track_clicks=bool(meta.get("track_clicks", True)),
         template_key=email_log.template_key,

@@ -8,6 +8,7 @@ the provider id is recorded is applied once it is.
 
 from __future__ import annotations
 
+import json
 import smtplib
 import threading
 import time
@@ -35,6 +36,7 @@ def _log(**kwargs: object) -> EmailLog:
         "status": "queued",
         **kwargs,
     }
+    fields["envelope"] = json.dumps({"to": [fields["to_addr"]]})
     row = EmailLog.objects.create(**fields)
     EmailLog.objects.filter(pk=row.pk).update(sent_at=timezone.now() - timedelta(minutes=11))
     row.refresh_from_db()
@@ -132,9 +134,7 @@ class StaleWritesUndoNothingTests(TestCase):
     def test_a_failure_still_writes_its_audit_event(self) -> None:
         row = _log()
 
-        with patch(
-            "django.core.mail.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")
-        ):
+        with patch("django.core.mail.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")):
             _send(row)
 
         self.assertTrue(AuditEvent.objects.filter(action="email_failed", metadata__email_log_id=str(row.pk)).exists())
@@ -149,7 +149,9 @@ class OwnershipBeforeSendingTests(TestCase):
         def reclaimed_elsewhere() -> None:
             EmailLog.objects.filter(pk=row.pk).update(claim_token=uuid.uuid4())
 
-        with patch("apps.notifications.attachments.regenerate_attachments", side_effect=lambda row: reclaimed_elsewhere() or []):
+        with patch(
+            "apps.notifications.attachments.regenerate_attachments", side_effect=lambda row: reclaimed_elsewhere() or []
+        ):
             _send(row)
 
         self.assertEqual(mail.outbox, [], "a worker that lost its claim must not send")
@@ -241,7 +243,6 @@ class DeliveryCallbackTests(TestCase):
 
         row.refresh_from_db()
         self.assertEqual((row.provider_id, row.status), ("pid-early", "bounced"))
-
 
 
 class BufferedCallbackTests(TestCase):
