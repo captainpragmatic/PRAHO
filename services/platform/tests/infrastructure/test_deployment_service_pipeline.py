@@ -14,14 +14,17 @@ Verifies:
 
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
+import paramiko
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.audit_service import InfrastructureAuditContext
-from apps.infrastructure.cloud_gateway import ServerCreateResult
+from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.forms import NodeDeploymentForm
@@ -33,6 +36,9 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
+from apps.infrastructure.ssh_key_manager import SSHKeyPair
+from apps.infrastructure.ssh_transport import persist_verified_ssh_port, trusted_node_known_hosts
+from apps.provisioning.virtualmin_models import VirtualminServer
 
 User = get_user_model()
 
@@ -127,11 +133,98 @@ def _make_service() -> NodeDeploymentService:
     with patch("apps.infrastructure.deployment_service.get_ansible_service", return_value=MagicMock()):
         service = NodeDeploymentService()
     service._ssh_manager = MagicMock()
+    service._ssh_manager.get_deployment_key.return_value = Ok(
+        SSHKeyPair(public_key="ssh-rsa AAAA", private_key="fixture-private-key", fingerprint="fixture")
+    )
     service._ssh_manager.delete_deployment_key.return_value = Ok(True)
     service._ansible = MagicMock()
     service._validation = MagicMock()
     service._registration = MagicMock()
+    service._node_firewall_rules = MagicMock(return_value=STANDARD_FIREWALL_RULES)
     return service
+
+
+class TestNodeSSHDatabaseState(TestCase):
+    def setUp(self) -> None:
+        self.deployment = _create_deployment(status="completed", external_node_id="original-vm")
+        self.key = paramiko.RSAKey.generate(2048)
+        self.public_key = f"{self.key.get_name()} {self.key.get_base64()}"
+
+    def test_fresh_identity_is_durably_enrolled_once(self) -> None:
+        self.deployment.ssh_host_keys = None
+        self.deployment.save(update_fields=["ssh_host_keys"])
+        with TemporaryDirectory() as directory:
+            scan = Path(directory) / "scan"
+            scan.write_text(f"1.2.3.4 {self.public_key}\n")
+            rendered = trusted_node_known_hosts(self.deployment, MagicMock(return_value=scan))
+            rendered.unlink()
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.ssh_host_keys, self.public_key)
+        self.assertEqual(self.deployment.ssh_port, 22)
+        scanner = MagicMock()
+        rendered = trusted_node_known_hosts(self.deployment, scanner)
+        rendered.unlink()
+        scanner.assert_not_called()
+
+    def test_stale_provider_identity_cannot_commit_a_new_port(self) -> None:
+        NodeDeployment.objects.filter(pk=self.deployment.pk).update(external_node_id="replacement-vm")
+        with self.assertRaisesMessage(ValueError, "identity changed"):
+            persist_verified_ssh_port(self.deployment)
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.ssh_port, 22)
+
+    def test_verified_port_commit_updates_the_linked_server(self) -> None:
+        server = VirtualminServer.objects.create(name="ssh-state-fixture", hostname="node.example.com", api_username="root", encrypted_api_password=b"")
+        self.deployment.virtualmin_server = server
+        self.deployment.ssh_host_keys = self.public_key
+        self.deployment.save(update_fields=["virtualmin_server", "ssh_host_keys"])
+        persist_verified_ssh_port(self.deployment)
+        self.deployment.refresh_from_db()
+        server.refresh_from_db()
+        self.assertEqual(self.deployment.ssh_port, 9876)
+        self.assertEqual(server.ssh_port, 9876)
+        self.assertEqual(server.effective_ssh_port, 9876)
+
+
+class TestExistingServerSSHKeyPreservation(TestCase):
+    def test_retry_retrieves_the_original_key_without_overwriting_the_vault(self) -> None:
+        deployment = _create_deployment("pending", external_node_id="existing-vm")
+        deployment.ssh_key_credential_id = "original-vault-key"
+        deployment.save(update_fields=["ssh_key_credential_id"])
+        service = _make_service()
+        service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
+        service._ssh_manager.get_deployment_key.return_value = Ok(
+            SSHKeyPair(public_key="original-public-key", private_key="original-private-key", fingerprint="original")
+        )
+        gateway = MagicMock()
+        gateway.get_server.return_value = Err("temporary provider failure")
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment, credentials={"api_token": "provider-token"})
+        self.assertTrue(result.is_err())
+        service._ssh_manager.get_deployment_key.assert_called_once()
+        service._ssh_manager.generate_deployment_key.assert_not_called()
+        service._ssh_manager.get_master_key.assert_not_called()
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.ssh_key_credential_id, "original-vault-key")
+
+    def test_missing_existing_key_fails_before_provider_operations(self) -> None:
+        deployment = _create_deployment("pending", external_node_id="existing-vm")
+        service = _make_service()
+        service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
+        service._ssh_manager.get_deployment_key.return_value = Err("vault unavailable")
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway") as gateway,
+        ):
+            result = service.deploy_node(deployment, credentials={"api_token": "provider-token"})
+        self.assertTrue(result.is_err())
+        self.assertIn("existing", result.unwrap_err().lower())
+        service._ssh_manager.generate_deployment_key.assert_not_called()
+        service._ssh_manager.get_master_key.assert_not_called()
+        gateway.assert_not_called()
 
 
 # ===========================================================================

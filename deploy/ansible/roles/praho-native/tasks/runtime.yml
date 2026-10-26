@@ -1,0 +1,64 @@
+---
+# Ubuntu's system Python belongs to Ansible/APT. Application Python is shared by
+# Platform and the isolated Portal, including with systemd ProtectHome enabled.
+- name: Install native runtime build dependencies
+  ansible.builtin.apt:
+    name: [acl, build-essential, gettext, locales, rsync]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Generate the PostgreSQL database locale
+  community.general.locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: Create installer directory
+  ansible.builtin.file:
+    path: /usr/local/lib/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download uv installer over HTTPS
+  ansible.builtin.get_url:
+    url: https://astral.sh/uv/install.sh
+    dest: /usr/local/lib/praho/install-uv.sh
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install uv
+  ansible.builtin.command: /bin/sh /usr/local/lib/praho/install-uv.sh
+  args:
+    creates: /usr/local/bin/uv
+  environment:
+    UV_INSTALL_DIR: /usr/local/bin
+    UV_NO_MODIFY_PATH: '1'
+
+- name: Install managed application Python
+  ansible.builtin.command:
+    argv: [/usr/local/bin/uv, python, install, "{{ python_version }}"]
+  environment:
+    UV_PYTHON_INSTALL_DIR: "{{ python_install_directory }}"
+    UV_PYTHON_BIN_DIR: "{{ python_install_directory }}/bin"
+  register: native_python_install
+  changed_when: "'Installed Python' in native_python_install.stderr"
+
+- name: Make application Python readable by both service identities
+  ansible.builtin.file:
+    path: "{{ python_install_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 'u=rwX,go=rX'
+    recurse: true
+
+- name: Resolve the managed Python interpreter
+  ansible.builtin.command:
+    argv: [/usr/local/bin/uv, python, find, --managed-python, "{{ python_version }}"]
+  environment:
+    UV_PYTHON_INSTALL_DIR: "{{ python_install_directory }}"
+  register: native_python
+  changed_when: false

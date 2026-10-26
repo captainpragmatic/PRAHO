@@ -1,21 +1,19 @@
 """Shared plumbing for the Virtualmin lab commands (deploy/virtualmin-lab).
 
-The lab publishes two Virtualmin nodes on 127.0.0.1 under distinct ports. PRAHO's
-production transport assumes things a Docker host cannot offer, so
-`lab_transport()` adapts exactly four of them, and only inside lab commands:
+The lab publishes Virtualmin nodes on 127.0.0.1 under distinct ports.
+`lab_transport()` adapts the following only inside validated lab commands:
 
 1. Virtualmin API hostnames resolve through DNS and must be globally routable.
    The lab node names (vm-a.praho.test, ...) resolve to 127.0.0.1 here, and only
    those names: every other host still goes through the real resolver and the
    SSRF check.
-2. Ansible always connects to port 22 (the inventory has no port). Each lab
-   deployment gets its published SSH port as `ansible_port`.
-3. `_wait_for_ssh()` probes port 22, which on a Mac is the host's own sshd. Here
-   it probes the lab ports instead.
-4. The known_hosts lookup is keyed by bare IP, so it never matches the
-   port-keyed lab entries and would fall back to ssh-keyscan on port 22, pinning
-   the host's key. The lab known_hosts file (written by the bootstrap) is used
-   instead, and strict host-key checking stays on.
+2. Each lab deployment uses its published SSH port for inventory and readiness
+   probes. Container firewall rules still use the daemon's internal port 22.
+3. Bootstrap imports the lab's verified, port-specific host keys into its
+   deployment record. The normal strict enrolled-identity checks remain active.
+4. The Ubuntu port transition is skipped for these disposable Debian containers.
+   The hook refuses any non-lab hostname or address; there is no production skip
+   setting. Real Ubuntu transitions are exercised by the SSH Docker suite.
 
 Everything else (gateway, TLS pinning, credentials, job layer, playbooks, S3)
 is the production code path.
@@ -37,6 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import paramiko
 from django.conf import settings
 from django.core.management.base import CommandError
 from django.test import override_settings
@@ -190,6 +189,8 @@ def ensure_lab_deployment(
             "node_number": int(node.deployment_hostname.rsplit("-", 1)[1]),
             "display_name": f"Virtualmin lab {node.key}",
             "ipv4_address": LAB_LOOPBACK,
+            "ssh_port": node.ssh_port,
+            "ssh_host_keys": lab_ssh_host_keys(node, state_dir),
             "dns_zone": dns_zone,
             "virtualmin_server": server,
             "status": "completed",
@@ -202,6 +203,18 @@ def ensure_lab_deployment(
         raise CommandError(f"SSH key generation failed for {node.key}: {key.unwrap_err()}")
     write_private(state_dir / node.key / "inject" / "authorized_keys", key.unwrap().public_key.strip() + "\n")
     return deployment
+
+
+def lab_ssh_host_keys(node: LabNode, state_dir: Path) -> str:
+    """Use bootstrap-pinned keys for the published lab endpoint, never the Mac's SSH daemon."""
+    for filename in ("known_hosts", "known_hosts-with-node-c"):
+        path = state_dir / filename
+        if not path.is_file():
+            continue
+        keys = paramiko.HostKeys(str(path)).lookup(f"[{LAB_LOOPBACK}]:{node.ssh_port}")
+        if keys:
+            return "\n".join(f"{key.get_name()} {key.get_base64()}" for key in keys.values())
+    raise CommandError(f"No bootstrap-verified SSH host key for lab node {node.key}")
 
 
 def refuse_unless_lab_settings() -> None:
@@ -383,23 +396,35 @@ def lab_transport(state: LabState) -> Iterator[None]:
                 return Err(f"Lab node {node.key} SSH port {node.ssh_port} unreachable: {error}")
         return Ok(True)
 
-    def known_hosts_covers(ip: str) -> bool:
-        return ip == LAB_LOOPBACK
+    def checked_lab_port(deployment: NodeDeployment) -> int:
+        port = ports_by_deployment.get(str(deployment.hostname))
+        if port is None or str(deployment.ipv4_address) != LAB_LOOPBACK:
+            raise CommandError("Refusing non-lab deployment in lab SSH transport")
+        return port
+
+    def recover_lab_port(deployment: NodeDeployment, key_file: Path, known_hosts: Path) -> int:
+        del key_file, known_hosts
+        return checked_lab_port(deployment)
+
+    def lab_ssh_policy(self: AnsibleService, deployment: NodeDeployment) -> Result[bool, str]:
+        del self
+        checked_lab_port(deployment)
+        # The Debian lab's key-only daemon stays on its published NAT endpoint.
+        # The Ubuntu SSH transition itself is exercised by test-ssh-docker.
+        return Ok(True)
 
     def build_vars(self: AnsibleService, deployment: Any, extra_vars: dict[str, Any] | None = None) -> dict[str, Any]:
         built = real_build_vars(self, deployment, extra_vars)
-        port = ports_by_deployment.get(str(deployment.hostname))
-        if port is None:
-            raise CommandError(f"Deployment {deployment.hostname} is not a lab node")
+        port = checked_lab_port(deployment)
         built["ansible_port"] = port
+        built["ssh_port"] = 22  # Host forwarding port differs from the daemon's container port.
         return built
 
     with ExitStack() as stack:
         stack.enter_context(mock.patch.object(outbound_http, "_resolve_dns", resolve))
         stack.enter_context(mock.patch.object(AnsibleService, "_wait_for_ssh", staticmethod(wait_for_ssh)))
-        stack.enter_context(
-            mock.patch.object(AnsibleService, "_configured_known_hosts_covers", staticmethod(known_hosts_covers))
-        )
+        stack.enter_context(mock.patch("apps.infrastructure.ansible_service.recover_connection_port", recover_lab_port))
+        stack.enter_context(mock.patch.object(AnsibleService, "_ensure_ssh_policy", lab_ssh_policy))
         stack.enter_context(mock.patch.object(AnsibleService, "_build_vars", build_vars))
         stack.enter_context(override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=state.known_hosts))
         yield

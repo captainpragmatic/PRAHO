@@ -13,11 +13,7 @@
         name: ufw
         state: present
 
-    - name: Allow SSH
-      community.general.ufw:
-        rule: allow
-        port: "22"
-        proto: tcp
+    # The shared SSH role installs source-scoped rules for the verified port.
 
     - name: Allow HTTP
       community.general.ufw:
@@ -71,7 +67,7 @@
         content: |
           [sshd]
           enabled = true
-          port = ssh
+          port = {{ ssh_port }}
           filter = sshd
           logpath = /var/log/auth.log
           maxretry = 5
@@ -120,18 +116,7 @@
         mode: '0644'
       notify: Enable security headers
 
-    # SSH hardening
-    - name: Harden SSH configuration
-      ansible.builtin.lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-      loop:
-        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
-        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
-        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
-        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 3' }
-      notify: Restart SSH
+    # SSH policy and its connection handoff belong to the shared role.
 
     - name: Create hardening marker
       ansible.builtin.copy:
@@ -150,7 +135,6 @@
       ansible.builtin.service:
         name: fail2ban
         state: restarted
-
     - name: Enable security headers
       ansible.builtin.command: a2enconf security-headers
       changed_when: true
@@ -159,9 +143,4 @@
     - name: Restart Apache
       ansible.builtin.service:
         name: apache2
-        state: restarted
-
-    - name: Restart SSH
-      ansible.builtin.service:
-        name: sshd
         state: restarted

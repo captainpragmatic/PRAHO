@@ -170,6 +170,9 @@ class Project:
         curl.write_text('#!/bin/sh\necho curl >> "$DOCKER_LOG"\nexit 7\n')
         for tool in (stub, curl):
             tool.chmod(0o755)
+        # Avoid macOS's /usr/bin/python3 developer-tools shim, which creates xcrun_db
+        # inside TMPDIR and contaminates the restore workspace under test.
+        (bin_dir / "python3").symlink_to(sys.executable)
         self.log = root / "docker.log"
         self.log.touch()
         self.env = {

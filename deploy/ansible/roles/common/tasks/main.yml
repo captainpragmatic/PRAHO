@@ -27,6 +27,9 @@
       - lsb-release
     state: present
 
+- name: Configure the staging and production swap buffer
+  ansible.builtin.include_tasks: swap.yml
+
 - name: Create project group
   group:
     name: "{{ project_group }}"
@@ -58,16 +61,8 @@
 - name: Configure firewall (UFW)
   when: firewall_enabled | default(true) | bool
   block:
-    - name: Reset UFW
-      community.general.ufw:
-        state: reset
-
-    - name: Allow SSH
-      community.general.ufw:
-        rule: allow
-        port: "22"
-        proto: tcp
-
+    # The ssh-hardening role owns SSH rules and verifies the listener first.
+    # Resetting UFW here would erase the working access path on every deploy.
     - name: Allow HTTP
       community.general.ufw:
         rule: allow

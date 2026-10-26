@@ -16,11 +16,13 @@
   include_tasks: env_preflight.yml
 
 - name: Read .env file locally for role variables
+  tags: [always]
   set_fact:
     native_configuration: "{{ lookup('native_env', env_file_path) }}"
   no_log: true
 
 - name: Parse .env vars for role use
+  tags: [always]
   set_fact:
     deployed_env: "{{ native_configuration['env'] }}"
   no_log: true
@@ -82,6 +84,9 @@
 # 1. PostgreSQL 16
 # ---------------------------------------------------------------------------
 
+- name: Prepare Python runtime and database locale
+  include_tasks: runtime.yml
+
 # Inspect registered clusters before installing a new major or changing any database settings.
 - name: Detect existing PostgreSQL cluster tool
   stat:
@@ -119,7 +124,7 @@
 
 - name: Add PostgreSQL APT repository
   apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
     state: present
 
 - name: Install PostgreSQL 16
@@ -160,46 +165,6 @@
     lc_collate: en_US.UTF-8
     lc_ctype: en_US.UTF-8
     state: present
-
-# ---------------------------------------------------------------------------
-# 2. Python 3.13 + build dependencies
-# ---------------------------------------------------------------------------
-
-- name: Install prerequisites for deadsnakes PPA
-  apt:
-    name:
-      - software-properties-common
-      - acl
-    state: present
-
-- name: Add deadsnakes PPA
-  apt_repository:
-    repo: "ppa:deadsnakes/ppa"
-    state: present
-
-- name: Install Python {{ python_version }} and build dependencies
-  apt:
-    name:
-      - "python{{ python_version }}"
-      - "python{{ python_version }}-dev"
-      - "python{{ python_version }}-venv"
-      - build-essential
-      - gettext
-    state: present
-    update_cache: yes
-
-# ---------------------------------------------------------------------------
-# 3. uv package manager
-# ---------------------------------------------------------------------------
-
-- name: Install uv
-  shell: curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
-  args:
-    creates: /usr/local/bin/uv
-
-- name: Verify uv is available
-  command: /usr/local/bin/uv --version
-  changed_when: false
 
 # ---------------------------------------------------------------------------
 # 4. Code deployment
@@ -308,7 +273,7 @@
 - name: Create virtualenv with uv
   command: >
     /usr/local/bin/uv venv
-    --python python{{ python_version }}
+    --python {{ native_python.stdout | trim }}
     {{ project_root }}/.venv-linux
   args:
     creates: "{{ project_root }}/.venv-linux/bin/python"
@@ -318,13 +283,17 @@
   command: >
     /usr/local/bin/uv sync
     --group platform
+    --group portal
     --group prod
+    --no-dev
     --frozen
   args:
     chdir: "{{ project_root }}/src"
   become_user: "{{ project_user }}"
   environment:
     UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv-linux"
+    UV_CONCURRENT_INSTALLS: '1'
+    UV_CONCURRENT_BUILDS: '1'
 
 # ---------------------------------------------------------------------------
 # 6. Environment file (.env as single source of truth)
@@ -352,6 +321,22 @@
   apt:
     name: openssh-client
     state: present
+
+- name: Create read-only node operator key directory
+  file:
+    path: /etc/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install approved public keys for managed-node deployment
+  copy:
+    content: "{{ ssh_operator_public_keys | join('\n') }}\n"
+    dest: /etc/praho/operator_authorized_keys
+    owner: root
+    group: root
+    mode: '0644'
 
 - name: Validate .env file exists locally
   stat:
@@ -568,7 +553,9 @@
   args:
     chdir: "{{ project_root }}/src/services/portal"
   become_user: "{{ project_user }}"
-  environment: "{{ portal_django_env }}"
+  # Static assets belong to the project user, who cannot write Portal's private
+  # log directory. Keep this build command on the console; runtime stays private.
+  environment: "{{ portal_django_env | combine({'PORTAL_LOG_DIR': ''}) }}"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
   no_log: true
@@ -629,6 +616,7 @@
     - platform-access.log
 
 - name: Template Caddyfile
+  tags: [caddy]
   template:
     src: Caddyfile.native.j2
     dest: /etc/caddy/Caddyfile

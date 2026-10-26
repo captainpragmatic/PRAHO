@@ -1,0 +1,65 @@
+---
+- name: Install approved operator public keys additively
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ ssh_operator_public_keys | join('\n') }}"
+    exclusive: false
+    manage_dir: true
+    state: present
+
+- name: Install host firewall tooling
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Permit the new SSH port before changing listeners
+  community.general.ufw:
+    rule: allow
+    port: "{{ ssh_target_port }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+  loop: "{{ ssh_allowed_cidrs }}"
+
+- name: Prove cloud and host firewall reachability before SSH changes
+  when: ssh_previous_port | int != ssh_target_port | int
+  block:
+    - name: Install bounded reachability probe
+      ansible.builtin.copy:
+        src: probe_port.py
+        dest: /var/lib/praho-ssh/probe_port.py
+        mode: '0600'
+    - name: Choose a unique reachability marker
+      ansible.builtin.set_fact:
+        ssh_reachability_marker: "praho-ssh-{{ ssh_transition_token }}"
+    - name: Start temporary listener without changing SSH
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /var/lib/praho-ssh/probe_port.py, "{{ ssh_target_port }}", "{{ ssh_reachability_marker }}"]
+      async: 25
+      poll: 0
+      changed_when: false
+      register: ssh_reachability_job
+    - name: Require the exact probe from this controller
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ ssh_target_port }}"
+        search_regex: "{{ ssh_reachability_marker }}"
+        timeout: 15
+      delegate_to: localhost
+      become: false
+    - name: Require the probe to exit before starting SSH on its port
+      ansible.builtin.async_status:
+        jid: "{{ ssh_reachability_job.ansible_job_id }}"
+      register: ssh_reachability_finished
+      until: ssh_reachability_finished.finished
+      retries: 5
+      delay: 1
+      changed_when: false
+
+- name: Create SSH socket override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/ssh.socket.d
+    state: directory
+    mode: '0755'
+  when: ssh_socket_active

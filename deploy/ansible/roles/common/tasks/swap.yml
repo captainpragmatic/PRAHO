@@ -1,0 +1,44 @@
+---
+- name: Validate swap size
+  ansible.builtin.assert:
+    that:
+      - swap_size_mb | int > 0
+      - swap_size_mb | int <= 16384
+
+- name: Install swap preparation helper
+  ansible.builtin.copy:
+    src: prepare-swap.sh
+    dest: /usr/local/sbin/praho-prepare-swap
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Prepare or verify the owned swap file
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/praho-prepare-swap, "{{ swap_size_mb | int }}"]
+  register: praho_swap_prepared
+  changed_when: "'created' in praho_swap_prepared.stdout_lines"
+
+- name: Read active swap files
+  ansible.builtin.command: swapon --show=NAME --noheadings --raw
+  register: praho_active_swap
+  changed_when: false
+
+- name: Activate the swap file before making it persistent
+  ansible.builtin.command: swapon /swapfile
+  when: "'/swapfile' not in praho_active_swap.stdout_lines"
+  changed_when: true
+
+- name: Verify the kernel accepted the swap file
+  ansible.builtin.command: swapon --show=NAME --noheadings --raw
+  register: praho_verified_swap
+  changed_when: false
+  failed_when: "'/swapfile' not in praho_verified_swap.stdout_lines"
+
+- name: Persist the verified swap file across reboots
+  ansible.posix.mount:
+    name: none
+    src: /swapfile
+    fstype: swap
+    opts: sw
+    state: present

@@ -178,6 +178,7 @@
       tags: [preflight, dns]
 
   roles:
+    - ssh-hardening
     - common
     - praho-native
 
@@ -206,6 +207,8 @@
       until: post_portal_check.status in [200, 301, 302]
 
     - name: Verify Portal HTTPS endpoint
+      delegate_to: localhost
+      become: false
       uri:
         url: "https://{{ deployed_env.PORTAL_DOMAIN }}/"
         status_code:
@@ -218,9 +221,11 @@
       retries: 15
       delay: 10
       until: post_portal_https.status | default(0) in [200, 301, 302]
-      tags: [post-verify]
+      tags: [post-verify, caddy]
 
     - name: Verify Platform HTTPS endpoint
+      delegate_to: localhost
+      become: false
       uri:
         url: "https://{{ deployed_env.PLATFORM_DOMAIN }}/api/users/health/"
         status_code: 200
@@ -230,7 +235,7 @@
       retries: 15
       delay: 10
       until: post_platform_https.status | default(0) == 200
-      tags: [post-verify]
+      tags: [post-verify, caddy]
 
     - name: Report deployment status
       debug:

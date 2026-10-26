@@ -12,8 +12,17 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from apps.common.performance.connection_pool import SSHConnectionPool
 from apps.common.types import Err, Ok
 from apps.infrastructure.ansible_service import ANSIBLE_BASE_PATH, AnsibleService
+from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.ssh_key_manager import SSHKeyManager, SSHKeyPair
 from apps.infrastructure.validation_service import NodeValidationService
+
+
+def enrolled_node() -> NodeDeployment:
+    key = paramiko.RSAKey.generate(2048)
+    return NodeDeployment(
+        id=1, ipv4_address="203.0.113.10", hostname="node", dns_zone="example.com",
+        ssh_port=9876, external_node_id="fixture-vm", ssh_host_keys=f"{key.get_name()} {key.get_base64()}",
+    )
 
 
 class AnsiblePlaybookBoundaryTests(SimpleTestCase):
@@ -24,6 +33,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         service.timeout = 30
         service._ansible_path = "/usr/bin/ansible-playbook"
         service._ssh_manager = MagicMock()
+        service._ensure_ssh_policy = MagicMock(return_value=Ok(True))
         return service
 
     def test_path_traversal_is_rejected_before_ssh_key_access(self) -> None:
@@ -40,7 +50,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
     def test_ansible_host_key_checking_is_enabled(self, mock_run: MagicMock) -> None:
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # The configured trust anchor must be a real file: _build_ansible_env
@@ -61,7 +71,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
             self.assertTrue(result.is_ok())
             self.assertEqual(mock_run.call_args.kwargs["env"]["ANSIBLE_HOST_KEY_CHECKING"], "True")
             self.assertIn(
-                f"UserKnownHostsFile={configured_known_hosts}",
+                "UserKnownHostsFile=/",
                 mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
             )
         finally:
@@ -75,7 +85,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         leaks into the PRAHO host's process list."""
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         secret = "SUPER-SECRET-API-PW-9f3a"  # test literal, not a real credential
@@ -100,7 +110,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         keys cleanup on the returned path, which never binds when the write raises."""
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
 
         tmpdir = Path(tempfile.gettempdir())
         before = set(tmpdir.glob("praho_ansible_vars_*"))
@@ -189,6 +199,7 @@ class AnsibleTrustPrecedenceTests(SimpleTestCase):
         service.timeout = 30
         service._ansible_path = "/usr/bin/ansible-playbook"
         service._ssh_manager = MagicMock()
+        service._ensure_ssh_policy = MagicMock(return_value=Ok(True))
         return service
 
     @patch("apps.infrastructure.ansible_service.subprocess.run")
@@ -198,13 +209,15 @@ class AnsibleTrustPrecedenceTests(SimpleTestCase):
         re-run time silently defeats the pinned key."""
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
+        public_key = deployment.ssh_host_keys
+        deployment.ssh_host_keys = ""
         # Covers-lookup (ssh-keygen -F) and the ansible run share this mock:
         # non-empty stdout + rc=0 means "the configured file covers the node".
-        mock_run.return_value = MagicMock(returncode=0, stdout="203.0.113.10 ssh-ed25519 AAAA\n", stderr="")
+        mock_run.return_value = MagicMock(returncode=0, stdout=f"203.0.113.10 {public_key}\n", stderr="")
 
         with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
-            known_hosts_fh.write("203.0.113.10 ssh-ed25519 AAAAconfigured\n")
+            known_hosts_fh.write(f"203.0.113.10 {public_key}\n")
             configured_known_hosts = known_hosts_fh.name
         try:
             with (
@@ -213,24 +226,28 @@ class AnsibleTrustPrecedenceTests(SimpleTestCase):
                 patch.object(AnsibleService, "_scan_host_key") as mock_scan,
                 patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
                 patch.object(service, "_build_vars", return_value={}),
+                patch("apps.infrastructure.ssh_transport.NodeDeployment.objects.filter") as records,
             ):
+                records.return_value.update.return_value = 1
                 result = service.run_playbook(deployment, "virtualmin.yml")
 
             self.assertTrue(result.is_ok())
             mock_scan.assert_not_called()
             self.assertIn(
-                f"UserKnownHostsFile={configured_known_hosts}",
+                "UserKnownHostsFile=/",
                 mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
             )
+            self.assertEqual(deployment.ssh_host_keys, public_key)
         finally:
             Path(configured_known_hosts).unlink(missing_ok=True)
 
-    def test_uncovered_node_falls_back_to_tofu_scan(self) -> None:
-        """A genuinely new node (not in the configured anchor) still gets the
-        managed TOFU scan — that is the case #367 exists to fix."""
+    @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="")
+    def test_uncovered_legacy_node_refuses_tofu_scan(self) -> None:
+        """Only explicitly fresh provider VMs can enroll a network identity."""
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
+        deployment.ssh_host_keys = ""
 
         with (
             patch.object(AnsibleService, "_configured_known_hosts_covers", return_value=False),
@@ -243,8 +260,9 @@ class AnsibleTrustPrecedenceTests(SimpleTestCase):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             result = service.run_playbook(deployment, "virtualmin.yml")
 
-        self.assertTrue(result.is_ok())
-        mock_scan.assert_called_once_with("203.0.113.10")
+        self.assertTrue(result.is_err())
+        self.assertIn("operator-verified", result.unwrap_err())
+        mock_scan.assert_not_called()
 
     def test_configured_known_hosts_covers_real_lookup(self) -> None:
         """The covers-check uses real ssh-keygen -F semantics (handles hashed
@@ -319,8 +337,10 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         service.timeout = 10
         service._ssh_manager = MagicMock()
         service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10")
+        deployment = enrolled_node()
         client = mock_client_class.return_value
+        client.get_host_keys.return_value = paramiko.HostKeys()
+        client._system_host_keys = paramiko.HostKeys()
         stdout = MagicMock()
         stdout.read.return_value = b"node.example.com"
         client.exec_command.return_value = (MagicMock(), stdout, MagicMock())
@@ -328,8 +348,9 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         result = service._check_ssh(deployment)
 
         self.assertTrue(result.passed)
-        client.load_system_host_keys.assert_called_once_with()
-        client.load_host_keys.assert_called_once_with("/etc/praho/known_hosts")
+        client.load_system_host_keys.assert_not_called()
+        client.load_host_keys.assert_not_called()
+        self.assertIsNotNone(client.get_host_keys().lookup("[203.0.113.10]:9876"))
         policy = client.set_missing_host_key_policy.call_args.args[0]
         self.assertIsInstance(policy, paramiko.RejectPolicy)
 
@@ -348,8 +369,10 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         service.timeout = 10
         service._ssh_manager = MagicMock()
         service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        deployment = enrolled_node()
         client = mock_client_class.return_value
+        client.get_host_keys.return_value = paramiko.HostKeys()
+        client._system_host_keys = paramiko.HostKeys()
         client.connect.side_effect = paramiko.BadHostKeyException("203.0.113.10", MagicMock(), MagicMock())
 
         result = service.get_webmin_certificate_fingerprint(deployment)
@@ -386,8 +409,10 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         service.timeout = 10
         service._ssh_manager = MagicMock()
         service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
-        deployment = MagicMock(ipv4_address="203.0.113.10")
+        deployment = enrolled_node()
         client = mock_client_class.return_value
+        client.get_host_keys.return_value = paramiko.HostKeys()
+        client._system_host_keys = paramiko.HostKeys()
         stdout = MagicMock()
         stdout.read.return_value = b"sha256 Fingerprint=" + b"AA:" * 31 + b"BB\n"
         stdout.channel.recv_exit_status.return_value = 0

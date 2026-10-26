@@ -33,24 +33,7 @@
         enabled: yes
         state: started
 
-    # SSH hardening (already done in common_base but reinforcing)
-    - name: Harden SSH configuration
-      ansible.builtin.lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        validate: 'sshd -t -f %s'
-      loop:
-        - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
-        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
-        - { regexp: '^#?AllowTcpForwarding', line: 'AllowTcpForwarding no' }
-        - { regexp: '^#?AllowAgentForwarding', line: 'AllowAgentForwarding no' }
-        - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval 300' }
-        - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax 2' }
-        - { regexp: '^#?Protocol', line: 'Protocol 2' }
-        - { regexp: '^#?Ciphers', line: 'Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com,aes256-ctr' }
-        - { regexp: '^#?MACs', line: 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com' }
-      notify: Restart sshd
+    # SSH policy and its connection handoff belong to the shared role.
 
     # UFW firewall (backup to cloud firewall)
     #
@@ -286,11 +269,6 @@
     - name: Restart fail2ban
       ansible.builtin.service:
         name: fail2ban
-        state: restarted
-
-    - name: Restart sshd
-      ansible.builtin.service:
-        name: sshd
         state: restarted
 
     - name: Enable ufw

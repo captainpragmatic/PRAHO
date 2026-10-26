@@ -27,6 +27,13 @@ from django.conf import settings
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
+from apps.infrastructure.ssh_transport import (
+    TARGET_SSH_PORT,
+    persist_verified_ssh_port,
+    recover_connection_port,
+    trusted_node_known_hosts,
+    verify_idle_ssh,
+)
 from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
@@ -106,6 +113,7 @@ class AnsibleService:
     PLAYBOOK_ORDER = PANEL_PLAYBOOKS["virtualmin"]
     ALLOWED_PLAYBOOKS: ClassVar[frozenset[str]] = frozenset(
         {
+            "ssh-hardening.yml",
             "common_base.yml",
             "virtualmin.yml",
             "virtualmin_harden.yml",
@@ -122,6 +130,15 @@ class AnsibleService:
             "virtualmin_install_account_cert.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",
+        }
+    )
+    SSH_POLICY_ENTRYPOINTS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "common_base.yml",
+            "virtualmin.yml",
+            "virtualmin_harden.yml",
+            "blesta.yml",
+            "blesta_harden.yml",
         }
     )
 
@@ -210,6 +227,8 @@ class AnsibleService:
 
         if playbook not in self.ALLOWED_PLAYBOOKS:
             return Err(f"Playbook not allowed: {playbook}")
+        if any(key.startswith(("ansible_", "ssh_")) for key in (extra_vars or {})):
+            return Err("Connection and SSH policy variables are owned by the verified node transport")
 
         playbook_path = (PLAYBOOKS_PATH / playbook).resolve()
         if playbook_path.parent != PLAYBOOKS_PATH.resolve():
@@ -224,33 +243,53 @@ class AnsibleService:
         )
 
         if key_result.is_err():
-            # Try master key fallback
-            master_result = self._ssh_manager.get_master_key_file()
-            if master_result.is_err():
-                return Err(f"Could not get SSH key: {key_result.unwrap_err()}")
-            key_file = master_result.unwrap()
-        else:
-            key_file = key_result.unwrap()
+            return Err("Could not retrieve the node's enrolled authentication key; refusing key replacement")
+        key_file = key_result.unwrap()
 
         try:
             # A freshly-created node reports "running" before its OS has booted sshd, so wait
             # until SSH is actually reachable — otherwise ansible fails UNREACHABLE (#node-deploy).
-            ssh_wait = self._wait_for_ssh(deployment.ipv4_address)
+            if deployment.ssh_host_keys is None:
+                ssh_wait = self._wait_for_ssh(deployment.ipv4_address, port=deployment.ssh_port)
+                if ssh_wait.is_err():
+                    return Err(ssh_wait.unwrap_err())
+            known_hosts_file = trusted_node_known_hosts(deployment, self._scan_host_key)
+            connection_port = recover_connection_port(deployment, key_file, known_hosts_file)
+            if playbook != "ssh-hardening.yml" and (
+                playbook in self.SSH_POLICY_ENTRYPOINTS or connection_port != deployment.ssh_port
+            ):
+                transition = self._ensure_ssh_policy(deployment)
+                if transition.is_err():
+                    return Err(transition.unwrap_err())
+                connection_port = deployment.ssh_port
+            ssh_wait = self._wait_for_ssh(deployment.ipv4_address, port=connection_port)
             if ssh_wait.is_err():
                 return Err(ssh_wait.unwrap_err())
-            # Managed TOFU is only sound on FIRST use: when the operator's configured
-            # known_hosts already covers this node, that pinned key must outrank any
-            # fresh network scan — otherwise an active MITM at re-run time silently
-            # replaces the trust anchor. Scan-and-pin only for genuinely new nodes.
-            known_hosts_file = None
-            if not self._configured_known_hosts_covers(deployment.ipv4_address):
-                known_hosts_file = self._scan_host_key(deployment.ipv4_address)
 
             # Generate inventory
-            inventory_file = self._generate_inventory(deployment)
+            inventory_file = self._generate_inventory(deployment, connection_port=connection_port)
 
             # Build extra vars
             vars_dict = self._build_vars(deployment, extra_vars)
+            if playbook == "ssh-hardening.yml":
+                operator_keys = Path(
+                    str(
+                        getattr(
+                            settings,
+                            "PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE",
+                            "/etc/praho/operator_authorized_keys",
+                        )
+                    )
+                )
+                vars_dict.update(
+                    {
+                        "ssh_target_port": TARGET_SSH_PORT,
+                        "ssh_operator_public_keys": operator_keys.read_text().splitlines(),
+                        "ssh_allowed_cidrs": node_admin_allowed_cidrs(),
+                        "ssh_probe_known_hosts_file": str(known_hosts_file),
+                        "ssh_probe_identity_file": str(key_file),
+                    }
+                )
             # Pass vars via a 0600 temp file (`-e @file`), never `-e <json>` on the
             # command line: extra_vars can carry secrets (the Virtualmin API
             # password, #347) that would otherwise leak into the process list.
@@ -283,6 +322,7 @@ class AnsibleService:
             logger.info(f"📜 [Ansible] Running: {playbook} on {deployment.ipv4_address}")
 
             ansible_env = self._build_ansible_env(known_hosts_file=known_hosts_file)
+            ansible_env["ANSIBLE_SSH_COMMON_ARGS"] += f" -o HostKeyAlias={deployment.ipv4_address}"
 
             # Execute
             result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
@@ -296,6 +336,9 @@ class AnsibleService:
             )
 
             success = result.returncode == 0
+            if success and playbook == "ssh-hardening.yml":
+                verify_idle_ssh(deployment, key_file, known_hosts_file, TARGET_SSH_PORT)
+                persist_verified_ssh_port(deployment)
             log_level = logging.INFO if success else logging.ERROR
             logger.log(log_level, f"📜 [Ansible] Playbook {playbook}: {'success' if success else 'failed'}")
 
@@ -352,6 +395,15 @@ class AnsibleService:
                     except OSError as _cleanup_err:
                         logger.warning(f"⚠️ [Ansible] Could not remove temp file {_tmp_path}: {_cleanup_err}")
 
+    def _ensure_ssh_policy(self, deployment: NodeDeployment) -> Result[bool, str]:
+        """Shared initial/maintenance boundary; lab adapters override only this hook."""
+        result = self.run_playbook(deployment, "ssh-hardening.yml")
+        if result.is_err():
+            return Err(result.unwrap_err())
+        if not result.unwrap().success:
+            return Err("Node SSH transition failed; inspect the retained snapshot and verified port")
+        return Ok(True)
+
     @staticmethod
     def _write_vars_file(vars_dict: dict[str, Any]) -> Path:
         """Write playbook vars to a 0600 temp file so secrets in extra_vars (the
@@ -403,6 +455,9 @@ class AnsibleService:
         if known_hosts_path:
             known_hosts_arg = f"-o UserKnownHostsFile={shlex.quote(known_hosts_path)}"
             ansible_env["ANSIBLE_SSH_COMMON_ARGS"] = f"{ansible_env['ANSIBLE_SSH_COMMON_ARGS']} {known_hosts_arg}"
+            ansible_env["ANSIBLE_SSH_COMMON_ARGS"] += (
+                " -o GlobalKnownHostsFile=/dev/null -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no"
+            )
         return ansible_env
 
     @staticmethod
@@ -489,11 +544,11 @@ class AnsibleService:
             path.unlink(missing_ok=True)
             return None
 
-    def _generate_inventory(self, deployment: NodeDeployment) -> Path:
+    def _generate_inventory(self, deployment: NodeDeployment, connection_port: int | None = None) -> Path:
         """Generate dynamic inventory file for deployment"""
         inventory_content = f"""# Auto-generated inventory for {deployment.hostname}
 [all]
-{deployment.hostname} ansible_host={deployment.ipv4_address} ansible_user=root
+{deployment.hostname} ansible_host={deployment.ipv4_address} ansible_user=root ansible_port={connection_port or deployment.ssh_port}
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
@@ -524,6 +579,7 @@ ansible_python_interpreter=/usr/bin/python3
         backup_schedule = SettingsService.get_setting("node_deployment.backup_schedule", "0 2 * * *")
 
         vars_dict: dict[str, Any] = {
+            "ssh_port": deployment.ssh_port,
             # Deployment info
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,

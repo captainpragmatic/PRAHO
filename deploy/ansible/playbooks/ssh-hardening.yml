@@ -1,0 +1,7 @@
+---
+- name: Establish PRAHO key-only SSH access
+  hosts: praho
+  become: true
+  gather_facts: true
+  roles:
+    - ssh-hardening

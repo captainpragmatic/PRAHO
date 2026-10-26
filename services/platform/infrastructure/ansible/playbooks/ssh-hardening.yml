@@ -1,0 +1,7 @@
+---
+- name: Establish verified key-only SSH for a managed hosting node
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - ssh-hardening

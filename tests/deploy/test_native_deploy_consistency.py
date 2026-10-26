@@ -20,11 +20,13 @@ import re
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ANSIBLE = PROJECT_ROOT / "deploy/ansible"
@@ -37,6 +39,25 @@ GUIDE = PROJECT_ROOT / "docs/deployment/DEPLOYMENT.md"
 # Modules outside ansible.builtin that the playbooks and roles use.
 EXTERNAL_SHORT_NAME = re.compile(r"^\s*-?\s*(synchronize|ufw|timezone|postgresql_\w+):", re.MULTILINE)
 QUALIFIED_MODULE = re.compile(r"^\s*-?\s*([a-z_]+\.[a-z_]+)\.[a-z_]+:", re.MULTILINE)
+
+
+def test_native_dependency_resolution_contains_the_portals_runtime_packages(tmp_path: Path) -> None:
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    sync = next(task["command"] for task in tasks if task.get("name") == "Install dependencies with uv")
+    import shlex  # noqa: PLC0415 -- Parse the actual deployment command, without running a shell.
+
+    arguments = shlex.split(sync)[2:]
+    exported = subprocess.run(  # noqa: S603 -- uv exports the frozen lockfile, no environment mutation.
+        [shutil.which("uv") or "uv", "export", "--format", "requirements-txt", "--no-hashes",
+         "--no-header", "--no-annotate", *arguments],
+        cwd=PROJECT_ROOT, env={**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")},
+        capture_output=True, text=True, check=False,
+    )
+    assert exported.returncode == 0, exported.stderr
+    resolved = {Requirement(line).name for line in exported.stdout.splitlines() if line and not line.startswith("#")}
+    configuration = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+    required = {Requirement(spec).name for spec in configuration["dependency-groups"]["portal"]}
+    assert required <= resolved, f"Native deployment omits Portal packages: {sorted(required - resolved)}"
 
 
 def _flat_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -59,6 +80,10 @@ def _version(text: str) -> tuple[int, ...]:
 
 
 class TestBackupPlaybook:
+    def test_backup_runs_as_the_directory_owner(self) -> None:
+        run = next(task for task in _backup_tasks() if task.get("name") == "Run backup script")
+        assert run["become_user"] == "{{ project_user }}"
+
     @pytest.mark.integration
     def test_it_targets_a_group_every_inventory_defines(self) -> None:
         play = yaml.safe_load(BACKUP_PLAYBOOK.read_text())[0]
@@ -159,6 +184,10 @@ class TestSingleServerMakeTarget:
     @pytest.mark.integration
     def test_a_production_version_reaches_the_playbook(self) -> None:
         assert "--version v9.9.9" in _dry_run("ansible-single-server", "ENV=prod", "VERSION=v9.9.9")
+
+    @pytest.mark.integration
+    def test_staging_can_deploy_an_explicit_reviewed_revision(self) -> None:
+        assert "--version abcdef123456" in _dry_run("deploy-staging", "VERSION=abcdef123456")
 
 
 class TestNativeMakeTargets:

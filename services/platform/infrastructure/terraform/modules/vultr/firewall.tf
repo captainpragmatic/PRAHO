@@ -23,6 +23,26 @@ resource "vultr_firewall_rule" "ssh_v6" {
 }
 
 # HTTP
+resource "vultr_firewall_rule" "ssh_hardened" {
+  firewall_group_id = vultr_firewall_group.node.id
+  protocol          = "tcp"
+  ip_type           = "v4"
+  subnet            = "0.0.0.0"
+  subnet_size       = 0
+  port              = "9876"
+  notes             = "Key-only SSH"
+}
+
+resource "vultr_firewall_rule" "ssh_hardened_v6" {
+  firewall_group_id = vultr_firewall_group.node.id
+  protocol          = "tcp"
+  ip_type           = "v6"
+  subnet            = "::"
+  subnet_size       = 0
+  port              = "9876"
+  notes             = "Key-only SSH IPv6"
+}
+
 resource "vultr_firewall_rule" "http" {
   firewall_group_id = vultr_firewall_group.node.id
   protocol          = "tcp"

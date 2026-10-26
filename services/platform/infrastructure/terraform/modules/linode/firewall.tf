@@ -20,6 +20,15 @@ resource "linode_firewall" "node" {
 
   # HTTP
   inbound {
+    label    = "ssh-hardened"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "9876"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
     label    = "http"
     action   = "ACCEPT"
     protocol = "TCP"
