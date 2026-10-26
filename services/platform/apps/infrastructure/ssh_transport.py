@@ -200,8 +200,8 @@ def persist_verified_ssh_port(deployment: NodeDeployment) -> None:
             raise ValueError("Node identity changed before SSH commit")
         current.ssh_port = TARGET_SSH_PORT
         current.save(update_fields=["ssh_port", "updated_at"])
-        if current.virtualmin_server_id:
-            server = current.virtualmin_server
+        server = current.virtualmin_server
+        if server is not None:
             server.ssh_port = TARGET_SSH_PORT
             server.save(update_fields=["ssh_port", "updated_at"])
     deployment.ssh_port = TARGET_SSH_PORT
