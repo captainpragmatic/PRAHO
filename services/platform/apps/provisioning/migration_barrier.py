@@ -167,6 +167,7 @@ def barrier_variables(  # noqa: PLR0913  # One value per input the playbook vali
     domain_id: str,
     token: str,
     previous_token: str = "",
+    saved_token: str = "",
     record: BarrierRecord | None = None,
     killed_at: int = 0,
 ) -> Result[dict[str, Any], str]:
@@ -177,6 +178,7 @@ def barrier_variables(  # noqa: PLR0913  # One value per input the playbook vali
         or not _DOMAIN_ID_RE.match(domain_id)
         or not _TOKEN_RE.match(token)
         or (previous_token and not _TOKEN_RE.match(previous_token))
+        or (saved_token and not _TOKEN_RE.match(saved_token))
         or killed_at < 0
     ):
         return Err("The barrier inputs are not acceptable to the node", retriability=Retriability.NOT_RETRIABLE)
@@ -188,6 +190,7 @@ def barrier_variables(  # noqa: PLR0913  # One value per input the playbook vali
         "barrier_domain_id": domain_id,
         "barrier_token": token,
         "barrier_previous_token": previous_token,
+        "barrier_saved_token": saved_token,
         "barrier_lock_wait_seconds": BARRIER_LOCK_WAIT_SECONDS,
         "barrier_drain_wait_seconds": BARRIER_DRAIN_WAIT_SECONDS,
         "barrier_killed_at": str(killed_at),

@@ -52,6 +52,7 @@ domain=${PRAHO_DOMAIN:?}
 domain_id=${PRAHO_DOMAIN_ID:?}
 token=${PRAHO_OPERATION_TOKEN:?}
 previous=${PRAHO_PREVIOUS_TOKEN:-}
+saved=${PRAHO_SAVED_TOKEN:-$token}
 lock_wait=${PRAHO_LOCK_WAIT:-60}
 drain_wait=${PRAHO_DRAIN_WAIT:-60}
 accounts_b64=${PRAHO_ACCOUNTS:-}
@@ -67,6 +68,7 @@ host_ok='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 [[ $domain_id =~ ^[0-9]{1,30}$ ]] || exit 64
 [[ $token =~ $uuid ]] || exit 64
 [[ -z $previous || $previous =~ $uuid ]] || exit 64
+[[ $saved =~ $uuid ]] || exit 64
 [[ $lock_wait =~ ^[0-9]{1,4}$ && $drain_wait =~ ^[0-9]{1,4}$ && $killed_at =~ ^[0-9]{1,12}$ ]] || exit 64
 [[ $accounts_b64 =~ ^[A-Za-z0-9+/=]*$ && $enabled_b64 =~ ^[A-Za-z0-9+/=]*$ ]] || exit 64
 [[ -z $has_crontab_record || $has_crontab_record =~ ^[01]$ ]] || exit 64
@@ -74,7 +76,7 @@ host_ok='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 
 lock_file="$RUN_DIR/migration-$domain_id.lock"
 cancel_marker="$RUN_DIR/migration-$domain_id.cancelled.$token"
-kept_crontab="$STATE_DIR/migration-$domain_id.$token.crontab"
+kept_crontab="$STATE_DIR/migration-$domain_id.$saved.crontab"
 account_ok='^[A-Za-z0-9._@-]{1,80}$'
 account_host_ok='^[A-Za-z0-9.%_:-]{1,255}$'
 database_ok='^[A-Za-z0-9_]{1,64}$'

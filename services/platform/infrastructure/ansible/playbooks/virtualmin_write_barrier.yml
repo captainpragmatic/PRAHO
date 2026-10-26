@@ -18,6 +18,7 @@
     barrier_lock_wait_seconds: 60
     barrier_drain_wait_seconds: 60
     barrier_previous_token: ""
+    barrier_saved_token: ""
     barrier_accounts: ""
     barrier_enabled: ""
     barrier_killed_at: "0"
@@ -33,6 +34,7 @@
           - barrier_domain_id is match('^[0-9]{1,30}$')
           - barrier_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - barrier_previous_token == '' or barrier_previous_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - barrier_saved_token == '' or barrier_saved_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - barrier_lock_wait_seconds | string is match('^[0-9]{1,4}$')
           - barrier_drain_wait_seconds | string is match('^[0-9]{1,4}$')
           - barrier_accounts is match('^[A-Za-z0-9+/=]*$')
@@ -50,6 +52,7 @@
         PRAHO_DOMAIN_ID: "{{ barrier_domain_id }}"
         PRAHO_OPERATION_TOKEN: "{{ barrier_token }}"
         PRAHO_PREVIOUS_TOKEN: "{{ barrier_previous_token }}"
+        PRAHO_SAVED_TOKEN: "{{ barrier_saved_token }}"
         PRAHO_LOCK_WAIT: "{{ barrier_lock_wait_seconds }}"
         PRAHO_DRAIN_WAIT: "{{ barrier_drain_wait_seconds }}"
         PRAHO_ACCOUNTS: "{{ barrier_accounts }}"

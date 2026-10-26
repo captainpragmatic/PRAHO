@@ -18,7 +18,11 @@ from apps.common.types import Ok
 from apps.provisioning.migration_barrier import BarrierStep
 from apps.provisioning.virtualmin_drain_service import NodeDrainService
 from apps.provisioning.virtualmin_migration_models import NodeDrain, VirtualminMigration
-from apps.provisioning.virtualmin_migration_service import RESUME_POLICY, VirtualminMigrationService
+from apps.provisioning.virtualmin_migration_service import (
+    RESUME_POLICY,
+    MigrationLeaseLostError,
+    VirtualminMigrationService,
+)
 from apps.provisioning.virtualmin_models import VirtualminServer
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
 
@@ -88,6 +92,23 @@ class RecordAndApplyTests(BarrierCase):
         self.assertEqual(migration.status, "backing_up")
         self.assertEqual(migration.barrier_state["record"]["active_sha"], "b" * 64)
         self.assertIsNotNone(migration.source_disabled_at)
+
+    def test_barrier_evidence_cannot_be_written_after_the_lease_moves(self) -> None:
+        migration, _token = self._cutover()
+        stale = uuid4()
+
+        def run(_server: VirtualminServer, variables: dict) -> object:
+            action = variables["barrier_action"]
+            return Ok(_ok(action, "ok", RECORD if action == "record" else None))
+
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+            self.assertRaises(MigrationLeaseLostError),
+        ):
+            VirtualminMigrationService()._barrier_quiesce(migration, stale)
+
+        migration.refresh_from_db()
+        self.assertEqual(migration.barrier_state, {})
 
     def test_a_recorded_barrier_is_persisted_before_the_fence_is_applied(self) -> None:
         migration, token = self._cutover()

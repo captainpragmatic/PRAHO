@@ -501,6 +501,30 @@ class ReleaseTests(BarrierScriptCase):
         self.assertTrue([call for call in self.calls() if call.startswith(f"login {OWNER} CREATE TABLE praho_barrier_probe_")])
         self.assertFalse((self.state_dir / f"migration-{DOMAIN_ID}.{TOKEN}.crontab").exists(), "the kept copy goes")
 
+    def test_a_release_under_a_new_operation_token_uses_the_recorded_copy(self) -> None:
+        recorded = self.record()
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
+        new_token = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+        completed = self.run_script(
+            "release",
+            **{
+                **self.inputs(recorded),
+                "PRAHO_OPERATION_TOKEN": new_token,
+                "PRAHO_SAVED_TOKEN": TOKEN,
+                "PRAHO_PREVIOUS_TOKEN": TOKEN,
+                "FAKE_ENABLE_STRANDS_CRON": "1",
+            },
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        lines = [line for line in completed.stdout.splitlines() if line.startswith("BARRIER_RESULT=")]
+        self.assertEqual(len(lines), 1, completed.stdout)
+        payload = json.loads(base64.b64decode(lines[0].removeprefix("BARRIER_RESULT=")))
+        self.assertEqual((payload["outcome"], payload["reason"], payload["token"]), ("ok", "released", new_token))
+        self.assertEqual((self.state / "crontab").read_text(), CRONTAB)
+        self.assertFalse((self.state_dir / f"migration-{DOMAIN_ID}.{TOKEN}.crontab").exists())
+
     def test_jobs_stranded_by_a_failed_enable_are_put_back_from_the_kept_copy(self) -> None:
         recorded = self.record()
         self.assertEqual(self.apply(recorded)["outcome"], "ok")

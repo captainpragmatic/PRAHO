@@ -58,7 +58,6 @@ SYNCABLE_STATUSES = frozenset({"active", "suspended"})
 # The cutover lowers the name's TTL for the move and the bridge (ADR-0061 P2.3). The provider's
 # reported TTL on every owned record is what proves the change is live; the wait is bounded, and a
 # name that never confirms is rolled back rather than moved on stale routing.
-CUTOVER_TTL_SECONDS = 60
 TTL_LOWER_DEADLINE = timedelta(minutes=30)
 
 
@@ -524,21 +523,33 @@ def _decide(hostname: AccountHostname) -> Result[str, str] | None:
     return None
 
 
-def _specs(hostname: AccountHostname, *, ttl: int | None = None) -> list[DnsRecordSpec]:
+def _specs(hostname: AccountHostname, *, ttl: int | Mapping[str, int] | None = None) -> list[DnsRecordSpec]:
     from apps.infrastructure.dns_gateway import DnsRecordSpec  # noqa: PLC0415  # Deferred: see _dns_gateway
 
     server = hostname.target_server
     if server is None or not server.ipv4_address:  # _syncable refused these; kept for the type
         return []
-    record_ttl = config.account_record_ttl_seconds() if ttl is None else ttl
+
+    def _ttl(record_type: str) -> int:
+        if ttl is None:
+            # A routine sync during a cutover must not undo the lowering; only the restore raises it.
+            return (
+                config.account_cutover_ttl_seconds()
+                if hostname.previous_ttl is not None
+                else config.account_record_ttl_seconds()
+            )
+        if isinstance(ttl, Mapping):
+            return int(ttl.get(record_type, config.account_record_ttl_seconds()))
+        return ttl
+
     tag = owner_tag(hostname)
     specs = [
-        DnsRecordSpec(record_type="A", name=hostname.fqdn, content=server.ipv4_address, owner_tag=tag, ttl=record_ttl)
+        DnsRecordSpec(record_type="A", name=hostname.fqdn, content=server.ipv4_address, owner_tag=tag, ttl=_ttl("A"))
     ]
     if server.ipv6_address:
         specs.append(
             DnsRecordSpec(
-                record_type="AAAA", name=hostname.fqdn, content=server.ipv6_address, owner_tag=tag, ttl=record_ttl
+                record_type="AAAA", name=hostname.fqdn, content=server.ipv6_address, owner_tag=tag, ttl=_ttl("AAAA")
             )
         )
     return specs
@@ -555,6 +566,9 @@ def _merged(previous: Mapping[str, Any], intended: Mapping[str, dict[str, object
         before = previous.get(record_type) or {}
         kept = before if before.get("intended") == entry.get("intended") else {}
         merged[record_type] = {**kept, **entry}
+        if "previous_ttl" in before:
+            # The TTL to restore belongs to the name, not to the content that happened to be live then.
+            merged[record_type]["previous_ttl"] = before["previous_ttl"]
     return merged
 
 
@@ -568,7 +582,7 @@ def _store_intent(hostname: AccountHostname, specs: list[DnsRecordSpec]) -> dict
     return merged
 
 
-def _publish(pk: UUID, gateway: Any, zone_id: str, *, ttl: int | None = None) -> Result[str, str]:
+def _publish(pk: UUID, gateway: Any, zone_id: str, *, ttl: int | Mapping[str, int] | None = None) -> Result[str, str]:
     """The provider call, under the lock, for what the row says now: a commit since may have moved it."""
     with transaction.atomic():
         hostname = lock_for_publication(pk)
@@ -645,30 +659,58 @@ def _effective_ttl(hostname: AccountHostname) -> int:
     return config.account_record_ttl_seconds()
 
 
-def ttl_is_lowered(hostname: AccountHostname, *, ttl: int = CUTOVER_TTL_SECONDS) -> bool:
+def ttl_is(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> bool:
+    """Every owned record the provider reports carries the TTL asked for, record type by record type."""
+    records = hostname.records or {}
+    if not records:
+        return False
+    for record_type, entry in records.items():
+        expected = int(ttl.get(record_type, -1)) if isinstance(ttl, Mapping) else ttl
+        if entry.get("applied_ttl") != expected:
+            return False
+    return True
+
+
+def ttl_is_lowered(hostname: AccountHostname, *, ttl: int | None = None) -> bool:
     """Every owned record the provider reports carries the lower TTL; one holdout is not converged."""
-    records = list((hostname.records or {}).values())
-    return bool(records) and all(entry.get("applied_ttl") == ttl for entry in records)
+    threshold = config.account_cutover_ttl_seconds() if ttl is None else ttl
+    return ttl_is(hostname, threshold)
+
+
+def _previous_ttls(hostname: AccountHostname) -> dict[str, int]:
+    """The TTL to restore for each record type, from what was recorded when the lowering began."""
+    fallback = hostname.previous_ttl or config.account_record_ttl_seconds()
+    return {
+        record_type: int(entry.get("previous_ttl") or entry.get("ttl") or fallback)
+        for record_type, entry in (hostname.records or {}).items()
+    }
 
 
 def _begin_lowering(hostname: AccountHostname) -> bool:
-    """Record the TTL to restore once, under the name's lock. False when the name is not published."""
+    """Record the TTL each record had, once, under the name's lock. False when nothing is published."""
     now = timezone.now()
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
         if locked is None or not locked.records:
             return False
-        fields: dict[str, object] = {}
+        records = locked.records
+        for entry in records.values():
+            if "previous_ttl" not in entry:
+                entry["previous_ttl"] = (
+                    entry.get("applied_ttl") or entry.get("ttl") or config.account_record_ttl_seconds()
+                )
+        fields: dict[str, object] = {"records": records}
         if locked.previous_ttl is None:
-            fields["previous_ttl"] = _effective_ttl(locked)
+            fields["previous_ttl"] = int(
+                next(iter(records.values())).get("previous_ttl") or config.account_record_ttl_seconds()
+            )
         if locked.ttl_lowered_at is None:
             fields["ttl_lowered_at"] = now
-        if fields:
-            AccountHostname.objects.filter(pk=locked.pk).update(updated_at=now, **fields)
+        AccountHostname.objects.filter(pk=locked.pk).update(updated_at=now, **fields)
         return True
 
 
-def _apply_ttl(hostname: AccountHostname, ttl: int) -> Result[str, str]:
+def _apply_ttl(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> Result[str, str]:
     """Publish the name's records with `ttl`, proving the zone first; says whether that landed."""
     zone_id = config.account_zone_id()
     gateway = _dns_gateway()
@@ -695,7 +737,7 @@ def lower_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
         return Ok("disabled")
     if not _begin_lowering(hostname):
         return Ok("skipped:not_published")
-    applied = _apply_ttl(hostname, CUTOVER_TTL_SECONDS)
+    applied = _apply_ttl(hostname, config.account_cutover_ttl_seconds())
     if applied.is_err():
         return applied
     hostname.refresh_from_db()
@@ -717,12 +759,29 @@ def restore_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
         return Ok("restored")
     if not config.account_hostnames_enabled():
         return Ok("disabled")
-    applied = _apply_ttl(hostname, hostname.previous_ttl)
+    recorded_ttls = _previous_ttls(hostname)
+    applied = _apply_ttl(hostname, recorded_ttls)
     if applied.is_err():
         return applied
-    AccountHostname.objects.filter(pk=hostname.pk).update(
-        previous_ttl=None, ttl_lowered_at=None, updated_at=timezone.now()
-    )
+    return _confirm_restored(hostname, recorded_ttls)
+
+
+def _confirm_restored(hostname: AccountHostname, recorded_ttls: Mapping[str, int]) -> Result[str, str]:
+    """Under the name's lock: only clear the evidence when the provider reports the restored TTLs."""
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None:
+            return Ok("skipped:retired")
+        if not ttl_is(locked, recorded_ttls):
+            # The provider still reports the lowered value, or a sync raced in: keep the evidence so a
+            # retry can finish rather than falsely reporting the restore done.
+            return Ok("waiting")
+        records = locked.records or {}
+        for entry in records.values():
+            entry.pop("previous_ttl", None)
+        AccountHostname.objects.filter(pk=locked.pk).update(
+            records=records, previous_ttl=None, ttl_lowered_at=None, updated_at=timezone.now()
+        )
     hostname.refresh_from_db()
     return Ok("restored")
 

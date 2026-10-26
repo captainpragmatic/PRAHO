@@ -156,6 +156,26 @@ class HostingDnsDefaultsTests(TestCase):
         self.assertIsNone(_write("dns.account_record_ttl_seconds", 600))
         self.assertEqual(config.account_record_ttl_seconds(), 600)
 
+    def test_the_cutover_defaults_are_bounded(self) -> None:
+        self.assertEqual(config.account_cutover_ttl_seconds(), 60)
+        self.assertEqual(config.bridge_window_hours(), 48)
+
+    def test_the_cutover_settings_take_effect(self) -> None:
+        self.assertIsNone(_write("dns.cutover_ttl_seconds", 120))
+        self.assertIsNone(_write("dns.bridge_window_hours", 24))
+        self.assertEqual(config.account_cutover_ttl_seconds(), 120)
+        self.assertEqual(config.bridge_window_hours(), 24)
+
+    def test_out_of_range_cutover_settings_are_refused(self) -> None:
+        for key, value in (
+            ("dns.cutover_ttl_seconds", 10),
+            ("dns.cutover_ttl_seconds", 1000),
+            ("dns.bridge_window_hours", 0),
+            ("dns.bridge_window_hours", 200),
+        ):
+            with self.subTest(key=key, value=value):
+                self.assertIsNotNone(_write(key, value))
+
     def test_the_certificate_budget_takes_effect(self) -> None:
         self.assertIsNone(_write("dns.account_cert_weekly_budget", 25))
         self.assertEqual(config.account_cert_weekly_budget(), 25)

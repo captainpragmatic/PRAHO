@@ -41,6 +41,7 @@ from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import (
     _TERMINAL_STATUSES,
     PRE_COMMIT_STATUSES,
+    MigrationBridge,
     NodeDrain,
     VirtualminMigration,
     account_has_active_operation,
@@ -348,6 +349,12 @@ class VirtualminMigrationService:
             raise ValueError("Virtualmin migration is disabled")
         if account_has_active_operation(account):
             raise ValueError("Account already has an active migration or backup/restore operation")
+        if (
+            MigrationBridge.objects.filter(migration__account_id=account.pk)
+            .exclude(status=MigrationBridge.Status.TORN_DOWN)
+            .exists()
+        ):
+            raise ValueError("An earlier move's bridge is still standing for this account")
         if account.server_id == target.pk:
             raise ValueError("Source and target must differ")
         if account.status not in {"active", "suspended"}:
@@ -517,7 +524,7 @@ class VirtualminMigrationService:
         try:
             if migration.status != "compensating":
                 self._move(migration, token, "compensating")
-            self._release_barrier(migration)
+            self._release_barrier(migration, token)
             self._restore_ttl(migration)
             if target_delete_allowed:
                 if not migration.restore_issued:
@@ -570,13 +577,14 @@ class VirtualminMigrationService:
         if state not in {"restored", "noop"}:
             raise ValueError(f"TTL restore refused: {state}")
 
-    def _barrier(
+    def _barrier(  # noqa: PLR0913  # Every barrier input is explicit; the node validates each
         self,
         migration: VirtualminMigration,
         action: str,
         *,
         token: str,
         previous_token: str = "",
+        saved_token: str = "",
         record: BarrierRecord | None = None,
     ) -> Result[BarrierStep, str]:
         """Run one barrier action on the source node; the variables refuse what the node would."""
@@ -588,6 +596,7 @@ class VirtualminMigrationService:
             domain_id=domain_id,
             token=token,
             previous_token=previous_token,
+            saved_token=saved_token,
             record=record,
         )
         if variables.is_err():
@@ -610,9 +619,7 @@ class VirtualminMigrationService:
             self._abort(migration, token, DefiniteMigrationFailureError(record.unwrap_err()))
             return
         state = {"record": record.unwrap().as_state(), "token": barrier_token, "recorded": step.payload}
-        # fsm-bypass: barrier evidence, not a state move; the lease token fences this writer.
-        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=state, updated_at=timezone.now())
-        migration.refresh_from_db()
+        self._store_barrier_state(migration, token, state)
         for action in ("apply", "verify"):
             result = self._barrier(migration, action, token=barrier_token, record=record.unwrap())
             if result.is_err():
@@ -629,7 +636,18 @@ class VirtualminMigrationService:
             source_disabled_at=migration.source_disabled_at or timezone.now(),
         )
 
-    def _release_barrier(self, migration: VirtualminMigration) -> None:
+    def _store_barrier_state(self, migration: VirtualminMigration, token: UUID, state: dict[str, Any]) -> None:
+        """Persist barrier evidence only while this worker still owns an unexpired lease."""
+        updated = VirtualminMigration.objects.filter(
+            pk=migration.pk, lease_token=token, worker_lease_expires_at__gt=timezone.now()
+        ).update(  # fsm-bypass: evidence only; the status moves through _move
+            barrier_state=state, updated_at=timezone.now()
+        )
+        if not updated:
+            raise MigrationLeaseLostError("Barrier evidence write lost the migration lease")
+        migration.barrier_state = state
+
+    def _release_barrier(self, migration: VirtualminMigration, token: UUID) -> None:
         """Undo the fence from the persisted record; a migration that never fenced is a no-op."""
         state = migration.barrier_state or {}
         if not state.get("record"):
@@ -642,6 +660,7 @@ class VirtualminMigrationService:
             "release",
             token=str(uuid4()),
             previous_token=str(state.get("token") or ""),
+            saved_token=str(state.get("token") or ""),
             record=record.unwrap(),
         )
         if step.is_err():
@@ -649,10 +668,7 @@ class VirtualminMigrationService:
         result = step.unwrap()
         if not result.ok:
             raise ValueError(f"Barrier release not confirmed: {result.reason}")
-        state = {**state, "release": result.payload}
-        # fsm-bypass: release evidence, not a state move; the row's own transition records the outcome.
-        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=state, updated_at=timezone.now())
-        migration.barrier_state = state
+        self._store_barrier_state(migration, token, {**state, "release": result.payload})
 
     def _quiesce(self, migration: VirtualminMigration, token: UUID) -> None:
         if migration.contract == VirtualminMigration.Contract.CUTOVER:

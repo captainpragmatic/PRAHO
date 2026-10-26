@@ -13,8 +13,10 @@ from unittest.mock import patch
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Retriability, retriability_of
+from apps.provisioning import account_hostname_config as hostname_config
 from apps.provisioning import account_hostname_service as service
 from apps.provisioning.account_hostname_models import AccountHostname
+from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.settings.services import SettingsService
 from tests.helpers.fake_dns_gateway import FakeDnsGateway
 from tests.provisioning.test_account_hostname_service import AccountNameTestCase
@@ -23,6 +25,15 @@ ORIGINAL_TTL = 900
 
 
 _ORIGINAL_RECONCILE = FakeDnsGateway.reconcile_records
+
+
+def _stuck_low(gateway: FakeDnsGateway, zone_id: str, specs: list, owner_tag: str):
+    """A provider that accepts a restore but keeps reporting the cutover TTL (propagation not done)."""
+    outcome = _ORIGINAL_RECONCILE(gateway, zone_id, specs, owner_tag)
+    outcome.applied = [
+        dataclasses.replace(record, ttl=hostname_config.account_cutover_ttl_seconds()) for record in outcome.applied
+    ]
+    return outcome
 
 
 def _stale_ttl(gateway: FakeDnsGateway, zone_id: str, specs: list, owner_tag: str):
@@ -68,8 +79,16 @@ class LowerTests(TtlCase):
         self.assertIsNotNone(self.hostname.ttl_lowered_at)
         for record_type in ("A", "AAAA"):
             with self.subTest(record_type=record_type):
-                self.assertEqual(self.hostname.records[record_type]["applied_ttl"], service.CUTOVER_TTL_SECONDS)
-                self.assertEqual(self._provider_ttls()[record_type], service.CUTOVER_TTL_SECONDS)
+                self.assertEqual(self.hostname.records[record_type]["applied_ttl"], hostname_config.account_cutover_ttl_seconds())
+                self.assertEqual(self._provider_ttls()[record_type], hostname_config.account_cutover_ttl_seconds())
+
+    def test_the_configured_cutover_ttl_is_what_gets_published(self) -> None:
+        SettingsService.update_setting("dns.cutover_ttl_seconds", 120).unwrap()
+        self._published()
+
+        self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
+
+        self.assertEqual(self._provider_ttls(), {"A": 120, "AAAA": 120})
 
     def test_lowering_twice_keeps_the_first_ttl_as_the_one_to_restore(self) -> None:
         self._published()
@@ -95,7 +114,7 @@ class LowerTests(TtlCase):
 
         self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
 
-        self.assertEqual(self._provider_ttls(), {"A": service.CUTOVER_TTL_SECONDS})
+        self.assertEqual(self._provider_ttls(), {"A": hostname_config.account_cutover_ttl_seconds()})
 
     def test_a_provider_that_has_not_applied_the_lower_ttl_is_not_converged(self) -> None:
         self._published()
@@ -138,6 +157,16 @@ class TtlPredicateTests(TtlCase):
         self.assertFalse(service.ttl_is_lowered(self.hostname), "one record still on the old TTL is not converged")
 
 
+class RoutineSyncTests(TtlCase):
+    def test_a_routine_sync_keeps_the_lowered_ttl_until_it_is_restored(self) -> None:
+        self._published()
+        service.lower_account_hostname_ttl(self.hostname)
+
+        self.assertEqual(service.sync_account_hostname(self.hostname), Ok("published"))
+
+        self.assertEqual(self._provider_ttls(), {"A": hostname_config.account_cutover_ttl_seconds(), "AAAA": hostname_config.account_cutover_ttl_seconds()})
+
+
 class RestoreTests(TtlCase):
     def test_restoring_returns_every_record_and_clears_the_evidence(self) -> None:
         self._published()
@@ -150,6 +179,72 @@ class RestoreTests(TtlCase):
         self.assertIsNone(self.hostname.previous_ttl)
         self.assertIsNone(self.hostname.ttl_lowered_at)
         self.assertEqual(self._provider_ttls(), {"A": ORIGINAL_TTL, "AAAA": ORIGINAL_TTL})
+
+    def test_restoring_keeps_its_evidence_until_the_provider_confirms(self) -> None:
+        self._published()
+        service.lower_account_hostname_ttl(self.hostname)
+
+        with patch.object(FakeDnsGateway, "reconcile_records", _stuck_low):
+            result = service.restore_account_hostname_ttl(self.hostname)
+
+        self.assertEqual(result, Ok("waiting"))
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.previous_ttl, ORIGINAL_TTL, "a failed restore keeps its retry evidence")
+
+    def test_mixed_record_ttls_are_restored_record_by_record(self) -> None:
+        self._published()
+        records = self.hostname.records
+        records["A"]["applied_ttl"] = 900
+        records["AAAA"]["applied_ttl"] = 1800
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(records=records)
+        for record in FakeDnsGateway.records.values():
+            if record["name"] == self.hostname.fqdn:
+                record["ttl"] = 900 if record["type"] == "A" else 1800
+        self.hostname.refresh_from_db()
+
+        self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
+        self.assertEqual(service.restore_account_hostname_ttl(self.hostname), Ok("restored"))
+
+        self.assertEqual(self._provider_ttls(), {"A": 900, "AAAA": 1800})
+        self.hostname.refresh_from_db()
+        self.assertIsNone(self.hostname.previous_ttl)
+        self.assertNotIn("previous_ttl", self.hostname.records["A"])
+
+    def test_an_address_change_while_lowered_keeps_each_original_ttl(self) -> None:
+        self._published()
+        records = self.hostname.records
+        records["A"]["applied_ttl"] = 900
+        records["AAAA"]["applied_ttl"] = 1800
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(records=records)
+        for record in FakeDnsGateway.records.values():
+            if record["name"] == self.hostname.fqdn:
+                record["ttl"] = 900 if record["type"] == "A" else 1800
+        self.hostname.refresh_from_db()
+        self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
+        VirtualminServer.objects.filter(pk=self.server.pk).update(ipv4_address="95.217.0.11")
+        self.server.refresh_from_db()
+        self.assertEqual(service.sync_account_hostname(self.hostname), Ok("published"))
+
+        self.assertEqual(service.restore_account_hostname_ttl(self.hostname), Ok("restored"))
+
+        self.assertEqual(self._provider_ttls(), {"A": 900, "AAAA": 1800})
+
+    def test_a_sync_that_races_the_restore_keeps_the_evidence(self) -> None:
+        self._published()
+        self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
+        original = service._apply_ttl
+
+        def restore_then_race(hostname, ttl):
+            result = original(hostname, ttl)
+            service.sync_account_hostname(hostname)  # a routine sweep lowers it again, legitimately
+            return result
+
+        with patch.object(service, "_apply_ttl", side_effect=restore_then_race):
+            result = service.restore_account_hostname_ttl(self.hostname)
+
+        self.assertEqual(result, Ok("waiting"))
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.previous_ttl, ORIGINAL_TTL)
 
     def test_restoring_a_name_that_was_not_lowered_does_nothing(self) -> None:
         self._published()

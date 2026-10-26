@@ -10,6 +10,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 if TYPE_CHECKING:
     from .virtualmin_models import VirtualminAccount, VirtualminServer
@@ -173,8 +174,8 @@ class VirtualminMigration(models.Model):
         rows = type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status)
         if to_status == "compensating":
             rows = rows.filter(cutover_committed_at__isnull=True)
-        fields.update(status=to_status, updated_at=timezone.now())
-        return bool(rows.update(**fields))
+        fields.update(status=to_status, updated_at=timezone.now())  # fsm-bypass: a dict for the guarded UPDATE
+        return bool(rows.update(**fields))  # fsm-bypass: this method is the guarded writer (graph + commit check)
 
     @classmethod
     def active_reservations(cls, server: VirtualminServer) -> int:
@@ -187,6 +188,85 @@ class VirtualminMigration(models.Model):
             .exclude(status__in=_TERMINAL_STATUSES)
             .count()
         )
+
+
+class MigrationBridge(ConcurrentTransitionMixin, models.Model):
+    """The source node's reverse proxy to the target during a cutover (ADR-0061 P2.5).
+
+    It starts `pending`, serves once `active`, keeps serving while the retained source content is
+    removed (`removing_source`), and is `torn_down` only when the source no longer answers for the
+    domain. A bridge that cannot be proven or removed is `failed` and blocks a new move.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        ACTIVE = "active", _("Active")
+        REMOVING_SOURCE = "removing_source", _("Removing source")
+        TORN_DOWN = "torn_down", _("Torn down")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    migration = models.OneToOneField(VirtualminMigration, on_delete=models.PROTECT, related_name="bridge")
+    source_server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.PROTECT, related_name="bridges_out"
+    )
+    target_server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.PROTECT, related_name="bridges_in"
+    )
+    domain = models.CharField(max_length=253)
+    status = FSMField(max_length=20, choices=Status.choices, default=Status.PENDING, protected=True, db_index=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    torn_down_at = models.DateTimeField(null=True, blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "provisioning_migration_bridges"
+        db_table_comment = "The source node's reverse proxy to the target during a cutover (ADR-0061 Phase 2)."
+        verbose_name = _("Migration Bridge")
+        verbose_name_plural = _("Migration Bridges")
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["pending", "active", "removing_source", "torn_down", "failed"]),
+                name="migration_bridge_valid_status",
+            )
+        ]
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Allow refresh_from_db with FSMField(protected=True), as the other FSM models do."""
+        saved = {name: self.__dict__.pop(name) for name in ("status",) if name in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source=Status.PENDING, target=Status.ACTIVE)
+    def activate(self) -> None:
+        self.activated_at = timezone.now()
+
+    @transition(field=status, source=Status.ACTIVE, target=Status.REMOVING_SOURCE)
+    def start_removing_source(self) -> None:
+        """The retained source content is being removed; the proxy keeps answering meanwhile."""
+
+    @transition(field=status, source=Status.REMOVING_SOURCE, target=Status.TORN_DOWN)
+    def tear_down(self) -> None:
+        self.torn_down_at = timezone.now()
+
+    @transition(
+        field=status,
+        source=(Status.PENDING, Status.ACTIVE, Status.REMOVING_SOURCE),
+        target=Status.FAILED,
+    )
+    def fail(self) -> None:
+        """A bridge whose state cannot be proven or removed; it blocks a new move until resolved."""
 
 
 class NodeDrain(models.Model):

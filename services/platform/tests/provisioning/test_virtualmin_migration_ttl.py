@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from apps.common.types import Ok
 from apps.infrastructure.dns_gateway import _DNS_PROVIDER_REGISTRY, register_dns_gateway
+from apps.provisioning import account_hostname_config as hostname_config
 from apps.provisioning import account_hostname_service as hostname_service
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.account_hostname_models import AccountHostname
@@ -135,7 +136,7 @@ class LoweringStepTests(MigrationTtlCase):
         ):
             VirtualminMigrationService().execute(migration, token)
 
-        self.assertEqual(seen, {"A": hostname_service.CUTOVER_TTL_SECONDS, "AAAA": hostname_service.CUTOVER_TTL_SECONDS})
+        self.assertEqual(seen, {"A": hostname_config.account_cutover_ttl_seconds(), "AAAA": hostname_config.account_cutover_ttl_seconds()})
         migration.refresh_from_db()
         self.assertEqual(migration.status, "quiescing")
 
