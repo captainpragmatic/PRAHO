@@ -44,15 +44,24 @@ fi
 
 filesystem=$(findmnt -n -o FSTYPE --target "$workspace")
 [[ $filesystem == ext4 || $filesystem == xfs ]] || fail 'Swap allocation supports ext4/XFS only.'
-free_bytes=$(df -B1 --output=avail -- "$workspace" | awk 'NR == 2 { print $1 }')
-[[ $free_bytes =~ ^[0-9]+$ ]] || fail 'Could not determine free disk space.'
-(( free_bytes >= swap_bytes + 1073741824 )) || fail 'Swap allocation must leave at least 1 GiB free.'
-
+allocated_bytes=0
 if [[ -e $candidate || -L $candidate ]]; then
   validate_file "$candidate"
   [[ $(stat -c %h -- "$candidate") == 1 ]] || fail 'Pending swap file has unexpected hard links.'
   (( $(stat -c %s -- "$candidate") <= swap_bytes )) || fail 'Pending swap file exceeds requested size.'
-else
+  allocated_blocks=$(stat -c %b -- "$candidate")
+  [[ $allocated_blocks =~ ^[0-9]+$ ]] || fail 'Could not determine pending swap allocation.'
+  allocated_bytes=$((allocated_blocks * 512))
+  if (( allocated_bytes > swap_bytes )); then allocated_bytes=$swap_bytes; fi
+fi
+
+# df already excludes the pending file's physical extents, including an interrupted
+# allocation. Sparse bytes do not count toward the space already reserved.
+free_bytes=$(df -B1 --output=avail -- "$workspace" | awk 'NR == 2 { print $1 }')
+[[ $free_bytes =~ ^[0-9]+$ ]] || fail 'Could not determine free disk space.'
+(( free_bytes >= swap_bytes - allocated_bytes + 1073741824 )) || fail 'Swap allocation must leave at least 1 GiB free.'
+
+if [[ ! -e $candidate ]]; then
   (set -o noclobber; : > "$candidate")
 fi
 

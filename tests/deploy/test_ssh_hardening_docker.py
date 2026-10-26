@@ -244,3 +244,39 @@ def test_swap_preparation_recovers_and_never_formats_existing_data(ssh_target: s
     assert activation.returncode != 0
     assert "Activate the swap file before making it persistent" in activation.stdout
     assert docker("exec", container, "cat", "/etc/fstab").stdout == fstab
+
+
+def test_swap_retry_counts_only_unallocated_bytes(ssh_target: str) -> None:
+    container = ssh_target
+    docker("exec", container, "mkdir", "-p", "/work/test-bin", "/var/lib/praho-swap")
+    docker("exec", container, "chmod", "700", "/var/lib/praho-swap")
+    docker("exec", "-i", container, "tee", "/work/test-bin/findmnt", input_text="#!/bin/sh\nprintf 'ext4\\n'\n")
+    docker("exec", container, "chmod", "700", "/work/test-bin/findmnt")
+    path = "/work/test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    # Already allocated extents are reflected in df's remaining free bytes.
+    # Sparse logical bytes must not receive credit for unallocated physical space.
+    cases = ((16, 16, 1048, True), (32, 32, 1040, True), (0, 0, 1040, False), (16, 16, 1032, False), (0, 32, 1040, False))
+    for allocated_mb, logical_mb, available_mb, succeeds in cases:
+        docker("exec", container, "touch", "/var/lib/praho-swap/pending")
+        docker("exec", container, "chmod", "600", "/var/lib/praho-swap/pending")
+        if allocated_mb:
+            docker("exec", container, "fallocate", "-l", str(allocated_mb * 1024**2), "/var/lib/praho-swap/pending")
+        if logical_mb > allocated_mb:
+            docker("exec", container, "truncate", "-s", str(logical_mb * 1024**2), "/var/lib/praho-swap/pending")
+        docker("exec", "-i", container, "tee", "/work/test-bin/df", input_text=(
+            f"#!/bin/sh\nprintf 'Avail\\n{available_mb * 1024**2}\\n'\n"
+        ))
+        docker("exec", container, "chmod", "700", "/work/test-bin/df")
+        prepared = docker("exec", "-e", f"PATH={path}", container, "bash",
+                          "/work/roles/common/files/prepare-swap.sh", "32", check=False)
+        if succeeds:
+            assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+            assert docker("exec", container, "stat", "-c", "%s", "/swapfile").stdout.strip() == str(32 * 1024**2)
+            assert docker("exec", container, "blkid", "-p", "-s", "TYPE", "-o", "value", "/swapfile").stdout.strip() == "swap"
+            docker("exec", container, "rm", "/swapfile")
+        else:
+            assert prepared.returncode != 0
+            assert "leave at least 1 GiB free" in prepared.stderr
+            assert docker("exec", container, "test", "-e", "/swapfile", check=False).returncode != 0
+            assert docker("exec", container, "stat", "-c", "%s", "/var/lib/praho-swap/pending").stdout.strip() == str(logical_mb * 1024**2)
+            docker("exec", container, "rm", "/var/lib/praho-swap/pending")
