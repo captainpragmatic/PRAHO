@@ -17,7 +17,7 @@ from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
-from .virtualmin_migration_models import _TERMINAL_STATUSES, NodeDrain, VirtualminMigration
+from .virtualmin_migration_models import _TERMINAL_STATUSES, PRE_COMMIT_STATUSES, NodeDrain, VirtualminMigration
 from .virtualmin_migration_service import VirtualminMigrationService, migration_task_timeout
 from .virtualmin_models import HEALTH_AUTO_FAIL_THRESHOLD, VirtualminAccount, VirtualminServer
 
@@ -153,9 +153,14 @@ class NodeDrainService:
                 return Err("Only a non-terminal drain can be cancelled")
             migration = drain.current_migration
             if migration is not None and migration.status not in _TERMINAL_STATUSES:
-                # Cancelling would clear is_draining and re-admit the server to
-                # placement while its account is still mid-migration.
-                return Err("Resolve the in-flight migration before cancelling the drain")
+                # A migration before the point of no return can still be undone: ask its worker to
+                # compensate at the next step (the barrier's cancel marker releases the node). A
+                # migration parked for review, or already committed, needs an operator.
+                if migration.status not in PRE_COMMIT_STATUSES:
+                    return Err("Resolve the in-flight migration before cancelling the drain")
+                VirtualminMigration.objects.filter(pk=migration.pk).update(
+                    cancel_requested=True, updated_at=timezone.now()
+                )
             drain.cancel_requested = True
             drain.save(update_fields=["cancel_requested", "updated_at"])
             if drain.status != "running":

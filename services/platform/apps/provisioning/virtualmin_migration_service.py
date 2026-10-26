@@ -20,6 +20,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from . import account_hostname_service
 from .account_hostname_lifecycle import ensure_on_recreated_node
 from .account_hostname_models import AccountHostname
+from .migration_barrier import BarrierRecord, BarrierStep, barrier_variables, run_barrier
 from .placement import order_placement_candidates
 from .virtualmin_backup_service import (
     CHAIN_ROLE_STANDALONE,
@@ -39,6 +40,7 @@ from .virtualmin_gateway import (
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import (
     _TERMINAL_STATUSES,
+    PRE_COMMIT_STATUSES,
     NodeDrain,
     VirtualminMigration,
     account_has_active_operation,
@@ -513,6 +515,9 @@ class VirtualminMigrationService:
     def _rollback(self, migration: VirtualminMigration, token: UUID, *, target_delete_allowed: bool) -> None:
         logger.warning("⚠️ [VirtualminMigration] Rollback: migration=%s", migration.pk)
         try:
+            if migration.status != "compensating":
+                self._move(migration, token, "compensating")
+            self._release_barrier(migration)
             self._restore_ttl(migration)
             if target_delete_allowed:
                 if not migration.restore_issued:
@@ -565,7 +570,94 @@ class VirtualminMigrationService:
         if state not in {"restored", "noop"}:
             raise ValueError(f"TTL restore refused: {state}")
 
+    def _barrier(
+        self,
+        migration: VirtualminMigration,
+        action: str,
+        *,
+        token: str,
+        previous_token: str = "",
+        record: BarrierRecord | None = None,
+    ) -> Result[BarrierStep, str]:
+        """Run one barrier action on the source node; the variables refuse what the node would."""
+        remote = migration.pre_migration_snapshot["remote"]
+        domain_id = str(listing_attribute(remote["attributes"], "ID") or "")
+        variables = barrier_variables(
+            action,
+            domain=migration.account.domain,
+            domain_id=domain_id,
+            token=token,
+            previous_token=previous_token,
+            record=record,
+        )
+        if variables.is_err():
+            return Err(variables.unwrap_err(), retriability=retriability_of(variables))
+        return run_barrier(migration.source_server, variables.unwrap())
+
+    def _barrier_quiesce(self, migration: VirtualminMigration, token: UUID) -> None:
+        """Contract step 2 on a cutover: persist the record, apply the fence, verify it holds."""
+        barrier_token = str(migration.pk)
+        recorded = self._barrier(migration, "record", token=barrier_token)
+        if recorded.is_err():
+            self._abort(migration, token, DefiniteMigrationFailureError(recorded.unwrap_err()))
+            return
+        step = recorded.unwrap()
+        if not step.ok:
+            self._abort(migration, token, DefiniteMigrationFailureError(f"Barrier record refused: {step.reason}"))
+            return
+        record = BarrierRecord.from_state(step.payload)
+        if record.is_err():
+            self._abort(migration, token, DefiniteMigrationFailureError(record.unwrap_err()))
+            return
+        state = {"record": record.unwrap().as_state(), "token": barrier_token, "recorded": step.payload}
+        # fsm-bypass: barrier evidence, not a state move; the lease token fences this writer.
+        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=state, updated_at=timezone.now())
+        migration.refresh_from_db()
+        for action in ("apply", "verify"):
+            result = self._barrier(migration, action, token=barrier_token, record=record.unwrap())
+            if result.is_err():
+                self._abort(migration, token, DefiniteMigrationFailureError(result.unwrap_err()))
+                return
+            step = result.unwrap()
+            if not step.ok:
+                self._abort(migration, token, DefiniteMigrationFailureError(f"Barrier {action} failed: {step.reason}"))
+                return
+        self._move(
+            migration,
+            token,
+            "backing_up",
+            source_disabled_at=migration.source_disabled_at or timezone.now(),
+        )
+
+    def _release_barrier(self, migration: VirtualminMigration) -> None:
+        """Undo the fence from the persisted record; a migration that never fenced is a no-op."""
+        state = migration.barrier_state or {}
+        if not state.get("record"):
+            return
+        record = BarrierRecord.from_state(state["record"])
+        if record.is_err():
+            raise ValueError(f"Barrier record unusable: {record.unwrap_err()}")
+        step = self._barrier(
+            migration,
+            "release",
+            token=str(uuid4()),
+            previous_token=str(state.get("token") or ""),
+            record=record.unwrap(),
+        )
+        if step.is_err():
+            raise ValueError(step.unwrap_err())
+        result = step.unwrap()
+        if not result.ok:
+            raise ValueError(f"Barrier release not confirmed: {result.reason}")
+        state = {**state, "release": result.payload}
+        # fsm-bypass: release evidence, not a state move; the row's own transition records the outcome.
+        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=state, updated_at=timezone.now())
+        migration.barrier_state = state
+
     def _quiesce(self, migration: VirtualminMigration, token: UUID) -> None:
+        if migration.contract == VirtualminMigration.Contract.CUTOVER:
+            self._barrier_quiesce(migration, token)
+            return
         source = self._domain(migration.source_server, migration.account.domain)
         if migration.pre_migration_snapshot["status"] == "suspended":
             if source["enabled"] is not False:
@@ -742,6 +834,10 @@ class VirtualminMigrationService:
             while migration.status in handlers:
                 if not migration.renew_lease(lease_token, self.lease_ttl):
                     raise MigrationLeaseLostError("Migration lease expired or ownership changed")
+                migration.refresh_from_db()
+                if migration.cancel_requested and migration.status in PRE_COMMIT_STATUSES:
+                    self._abort(migration, lease_token, ValueError("Migration cancelled"))
+                    break
                 logger.info("🚀 [VirtualminMigration] migration=%s phase=%s", migration.pk, migration.status)
                 handlers[migration.status](migration, lease_token)
         except MigrationDeferredError as deferral:
