@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from . import account_hostname_service
 from .account_hostname_lifecycle import ensure_on_recreated_node
 from .account_hostname_models import AccountHostname
 from .placement import order_placement_candidates
@@ -50,6 +51,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# How long a lowered TTL may take to appear on every authoritative answer before the move is
+# compensated instead of proceeding on routing that still carries the old TTL (ADR-0061 P2.3).
+TTL_POLL_SECONDS = 60
+
 
 def _reconcile_after_migration(service_id: str) -> None:
     """Post-commit: converge the account's enabled state once a migration releases it."""
@@ -82,6 +87,7 @@ def migration_backup_params(archive_name: str) -> dict[str, str]:
 # Recovery policy concerns an INTERRUPTED phase, before invoking execute().
 RESUME_POLICY = {
     "pending": "continue",  # Preflight evidence exists; no remote mutation issued.
+    "lowering_ttl": "continue",  # Republishing the lower TTL and re-reading it is idempotent.
     "quiescing": "continue",  # Read state first; disable is verifiable and repeatable.
     "backing_up": "review",  # Never infer that a remote backup stopped.
     "fetching": "continue",  # Deterministic local filename; checksum-checked fetch.
@@ -368,6 +374,14 @@ class VirtualminMigrationService:
         if self.task_timeout + 60 >= int(str(settings.Q_CLUSTER.get("retry", 0))):
             raise ValueError("Migration budget must fit below the Django-Q broker visibility timeout")
 
+    @staticmethod
+    def _contract(account: VirtualminAccount) -> str:
+        """A cutover when the account has a live published name; nothing to carry otherwise."""
+        hostname = AccountHostname.objects.filter(account=account, retired_at__isnull=True).first()
+        if hostname is not None and hostname.records and hostname.target_server_id is not None:
+            return VirtualminMigration.Contract.CUTOVER
+        return VirtualminMigration.Contract.LEGACY
+
     def start_migration(  # noqa: PLR0913  # Admission carries its whole context, the drain included
         self,
         account: VirtualminAccount,
@@ -404,6 +418,7 @@ class VirtualminMigrationService:
                     initiated_by=initiated_by,
                     reason=reason,
                     drain=drain,
+                    contract=self._contract(account),
                 )
                 token = uuid4()
                 if not migration.acquire_lease(token, self.lease_ttl):
@@ -498,6 +513,7 @@ class VirtualminMigrationService:
     def _rollback(self, migration: VirtualminMigration, token: UUID, *, target_delete_allowed: bool) -> None:
         logger.warning("⚠️ [VirtualminMigration] Rollback: migration=%s", migration.pk)
         try:
+            self._restore_ttl(migration)
             if target_delete_allowed:
                 if not migration.restore_issued:
                     raise ValueError("Target deletion lacks restore-issued evidence")
@@ -510,6 +526,44 @@ class VirtualminMigrationService:
             self._finish(migration, token, "needs_review", f"Compensation failed: {error}", compensation_failure=True)
             return
         self._finish(migration, token, "rolled_back", migration.error_detail)
+
+    def _lower_ttl(self, migration: VirtualminMigration, token: UUID) -> None:
+        """Contract step 1: lower the published name's TTL and wait until every record confirms it."""
+        hostname = AccountHostname.objects.filter(account_id=migration.account_id, retired_at__isnull=True).first()
+        if hostname is None:
+            self._move(migration, token, "quiescing")
+            return
+        if migration.cancel_requested:
+            self._abort(migration, token, ValueError("Migration cancelled while lowering the TTL"))
+            return
+        outcome = account_hostname_service.lower_account_hostname_ttl(hostname)
+        if outcome.is_err():
+            self._abort(migration, token, DefiniteMigrationFailureError(outcome.unwrap_err()))
+            return
+        state = outcome.unwrap()
+        if state == "waiting":
+            # Published, not confirmed: keep the state and come back, bounded by the service's deadline.
+            raise MigrationDeferredError(
+                timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "waiting for the lower TTL"
+            )
+        if state not in {"converged", "skipped:not_published"}:
+            self._abort(migration, token, DefiniteMigrationFailureError(f"Account name TTL was not lowered: {state}"))
+            return
+        self._move(migration, token, "quiescing")
+
+    def _restore_ttl(self, migration: VirtualminMigration) -> None:
+        """Undo the cutover's TTL change; a legacy migration or an unlowered name is a no-op."""
+        hostname = AccountHostname.objects.filter(
+            account_id=migration.account_id, retired_at__isnull=True, previous_ttl__isnull=False
+        ).first()
+        if hostname is None:
+            return
+        restored = account_hostname_service.restore_account_hostname_ttl(hostname)
+        if restored.is_err():
+            raise ValueError(f"TTL restore failed: {restored.unwrap_err()}")
+        state = restored.unwrap()
+        if state not in {"restored", "noop"}:
+            raise ValueError(f"TTL restore refused: {state}")
 
     def _quiesce(self, migration: VirtualminMigration, token: UUID) -> None:
         source = self._domain(migration.source_server, migration.account.domain)
@@ -669,7 +723,10 @@ class VirtualminMigrationService:
 
     def execute(self, migration: VirtualminMigration, lease_token: UUID) -> Result[VirtualminMigration, str]:
         handlers = {
-            "pending": lambda row, token: self._move(row, token, "quiescing"),
+            "pending": lambda row, token: self._move(
+                row, token, "lowering_ttl" if row.contract == VirtualminMigration.Contract.CUTOVER else "quiescing"
+            ),
+            "lowering_ttl": self._lower_ttl,
             "quiescing": self._quiesce,
             "backing_up": self._backup,
             "fetching": self._transfer,
