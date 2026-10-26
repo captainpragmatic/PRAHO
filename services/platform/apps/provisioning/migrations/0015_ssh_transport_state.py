@@ -3,6 +3,20 @@
 import django.core.validators
 from django.db import migrations, models
 
+from apps.common.db_triggers import create_context_immutability_trigger, drop_context_immutability_trigger
+
+
+def restore_server_identity_guard(apps, schema_editor):
+    # SQLite rebuilds this table for AddField/RemoveField and drops migration-owned triggers.
+    # PostgreSQL preserves the existing guard and its function during ordinary ALTER TABLE.
+    if schema_editor.connection.vendor != "sqlite":
+        return
+    model = apps.get_model("provisioning", "VirtualminServer")
+    table = model._meta.db_table
+    name = "secret_ctx_provisioning_virtualminserver"
+    drop_context_immutability_trigger(schema_editor, table=table, name=name)
+    create_context_immutability_trigger(schema_editor, table=table, column=model._meta.pk.column, name=name)
+
 
 class Migration(migrations.Migration):
 
@@ -11,9 +25,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(migrations.RunPython.noop, restore_server_identity_guard),
         migrations.AddField(
             model_name='virtualminserver',
             name='ssh_port',
             field=models.PositiveIntegerField(default=22, validators=[django.core.validators.MinValueValidator(1), django.core.validators.MaxValueValidator(65535)], verbose_name='SSH Port'),
         ),
+        migrations.RunPython(restore_server_identity_guard, migrations.RunPython.noop),
     ]

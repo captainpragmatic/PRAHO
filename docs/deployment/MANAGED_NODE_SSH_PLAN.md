@@ -1,10 +1,9 @@
 # Managed-node SSH integration
 
 Implemented and reviewed in the SSH-hardening worktree. This extends the tested
-native transition to hosting-node provisioning
-and maintenance. These application changes and migrations are not part of the
-staging application's pinned main revision. No managed-node or production rollout
-has been performed.
+native transition to hosting-node provisioning and maintenance. Application and
+managed-node rollouts are separate: applying the schema does not migrate any
+managed host. No production rollout is implied.
 
 Verification: 831 infrastructure and related provisioning/lab-adapter tests passed,
 including real database enrollment/port propagation and legacy configured-pin

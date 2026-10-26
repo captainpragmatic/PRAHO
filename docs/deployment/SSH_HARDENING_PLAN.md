@@ -25,8 +25,9 @@ No production rollout is authorized.
   4 GB RAM and 2 GB swap. No production host has been changed.
 - Both staging application hostnames are DNS-only A records at the verified
   inventory address. Environment-specific names and addresses stay in operator configuration.
-- The application deploy is pinned to main revision
-  `296170734f8b4e6a201241437411f42641f67e57`; no branch push/fast-forward was needed.
+- The initial application deploy used main revision
+  `296170734f8b4e6a201241437411f42641f67e57`. Subsequent deployments pin the exact
+  reviewed merge SHA; the verified live revision belongs in the private inventory.
 - Both entire staging sites enforce the seven approved public IPv4 sources plus
   loopback. Controller HTTPS checks passed; unapproved live requests receive 403
   for API, health, static, login and webhook routes, including spoofed headers.
