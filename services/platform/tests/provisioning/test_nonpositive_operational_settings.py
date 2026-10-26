@@ -90,15 +90,18 @@ class NonpositiveVirtualminSettingsTests(TestCase):
                 self.assertTrue(result.unwrap().success)
                 self.assertEqual(result.unwrap().raw_response, response.text)
 
-    @override_settings(VIRTUALMIN_SSH_PASSWORD="fixture-password", VIRTUALMIN_SSH_PRIVATE_KEY_PATH=None)
+    @override_settings(VIRTUALMIN_SSH_PRIVATE_KEY_PATH="/fixture/ssh-key", PRAHO_SSH_KNOWN_HOSTS_PATH="")
     def test_legacy_nonpositive_ssh_timeouts_reach_the_transports_as_defaults(
         self,
     ) -> None:
         connect_timeouts: list[object] = []
         command_timeouts: list[object] = []
-        server = VirtualminServer(hostname="ssh-timeout.example.test")
+        server = VirtualminServer(hostname="ssh-timeout.example.test", ssh_port=9876)
 
         def connect(**kwargs: object) -> None:
+            self.assertEqual(kwargs["key_filename"], "/fixture/ssh-key")
+            self.assertEqual(kwargs["port"], 9876)
+            self.assertNotIn("password", kwargs)
             connect_timeouts.append(kwargs["timeout"])
 
         def execute(command: str, *, timeout: int) -> tuple[BytesIO, SSHOutput, BytesIO]:

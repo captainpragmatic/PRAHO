@@ -7,8 +7,12 @@ without needing the lab.
 
 from __future__ import annotations
 
+from itertools import product
+
 import yaml
 from django.test import SimpleTestCase
+from jinja2 import StrictUndefined
+from jinja2.nativetypes import NativeEnvironment
 
 from tests.provisioning.test_virtualmin_transfer_playbooks import PLAYBOOKS, command_text, load, task_named, tasks
 
@@ -144,7 +148,7 @@ class NodeBackupPlaybookTests(SimpleTestCase):
 class NodeFirewallPlaybookTests(SimpleTestCase):
     """virtualmin_harden.yml: SSH and Webmin reachable only from the node admin allowlist (ADR-0060)."""
 
-    ADMIN_PORTS = frozenset({"22", "10000"})
+    ADMIN_PORTS = frozenset({"9876", "10000"})
 
     @staticmethod
     def _group_vars() -> dict[str, list[object]]:
@@ -155,8 +159,18 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
     def test_admin_ports_are_not_open_to_everyone(self) -> None:
         group_vars = self._group_vars()
         public = {str(port) for port in group_vars["firewall_allowed_tcp_ports"]}
-        self.assertFalse(public & self.ADMIN_PORTS, public)
-        self.assertEqual({str(port) for port in group_vars["firewall_admin_tcp_ports"]}, self.ADMIN_PORTS)
+        self.assertFalse(public & (self.ADMIN_PORTS | {"22"}), public)
+        environment = NativeEnvironment(undefined=StrictUndefined)
+        rendered = {
+            str(environment.from_string(str(port)).render(ssh_port=9876))
+            for port in group_vars["firewall_admin_tcp_ports"]
+        }
+        self.assertEqual(rendered, self.ADMIN_PORTS)
+        bootstrap = {
+            str(environment.from_string(str(port)).render(ssh_port=22))
+            for port in group_vars["firewall_admin_tcp_ports"]
+        }
+        self.assertEqual(bootstrap, {"22", "10000"})
         # Web, mail, FTP, DNS and Usermin stay public.
         self.assertLessEqual({"80", "443", "25", "465", "587", "993", "995", "21", "53", "20000"}, public)
 
@@ -177,12 +191,24 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
         self.assertEqual(rule["port"], "{{ item.0 }}")
         self.assertIn("product(node_admin_allowed_cidrs)", task["loop"])
         self.assertIn("firewall_admin_tcp_ports", task["loop"])
+        environment = NativeEnvironment(undefined=StrictUndefined)
+        environment.filters["product"] = product
+        sources = ["192.0.2.10/32", "2001:db8::10/128"]
+        rendered_rules = environment.from_string(task["loop"]).render(
+            firewall_admin_tcp_ports=sorted(self.ADMIN_PORTS), node_admin_allowed_cidrs=sources,
+        )
+        self.assertEqual(set(rendered_rules), set(product(self.ADMIN_PORTS, sources)))
+        for item in rendered_rules:
+            with self.subTest(port=item[0], source=item[1]):
+                source = environment.from_string(rule["from_ip"]).render(item=item)
+                self.assertEqual(source, item[1])
+                self.assertNotIn(source, ("0.0.0.0/0", "::/0"))
         for other in tasks("virtualmin_harden.yml"):
             spec = other.get("community.general.ufw") or {}
             if spec.get("rule") == "allow" and not spec.get("delete") and "from_ip" not in spec:
                 with self.subTest(task=other.get("name")):
                     self.assertNotIn("firewall_admin_tcp_ports", str(other.get("loop", "")))
-                    self.assertNotIn(str(spec.get("port")), self.ADMIN_PORTS)
+                    self.assertNotIn(str(spec.get("port")), self.ADMIN_PORTS | {"22"})
         removed = task_named("virtualmin_harden.yml", "Remove any-source SSH and Webmin rules")
         self.assertIs(removed["community.general.ufw"]["delete"], True)
 

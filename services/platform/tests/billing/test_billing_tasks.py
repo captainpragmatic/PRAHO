@@ -11,7 +11,7 @@ dunning, retry, and non-renewal lifecycle task boundaries.
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -344,13 +344,31 @@ class StartDunningProcessTests(TestCase):
         mock_audit: MagicMock,
         mock_email: MagicMock,
     ) -> None:
-        invoice = _make_invoice(status="overdue", due_days=-10)
-        result = start_dunning_process(str(invoice.id))
+        # Ten elapsed UTC days can span nine local dates after the DST fallback.
+        cases = (
+            (datetime(2026, 10, 26, 12, tzinfo=UTC), date(2026, 10, 16), 10),
+            (datetime(2026, 10, 26, 21, 48, tzinfo=UTC), date(2026, 10, 17), 9),
+        )
+        with patch("django.utils.timezone.now", return_value=cases[0][0]):
+            invoice = _make_invoice(status="overdue", due_days=-10)
+        for now, due_date, days_overdue in cases:
+            with (
+                self.subTest(now=now),
+                timezone.override("Europe/Bucharest"),
+                patch("django.utils.timezone.now", return_value=now),
+            ):
+                mock_email.reset_mock()
+                mock_audit.reset_mock()
+                invoice.due_at = now - timedelta(days=10)
+                invoice.save(update_fields=["due_at"])
+                self.assertEqual(timezone.localdate(), date(2026, 10, 26))
+                self.assertEqual(timezone.localtime(invoice.due_at).date(), due_date)
+                result = start_dunning_process(str(invoice.id))
 
-        self.assertTrue(result["success"], result)
-        mock_email.assert_called_once_with(invoice)
-        last_call = _last_audit_call_kwargs(mock_audit)
-        self.assertEqual(last_call["metadata"]["days_overdue"], 10)
+                self.assertTrue(result["success"], result)
+                mock_email.assert_called_once_with(invoice)
+                last_call = _last_audit_call_kwargs(mock_audit)
+                self.assertEqual(last_call["metadata"]["days_overdue"], days_overdue)
 
     @patch("apps.notifications.services.EmailService.send_payment_reminder")
     @patch("apps.audit.services.AuditService.log_simple_event")
