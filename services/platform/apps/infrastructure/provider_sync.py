@@ -99,7 +99,7 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
 
     try:
         # 1. Ensure CloudProvider record exists
-        provider, created = CloudProvider.objects.update_or_create(
+        provider, created = CloudProvider.objects.get_or_create(
             provider_type="hetzner",
             defaults={
                 "name": "Hetzner Cloud",
@@ -354,7 +354,7 @@ def sync_digitalocean_provider(token: str, dry_run: bool = False) -> Result[Sync
     result = SyncResult(provider_type="digitalocean")
 
     try:
-        provider, created = CloudProvider.objects.update_or_create(
+        provider, created = CloudProvider.objects.get_or_create(
             provider_type="digitalocean",
             defaults={
                 "name": "DigitalOcean",
@@ -565,7 +565,7 @@ def sync_vultr_provider(token: str, dry_run: bool = False) -> Result[SyncResult,
     result = SyncResult(provider_type="vultr")
 
     try:
-        provider, created = CloudProvider.objects.update_or_create(
+        provider, created = CloudProvider.objects.get_or_create(
             provider_type="vultr",
             defaults={
                 "name": "Vultr",
@@ -839,7 +839,7 @@ def sync_aws_provider(token: str, dry_run: bool = False) -> Result[SyncResult, s
     result = SyncResult(provider_type="aws")
 
     try:
-        provider, created = CloudProvider.objects.update_or_create(
+        provider, created = CloudProvider.objects.get_or_create(
             provider_type="aws",
             defaults={
                 "name": "Amazon Web Services",

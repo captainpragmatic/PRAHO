@@ -478,7 +478,7 @@ class TestSyncDigitalOceanProvider(TestCase):
 
 @mock.patch("apps.infrastructure.vultr_service.get_vultr_service")
 class TestSyncVultrProvider(TestCase):
-    """Tests for sync_vultr_provider — including M5 (no private _request usage)."""
+    """Vultr catalog requests use the provider's authenticated request boundary."""
 
     def test_sync_vultr_happy_path(self, mock_get_svc):
         """Full Vultr sync creates provider and regions."""
@@ -488,11 +488,9 @@ class TestSyncVultrProvider(TestCase):
             is_err=lambda: False,
             unwrap=lambda: [_make_mock_location("ewr", "New Jersey", "US", "New Jersey")],
         )
-        # Mock the session.get call (our M5 fix uses session directly)
         mock_resp = mock.Mock()
         mock_resp.json.return_value = {"plans": []}
-        mock_resp.raise_for_status = mock.Mock()
-        svc.session.get.return_value = mock_resp
+        svc._request.return_value = mock_resp
 
         result = sync_vultr_provider(token="fake")
 
@@ -501,22 +499,22 @@ class TestSyncVultrProvider(TestCase):
         self.assertEqual(data.provider_type, "vultr")
         self.assertEqual(data.regions_created, 1)
 
-    def test_sync_vultr_uses_public_api_not_private(self, mock_get_svc):
-        """Vultr sync must NOT call vultr_svc._request() (M5 fix)."""
+    def test_sync_vultr_uses_authenticated_provider_request_boundary(self, mock_get_svc):
+        """Raw plan prices are read through the same transport as other provider calls."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
         svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
         mock_resp = mock.Mock()
-        mock_resp.json.return_value = {"plans": []}
-        mock_resp.raise_for_status = mock.Mock()
-        svc.session.get.return_value = mock_resp
+        mock_resp.json.return_value = {"plans": [{"id": "vc2-1c-1gb", "vcpu_count": 1, "ram": 1024, "disk": 25, "monthly_cost": 5}]}
+        svc._request.return_value = mock_resp
 
-        sync_vultr_provider(token="fake")
-
-        # _request should NOT have been called
-        svc._request.assert_not_called()
-        # session.get SHOULD have been called (public attribute)
-        svc.session.get.assert_called_once()
+        result = sync_vultr_provider(token="fake")
+        self.assertTrue(result.is_ok())
+        svc._request.assert_called_once_with("GET", "/plans")
+        svc.session.get.assert_not_called()
+        size = NodeSize.objects.get(provider_type_id="vc2-1c-1gb")
+        self.assertEqual(size.monthly_cost_eur, Decimal("5"))
+        self.assertEqual(size.memory_gb, 1)
 
     def test_sync_vultr_regions_api_failure(self, mock_get_svc):
         """Failure fetching Vultr regions returns Err."""
