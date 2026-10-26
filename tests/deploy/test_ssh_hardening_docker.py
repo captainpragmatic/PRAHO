@@ -164,6 +164,13 @@ def test_rollback_timer_recovers_a_delayed_controller(ssh_target: str, before_ac
 
 def test_application_python_and_postgresql_on_supported_ubuntu(ssh_target: str) -> None:
     container = ssh_target
+    # A freshly cleaned image can retain a recent APT timestamp with no indexes.
+    # Keep that state deterministic even when the local Docker image is old.
+    docker("exec", container, "test", "-d", "/var/lib/apt/lists")
+    docker("exec", container, "find", "/var/lib/apt/lists", "-mindepth", "1", "-delete")
+    assert not docker("exec", container, "find", "/var/lib/apt/lists", "-mindepth", "1", "-print").stdout.strip()
+    docker("exec", container, "mkdir", "-p", "/var/lib/apt/periodic")
+    docker("exec", container, "touch", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp")
     native = ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml"
     package_names = {
         "Create keyrings directory", "Download PostgreSQL GPG key",

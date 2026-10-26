@@ -6,7 +6,6 @@
     name: [acl, build-essential, gettext, locales, rsync]
     state: present
     update_cache: true
-    cache_valid_time: 3600
 
 - name: Generate the PostgreSQL database locale
   community.general.locale_gen:
