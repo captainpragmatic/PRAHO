@@ -12,6 +12,7 @@ behaviour deserves rather than the one that would look tidier - see `NoReplyAddr
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -231,7 +232,11 @@ class NoReplyAddressPrecedenceTests(TestCase):
     def task_sender(self, sender: str | None) -> str:
         # The sender is whatever the row stores (written by the producer); empty means the default.
         log = EmailLog.objects.create(
-            to_addr="recipient@example.test", from_addr=sender or "", subject="Subject", body_text="Body"
+            to_addr="recipient@example.test",
+            from_addr=sender or "",
+            subject="Subject",
+            body_text="Body",
+            envelope=json.dumps({"to": ["recipient@example.test"]}),
         )
         mail.outbox.clear()
         result = send_email_task(str(log.pk))
@@ -256,15 +261,16 @@ class NoReplyAddressPrecedenceTests(TestCase):
     def test_task_sender_uses_row_then_default_and_preserves_override(self) -> None:
         self.assert_precedence(self.task_sender)
 
-    def test_retry_without_sender_argument_preserves_logged_sender(self) -> None:
+    def test_retry_preserves_logged_sender_despite_stale_argument(self) -> None:
         self.configure_sender(self.RUNTIME)
         log = EmailLog.objects.create(
             to_addr="recipient@example.test",
             from_addr="original-logged@example.test",
             subject="Retry",
             status="queued",
+            envelope=json.dumps({"to": ["recipient@example.test"]}),
         )
-        result = send_email_task(str(log.pk))
+        result = send_email_task(str(log.pk), from_email=self.EXPLICIT)
         self.assertTrue(result["success"], result)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].from_email, "original-logged@example.test")
@@ -272,9 +278,8 @@ class NoReplyAddressPrecedenceTests(TestCase):
         self.assertEqual(log.status, "sent")
         self.assertEqual(log.from_addr, "original-logged@example.test")
 
-        # A task carries only the id: no argument can replace the sender the row stores.
-        with self.assertRaises(TypeError):
-            stale_arguments = {"from_email": self.EXPLICIT}
-            send_email_task(str(log.pk), **stale_arguments)
+        # Legacy arguments cannot replace the stored sender or resend a delivered message.
+        send_email_task(str(log.pk), from_email=self.EXPLICIT)
+        self.assertEqual(len(mail.outbox), 1)
         log.refresh_from_db()
         self.assertEqual(log.from_addr, "original-logged@example.test")
