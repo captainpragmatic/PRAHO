@@ -1,5 +1,6 @@
 """Permanent failures cannot consume the limited retry batch."""
 
+import json
 from datetime import timedelta
 from typing import cast
 
@@ -23,6 +24,7 @@ class RetryEligibilityTests(TestCase):
 
     def failed_email(self, response: dict[str, object], *, age_minutes: int) -> EmailLog:
         log = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["retry@example.test"]}),
             to_addr="retry@example.test",
             from_addr="original@example.test",
             subject="Retry me",

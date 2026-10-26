@@ -25,7 +25,6 @@ from apps.notifications.delivery import (
     InvalidRetryMetadataError,
     block_for_operator,
     budget_spent,
-    claim_delivery,
     claimable,
     mark_exhausted,
     mark_permanent,
@@ -35,6 +34,7 @@ from apps.notifications.delivery import (
     retry_delay,
     retry_index,
 )
+from apps.notifications.legacy import Attachment, claim_email_task
 from apps.notifications.models import EmailLog, PendingDeliveryEvent
 from apps.notifications.services import (
     PENDING_DELIVERY_EVENT_WINDOW,
@@ -51,21 +51,21 @@ _DEFAULT_MAX_RETRIES = 3  # Fallback — authoritative source is SettingsService
 RETRY_DELAY_MINUTES = 5
 
 
-def send_email_task(email_log_id: str) -> dict[str, Any]:
+def send_email_task(email_log_id: str, *legacy_args: object, **legacy_kwargs: object) -> dict[str, Any]:
     """Send one stored email. The task carries only its id: the message is rebuilt from the row.
 
     Claim, rebuild (attachments made again from their sources and checked against the first send),
     re-check the claim immediately before the provider call, send, then record the outcome for this
     claim only. A message that can never be sent as written is a permanent failure.
     """
-    token = None
+    # Outside the provider handler: a held old payload must fail at the broker boundary.
+    email_log, refusal, legacy_attachments = claim_email_task(email_log_id, legacy_args, legacy_kwargs)
+    if refusal is not None:
+        return refusal
+    assert email_log is not None
+    token = email_log.claim_token
     try:
-        email_log, refusal = claim_delivery(email_log_id)
-        if refusal is not None:
-            return refusal
-        assert email_log is not None
-        token = email_log.claim_token
-        rebuilt, refusal = _rebuild(email_log, token)
+        rebuilt, refusal = _rebuild(email_log, token, legacy_attachments)
         if refusal is not None:
             return refusal
         message, msg = rebuilt
@@ -104,7 +104,11 @@ def send_email_task(email_log_id: str) -> dict[str, Any]:
         }
 
 
-def _rebuild(email_log: EmailLog, token: Any) -> tuple[Any, dict[str, Any] | None]:
+def _rebuild(
+    email_log: EmailLog,
+    token: Any,
+    legacy_attachments: list[Attachment] | None = None,
+) -> tuple[Any, dict[str, Any] | None]:
     """The stored message and its provider message, or the refusal to return when it can never be sent.
 
     Attachments are made again from their sources and checked against the first send. A source that fails
@@ -118,7 +122,7 @@ def _rebuild(email_log: EmailLog, token: Any) -> tuple[Any, dict[str, Any] | Non
 
     email_log_id = str(email_log.pk)
     try:
-        attachments = regenerate_attachments(email_log)
+        attachments = regenerate_attachments(email_log) if legacy_attachments is None else legacy_attachments
     except AttachmentRefusedError as refused:
         if not refused.permanent:
             raise
@@ -288,7 +292,8 @@ def process_email_queue() -> dict[str, Any]:
     now = timezone.now()
     overdue = now - QUEUE_OVERDUE
     candidates = list(
-        EmailLog.objects.filter(status="queued")
+        EmailLog.objects.filter(status="queued", envelope__isnull=False)
+        .exclude(envelope="")
         .filter(Q(next_attempt_at__lte=overdue) | Q(next_attempt_at__isnull=True, sent_at__lt=overdue))
         .order_by("sent_at")
         .values_list("pk", flat=True)[: _batch()]
@@ -298,7 +303,11 @@ def process_email_queue() -> dict[str, Any]:
         try:
             with transaction.atomic():
                 email_log = EmailLog.objects.select_for_update().filter(pk=pk, status="queued").first()
-                if email_log is None or (email_log.next_attempt_at or email_log.sent_at) > overdue:
+                if (
+                    email_log is None
+                    or not email_log.envelope
+                    or (email_log.next_attempt_at or email_log.sent_at) > overdue
+                ):
                     continue  # Claimed, finished or rescheduled since the batch was read
                 retry_index(email_log)  # Raises on corrupt retry metadata (marked permanent below)
                 if budget_spent(email_log):
@@ -338,7 +347,8 @@ def recover_sending_emails() -> dict[str, int]:
     """
     now = timezone.now()
     candidates = list(
-        EmailLog.objects.filter(status="sending")
+        EmailLog.objects.filter(status="sending", envelope__isnull=False)
+        .exclude(envelope="")
         .filter(Q(lease_until__lt=now) | Q(lease_until__isnull=True, sent_at__lt=now - UNLEASED_SENDING_GRACE))
         .filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now - CLAIM_LEASE))
         .order_by("sent_at")
@@ -349,7 +359,12 @@ def recover_sending_emails() -> dict[str, int]:
         try:
             with transaction.atomic():
                 email_log = EmailLog.objects.select_for_update().filter(pk=pk).first()
-                if email_log is None or email_log.status != "sending" or not claimable(email_log, timezone.now()):
+                if (
+                    email_log is None
+                    or not email_log.envelope
+                    or email_log.status != "sending"
+                    or not claimable(email_log, timezone.now())
+                ):
                     continue  # Finished, or a worker holds it again
                 stamped = email_log.next_attempt_at
                 if stamped is not None and stamped > timezone.now() - CLAIM_LEASE:
@@ -430,7 +445,8 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
     # Negating a JSON comparison alone also drops rows with a missing key (SQL NULL).
     # Retain those legacy rows and exclude terminal failures before limiting the batch.
     candidates = list(
-        EmailLog.objects.filter(status="failed", sent_at__gte=cutoff)
+        EmailLog.objects.filter(status="failed", sent_at__gte=cutoff, envelope__isnull=False)
+        .exclude(envelope="")
         .filter(Q(provider_response__permanent_failure__isnull=True) | ~Q(provider_response__permanent_failure=True))
         .filter(Q(provider_response__retry_exhausted__isnull=True) | ~Q(provider_response__retry_exhausted=True))
         .order_by("sent_at")
@@ -442,7 +458,12 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
             with transaction.atomic():
                 email_log = EmailLog.objects.select_for_update().filter(pk=pk, status="failed").first()
                 response = email_log.provider_response if email_log is not None else None
-                if email_log is None or not isinstance(response, dict) or response.get("permanent_failure") is True:
+                if (
+                    email_log is None
+                    or not email_log.envelope
+                    or not isinstance(response, dict)
+                    or response.get("permanent_failure") is True
+                ):
                     skipped += 1
                     continue
                 if response.get("retry_exhausted") is True:

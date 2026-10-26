@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TypedDict, Unpack
@@ -48,6 +49,7 @@ class EmailRecoverySenderTests(TestCase):
             with self.subTest(logged_sender=logged_sender):
                 mail.outbox.clear()
                 log = EmailLog.objects.create(
+                    envelope=json.dumps({"to": ["recipient@example.test"]}),
                     to_addr="recipient@example.test",
                     from_addr=logged_sender,
                     subject="Recovered email",

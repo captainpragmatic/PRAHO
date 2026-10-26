@@ -124,7 +124,7 @@ jobs:
   # Integration Tests — requires PostgreSQL
   # ---------------------------------------------------------------------------
   integration-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
 
     # Override workflow-level settings: integration tests need PostgreSQL + DatabaseCache
     env:

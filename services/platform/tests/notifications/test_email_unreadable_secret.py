@@ -7,6 +7,7 @@ and every sweep picked it up again to fail the same way. It can never be sent as
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import timedelta
 from unittest.mock import patch
@@ -24,7 +25,13 @@ LEGACY_CIPHERTEXT = "aes:v1:bm90LXJlYWRhYmxlLWFueS1tb3Jl"
 
 class UnreadableStoredMessageTests(TestCase):
     def _legacy(self, **stored: str) -> EmailLog:
-        row = EmailLog.objects.create(to_addr="legacy@example.com", subject="Legacy", body_text="Body", status="queued")
+        row = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["legacy@example.com"]}),
+            to_addr="legacy@example.com",
+            subject="Legacy",
+            body_text="Body",
+            status="queued",
+        )
         EmailLog.objects.filter(pk=row.pk).update(sent_at=timezone.now() - timedelta(minutes=11), **stored)
         return row
 

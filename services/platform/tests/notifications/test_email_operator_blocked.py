@@ -9,6 +9,7 @@ next attempt after the fix sends it. A message blocked for longer than the block
 
 from __future__ import annotations
 
+import json
 import smtplib
 from datetime import timedelta
 from types import SimpleNamespace
@@ -70,7 +71,12 @@ OPERATOR_ERRORS: dict[str, Any] = {
 
 def _queued(**fields: Any) -> EmailLog:
     row = EmailLog.objects.create(
-        to_addr="customer@example.com", subject="Invoice", body_text="Body", status="queued", **fields
+        envelope=json.dumps({"to": ["customer@example.com"]}),
+        to_addr="customer@example.com",
+        subject="Invoice",
+        body_text="Body",
+        status="queued",
+        **fields,
     )
     EmailLog.objects.filter(pk=row.pk).update(sent_at=timezone.now() - timedelta(minutes=11))
     row.refresh_from_db()

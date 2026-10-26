@@ -22,6 +22,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.transactions import best_effort_atomic
+from apps.notifications.legacy import LegacyEmailRecoveryRequiredError
 from apps.notifications.models import EmailLog
 from apps.notifications.services import validate_email_log_subject
 from apps.settings.services import SettingsService, get_default_from_email
@@ -287,7 +288,10 @@ def claim_delivery(
         if row is None:
             return None, {"success": False, "error": "EmailLog not found", "retry_scheduled": False}
         now = timezone.now()
-        if not claimable(row, now):
+        erased = (isinstance(row.meta, dict) and row.meta.get("erased")) or (
+            isinstance(row.provider_response, dict) and row.provider_response.get("erased")
+        )
+        if not claimable(row, now) or erased:
             return row, {"success": False, "error": f"Not claimable: {row.status}", "retry_scheduled": False}
         try:
             if isinstance(supplied_retry, bool) or not isinstance(supplied_retry, int) or supplied_retry < 0:
@@ -298,6 +302,8 @@ def claim_delivery(
             return row, {"success": False, "error": str(error), "retry_scheduled": False}
         if (subject_error := validate_email_log_subject(row, row.subject if subject is None else subject)) is not None:
             return row, {"success": False, "error": subject_error, "retry_scheduled": False}
+        if not row.envelope:
+            raise LegacyEmailRecoveryRequiredError
         if index >= maximum + 1:
             mark_exhausted(row)
             return row, {

@@ -21,6 +21,95 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 
 ---
 
+## Queued email across the durable-envelope upgrade
+
+Upgrade all Platform writers and Django-Q workers together. The new publishers queue only an email id;
+old workers cannot execute those tasks. Old publishers still create rows without a durable envelope,
+so a mixed-version rollout is not supported. This patch adds no schema or status migration.
+
+1. Take the normal restricted database backup before the upgrade. Keep the original ORM queue,
+   Schedule and Task rows. Do not purge jobs or delete their kwargs to make worker errors disappear.
+2. Stop incoming writes and let any in-flight email sends finish before stopping workers. For native
+   hosts the units are `praho-platform`, `praho-portal`, and `praho-qcluster`; the Compose service names
+   are `platform`, `portal`, and `qcluster` (Portal is on its own host for split deployments). Confirm
+   the topology in this guide before operating it. An old `sending` row, even without a lease, has an
+   uncertain provider outcome and needs review, not an automatic resend.
+3. With those processes stopped, install the same build for every Platform writer and worker. Use
+   the normal migration/deploy procedure. Do not restart workers until the checks below are safe.
+4. In the Platform runtime, from `services/platform`, run the read-only inventory below with its
+   normal production settings and credentials. It prints ids and counts only. An unsafe global
+   setting, per-task acknowledgement override, or unreadable package is a rollout blocker: keep the
+   original signed packages in the restricted backup and reconcile them before starting workers.
+
+```python
+# Run in `python manage.py shell` in the configured Platform runtime.
+import ast
+from collections import Counter
+from django.db.models import Q
+from django_q.conf import Conf
+from django_q.models import OrmQ, Schedule
+from django_q.signing import SignedPackage
+from apps.notifications.models import EmailLog
+
+send_task = "apps.notifications.tasks.send_email_task"
+counts = Counter()
+counts["unsafe_global_retention"] = int(bool(Conf.ACK_FAILURES) or Conf.MAX_ATTEMPTS != 0)
+for job in OrmQ.objects.iterator():
+    try:
+        task = SignedPackage.loads(job.payload)
+        if task.get("func") == send_task:
+            counts["email_packages"] += 1
+            counts["unsafe_ack_override"] += int(bool(task.get("ack_failure")))
+    except Exception:
+        counts["unreadable_packages"] += 1
+for entry in Schedule.objects.filter(func=send_task).iterator():
+    try:
+        kwargs = ast.literal_eval(entry.kwargs or "{}")
+        options = kwargs.get("q_options", {})
+        counts["unsafe_schedule_ack_override"] += int(bool(kwargs.get("ack_failure") or options.get("ack_failure")))
+    except Exception:
+        counts["unreadable_schedule_kwargs"] += 1
+print(dict(counts))
+for row in EmailLog.objects.filter(Q(envelope__isnull=True) | Q(envelope=""), status__in=["queued", "failed", "sending"]).values("id", "status").iterator():
+    print(row)
+```
+
+The required retention settings are `ack_failures=False` and `max_attempts=0` (the Django-Q defaults).
+A held invocation raises `LegacyEmailRecoveryRequiredError` outside the provider error handler; under
+those settings the worker/monitor retains its original signed ORM package. A per-task
+`ack_failure=True` overrides that protection. Never interpret a returned `{"success": False}` as a
+broker failure: Django-Q acknowledges a normally returned function as successful execution.
+
+5. Resume the new writers and workers. All new sends and retries still carry only their email id.
+   The compatibility path imports only complete original calls with no explicitly supplied
+   `retry_count`, addressed solely to a bare primary mailbox already on the row. Historical display-name
+   primaries are held too: erasure before recipient digests existed may have missed them. It checks the stored
+   identity and bodies, seals the envelope, then claims the row under the same lock. Stored envelopes
+   remain authoritative over stale task arguments. Old lossy sweep payloads, their retries (including
+   full-shaped retries), additional To/CC/BCC recipients, and unresolved `sending` rows are held.
+   A hidden recipient's earlier erasure may have missed the old row, so importing that address is not
+   safe merely because the package survived. Staff must reconstruct these messages from their source.
+6. Confirm recoverable messages reach the provider and review held ids with staff. A missing-key
+   failure before preparation commits preserves the original package for redelivery after keys are
+   fixed. Raw legacy attachment bytes are available only to that claiming invocation; if it fails or
+   dies, an id-only retry refuses instead of sending without the attachment. Reconstruct the source
+   document explicitly. Never bulk resend `sent` or `delivered` messages, or assume a timeout proves
+   that the provider accepted nothing.
+
+A held package can be redelivered on the existing broker retry interval until it is reconciled.
+There is no new retry loop. Empty-envelope rows are excluded before drain batch limits, so they do
+not block newer complete messages. Malformed decoded envelopes fail permanently at the sending
+boundary; historical log displays can still show their first recorded recipient.
+
+Django-Q already copies old args/kwargs into Task results, and old one-off schedules with `repeats=1`
+may remain with `repeats=0` and their original kwargs. This fix adds no attachment blob store and does
+not claim to erase those historical copies. Keep unresolved payloads restricted and recoverable.
+Review their existing retention/erasure separately; clean up resolved originals only after approved
+reconciliation. Do not expose a queue export or Task kwargs in logs or support replies.
+
+A version rollback to an old worker is unsafe while id-only tasks remain. Follow the full database
+and release rollback procedure rather than restarting old workers against the new queue.
+
 ## Managed-node SSH Trust
 
 Platform and its task worker include `ansible-core` from the locked Platform dependency group and
