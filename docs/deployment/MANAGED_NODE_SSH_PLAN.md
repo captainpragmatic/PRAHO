@@ -131,6 +131,7 @@ operators who enable managed-node deployment must mount that public file into bo
 Platform and Q-cluster. For example, from the repository root:
 
 ```bash
+PRAHO_ENV_FILE="$PWD/.env.staging" \
 PRAHO_SSH_PUBLIC_KEYS_FILE=/absolute/path/operator_authorized_keys \
   docker compose --env-file .env.staging \
   -f deploy/docker-compose.single-server.yml \

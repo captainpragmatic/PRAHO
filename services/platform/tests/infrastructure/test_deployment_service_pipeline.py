@@ -229,6 +229,20 @@ class TestExistingServerSSHKeyPreservation(TestCase):
 
 
 class TestSupportedNodeImagePreflight(TestCase):
+    def test_a_cached_supported_provider_cannot_bypass_the_current_database_type(self) -> None:
+        deployment = _create_deployment("pending")
+        self.assertEqual(deployment.provider.provider_type, "hetzner")
+        CloudProvider.objects.filter(pk=deployment.provider_id).update(provider_type="aws")
+        service = _make_service()
+        with patch("apps.infrastructure.deployment_service.get_cloud_gateway") as gateway:
+            result = service.deploy_node(deployment, {"api_token": "fixture"})
+        self.assertTrue(result.is_err())
+        self.assertIn("Ubuntu", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "pending")
+        self.assertEqual(service._ssh_manager.mock_calls, [])
+        gateway.assert_not_called()
+
     def test_missing_or_invalid_operator_keys_block_both_entrypoints_before_writes(self) -> None:
         from apps.audit.models import AuditEvent  # noqa: PLC0415 -- Persisted side-effect assertion.
 

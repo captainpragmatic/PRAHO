@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext
 
 from apps.common.types import Err, Ok, Result, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
@@ -123,9 +123,12 @@ class NodeDeploymentService:
 
     def _deployment_preflight(self, deployment: NodeDeployment) -> Result[tuple[str, ...], str]:
         """Reject unverified cloud image selectors before any deployment side effects."""
-        if deployment.provider.provider_type != "hetzner":
+        from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Deferred app model import.
+
+        provider_type = CloudProvider.objects.values_list("provider_type", flat=True).get(pk=deployment.provider_id)
+        if provider_type != "hetzner":
             return Err(
-                _(
+                gettext(
                     "Automatic node deployment currently supports Hetzner Ubuntu 26.04 only. "
                     "Other provider image selectors require Ubuntu 24.04/26.04 verification before deployment or retry."
                 )
@@ -134,7 +137,7 @@ class NodeDeploymentService:
             return Ok(self._ansible.operator_public_keys())
         except (OSError, ValueError):
             return Err(
-                _(
+                gettext(
                     "Approved operator public keys are missing or invalid. "
                     "Configure PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE before deployment or retry."
                 )
@@ -214,6 +217,13 @@ class NodeDeploymentService:
                 if not locked or locked.status not in ("pending", "failed"):
                     return Err(f"Cannot deploy node in status '{locked.status if locked else 'unknown'}'")
 
+                from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Claim the current provider too.
+
+                claimed_provider = CloudProvider.objects.select_for_update().get(pk=locked.provider_id)
+                if claimed_provider.provider_type != "hetzner":
+                    return Err(gettext("Provider image support changed before deployment claim; no VM was created."))
+                claimed_provider_type = claimed_provider.provider_type
+
                 # Transition to provisioning (transition_to saves internally)
                 try:
                     locked.transition_to("provisioning_node")
@@ -279,7 +289,8 @@ class NodeDeploymentService:
                 self._mark_failed(deployment, "No API token provided", stage="provision_server", audit_ctx=audit_ctx)
                 return Err("No API token provided")
 
-            provider_type = deployment.provider.provider_type
+            # Retain the supported adapter selected under the claim, never a refreshed relation's type.
+            provider_type = claimed_provider_type
             gateway = get_cloud_gateway(provider_type, api_token)
 
             # Idempotent: skip server creation if external_node_id already set (retry scenario)
