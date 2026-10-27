@@ -588,6 +588,27 @@ passdb praho-proxy {
         configuration.write_text(configuration.read_text().replace("preserved-secret", "unexpected-change"))
         self.assertNotEqual(driver.provider_digest(), before)
 
+    def test_native_blank_line_normalization_preserves_policy_but_not_changed_values(self):
+        mailbox = self.write("etc/webmin/mailboxes/config", "mail_system=6\n\noperator_option=preserved\n")
+        configuration = self.root / "etc/webmin/virtual-server/config"
+        configuration.write_text("\n" + configuration.read_text() + "\n  \n")
+        driver = self.node.setup_driver()
+        before = driver.provider_digest()
+        for path in (configuration, mailbox):
+            path.write_text("\n".join(line for line in path.read_text().splitlines() if line.strip()) + "\n")
+        self.assertEqual(driver.provider_digest(), before)
+        normalized = configuration.read_text()
+        for changed in (
+            normalized.replace("preserved-secret", "unexpected-change"),
+            normalized + "unrecognized native configuration\n",
+        ):
+            with self.subTest(changed=changed):
+                configuration.write_text(changed)
+                self.assertNotEqual(driver.provider_digest(), before)
+        configuration.write_text(normalized)
+        mailbox.write_text(mailbox.read_text().replace("operator_option=preserved", "operator_option=changed"))
+        self.assertNotEqual(driver.provider_digest(), before)
+
     def test_native_renewal_bookkeeping_does_not_hide_certificate_or_provider_policy_changes(self):
         self.write("etc/webmin/mailboxes/config", "mail_system=6\noperator_option=preserved\n")
         driver = self.node.setup_driver()

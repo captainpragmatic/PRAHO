@@ -453,7 +453,13 @@ class MailSetup:
             ("mailboxes", {"mail_system"}),
         ):
             file = self.path("/etc/webmin/" + name + "/config")
-            lines = [line for line in file.read_text().splitlines() if line.partition("=")[0] not in permitted]
+            # Webmin rewrites parsed settings as key=value lines; blank-only
+            # lines carry no policy and disappear during that native write.
+            lines = [
+                line
+                for line in file.read_text().splitlines()
+                if line.strip() and line.partition("=")[0] not in permitted
+            ]
             hashes.append(hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest())
         return hashlib.sha256("".join(hashes).encode()).hexdigest()
 
