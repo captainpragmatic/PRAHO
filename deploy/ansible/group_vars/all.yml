@@ -4,7 +4,7 @@
 # Variables needed by Ansible itself (infrastructure, not Django config).
 # Django configuration lives in .env.{prod,staging} — see .env.example.prod.
 
-# Ansible remote Python — pin to system Python to avoid deadsnakes/venv conflicts
+# Ansible remote Python stays on the OS interpreter, separate from application Python.
 ansible_python_interpreter: /usr/bin/python3
 
 # Project settings
@@ -43,3 +43,7 @@ praho_git_repo: "https://github.com/captainpragmatic/PRAHO.git"
 
 # Firewall
 firewall_enabled: true
+
+# Controller-only access inputs. Public keys stay in ignored operator files.
+ssh_operator_public_keys: "{{ lookup('file', lookup('env', 'PRAHO_SSH_PUBLIC_KEYS_FILE')).splitlines() }}"
+ssh_probe_known_hosts_file: "{{ lookup('env', 'PRAHO_DEPLOY_KNOWN_HOSTS_FILE') }}"

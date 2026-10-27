@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from django.core.validators import MinValueValidator
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -90,6 +91,9 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
 
     # API configuration
     api_port = models.PositiveIntegerField(default=10000, verbose_name=_("API Port"))
+    ssh_port = models.PositiveIntegerField(
+        default=22, validators=[MinValueValidator(1), MaxValueValidator(65535)], verbose_name=_("SSH Port")
+    )
     api_path = models.CharField(max_length=100, default="/virtual-server/remote.cgi", verbose_name=_("API Path"))
     use_ssl = models.BooleanField(default=True, verbose_name=_("Use SSL"))
     ssl_verify = models.BooleanField(default=True, verbose_name=_("Verify SSL Certificate"))
@@ -175,6 +179,27 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
                 kwargs["api_username"] = "test_user"
 
         super().__init__(*args, **kwargs)
+
+    @property
+    def effective_ssh_port(self) -> int:
+        """A managed deployment owns its live port; manual servers use their own."""
+        try:
+            return int(self.node_deployment.ssh_port)
+        except ObjectDoesNotExist:
+            return int(self.ssh_port)
+
+    @property
+    def enrolled_ssh_host_keys(self) -> str | None:
+        """Public host keys shared with provisioning, or configured manual trust."""
+        from apps.infrastructure.ssh_transport import (  # noqa: PLC0415 -- Avoid model import cycle.
+            resolve_node_host_keys,
+        )
+
+        try:
+            deployment = self.node_deployment
+        except ObjectDoesNotExist:
+            return None
+        return resolve_node_host_keys(deployment)
 
     @property
     def api_url(self) -> str:

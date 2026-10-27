@@ -1,0 +1,142 @@
+---
+- name: Create private SSH rollback snapshot
+  ansible.builtin.tempfile:
+    state: directory
+    path: /var/lib/praho-ssh
+    prefix: rollback-
+  register: ssh_snapshot
+
+- name: Preserve the previously verified daemon configuration
+  ansible.builtin.copy:
+    src: /etc/ssh/sshd_config
+    dest: "{{ ssh_snapshot.path }}/sshd_config"
+    remote_src: true
+    mode: '0600'
+
+- name: Inspect previous managed socket override
+  ansible.builtin.stat:
+    path: /etc/systemd/system/ssh.socket.d/99-praho-listen.conf
+  register: ssh_prior_socket
+
+- name: Preserve previous socket override
+  ansible.builtin.copy:
+    src: /etc/systemd/system/ssh.socket.d/99-praho-listen.conf
+    dest: "{{ ssh_snapshot.path }}/socket.conf"
+    remote_src: true
+    mode: '0600'
+  when: ssh_prior_socket.stat.exists
+
+- name: Preserve the rollback implementation for this phase
+  ansible.builtin.copy:
+    src: transaction.py
+    dest: "{{ ssh_snapshot.path }}/transaction.py"
+    mode: '0700'
+
+- name: Record rollback metadata
+  ansible.builtin.copy:
+    content: "{{ {'socket_active': ssh_socket_active, 'had_socket_override': ssh_prior_socket.stat.exists} | to_json }}"
+    dest: "{{ ssh_snapshot.path }}/metadata.json"
+    mode: '0600'
+
+- name: Record transition ownership in the snapshot
+  ansible.builtin.copy:
+    content: "{{ ssh_transition_token }}"
+    dest: "{{ ssh_snapshot.path }}/token"
+    mode: '0600'
+
+- name: Prepare atomic commit and rollback arbitration
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "{{ ssh_snapshot.path }}/transaction.py", prepare, "{{ ssh_snapshot.path }}", "{{ ssh_transition_token }}"]
+  changed_when: true
+
+- name: Stage validated key-only SSH configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: "{{ ssh_snapshot.path }}/candidate_sshd_config"
+    owner: root
+    group: root
+    mode: '0600'
+    validate: /usr/sbin/sshd -t -f %s
+
+- name: Stage socket listener override
+  ansible.builtin.template:
+    src: socket.conf.j2
+    dest: "{{ ssh_snapshot.path }}/candidate_socket.conf"
+    mode: '0600'
+  when: ssh_socket_active
+
+- name: Arm rollback before changing SSH
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - "--unit=praho-ssh-{{ ssh_snapshot.path | basename }}"
+      - "--on-active={{ ssh_rollback_seconds }}s"
+      - --timer-property=AccuracySec=1s
+      - /usr/bin/python3
+      - "{{ ssh_snapshot.path }}/transaction.py"
+      - rollback
+      - "{{ ssh_snapshot.path }}"
+  changed_when: true
+
+- name: Record the armed rollback timer
+  ansible.builtin.set_fact:
+    ssh_rollback_armed: true
+
+- name: Activate staged SSH policy with exclusive phase ownership
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "{{ ssh_snapshot.path }}/transaction.py", activate, "{{ ssh_snapshot.path }}"]
+  changed_when: true
+
+- name: Verify the new listener with a separate connection
+  ansible.builtin.include_tasks: prove.yml
+  vars:
+    ssh_proof_port: "{{ ssh_target_port }}"
+
+- name: Move the active Ansible host connection to the verified port
+  ansible.builtin.set_fact:
+    ansible_port: "{{ ssh_target_port | int }}"
+    ansible_ssh_args: "-o ControlMaster=no -o ControlPath=none"
+    ansible_ssh_extra_args: "-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no"
+
+- name: Discard the old Ansible connection
+  ansible.builtin.meta: reset_connection
+
+- name: Prove the active Ansible connection after handoff
+  ansible.builtin.command: /usr/bin/id -u
+  changed_when: false
+  register: ssh_ansible_proof
+  failed_when: ssh_ansible_proof.stdout | trim != '0'
+
+- name: Read the policy before committing this phase
+  ansible.builtin.command: /usr/sbin/sshd -T
+  register: ssh_phase_policy
+  changed_when: false
+
+- name: Verify the phase policy before committing
+  ansible.builtin.assert:
+    that:
+      - >-
+        ssh_phase_policy.stdout_lines | select('match', '^port ') | map('regex_replace', '^port ', '') | sort
+        == ssh_phase_ports | unique | map('string') | sort
+      - "'authenticationmethods publickey' in ssh_phase_policy.stdout_lines"
+      - "'passwordauthentication no' in ssh_phase_policy.stdout_lines"
+      - "'kbdinteractiveauthentication no' in ssh_phase_policy.stdout_lines"
+      - >-
+        ssh_phase_policy.stdout_lines | intersect(
+        ['permitrootlogin without-password', 'permitrootlogin prohibit-password']) | length == 1
+
+- name: Commit only if rollback has not won the phase lock
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "{{ ssh_snapshot.path }}/transaction.py", commit, "{{ ssh_snapshot.path }}"]
+  changed_when: true
+
+- name: Disarm rollback after authenticated handoff
+  ansible.builtin.command:
+    argv: [systemctl, stop, "praho-ssh-{{ ssh_snapshot.path | basename }}.timer"]
+  register: ssh_timer_stop
+  changed_when: ssh_timer_stop.rc == 0
+  failed_when: ssh_timer_stop.rc not in [0, 5]
+
+- name: Record the verified transition
+  ansible.builtin.set_fact:
+    ssh_rollback_armed: false

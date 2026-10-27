@@ -3,7 +3,7 @@ Drift Scanner Service
 
 Scans deployments for configuration drift across three layers:
 1. Cloud Provider — server type, status, IPs, labels
-2. Network — TCP reachability (port 22)
+2. Network — TCP reachability on the recorded SSH port
 3. Application — Virtualmin config consistency
 """
 
@@ -52,7 +52,6 @@ _NETWORK_FIELD_NAMES = ("network_unreachable", "network_unreachable_consecutive"
 _DEFAULT_NETWORK_PROBE_TIMEOUT = 10
 
 # Port to probe for network checks
-NETWORK_PROBE_PORT = 22
 
 # Number of consecutive failures for critical network drift
 _DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD = 3
@@ -309,13 +308,13 @@ class DriftScannerService:
         deployment: NodeDeployment,
         check: DriftCheck,
     ) -> list[ReportOutcome]:
-        """TCP probe port 22 with timeout."""
+        """Probe the node's verified SSH port with a bounded timeout."""
         outcomes: list[ReportOutcome] = []
 
         if not deployment.ipv4_address:
             return outcomes
 
-        reachable = self._tcp_probe(str(deployment.ipv4_address), NETWORK_PROBE_PORT)
+        reachable = self._tcp_probe(str(deployment.ipv4_address), deployment.ssh_port)
 
         if reachable:
             self._heal_clean_fields(deployment, set(_NETWORK_FIELD_NAMES))

@@ -16,7 +16,12 @@ all:
     praho-server:
       ansible_host: "{{ lookup('env', 'PRAHO_SERVER_IP') }}"
       ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
-      ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_ed25519', true) }}"
+      ansible_port: "{{ lookup('env', 'PRAHO_SSH_PORT') | default('9876', true) | int }}"
+      ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default(None, true) }}"
+      ansible_ssh_common_args: >-
+        -o StrictHostKeyChecking=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+        -o HostKeyAlias={{ ansible_host | quote }}
+        -o UserKnownHostsFile={{ lookup('env', 'PRAHO_DEPLOY_KNOWN_HOSTS_FILE') | quote }}
 
   children:
     praho:

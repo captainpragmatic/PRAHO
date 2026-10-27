@@ -704,6 +704,11 @@ Q_CLUSTER = {
     "sync": False,  # Async execution
 }
 
+# Approved human public keys used by node deployment, separate from private credentials.
+PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE = os.environ.get(
+    "PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE", "/etc/praho/operator_authorized_keys"
+)
+
 # ===============================================================================
 # 🚀 PERFORMANCE & SCALABILITY CONFIGURATION
 # ===============================================================================

@@ -412,6 +412,15 @@ class NodeDeployment(models.Model):
     )
 
     # SSH key reference (stored in CredentialVault)
+    ssh_port = models.PositiveIntegerField(
+        default=22,
+        validators=[MinValueValidator(1), MaxValueValidator(65535)],
+        verbose_name=_("Verified SSH Port"),
+    )
+    # None is set only for a newly-created VM awaiting first host-key enrollment.
+    # Empty string identifies legacy nodes requiring an operator-supplied pin.
+    ssh_host_keys = models.TextField(default="", blank=True, null=True, editable=False)  # noqa: DJ001 -- Three trust states.
+
     ssh_key_credential_id = models.CharField(
         max_length=100,
         blank=True,

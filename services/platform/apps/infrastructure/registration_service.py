@@ -136,6 +136,7 @@ class NodeRegistrationService:
                 server = VirtualminServer.objects.create(
                     name=f"Node: {deployment.hostname}",
                     hostname=deployment.fqdn,
+                    ssh_port=deployment.ssh_port,
                     api_port=10000,
                     use_ssl=True,
                     ssl_verify=False,  # Self-signed initially

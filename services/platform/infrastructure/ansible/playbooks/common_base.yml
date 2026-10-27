@@ -74,20 +74,7 @@
         insertafter: '^127\.0\.0\.1'
       when: virtualmin_force_hostname | default(true)
 
-    - name: Configure SSH daemon
-      ansible.builtin.lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        validate: 'sshd -t -f %s'
-      loop:
-        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
-        # sshd_config expects yes/no, NOT true/false — a boolean | string | lower yields
-        # "false", which `sshd -t` rejects as "unsupported option". Map booleans to yes/no.
-        - { regexp: '^#?PasswordAuthentication', line: "PasswordAuthentication {{ 'yes' if ssh_password_authentication else 'no' }}" }
-        - { regexp: '^#?UseDNS', line: "UseDNS {{ 'yes' if ssh_use_dns else 'no' }}" }
-        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
-      notify: Restart sshd
+    # The shared ssh-hardening role runs before this playbook and owns sshd.
 
     - name: Create swap file
       ansible.builtin.command: |
@@ -128,9 +115,3 @@
         state: touch
         mode: '0644'
       when: praho_managed | default(true)
-
-  handlers:
-    - name: Restart sshd
-      ansible.builtin.service:
-        name: sshd
-        state: restarted

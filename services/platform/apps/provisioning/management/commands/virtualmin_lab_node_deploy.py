@@ -174,11 +174,10 @@ class Command(BaseCommand):
         shutil.rmtree(FACT_CACHE, ignore_errors=True)
         # Nothing of an earlier run may survive: the server row (and its vault credential) belongs to a node
         # whose certificate and API password no longer exist.
-        ensure_lab_deployment(DEPLOY_NODE, state_dir, dns_zone=DEPLOY_NODE_ZONE)
-
         # Host keys are generated at every boot: pin this run's, next to the two lab nodes' keys.
         known_hosts = Path(state.known_hosts).read_text() + _scan_host_keys(DEPLOY_NODE.ssh_port)
         write_private(Path(with_deploy_node(state).known_hosts), known_hosts)
+        ensure_lab_deployment(DEPLOY_NODE, state_dir, dns_zone=DEPLOY_NODE_ZONE)
 
         allowed = [f"{container_address(DEPLOY_NODE.container, 'Gateway')}/32"]
         result = SettingsService.update_setting("infrastructure.node_admin_allowed_cidrs", allowed)

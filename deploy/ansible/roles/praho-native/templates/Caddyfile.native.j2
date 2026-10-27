@@ -54,6 +54,12 @@
 
     encode gzip zstd
 
+{% if (praho_env | default('prod')) == 'staging' %}
+    # All staging routes require an approved connection IP. Forwarded headers cannot bypass this.
+    route {
+        @staging_denied not remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
+        respond @staging_denied "Access denied" 403
+{% endif %}
     # Portal static files
     handle_path /static/* {
         root * {{ project_root }}/portal-static
@@ -83,6 +89,9 @@
         }
     }
 
+{% if (praho_env | default('prod')) == 'staging' %}
+    }
+{% endif %}
     log {
         format filter {
             wrap json
@@ -120,6 +129,11 @@
 
     encode gzip zstd
 
+{% if (praho_env | default('prod')) == 'staging' %}
+    route {
+        @staging_denied not remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
+        respond @staging_denied "Access denied" 403
+{% endif %}
     # Public handles cap request bodies at Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10 MiB). None takes a
     # multipart upload; the tickets API's attachments arrive base64 inside a JSON body, which Django
     # caps at the same size. So the cap refuses nothing Django would take, and an oversized body stops
@@ -189,6 +203,10 @@
     }
 
     respond "Access denied" 403
+
+{% if (praho_env | default('prod')) == 'staging' %}
+    }
+{% endif %}
 
     log {
         format filter {

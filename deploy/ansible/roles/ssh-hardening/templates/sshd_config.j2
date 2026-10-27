@@ -1,0 +1,27 @@
+# Managed by PRAHO's ssh-hardening role. Custom access policy requires review.
+{% for port in ssh_phase_ports | unique %}
+Port {{ port }}
+{% endfor %}
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+HostbasedAuthentication no
+UsePAM yes
+StrictModes yes
+AuthorizedKeysFile {{ ssh_authorized_keys_files | join(' ') }}
+MaxAuthTries 6
+LoginGraceTime 30
+UseDNS no
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+PermitTunnel no
+PermitUserEnvironment no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp internal-sftp

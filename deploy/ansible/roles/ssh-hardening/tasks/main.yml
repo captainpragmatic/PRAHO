@@ -1,0 +1,224 @@
+---
+- name: Validate SSH hardening inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] in ['24.04', '26.04']
+      - ansible_user | default('root') == 'root'
+      - ssh_target_port | int == 9876
+      - ssh_operator_public_keys | type_debug == 'list'
+      - ssh_operator_public_keys | length > 0
+      - ssh_allowed_cidrs | length > 0
+      - ssh_probe_known_hosts_file | length > 0
+      - ssh_rollback_seconds | int >= 60
+    fail_msg: "SSH hardening needs supported Ubuntu, root key access, approved public keys and pinned controller known_hosts."
+
+- name: Validate public key lines
+  ansible.builtin.assert:
+    that:
+      - item is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( .*)?$')
+    fail_msg: "Provide plain public keys, one per line, without authorized_keys options or private material."
+  loop: "{{ ssh_operator_public_keys }}"
+
+- name: Remember the connection port before the handoff
+  ansible.builtin.set_fact:
+    ssh_previous_port: "{{ ansible_port | default(22) | int }}"
+
+- name: Inspect root SSH paths without following links
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/root, /root/.ssh, /root/.ssh/authorized_keys]
+  register: ssh_root_paths
+
+- name: Refuse symlinks or unexpected owners in root SSH paths
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (not item.stat.islnk and item.stat.uid == 0)
+    fail_msg: "Root SSH paths must be ordinary root-owned files/directories."
+  loop: "{{ ssh_root_paths.results }}"
+
+- name: Read SSH service session-preservation policy
+  ansible.builtin.command: systemctl show --property=KillMode --value ssh.service
+  changed_when: false
+  register: ssh_kill_mode
+
+- name: Read SSH service command overrides
+  ansible.builtin.command: systemctl show --property=DropInPaths --value ssh.service
+  changed_when: false
+  register: ssh_service_overrides
+
+- name: Read SSH socket overrides
+  ansible.builtin.command: systemctl show --property=DropInPaths --value ssh.socket
+  changed_when: false
+  register: ssh_socket_overrides
+
+- name: Read SSH daemon startup options
+  ansible.builtin.slurp:
+    src: /etc/default/ssh
+  register: ssh_startup_options
+
+- name: Refuse unsupported service customizations
+  ansible.builtin.assert:
+    that:
+      - ssh_kill_mode.stdout | trim == 'process'
+      - ssh_service_overrides.stdout | trim == ''
+      - >-
+        ssh_socket_overrides.stdout.split() | reject('match',
+        '^(/run/systemd/generator/ssh.socket.d/addresses.conf|/etc/systemd/system/ssh.socket.d/99-praho-listen.conf)$') | list | length == 0
+      - >-
+        ssh_startup_options.content | b64decode | regex_findall('(?m)^\s*SSHD_OPTS=(.*)$')
+        | difference(['', '""', "''"]) | length == 0
+    fail_msg: "Custom SSH service/socket startup options require review before migration."
+
+- name: Detect socket activation
+  ansible.builtin.command: systemctl is-active ssh.socket
+  register: ssh_socket_state
+  changed_when: false
+  failed_when: ssh_socket_state.rc not in [0, 3]
+
+- name: Record the observed listener owner
+  ansible.builtin.set_fact:
+    ssh_socket_active: "{{ ssh_socket_state.rc == 0 }}"
+
+- name: Check the current daemon configuration
+  ansible.builtin.command: /usr/sbin/sshd -T
+  changed_when: false
+  register: ssh_original_policy
+
+- name: Preserve the accepted authorized key paths
+  ansible.builtin.set_fact:
+    ssh_authorized_keys_files: "{{ (ssh_original_policy.stdout_lines | select('match', '^authorizedkeysfile ') | first).split()[1:] }}"
+
+- name: Require a supported effective authorized key path
+  ansible.builtin.assert:
+    that:
+      - ssh_authorized_keys_files in [['.ssh/authorized_keys'], ['.ssh/authorized_keys', '.ssh/authorized_keys2']]
+
+- name: Validate access policy before mutation
+  ansible.builtin.script:
+    cmd: check_config.py /etc/ssh/sshd_config --check-service
+    executable: /usr/bin/python3
+  changed_when: false
+
+- name: Verify controller is within the SSH source allowlist
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import ipaddress, json, os, sys;
+        peer = ipaddress.ip_address(os.environ['SSH_CONNECTION'].split()[0]);
+        networks = [ipaddress.ip_network(cidr, strict=True) for cidr in json.loads(sys.argv[1])];
+        sys.exit(0 if any(peer in network for network in networks) else 1)
+      - "{{ ssh_allowed_cidrs | to_json }}"
+  changed_when: false
+
+- name: Prove the current controller key before changing access
+  ansible.builtin.include_tasks: prove.yml
+  vars:
+    ssh_proof_port: "{{ ssh_previous_port }}"
+
+- name: Create protected rollback storage
+  ansible.builtin.file:
+    path: /var/lib/praho-ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Identify this transition
+  ansible.builtin.set_fact:
+    ssh_transition_token: "{{ lookup('password', '/dev/null', length=24, chars=['ascii_letters', 'digits']) }}"
+
+- name: Install transaction coordinator
+  ansible.builtin.copy:
+    src: transaction.py
+    dest: "/var/lib/praho-ssh/controller-{{ ssh_transition_token }}.py"
+    mode: '0700'
+
+- name: Refuse concurrent SSH transitions
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, "/var/lib/praho-ssh/controller-{{ ssh_transition_token }}.py", acquire, "{{ ssh_transition_token }}"]
+  changed_when: true
+
+- name: Transition with a timed recovery path
+  block:
+    - name: Prepare keys and firewall with exclusive transition ownership
+      ansible.builtin.include_tasks: prepare.yml
+
+    - name: Activate and verify both ports
+      ansible.builtin.include_tasks: phase.yml
+      vars:
+        ssh_phase_ports: "{{ [ssh_previous_port | int, ssh_target_port | int] | unique }}"
+
+    - name: Remove the old listener only after the new connection succeeds
+      ansible.builtin.include_tasks: phase.yml
+      vars:
+        ssh_phase_ports: "{{ [ssh_target_port | int] }}"
+      when: ssh_previous_port | int != ssh_target_port | int
+
+    - name: Remove the old unrestricted SSH firewall allowance
+      community.general.ufw:
+        rule: allow
+        port: "{{ ssh_previous_port }}"
+        proto: tcp
+        delete: true
+      when: ssh_previous_port | int != ssh_target_port | int
+
+    - name: Remove old source-scoped SSH firewall allowances
+      community.general.ufw:
+        rule: allow
+        port: "{{ ssh_previous_port }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        delete: true
+      loop: "{{ ssh_allowed_cidrs }}"
+      when: ssh_previous_port | int != ssh_target_port | int
+
+    - name: Check effective final SSH policy
+      ansible.builtin.command: /usr/sbin/sshd -T
+      register: ssh_effective_policy
+      changed_when: false
+
+    - name: Require the final listener and authentication policy
+      ansible.builtin.assert:
+        that:
+          - ssh_effective_policy.stdout_lines | select('match', '^port ') | list == ['port 9876']
+          - "'authenticationmethods publickey' in ssh_effective_policy.stdout_lines"
+          - "'passwordauthentication no' in ssh_effective_policy.stdout_lines"
+          - "'kbdinteractiveauthentication no' in ssh_effective_policy.stdout_lines"
+          - >-
+            ssh_effective_policy.stdout_lines | intersect(
+            ['permitrootlogin without-password', 'permitrootlogin prohibit-password']) | length == 1
+
+    - name: Check old SSH is unreachable from the controller
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ ssh_previous_port }}"
+        state: stopped
+        timeout: 15
+      delegate_to: localhost
+      become: false
+      when: ssh_previous_port | int != ssh_target_port | int
+  rescue:
+    - name: Restore the last verified configuration
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, "{{ ssh_snapshot.path }}/transaction.py", rollback, "{{ ssh_snapshot.path }}"]
+      when: ssh_snapshot.path is defined
+      changed_when: true
+    - name: Disarm timer after a successful immediate rollback
+      ansible.builtin.command:
+        argv: [systemctl, stop, "praho-ssh-{{ ssh_snapshot.path | basename }}.timer"]
+      register: ssh_rescue_timer_stop
+      changed_when: ssh_rescue_timer_stop.rc == 0
+      failed_when: ssh_rescue_timer_stop.rc not in [0, 5]
+      when: ssh_snapshot.path is defined and ssh_rollback_armed | default(false)
+    - name: Report failed SSH transition
+      ansible.builtin.fail:
+        msg: "SSH hardening failed. Uncommitted phases use the saved rollback; committed phases retain verified access on port 9876. Inspect the reported phase and snapshot before retrying."
+  always:
+    - name: Release the transition lock
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, "/var/lib/praho-ssh/controller-{{ ssh_transition_token }}.py", release, "{{ ssh_transition_token }}"]
+      changed_when: false

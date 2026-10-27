@@ -462,34 +462,31 @@ class VirtualminAuthenticationManager:
 
         try:
             self._ssh_client = paramiko.SSHClient()
-            configure_strict_host_key_checking(self._ssh_client)
+            configure_strict_host_key_checking(
+                self._ssh_client,
+                host_keys=self.server.enrolled_ssh_host_keys,
+                hostnames=(self.server.hostname,),
+                port=self.server.effective_ssh_port,
+            )
 
             # Get SSH credentials from settings
             ssh_username = getattr(settings, "VIRTUALMIN_SSH_USERNAME", "virtualmin-praho")
             ssh_private_key = getattr(settings, "VIRTUALMIN_SSH_PRIVATE_KEY_PATH", None)
-            ssh_password = getattr(settings, "VIRTUALMIN_SSH_PASSWORD", None)
             ssh_timeout = get_ssh_timeout()
 
             if ssh_private_key:
                 # Use private key authentication
                 self._ssh_client.connect(
                     hostname=self.server.hostname,
-                    port=22,
+                    port=self.server.effective_ssh_port,
                     username=ssh_username,
                     key_filename=ssh_private_key,
                     timeout=ssh_timeout,
-                )
-            elif ssh_password:
-                # Use password authentication
-                self._ssh_client.connect(
-                    hostname=self.server.hostname,
-                    port=22,
-                    username=ssh_username,
-                    password=ssh_password,
-                    timeout=ssh_timeout,
+                    allow_agent=False,
+                    look_for_keys=False,
                 )
             else:
-                raise Exception("No SSH credentials configured")
+                raise RuntimeError("Virtualmin SSH access requires an explicit private key; password login is disabled")
 
             logger.info(f"✅ [SSH] Connected to {self.server.hostname}")
 

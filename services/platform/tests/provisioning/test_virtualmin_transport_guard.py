@@ -24,6 +24,7 @@ from django.test import SimpleTestCase, override_settings
 
 from apps.common import outbound_http
 from apps.infrastructure.ansible_service import AnsibleService
+from apps.infrastructure.models import NodeDeployment
 from apps.provisioning.management.commands._virtualmin_lab import LabNode, LabState, lab_transport
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
@@ -86,10 +87,16 @@ class GatewayPrivateHostTests(VirtualminTaskTestBase):
 
 
 class AnsibleProductionPortTests(SimpleTestCase):
-    def test_ssh_wait_probes_port_22_and_inventory_names_no_port(self) -> None:
+    def test_inventory_uses_recorded_port_and_preserves_bootstrap_default(self) -> None:
         self.assertEqual(inspect.signature(AnsibleService._wait_for_ssh).parameters["port"].default, 22)
-        source = inspect.getsource(AnsibleService._generate_inventory)
-        self.assertNotIn("ansible_port", source)
+        service = object.__new__(AnsibleService)
+        for port in (22, 9876):
+            with self.subTest(port=port):
+                path = service._generate_inventory(NodeDeployment(hostname="node", ipv4_address="192.0.2.1", ssh_port=port))
+                try:
+                    self.assertIn(f"ansible_port={port}", path.read_text())
+                finally:
+                    path.unlink()
         self.assertNotIn("ansible_port", inspect.getsource(AnsibleService._build_vars))
 
 

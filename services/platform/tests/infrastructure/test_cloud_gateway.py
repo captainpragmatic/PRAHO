@@ -35,7 +35,7 @@ class TestCloudProviderGatewayABC(TestCase):
 
     def test_server_create_request_defaults(self):
         req = ServerCreateRequest(name="test", server_type="cpx21", location="fsn1", ssh_keys=["key1"])
-        self.assertEqual(req.image, "ubuntu-22.04")
+        self.assertEqual(req.image, "ubuntu-26.04")
         self.assertEqual(req.labels, {})
         self.assertEqual(req.firewall_ids, [])
 
@@ -116,7 +116,7 @@ class TestGatewayFactory(TestCase):
             get_cloud_gateway("nonexistent_provider", token="xxx")
         self.assertIn("nonexistent_provider", str(ctx.exception))
 
-    def test_register_custom_provider(self):
+    def test_register_custom_provider(self):  # noqa: C901 -- Fixture implements every abstract gateway method.
         class DummyGateway(CloudProviderGateway):
             def __init__(self, token: str, **kwargs):
                 pass
@@ -182,7 +182,7 @@ class TestGatewayFactory(TestCase):
         providers = get_registered_providers()
         self.assertEqual(providers, sorted(providers))
 
-    def test_register_overwrites_existing(self):
+    def test_register_overwrites_existing(self):  # noqa: C901 -- Fixture implements every abstract gateway method.
         """Re-registering a provider replaces the previous gateway class."""
 
         class GatewayV1(CloudProviderGateway):
