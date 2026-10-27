@@ -33,6 +33,7 @@ _ERRORS = frozenset(
         "mail_operation_active",
         "mail_mode_conflict",
         "mail_execution_invalid_consent",
+        "mail_prerequisites_expired",
     }
 )
 _NAME = re.compile(r"[a-z0-9]{8}(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")

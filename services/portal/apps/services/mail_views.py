@@ -35,6 +35,15 @@ def _context(status: PublicMailStatus) -> dict[str, Any]:
             "failed": _("The latest request did not complete."),
             "cancelled": _("The latest request was cancelled."),
         }.get(operation["status"], _("The request status is not confirmed."))
+        if (
+            operation["intent"] == "enable"
+            and operation["status"] == "cancelled"
+            and operation["error_code"] == "mail_prerequisites_expired"
+        ):
+            context["mail_progress"] = _(
+                "Setup prerequisites were not ready within 24 hours, so this request was cancelled. "
+                "You can request enrollment again."
+            )
         context["mail_updated_at"] = parse_datetime(operation["updated_at"]) if operation["updated_at"] else None
     return context
 

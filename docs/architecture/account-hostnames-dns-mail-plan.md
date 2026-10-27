@@ -57,7 +57,7 @@ Owner decisions for the remaining phases:
 - Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
 - Missing trusted node TLS leaves web provisioning available and hosted mail unavailable until verification succeeds.
 - A moved legacy mailbox with ambiguous lock history stays locked until its intended state is explicitly confirmed.
-- Cancel a confirmed opt-in after 24 hours without prerequisites only while it has made no mail or DNS changes. Release its account reservation so the owner can try again. This policy's coordinator is not implemented yet; running or uncertain effects retain their evidence and exclusion.
+- Cancel a confirmed opt-in after 24 hours without prerequisites only while it has made no mail or DNS changes. Release its account reservation so the owner can try again. The guarded disposition is implemented; automatic preparation dispatch is still unfinished. Running or uncertain effects retain their evidence and exclusion.
 
 This document is the implementation plan and verification record for every phase. The ADR owns
 the architecture contract. Phase branches are local checkpoints for the same PR, and temporary
@@ -166,19 +166,29 @@ not establish completed enrollment, mailbox migration or rollout:
 | Component | Implemented and verified | Remaining boundary |
 |---|---|---|
 | Native node capability | Actual selective setup, preservation, default-off account creation, valid Unix credential denials on 993/995/465, replay and reboot pass on Debian 12/Dovecot 2.3 and Ubuntu 26.04/Dovecot 2.4 | Durable bootstrap/existing-node scheduling; missing trusted TLS must not block web |
-| Routine node-certificate reconciliation | Private staging and durable applying/ready records, exact leaf verification, invalid-candidate preservation and non-rewinding completed UUIDs; 97 focused cases and the complete Debian native rotation contract pass | Ubuntu rotation run is pending; recovery when expired TLS prevents service startup is unfinished |
-| Enrollment persistence and consent | Immutable confirmed owner intent, submission identity, target generation, protected mode transitions and enrollment-specific retirement; 20 model/audit cases pass on SQLite/PostgreSQL and four real enrollment/admission races pass | Worker coordinator, actual native activation, consent HTTP mutations and the confirmed 24-hour pristine-attempt cancellation |
+| Routine node-certificate reconciliation | Private staging and durable applying/ready records, exact leaf verification, invalid-candidate preservation and non-rewinding completed UUIDs; 97 focused cases and complete Debian/Ubuntu native rotation contracts pass | Recovery when expired TLS prevents service startup is unfinished |
+| Enrollment persistence and consent | Immutable confirmed owner intent, submission identity, target generation, protected mode transitions, enrollment-specific retirement and guarded 24-hour pristine expiry; model/audit and real enrollment/admission contention tests pass | Worker coordinator, actual native activation and consent HTTP mutations |
 | Execution ownership | Claim, renew, checkpoint and park under fresh account/name/service locks; 75-minute lease and six PostgreSQL claim/admission races | Dispatch and activation; expired or uncertain effects retain exclusion rather than replaying |
 | DNS/SPF planning | Exact complete source scope, revision and contents; preserve external senders/DMARC and require a native per-domain RSA DKIM key of at least 2048 bits; 21 planner and 25 bounded SPF cases pass | Checkpointed MX/SPF/DKIM publication and the shared node SPF writer; dependency receipts must be checked against every proposed/provider-managed change |
 | Managed DNS source | Complete typed provider inventory outside DB locks, fresh owner/zone/revision recheck and private provider-record-ID binding; 60 source/planner/SPF cases and 14 source cases on PostgreSQL pass | Bind the observation to exact confirmed consent and fenced publication outbox |
 | Public mail status | Signed, tenant-scoped, database-only API and lazy Portal section; 159 service/Portal cases, 304 subtests and 11 real HMAC/resolver contracts pass | Owner/staff mutations, mailbox/alias management and verified login details |
-| All-user private state | Strict original/frozen snapshot schema, immutable private store and credential-free identity projection; 19 cases and 24 subtests pass | Live native inventory, fencing, compensation, inert held restore and final activation |
+| All-user private state | Strict original/frozen snapshot schema, immutable private store and credential-free identity projection; 21 cases and 24 subtests pass, including safe imported/CLI error handling | Live native inventory, fencing, compensation, inert held restore and final activation |
 
 An integration regression also proved that waiting mail prerequisites were blocked by asynchronous
 name publication while direct publication could run during uncertain native mail work. Waiting
 prerequisites now pass; both publication phases freshly refuse running/uncertain native ownership.
 The affected composite passes 191 cases and 32 PostgreSQL cases. Scoped types, Ruff, FSM,
 123 migration checksums and both schema checks pass. Full combined verification remains pending.
+
+The prerequisite-disposition service now preserves a 15-minute backoff capped at the original
+24-hour deadline. Only exact untouched queued opt-ins can cancel; malformed empty JSON, acquired
+execution ownership and uncertain/DNS-waiting work retain exclusion or require review. Expiry is
+audited without replacing consent or submission identity, and the owner can submit a new attempt.
+Pristine expiry can release obsolete intent after owner/target changes without applying it; before
+expiry, deferral still checks current authorization and generation. Age alone never cancels an
+otherwise claimable attempt. The composite passes 94 affected Platform cases, 21 Portal cases and
+24 PostgreSQL cases, including both expiry/claim lock orderings. Automatic enrollment dispatch and
+native activation remain unfinished; these service proofs do not establish rollout.
 
 The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
 restricted to its source and admitted hostnames; HTTPS uses the customer's verified
@@ -579,7 +589,7 @@ The isolated lab has proven credential forwarding/password changes, verified rel
 recipient rejection, per-mailbox throttling and public per-domain DKIM extraction/signing. The actual
 mixed-user restore exposed lost child activation/cron and aging; these remain unfinished integration
 gates. Owner-only Phase 2 proofs do not close them. Debian 12 and Ubuntu 26.04 default-off setup and
-reboot contracts pass; the later certificate-rotation extension passes Debian while Ubuntu is pending.
+reboot contracts and the later certificate-rotation extension pass on both native profiles.
 The runnable contract and cleanup instructions live with `tests/virtualmin_mail_lab/README.md`.
 
 Primary native contracts: [Dovecot proxying](https://doc.dovecot.org/2.3/configuration_manual/authentication/proxies/),

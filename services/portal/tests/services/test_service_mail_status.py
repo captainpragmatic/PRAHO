@@ -45,6 +45,16 @@ def operation_payload(**changes):
 
 
 class MailStatusClientTests(SimpleTestCase):
+    def test_pristine_preparation_expiry_is_an_understood_cancelled_receipt(self):
+        api = ServicesAPIClient()
+        payload = status_payload(
+            operation=operation_payload(
+                status="cancelled", checkpoint="not_started", error_code="mail_prerequisites_expired"
+            )
+        )
+        with patch.object(api, "_make_request", return_value={"success": True, "data": {"mail_status": payload}}):
+            self.assertEqual(api.get_service_mail_status(42, 7, 5), payload)
+
     def test_mail_read_uses_get_with_a_signed_identity_body_and_a_typed_public_receipt(self):
         api = ServicesAPIClient()
         with patch.object(
@@ -206,6 +216,28 @@ class MailStatusCardTests(SimpleTestCase):
         self.assertIn("Staff review is required", text)
         self.assertNotIn("mail_native_outcome_unknown", text)
         self.assertNotIn(PRIVATE, text)
+
+    def test_pristine_expiry_explains_that_the_owner_can_try_again_without_claiming_mail_changes(self):
+        self.read.return_value = status_payload(
+            operation=operation_payload(
+                status="cancelled", checkpoint="not_started", error_code="mail_prerequisites_expired"
+            )
+        )
+        text = self.client.get(self.path, HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn("prerequisites were not ready within 24 hours", text)
+        self.assertIn("You can request enrollment again", text)
+        self.assertNotIn("mail_prerequisites_expired", text)
+        self.assertIn("not enrolled in PRAHO hosted mail", text)
+
+    def test_retirement_is_not_described_as_an_expired_enrollment_even_with_inconsistent_test_input(self):
+        self.read.return_value = status_payload(
+            operation=operation_payload(
+                intent="disable", status="cancelled", checkpoint="not_started", error_code="mail_prerequisites_expired"
+            )
+        )
+        text = self.client.get(self.path, HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn("latest request was cancelled", text)
+        self.assertNotIn("request enrollment again", text)
 
     def test_accountless_service_is_not_applicable_and_does_not_offer_a_login(self):
         self.read.return_value = status_payload(applicability="not_applicable", account_name=None, client_ports={})

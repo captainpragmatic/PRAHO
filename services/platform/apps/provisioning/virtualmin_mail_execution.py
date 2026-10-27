@@ -1,8 +1,8 @@
 """Fenced mail-attempt bookkeeping; no native effects, completion or mail-mode transitions.
 
-Pristine queued refusals remain queued. The future coordinator must bound their
-retry or definitive-refusal policy. Uncertain running work always retains account
-exclusion in needs_review; a timeout never authorizes replaying its native effects.
+Read-only prerequisite refusals can defer pristine opt-ins for at most 24 hours.
+Uncertain running work always retains account exclusion in needs_review; a timeout
+never authorizes replaying or discarding its native effects. Dispatch is separate.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from django.db import transaction
@@ -35,10 +35,14 @@ from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, Vir
 MAIL_EXECUTION_LEASE = timedelta(minutes=75)
 # This covers one bounded setup step, including the supported one-time SSH
 # repair. Future workers renew between steps; no whole-workflow bound is implied.
+MAIL_PREPARATION_LIFETIME = timedelta(hours=24)
+MAIL_PREPARATION_RETRY = timedelta(minutes=15)
+_PREPARATION_REASONS = frozenset({"mail_node_certificate_unproven", "mail_dns_source_unavailable"})
+_PREPARATION_EXPIRED = "mail_prerequisites_expired"
 _DIGEST = re.compile(r"[a-f0-9]{64}")
 _PHASES = {"claimed": "preflight", "preflight": "native_inflight"}
 _PARK_CODES = frozenset({"mail_native_outcome_unknown", "mail_execution_interrupted", "mail_native_preparation_failed"})
-_REVIEW_CODES = _PARK_CODES | {
+_STATE_CODES = _PARK_CODES | {
     "mail_execution_ownership_expired",
     "mail_execution_state_uncertain",
     "mail_execution_forbidden",
@@ -48,6 +52,7 @@ _REVIEW_CODES = _PARK_CODES | {
     "mail_operation_active",
     "mail_mode_conflict",
     "mail_execution_invalid_consent",
+    _PREPARATION_EXPIRED,
 }
 _MAX_EVIDENCE_BYTES = 2048
 _MAX_EVIDENCE_ITEMS = 5
@@ -194,7 +199,7 @@ def _state(operation: VirtualminMailOperation) -> dict[str, str]:
         if operation.checkpoint in {"", "claimed", "preflight", "native_inflight"}
         else "unrecognized",
         "error_code": operation.error_code
-        if operation.error_code == "" or operation.error_code in _REVIEW_CODES
+        if operation.error_code == "" or operation.error_code in _STATE_CODES
         else "unrecognized",
     }
 
@@ -269,6 +274,45 @@ def claim_mail_operation(identifier: UUID | str) -> Result[MailExecutionLease, s
         return Err(str(error))
 
 
+def defer_mail_preparation(
+    identifier: UUID | str, *, generation: str, reason: str
+) -> Result[Literal["queued", "cancelled"], str]:
+    """Consume a fixed read-only refusal; never cancel work that acquired execution ownership.
+
+    Workers call this only after prerequisites are observed unavailable. Age alone
+    does not expire confirmed consent or prevent a now-ready pristine claim.
+    """
+    try:
+        if not isinstance(reason, str) or reason not in _PREPARATION_REASONS:
+            raise _ExecutionRefusalError("mail_invalid_error_code")
+        with _locked(_identifier(identifier)) as (context, operation):
+            if not isinstance(generation, str) or generation != operation.target_generation:
+                raise _ExecutionRefusalError("mail_generation_changed")
+            if operation.intent != "enable":
+                raise _ExecutionRefusalError("mail_preparation_not_enable")
+            if operation.status == "cancelled" and operation.error_code == _PREPARATION_EXPIRED:
+                return Ok("cancelled")
+            state_refusal = _claim_state(operation)
+            if state_refusal not in {"", "mail_execution_not_due"}:
+                # Return inside the transaction so uncertainty parking is committed.
+                return Err(state_refusal)
+            now = timezone.now()
+            deadline = operation.created_at + MAIL_PREPARATION_LIFETIME
+            if now >= deadline:
+                # System cleanup may release untouched expired intent even after
+                # owner/target changes. It never applies that obsolete intent.
+                _cas(operation, status="cancelled", error_code=_PREPARATION_EXPIRED, resume_after=None)
+                return Ok("cancelled")
+            refused = _eligibility(context, operation)
+            if refused:
+                raise _ExecutionRefusalError(refused)
+            if operation.resume_after is None or not now < operation.resume_after <= deadline:
+                _cas(operation, resume_after=min(now + MAIL_PREPARATION_RETRY, deadline))
+            return Ok("queued")
+    except _ExecutionRefusalError as error:
+        return Err(str(error))
+
+
 def _claim_state(operation: VirtualminMailOperation) -> str:
     if operation.status == "running":
         return _running_claim_state(operation)
@@ -276,7 +320,7 @@ def _claim_state(operation: VirtualminMailOperation) -> str:
         operation.lease_token
         or operation.lease_expires_at
         or operation.checkpoint
-        or operation.result
+        or operation.result != {}
         or operation.error_code
     )
     if unknown_queued:

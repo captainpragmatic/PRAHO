@@ -35,6 +35,7 @@ _ERRORS = frozenset(
         "mail_operation_active",
         "mail_mode_conflict",
         "mail_execution_invalid_consent",
+        "mail_prerequisites_expired",
     }
 )
 

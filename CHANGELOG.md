@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Hosting service pages show cached mail enrollment, verification and pending-operation status, with the standard implicit-TLS connection ports.
+- Hosting service pages show cached mail enrollment, verification and pending-operation status, with the standard implicit-TLS connection ports. Cancelled enrollment requests explain when setup prerequisites timed out and that the owner can request enrollment again.
 
 - **Customer DNS zones can be imported, reviewed and managed in the Portal.** A complete zone-file preview preserves external mail and verification records, shows managed website changes, and withholds nameserver instructions until the confirmed inventory is published and checked. Owners and technical contacts can edit supported records; all active members can read and export. Hosting moves carry managed web records with their TTL evidence, while unrelated DNS survives hosting termination. Whole-zone deletion requires a current export and independently verified move to another DNS provider.
 

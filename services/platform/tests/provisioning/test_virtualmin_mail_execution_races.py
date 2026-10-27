@@ -3,6 +3,8 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from unittest.mock import patch
 
 from django.db import close_old_connections, connection, transaction
 from django.test import TransactionTestCase, override_settings
@@ -101,4 +103,37 @@ class MailExecutionPostgresRaceTests(MailExecutionFixture, TransactionTestCase):
         self.assertEqual(self.operation.checkpoint, "preflight")
         self.assertEqual(self.operation.result["evidence"], {"domain_id": "123456"})
         self.assertIsNone(self.operation.lease_token)
+        self.assertEqual(self.operation.configuration.mode, "external")
+
+    def defer_preparation(self):
+        return execution.defer_mail_preparation(
+            self.operation.pk,
+            generation=self.operation.target_generation,
+            reason="mail_node_certificate_unproven",
+        )
+
+    def test_preparation_expiry_wins_before_a_waiting_execution_claim(self):
+        when = self.operation.created_at + timedelta(days=1)
+        with patch.object(execution.timezone, "now", return_value=when):
+            expired, claimed = self._race(
+                self.defer_preparation, lambda: execution.claim_mail_operation(self.operation.pk)
+            )
+        self.assertEqual(expired.unwrap(), "cancelled")
+        self.assertEqual(claimed.unwrap_err(), "mail_execution_not_queued")
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.status, "cancelled")
+        self.assertIsNone(self.operation.lease_token)
+        self.assertEqual(self.operation.configuration.mode, "external")
+
+    def test_preparation_expiry_cannot_cancel_an_execution_claim_that_won_the_account_lock(self):
+        when = self.operation.created_at + timedelta(days=1)
+        with patch.object(execution.timezone, "now", return_value=when):
+            claimed, expired = self._race(
+                lambda: execution.claim_mail_operation(self.operation.pk), self.defer_preparation
+            )
+        self.assertTrue(claimed.is_ok(), claimed)
+        self.assertEqual(expired.unwrap_err(), "mail_execution_busy")
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.status, "running")
+        self.assertEqual(self.operation.lease_token, claimed.unwrap().token)
         self.assertEqual(self.operation.configuration.mode, "external")
