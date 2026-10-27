@@ -8,9 +8,9 @@ after a Name. Unchanged identity fields are omitted from incidental full saves.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Collection, Iterable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
@@ -24,6 +24,29 @@ OwnedModel = TypeVar("OwnedModel", bound=models.Model)
 OwnershipKind = Literal["service", "account"]
 _MISSING = object()
 _SAVE_POSITIONAL = ("force_insert", "force_update", "using", "update_fields")
+_SAVE_FIELD_INTENT = "_dns_save_field_intent"
+
+
+def save_field_intent(instance: models.Model, fallback: Collection[str] | None) -> Collection[str] | None:
+    """Signal consumers observe the caller's write intent, before ownership SQL filtering."""
+    return cast("Collection[str] | None", instance.__dict__.get(_SAVE_FIELD_INTENT, fallback))
+
+
+def _save_with_field_intent(
+    instance: models.Model,
+    save: Callable[..., None],
+    kwargs: dict[str, Any],
+    intent: Collection[str] | None,
+) -> None:
+    previous = instance.__dict__.get(_SAVE_FIELD_INTENT, _MISSING)
+    instance.__dict__[_SAVE_FIELD_INTENT] = intent
+    try:
+        save(**kwargs)
+    finally:
+        if previous is _MISSING:
+            instance.__dict__.pop(_SAVE_FIELD_INTENT, None)
+        else:
+            instance.__dict__[_SAVE_FIELD_INTENT] = previous
 
 
 def _field(kind: OwnershipKind) -> str:
@@ -158,9 +181,10 @@ def save_with_ownership(
     if fields is not None:
         fields = set(fields)
         kwargs["update_fields"] = fields
+    intent = fields
     desired = instance.__dict__.get(attribute, _MISSING)
     if (fields is not None and not {field, attribute}.intersection(fields)) or desired is _MISSING:
-        save(**kwargs)
+        _save_with_field_intent(instance, save, kwargs, intent)
         return
     loaded = instance.__dict__.get(_snapshot_key(kind), _MISSING)
     if not instance._state.adding and desired == loaded:
@@ -172,7 +196,7 @@ def save_with_ownership(
                 if not item.primary_key and item.attname not in instance.get_deferred_fields()
             }
         kwargs["update_fields"] = fields - {field, attribute}
-        save(**kwargs)
+        _save_with_field_intent(instance, save, kwargs, intent)
         return
     using = kwargs.get("using") or router.db_for_write(type(instance), instance=instance)
     source = _services(using) if kind == "service" else _accounts(using)
@@ -180,12 +204,12 @@ def save_with_ownership(
         source.filter(pk=instance.pk).values_list(attribute, flat=True).first() if instance.pk is not None else None
     )
     if current is None:
-        save(**kwargs)
+        _save_with_field_intent(instance, save, kwargs, intent)
         remember_ownership(instance, kind)
         return
     expected = current if loaded is _MISSING else loaded
     with _fence(kind, {instance.pk: expected}, (_identity(desired),), using):
-        save(**kwargs)
+        _save_with_field_intent(instance, save, kwargs, intent)
     remember_ownership(instance, kind)
 
 

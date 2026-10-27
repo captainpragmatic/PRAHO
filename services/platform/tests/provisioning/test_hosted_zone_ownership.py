@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, models, transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 
+from apps.audit.models import AuditEvent
 from apps.customers.models import Customer
 from apps.domains.dns_zone_import import make_record_data
 from apps.domains.dns_zone_models import HostedZone, HostedZoneRecord
@@ -33,6 +34,15 @@ from tests.provisioning.test_managed_customer_dns import MemoryZoneGateway
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
 class HostedZoneOwnershipTests(TestCase):
+    @override_settings(DISABLE_AUDIT_SIGNALS=False)
+    def test_full_account_save_keeps_general_audit_without_inventing_a_server_move(self):
+        self.account.set_password("ownership-audit-test-password")
+        self.account.save()
+        actions = list(AuditEvent.objects.filter(object_id=str(self.account.pk)).values_list("action", flat=True))
+        self.assertEqual(actions.count("virtualmin_account_updated"), 1)
+        self.assertNotIn("virtualmin_account_server_migrated", actions)
+        self.assertNotIn("virtualmin_account_status_changed", actions)
+
     def setUp(self):
         self.account, self.hostname, _actor = hosting_fixture()
         self.service = self.account.service
