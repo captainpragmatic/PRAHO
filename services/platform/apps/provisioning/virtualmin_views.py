@@ -440,6 +440,7 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
 @monitor_performance(max_duration_seconds=5.0, alert_threshold=2.0)
 def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResponse:
     """📋 Detailed view of a specific Virtualmin account."""
+    from .migration_optional_aliases import declared_independent_names, optional_alias_names  # noqa: PLC0415
 
     account = get_object_or_404(
         VirtualminAccount.objects.select_related("server", "service", "service__customer"), id=account_id
@@ -464,6 +465,10 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         {"text": account.domain},  # Current page - no URL
     ]
 
+    bridge = migration.bridge if migration is not None and hasattr(migration, "bridge") else None
+    frontend_names = bridge.evidence.get("dns_names", []) if bridge is not None else []
+    independent_names = declared_independent_names(bridge, frontend_names, timezone.now()) if bridge is not None else []
+    optional_names = optional_alias_names(bridge, frontend_names) if bridge is not None else []
     context = {
         "page_title": f"Account: {account.domain}",
         "account": account,
@@ -480,7 +485,9 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "can_backup": account.is_active,
         "can_restore": len(recent_backups) > 0,
         "migration": migration,
-        "migration_bridge": migration.bridge if migration is not None and hasattr(migration, "bridge") else None,
+        "migration_bridge": bridge,
+        "independent_alias_options": [{"value": name, "label": name} for name in optional_names],
+        "bridge_target_origin_names": [name for name in frontend_names if name not in independent_names],
         "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
@@ -599,7 +606,10 @@ def virtualmin_bridge_control(request: HttpRequest, account_id: str) -> HttpResp
         bridge.migration_id,
         action=request.POST.get("action", ""),
         actor=cast(User, request.user),
-        attestation={key: request.POST.get(key, "") for key in ("note", "target_id", "ipv4", "ipv6")},
+        attestation={
+            key: request.POST.get(key, "target_origin" if key == "kind" else "")
+            for key in ("note", "target_id", "ipv4", "ipv6", "kind", "names")
+        },
     )
     if result.is_ok():
         messages.success(request, _("Bridge updated. Refresh this page for cleanup progress."))

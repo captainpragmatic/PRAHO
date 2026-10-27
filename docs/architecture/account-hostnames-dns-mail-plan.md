@@ -71,9 +71,9 @@ Review findings to close, each with a failing regression and recorded green resu
 | Encrypted bridge, aliases, full chain and neutral-default ordering | Real two-node contract green, including continued traffic after source deletion |
 | Bridge lifecycle audit coverage | Audit/scanner/model suite: 27 tests green |
 | Audit scanner respects lexical scopes | Two scope regressions reproduced; scanner tests green |
-| New bridge migration checksum matches its file | 0014 digest corrected; final manifest/schema gate pending new recovery migration |
-| Bridge playbook has production-path lab coverage | Focused two-node contract passed in 203.92 seconds; full contract rerun remains |
-| A restored target stays held before ownership commits | Shared disabled-placeholder restore; real Unix-lock proof passed; database identity proof is being rerun |
+| New bridge migration checksum matches its file | 0014 digest corrected; 115 checksums and both service schema checks passed |
+| Bridge playbook has production-path lab coverage | Full real-node contract: 37 cases passed in 1512.66 seconds, including active and suspended cutovers and recovery |
+| A restored target stays held before ownership commits | Real Unix-lock proof, archived application database login and grants, suspension and activation replay passed |
 | Native API children count as running operations during cleanup | Remote CGI and argument-free native-child regressions green; CLI commands for other domains remain independent |
 | Cancellation arriving during bridge preparation cannot commit | Fresh-row cancellation regression green; compensation runs outside the ownership transaction |
 | A fenced, unavailable source cannot trap an already committed cutover | Audited staff-only fencing control; target-only convergence regression green; failed bridge retains separate cleanup exclusion |
@@ -82,6 +82,8 @@ Review findings to close, each with a failing regression and recorded green resu
 | Completed or conclusively abandoned moves remove temporary transport data | UUID-scoped archive and private target-data cleanup, retryable per location, permanent replay markers retained |
 | Backup recovery keeps current billing quotas | Two regressions reproduced; current quotas reapplied on target before ownership commits; 32 neighboring checks green |
 | Recovery refuses a missing account name before changing nodes | Admission regression green; source remains eligible when admission is refused |
+| Cancellation and completed releases survive replay and reboot | Source/pair script suites: 59 tests with 38 subtests; additional bridge/pair batch: 59 tests with 17 subtests |
+| External webmail/admin aliases do not require a false target-origin statement | Explicit independent-service declarations, fresh route/cache checks and historical source-IP guards; 52 tests green |
 
 The audit CI failures mentioning `virtualmin_migration_apply` and
 `virtualmin_migration_verify` are scanner false positives: unrelated barrier loop
@@ -98,10 +100,10 @@ The retained frontend certificates bound the bridge deadline and any staff exten
 
 Recovery uses a disabled placeholder and the existing-domain restore path, with Unix
 restore excluded and the inherited maintenance barrier retained until ownership commits.
-Review against Virtualmin 8.3 identified additional gates: restore the archive's Unix
+Review against Virtualmin 8.3 established additional gates: restore the archive's Unix
 hash through native `modify_unix` so `disabled_oldpass` is correct, use reversible native
 cron markers, and persist node activation before exposing the target so replay cannot
-overwrite a customer's new cron. These recovery gates require their own lab proof.
+overwrite a customer's new cron. These recovery gates passed their real-node checks.
 
 Native existing-domain restore also creates database users from the placeholder's domain
 metadata. Before activation, the target therefore needs the archived native credential metadata

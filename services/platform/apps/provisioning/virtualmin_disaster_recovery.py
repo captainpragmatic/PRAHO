@@ -64,7 +64,7 @@ class VirtualminDisasterRecoveryService:
             logger.warning(f"⚠️ [DisasterRecovery] Refused a real rebuild of {target_server.hostname}: dry run only")
             return Err(
                 "Rebuilding a server from PRAHO data recreates empty domains and loses the customers' "
-                "data. Use virtualmin_recover_node for backup-based recovery; this legacy rebuild is dry-run only."
+                "data. Use virtualmin_recover_node for backup-based recovery; this legacy rebuild supports a dry run only."
             )
         return self._legacy_rebuild(target_server, dry_run=True)
 

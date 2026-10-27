@@ -89,6 +89,21 @@ def _ipv4(server: VirtualminServer) -> str:
     return str(address)
 
 
+def _known_source_addresses(bridge: MigrationBridge) -> set[str]:
+    """A node address change cannot turn any recorded source address into an external origin."""
+    addresses = [_ipv4(bridge.source_server)]
+    if bridge.source_server.ipv6_address:
+        addresses.append(bridge.source_server.ipv6_address)
+    snapshots = bridge.evidence.get("frontend_dns_before", {})
+    if not isinstance(snapshots, dict):
+        raise ValueError("The recorded source address history is invalid")
+    for snapshot in snapshots.values():
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("source_addresses", []), list):
+            raise ValueError("The recorded source address history is invalid")
+        addresses.extend(snapshot.get("source_addresses", []))
+    return {str(ipaddress.ip_address(address)) for address in addresses}
+
+
 def snapshot_frontends(migration: VirtualminMigration, names: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     """Capture old cache bounds before commit; a later shorter TTL never erases an earlier bound."""
     from .account_hostname_models import AccountHostname  # noqa: PLC0415
@@ -105,7 +120,17 @@ def snapshot_frontends(migration: VirtualminMigration, names: tuple[str, ...]) -
         ttl = _snapshot_ttl(observed)
         if "ttl" in previous:
             ttl = max(ttl, _ttl(previous["ttl"]))
-        saved[name] = {"ttl": ttl, "checked_at": timezone.now().isoformat(), "observation": asdict(observed)}
+        source_addresses = [
+            *previous.get("source_addresses", []),
+            _ipv4(source),
+            *([source.ipv6_address] if source.ipv6_address else []),
+        ]
+        saved[name] = {
+            "ttl": ttl,
+            "checked_at": timezone.now().isoformat(),
+            "observation": asdict(observed),
+            "source_addresses": sorted({str(ipaddress.ip_address(address)) for address in source_addresses}),
+        }
     return saved
 
 
@@ -126,7 +151,7 @@ def prepare_frontend_snapshot(migration: VirtualminMigration, preparation: Bridg
     }
 
 
-def _attested(bridge: MigrationBridge, names: list[str], agreement: Agreement, now: datetime) -> bool:
+def _attested(bridge: MigrationBridge, names: list[str], name: str, agreement: Agreement, now: datetime) -> bool:
     """Only a current staff statement about opaque external origins may supplement DNS evidence."""
     statement = bridge.evidence.get("routing_attestation")
     if not isinstance(statement, dict):
@@ -141,6 +166,7 @@ def _attested(bridge: MigrationBridge, names: list[str], agreement: Agreement, n
         or statement.get("ipv4") != _ipv4(bridge.target_server)
         or statement.get("ipv6") != (bridge.target_server.ipv6_address or "")
         or statement.get("names") != sorted(names)
+        or name not in statement.get("covered_names", names)
     ):
         return False
     # A statement cannot override records that demonstrably still publish this source,
@@ -153,16 +179,14 @@ def _attested(bridge: MigrationBridge, names: list[str], agreement: Agreement, n
         return False
     try:
         addresses = {ipaddress.ip_address(address) for answer in agreement.answers for address in answer.addresses}
-        source_addresses = {ipaddress.ip_address(_ipv4(bridge.source_server))}
-        if bridge.source_server.ipv6_address:
-            source_addresses.add(ipaddress.ip_address(bridge.source_server.ipv6_address))
+        source_addresses = _known_source_addresses(bridge)
     except ValueError:
         return False
     return (
         bool(addresses)
         and all(address.is_global for address in addresses)
         and not any(answer.error for answer in agreement.answers)
-        and not (addresses & source_addresses)
+        and not ({str(address) for address in addresses} & source_addresses)
     )
 
 
@@ -170,6 +194,8 @@ def observe_frontends(
     bridge: MigrationBridge, *, now: datetime | None = None
 ) -> tuple[dict[str, dict[str, Any]], list[str]]:
     """Require fresh routing and age each old frontend TTL after its first target confirmation."""
+    from .migration_optional_aliases import independent_service_matches  # noqa: PLC0415
+
     checked = now or timezone.now()
     try:
         names = _inventory(bridge.evidence.get("dns_names", []))
@@ -195,6 +221,7 @@ def observe_frontends(
                 "confirmed_at": None,
                 "cache_until": None,
                 "attested": False,
+                "independent_service": False,
                 "observation": asdict(agreement),
             }
             errors.append(f"{name}: {error}")
@@ -202,8 +229,11 @@ def observe_frontends(
         # A stale answer can expose a larger cache bound than the precommit snapshot.
         if not agreement.agreed and agreement.ttl is not None:
             ttl = max(ttl, _ttl(agreement.ttl))
-        attested = not agreement.agreed and _attested(bridge, names, agreement, checked)
-        verified = agreement.agreed or attested
+        independent = not agreement.agreed and independent_service_matches(
+            bridge, names, name, asdict(agreement), checked
+        )
+        attested = not agreement.agreed and not independent and _attested(bridge, names, name, agreement, checked)
+        verified = agreement.agreed or attested or independent
         confirmed = (_date(prior.get("confirmed_at")) or checked) if verified else None
         until = confirmed + timedelta(seconds=ttl) if confirmed is not None else None
         results[name] = {
@@ -213,6 +243,7 @@ def observe_frontends(
             "confirmed_at": confirmed.isoformat() if confirmed else None,
             "cache_until": until.isoformat() if until else None,
             "attested": attested,
+            "independent_service": independent,
             "observation": asdict(agreement),
         }
         if not verified:
@@ -234,7 +265,9 @@ def _attestation_expiry(bridge: MigrationBridge, names: list[str]) -> datetime:
     return expires
 
 
-def attest_proxy_origin(bridge: MigrationBridge, actor: User | None, fields: Mapping[str, str]) -> Result[None, str]:
+def attest_proxy_origin(  # noqa: PLR0911  # Staff, ownership and distinct routing-proof refusals
+    bridge: MigrationBridge, actor: User | None, fields: Mapping[str, str]
+) -> Result[None, str]:
     """Record a staff inspection bound to this target, its current addresses, and the complete inventory.
 
     Caller holds the bridge row lock and has excluded cleanup workers. The statement supplements
@@ -243,10 +276,18 @@ def attest_proxy_origin(bridge: MigrationBridge, actor: User | None, fields: Map
     from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
 
     from .account_hostname_models import AccountHostname  # noqa: PLC0415
+    from .migration_optional_aliases import (  # noqa: PLC0415
+        declared_independent_names,
+        independent_statement_evidence,
+        prepare_independent_statement,
+    )
     from .virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
 
     if actor is None or not (actor.is_staff or actor.is_superuser):
         return Err("Only staff may attest an external proxy origin")
+    kind = fields.get("kind", "target_origin")
+    if kind not in {"target_origin", "optional_alias"}:
+        return Err("This routing declaration is not supported")
     try:
         names = _inventory(bridge.evidence.get("dns_names", []))
     except ValueError as error:
@@ -268,23 +309,39 @@ def attest_proxy_origin(bridge: MigrationBridge, actor: User | None, fields: Map
         expires = _attestation_expiry(bridge, names)
     except ValueError as error:
         return Err(str(error))
-    statement = {
+    now = timezone.now()
+    statement: dict[str, Any] = {
         "actor": str(actor.pk),
         "note": note,
         "target_id": str(target.pk),
         "ipv4": _ipv4(target),
         "ipv6": target.ipv6_address or "",
         "names": names,
-        "checked_at": timezone.now().isoformat(),
+        "checked_at": now.isoformat(),
         "expires_at": expires.isoformat(),
     }
-    bridge.evidence = {**bridge.evidence, "routing_attestation": statement}
+    if kind == "optional_alias":
+        prepared = prepare_independent_statement(bridge, names, fields, statement, now)
+        if prepared.is_err():
+            return Err(prepared.unwrap_err())
+        statement = prepared.unwrap()
+        bridge.evidence = independent_statement_evidence(bridge, statement)
+        description = "Staff verified an independent optional service and its unchanged external routing"
+    else:
+        independent = declared_independent_names(bridge, names, now)
+        statement = {
+            **statement,
+            "kind": "target_origin",
+            "covered_names": [name for name in names if name not in independent],
+        }
+        bridge.evidence = {**bridge.evidence, "routing_attestation": statement}
+        description = "Staff verified the external proxy origin for the committed target"
     bridge.save(update_fields=["evidence", "updated_at"])
     AuditService.log_event(
         AuditEventData(
             event_type="virtualmin_bridge_origin_attested",
             content_object=bridge,
-            description="Staff verified the external proxy origin for the committed target",
+            description=description,
             new_values=statement,
         ),
         AuditContext(user=actor, actor_type="user", metadata={"source_app": "provisioning"}),

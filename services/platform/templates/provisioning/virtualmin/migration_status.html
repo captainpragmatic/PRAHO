@@ -86,7 +86,7 @@
       {% if migration_bridge.evidence.last_error %}<p class="text-amber-300">{{ migration_bridge.evidence.last_error }}</p>{% endif %}
       {% for name, progress in migration_bridge.evidence.routing.items %}
         <div class="rounded border border-slate-600 p-2 text-sm">
-          <p>{{ name }}: {% if progress.agreed %}{% trans "Target routing confirmed" %}{% else %}{% trans "Customer DNS still needs verification" %}{% endif %}</p>
+          <p>{{ name }}: {% if progress.independent_service %}{% trans "Independent service verified" %}{% elif progress.agreed %}{% trans "Target routing confirmed" %}{% else %}{% trans "Customer DNS still needs verification" %}{% endif %}</p>
           {% if progress.cache_until %}<p>{% trans "Old DNS cache wait ends:" %} {{ progress.cache_until }}</p>{% endif %}
           {% if progress.attested %}<p>{% trans "External proxy origin verified by staff." %}</p>{% endif %}
           {% if progress.observation.detail %}<p>{{ progress.observation.detail }}</p>{% endif %}
@@ -104,14 +104,33 @@
         <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
           {% csrf_token %}
           <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+          <input type="hidden" name="kind" value="target_origin">
           <input type="hidden" name="target_id" value="{{ migration_bridge.target_server_id }}">
           <input type="hidden" name="ipv4" value="{{ migration_bridge.target_server.ipv4_address|default_if_none:'' }}">
           <input type="hidden" name="ipv6" value="{{ migration_bridge.target_server.ipv6_address|default_if_none:'' }}">
-          <p class="text-sm">{% trans "If customer DNS uses an external proxy, inspect its origin settings and confirm that every listed frontend forwards to this target. DNS errors and records still pointing at the source cannot be overridden." %}</p>
+          <p class="text-sm">{% trans "If customer DNS uses an external proxy, inspect its origin settings and confirm that each account frontend below forwards to this target. Independently declared optional services are recorded separately. DNS errors and records still pointing at the source cannot be overridden." %}</p>
+          <p class="text-sm">{% for name in bridge_target_origin_names %}{{ name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
           {% trans "External origin inspection evidence" as origin_note_label %}
           {% input_field "note" input_type="textarea" html_id="bridge-origin-note" label=origin_note_label required=True maxlength=1000 %}
           {% trans "Attest external proxy origin" as attest_label %}{% button attest_label type="submit" variant="warning" attrs='name="action" value="attest"' %}
         </form>
+        {% if independent_alias_options %}
+          <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+            <input type="hidden" name="kind" value="optional_alias">
+            <input type="hidden" name="target_id" value="{{ migration_bridge.target_server_id }}">
+            <input type="hidden" name="ipv4" value="{{ migration_bridge.target_server.ipv4_address|default_if_none:'' }}">
+            <input type="hidden" name="ipv6" value="{{ migration_bridge.target_server.ipv6_address|default_if_none:'' }}">
+            <h3 class="font-semibold">{% trans "Independent optional service" %}</h3>
+            <p class="text-sm">{% trans "Inspect the service provider's settings and confirm that this optional hostname serves an independent service. Its complete pre-migration routing and a DNS observation from the last 15 minutes must support the declaration. Every cleanup checks the declared route again; source addresses and DNS errors keep the bridge in place." %}</p>
+            {% trans "Optional service hostname" as independent_name_label %}
+            {% input_field "names" input_type="select" html_id="bridge-independent-name" options=independent_alias_options label=independent_name_label required=True %}
+            {% trans "Independent service inspection evidence" as independent_note_label %}
+            {% input_field "note" input_type="textarea" html_id="bridge-independent-note" label=independent_note_label required=True maxlength=1000 %}
+            {% trans "Declare independent service" as independent_label %}{% button independent_label type="submit" variant="warning" attrs='name="action" value="attest"' %}
+          </form>
+        {% endif %}
       {% endif %}
     {% endif %}
   </section>
