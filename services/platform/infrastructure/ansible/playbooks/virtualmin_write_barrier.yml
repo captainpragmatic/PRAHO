@@ -51,6 +51,12 @@
         group: root
         mode: '0700'
 
+    - name: Install the root-private read-only Apache binding reader
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
     - name: Run the barrier action under the per-domain migration lock
       ansible.builtin.script:
         cmd: files/praho-write-barrier.sh

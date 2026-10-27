@@ -7,9 +7,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shlex
+import stat
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -25,6 +28,7 @@ HELPER = Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files/praho
 BRIDGE_ID = "11111111-2222-4333-8444-555555555555"
 SECOND_ID = "99999999-2222-4333-8444-555555555555"
 DOMAIN = "shop.example.com"
+ACCOUNT_NAME = "h7k3p2q8.accounts.example.net"
 ORIGIN = "bridge-" + BRIDGE_ID.replace("-", "") + ".invalid"
 
 
@@ -45,6 +49,21 @@ class BridgeNodeTests(SimpleTestCase):
                 return subprocess.run(argv, text=True, capture_output=True, check=True).stdout  # noqa: S603
             if argv[0] == "curl" and "--write-out" in argv:
                 return "404"
+            if argv[:2] == ["ip", "-j"]:
+                return json.dumps(
+                    [
+                        {
+                            "addr_info": [
+                                {"local": "127.0.0.1"},
+                                {"local": "192.0.2.20"},
+                                {"local": "192.0.2.10"},
+                                {"local": "2001:db8::20"},
+                            ]
+                        }
+                    ]
+                )
+            if argv[:3] == ["ss", "-H", "-lnt"]:
+                return "LISTEN 0 511 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 511 0.0.0.0:443 0.0.0.0:*\nLISTEN 0 511 [::]:80 [::]:*\nLISTEN 0 511 [::]:443 [::]:*\n"
             return ""
 
         self.node = self.module.NodeBridge(self.root, execute=command)
@@ -81,6 +100,322 @@ class BridgeNodeTests(SimpleTestCase):
             f"<VirtualHost *:443>\nServerName {DOMAIN}\nServerAlias www.{DOMAIN}\nSSLEngine on\n"
             f"SSLCertificateFile {self.certificate}\nSSLCertificateKeyFile {self.key}\n</VirtualHost>\n"
         )
+
+    def add_account_name_site(self) -> None:
+        key = serialization.load_pem_private_key(self.key.read_bytes(), password=None)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, ACCOUNT_NAME)])
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(UTC) - timedelta(minutes=1))
+            .not_valid_after(datetime.now(UTC) + timedelta(days=30))
+            .add_extension(
+                x509.SubjectAlternativeName([x509.DNSName(ACCOUNT_NAME), x509.DNSName(f"www.{ACCOUNT_NAME}")]),
+                False,
+            )
+            .sign(key, hashes.SHA256())
+        )
+        self.account_certificate = self.certificate.with_name("account-chain.pem")
+        self.account_certificate.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        self.account_site = self.node.sites / f"{ACCOUNT_NAME}.conf"
+        self.account_site.write_text(
+            f"<VirtualHost *:80>\nServerName {ACCOUNT_NAME}\nServerAlias www.{ACCOUNT_NAME}\n</VirtualHost>\n"
+            f"<VirtualHost *:443>\nServerName {ACCOUNT_NAME}\nServerAlias www.{ACCOUNT_NAME}\nSSLEngine on\n"
+            f"SSLCertificateFile {self.account_certificate}\nSSLCertificateKeyFile {self.key}\n</VirtualHost>\n"
+        )
+
+    def test_source_and_target_use_their_own_native_address_groups_and_real_http_backend(self) -> None:
+        self.site.write_text(self.site.read_text().replace("*:80", "192.0.2.10:80").replace("*:443", "192.0.2.10:443"))
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.assertEqual([item["bindings"] for item in manifest["vhosts"]], [["192.0.2.10"], ["192.0.2.10"]])
+        self.site.write_text(self.site.read_text().replace("192.0.2.10", "192.0.2.20"))
+        certificate = self.node.install_origin(BRIDGE_ID, manifest)
+        origin = (self.node.conf / f"praho-origin-{BRIDGE_ID}.conf").read_text()
+        self.assertIn("192.0.2.20:443", origin)
+        self.assertIn("http://192.0.2.20:80/", origin)
+        self.assertNotIn("192.0.2.10:443", origin)
+        self.node.install_source(BRIDGE_ID, certificate)
+        source = (self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").read_text()
+        self.assertIn("<VirtualHost 192.0.2.10:80>", source)
+        self.assertIn("<VirtualHost 192.0.2.10:443>", source)
+        self.site.unlink()
+        self.node.install_source(BRIDGE_ID, certificate)
+        self.assertEqual(source, (self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").read_text())
+        self.node.execute = Mock(side_effect=self.neutral_response)
+        self.node.verify(BRIDGE_ID)
+        probes = [call.args[0] for call in self.node.execute.call_args_list if "--dump-header" in call.args[0]]
+        self.assertTrue(probes)
+        self.assertTrue(
+            all(any(f":{port}:192.0.2.10" in value for value in argv for port in (80, 443)) for argv in probes)
+        )
+
+    def test_ipv6_target_http_backend_is_bracketed_and_changed_target_binding_is_refused(self) -> None:
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.site.write_text(
+            self.site.read_text().replace("*:80", "[2001:db8::20]:80").replace("*:443", "[2001:db8::20]:443")
+        )
+        self.node.install_origin(BRIDGE_ID, manifest)
+        origin = (self.node.conf / f"praho-origin-{BRIDGE_ID}.conf").read_text()
+        self.assertIn("http://[2001:db8::20]:80/", origin)
+        self.site.write_text(self.site.read_text().replace("[2001:db8::20]", "192.0.2.20"))
+        with self.assertRaisesRegex(ValueError, "binding"):
+            self.node.install_origin(BRIDGE_ID, manifest)
+
+    def test_failed_config_transaction_keeps_every_private_pem_referenced_by_the_restored_bridge(self) -> None:
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
+        directory = self.node.directory(BRIDGE_ID)
+        before = {path: path.read_bytes() for path in directory.glob("*.pem")}
+        original = self.node.bindings().transaction
+
+        @contextmanager
+        def fail_after_operation(*args, **kwargs):
+            with original(*args, **kwargs):
+                yield
+                raise ValueError("Observed dispatcher failure before transaction commit")
+
+        with (
+            patch.object(self.node.bindings(), "transaction", fail_after_operation),
+            self.assertRaisesRegex(ValueError, "dispatcher"),
+        ):
+            self.node.remove_source(BRIDGE_ID)
+        self.assertTrue((self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").exists())
+        self.assertEqual(set(directory.glob("*.pem")), set(before))
+        for path, content in before.items():
+            self.assertTrue(path.read_bytes() == content, "A UUID-owned PEM changed during refused teardown")
+
+    def test_source_teardown_reclaims_private_pems_after_commit_and_manifest_loss(self) -> None:
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
+        self.node.prepare(SECOND_ID, DOMAIN, "", "192.0.2.30", "192.0.2.10")
+        adjacent = self.node.directory(SECOND_ID)
+        kept = {path.name for path in adjacent.glob("*.pem")}
+        directory = self.node.directory(BRIDGE_ID)
+        note = directory / "operator-note.txt"
+        note.write_text("Keep unrelated state")
+        with (
+            patch.object(self.node, "pin_origin", side_effect=OSError("Observed interruption after config commit")),
+            self.assertRaisesRegex(OSError, "interruption"),
+        ):
+            self.node.remove_source(BRIDGE_ID)
+        self.assertFalse((self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").exists())
+        self.assertTrue((directory / "source-removed").exists())
+        self.assertTrue(list(directory.glob("source-*-key.pem")))
+        (directory / "source.json").unlink()  # A resumed terminal cleanup must not depend on the manifest.
+        self.node.remove_source(BRIDGE_ID)
+        self.assertFalse(list(directory.glob("source-*-*.pem")))
+        self.assertFalse((directory / "upstream-ca.pem").exists())
+        self.assertNotIn(self.node.origin_hostname(BRIDGE_ID), self.node.hosts.read_text())
+        self.assertEqual({path.name for path in adjacent.glob("*.pem")}, kept)
+        self.assertEqual(note.read_text(), "Keep unrelated state")
+
+    def test_retirement_marker_and_directory_are_fsynced_before_any_owned_pem_is_pruned(self) -> None:
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
+        directory = self.node.directory(BRIDGE_ID)
+        real_sync, real_unlink = os.fsync, Path.unlink
+        for role, retire in (("source", self.node.remove_source), ("origin", self.node.remove_origin)):
+            with self.subTest(role=role):
+                marker = directory / f"{role}-removed"
+                events = []
+                flushed_files = set()
+
+                def observe_sync(descriptor, marker=marker, events=events, flushed_files=flushed_files):
+                    info = os.fstat(descriptor)
+                    if stat.S_ISREG(info.st_mode):
+                        flushed_files.add((info.st_dev, info.st_ino))
+                    if marker.exists() and stat.S_ISDIR(info.st_mode) and info.st_ino == directory.stat().st_ino:
+                        # Atomic writes fsync their temporary inode before rename.
+                        # Bind that inode to the final marker at the directory flush.
+                        actual = marker.stat()
+                        self.assertIn((actual.st_dev, actual.st_ino), flushed_files)
+                        events.append("marker_directory")
+                    return real_sync(descriptor)
+
+                def observe_unlink(path, *args, events=events, **kwargs):
+                    if path.parent == directory and path.suffix == ".pem":
+                        self.assertIn("marker_directory", events, "Retirement was not durable before PEM pruning")
+                        events.append("pem_pruned")
+                    return real_unlink(path, *args, **kwargs)
+
+                with patch.object(os, "fsync", observe_sync), patch.object(Path, "unlink", observe_unlink):
+                    retire(BRIDGE_ID)
+                self.assertIn("pem_pruned", events)
+
+    def test_origin_teardown_reclaims_keys_after_config_commit_and_manifest_loss(self) -> None:
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
+        self.node.install_origin(BRIDGE_ID, manifest)
+        directory = self.node.directory(BRIDGE_ID)
+        original = Path.unlink
+
+        def interrupted(path, *args, **kwargs):
+            if path == directory / "origin.json":
+                raise OSError("Observed origin cleanup interruption")
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", interrupted), self.assertRaisesRegex(OSError, "interruption"):
+            self.node.remove_origin(BRIDGE_ID)
+        self.assertFalse((self.node.conf / f"praho-origin-{BRIDGE_ID}.conf").exists())
+        self.assertTrue((directory / "origin-removed").exists())
+        self.assertTrue((directory / "origin-key.pem").exists())
+        (directory / "origin.json").unlink()
+        self.node.remove_origin(BRIDGE_ID)
+        self.assertFalse((directory / "origin-key.pem").exists())
+        self.assertFalse((directory / "origin.pem").exists())
+
+    def neutral_response(self, argv: list[str]) -> str:
+        if ACCOUNT_NAME in argv[-1]:
+            return "Not Found\n404"
+        if "--dump-header" in argv:
+            return f"HTTP/1.1 200 OK\nX-Praho-Bridge: {BRIDGE_ID}\n"
+        return "403" if "--write-out" in argv else BRIDGE_ID
+
+    def test_preparation_keeps_account_name_dns_and_certificate_but_marks_its_aliases_neutral(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        self.assertEqual(manifest.get("account_name"), ACCOUNT_NAME)
+        self.assertEqual(len(manifest["vhosts"]), 4)
+        for item in manifest["vhosts"]:
+            self.assertIs(item["neutral"], item["name"] == ACCOUNT_NAME)
+            if item["name"] == ACCOUNT_NAME:
+                self.assertEqual(item["names"], [ACCOUNT_NAME, f"www.{ACCOUNT_NAME}"])
+                if item["port"] == 443:
+                    self.assertEqual(Path(item["certificate"]).read_bytes(), self.account_certificate.read_bytes())
+                    self.assertEqual(Path(item["key"]).read_bytes(), self.key.read_bytes())
+        self.node.minimum_certificate_lifetime = 31 * 24 * 3600
+        with self.assertRaisesRegex(ValueError, "expires"):
+            self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+
+    def test_source_account_name_vhosts_remain_fixed_neutral_after_native_child_and_guard_are_gone(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
+        self.account_site.unlink()
+        self.account_certificate.unlink()
+        self.key.unlink()
+        conf = (self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").read_text()
+        blocks = re.findall(r"<VirtualHost[^>]+>(.*?)</VirtualHost>", conf, re.S)
+        self.assertEqual(len(blocks), 4)
+        for item, block in zip(manifest["vhosts"], blocks, strict=True):
+            if item["name"] == ACCOUNT_NAME:
+                self.assertIn("Redirect 404 /", block)
+                self.assertIn('ErrorDocument 404 "Not Found"', block)
+                self.assertNotIn("Proxy", block)
+                self.assertNotIn("RequestHeader", block)
+                if item["port"] == 443:
+                    self.assertIn(f"SSLCertificateFile {item['certificate']}", block)
+                    self.assertTrue(Path(item["certificate"]).is_file())
+            else:
+                self.assertIn("ProxyPass / https://", block)
+
+    def test_neutral_account_names_are_excluded_from_synthetic_origin_allowlist_and_checks(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        certificate = self.node.install_origin(BRIDGE_ID, manifest)
+        conf = (self.node.conf / f"praho-origin-{BRIDGE_ID}.conf").read_text()
+        self.assertNotIn(re.escape(ACCOUNT_NAME), conf)
+        self.assertIn(re.escape(DOMAIN), conf)
+        self.node.execute = Mock(side_effect=self.neutral_response)
+        self.node.verify_origin(BRIDGE_ID, certificate)
+        synthetic = [call.args[0] for call in self.node.execute.call_args_list if ORIGIN in call.args[0][-1]]
+        self.assertEqual(len(synthetic), 2)
+        self.assertEqual(
+            {argv[argv.index("--header") + 1] for argv in synthetic},
+            {f"X-Praho-Original-Host: {DOMAIN}", f"X-Praho-Original-Host: www.{DOMAIN}"},
+        )
+
+    def test_target_and_source_neutral_checks_require_exact_404_body_and_verified_tls(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        certificate = self.node.install_origin(BRIDGE_ID, manifest)
+        self.node.install_source(BRIDGE_ID, certificate)
+        for source, verifier in (
+            (False, lambda: self.node.verify_origin(BRIDGE_ID, certificate)),
+            (True, lambda: self.node.verify(BRIDGE_ID)),
+        ):
+            with self.subTest(verifier=verifier):
+                self.node.execute = Mock(side_effect=self.neutral_response)
+                verifier()
+                neutral = [
+                    call.args[0] for call in self.node.execute.call_args_list if ACCOUNT_NAME in call.args[0][-1]
+                ]
+                self.assertEqual(len(neutral), 16 if source else 4)
+                self.assertEqual({argv[-1].split(":", 1)[0] for argv in neutral}, {"http", "https"})
+                for argv in neutral:
+                    self.assertNotIn("--fail", argv)
+                    self.assertNotIn("--insecure", argv)
+                    self.assertIn("--max-time", argv)
+                    if argv[-1].startswith("https:"):
+                        self.assertIn("--cacert", argv)
+                for scheme in ("http:", "https:"):
+                    for bad in ("customer content\n404", "Not Found\n200", "Not Found\n000", " Not Found\n404"):
+                        with self.subTest(scheme=scheme, response=bad):
+                            self.node.execute = Mock(
+                                side_effect=lambda argv, bad=bad, scheme=scheme: (
+                                    bad
+                                    if ACCOUNT_NAME in argv[-1] and argv[-1].startswith(scheme)
+                                    else self.neutral_response(argv)
+                                )
+                            )
+                            with self.assertRaisesRegex(ValueError, "neutral"):
+                                verifier()
+
+                    def connection_failure(argv: list[str], scheme: str = scheme) -> str:
+                        if ACCOUNT_NAME in argv[-1] and argv[-1].startswith(scheme):
+                            raise subprocess.CalledProcessError(60, ["curl"])
+                        return self.neutral_response(argv)
+
+                    self.node.execute = Mock(side_effect=connection_failure)
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        verifier()
+
+    def test_preparation_upgrades_only_a_legacy_manifest_with_the_exact_captured_account_name(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        manifest.pop("account_name", None)
+        for item in manifest["vhosts"]:
+            item.pop("neutral", None)
+        kept = self.node.directory(BRIDGE_ID) / "source.json"
+        kept.write_text(json.dumps(manifest))
+        upgraded = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        self.assertEqual(upgraded.get("account_name"), ACCOUNT_NAME)
+        self.assertTrue(all(item.get("neutral") for item in upgraded["vhosts"] if item["name"] == ACCOUNT_NAME))
+        self.assertEqual(json.loads(kept.read_text()), upgraded)
+        with self.assertRaisesRegex(ValueError, "account|identity"):
+            self.node.prepare(BRIDGE_ID, DOMAIN, "different.accounts.example.net", "192.0.2.20", "192.0.2.10")
+
+    def test_unbound_legacy_manifest_is_refused_before_any_source_proxy_or_target_origin_reinstall(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        certificate = self.node.install_origin(BRIDGE_ID, manifest)
+        manifest.pop("account_name", None)
+        for item in manifest["vhosts"]:
+            item.pop("neutral", None)
+        (self.node.directory(BRIDGE_ID) / "source.json").write_text(json.dumps(manifest))
+        self.commands.clear()
+        for action in (
+            lambda: self.node.install_source(BRIDGE_ID, certificate),
+            lambda: self.node.install_origin(BRIDGE_ID, manifest),
+            lambda: self.node.verify_origin(BRIDGE_ID, certificate),
+            lambda: self.node.verify(BRIDGE_ID),
+        ):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, "manifest"):
+                action()
+        self.assertEqual(self.commands, [])
+
+    def test_an_already_installed_legacy_source_proxy_is_not_reused_as_a_neutral_bridge(self) -> None:
+        self.add_account_name_site()
+        manifest = self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
+        self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
+        manifest.pop("account_name", None)
+        for item in manifest["vhosts"]:
+            item.pop("neutral", None)
+        (self.node.directory(BRIDGE_ID) / "source.json").write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "legacy|Legacy"):
+            self.node.prepare(BRIDGE_ID, DOMAIN, ACCOUNT_NAME, "192.0.2.20", "192.0.2.10")
 
     def test_source_keeps_full_chain_keys_and_aliases_after_virtualmin_domain_is_deleted(self) -> None:
         manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
@@ -189,7 +524,7 @@ class BridgeNodeTests(SimpleTestCase):
         )
         self.node.verify(BRIDGE_ID)
         calls = self.node.execute.call_args_list
-        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(calls), 18)  # Two origin names plus four source names at four real local addresses.
         for call in calls:
             argv = call.args[0]
             self.assertIn("--max-time", argv)
@@ -267,7 +602,9 @@ class BridgeNodeTests(SimpleTestCase):
                 if name == DOMAIN and "--subservers" in argv:
                     disabled.discard(child)
                 if name == DOMAIN:
-                    self.assertIn(child, disabled, "An originally disabled name became enabled before activation finished")
+                    self.assertIn(
+                        child, disabled, "An originally disabled name became enabled before activation finished"
+                    )
             if argv[:2] == ["virtualmin", "disable-domain"]:
                 disabled.add(argv[argv.index("--domain") + 1])
             if argv[:3] == ["crontab", "-u", "shop"]:
@@ -396,7 +733,8 @@ class BridgeNodeTests(SimpleTestCase):
         for originally_enabled in (False, True):
             with self.subTest(originally_enabled=originally_enabled):
                 completed["policy_record"]["enabled"] = [
-                    {"name": DOMAIN, "enabled": True}, {"name": child, "enabled": originally_enabled},
+                    {"name": DOMAIN, "enabled": True},
+                    {"name": child, "enabled": originally_enabled},
                 ]
                 completed["policy_record"]["ids"][child] = "1002"
                 marker.write_text(json.dumps(completed))

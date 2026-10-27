@@ -63,6 +63,13 @@
         mode: '0600'
       no_log: true
 
+    - name: Install the root-private shared Apache binding library
+      when: bridge_action in ['prepare', 'origin_install', 'install', 'remove', 'origin_remove']
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
     - name: Run the migration-owned node operation
       ansible.builtin.script:
         cmd: files/praho-bridge.py

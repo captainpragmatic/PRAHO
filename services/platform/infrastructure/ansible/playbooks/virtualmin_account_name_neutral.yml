@@ -1,0 +1,47 @@
+---
+# The helper owns its state/locking and refuses unsafe existing files before any write.
+# Private native keys are copied locally into protected state, never to the controller.
+- name: Keep account-name HTTP neutral while retaining native named TLS
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate the single-host account-name policy request
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - account_name_guard_action in ['ensure', 'prepare', 'retire']
+          - account_name_guard_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - account_name_zone is match('^[a-z0-9][a-z0-9.-]{1,251}[a-z0-9]$')
+          - account_name_fqdn is match('^[a-z0-9]{8}\\.[a-z0-9][a-z0-9.-]+$')
+          - (account_name_guard_action == 'retire' and customer_user == '') or customer_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+
+    - name: Install the root-private shared Apache binding library
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
+    - name: Install or retire the root-owned neutral policy and prove the response
+      ansible.builtin.script:
+        cmd: files/praho-account-name-neutral.py
+        executable: python3
+      environment:
+        PRAHO_NEUTRAL_ACTION: "{{ account_name_guard_action }}"
+        PRAHO_NEUTRAL_IDENTITY: "{{ account_name_guard_id }}"
+        PRAHO_NEUTRAL_ZONE: "{{ account_name_zone }}"
+        PRAHO_NEUTRAL_NAME: "{{ account_name_fqdn }}"
+        PRAHO_NEUTRAL_OWNER: "{{ customer_user }}"
+      register: neutral_step
+      changed_when: true
+
+    - name: Require one complete nonce-bound neutral receipt
+      vars:
+        neutral_receipts: "{{ neutral_step.stdout_lines | select('match', '^NEUTRAL_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - neutral_receipts | length == 1
+
+    - name: Emit the account-name neutral receipt
+      ansible.builtin.debug:
+        msg: "{{ neutral_step.stdout_lines | select('match', '^NEUTRAL_RESULT=[A-Za-z0-9+/=]+$') | first }}"

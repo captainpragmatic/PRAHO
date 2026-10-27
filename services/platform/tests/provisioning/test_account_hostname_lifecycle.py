@@ -123,7 +123,7 @@ class AccountReadyTests(LifecycleCase):
             for callback in pending:
                 callback()
         enqueue.assert_called_once_with(
-            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
         )
 
     def test_the_task_allocates_the_name_points_it_at_the_node_and_serves_it(self) -> None:
@@ -131,11 +131,15 @@ class AccountReadyTests(LifecycleCase):
         account = self._account()
         VirtualminAccount.objects.filter(pk=account.pk).update(provisioned_at=timezone.now())
         self.server.__class__.objects.filter(pk=self.server.pk).update(ipv4_address="95.217.0.10")
-        outcome = lifecycle.ensure_account_name(str(account.pk))
+        with patch("django_q.tasks.async_task") as enqueue:
+            outcome = lifecycle.ensure_account_name(str(account.pk))
         hostname = AccountHostname.objects.get(account=account)
         self.assertEqual(hostname.target_server, self.server)
         self.assertEqual(self.node_calls, ["ensure enabled=True"])
-        self.assertEqual(outcome, {"outcome": "skipped:certificate_not_ready"})
+        self.assertEqual(outcome, {"outcome": "sync_queued"})
+        enqueue.assert_called_once_with(
+            lifecycle.SYNC_TASK, str(hostname.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
+        )
 
     def test_a_suspended_account_gets_its_name_disabled(self) -> None:
         _configure(enabled=True)
@@ -192,7 +196,9 @@ class MigrationTargetTests(LifecycleCase):
         _configure(enabled=True)
         account = self._account()
         service.allocate_account_hostname(account)
-        served = service.EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        served = service.EnsureOutcome(
+            created=True, enabled=False, linked=False, certificate_installed=True, neutral=True
+        )
         with patch.object(service, "ensure_node_account_name", return_value=Ok(served)):
             self.assertEqual(lifecycle.ensure_on_recreated_node(account, self.server, enabled=False), Ok(served))
 
@@ -205,16 +211,29 @@ class TerminationTests(LifecycleCase):
 
     def test_a_terminated_account_retires_its_name_once_it_commits(self) -> None:
         account, hostname = self._named_account()
-        with self.captureOnCommitCallbacks(execute=True):
+        with patch("django_q.tasks.async_task") as enqueue, self.captureOnCommitCallbacks(execute=True):
             account.status = "terminated"
             account.save(update_fields=["status", "updated_at"])
+        hostname.refresh_from_db()
+        self.assertIsNone(hostname.retired_at, "a queued job is not completed cleanup")
+        enqueue.assert_called_once_with(
+            lifecycle.RETIRE_TASK, str(hostname.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
+        )
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
         hostname.refresh_from_db()
         self.assertIsNotNone(hostname.retired_at)
 
     def test_a_deleted_account_row_retires_its_name_and_keeps_the_label_taken(self) -> None:
         account, hostname = self._named_account()
-        with self.captureOnCommitCallbacks(execute=True):
+        AccountHostname.objects.filter(pk=hostname.pk).update(target_server=self.server)
+        with patch("django_q.tasks.async_task"), self.captureOnCommitCallbacks(execute=True):
             account.delete()
+        with (
+            patch.object(service, "_gateway") as gateway,
+            patch.object(service, "retire_account_name_neutral", return_value=Ok("a" * 64)),
+        ):
+            gateway.return_value.list_domains_with_owners.return_value = Ok([])
+            self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
         hostname.refresh_from_db()
         self.assertIsNotNone(hostname.retired_at)
         self.assertIsNone(hostname.account_id)
@@ -231,9 +250,10 @@ class TerminationTests(LifecycleCase):
         from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         account, hostname = self._named_account()
-        with self.captureOnCommitCallbacks(execute=True):
+        with patch("django_q.tasks.async_task"), self.captureOnCommitCallbacks(execute=True):
             account.status = "terminated"
             account.save(update_fields=["status", "updated_at"])
+        lifecycle.retire_account_name(str(hostname.pk))
         events: Any = AuditEvent.objects.filter(object_id=str(hostname.pk)).values_list("action", flat=True)
         self.assertTrue(any("retired" in action for action in events), list(events))
 
@@ -262,6 +282,12 @@ class SweepTests(LifecycleCase):
         hostname.refresh_from_db()
         return hostname
 
+    @staticmethod
+    def _run_sync_jobs(enqueue: Any) -> None:
+        for call in enqueue.call_args_list:
+            if call.args[0] == lifecycle.SYNC_TASK:
+                lifecycle.sync_account_name(call.args[1])
+
     def test_the_sweep_does_nothing_while_off(self) -> None:
         _configure(enabled=False)
         self._named()
@@ -274,7 +300,10 @@ class SweepTests(LifecycleCase):
         with patch("django_q.tasks.async_task") as enqueue:
             counts = lifecycle.reconcile_account_names()
         enqueue.assert_called_once_with(
-            lifecycle.ENSURE_TASK, str(hostname.account_id), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+            lifecycle.ENSURE_TASK,
+            str(hostname.account_id),
+            timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS,
+            sync=False,
         )
         self.assertEqual((self.node_calls, self.synced), ([], []))
         self.assertEqual(counts["enqueued"], 1)
@@ -284,9 +313,10 @@ class SweepTests(LifecycleCase):
         for _ in range(3):
             self._named()  # never reconciled: their task cannot publish them (no certificate yet)
         published = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
-        with patch("django_q.tasks.async_task"), patch.object(lifecycle, "SWEEP_BATCH", 2):
+        with patch("django_q.tasks.async_task") as enqueue, patch.object(lifecycle, "SWEEP_BATCH", 2):
             for _ in range(3):
                 lifecycle.reconcile_account_names()
+            self._run_sync_jobs(enqueue)
         self.assertIn(published.label, self.synced)
 
     def test_every_pass_moves_a_name_to_the_back_of_the_queue(self) -> None:
@@ -302,13 +332,13 @@ class SweepTests(LifecycleCase):
         first = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
         second = self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=26))
 
-        def sync(hostname: AccountHostname, *, skip_locked: bool = False) -> Any:
-            if hostname.pk == second.pk:
+        def enqueue(task: str, identity: str, **kwargs: Any) -> Any:
+            if identity == str(second.pk):
                 raise ValueError("unexpected")
-            self.synced.append(hostname.label)
-            return Ok("published")
+            self.assertEqual(task, lifecycle.SYNC_TASK)
+            self.synced.append(AccountHostname.objects.get(pk=identity).label)
 
-        with patch.object(service, "sync_account_hostname", sync):
+        with patch("django_q.tasks.async_task", side_effect=enqueue):
             counts = lifecycle.reconcile_account_names()
         self.assertEqual(self.synced, [first.label])
         self.assertEqual(counts["failed"], 1)
@@ -321,16 +351,19 @@ class SweepTests(LifecycleCase):
         AccountHostname.objects.update(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
         with patch("django_q.tasks.async_task") as enqueue:
             lifecycle.reconcile_account_names()
+            self.assertEqual(self.synced, [])
+            self._run_sync_jobs(enqueue)
         self.assertEqual(len(self.synced), 1)
-        enqueue.assert_not_called()  # a name reconciled before does not repeat its node step
+        self.assertEqual(enqueue.call_args.args[0], lifecycle.SYNC_TASK)
 
     def test_the_sweep_passes_over_a_name_being_published_rather_than_wait(self) -> None:
         _configure(enabled=True)
         self._named(last_reconciled_at=timezone.now() - timezone.timedelta(hours=25))
         sync = Mock(return_value=Ok("published"))
 
-        with patch.object(service, "sync_account_hostname", sync):
+        with patch.object(service, "sync_account_hostname", sync), patch("django_q.tasks.async_task") as enqueue:
             lifecycle.reconcile_account_names()
+            self._run_sync_jobs(enqueue)
 
         self.assertEqual([call.kwargs for call in sync.call_args_list], [{"skip_locked": True}])
 

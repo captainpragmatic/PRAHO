@@ -31,11 +31,10 @@ from tests.provisioning.test_account_hostname_lifecycle import (
 from tests.provisioning.test_account_hostname_service import ZONE_ID, AccountNameTestCase
 
 
-class RetireFinishedTests(LifecycleCase):
+class RetireFinishedTests(AccountNameTestCase):
     def _named(self) -> tuple[VirtualminAccount, AccountHostname]:
         _configure(enabled=True)
-        account = _distinct_account(self.server)
-        hostname = service.allocate_account_hostname(account)
+        account, hostname = self.account, self.hostname
         AccountHostname.objects.filter(pk=hostname.pk).update(
             target_server=self.server, records={"A": {"intended": "95.217.0.10", "applied": "95.217.0.10"}}
         )
@@ -45,14 +44,19 @@ class RetireFinishedTests(LifecycleCase):
         account, hostname = self._named()
         with (
             patch.object(FakeDnsGateway, "delete_owned_records", return_value=service.Err("provider down")),
+            patch("django_q.tasks.async_task"),
             self.captureOnCommitCallbacks(execute=True),
         ):
             account.status = "terminated"
             account.save(update_fields=["status", "updated_at"])
+            self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retire_failed"})
         hostname.refresh_from_db()
         self.assertIsNone(hostname.retired_at, "the provider was down")
 
-        lifecycle.reconcile_account_names()
+        with patch("django_q.tasks.async_task") as enqueue:
+            lifecycle.reconcile_account_names()
+        self.assertEqual(enqueue.call_args.args, (lifecycle.RETIRE_TASK, str(hostname.pk)))
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
 
         hostname.refresh_from_db()
         self.assertIsNotNone(hostname.retired_at)
@@ -62,16 +66,41 @@ class RetireFinishedTests(LifecycleCase):
         account, hostname = self._named()
         with (
             patch.object(FakeDnsGateway, "delete_owned_records", return_value=service.Err("provider down")),
+            patch("django_q.tasks.async_task"),
             self.captureOnCommitCallbacks(execute=True),
         ):
             account.delete()
+            self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retire_failed"})
         hostname.refresh_from_db()
         self.assertEqual((hostname.account_id, hostname.retired_at), (None, None))
 
-        lifecycle.reconcile_account_names()
+        with patch("django_q.tasks.async_task") as enqueue:
+            lifecycle.reconcile_account_names()
+        self.assertEqual(enqueue.call_args.args, (lifecycle.RETIRE_TASK, str(hostname.pk)))
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
 
         hostname.refresh_from_db()
         self.assertIsNotNone(hostname.retired_at)
+
+    def test_private_cleanup_uncertainty_keeps_the_native_child_guarded_and_retries_after_absence(self) -> None:
+        account, hostname = self._named()
+        VirtualminAccount.objects.filter(pk=account.pk).update(status="terminated")
+        self.node.rows[hostname.fqdn] = {
+            "domain": hostname.fqdn,
+            "username": account.virtualmin_username,
+            "type": "Sub-server",
+            "parent_domain": account.domain,
+        }
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retire_failed"})
+        hostname.refresh_from_db()
+        self.assertEqual(hostname.records, {})
+        self.assertEqual(hostname.target_server_id, self.server.pk)
+        self.assertIsNone(hostname.retired_at)
+        self.retire_neutral.assert_not_called()
+        self.assertFalse(any(call.startswith("delete-domain ") for call in self.node.calls))
+        del self.node.rows[hostname.fqdn]  # The separate native parent deletion later proves absence.
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
+        self.retire_neutral.assert_called_once()
 
 
 class SyncAfterRetireTests(AccountNameTestCase):
@@ -201,8 +230,10 @@ class NodeRepairForReconciledNamesTests(LifecycleCase):
         ):
             lifecycle.reconcile_account_names()
 
-        enqueue.assert_not_called()
-        sync.assert_called_once()
+            sync.assert_not_called()
+            self.assertEqual(enqueue.call_args.args, (lifecycle.SYNC_TASK, str(hostname.pk)))
+            lifecycle.sync_account_name(str(hostname.pk))
+            sync.assert_called_once()
 
 
 class AccountsWithoutACompleteNameTests(LifecycleCase):
@@ -220,7 +251,7 @@ class AccountsWithoutACompleteNameTests(LifecycleCase):
             counts = lifecycle.reconcile_account_names()
 
         enqueue.assert_any_call(
-            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
         )
         self.assertGreaterEqual(counts["enqueued"], 1)
 
@@ -232,7 +263,7 @@ class AccountsWithoutACompleteNameTests(LifecycleCase):
             lifecycle.reconcile_account_names()
 
         enqueue.assert_any_call(
-            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS
+            lifecycle.ENSURE_TASK, str(account.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
         )
 
     def test_accounts_that_should_have_no_name_are_left_alone(self) -> None:

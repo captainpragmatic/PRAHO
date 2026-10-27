@@ -42,7 +42,79 @@ def manifest(account, backup_id="b" * 32, role="standalone"):
     }
 
 
+class RecoveryGuardRetirementTests(BarrierCase):
+    def test_abandonment_keeps_exclusion_when_absent_targets_private_tls_is_unproved(self):
+        migration, token = self._held("needs_review", contract="recovery")
+        self.events.clear()
+        with (
+            patch("apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))),
+            patch(
+                "apps.provisioning.account_hostname_service.retire_removed_node_name",
+                return_value=Err("private TLS cleanup unproved"),
+            ) as retire,
+            patch.object(VirtualminRecoveryService, "_prepare_completion") as complete,
+        ):
+            result = VirtualminRecoveryService().abandon_precommit(migration, token, actor=self.staff, note="Abandon")
+        self.assertTrue(result.is_err())
+        retire.assert_called_once()
+        complete.assert_not_called()
+        migration.refresh_from_db()
+        self.assertEqual(migration.status, "needs_review")
+        self.assertEqual(self._programs("source"), [])
+
+    def test_abandonment_retires_only_target_guard_before_terminal_completion(self):
+        migration, token = self._held("needs_review", contract="recovery")
+        self.events.clear()
+        steps = []
+        with (
+            patch("apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))),
+            patch(
+                "apps.provisioning.account_hostname_service.retire_removed_node_name",
+                side_effect=lambda *args: steps.append("retire") or Ok(None),
+            ) as retire,
+            patch.object(
+                VirtualminRecoveryService, "_prepare_completion", side_effect=lambda *args: steps.append("complete")
+            ),
+        ):
+            result = VirtualminRecoveryService().abandon_precommit(migration, token, actor=self.staff, note="Abandon")
+        self.assertTrue(result.is_ok())
+        self.assertEqual(steps, ["retire", "complete"])
+        self.assertEqual(retire.call_args.args[0].pk, self.account.pk)
+        self.assertEqual(retire.call_args.args[1].pk, self.target.pk)
+        migration.refresh_from_db()
+        self.assertEqual(migration.status, "failed")
+        self.assertEqual(self._programs("source"), [])
+
+
 class RecoverySelectionTests(BarrierCase):
+    def _restored_name(self):
+        migration, token = self._held("verifying", contract="recovery", restore_issued=True)
+        AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        return migration, token
+
+    def test_recovery_requires_neutral_http_proof_before_ownership_commit(self):
+        migration, token = self._restored_name()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=False)
+        with (
+            patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            self.assertRaisesRegex(ValueError, "account name"),
+        ):
+            VirtualminRecoveryService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+
+    def test_recovery_keeps_previews_off_after_the_public_suffix_entry_ships(self):
+        migration, token = self._restored_name()
+        self.settings_values["dns.account_zone_psl_shipped"] = True
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        with patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)):
+            VirtualminRecoveryService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.assertIsNotNone(migration.cutover_committed_at)
+
     def test_recovery_reapplies_current_quotas_after_restore_before_ownership_commit(self):
         migration, token = self._held("verifying", contract="recovery", restore_issued=True)
         self.account.disk_quota_mb = 2048
@@ -54,7 +126,7 @@ class RecoverySelectionTests(BarrierCase):
         )
         self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         self.events.clear()
-        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)):
             VirtualminRecoveryService()._verify(migration, token)
         commands = [event for event in self.events if event[1] == "modify-domain"]
@@ -74,7 +146,7 @@ class RecoverySelectionTests(BarrierCase):
         )
         self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         self.effects[("target", "modify-domain")] = self._error("target", "modify-domain")
-        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
             patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)),
             self.assertRaisesRegex(RuntimeError, "injected failure"),
@@ -381,7 +453,7 @@ class RecoverySelectionTests(BarrierCase):
         self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         self.events.clear()  # _held uses normal migration admission to construct the fixture.
         self.effects[("source", "list-domains")] = AssertionError("Recovery must never contact the source")
-        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)):
             VirtualminRecoveryService()._verify(migration, token)
         self.account.refresh_from_db()

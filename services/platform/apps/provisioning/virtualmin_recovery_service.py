@@ -15,7 +15,6 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 
 from . import account_hostname_service
-from .account_hostname_config import account_zone_psl_shipped
 from .account_hostname_lifecycle import ensure_on_recreated_node
 from .account_hostname_models import AccountHostname
 from .migration_barrier import barrier_variables, run_barrier
@@ -268,12 +267,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         if named.is_err():
             raise ValueError(named.unwrap_err())
         ready = named.unwrap()
-        if (
-            ready is None
-            or ready.enabled
-            or not ready.certificate_installed
-            or (account_zone_psl_shipped() and not ready.linked)
-        ):
+        if ready is None or ready.enabled or not ready.certificate_installed or not ready.neutral:
             raise ValueError("The recovered account name and certificate are not ready")
         with transaction.atomic():
             account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
@@ -400,6 +394,11 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     for row in self._listing(self._gateway(migration.target_server))
                 ):
                     return Err("The partial recovery target could not be verified absent")
+            self._move(migration, token, migration.status)
+            retired = account_hostname_service.retire_removed_node_name(migration.account, migration.target_server)
+            self._move(migration, token, migration.status)
+            if retired.is_err():
+                return Err(retired.unwrap_err())
             self._prepare_completion(migration, token)
             self._finish(
                 migration, token, "failed", f"Recovery abandoned after target verification: {note}", actor=actor

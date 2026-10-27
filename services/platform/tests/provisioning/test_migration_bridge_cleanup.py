@@ -15,13 +15,22 @@ from apps.provisioning.virtualmin_migration_models import (
     VirtualminMigration,
     account_has_active_operation,
 )
+from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
+from tests.provisioning.test_virtualmin_migration_barrier_wiring import BarrierCase
 from tests.provisioning.test_virtualmin_migration_bridge import BridgeCase
 
 
 class BridgeCleanupTests(BridgeCase):
     def setUp(self):
         super().setUp()
+        self.retire_guard = self.enterContext(
+            patch(
+                "apps.provisioning.account_hostname_service.retire_removed_node_name",
+                return_value=Ok(None),
+                create=True,
+            )
+        )
         self.enterContext(
             patch("apps.provisioning.migration_routing.routing_agreement", return_value=Agreement(True, 300))
         )
@@ -118,6 +127,76 @@ class BridgeCleanupTests(BridgeCase):
         self.assertEqual(remove.call_count, 1)
         self.assertEqual(self._programs("source").count("delete-domain"), 1)
 
+    def test_private_source_guard_cleanup_is_after_native_absence_and_bridge_pem_teardown(self):
+        bridge, migration = self.due()
+        order = []
+
+        def retire(account, server):
+            self.assertEqual((account.pk, server.pk), (self.account.pk, self.server.pk))
+            self.assertIsNone(self.source_gateway.domain_state_of(self.account.domain))
+            order.append("guard")
+            return Ok(None)
+
+        def transport(*args, **kwargs):
+            order.append("bridge")
+            return Ok("removed")
+
+        self.retire_guard.side_effect = retire
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", side_effect=transport),
+        ):
+            self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "torn_down")
+        self.assertEqual(order, ["bridge", "guard"])
+        bridge.refresh_from_db()
+        self.assertTrue(bridge.evidence["source_guard_retired"])
+
+    def test_interrupted_source_guard_cleanup_keeps_transport_progress_and_retries_without_false_completion(self):
+        bridge, migration = self.due()
+        self.retire_guard.return_value = Err("node offline", retriability=Retriability.UNKNOWN)
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", return_value=Ok("removed")) as transport,
+            patch("apps.provisioning.migration_bridge_cleanup.schedule_bridge_cleanup"),
+        ):
+            self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "retrying")
+            transport.assert_called_once()
+            bridge.refresh_from_db()
+            self.assertTrue(bridge.evidence["source_removed"])
+            self.assertTrue(bridge.evidence["bridge_removed"])
+            self.assertFalse(bridge.evidence.get("source_guard_retired"))
+            self.assertFalse(bridge.evidence.get("ttl_restored"))
+            self.assertEqual(bridge.status, "removing_source")
+            self.retire_guard.return_value = Ok(None)
+            self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "torn_down")
+            transport.assert_called_once()
+        self.assertEqual(self._programs("source").count("delete-domain"), 1)
+        self.assertEqual(self.retire_guard.call_count, 2)
+
+    def test_lease_loss_during_private_cleanup_cannot_record_private_completion_or_restore_ttls(self):
+        bridge, migration = self.due()
+
+        def stolen(*args, **kwargs):
+            current = MigrationBridge.objects.get(pk=bridge.pk)
+            current.evidence = {**current.evidence, "lease_token": "other-worker"}
+            current.save(update_fields=["evidence", "updated_at"])
+            return Ok(None)
+
+        self.retire_guard.side_effect = stolen
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", return_value=Ok("removed")) as transport,
+        ):
+            self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "busy")
+        transport.assert_called_once()
+        bridge.refresh_from_db()
+        self.assertTrue(bridge.evidence["bridge_removed"])
+        self.assertFalse(bridge.evidence.get("source_guard_retired"))
+        self.assertFalse(bridge.evidence.get("ttl_restored"))
+
     def test_different_source_owner_is_never_deleted(self):
         bridge, migration = self.due()
         self.source_gateway.seed_domain(self.account.domain, username="anothercustomer", enabled=True)
@@ -208,3 +287,56 @@ class BridgeCleanupTests(BridgeCase):
         retry.assert_called_once()
         remove.assert_not_called()
         self.assertNotIn("delete-domain", self._programs("source"))
+
+
+class TargetGuardRetirementTests(BarrierCase):
+    def restored(self):
+        migration, token = self._held("compensating", contract="cutover", restore_issued=True)
+        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        AccountHostname.objects.create(
+            account=self.account,
+            target_server=self.server,
+            label="a1b2c3d4",
+            zone="accounts.example.net",
+            retired_at=timezone.now(),
+        )
+        return migration, token
+
+    def test_compensation_retires_only_the_removed_target_after_verified_native_absence(self):
+        migration, token = self.restored()
+
+        def retire(account, server):
+            self.assertEqual((account.pk, server.pk), (self.account.pk, self.target.pk))
+            self.assertIsNone(self.target_gateway.domain_state_of(self.account.domain))
+            return Ok(None)
+
+        with (
+            patch(
+                "apps.provisioning.virtualmin_migration_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))
+            ),
+            patch(
+                "apps.provisioning.account_hostname_service.retire_removed_node_name", side_effect=retire, create=True
+            ) as retire_guard,
+        ):
+            VirtualminMigrationService()._remove_target_copy(migration, token)
+        retire_guard.assert_called_once()
+
+    def test_failed_target_guard_retirement_remains_retryable_after_native_parent_is_already_absent(self):
+        migration, token = self.restored()
+        with (
+            patch(
+                "apps.provisioning.virtualmin_migration_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))
+            ),
+            patch(
+                "apps.provisioning.account_hostname_service.retire_removed_node_name",
+                return_value=Err("private cleanup unproven", retriability=Retriability.UNKNOWN),
+                create=True,
+            ) as retire_guard,
+        ):
+            with self.assertRaisesRegex(ValueError, "private|neutral|guard"):
+                VirtualminMigrationService()._remove_target_copy(migration, token)
+            self.assertIsNone(self.target_gateway.domain_state_of(self.account.domain))
+            retire_guard.return_value = Ok(None)
+            VirtualminMigrationService()._remove_target_copy(migration, token)
+        self.assertEqual(self._programs("target").count("delete-domain"), 1)
+        self.assertEqual(retire_guard.call_count, 2)

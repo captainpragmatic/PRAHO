@@ -100,9 +100,13 @@ def _release_target_pair(migration: VirtualminMigration) -> None:
     assert released.unwrap().outcome == "released"
 
 
-@pytest.mark.parametrize("suspended", [False, True])
+@pytest.mark.parametrize(
+    ("suspended", "explicit_ip"),
+    [(False, False), (True, False), (False, True)],
+    ids=["active-wildcard", "suspended-wildcard", "active-explicit"],
+)
 def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deletion(  # noqa: PLR0915  # One real two-node lifecycle with exact cleanup.
-    lab: Lab, request: pytest.FixtureRequest, suspended: bool
+    lab: Lab, request: pytest.FixtureRequest, suspended: bool, explicit_ip: bool
 ) -> None:
     state = load_state()
     source_node = state.node("vm-a" if lab.node.key != "vm-a" else "vm-b")
@@ -117,6 +121,8 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
         node.exec("test", "-r", "/etc/ssl/private/ssl-cert-snakeoil.key")
         node.exec("install", "-d", "-m", "0755", "/var/www/praho-default")
         _copy(str(default), f"{node.node.container}:/etc/apache2/conf-enabled/praho-default-site.conf")
+        node.exec("chown", "root:root", "/etc/apache2/conf-enabled/praho-default-site.conf")
+        node.exec("chmod", "0644", "/etc/apache2/conf-enabled/praho-default-site.conf")
         node.exec("apache2ctl", "configtest")
         node.exec("apache2ctl", "graceful")
     identity, account_id, lease_token = uuid4(), uuid4(), uuid4()
@@ -126,6 +132,9 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
     source.create_domain(DOMAIN, "contractbridge")
     server.ipv4_address = container_address(source_node.container)
     lab.server.ipv4_address = container_address(lab.node.container)
+    source_address = str(server.ipv4_address) if explicit_ip else "127.0.0.1"
+    if explicit_ip:
+        _bind_native_fixture(source, str(server.ipv4_address))
     domain_id = source.exec("virtualmin", "list-domains", "--domain", DOMAIN, "--id-only").strip()
     owner = source.exec("virtualmin", "list-domains", "--domain", DOMAIN, "--user-only").strip()
     source.exec("chage", "-m", "2", "-M", "80", "-W", "8", "-I", "40", "-E", "2027-01-31", owner)
@@ -201,6 +210,10 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
         assert lab.exec("passwd", "-S", owner).split()[1] == "L", (
             "restored target Unix account stays locked until commit"
         )
+        if explicit_ip:
+            # Native node layouts can bind different addresses on each side;
+            # the bridge must discover target HTTP independently of the source.
+            _bind_native_fixture(lab, str(lab.server.ipv4_address))
         prepared = prepare_bridge(migration)
         assert prepared.is_ok(), prepared.unwrap_err() if prepared.is_err() else ""
         assert {DOMAIN, f"www.{DOMAIN}"}.issubset(prepared.unwrap().dns_names)
@@ -255,14 +268,15 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
         )
         for name in (DOMAIN, f"www.{DOMAIN}"):
             assert (
-                source.exec("curl", "-fsS", "--resolve", f"{name}:80:127.0.0.1", f"http://{name}/index.html")
+                source.exec("curl", "-fsS", "--resolve", f"{name}:80:{source_address}", f"http://{name}/index.html")
                 == "TARGET-WEB"
             )
             assert (
-                source.exec("curl", "-fsS", "--resolve", f"{name}:80:127.0.0.1", f"http://{name}/scheme.php") == "HTTP"
+                source.exec("curl", "-fsS", "--resolve", f"{name}:80:{source_address}", f"http://{name}/scheme.php")
+                == "HTTP"
             )
         assert (
-            source.exec("curl", "-fsS", "--resolve", f"{DOMAIN}:80:127.0.0.1", f"http://{DOMAIN}/write.php")
+            source.exec("curl", "-fsS", "--resolve", f"{DOMAIN}:80:{source_address}", f"http://{DOMAIN}/write.php")
             == "TARGET-WRITE"
         )
         assert lab.exec("stat", "-c", "%U", f"{home}/public_html/runtime-write").strip() == owner
@@ -271,7 +285,7 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
                 "curl",
                 "-fsS",
                 "--resolve",
-                f"{DOMAIN}:80:127.0.0.1",
+                f"{DOMAIN}:80:{source_address}",
                 "-H",
                 "X-Praho-Original-Host: foreign.invalid",
                 f"http://{DOMAIN}/index.html",
@@ -302,7 +316,7 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
                 "--cacert",
                 f"/var/lib/praho/bridges/{identity}/upstream-ca.pem",
                 "--resolve",
-                f"{DOMAIN}:443:127.0.0.1",
+                f"{DOMAIN}:443:{source_address}",
                 f"https://{DOMAIN}/scheme.php",
             )
             == "HTTPS"
@@ -319,7 +333,7 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
         verified = verify_bridge(migration)
         assert verified.is_ok(), verified.unwrap_err() if verified.is_err() else ""
         assert (
-            source.exec("curl", "-fsS", "--resolve", f"{DOMAIN}:80:127.0.0.1", f"http://{DOMAIN}/index.html")
+            source.exec("curl", "-fsS", "--resolve", f"{DOMAIN}:80:{source_address}", f"http://{DOMAIN}/index.html")
             == "TARGET-WEB"
         )
     finally:
@@ -333,5 +347,23 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
         source.remove_domain(DOMAIN)
         lab.remove_domain(DOMAIN)
         for node in (source, lab):
+            node.exec(
+                "python3",
+                "-c",
+                "import importlib.util;s=importlib.util.spec_from_file_location('bindings','/var/lib/praho/apache-bindings/library.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m);p=m.ApacheBindings();\nwith p.transaction():\n p.refresh();p.reload()",
+            )
+        for node in (source, lab):
             node.exec("rm", "-f", "--", archive, archive + ".dom", archive + ".info")
         source.exec("rm", "-f", "--", f"/var/lib/praho/migration/migration-{domain_id}.{identity}.crontab")
+
+
+def _bind_native_fixture(node: Lab, address: str) -> None:
+    node.exec(
+        "python3",
+        "-c",
+        "import pathlib,re,sys;name,address=sys.argv[1:];\nfor p in pathlib.Path('/etc/apache2/sites-enabled').glob('*.conf'):\n text=p.read_text()\n if 'ServerName '+name+'\\n' in text:\n  p.write_text(re.sub(r'<VirtualHost [^>]+>',lambda m:'<VirtualHost '+address+(':'+m[0].split(':')[-1]),text))",
+        DOMAIN,
+        address,
+    )
+    node.exec("apache2ctl", "configtest")
+    node.exec("apache2ctl", "graceful")

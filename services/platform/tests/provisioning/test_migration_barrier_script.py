@@ -24,6 +24,7 @@ from django.conf import settings
 from django.test import SimpleTestCase
 
 from tests.provisioning.test_virtualmin_chain_node_script import _SHIMS as CHAIN_SHIMS
+from tests.provisioning.test_virtualmin_pair_restore_script import _PAIR_SHIMS as PAIR_SHIMS
 
 SCRIPT = Path(settings.BASE_DIR) / "infrastructure" / "ansible" / "playbooks" / "files" / "praho-write-barrier.sh"
 DOMAIN = "shop.example.com"
@@ -54,7 +55,8 @@ case $cmd in
         echo "    Username for mysql: $FAKE_OWNER"
         echo "    Password for mysql: owner-db-pass"
         features="unix dir web ssl logrotate mysql webmin"; [[ ${FAKE_MAIL_ON:-} != "$want" ]] || features+=" mail"
-        echo "    Features: $features" ;;
+        echo "    Features: $features"
+        if [[ ${FAKE_DELAY_FEATURE_TRAILER:-0} == 1 ]]; then /bin/sleep 0.05; echo "    Description: native listing trailer"; fi ;;
       name) echo "$FAKE_DOMAIN" ;;
     esac ;;
   list-databases) echo "$FAKE_DB" ;;
@@ -134,10 +136,19 @@ esac
     "sshd": '#!/bin/bash\necho "subsystem sftp ${FAKE_SFTP:-/usr/lib/openssh/sftp-server}"\n',
     # The vhost answers the disabled page while it carries the AliasMatch, else the application.
     "curl": r"""#!/bin/bash
-host=""
-while (($#)); do case $1 in --resolve) host=${2%%:*}; shift ;; esac; shift; done
-if grep -q AliasMatch "$PRAHO_APACHE_SITES/$host.conf" 2>/dev/null; then cat "$FAKE_PAGE_DIR/disabled_by_virtualmin.html"; else echo "APP-RAN"; fi
+host=""; with_status=0; code=200; address=""; port=""
+while (($#)); do case $1 in --resolve) host=${2%%:*}; address=${2#*:*:}; port=${2#*:};port=${port%%:*}; shift ;; --write-out) with_status=1; shift ;; esac; shift; done
+printf '%s %s\n' "$host" "$address" >>"$FAKE_STATE/probed_bindings"
+if [[ ${FAKE_REQUIRE_NATIVE_BINDING:-0} == 1 && $address != "${FAKE_NATIVE_ADDRS:-10.0.0.1}" ]]; then printf '\n000'; exit 0; fi
+if [[ ${FAKE_HTTP_REDIRECT:-0} == 1 && $port == 80 ]]; then
+  printf 'Native HTTPS redirect'; code=301
+elif [[ -n ${FAKE_NEUTRAL_NAME:-} && $host == "$FAKE_NEUTRAL_NAME" ]]; then
+  [[ ${FAKE_NEUTRAL_TRANSPORT_FAIL:-0} != 1 ]] || exit 7
+  printf '%s' "${FAKE_NEUTRAL_BODY-Not Found}"; code=${FAKE_NEUTRAL_STATUS:-404}
+elif grep -q AliasMatch "$PRAHO_APACHE_SITES/$host.conf" 2>/dev/null; then cat "$FAKE_PAGE_DIR/disabled_by_virtualmin.html"; else echo "APP-RAN"; fi
+[[ $with_status == 0 ]] || printf '\n%s' "$code"
 """,
+    "python3": PAIR_SHIMS["python3"],
     "ps": r"""#!/bin/bash
 if [[ $* == "-eo args=" ]]; then cat "$FAKE_STATE/ps_args" 2>/dev/null; exit 0; fi
 cat "$FAKE_STATE/ps_user" 2>/dev/null; exit 0
@@ -171,6 +182,7 @@ class BarrierScriptCase(SimpleTestCase):
         )
         for directory in (self.bin, self.state, self.webmin, self.proc, self.sites, self.page):
             directory.mkdir()
+        self.bin.chmod(0o700)
         for name, body in {**CHAIN_SHIMS, **_SHIMS}.items():
             shim = self.bin / name
             shim.write_text(body)
@@ -190,6 +202,14 @@ class BarrierScriptCase(SimpleTestCase):
         self.webmin_process = subprocess.Popen(["/bin/sleep", "60"])  # Stands in for miniserv
         self.addCleanup(self._stop_webmin)
         (self.webmin / "miniserv.pid").write_text(str(self.webmin_process.pid))
+        self.neutral_helper = self.bin / "neutral-helper.py"
+        self.neutral_helper.write_text(
+            "# Root-owned helper boundary; python3 shim implements its read-only contract.\n"
+        )
+        self.neutral_helper.chmod(0o700)
+        self.binding_helper = self.bin / "apache-bindings.py"
+        self.binding_helper.write_text("# Root-private fixed read-only Apache binding query fixture\n")
+        self.binding_helper.chmod(0o700)
 
     def _stop_webmin(self) -> None:
         if self.webmin_process.poll() is None:
@@ -221,8 +241,12 @@ class BarrierScriptCase(SimpleTestCase):
             "PRAHO_WEBMIN_VAR": str(self.webmin),
             "PRAHO_PROC_DIR": str(self.proc),
             "PRAHO_APACHE_SITES": str(self.sites),
+            "PRAHO_NEUTRAL_HELPER": str(self.neutral_helper),
+            "PRAHO_APACHE_BINDINGS_HELPER": str(self.binding_helper),
+            "FAKE_NATIVE_ADDRS": "10.0.0.1",
             "FAKE_STATE": str(self.state),
             "FAKE_DOMAIN": DOMAIN,
+            "FAKE_DOMAIN_ID": DOMAIN_ID,
             "FAKE_CHILD": CHILD,
             "FAKE_OWNER": OWNER,
             "FAKE_DB": DB,
@@ -253,7 +277,9 @@ class BarrierScriptCase(SimpleTestCase):
     def inputs(self, recorded: dict[str, Any]) -> dict[str, str]:
         """What PRAHO passes back to apply, verify and release from the persisted record."""
         return {
-            "PRAHO_ACCOUNTS": _lines([(a["user"], a["host"], "1" if a["locked"] else "0") for a in recorded["accounts"]]),
+            "PRAHO_ACCOUNTS": _lines(
+                [(a["user"], a["host"], "1" if a["locked"] else "0") for a in recorded["accounts"]]
+            ),
             "PRAHO_ENABLED": _lines([(e["name"], "1" if e["enabled"] else "0") for e in recorded["enabled"]]),
             "PRAHO_HAS_CRONTAB": "1" if recorded["has_crontab"] else "0",
             "PRAHO_CRONTAB_ACTIVE_SHA": recorded["active_sha"],
@@ -284,6 +310,24 @@ class BarrierScriptCase(SimpleTestCase):
 
 
 class RecordTests(BarrierScriptCase):
+    def test_existing_native_https_redirect_does_not_invalidate_the_tls_disabled_page_proof(self) -> None:
+        recorded = self.record()
+        applied = self.apply(recorded, FAKE_HTTP_REDIRECT="1")
+        self.assertEqual(applied["outcome"], "ok", applied)
+
+    def test_http_only_native_account_uses_its_actual_http_binding_without_a_tls_fallback(self) -> None:
+        recorded = self.record()
+        applied = self.apply(recorded, FAKE_NATIVE_PORTS="80", FAKE_REQUIRE_NATIVE_BINDING="1")
+        self.assertEqual(applied["outcome"], "ok", applied)
+
+    def test_explicit_native_bindings_are_verified_instead_of_unrelated_loopback_default(self) -> None:
+        recorded = self.record()
+        applied = self.apply(recorded, FAKE_REQUIRE_NATIVE_BINDING="1")
+        self.assertEqual(applied["outcome"], "ok", applied)
+        probes = (self.state / "probed_bindings").read_text().splitlines()
+        self.assertTrue(probes)
+        self.assertTrue(all(line.endswith(" 10.0.0.1") for line in probes))
+
     def test_a_web_only_account_can_record_apply_verify_and_release_without_database_queries(self) -> None:
         recorded = self.record(FAKE_DB="")
 
@@ -349,6 +393,76 @@ class RecordTests(BarrierScriptCase):
 
 
 class ApplyTests(BarrierScriptCase):
+    def test_native_feature_listing_trailer_cannot_hide_mail_and_admit_an_unfenced_mail_account(self) -> None:
+        result = self.step("record", FAKE_MAIL_ON=CHILD, FAKE_DELAY_FEATURE_TRAILER="1")
+        self.assertEqual((result["outcome"], result["reason"]), ("refused", "mail_feature"))
+
+    def test_root_neutral_child_page_proof_keeps_all_native_disabled_and_writer_fences(self) -> None:
+        recorded = self.record()
+        options = {"FAKE_NEUTRAL_NAME": CHILD, "FAKE_NEUTRAL_PROOF": "ready"}
+        applied = self.apply(recorded, **options)
+        self.assertEqual((applied["outcome"], applied["reason"]), ("ok", "applied"))
+        self.assertEqual(self.disabled(), {DOMAIN, CHILD})
+        self.assertEqual(self.locked(), {f"{user}@{host}" for user, host in self.accounts})
+        proof = (self.state / "neutral_calls").read_text()
+        self.assertIn(f"--name {CHILD} --owner {OWNER} --parent {DOMAIN} --parent-id {DOMAIN_ID} --host {CHILD}", proof)
+        self.assertEqual(self.step("verify", **self.inputs(recorded), **options)["outcome"], "ok")
+        (self.state / f"locked.{EXTRA}@localhost").unlink()
+        failed = self.step("verify", **self.inputs(recorded), **options)
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"account_open:{EXTRA}@localhost"))
+
+    def test_source_neutral_exception_refuses_unowned_proofs_and_tenant_404_mimics(self) -> None:
+        recorded = self.record()
+        for proof in ("missing", "malformed_state", "foreign_id", "mutable_guard", "tenant_404"):
+            with self.subTest(proof=proof):
+                failed = self.apply(recorded, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF=proof)
+                self.assertEqual(
+                    (failed["outcome"], failed["reason"]), ("failed", f"barrier_not_verified:serving:{CHILD}")
+                )
+        failed = self.apply(
+            recorded, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready", FAKE_NEUTRAL_BODY="tenant content"
+        )
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"barrier_not_verified:serving:{CHILD}"))
+
+    def test_primary_customer_page_is_never_a_neutral_guard_exception(self) -> None:
+        failed = self.apply(self.record(), FAKE_NEUTRAL_NAME=DOMAIN, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"barrier_not_verified:serving:{DOMAIN}"))
+        self.assertFalse((self.state / "neutral_calls").exists())
+
+    def test_denied_neutral_proof_cannot_fall_back_to_a_matching_tenant_page_on_404_or_transport_failure(self) -> None:
+        recorded = self.record()
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
+        for body, status, transport in (("Not Found", "404", "0"), ("", "000", "0"), ("", "200", "1")):
+            with self.subTest(body=body, status=status, transport=transport):
+                (self.page / "disabled_by_virtualmin.html").write_text(body)
+                failed = self.step(
+                    "verify",
+                    **self.inputs(recorded),
+                    FAKE_NEUTRAL_NAME=CHILD,
+                    FAKE_NEUTRAL_PROOF="foreign_id",
+                    FAKE_NEUTRAL_BODY=body,
+                    FAKE_NEUTRAL_STATUS=status,
+                    FAKE_NEUTRAL_TRANSPORT_FAIL=transport,
+                )
+                self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"serving:{CHILD}"))
+
+    def test_source_neutral_helper_cannot_be_mutable_or_replace_native_child_disabled_state(self) -> None:
+        recorded = self.record()
+        self.neutral_helper.chmod(0o777)
+        failed = self.apply(recorded, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"barrier_not_verified:serving:{CHILD}"))
+        self.neutral_helper.chmod(0o700)
+        original = self.neutral_helper.with_suffix(".saved")
+        self.neutral_helper.rename(original)
+        self.neutral_helper.symlink_to(original)
+        failed = self.step("verify", **self.inputs(recorded), FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"serving:{CHILD}"))
+        self.neutral_helper.unlink()
+        original.rename(self.neutral_helper)
+        (self.state / f"disabled.{CHILD}").unlink()
+        failed = self.step("verify", **self.inputs(recorded), FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((failed["outcome"], failed["reason"]), ("failed", f"not_disabled:{CHILD}"))
+
     def test_the_fence_closes_every_write_path_and_the_barrier_holds(self) -> None:
         recorded = self.record()
 
@@ -483,8 +597,13 @@ class VerifyTests(BarrierScriptCase):
                     path.write_bytes(content)
                 for key in set(self._sessions()) - set(sessions):
                     subprocess.run(  # noqa: S603  # Fixed argv
-                        ["/usr/bin/perl", "-e", 'use Fcntl; use SDBM_File; tie(my %s,"SDBM_File",$ARGV[0],O_RDWR,0600) or die; delete $s{$ARGV[1]}',
-                         str(self.webmin / "sessiondb"), key],
+                        [
+                            "/usr/bin/perl",
+                            "-e",
+                            'use Fcntl; use SDBM_File; tie(my %s,"SDBM_File",$ARGV[0],O_RDWR,0600) or die; delete $s{$ARGV[1]}',
+                            str(self.webmin / "sessiondb"),
+                            key,
+                        ],
                         check=True,
                     )
                 self.accounts = accounts
@@ -514,7 +633,9 @@ class ReleaseTests(BarrierScriptCase):
         self.assertEqual(self.disabled(), set())
         self.assertEqual(self.locked(), {f"{EXTRA}@localhost"})
         self.assertEqual((self.state / "crontab").read_text(), CRONTAB)
-        self.assertTrue([call for call in self.calls() if call.startswith(f"login {OWNER} CREATE TABLE praho_barrier_probe_")])
+        self.assertTrue(
+            [call for call in self.calls() if call.startswith(f"login {OWNER} CREATE TABLE praho_barrier_probe_")]
+        )
         self.assertFalse((self.state_dir / f"migration-{DOMAIN_ID}.{TOKEN}.crontab").exists(), "the kept copy goes")
 
     def test_a_release_under_a_new_operation_token_uses_the_recorded_copy(self) -> None:
