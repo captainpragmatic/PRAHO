@@ -18,4 +18,4 @@ class BridgePlaybookContractTests(SimpleTestCase):
             patch.object(runner._ssh_manager, "get_master_key_file", return_value=Err("test fallback absent")),
         ):
             result = runner.run_playbook(SimpleNamespace(ipv4_address="192.0.2.2"), "virtualmin_bridge.yml")
-        self.assertIn("Could not get SSH key", result.unwrap_err())
+        self.assertIn("refusing key replacement", result.unwrap_err())
