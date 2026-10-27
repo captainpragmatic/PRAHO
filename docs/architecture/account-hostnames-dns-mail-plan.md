@@ -64,6 +64,8 @@ Review findings to close, each with a failing regression and recorded green resu
 
 | Finding | State / evidence |
 |---|---|
+| Native backups omit original owner password aging/expiry | Open: native mixed-user probe reproduced the omission; source capture and held activation are being corrected before publishing Phase 2 |
+| A service/domain hold introduced during a move waits for DNS completion | Open: ADR-0051 regression reproduces target activation from the old snapshot; current-policy activation and safe postactivation reconciliation are being corrected |
 | Original barrier record and saved-crontab token survive replay | Regression green; migration review suite: 100 tests + 90 subtests |
 | Compensation preserves each child's enabled state | Regression green in the migration review suite |
 | Cancellation removes only the owned, idle target copy | Regression green in the migration review suite |

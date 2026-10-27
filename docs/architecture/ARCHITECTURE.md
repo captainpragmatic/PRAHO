@@ -1,352 +1,209 @@
 # PRAHO Platform Architecture
 
-**Version:** 1.2.0
-**Last Updated:** March 1, 2026
-**Status:** ✅ Services Architecture Complete
+**Source snapshot:** 2026-10-27, including the ADR-0061 Phase 3 and Phase 4 implementation branches.
+This describes repository behavior, not deployment status. [ADR-0061](../ADRs/ADR-0061-account-hostnames-follow-the-account.md)
+remains Proposed; the [execution plan](account-hostnames-dns-mail-plan.md) records phase verification and remaining work.
 
-> **Note**: Architecture diagrams available in `docs/architecture/` (Mermaid format):
-> - `diagrams/system-overview.mmd` - High-level service boundaries and data flow
-> - `diagrams/data-flow.mmd` - Sequence diagram showing Portal ↔ Platform communication
-> - `diagrams/deployment.mmd` - Docker network topology and security isolation
-> - `diagrams/app-dependencies.mmd` - Inter-app dependency graph (17 platform apps, 4 tiers)
-> - `diagrams/entity-relationships.mmd` - Database ER diagram (~20 core entities)
+## Service boundaries
 
-## 🏗️ Architecture Overview
+PRAHO is a Django modular monolith with two HTTP services and a background worker. Platform owns business
+models and external integrations. Portal renders customer pages and calls Platform through a signed API.
+The worker runs Platform code against the same database; it is not a separate business-data service.
 
-PRAHO Platform uses **Services-based Django architecture** for secure separation between business logic and customer-facing APIs. This architecture provides security isolation while maintaining development simplicity.
+| Component | Responsibility | Storage and outbound access |
+|---|---|---|
+| Platform, port 8700 | Staff UI, authenticated APIs, business services and authorization | PostgreSQL, database cache, provider adapters |
+| Portal, port 8701 | Customer HTML/HTMX pages, forms and signed Platform client | Local SQLite sessions and infrastructure counters; disposable local-memory cache; Platform HTTP API |
+| Django-Q2 worker | Provisioning, DNS checks, provider operations, notifications and scheduled work | Platform PostgreSQL ORM broker and business models; bounded external transports |
 
-### **Core Principles**
+Portal has no Platform business-model imports or PostgreSQL connection. Its local database is still required:
+it stores login sessions and shared rate-limit, replay and idempotency claims. Losing it forces re-login and
+loses those coordination records, while business records remain on Platform. Portal is not a stateless process.
 
-1. **� Security Isolation** - Portal service cannot access platform database or models
-2. **🎯 Service Boundaries** - Clear separation between platform (business logic) and portal (customer API)
-3. **�️ Database Cache** - Django database cache replaces Redis for simplified deployment
-4. **🐳 Docker Services** - Containerized deployment with network isolation
-5. **🇷🇴 Romanian First** - Built for Romanian hosting provider compliance
+## Repository structure
 
----
-
-## 📁 Services Structure
-
-```bash
-PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
-├─ services/                    # 🏗️ Services Architecture
-│  ├─ platform/                # 🏢 Main Django application (full database access)
-│  │  ├─ apps/                 # 17 Django apps (business domains)
-│  │  │  ├─ users/             # Authentication & user management
-│  │  │  ├─ customers/         # Customer organization management
-│  │  │  ├─ billing/           # Invoice & payment processing
-│  │  │  ├─ tickets/           # Support ticket system
-│  │  │  ├─ provisioning/      # Service provisioning
-│  │  │  ├─ audit/             # Compliance & audit logging
-│  │  │  ├─ common/            # Shared utilities
-│  │  │  ├─ ui/                # Templates & UI components
-│  │  │  └─ ... (17 total)     # See ls services/platform/apps/
-│  │  ├─ config/               # Django configuration
-│  │  └─ manage.py             # Django management
-│  └─ portal/                  # 🌐 Customer API service (stateless, session-only DB)
-│     ├─ apps/                 # 9 Django apps (API proxies, no business models)
-│     │  ├─ api_client/        # HMAC authentication client
-│     │  ├─ users/             # User API proxy
-│     │  ├─ billing/           # Billing API proxy
-│     │  ├─ tickets/           # Support API proxy
-│     │  └─ ... (9 total)      # See ls services/portal/apps/
-│     ├─ config/               # Minimal Django configuration
-├─ deploy/                      # 🐳 Deployment: images, Compose, Caddy edge, Ansible
-│  ├─ platform/                # Platform service Dockerfile + entrypoint
-│  ├─ portal/                  # Portal service Dockerfile + entrypoint
-│  ├─ caddy/                   # Caddy edge: automatic HTTPS, hostname routing, edge headers
-│  ├─ ansible/                 # Native (systemd) deployment role
-│  ├─ docker-compose.single-server.yml  # Production: both services + PostgreSQL + Caddy
-│  └─ docker-compose.dev.yml   # Development services
-├─ shared/                      # 🎨 Cross-service shared assets (ADR-0035)
-│  ├─ ui/                      # Shared design system
-│  │  ├─ templates/components/ # 15 shared component templates (canonical)
-│  │  └─ static/js/components/ # Shared JS modules (modal, toast)
-├─ assets/                      # 🎨 Build inputs
-│  ├─ css/platform.css         # Platform entry point (@theme + plugins)
-│  ├─ css/portal.css           # Portal entry point (@theme + plugins)
-│  └─ css/input.css            # Shared design-token partial (imported by both)
-├─ tests/                      # 🧪 Cross-service testing
-│  └─ integration/             # Integration tests for service communication
-└─ Makefile                    # ⚙️ Service management commands
-
----
-
-## 🏢 Platform Service Architecture
-
-**Location**: `services/platform/`
-**Purpose**: Main Django application with full database access and business logic
-
-### Business Domain Applications
-
-#### 👤 users/ - Authentication & User Management
-- **Models**: User (AbstractUser), UserProfile, CustomerMembership
-- **Services**: Registration, 2FA, password reset, role management
-- **Features**: Email-based authentication, TOTP 2FA, role-based access
-
-#### 🏢 customers/ - Business Organizations & Contacts
-- **Models**: Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
-- **Services**: Customer CRUD, multi-tenant access, CUI validation
-- **Features**: Romanian business registration, VAT handling
-
-#### 💰 billing/ - Invoicing & Payment Processing
-- **Models**: ProformaInvoice, Invoice, InvoiceLine, Payment, CreditLedger
-- **Services**: Invoice generation, payment processing, VAT compliance
-- **Features**: e-Factura integration, Romanian tax compliance
-
-#### 🎫 tickets/ - Support System & SLA Tracking
-- **Models**: Ticket, TicketComment, TicketAttachment, TicketWorklog, SupportCategory
-- **Services**: Ticket management, SLA tracking, escalation
-- **Features**: File attachments, time tracking, customer satisfaction
-
-#### 🖥️ provisioning/ - Hosting Services & Server Management
-- **Models**: ServicePlan, Server, Service, ProvisioningTask
-- **Services**: Service provisioning, server management, resource allocation
-- **Features**: Automated provisioning, resource monitoring
-
-#### 📋 audit/ - Compliance & Audit Logging
-- **Models**: AuditEntry, GDPRRequest, ComplianceLog
-- **Services**: Audit trail creation, GDPR compliance, data export
-- **Features**: Immutable audit logs, Romanian compliance
-
-## 🌐 Portal Service Architecture
-
-**Location**: `services/portal/`
-**Purpose**: Customer-facing API service — **NO business data access**
-
-### Database Isolation
-
-Portal uses a **minimal SQLite database for Django session storage only**. It has:
-- ✅ Session storage (required by Django's session framework)
-- ❌ NO business models (no User, Customer, Invoice, etc.)
-- ❌ NO PostgreSQL access (no connection to platform database)
-- ❌ NO direct data queries (all business data fetched via Platform API)
-
-This maintains stateless architecture while leveraging Django's built-in session management.
-
-### API Endpoints
-
-#### 🔐 Authentication API
-```
-POST /api/v1/auth/login/     # Customer login
-POST /api/v1/auth/logout/    # Session termination
-POST /api/v1/auth/refresh/   # Token refresh
+```text
+services/
+  platform/
+    apps/                # 17 installed local Django apps
+    config/              # Platform settings and root routes
+    templates/           # Staff pages
+    tests/               # Platform unit, integration and provider-wire tests
+  portal/
+    apps/                # 10 installed local Django apps; API clients and browser views
+    config/              # Portal settings and root routes
+    templates/           # Customer pages
+    tests/               # Customer views and signed-client tests
+shared/ui/               # Shared component templates and JavaScript
+assets/css/              # Shared tokens and service-specific Tailwind entry points
+deploy/                  # Docker, Caddy and native systemd/Ansible deployment
+tests/integration/       # Cross-service and deployment-boundary checks
+docs/ADRs/               # Architecture decisions
 ```
 
-#### 🏢 Account API
-```
-GET  /api/v1/account/profile/      # Customer profile
-PUT  /api/v1/account/profile/      # Update profile
-GET  /api/v1/account/services/     # Service list
-GET  /api/v1/account/invoices/     # Billing history
-```
+Platform's installed local apps are `common`, `users`, `customers`, `billing`, `tickets`, `provisioning`,
+`infrastructure`, `products`, `orders`, `domains`, `notifications`, `integrations`, `audit`, `ui`,
+`promotions`, `settings` and `api`. Portal installs `common`, `users`, `dashboard`, `billing`, `tickets`,
+`services`, `dns`, `customers`, `ui` and `api_client`; its URL configuration also mounts the `orders` package.
+The authoritative lists are the services' `config/settings/base.py` files.
 
-#### 🎫 Support API
-```
-GET  /api/v1/tickets/              # Customer tickets
-POST /api/v1/tickets/              # Create ticket
-GET  /api/v1/tickets/{id}/         # Ticket details
-POST /api/v1/tickets/{id}/comments/ # Add comment
-```
+Platform apps share one database. Domain services coordinate transactions and invariants; infrastructure
+gateways encapsulate external protocols. This is not a strict dependency DAG: hosting publication and customer
+DNS intentionally collaborate. [ADR-0007](../ADRs/ADR-0007-function-level-cross-app-imports.md) defines deferred
+cross-app model imports and exempts API composition roots. `make lint-imports` checks new import dependencies.
 
-### Security Constraints
-- ❌ **NO PostgreSQL access** (no psycopg driver, no connection to business database)
-- ❌ **NO direct model imports** from platform (enforced by pre-commit hooks)
-- ❌ **NO business data models** (apps have no models.py with domain entities)
-- ✅ **SQLite for sessions only** (minimal local storage, no business data)
-- ✅ **HMAC-signed API communication** with platform for all business operations
-- ✅ **Stateless design** - can be destroyed/recreated without data loss
+## Storage, sessions and authentication
 
----
+Platform base settings use PostgreSQL and Django `DatabaseCache` in `django_cache_table`. Django-Q2 uses
+the same database's ORM broker with asynchronous execution. Platform sessions use `apps.users.session_backend`,
+which coordinates persisted sessions with their revocation index.
+Development and fast unit-test settings may substitute SQLite; PostgreSQL concurrency checks are required to
+exercise the real row locks and deferred foreign-key behavior.
 
-## 🗄️ Data Architecture
+Portal uses SQLite in every environment, with WAL mode and a configurable `SESSION_DB_PATH`.
+`apps.common.session_store` merges concurrent session writes. The `common_counters` infrastructure model
+supports rate limits, expiring token-owned claims and webhook replay protection across Portal workers.
+`LocMemCache` holds disposable, per-process data; it is not the shared replay or checkout-claim store.
+See [ADR-0050](../ADRs/ADR-0050-portal-infrastructure-tables.md) and
+[ADR-0055](../ADRs/ADR-0055-portal-sessions-merge-concurrent-writes.md).
 
-### Database Design (Platform Only)
-```sql
--- Core business entities
-Users ←→ CustomerMembership ←→ Customers
-Customers ←→ Invoices ←→ InvoiceLines
-Customers ←→ Tickets ←→ TicketComments
-Customers ←→ Services ←→ Servers
+Customer credentials are checked by Platform. Portal validates browser form input, forwards credentials to
+`/api/users/login/`, then stores the returned identity, membership and session-authentication information in
+its own server-side session. The Portal session cookie is `portal_session`.
 
--- Database cache table (replaces Redis)
-django_cache_table (
-    cache_key VARCHAR(255) PRIMARY KEY,
-    value TEXT NOT NULL,
-    expires TIMESTAMP NOT NULL
-);
-```
+Portal-to-Platform business API requests carry `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash` and `X-Signature`.
+The HMAC-SHA256 canonical string binds the method, normalized path/query, content type, body hash, portal ID,
+nonce and timestamp. User/customer context is bound in the signed JSON payload. Platform verifies the service
+signature and replay controls before API decorators establish the active customer membership and role.
+DNS status and zone reads permit active customer members; DNS mutation intents require owner or technical roles.
+Secrets use `PORTAL_HMAC_SECRET` and Platform's `PORTAL_HMAC_CREDENTIALS` registry when configured; legacy
+mode uses `PLATFORM_API_SECRET`. Production configuration applies the required isolation checks.
 
-### Service Communication
-```
-Portal Service                Platform Service
-      │                            │
-      │ HTTP API Calls             │
-      │────────────────────────────▶│
-      │                            │
-      │◄───────────────────────────│
-      │     JSON Responses         │
-```
+Platform-to-Portal payment webhooks use a separate `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, signing `ts.body`
+with `X-Platform-Timestamp` and `X-Platform-Signature`; accepted signatures reserve shared SQLite counter claims.
 
----
+## HTTP routes
 
-## 🔒 Security Model
+Portal serves browser pages, not a versioned `/api/v1` customer API. Current entry points include:
 
-### Service Isolation
-1. **Import Prevention**: Portal cannot import platform models
-2. **Database Blocking**: Portal has no database drivers
-3. **Network Isolation**: Docker networks separate concerns
-4. **Session Separation**: Different cookie names prevent conflicts
+| Browser route | Purpose |
+|---|---|
+| `/login/`, `/logout/`, `/profile/` | Customer session and profile |
+| `/dashboard/`, `/billing/`, `/tickets/`, `/services/` | Customer business pages |
+| `/company/`, `/order/` | Team/company management and checkout |
+| `/dns/`, `/dns/import/<service_id>/`, `/dns/zones/<zone_uuid>/` | DNS list, hosting-scoped import and zone management |
 
-### Security Testing
-```python
-# Automated security validation
-def test_portal_isolation():
-    # Portal cannot import platform models
-    with pytest.raises(ImportError):
-        from apps.billing.models import Invoice
+Platform mounts the signed service API under `/api/`, with domain subroutes such as `/api/users/`,
+`/api/customers/`, `/api/billing/`, `/api/services/` and `/api/dns/`. DNS reads use signed JSON POSTs as well
+as mutations; do not infer an endpoint's HTTP method from its name.
 
-    # Portal cannot access database
-    with pytest.raises(Exception):
-        from django.db import connection
-```
+| Platform endpoint | Method and behavior |
+|---|---|
+| `/api/users/login/` | POST; validate customer credentials |
+| `/api/services/<service_id>/dns-status/` | POST; read saved public DNS status |
+| `/api/services/<service_id>/dns-status/recheck/` | POST; persist a bounded recheck request |
+| `/api/dns/zones/`, `/api/dns/zones/<zone_uuid>/` | POST; tenant-scoped paginated reads |
+| `/api/dns/zones/import/` | POST; parse a complete zone-file upload and save a proposed revision |
+| `/api/dns/zones/<zone_uuid>/crosscheck/`, `confirm/`, `switch/`, `delete/` | POST; validate current intent and persist background work |
+| `/api/dns/zones/<zone_uuid>/records/` and `records/<record_uuid>/` | POST; request a typed customer record change |
 
----
+The authoritative route definitions are `services/portal/config/urls.py` and
+`services/platform/apps/api/urls.py` with their included domain URL modules. Liveness routes are Portal
+`GET /status/` and Platform `GET /api/users/health/`; these shallow responses do not prove database,
+provider, DNS or authentication health.
 
-## 🚀 Deployment Architecture
+## Hosting names, DNS monitoring and customer zones
 
-### Docker Services
+### Account identity and publication
 
-`deploy/docker-compose.single-server.yml` runs the whole stack on one host:
+`VirtualminAccount.server` identifies the actual hosting node; `Service.server` is a separate service-level
+association and is not used as authoritative customer routing advice. Each eligible account has an
+`AccountHostname`, with stable identity and direct A/AAAA records through the account-name DNS gateway.
+Certificates and node installation evidence gate publication. Account-name customer-content previews remain
+disabled in this rollout. Public Suffix List inclusion is a prerequisite for any future enablement, not an
+instruction to enable them.
+
+Planned cutover coordinates source write barriers, held target restore, activation, forwarding and authoritative
+DNS convergence. Ownership commits once under a live operation lease and publication lock. Before commit,
+compensation restores recorded source state; after commit, work proceeds toward the committed target.
+Recovery from an unavailable source requires explicit source fencing. A durable `MigrationBridge` retains
+the old route separately from migration completion; fresh frontend agreement, cache age and cleanup proofs
+gate source removal. These are Phase 2 implementation contracts, not a claim that every deployment enables them.
+
+### Phase 3: saved DNS observations
+
+`provisioning/hosted_domain_dns_service.py` owns saved status and incident state; its dispatcher and worker
+in `hosted_domain_dns_tasks.py` call `infrastructure/dns_probes.py`. Probes share a 90-second/96-query budget
+and report apex, `www`, CAA, DNSSEC and mail components independently. DNSSEC checks DS/DNSKEY consistency;
+they do not claim full cryptographic validation. External or null MX is valid when hosted mail is not enabled.
+
+Reads and manual recheck requests perform no DNS or provider network I/O. Saved results are invalidated against
+current tenant, routing generation, maintenance and freshness. Background workers commit fenced observations;
+verified deterioration from a healthy baseline may open one notification incident. Unknown observations do not
+manufacture a healthy baseline or an outage. See the [Phase 3 implementation record](account-hostnames-phase3-execution.md).
+
+### Phase 4: independently owned customer DNS
+
+The `domains/dns_zone_*` modules own `HostedZone`, immutable import revisions, stable record slots and durable
+operations. Enrollment starts from an existing hosting service's primary domain. The first import requires a
+complete uploaded zone file; DNS probes cross-check it rather than trying to discover arbitrary record names.
+The preview includes original SOA/NS infrastructure, proposed managed-record replacements and unsupported-record
+refusals before any provider write or nameserver instructions. The customer confirms the exact revision and digest.
+
+`domains/dns_zone_tasks.py` advances leased provider/checkpoint operations through the typed
+`infrastructure/dns_zone_gateway.py` interface and Cloudflare adapter. It verifies complete provider inventories,
+record ownership and immutable zone binding, and preserves ambiguous outcomes for reconciliation. Nameserver
+instructions require current published/read-back and DNS handover evidence. A supported registrar change is a
+separate durable operation; other owners change their registrar manually. Customer edits support A, AAAA,
+CNAME, MX, TXT, SRV and CAA; PRAHO-managed records are protected.
+
+`provisioning/managed_dns_service.py` publishes hosting-managed customer records under the same
+`AccountHostname` publication fence as the owned name. Migration/recovery share per-record original TTL,
+provider confirmation, convergence and restoration evidence. Account and name locks serialize hosting
+ownership transfers with publication; `HostedZone.customer` remains the independent DNS data owner.
+Hosting termination withdraws managed web records while unrelated DNS remains. Whole-zone deletion requires
+a current export and verified move-away/cache-age proof. See the [Phase 4 implementation record](account-hostnames-phase4-execution.md).
+
+Portal's `apps/dns` contains forms, view orchestration and a bounded signed API client; staff diagnostics show
+saved private evidence on Platform. Neither interface runs customer DNS probes or provider calls inline.
+
+### Phase 5: mail remains separate work
+
+Native Postfix/Dovecot lab work and mail-node preparation do not establish a completed hosted-mail lifecycle.
+Per-domain owner opt-in, managed mail records, mailbox-safe move/restore, relay/proxy cleanup and customer mail
+settings remain Phase 5 gates in the execution plan. Mail stays default-off until that workflow is proven;
+customer-zone import preserves external mail routing. Do not infer production mail support from a successful lab case.
+
+## Deployment and isolation
+
+`deploy/docker-compose.single-server.yml` defines:
 
 | Service | Role | Networks |
 |---|---|---|
-| `caddy` | Edge: automatic HTTPS, routing by hostname, edge headers | `web` |
-| `platform` | Staff app and API (Gunicorn, :8700); see the routing note below | `web`, `internal` |
-| `portal` | Customer app (Gunicorn, :8701) | `web` |
+| `caddy` | HTTPS edge and hostname routing | `web` |
+| `platform` | Staff HTTP app and API | `web`, `internal` |
+| `qcluster` | Platform background worker, no HTTP listener | `web`, `internal` |
+| `portal` | Customer HTTP app with local SQLite | `web` |
 | `db` | PostgreSQL | `internal` |
 
-On the platform domain, Caddy routes these paths to anyone: `/api/*` (the portal's HMAC-signed calls
-and API tokens), `/api/users/health/*`, `/integrations/webhooks/*`, `/notifications/webhooks/*` and
-`/notifications/unsubscribe/*`. Everything else, meaning the staff UI and `/static/`, is served only
-to `PLATFORM_ALLOWED_CIDRS` and answers 403 elsewhere. Both Caddy configs route the same way. No
-route serves media: stored files are read only through Django views that check access (ADR-0057).
+Portal shares no network with PostgreSQL. Both Platform and its worker need the business database and external
+integration access. Other production Compose variants split these roles across hosts or a container service.
+Native Ansible installs `praho-platform`, `praho-portal` and `praho-qcluster` systemd services behind Caddy.
 
-`docker-compose.platform-only.yml`, `docker-compose.portal-only.yml` and
-`docker-compose.container-service.yml` split the same services across hosts or a managed container
-platform. Native deployments (the `praho-native` Ansible role) run the same Caddy edge under systemd.
+On the Platform hostname, Caddy permits the configured public API, webhook and unsubscribe paths; staff pages
+and staff static files require `PLATFORM_ALLOWED_CIDRS`. Stored media is served through authorized Django views,
+not a public media route. See [deployment instructions](../deployment/DEPLOYMENT.md) and
+[ADR-0057](../ADRs/ADR-0057-media-storage-filesystem-or-private-bucket.md) for the private-file contract.
 
-### Network Isolation
-- **internal**: Platform service + Database only
-- **web**: Caddy, Platform and Portal
-- **No direct connection**: the Portal shares no network with the database
-  (`tests/integration/test_docker_services.py` checks every production Compose file)
+## Verification and diagrams
 
----
+Use `make test-platform`, `make test-portal`, `make test-integration`, `make lint` and `make check-types` for
+application checks. Provider-wire fixtures test complete inventories and uncertain outcomes without real provider
+writes. PostgreSQL concurrency tests cover ownership/publication and cutover locking. Native node behavior is
+verified separately in the Virtualmin lab; passing unit tests does not establish a production rollout.
 
-## 🔧 Development Workflow
-
-### Local Development
-```bash
-# Start both services
-make dev
-
-# Or start individually
-make dev-platform    # Platform on :8700 (full Django)
-make dev-portal      # Portal on :8701 (API only)
-```
-
-### Testing Strategy
-```bash
-# Service-specific testing
-make test-platform     # Unit tests with database access
-make test-portal       # API tests without database
-
-# Cross-service testing
-make test-integration  # Service communication tests
-make test-security     # Service isolation validation
-make test-cache        # Database cache functionality
-```
-
-### Database Operations
-```bash
-# Platform service manages all database operations
-make migrate          # Run platform migrations only
-make shell-platform   # Django shell with full database access
-make fixtures         # Load sample data via platform
-```
-
----
-
-## 📊 Performance & Monitoring
-
-### Database Cache Performance
-- **Cache Operations**: ~1-2ms latency for typical cache operations
-- **Transaction Safety**: ACID guarantees with database operations
-- **Simplified Deployment**: No Redis maintenance or memory management
-
-### Service Communication
-- **Internal APIs**: <10ms latency between services in Docker network
-- **Authentication**: Two independent HMAC-SHA256 systems:
-  - **System 1** (Portal→Platform): Canonical string signing with nonce dedup (`HMAC_SECRET`)
-  - **System 2** (Platform→Portal webhooks): `ts.body` signing with replay dedup (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`)
-
-### Rate Limiting Architecture
-
-Rate limiting runs in three layers and is intentionally cumulative:
-
-1. **Portal middleware (pre-DRF)**: protects Portal auth and API routes before outbound calls are made.
-2. **Platform global DRF throttles**: routes traffic by source:
-   - HMAC service traffic: `PortalHMACRateThrottle` + `PortalHMACBurstThrottle`
-   - Direct/customer traffic: `CustomerRateThrottle` + `BurstRateThrottle`
-3. **Platform per-view DRF throttles**: operation-level controls:
-   - `StandardAPIThrottle` (`sustained`)
-   - `BurstAPIThrottle` (`api_burst`)
-   - `AuthThrottle` (`auth`)
-   - `EndpointRateThrottle` subclasses for order, catalog, and session-validation scopes
-
-For internal HMAC traffic, `request._portal_authenticated` drives mutual exclusion:
-- portal HMAC throttles apply
-- customer/burst fallback classes skip processing for the same request
-- endpoint throttles key on the verified portal identity rather than client IP
-
-Throttle scope rates are centrally configured via `THROTTLE_RATES` and validated at startup
-to fail fast on invalid rate strings or missing scopes.
-
-### Health Monitoring
-```python
-# Platform service health endpoints
-/health/database/     # Database connectivity
-/health/cache/        # Cache table operations
-/health/migrations/   # Migration status
-
-# Portal service health endpoints
-/health/api/          # Platform API connectivity
-/health/auth/         # Authentication flow status
-```
-
----
-
-## 🎯 Migration Benefits
-
-### Security Improvements
-1. **Data Isolation**: Customer API cannot access sensitive business data
-2. **Attack Surface Reduction**: Portal service has minimal dependencies
-3. **Compliance**: Clear audit boundaries between services
-4. **Defense in Depth**: Multiple security layers
-
-### Operational Benefits
-1. **Scalability**: Services scale independently based on load
-2. **Reliability**: Portal issues don't affect platform operations
-3. **Simplified Deployment**: Database cache eliminates Redis complexity
-4. **Monitoring**: Service-specific metrics and alerting
-
-### Development Benefits
-1. **Clear Boundaries**: Service responsibilities are well-defined
-2. **Testing Isolation**: Each service can be tested independently
-3. **Team Structure**: Teams can own specific services
-4. **Technology Choices**: Services can evolve different tech stacks
-
----
-
-This architecture provides a secure, scalable foundation for the PRAHO platform while maintaining the development simplicity of Django and preparing for future microservices evolution.
+The [diagram index](README.md) links the system, request/worker flow, deployment and selected dependency views.
+The [ER diagram](diagrams/entity-relationships.mmd) is a selected subset with actual model PK/FK types.
+The [table taxonomy](diagrams/database-tables.mmd) is the 2026-10-27 snapshot of 166 concrete local Platform model
+tables; it excludes framework tables and automatically created many-to-many tables. Neither diagram replaces
+the model definitions or migrations. No latency or availability benchmark is asserted by this guide.

@@ -1,51 +1,51 @@
-%% PRAHO Platform - Data Flow & Service Communication
-%% Generated: 2026-02-21
-%% Shows how Portal and Platform services communicate
-
+%% Source snapshot: 2026-10-27. Selected browser, API and DNS worker flows.
+%% DNS/provider I/O occurs in background jobs, not cached reads or recheck requests.
 sequenceDiagram
-    participant Customer as Customer Browser
-    participant Portal as Portal Service<br/>(Stateless API)
-    participant Platform as Platform Service<br/>(Business Logic)
-    participant DB as PostgreSQL<br/>(Business Data)
-    participant Cache as DB Cache Table
+    participant Browser as Customer browser
+    participant Portal as Portal views and signed client
+    participant SQLite as Portal SQLite
+    participant Platform as Platform API and domain services
+    participant DB as Platform PostgreSQL
+    participant Worker as Django-Q2 dispatcher and worker
+    participant External as DNS authorities or Cloudflare
 
-    Note over Customer,Cache: Customer Authentication Flow
-    Customer->>Portal: POST /api/v1/auth/login
-    Portal->>Portal: Validate credentials locally
-    Portal->>Platform: HMAC-signed request<br/>X-HMAC-Signature: sha256...
-    Platform->>Platform: Verify HMAC signature
-    Platform->>DB: SELECT * FROM users WHERE email=?
-    DB-->>Platform: User record
-    Platform->>Cache: Store session data
-    Cache-->>Platform: OK
-    Platform-->>Portal: {user_id, token}
-    Portal->>Portal: Store session in SQLite
-    Portal-->>Customer: Set-Cookie: sessionid=...
+    Note over Browser,DB: Login uses Platform credential validation
+    Browser->>Portal: POST /login/ with form and CSRF token
+    Portal->>Portal: Validate form input
+    Portal->>Platform: POST /api/users/login/ with signed JSON
+    Note over Portal,Platform: X-Portal-Id, X-Nonce, X-Timestamp, X-Body-Hash, X-Signature
+    Platform->>Platform: Verify service signature and replay controls
+    Platform->>DB: Authenticate user and load permitted memberships
+    DB-->>Platform: Canonical identity and current authorization state
+    Platform-->>Portal: Identity, membership and session-authentication data
+    Portal->>SQLite: Persist server-side session
+    Portal-->>Browser: Set-Cookie portal_session and redirect to customer page
 
-    Note over Customer,Cache: Fetching Customer Data
-    Customer->>Portal: GET /api/v1/account/profile
-    Portal->>Portal: Read session from SQLite
-    Portal->>Platform: HMAC-signed request<br/>X-User-Context: {user_id: 123}
-    Platform->>Platform: Verify HMAC + user context
-    Platform->>DB: SELECT * FROM customers WHERE user_id=123
-    DB-->>Platform: Customer data
-    Platform->>Cache: Cache customer profile
-    Cache-->>Platform: Cached
-    Platform-->>Portal: {customer_data}
-    Portal-->>Customer: JSON response
+    Note over Browser,External: Saved DNS status and a bounded manual recheck
+    Browser->>Portal: GET service DNS card
+    Portal->>Platform: POST /api/services/{id}/dns-status/ with signed identity
+    Platform->>DB: Read saved status and current routing/ownership generation
+    DB-->>Platform: Saved observation and freshness inputs
+    Platform-->>Portal: Versioned public status with private evidence omitted
+    Portal-->>Browser: Render cached status
+    Browser->>Portal: POST recheck with CSRF token
+    Portal->>Platform: POST /api/services/{id}/dns-status/recheck/
+    Platform->>DB: Verify owner/tech and persist due work
+    Platform-->>Portal: 202 with current pending state
+    Portal-->>Browser: Redirect or bounded status polling
+    Worker->>DB: Dispatch and claim due work under a live lease
+    Worker->>External: Bounded DNS probes
+    Worker->>DB: Fence generation and save results and incident state
 
-    Note over Customer,Cache: Platform→Portal Webhook (System 2)
-    Platform->>Portal: POST /orders/payment/webhook/<br/>X-Platform-Signature: hmac-sha256<br/>X-Platform-Timestamp: int(unix)
-    Portal->>Portal: Verify HMAC signature<br/>+ replay dedup (LocMemCache)
-    Portal-->>Platform: {success: true}
-
-    Note over Customer,Cache: Security Isolation
-    rect rgb(255, 200, 200)
-        Portal-XDB: ❌ Direct access blocked<br/>No psycopg driver
-        Portal-XCache: ❌ No Redis/cache access
-    end
-
-    rect rgb(200, 255, 200)
-        Platform->>DB: ✅ Full CRUD access
-        Platform->>Cache: ✅ Cache operations
-    end
+    Note over Browser,External: Customer-zone import and provider publication
+    Browser->>Portal: Multipart zone-file upload with CSRF token
+    Portal->>Platform: Signed JSON with bounded base64 upload
+    Platform->>DB: Parse and save complete immutable inventory and proposal
+    Platform-->>Portal: Paginated preview without nameserver instructions yet
+    Browser->>Portal: Confirm exact revision and digest
+    Portal->>Platform: Signed confirmation intent
+    Platform->>DB: Verify current binding and save durable operation
+    Worker->>DB: Claim operation and verify account/name publication fence
+    Worker->>External: Typed gateway calls and authoritative cross-checks
+    Worker->>DB: Save owned-record readback and readiness checkpoints
+    Note over Browser,DB: Later reads offer nameservers only while readiness remains current
