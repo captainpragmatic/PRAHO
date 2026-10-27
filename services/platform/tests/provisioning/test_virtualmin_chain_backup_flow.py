@@ -9,14 +9,18 @@ that was fetched, and that every uncertain outcome publishes nothing.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
+import tarfile
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from apps.common.types import Ok, Retriability, retriability_of
+from apps.provisioning.backup_owner_shadow import OWNER_SHADOW_KEY
 from apps.provisioning.virtualmin_backup_service import (
     CHAIN_ROLE_BASE,
     CHAIN_ROLE_DIFFERENTIAL,
@@ -57,15 +61,54 @@ class ChainBackupFlowTests(BackupNodeFixture):
         """Stand in for the node: the chain step, then the ordinary fetch."""
         self.played.append((playbook, dict(variables)))
         if playbook == "virtualmin_chain_backup.yml":
+            # The fake native node now captures aging into THIS archive before
+            # reporting its checksum; controller verification remains real.
+            profile = {
+                "version": 1,
+                "domain": self.account.domain,
+                "owner": self.account.virtualmin_username,
+                "source_domain_id": DOMAIN_ID,
+                "archive": variables["chain_archive"],
+                "credential_sha256": hashlib.sha256(b"$6$fixture$original-hash").hexdigest(),
+                "aging": {
+                    "change": "20000",
+                    "min": "0",
+                    "max": "99999",
+                    "warn": "7",
+                    "inactive": "",
+                    "expire": "",
+                    "flag": "",
+                },
+            }
+            encoded = base64.b64encode(json.dumps(profile).encode()).decode()
+            metadata = f"id={DOMAIN_ID}\ndom={self.account.domain}\nuser={self.account.virtualmin_username}\nenc_pass=$6$fixture$original-hash\n{OWNER_SHADOW_KEY}={encoded}\n"
+            output = io.BytesIO()
+            with (
+                tarfile.open(fileobj=io.BytesIO(ARCHIVE_BYTES), mode="r:gz") as original,
+                tarfile.open(fileobj=output, mode="w:gz") as enriched,
+            ):
+                for member in original:
+                    content = (
+                        metadata.encode()
+                        if member.name.endswith("_virtualmin")
+                        else original.extractfile(member).read()
+                    )
+                    member.size = len(content)
+                    enriched.addfile(member, io.BytesIO(content))
+            self.archive_bytes = output.getvalue()
+            self.fetched_sha = hashlib.sha256(self.archive_bytes).hexdigest()
+            if self.step_sha == ARCHIVE_SHA:
+                self.step_sha = self.fetched_sha
             return self.chain_reply(variables)
         archive = Path(variables["spool_dir"]) / variables["archive_name"]
-        archive.write_bytes(ARCHIVE_BYTES)
+        archive.write_bytes(self.archive_bytes)
         return Ok(SimpleNamespace(success=True, stdout=f"BACKUP_SHA256={self.fetched_sha}\n", return_code=0))
 
     def _prepare(self) -> None:
         self.played: list[tuple[str, dict[str, Any]]] = []
         self.fetched_sha = ARCHIVE_SHA
         self.step_sha = ARCHIVE_SHA
+        self.archive_bytes = ARCHIVE_BYTES
         self.noted: list[dict[str, Any]] = []
 
         def gateway_call(program: str, params: dict[str, Any], **kwargs: Any) -> Any:
@@ -86,7 +129,7 @@ class ChainBackupFlowTests(BackupNodeFixture):
                 fp_before=SNAP_B if ran_base else SNAP_A,
                 fp_after=SNAP_A,
                 sha256=self.step_sha,
-                size=len(ARCHIVE_BYTES),
+                size=len(self.archive_bytes),
             )
             return Ok(SimpleNamespace(success=True, stdout=f"msg: {line}\n", return_code=0))
 
@@ -117,7 +160,9 @@ class ChainBackupFlowTests(BackupNodeFixture):
     def test_a_base_runs_the_node_step_then_fetches_and_records_its_lineage(self) -> None:
         result = self._backup(self._config(CHAIN_ROLE_BASE))
         self.assertTrue(result.is_ok(), result)
-        self.assertEqual([name for name, _ in self.played], ["virtualmin_chain_backup.yml", "virtualmin_backup_fetch.yml"])
+        self.assertEqual(
+            [name for name, _ in self.played], ["virtualmin_chain_backup.yml", "virtualmin_backup_fetch.yml"]
+        )
         variables = self.played[0][1]
         self.assertEqual(
             {key: variables[key] for key in ("chain_action", "chain_mode", "chain_domain_id", "chain_token")},

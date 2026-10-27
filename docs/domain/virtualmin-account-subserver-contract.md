@@ -1,5 +1,11 @@
 # Virtualmin sub-server as the account hostname: lab contract
 
+**Historical experiment.** The symlink and content-serving results below establish Virtualmin's
+behavior; they do not describe the first release's preview policy. The owner subsequently chose
+previews off. Current account-name orchestration never creates the link and uses root-owned neutral
+Apache vhosts, while retaining the sub-server's per-name certificate. See
+[ADR-0061](../ADRs/ADR-0061-account-hostnames-follow-the-account.md).
+
 Evidence for ADR-0061, plan task P1.0 (second attempt). The alias design was disproved on Virtualmin 8.3
 (`virtualmin-account-alias-contract.md`). The owner then chose to test a sub-server of the customer's domain,
 with its own web root mapped to the customer's content, and accepted that the account name's certificate lands

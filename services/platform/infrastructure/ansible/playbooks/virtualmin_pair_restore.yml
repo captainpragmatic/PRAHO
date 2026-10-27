@@ -64,6 +64,12 @@
         mode: '0700'
       when: pair_recovery | bool
 
+    - name: Install the root-private read-only Apache binding reader
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
     - name: Run the pair step under the per-domain lock
       ansible.builtin.script:
         cmd: files/praho-pair-restore.sh

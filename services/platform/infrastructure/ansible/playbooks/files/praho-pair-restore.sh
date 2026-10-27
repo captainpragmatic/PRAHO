@@ -48,12 +48,16 @@ HELD_STATE_DIR=${PRAHO_HELD_STATE_DIR:-/var/lib/praho/recovery}
 APACHE_DIR=${PRAHO_APACHE_DIR:-/etc/apache2/conf-enabled}
 HTTP_PORT=${PRAHO_HTTP_PORT:-80}
 HTTPS_PORT=${PRAHO_HTTPS_PORT:-443}
-readonly RUN_DIR STATE_DIR HELD_STATE_DIR APACHE_DIR HTTP_PORT HTTPS_PORT
+NEUTRAL_HELPER=${PRAHO_NEUTRAL_HELPER:-/var/lib/praho/account-name-neutral/helper.py}
+APACHE_BINDINGS_HELPER=${PRAHO_APACHE_BINDINGS_HELPER:-/var/lib/praho/apache-bindings/library.py}
+readonly RUN_DIR STATE_DIR HELD_STATE_DIR APACHE_DIR HTTP_PORT HTTPS_PORT NEUTRAL_HELPER APACHE_BINDINGS_HELPER
 safe_dir='^/[A-Za-z0-9._/-]+$'
 [[ $RUN_DIR =~ $safe_dir && $RUN_DIR != *..* ]] || exit 64
 [[ $STATE_DIR =~ $safe_dir && $STATE_DIR != / && $STATE_DIR != *..* ]] || exit 64
 [[ $HELD_STATE_DIR =~ $safe_dir && $HELD_STATE_DIR != / && $HELD_STATE_DIR != *..* ]] || exit 64
 [[ $APACHE_DIR =~ $safe_dir && $APACHE_DIR != *..* ]] || exit 64
+[[ $NEUTRAL_HELPER =~ $safe_dir && $NEUTRAL_HELPER != *..* ]] || exit 64
+[[ $APACHE_BINDINGS_HELPER =~ $safe_dir && $APACHE_BINDINGS_HELPER != *..* ]] || exit 64
 [[ $HTTP_PORT =~ ^[0-9]{1,5}$ && $HTTPS_PORT =~ ^[0-9]{1,5}$ ]] || exit 64
 
 action=${PRAHO_PAIR_ACTION:?}
@@ -101,6 +105,7 @@ progress="$RUN_DIR/pair-$domain_id.progress"
 checkpoints=""
 docroot_regexes=()   # one per document root the domain's virtual host has had since this job began
 probe_hosts=()       # every spelling of every name it has answered to since then, probed at each checkpoint
+probe_addresses=()   # union of every actual native address seen before/after each restore
 name_regex=""        # the same names as one alternation, for the barrier's Host condition
 CP_ODD=none
 
@@ -145,7 +150,11 @@ cancelled() {
 # means for the refusal path: an account suspended before sub-servers were cascaded has a disabled
 # domain and an enabled account name, and must not be re-enabled by a refused restore.
 domain_disabled() {
-  virtualmin list-domains --disabled --name-only 2>/dev/null | grep -qxF -- "$domain"
+  local disabled
+  # Consume the complete native listing: grep -q can close its pipe after the parent match,
+  # turning the producer's later child output into SIGPIPE under pipefail and hiding the parent.
+  disabled=$(virtualmin list-domains --disabled --name-only 2>/dev/null) || return 1
+  grep -qxF -- "$domain" <<<"$disabled"
 }
 
 # is_disabled : the domain AND every sub-server under it (its account name, ADR-0061) are disabled.
@@ -161,32 +170,69 @@ is_disabled() {
 }
 
 http_code() { # SCHEME PORT [HOST]
-  local scheme=$1 port=$2 host=${3:-$domain} insecure=""
+  local scheme=$1 port=$2 host=${3:-$domain} insecure="" address resolved code first=""
   [[ $scheme == https ]] && insecure="-k"
-  # $insecure is deliberately unquoted: empty means no argument at all.
-  # shellcheck disable=SC2086
-  curl -s -o /dev/null -w '%{http_code}' --max-time 5 $insecure \
-    --resolve "$host:$port:127.0.0.1" "$scheme://$host:$port/" 2>/dev/null || printf '000'
+  for address in "${probe_addresses[@]}"; do
+    resolved=$address; [[ $resolved != *:* ]] || resolved="[$resolved]"
+    # $insecure is deliberately unquoted: empty means no argument at all.
+    # shellcheck disable=SC2086
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $insecure \
+      --resolve "$host:$port:$resolved" "$scheme://$host:$port/" 2>/dev/null) || code=000
+    [[ $code == 503 || $code == 404 ]] || { printf '%s' "$code"; return; }
+    [[ -n $first ]] || first=$code
+    [[ $code == "$first" ]] || { printf '000'; return; }
+  done
+  printf '%s' "${first:-000}"
 }
 
-ssl_loaded() { apache2ctl -M 2>/dev/null | grep -q 'ssl_module'; }
+ssl_loaded() {
+  local modules
+  modules=$(apache2ctl -M 2>/dev/null) || return 1
+  grep -q 'ssl_module' <<<"$modules"
+}
 
-# probe_odd_hosts : every spelling the domain's virtual host can be reached by must be answered 503
+# A provider-name child can have a root-owned neutral vhost that deliberately precedes this hold.
+# Only its descendants qualify, never the customer's own name or an unrelated native ServerAlias.
+# The fixed read-only helper verifies current native parent/owner/ID, root-private state/config digests,
+# disabled state and fresh exact HTTP+HTTPS 404/Not Found. A status alone never grants this exception.
+odd_host_holds() {
+  local host=$1 code=$2 child owner proof
+  [[ $code != 503 ]] || return 0
+  [[ $code == 404 && -f $NEUTRAL_HELPER && ! -L $NEUTRAL_HELPER &&
+     -d ${NEUTRAL_HELPER%/*} && ! -L ${NEUTRAL_HELPER%/*} &&
+     $(stat -c '%u:%a' -- "$NEUTRAL_HELPER") == 0:700 &&
+     $(stat -c '%u:%a' -- "${NEUTRAL_HELPER%/*}") == 0:700 ]] || return 1
+  host=$(printf '%s' "${host%.}" | tr '[:upper:]' '[:lower:]')
+  [[ $host != "$domain" ]] || return 1
+  for child in ${neutral_children[@]+"${neutral_children[@]}"}; do
+    [[ $child != "$domain" && ( $host == "$child" || $host == *."$child" ) ]] || continue
+    owner=$(virtualmin list-domains --domain "$domain" --user-only 2>/dev/null) || return 1
+    [[ -n $owner ]] || return 1
+    proof=$(python3 "$NEUTRAL_HELPER" verify --name "$child" --owner "$owner" --parent "$domain" \
+      --parent-id "$domain_id" --host "$host" 2>/dev/null) || return 1
+    [[ $proof == neutral ]] && return 0
+    return 1
+  done
+  return 1
+}
+
+# probe_odd_hosts : every spelling the domain's virtual host can be reached by must be fenced
 # on every port that is open: the names in upper case, with a trailing dot, the mail name and every
-# alias. Sets CP_ODD to 503, or to the first other answer (and writes which host gave it).
+# alias. CP_ODD=503 is the aggregate "all fenced" result, including the independently proven neutral
+# provider-name child exception above. Primary port fields retain their actual response codes.
 probe_odd_hosts() {
   local host code
   CP_ODD=503
   for host in "${probe_hosts[@]}"; do
     code=$(http_code http "$HTTP_PORT" "$host")
-    if [[ $code != 503 ]]; then
+    if ! odd_host_holds "$host" "$code"; then
       CP_ODD=$code
       printf 'host %s answered %s on port %s\n' "$host" "$code" "$HTTP_PORT" >>"$RUN_DIR/pair-$domain_id.diag"
       return
     fi
     if ssl_loaded; then
       code=$(http_code https "$HTTPS_PORT" "$host")
-      if [[ $code != 503 ]]; then
+      if ! odd_host_holds "$host" "$code"; then
         CP_ODD=$code
         printf 'host %s answered %s on port %s\n' "$host" "$code" "$HTTPS_PORT" >>"$RUN_DIR/pair-$domain_id.diag"
         return
@@ -301,6 +347,8 @@ name_alternatives=()
 seen_hosts=" "
 seen_names=" "
 seen_roots=" "
+seen_addresses=" "
+neutral_children=()
 add_probe_host() { # HOST : once per exact spelling (the upper-case spelling is a probe of its own)
   [[ $seen_hosts != *" $1 "* ]] || return 0
   seen_hosts+="$1 "
@@ -312,7 +360,7 @@ add_probe_host() { # HOST : once per exact spelling (the upper-case spelling is 
 # and probed, so a restore that drops or moves something never narrows the barrier mid-flight.
 # Returns 1, changing nothing, when the document root cannot be read as a safe absolute path.
 read_one_surface() {
-  local dom=$1 info root hostnames name escaped_name
+  local dom=$1 info root hostnames name escaped_name addresses address
   local -a listed_names
   info=$(virtualmin list-domains --domain "$dom" --multiline 2>/dev/null) || return 1
   root=$(sed -n 's/^ *HTML directory: *//p' <<<"$info")
@@ -321,6 +369,19 @@ read_one_surface() {
   [[ $root =~ $safe_dir && $root != *..* ]] || return 1
   hostnames=$(sed -n 's/^ *Website hostnames: *//p' <<<"$info")
   hostnames=${hostnames%%$'\n'*}
+  [[ -f $APACHE_BINDINGS_HELPER && ! -L $APACHE_BINDINGS_HELPER &&
+     -d ${APACHE_BINDINGS_HELPER%/*} && ! -L ${APACHE_BINDINGS_HELPER%/*} &&
+     $(stat -c '%u:%a' -- "$APACHE_BINDINGS_HELPER") == 0:700 &&
+     $(stat -c '%u:%a' -- "${APACHE_BINDINGS_HELPER%/*}") == 0:700 ]] || return 1
+  addresses=$(python3 "$APACHE_BINDINGS_HELPER" addresses --name "$dom" 2>/dev/null) || return 1
+  [[ -n $addresses ]] || return 1
+  while IFS= read -r address; do
+    [[ $address =~ ^[0-9A-Fa-f:.]+$ ]] || return 1
+    if [[ $seen_addresses != *" $address "* ]]; then
+      seen_addresses+="$address "
+      probe_addresses+=("$address")
+    fi
+  done <<<"$addresses"
 
   if [[ $seen_roots != *" $root "* ]]; then
     seen_roots+="$root "
@@ -347,9 +408,9 @@ read_one_surface() {
 }
 
 # read_surface : the domain's own virtual host AND every sub-server under it. The account name
-# (ADR-0061) is a sub-server with a virtual host, document root and names of its own that serve the
-# customer's files through a link, so the barrier must answer 503 for it too. A child listing that
-# cannot be read fails like an unreadable document root.
+# (ADR-0061) is a sub-server with a virtual host, document root and names of its own. Its root-owned
+# neutral frontend can remain 404 while all native writes are held; other child frontends require 503.
+# A child listing that cannot be read fails like an unreadable document root.
 read_surface() {
   local children child
   read_one_surface "$domain" || return 1
@@ -357,6 +418,7 @@ read_surface() {
   while IFS= read -r child; do
     [[ -n $child ]] || continue
     [[ $child =~ $host_ok ]] || return 1
+    neutral_children+=("$child")
     read_one_surface "$child" || return 1
   done <<<"$children"
   printf -v name_regex '%s|' "${name_alternatives[@]}"

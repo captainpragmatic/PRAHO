@@ -2,6 +2,12 @@
 
 Execution record, 2026-10-27. Phase 3 is implemented on `codex/adr61-phase3-dns-monitoring`, split after the signed Phase 2 implementation. The research and task breakdown below guided the implementation. Provisioning migration `0018_hosted_domain_dns_status` follows `0017_merge_ssh_cutover`, which joins the released SSH transport and cutover histories without editing either. Audit migration `0017_alter_auditevent_action` follows Phase 2's audit leaf. Fresh verification results are recorded in the main ADR-0061 plan's execution ledger.
 
+Integration refresh onto Phase 2 `04985396`: the ordinary merge preserves the P2 native helpers and
+certificate/publication code byte-for-byte, and preserves the Phase 3 probe/service modules. The merged
+tree passes 204 focused Platform tests, 19 Portal tests, 21 coverage/route contracts and eight PostgreSQL
+transaction/race checks. Full typing passes for 631 Platform and 101 Portal modules; 120 checksums and
+both schema checks pass. Complete combined lint/test publication gates remain separate.
+
 ## Source findings and decisions
 
 The saved tasks are P3.1–P3.5 in `docs/architecture/account-hostnames-dns-mail-plan.md:298`, implementing ADR-0061 section 6. Existing seams:
@@ -10,7 +16,7 @@ The saved tasks are P3.1–P3.5 in `docs/architecture/account-hostnames-dns-mail
 - `services/platform/apps/infrastructure/panel_cert_probes.py`: `public_address`, `AuthoritativeAnswer`; rejects private/special nameserver destinations. Its panel-address probe intentionally rejects CNAMEs and must retain that contract.
 - `services/platform/apps/provisioning/migration_routing.py`: customer frontend snapshots/bridge retention. Monitoring must not mistake an active move for an outage or publish results gathered against the previous target.
 - `services/platform/apps/api/secure_auth.py`: HMAC body identity and active membership, `require_customer_authentication` and `require_customer_role_in`. Add `TECH_ROLES=frozenset({'owner','tech'})`.
-- `services/platform/apps/api/services/{views,urls,serializers}.py`: customer service reads are POST signed JSON and tenant-filter the Service lookup. Public DNS status must follow this protocol. The saved GET Platform API is incompatible with the present HMAC contract. Browser/HTMX GET remains appropriate on Portal.
+- `services/platform/apps/api/services/{views,urls,serializers}.py`: Phase 3 follows the existing service-client convention of signed POST JSON and tenant-filtered Service lookup for DNS status. Customer/user identity stays in the signed body. Browser/HTMX GET remains appropriate on Portal; the security requirement is the same signed identity and replay protection across transports.
 - `services/portal/apps/services/{services,views,urls}.py`: `ServicesAPIClient`, `_get_session_identity`, `_get_user_role_for_customer`; role checks can fail/degrade and are not proof of current Platform membership. Existing `can_manage` includes billing and must not authorize DNS recheck.
 - `services/platform/tests/api/test_service_detail_hosting.py`, `test_services_api_hides_node_details.py`, `services/portal/tests/services/test_service_detail_hides_node_details.py`: customer instructions use account names and hide assigned node addresses/hostnames. Raw DNS traces and expected node addresses stay staff-only.
 - `services/platform/apps/provisioning/virtualmin_tasks.py:setup_virtualmin_scheduled_tasks`, `services/platform/apps/common/management/commands/setup_scheduled_tasks.py`, `services/platform/tests/common/fixtures/scheduled_tasks.json`: idempotent named schedule registry and exact production catalog fixture.
@@ -20,7 +26,7 @@ Use a persisted per-account result and per-account bounded jobs. Do not perform 
 
 ## Design blockers resolved by the proposed contract
 
-1. **Read HTTP method:** Platform `POST /api/services/<id>/dns-status/` carries signed customer_id/user_id/timestamp. `POST .../dns-status/recheck/` queues work. Portal `GET/POST /services/<id>/dns/` displays/rechecks with session + CSRF. Do not introduce GET bodies or a parallel HMAC identity protocol.
+1. **Read HTTP method:** Platform `POST /api/services/<id>/dns-status/` carries signed customer_id/user_id/timestamp. `POST .../dns-status/recheck/` queues work. Portal `GET/POST /services/<id>/dns/` displays/rechecks with session + CSRF. Retain the existing signed-body identity and replay-protection contract.
 2. **Unknown is distinct from broken:** initial checks, network failures, budget exhaustion, unsupported DNSSEC policy, opaque CDN origins and registrar redirect destinations must not manufacture healthy-to-broken transitions. Persist each component's last definitive state/time separately from its current observation. A proven broken required component outranks unrelated unknown diagnostics in the aggregate; an unknown external-proxy or MX observation cannot suppress that break. If no component is proven broken but relevant components remain unknown, show unknown. First-ever unknown/broken observations never manufacture a healthy baseline. One durable incident email covers an active outage; repeated or additional failures during that incident do not create another email. Unknown observations preserve the incident until definitive recovery.
 3. **External mail remains valid:** inspect and explain MX, but do not require MX to the account name before an explicit hosted-mail mode exists in Phase 5. Null MX can intentionally announce no mail; no MX can invoke SMTP's implicit A/AAAA fallback. No Phase 3 DNS writes or MX changes.
 4. **DNS does not prove external HTTP redirects/CDN origins:** show `unverified` with precise component diagnostics. Do not label an apex redirect broken simply because its A record is not the hosting node. Do not infer ALIAS vs direct A solely from a flattened answer. Any retained manual proxy attestation is target/address/name-bound and cannot certify an origin changed invisibly behind a proxy.

@@ -3,6 +3,11 @@
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.utils import timezone
+
+from apps.common.types import Ok
+from apps.provisioning import account_hostname_lifecycle as lifecycle
+from apps.provisioning import account_hostname_service as names
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.account_name_certificates import _name_under_operation
 from apps.provisioning.virtualmin_backup_service import RestoreConfig
@@ -10,6 +15,7 @@ from apps.provisioning.virtualmin_mail_models import VirtualminMailConfiguration
 from apps.provisioning.virtualmin_migration_models import account_blocks_reconcile, account_has_active_operation
 from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService, VirtualminProvisioningService
+from tests.helpers.fake_dns_gateway import FakeDnsGateway
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
 
 
@@ -102,3 +108,43 @@ class MailOperationExclusionTests(MigrationTestBase):
                     self.assertTrue(account_has_active_operation(self.account))
                 finally:
                     operation.delete()
+
+    def test_async_publication_finishes_waiting_mail_prerequisites_but_holds_uncertain_native_work(self):
+        self.account.provisioned_at = timezone.now()
+        self.account.save(update_fields=["provisioned_at"])
+        self.server.ipv4_address = "203.0.113.10"
+        self.server.save(update_fields=["ipv4_address"])
+        name = AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="mailwait", zone="accounts.example.test"
+        )
+        self.settings_values.update(
+            {
+                "dns.account_hostname_zone": name.zone,
+                "dns.account_hostname_zone_id": "mail-zone",
+                "dns.account_zone_api_token": "fake-token",
+            }
+        )
+        FakeDnsGateway.reset({"mail-zone": name.zone})
+        with (
+            patch.object(names, "_dns_gateway", return_value=FakeDnsGateway("fake-token")),
+            patch.object(names, "certificate_ready_on", return_value=True),
+            patch.object(names, "expected_certificate_fingerprint", return_value=Ok("f" * 64)),
+            patch.object(names, "ensure_account_name_neutral", return_value=Ok("f" * 64)),
+        ):
+            for status in ("queued", "awaiting_dns", "running", "needs_review"):
+                with self.subTest(status=status):
+                    operation = self.operation(status)
+                    FakeDnsGateway.calls.clear()
+                    try:
+                        result = lifecycle.sync_account_name(str(name.pk))
+                        if status in {"queued", "awaiting_dns"}:
+                            self.assertEqual(result, {"outcome": "published"})
+                            self.assertEqual(FakeDnsGateway.published(name.fqdn)["A"], self.server.ipv4_address)
+                        else:
+                            self.assertEqual(result, {"outcome": "migration_locked"})
+                            self.assertEqual(FakeDnsGateway.calls, [])
+                            self.assertEqual(names.sync_account_hostname(name), Ok("skipped:mail_operation_locked"))
+                            self.assertEqual(FakeDnsGateway.calls, [])
+                    finally:
+                        operation.delete()
+            self.assertEqual(lifecycle.sync_account_name(str(name.pk)), {"outcome": "published"})

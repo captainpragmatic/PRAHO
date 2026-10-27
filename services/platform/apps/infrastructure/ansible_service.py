@@ -131,6 +131,7 @@ class AnsibleService:
             "virtualmin_bridge.yml",
             "virtualmin_remote_cleanup.yml",
             "virtualmin_account_name_link.yml",
+            "virtualmin_account_name_neutral.yml",
             "virtualmin_install_account_cert.yml",
             "virtualmin_mail.yml",
             "blesta_harden.yml",

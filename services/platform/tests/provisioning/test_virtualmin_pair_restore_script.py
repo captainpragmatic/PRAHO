@@ -39,12 +39,14 @@ cmd=$1; shift
 case $cmd in
   list-domains)
     mode=name
-    for a in "$@"; do case $a in --id-only) mode=id ;; --disabled) mode=disabled ;; --multiline) mode=multi ;; --parent) mode=children ;; esac; done
+    for a in "$@"; do case $a in --id-only) mode=id ;; --user-only) mode=owner ;; --disabled) mode=disabled ;; --multiline) mode=multi ;; --parent) mode=children ;; esac; done
     case $mode in
       id) echo "$FAKE_DOMAIN_ID" ;;
+      owner) echo "${FAKE_OWNER:-node}" ;;
       children) if [[ -n ${FAKE_CHILD:-} ]]; then echo "$FAKE_CHILD"; fi ;;
       disabled)
         if [[ -e $state/disabled ]]; then echo "$FAKE_DOMAIN"; fi
+        if [[ ${FAKE_DELAY_DISABLED_CHILD:-0} == 1 ]]; then /bin/sleep 0.05; fi
         if [[ -n ${FAKE_CHILD:-} && -e $state/child_disabled ]]; then echo "$FAKE_CHILD"; fi
         ;;
       multi)
@@ -110,10 +112,16 @@ esac
     # document root the file does not list is answered 200. FAKE_NO_503 simulates a barrier that never takes.
     # Every probed host is recorded; FAKE_OPEN_HOST names one spelling the barrier does not cover.
     "curl": r"""#!/bin/bash
-host=""
-while (($#)); do case $1 in --resolve) host=${2%%:*}; shift ;; esac; shift; done
+host=""; request=""; address=""
+for arg in "$@"; do [[ $arg != https://* ]] || request=https; done
+while (($#)); do case $1 in --resolve) host=${2%%:*}; address=${2#*:*:}; shift ;; esac; shift; done
 echo "$host" >>"$FAKE_STATE/probed"
 answer() { echo "$host $1 restores=$(cat "$FAKE_STATE/restore_count" 2>/dev/null || echo 0)" >>"$FAKE_STATE/answers"; printf '%s' "$1"; }
+printf '%s %s\n' "$host" "$address" >>"$FAKE_STATE/probed_bindings"
+if [[ -n ${FAKE_OPEN_BINDING:-} && $address == "$FAKE_OPEN_BINDING" ]]; then answer 200; exit 0; fi
+if [[ ${FAKE_HTTPS_OPEN:-0} == 1 && $request == https ]]; then answer 200; exit 0; fi
+canonical=$(printf '%s' "${host%.}" | tr '[:upper:]' '[:lower:]')
+if [[ -n ${FAKE_NEUTRAL_NAME:-} && ( $canonical == "$FAKE_NEUTRAL_NAME" || $canonical == *."$FAKE_NEUTRAL_NAME" ) ]]; then answer "${FAKE_NEUTRAL_STATUS:-404}"; exit 0; fi
 if [[ -n ${FAKE_OPEN_HOST:-} && $host == "$FAKE_OPEN_HOST" ]]; then answer 200; exit 0; fi
 if [[ -n ${FAKE_OPEN_AFTER_RESTORE:-} && -e $FAKE_STATE/restore_count && $host == "$FAKE_OPEN_AFTER_RESTORE" ]]; then answer 200; exit 0; fi
 conf=$PRAHO_APACHE_DIR/zz-praho-maint-$FAKE_DOMAIN_ID.conf
@@ -131,18 +139,39 @@ if [[ $covered == 1 ]]; then answer 503; else answer 200; fi
 """,
     "apache2ctl": (
         "#!/bin/bash\n"
-        'if [[ $1 == -M ]]; then [[ ${FAKE_SSL:-1} == 1 ]] && echo " ssl_module (shared)"; exit 0; fi\n'
+        'if [[ $1 == -M ]]; then [[ ${FAKE_SSL:-1} == 1 ]] && echo " ssl_module (shared)"; '
+        'if [[ ${FAKE_DELAY_SSL_TRAILER:-0} == 1 ]]; then /bin/sleep 0.05; echo " another_module (shared)"; fi; exit 0; fi\n'
         'echo "$1" >>"$FAKE_STATE/apache"\n'
     ),
-    "openssl": (
-        "#!/bin/bash\n"
-        'while (($#)); do case $1 in -out) printf pem >"$2"; shift ;; esac; shift; done\n'
-    ),
+    "openssl": ('#!/bin/bash\nwhile (($#)); do case $1 in -out) printf pem >"$2"; shift ;; esac; shift; done\n'),
     "recovery-ssl": (
         "#!/bin/bash\n"
-        'while (($#)); do case $1 in --source) src=$2; shift ;; --destination) dest=$2; shift ;; esac; shift; done\n'
+        "while (($#)); do case $1 in --source) src=$2; shift ;; --destination) dest=$2; shift ;; esac; shift; done\n"
         'cp "$src" "$dest"\n'
     ),
+    "python3": r"""#!/bin/bash
+if [[ $1 == "${PRAHO_APACHE_BINDINGS_HELPER:-}" && ( $2 == endpoints || $2 == addresses ) ]]; then
+  [[ ${FAKE_BINDINGS_FAIL:-0} != 1 ]] || exit 5
+  values=${FAKE_NATIVE_ADDRS:-10.9.8.7}
+  if [[ -n ${FAKE_NEW_BINDING:-} && -e $FAKE_STATE/restore_count ]]; then values+=" $FAKE_NEW_BINDING"; fi
+  for address in $values; do
+    if [[ $2 == endpoints ]]; then
+      for port in ${FAKE_NATIVE_PORTS:-80 443}; do printf '%s\t%s\n' "$port" "$address"; done
+    else printf '%s\n' "$address"; fi
+  done
+  exit 0
+fi
+[[ $1 == "$PRAHO_NEUTRAL_HELPER" && $2 == verify ]] || exit 2
+shift 2
+printf '%s\n' "$*" >>"$FAKE_STATE/neutral_calls"
+name= owner= parent= parent_id= host=
+while (($#)); do case $1 in --name) name=$2 ;; --owner) owner=$2 ;; --parent) parent=$2 ;; --parent-id) parent_id=$2 ;; --host) host=$2 ;; *) exit 2 ;; esac; shift 2; done
+[[ $name == "${FAKE_CHILD:-}" && $name != "$FAKE_DOMAIN" && $owner == "${FAKE_OWNER:-node}" && $parent == "$FAKE_DOMAIN" && $parent_id == "$FAKE_DOMAIN_ID" ]] || exit 3
+[[ $host == "$name" || $host == *."$name" ]] || exit 3
+[[ ${FAKE_NEUTRAL_PROOF:-} == ready && ${FAKE_NEUTRAL_BODY:-Not Found} == 'Not Found' && ${FAKE_NEUTRAL_STATUS:-404} == 404 ]] || exit 4
+[[ ${FAKE_NEUTRAL_LOST_AFTER_RESTORE:-0} != 1 || ! -e $FAKE_STATE/restore_count ]] || exit 4
+printf 'neutral\n'
+""",
 }
 
 
@@ -157,6 +186,7 @@ class PairRestoreScriptTests(SimpleTestCase):
         )
         for directory in (self.bin, self.staging, self.apache, self.state):
             directory.mkdir()
+        self.bin.chmod(0o700)
         self.staging.chmod(0o700)
         for name, body in {**CHAIN_SHIMS, **_PAIR_SHIMS}.items():
             shim = self.bin / name
@@ -169,6 +199,14 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.maint = self.apache / f"zz-praho-maint-{DOMAIN_ID}.conf"
         self.durable = self.root / "durable"
         self.held_state = self.root / "held"
+        self.neutral_helper = self.bin / "neutral-helper.py"
+        self.neutral_helper.write_text(
+            "# Root-owned helper boundary; python3 shim implements its read-only contract.\n"
+        )
+        self.neutral_helper.chmod(0o700)
+        self.binding_helper = self.bin / "apache-bindings.py"
+        self.binding_helper.write_text("# Root-private fixed read-only Apache binding query fixture\n")
+        self.binding_helper.chmod(0o700)
 
     def run_script(self, **overrides: str) -> subprocess.CompletedProcess[str]:
         env = {
@@ -192,6 +230,8 @@ class PairRestoreScriptTests(SimpleTestCase):
             "FAKE_DOMAIN_ID": DOMAIN_ID,
             "FAKE_TOKEN": TOKEN,
             "PRAHO_RECOVERY_SSL_HELPER": str(self.bin / "recovery-ssl"),
+            "PRAHO_NEUTRAL_HELPER": str(self.neutral_helper),
+            "PRAHO_APACHE_BINDINGS_HELPER": str(self.binding_helper),
             **overrides,
         }
         return subprocess.run(["/bin/bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False)  # noqa: S603  # Fixed argv
@@ -229,6 +269,17 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertNotIn("enable", self.calls())
         self.assertFalse(self.maint.exists(), "the maintenance host comes down only after verification")
 
+    def test_a_loopback_503_cannot_hide_an_open_actual_native_ip_binding(self) -> None:
+        result = self.step(FAKE_OPEN_BINDING="10.9.8.7")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.assertEqual(self.restores(), [])
+
+    def test_a_new_native_binding_after_restore_is_included_in_all_later_barrier_proofs(self) -> None:
+        result = self.step(FAKE_NEW_BINDING="10.9.8.8", FAKE_OPEN_BINDING="10.9.8.8")
+        self.assertEqual((result.outcome, result.ran), ("failed", True))
+        self.assertEqual(len(self.restores()), 1)
+        self.assertTrue(self.maint.exists())
+
     def test_a_restore_that_re_enables_the_domain_is_put_back_and_verified(self) -> None:
         result = self.step(FAKE_RESTORE_ENABLES="1")
         self.assertEqual(result.outcome, "ok")
@@ -258,13 +309,23 @@ class PairRestoreScriptTests(SimpleTestCase):
         archive = f"migration_{TOKEN}.tar.gz"
         (self.staging / archive).write_bytes(b"migration-bytes")
         checksum = hashlib.sha256(b"migration-bytes").hexdigest()
-        result = self.step(PRAHO_RECOVERY="1", PRAHO_BASE_ARCHIVE=archive, PRAHO_BASE_SHA=checksum,
-                           PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        result = self.step(
+            PRAHO_RECOVERY="1",
+            PRAHO_BASE_ARCHIVE=archive,
+            PRAHO_BASE_SHA=checksum,
+            PRAHO_DIFF_ARCHIVE="",
+            PRAHO_DIFF_SHA="",
+        )
         self.assertEqual(result.outcome, "ok")
         self.assertTrue(self.maint.exists())
         foreign = "migration_22222222-2222-4222-8222-222222222222.tar.gz"
-        refused = self.run_script(PRAHO_RECOVERY="1", PRAHO_BASE_ARCHIVE=foreign, PRAHO_BASE_SHA=checksum,
-                                  PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        refused = self.run_script(
+            PRAHO_RECOVERY="1",
+            PRAHO_BASE_ARCHIVE=foreign,
+            PRAHO_BASE_SHA=checksum,
+            PRAHO_DIFF_ARCHIVE="",
+            PRAHO_DIFF_SHA="",
+        )
         self.assertEqual(refused.returncode, 64)
 
     def test_a_stop_between_the_restores_keeps_both_layers_and_reports_where_it_stopped(self) -> None:
@@ -277,7 +338,10 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertTrue(result.checkpoints[-1].barrier_holds)
 
     def test_a_failed_restore_keeps_both_layers(self) -> None:
-        for failing, steps in ((1, ["barrier_up", "base_failed"]), (2, ["barrier_up", "after_base", "differential_failed"])):
+        for failing, steps in (
+            (1, ["barrier_up", "base_failed"]),
+            (2, ["barrier_up", "after_base", "differential_failed"]),
+        ):
             with self.subTest(failing_restore=failing):
                 self.state_reset()
                 result = self.step(FAKE_RESTORE_FAIL_ON=str(failing))
@@ -328,7 +392,9 @@ class PairRestoreScriptTests(SimpleTestCase):
             with self.subTest(host=host):
                 self.state_reset()
                 result = self.step(FAKE_OPEN_HOST=host)
-                self.assertEqual((result.outcome, result.reason, result.ran), ("refused", "barrier_not_verified", False))
+                self.assertEqual(
+                    (result.outcome, result.reason, result.ran), ("refused", "barrier_not_verified", False)
+                )
                 self.assertEqual(result.checkpoints[0].odd_hosts, "200")
                 self.assertEqual(self.restores(), [])
                 self.assertFalse(self.maint.exists())
@@ -361,7 +427,9 @@ class PairRestoreScriptTests(SimpleTestCase):
         host_condition = next(line for line in conf.splitlines() if line.startswith("RewriteCond %{HTTP_HOST}"))
         self.assertIn(r"old-shop\.node\.example\.com", host_condition)
         after_base = [a for a in self.answers() if a[2] == "restores=1"]
-        self.assertIn((NEW_ALIAS, "503", "restores=1"), after_base, "the new alias is probed at the checkpoint after the base")
+        self.assertIn(
+            (NEW_ALIAS, "503", "restores=1"), after_base, "the new alias is probed at the checkpoint after the base"
+        )
         self.assertEqual({code for _, code, _ in after_base}, {"503"})
         for checkpoint in result.checkpoints[:-1]:
             self.assertTrue(checkpoint.barrier_holds, checkpoint.step)
@@ -393,14 +461,24 @@ class PairRestoreScriptTests(SimpleTestCase):
 
     def test_a_restore_whose_result_cannot_be_read_back_fails_closed_with_the_barrier_up(self) -> None:
         cases = (
-            ("listing_fails_after_base", {"FAKE_RESTORE_BREAKS_LISTING": "1"}, "surface_unreadable_after_after_base", 1),
+            (
+                "listing_fails_after_base",
+                {"FAKE_RESTORE_BREAKS_LISTING": "1"},
+                "surface_unreadable_after_after_base",
+                1,
+            ),
             (
                 "listing_fails_after_differential",
                 {"FAKE_RESTORE_BREAKS_LISTING": "2"},
                 "surface_unreadable_after_after_differential",
                 2,
             ),
-            ("docroot_not_a_path", {"FAKE_RESTORE_NEW_DOCROOT": "public_html"}, "surface_unreadable_after_after_base", 1),
+            (
+                "docroot_not_a_path",
+                {"FAKE_RESTORE_NEW_DOCROOT": "public_html"},
+                "surface_unreadable_after_after_base",
+                1,
+            ),
         )
         for name, overrides, reason, restores in cases:
             with self.subTest(case=name):
@@ -441,6 +519,75 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual((result.outcome, result.ran), ("ok", True))
         self.assertTrue(self.disabled())
         self.assertTrue((self.state / "child_disabled").exists(), "the account name must not keep serving")
+
+    def test_a_verified_root_neutral_account_name_keeps_both_restores_and_all_customer_503_checks(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((result.outcome, result.ran), ("ok", True))
+        self.assertEqual(len(self.restores()), 2)
+        self.assertTrue(all(row.barrier_holds for row in result.checkpoints[:-1]))
+        self.assertTrue((self.state / "child_disabled").exists())
+        proofs = (self.state / "neutral_calls").read_text().splitlines()
+        self.assertTrue(proofs)
+        self.assertTrue(
+            all(f"--name {CHILD} --owner node --parent {DOMAIN} --parent-id {DOMAIN_ID}" in row for row in proofs)
+        )
+        self.assertTrue(any(f"--host webmail.{CHILD}" in row for row in proofs))
+        answers = (self.state / "answers").read_text().splitlines()
+        self.assertTrue(any(row.startswith(f"{DOMAIN} 503 ") for row in answers))
+        self.assertTrue(any(row.startswith(f"{CHILD} 404 ") for row in answers))
+
+    def test_neutral_404_never_excuses_a_customer_domain_or_an_unverified_or_mutable_guard(self) -> None:
+        for proof in ("missing", "malformed_state", "foreign_id", "mutable_guard", "tenant_404"):
+            with self.subTest(proof=proof):
+                result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF=proof)
+                self.assertEqual((result.outcome, result.ran), ("refused", False))
+                self.assertEqual(self.restores(), [])
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=DOMAIN, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.assertEqual(self.restores(), [])
+
+    def test_neutral_guard_exception_rechecks_body_transport_and_proof_after_each_restore(self) -> None:
+        for extra in ({"FAKE_NEUTRAL_BODY": "tenant content"}, {"FAKE_NEUTRAL_STATUS": "000"}):
+            with self.subTest(extra=extra):
+                result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready", **extra)
+                self.assertEqual((result.outcome, result.ran), ("refused", False))
+                self.assertEqual(self.restores(), [])
+        result = self.step(
+            FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready", FAKE_NEUTRAL_LOST_AFTER_RESTORE="1"
+        )
+        self.assertEqual(result.outcome, "failed")
+        self.assertEqual(len(self.restores()), 1)
+        self.assertTrue(self.maint.exists())
+
+    def test_neutral_guard_helper_must_be_an_owned_regular_executable_and_child_still_disabled(self) -> None:
+        self.neutral_helper.chmod(0o777)
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.neutral_helper.chmod(0o700)
+        original = self.neutral_helper.with_suffix(".saved")
+        self.neutral_helper.rename(original)
+        self.neutral_helper.symlink_to(original)
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.neutral_helper.unlink()
+        original.rename(self.neutral_helper)
+        result = self.step(
+            FAKE_CHILD=CHILD, FAKE_NEUTRAL_NAME=CHILD, FAKE_NEUTRAL_PROOF="ready", FAKE_CHILD_IGNORES_DISABLE="1"
+        )
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.assertEqual(self.restores(), [])
+
+    def test_refused_restore_restores_enabled_state_when_listing_continues_after_the_parent_match(self) -> None:
+        result = self.step(FAKE_CHILD=CHILD, FAKE_NO_503="1", FAKE_DELAY_DISABLED_CHILD="1")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.assertFalse(self.disabled(), "a failed pipe must not hide the disabled parent and skip undo")
+        self.assertFalse((self.state / "child_disabled").exists())
+        self.assertEqual(self.restores(), [])
+
+    def test_ssl_listing_trailer_cannot_hide_a_loaded_module_and_skip_https_fence_checks(self) -> None:
+        result = self.step(FAKE_DELAY_SSL_TRAILER="1", FAKE_HTTPS_OPEN="1")
+        self.assertEqual((result.outcome, result.ran), ("refused", False))
+        self.assertEqual(self.restores(), [])
 
     def test_an_account_name_left_serving_fails_the_barrier_before_anything_destructive(self) -> None:
         result = self.step(FAKE_CHILD=CHILD, FAKE_CHILD_IGNORES_DISABLE="1")

@@ -181,6 +181,17 @@ then passed after excluding blank-only lines while retaining every nonblank poli
 Both complete native profiles passed with that final fix and the original blank-line fixture. This
 contract proves default-off capability, not domain enrollment, accepted-mail queues or forwarding.
 
+The ordinary Phase 4 integration (`54e6c883`) preserves the final cutover/native helpers and customer
+DNS publication, ownership and outbox code. A four-state regression reproduced queued/DNS-waiting
+mail prerequisites blocked by the new asynchronous name publisher, and direct publication still
+allowed during running/uncertain native mail work. Waiting prerequisites now pass the dispatcher;
+both publication phases recheck native mail ownership under the name lock. After this fix and a
+small ownership-check extraction, 191 affected cases and 32 PostgreSQL cases pass, including real
+claim/publication races. Scoped typing, Ruff, FSM, 123 checksums and both schema checks pass. The
+route/action guard now finds the actual isolated mail harness, with a planted finder regression and
+an exact 17-playbook inventory; its 22 contracts and four subtests pass. Full stack publication gates
+and the remaining native mail lifecycle work are still separate.
+
 The execution primitives claim, renew, checkpoint and park an existing immutable owner operation under
 the current account/node/name/service locks. A 75-minute lease covers the supported SSH repair path.
 Expired or uncertain native work parks for review rather than repeating effects. Checkpoints retain

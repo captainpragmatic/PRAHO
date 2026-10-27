@@ -97,7 +97,10 @@ class BackupCommandLineContractTests(VirtualminTaskTestBase):
             return http_response({"status": "success"})
 
         metadata = self.backups._initialize_backup_metadata(self.account, config.backup_type, "cli-id", config)
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport):
+        with (
+            patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport),
+        ):
             result = self.backups._execute_backup_by_type(config, self.account, "cli-id", metadata)
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(len(sent), 1)

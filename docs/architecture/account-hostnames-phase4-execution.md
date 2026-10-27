@@ -12,6 +12,17 @@ Verified focused evidence includes 169 backend tests (two further delivery races
 
 The four new tables use the established `domain_` prefix. Domains migration `0006_hostedzone_hostedzoneimportrevision_and_more` and audit migration `0018_alter_auditevent_action` extend the trusted checksum manifest to 122 entries. No released migration was edited.
 
+The ordinary integration of Phase 3 `3fa4513f` retains the final Phase 2 native helpers and certificate
+code unchanged, together with the customer-zone ownership, publication and outbox implementations.
+Legacy moves now advance a linked zone's target binding and invalidate old readiness in the same
+account/name ownership transaction. Two new regressions first proved the missing binding update and
+missing rollback on ownership refusal, then passed after wiring the existing locked helper. The
+merged tree passes 145 focused Platform cases, 59 Portal cases, 21 route/action contracts with four
+subtests and 31 PostgreSQL cases including real publication/ownership and admission races. Two older
+race fixtures were updated at the native certificate boundary so they still reach the real provider
+and PostgreSQL locks; no lock or transport requirement was weakened. The retirement follow-up passes
+28 affected cases. Full typing, lint and combined publication gates remain separately tracked.
+
 ## Scope and decisions
 
 - Implement a separate customer-zone gateway. The existing node/account-name gateway remains intentionally owner-scoped and supports A/AAAA/TXT; broadening that reconciler risks deleting customer records.

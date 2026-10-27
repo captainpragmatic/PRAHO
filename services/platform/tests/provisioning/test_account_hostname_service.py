@@ -8,6 +8,7 @@ against the in-memory DNS provider. Certificates (P1.10) are patched where a tes
 from __future__ import annotations
 
 import dataclasses
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -19,7 +20,7 @@ from apps.billing.models import Currency
 from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.infrastructure.dns_gateway import _DNS_PROVIDER_REGISTRY, register_dns_gateway
 from apps.provisioning import account_hostname_service as service
-from apps.provisioning.account_hostname_models import AccountHostname
+from apps.provisioning.account_hostname_models import AccountHostname, AccountNameCertificateInstall
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.settings.services import SettingsService
@@ -148,15 +149,39 @@ class AccountNameTransactionCase(TransactionTestCase):
         gateway.start()
         self.addCleanup(gateway.stop)
         self.links: list[str] = []
-        link = patch.object(
-            service,
-            "link_account_name_web_root",
+        link = patch(
+            "apps.provisioning.account_name_node.link_account_name_web_root",
             lambda server, *, home, customer_user: (
                 self.links.append(home) or self.node.calls.append("link") or Ok(True)
             ),
         )
         link.start()
         self.addCleanup(link.stop)
+        neutral = patch.object(
+            service,
+            "ensure_account_name_neutral",
+            side_effect=lambda *args, **kwargs: self.node.calls.append("neutral") or Ok("a" * 64),
+        )
+        self.neutral = neutral.start()
+        self.addCleanup(neutral.stop)
+        fingerprint = patch.object(service, "expected_certificate_fingerprint", return_value=Ok("a" * 64))
+        fingerprint.start()
+        self.addCleanup(fingerprint.stop)
+        prepare = patch.object(
+            service,
+            "prepare_account_name_neutral",
+            side_effect=lambda *args, **kwargs: self.node.calls.append("prepare-neutral") or Ok("a" * 64),
+        )
+        self.prepare_neutral = prepare.start()
+        self.addCleanup(prepare.stop)
+        retire = patch.object(
+            service,
+            "retire_account_name_neutral",
+            side_effect=lambda *args, **kwargs: self.node.calls.append("retire-neutral") or Ok("a" * 64),
+            create=True,
+        )
+        self.retire_neutral = retire.start()
+        self.addCleanup(retire.stop)
         certificate = patch.object(
             service, "install_certificate", lambda hostname, server: self.node.calls.append("certificate") or Ok(True)
         )
@@ -173,24 +198,27 @@ class AccountNameTestCase(AccountNameTransactionCase, TestCase):
 
 
 class EnsureTests(AccountNameTestCase):
-    def test_an_absent_name_is_created_set_linked_and_certified_in_that_order(self) -> None:
+    def test_an_absent_name_is_guarded_created_and_certified_in_that_order(self) -> None:
         self._psl_shipped()
         outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
-        self.assertEqual((outcome.created, outcome.linked, outcome.certificate_installed), (True, True, True))
+        self.assertEqual((outcome.created, outcome.linked, outcome.certificate_installed), (True, False, True))
+        self.assertTrue(outcome.neutral)
         name = self.hostname.fqdn
         steps = [c for c in self.node.calls if c != "list" and not c.startswith("list-domains")]
-        self.assertEqual(steps, [f"create-domain {name}", "link", "certificate"])
+        self.assertEqual(steps, ["prepare-neutral", f"create-domain {name}", "certificate", "neutral"])
         self.assertEqual(self.node.rows[name]["parent_domain"], DOMAIN)
-        self.assertEqual(self.links, [f"/home/{USER}/domains/{name}"])
+        self.assertEqual(self.links, [])
 
-    def test_a_name_present_and_owned_is_not_created_again_and_is_linked_again(self) -> None:
+    def test_a_name_present_and_owned_is_not_created_again_and_has_fresh_neutral_proof(self) -> None:
         self._psl_shipped()
         service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
         self.node.calls.clear()
         outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
         self.assertFalse(outcome.created)
         self.assertNotIn(f"create-domain {self.hostname.fqdn}", self.node.calls)
-        self.assertIn("link", self.node.calls)
+        self.assertEqual(self.node.calls.count("prepare-neutral"), 1)
+        self.assertEqual(self.node.calls.count("neutral"), 1)
+        self.assertEqual(self.links, [])
 
     def test_a_name_held_by_anything_else_is_refused_and_nothing_changes(self) -> None:
         name = self.hostname.fqdn
@@ -218,20 +246,55 @@ class EnsureTests(AccountNameTestCase):
         self.assertIsInstance(result, Err)
         self.assertIs(retriability_of(result), Retriability.UNKNOWN)
 
-    def test_under_a_disabled_parent_the_name_is_disabled_before_it_is_linked(self) -> None:
+    def test_under_a_disabled_parent_the_name_is_guarded_before_creation_and_explicitly_disabled(self) -> None:
         self._psl_shipped()
         self.node.disabled.add(DOMAIN)
         outcome = service.ensure_node_account_name(self.account, self.server, enabled=False).unwrap()
         name = self.hostname.fqdn
         self.assertIn(name, self.node.disabled)
         steps = [c for c in self.node.calls if c != "list" and not c.startswith("list-domains")]
-        self.assertLess(steps.index(f"disable-domain {name}"), steps.index("link"))
+        self.assertLess(steps.index("prepare-neutral"), steps.index(f"create-domain {name}"))
+        self.assertLess(steps.index(f"disable-domain {name}"), steps.index("certificate"))
         self.assertFalse(outcome.enabled)
 
     def test_no_customer_content_before_the_zone_is_a_shipped_public_suffix(self) -> None:
         outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
         self.assertFalse(outcome.linked)
         self.assertEqual(self.links, [])
+
+    def test_previews_stay_off_after_the_public_suffix_entry_has_shipped(self) -> None:
+        self._psl_shipped()
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self.assertFalse(outcome.linked)
+        self.assertEqual(self.links, [], "PSL inclusion is not permission to enable account-name previews")
+
+    def test_neutral_policy_is_proved_before_creation_and_refreshed_after_certificate_install(self) -> None:
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        self.assertEqual(self.prepare_neutral.call_count, 1)
+        self.assertEqual(self.neutral.call_count, 1)
+        self.assertTrue(outcome.neutral)
+        calls = self.node.calls
+        self.assertLess(calls.index("prepare-neutral"), calls.index(f"create-domain {self.hostname.fqdn}"))
+        self.assertLess(calls.index("certificate"), len(calls) - 1)
+        self.assertEqual(calls[-1], "neutral")
+
+    def test_unproved_neutral_policy_refuses_before_creating_or_enabling_the_name(self) -> None:
+        self.prepare_neutral.side_effect = None
+        self.prepare_neutral.return_value = Err("neutral policy unproved", retriability=Retriability.UNKNOWN)
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True)
+        self.assertTrue(outcome.is_err())
+        self.assertNotIn(self.hostname.fqdn, self.node.rows)
+        self.assertEqual(self.node.calls, ["list", "list"])
+
+    def test_preparation_does_not_replace_strict_post_install_neutral_readiness(self) -> None:
+        self.neutral.side_effect = None
+        self.neutral.return_value = Err("current certificate unproved", retriability=Retriability.UNKNOWN)
+        outcome = service.ensure_node_account_name(self.account, self.server, enabled=True)
+        self.assertTrue(outcome.is_err())
+        self.prepare_neutral.assert_called_once()
+        self.assertIn(f"create-domain {self.hostname.fqdn}", self.node.calls)
+        self.assertIn("certificate", self.node.calls)
+        self.assertEqual(self.neutral.call_count, 1)
 
     def test_remove_deletes_only_an_owned_name(self) -> None:
         service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
@@ -248,6 +311,121 @@ class EnsureTests(AccountNameTestCase):
         result = service.remove_node_account_name(self.account, self.server)
         self.assertIs(retriability_of(result), Retriability.NOT_RETRIABLE)
         self.assertIn(name, self.node.rows)
+
+
+class NeutralRetirementTests(AccountNameTestCase):
+    def test_native_absence_invalidates_only_removed_node_certificate_proof_even_if_private_cleanup_fails(self) -> None:
+        other = VirtualminServer.objects.create(name="Other", hostname="other.example.net")
+        for server in (self.server, other):
+            AccountNameCertificateInstall.objects.create(
+                hostname=self.hostname,
+                server=server,
+                certificate_ref="test-certificate",
+                not_after=timezone.now() + timedelta(days=30),
+            )
+        self.retire_neutral.side_effect = None
+        self.retire_neutral.return_value = Err("private cleanup uncertain", retriability=Retriability.UNKNOWN)
+        self.assertTrue(service.retire_removed_node_name(self.account, self.server).is_err())
+        self.assertFalse(
+            AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=self.server).exists()
+        )
+        self.assertTrue(AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=other).exists())
+
+    def test_removing_a_child_verifies_absence_then_retires_private_tls_and_retry_finishes_cleanup(self) -> None:
+        service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        name = self.hostname.fqdn
+
+        def cleanup(*args, **kwargs):
+            self.assertNotIn(name, self.node.rows)
+            self.assertIn(DOMAIN, self.node.rows)
+            self.assertEqual(kwargs, {"zone": ZONE, "name": name, "customer_user": USER})
+            return Err("cleanup interrupted", retriability=Retriability.UNKNOWN)
+
+        self.retire_neutral.side_effect = cleanup
+        self.assertTrue(service.remove_node_account_name(self.account, self.server).is_err())
+        self.assertEqual(self.node.calls.count(f"delete-domain {name}"), 1)
+        self.retire_neutral.side_effect = None
+        self.retire_neutral.return_value = Ok("a" * 64)
+        self.assertEqual(service.remove_node_account_name(self.account, self.server), Ok(False))
+        self.assertEqual(self.retire_neutral.call_count, 2)
+        self.assertEqual(self.node.calls.count(f"delete-domain {name}"), 1)
+
+    def test_a_noop_native_delete_never_retires_the_live_child_guard(self) -> None:
+        service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
+        original = self.node.call
+        with patch.object(
+            self.node,
+            "call",
+            side_effect=lambda program, params, **kwargs: (
+                Ok(FakeResponse(True, {"status": "success"}))
+                if program == "delete-domain"
+                else original(program, params, **kwargs)
+            ),
+        ):
+            self.assertTrue(service.remove_node_account_name(self.account, self.server).is_err())
+        self.retire_neutral.assert_not_called()
+        self.assertIn(self.hostname.fqdn, self.node.rows)
+
+    def test_public_removed_name_cleanup_includes_retired_rows_but_never_removes_live_child_guard(self) -> None:
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(retired_at=timezone.now())
+        self.assertEqual(service.retire_removed_node_name(self.account, self.server), Ok(None))
+        self.retire_neutral.assert_called_once_with(self.server, zone=ZONE, name=self.hostname.fqdn, customer_user=USER)
+        self.retire_neutral.reset_mock()
+        self.node.rows[self.hostname.fqdn] = {
+            "domain": self.hostname.fqdn,
+            "username": USER,
+            "parent_domain": DOMAIN,
+            "type": "Sub-server",
+        }
+        self.assertTrue(service.retire_removed_node_name(self.account, self.server).is_err())
+        self.retire_neutral.assert_not_called()
+
+    def test_dns_withdrawal_is_durable_and_target_is_retained_until_private_cleanup_succeeds(self) -> None:
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(
+            target_server=self.server, records={"A": {"content": self.server.ipv4_address}}
+        )
+        self.retire_neutral.side_effect = None
+        self.retire_neutral.return_value = Err("node offline", retriability=Retriability.UNKNOWN)
+        self.assertTrue(service.retire_account_hostname(self.hostname).is_err())
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records, {})
+        self.assertIsNone(self.hostname.retired_at)
+        self.assertEqual(self.hostname.target_server_id, self.server.pk)
+        self.retire_neutral.return_value = Ok("a" * 64)
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self.hostname.refresh_from_db()
+        self.assertIsNotNone(self.hostname.retired_at)
+        self.assertIsNone(self.hostname.target_server_id)
+        self.assertEqual(self.retire_neutral.call_count, 2)
+
+    def test_failed_first_ensure_uses_and_keeps_account_node_without_deleting_parent_or_live_child(self) -> None:
+        self.assertIsNone(self.hostname.target_server_id)
+        service.ensure_node_account_name(self.account, self.server, enabled=False).unwrap()
+        self.assertTrue(service.retire_account_hostname(self.hostname).is_err())
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.target_server_id, self.server.pk)
+        self.assertIsNone(self.hostname.retired_at)
+        self.assertIn(self.hostname.fqdn, self.node.rows)
+        self.assertIn(DOMAIN, self.node.rows)
+        self.retire_neutral.assert_not_called()
+        self.assertFalse([row for row in self.node.calls if row.startswith("delete-domain")])
+
+    def test_orphan_with_known_node_uses_absence_only_retirement_and_unknown_placement_stays_pending(self) -> None:
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(account=None, target_server=self.server)
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self.retire_neutral.assert_called_once_with(self.server, zone=ZONE, name=self.hostname.fqdn, customer_user="")
+        other = AccountHostname.objects.create(label="zz99zz99", zone=ZONE)
+        self.assertTrue(service.retire_account_hostname(other).is_err())
+        other.refresh_from_db()
+        self.assertIsNone(other.retired_at)
+
+    def test_unprovisioned_unmanaged_unplaced_name_retires_metadata_without_claiming_node_cleanup(self) -> None:
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(provisioned_at=None)
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self.retire_neutral.assert_not_called()
+        self.assertEqual(self.node.calls, [])
+        self.hostname.refresh_from_db()
+        self.assertIsNotNone(self.hostname.retired_at)
 
 
 class NodeStepExclusionTests(AccountNameTestCase):
@@ -271,10 +449,10 @@ class NodeStepExclusionTests(AccountNameTestCase):
         with patch.object(
             service,
             "install_certificate",
-            lambda hostname, server: seen.append(
-                AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server).exists()
-            )
-            or Ok(True),
+            lambda hostname, server: (
+                seen.append(AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server).exists())
+                or Ok(True)
+            ),
         ):
             outcome = service.ensure_node_account_name(self.account, self.server, enabled=True).unwrap()
         self.assertTrue(outcome.created)
@@ -353,6 +531,15 @@ class SyncTests(AccountNameTestCase):
         self.hostname.refresh_from_db()
         self.assertEqual(self.hostname.records["A"]["applied"], "95.217.0.10")
         self.assertIsNotNone(self.hostname.last_reconciled_at)
+
+    def test_a_certificate_without_fresh_neutral_http_proof_cannot_publish(self) -> None:
+        self._enable()
+        self.neutral.side_effect = None
+        self.neutral.return_value = Err("neutral policy unproved", retriability=Retriability.UNKNOWN)
+        with patch.object(service, "certificate_ready_on", return_value=True):
+            result = service.sync_account_hostname(self.hostname)
+        self.assertTrue(result.is_err())
+        self.assertEqual(FakeDnsGateway.published(self.hostname.fqdn), {})
 
     def test_the_ttl_the_provider_reports_is_stored_beside_the_one_asked_for(self) -> None:
         self._enable()

@@ -354,6 +354,7 @@ def account_has_active_operation(
     that allowance.
     """
     from .virtualmin_mail_models import (  # noqa: PLC0415  # Same-app model registry cycle.
+        MAIL_NATIVE_OPERATION_STATUSES,
         MAIL_OPEN_OPERATION_STATUSES,
         VirtualminMailOperation,
     )
@@ -363,7 +364,7 @@ def account_has_active_operation(
         return True
     mail = VirtualminMailOperation.objects.filter(
         configuration__account_id=account.pk,
-        status__in=("running", "needs_review") if allow_waiting_mail else MAIL_OPEN_OPERATION_STATUSES,
+        status__in=MAIL_NATIVE_OPERATION_STATUSES if allow_waiting_mail else MAIL_OPEN_OPERATION_STATUSES,
     )
     if ignore_mail_operation_id is not None:
         mail = mail.exclude(pk=ignore_mail_operation_id)

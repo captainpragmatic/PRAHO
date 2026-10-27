@@ -21,6 +21,7 @@ from .virtualmin_models import VirtualminAccount
 
 MAIL_READINESS_MAX_AGE = timedelta(hours=1)
 MAIL_OPEN_OPERATION_STATUSES = ("queued", "running", "awaiting_dns", "needs_review")
+MAIL_NATIVE_OPERATION_STATUSES = ("running", "needs_review")
 _INTENT_FIELDS = (
     "configuration_id",
     "requested_customer_id",

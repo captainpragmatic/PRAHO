@@ -145,6 +145,12 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.ansible = ansible_patch.start()
         self.addCleanup(ansible_patch.stop)
         self.ansible.return_value.run_playbook.side_effect = self._transport
+        # Numeric owner capture is a separate node boundary; its archive binding,
+        # lease refusal and native restoration have focused unit/lab coverage.
+        capture_patch = patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow")
+        self.owner_capture = capture_patch.start()
+        self.addCleanup(capture_patch.stop)
+        self._account_name_boundaries()
         enqueue_patch = patch("apps.provisioning.virtualmin_tasks.async_task", return_value="migration-task")
         self.enqueue = enqueue_patch.start()
         self.addCleanup(enqueue_patch.stop)
@@ -155,6 +161,22 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         )
         idle_patch.start()
         self.addCleanup(idle_patch.stop)
+
+    def _account_name_boundaries(self) -> None:
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.prepare_account_name_neutral", return_value=Ok("a" * 64))
+        )
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.ensure_account_name_neutral", return_value=Ok("a" * 64))
+        )
+        self.enterContext(
+            patch(
+                "apps.provisioning.account_hostname_service.expected_certificate_fingerprint", return_value=Ok("a" * 64)
+            )
+        )
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.retire_removed_node_name", return_value=Ok(None))
+        )
 
     def _call(self, side: str, program: str, params: dict[str, Any], **kwargs: Any) -> Any:
         self.events.append((side, program, params, kwargs.get("timeout_seconds")))
@@ -409,6 +431,18 @@ class MigrationTests(MigrationTestBase):
         self.assertEqual(migration.status, "rolled_back")
         self.assertEqual(self._programs("source")[-2:], ["enable-domain", "list-domains"])
         self.assertTrue(self.source_gateway.domain_state_of(self.account.domain).enabled)
+
+    def test_owner_capture_that_outlives_the_lease_never_dispatches_a_backup(self) -> None:
+        migration = self._start()
+
+        def expire_during_capture(*args: Any, **kwargs: Any) -> None:
+            VirtualminMigration.objects.filter(pk=migration.pk).update(
+                worker_lease_expires_at=timezone.now() - timedelta(seconds=1)
+            )
+
+        self.owner_capture.side_effect = expire_during_capture
+        virtualmin_tasks.run_virtualmin_migration(str(migration.pk))
+        self.assertNotIn("backup-domain", self._programs("source"))
 
     def test_backup_unknown_retains_quiesce_without_retry(self) -> None:
         self.effects[("source", "backup-domain")] = self._error("source", "backup-domain", unknown=True)
@@ -734,7 +768,10 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-migration-key"))
         deployment = NodeDeployment(ipv4_address="203.0.113.1", hostname="migration-node", ssh_port=9876)
         with (
-            patch("apps.infrastructure.ansible_service.trusted_node_known_hosts", return_value=Path("nonexistent-migration-pins")),
+            patch(
+                "apps.infrastructure.ansible_service.trusted_node_known_hosts",
+                return_value=Path("nonexistent-migration-pins"),
+            ),
             patch("apps.infrastructure.ansible_service.recover_connection_port", return_value=9876),
             patch.object(service, "_wait_for_ssh", return_value=Ok(True)),
             patch.object(service, "_configured_known_hosts_covers", return_value=True),
