@@ -62,6 +62,7 @@ CALLS = (
     "stripe-config",
     "data-export-request",
     "data-export-download",
+    "mail-status",
     *(f"invoice-{name}" for name in INVOICE_NUMBERS),
     *(f"document-{name}" for name in DOCUMENT_NUMBERS),
 )
@@ -93,6 +94,7 @@ django.setup()
 from django.test import override_settings
 
 from apps.api_client.services import PlatformAPIClient
+from apps.services.services import ServicesAPIClient
 
 records = []
 current = {}
@@ -120,6 +122,7 @@ def transport(*, method, url, headers, data=None, params=None, **kwargs):
 
 
 def calls(client):
+    yield "mail-status", lambda: ServicesAPIClient().get_service_mail_status(42, 7, 5)
     yield "localisation", lambda: client.get_localisation_defaults()
     yield "login", lambda: client.authenticate_customer("customer@example.test", "correct-password")
     yield "query-params", lambda: client._make_request(
@@ -254,6 +257,17 @@ class PortalSignatureVerifiesOnPlatformTests(TestCase):  # nonce claims live in 
         for record in payments:
             with self.subTest(configuration=record["configuration"], call=record["call"]):
                 self.assertTrue(record["path_url"].startswith("/api/billing/"), record["path_url"])
+
+    def test_mail_status_uses_get_with_identity_in_the_verified_json_body(self) -> None:
+        records = [record for record in self.records if record["call"] == "mail-status"]
+        self.assertEqual(len(records), len(CONFIGURATIONS))
+        for record in records:
+            with self.subTest(configuration=record["configuration"]):
+                self.assertEqual(record["method"], "GET")
+                self.assertEqual(record["path_url"], "/api/services/5/mail-status/")
+                payload = json.loads(base64.b64decode(record["body"]))
+                self.assertEqual((payload["customer_id"], payload["user_id"]), (42, 7))
+                self.assertIn("timestamp", payload)
 
     def test_document_numbers_reach_platform_as_one_unchanged_segment(self) -> None:
         documents = [record for record in self.records if record["call"].startswith("document-")]

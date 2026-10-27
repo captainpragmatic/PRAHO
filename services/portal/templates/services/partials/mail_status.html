@@ -1,0 +1,39 @@
+{% load i18n %}
+<section id="service-mail-status" class="rounded-lg border border-slate-600 bg-slate-800 p-6" aria-labelledby="mail-status-heading" aria-live="polite">
+  <h3 id="mail-status-heading" class="text-lg font-semibold text-white">{% trans "Mail status" %}</h3>
+  {% if mail_error == "forbidden" %}
+    <p class="mt-3 text-sm text-slate-300">{% trans "You do not have permission to view this mail status." %}</p>
+  {% elif mail_error == "not_found" %}
+    <p class="mt-3 text-sm text-slate-300">{% trans "This service could not be found or is no longer accessible." %}</p>
+  {% elif mail_error %}
+    <p class="mt-3 text-sm text-slate-300">{% trans "Mail status is temporarily unavailable. Try reloading this page later." %}</p>
+  {% elif mail_status.applicability == "not_applicable" %}
+    <p class="mt-3 text-sm text-slate-300">{% trans "Mail enrollment is not available for this service." %}</p>
+  {% else %}
+    {% if mail_status.mode == "hosted" %}
+      <p class="mt-3 text-sm text-slate-300">{% trans "This account is enrolled in PRAHO hosted mail." %}</p>
+    {% elif mail_status.mode == "external" %}
+      <p class="mt-3 text-sm text-slate-300">{% trans "This account is not enrolled in PRAHO hosted mail." %}</p>
+    {% else %}
+      <p class="mt-3 text-sm text-slate-300">{% trans "PRAHO mail enrollment status is not confirmed." %}</p>
+    {% endif %}
+    <p class="mt-2 text-sm text-slate-400">{% trans "This status describes PRAHO enrollment and does not check your current mail routing." %}</p>
+    {% if mail_status.verification == "stale" %}
+      <p class="mt-2 text-sm text-slate-300">{% trans "Earlier verification is no longer current. Enrollment remains recorded." %}</p>
+    {% elif mail_status.verification == "current" %}
+      <p class="mt-2 text-sm text-slate-300">{% trans "Recorded verification is current." %}</p>
+    {% endif %}
+    {% if mail_status.account_name %}
+      <p class="mt-3 text-sm text-slate-300">{% trans "Account name:" %} <span class="font-mono break-all">{{ mail_status.account_name }}</span></p>
+    {% endif %}
+    {% if mail_status.mode == "hosted" and mail_status.client_ports %}
+      <p class="mt-2 text-sm text-slate-300">{% trans "Standard encrypted ports:" %} IMAPS 993 · POP3S 995 · {% trans "Submission" %} 465</p>
+    {% endif %}
+    {% if mail_progress %}
+      <h4 class="mt-4 font-medium text-white">{{ mail_intent }}</h4>
+      <p class="mt-2 text-sm text-slate-300">{{ mail_progress }}</p>
+      {% if mail_updated_at %}<p class="mt-2 text-xs text-slate-400">{% trans "Request updated:" %} {{ mail_updated_at|date:"DATETIME_FORMAT" }}</p>{% endif %}
+    {% endif %}
+    <p class="mt-3 text-sm text-slate-400">{% trans "Hosted-mail enrollment requires explicit owner consent." %}</p>
+  {% endif %}
+</section>

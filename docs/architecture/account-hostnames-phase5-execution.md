@@ -1,6 +1,6 @@
 # ADR-0061 Phase 5: native mail implementation and verification plan
 
-Updated 2026-10-27 after real authorized probes on isolated vmlab-a/vmlab-b. This branch starts from the signed Phase 4 checkpoint and keeps the implementation in a separate PR. Native mail transport has lab evidence; the hosted-mail application lifecycle is not implemented yet. The production `mail_feature` migration refusal remains required until every gate below passes. The architecture and service boundaries remain those in ADR-0061 and the existing Platform/Portal design.
+Updated 2026-10-27 after real authorized probes on isolated lab nodes. This branch starts from the signed Phase 4 checkpoint and keeps the implementation in a separate PR. Native mail transport has lab evidence; enrollment persistence, fenced execution primitives and cached status reads are implemented. The worker-driven hosted-mail lifecycle and mailbox management remain unfinished. The production `mail_feature` migration refusal remains required until every gate below passes. The architecture and service boundaries remain those in ADR-0061 and the existing Platform/Portal design.
 
 ## Chosen native topology
 
@@ -70,7 +70,7 @@ All-mailbox held restore, not just owner: native mail callback re-creates child 
 
 Target private stage must complete before ownership commit; source loss cannot prevent activation. Durable applying/completed marker must preserve customer-modified child password/cron on replay; interrupted applying refuses safely. Secret retirement keeps small replay/deletion/reboot tombstones. Precommit compensation restores exact source per-user state/routing while target stays inaccessible. Active+suspended parents, mixed disabled users, mail-user DB credentials, existing FTP/SSH/app writers, UID/domain conflicts and target-only recovery need real tests.
 
-DKIM key/selector/signed-message continuity through held restore/recovery, mailbox/alias CRUD map synchronization, zero-recipient roster, rate handoff refcounts/revoke/replay, SNI renewals/extension limits, multiple source pairs and provider/firewall deployment require contract coverage. No current P2 unit or owner-only native test substitutes for these gates.
+DKIM key/selector/signed-message continuity through held restore/recovery, mailbox/alias CRUD map synchronization, zero-recipient roster, rate handoff refcounts/revoke/replay, SNI renewals/extension limits, multiple source pairs and provider/firewall deployment require contract coverage. Prove the mail lifecycle on both supported native profiles and mixed-profile moves; Dovecot 2.3 transport evidence alone does not prove Dovecot 2.4 forwarding or held activation. No current P2 unit or owner-only native test substitutes for these gates.
 
 ## File/task boundaries after P4 freeze
 
@@ -119,9 +119,72 @@ Ordinary billing reconciliation keeps its separate permission. Model/enrollment/
 deletion/backup/restore guards, existing operation callers and all four contention cases pass together
 on PostgreSQL (77 cases). Final stack gates remain separate.
 
+The pure DNS planner now accepts either the complete managed-zone inventory or explicitly complete
+affected RRsets, including proven empty RRsets. It proposes only the confirmed MX/SPF/DKIM changes;
+it neither discovers unknown records nor replaces a whole zone. Existing SPF senders and the terminal
+policy are preserved; ambiguous policies and an apex `mx` mechanism whose authorization would change
+with the proposed MX require review. DKIM comes from the native public projection and must contain a
+valid RSA key of at least 2048 bits. Unowned conflicting or delegated DKIM refuses adoption. Parent-zone
+inventories may describe child-only deltas, but the existing Platform ownership and publication checks
+still decide whether that customer may write the zone.
+
+Before the first write, preflight compares the exact source revision, digest, declared scope, covered
+RRsets and record contents. It is not yet a checkpointed publisher. Twenty-one planner tests and the
+model/enrollment/native-receipt siblings pass together (81 cases, 73 subtests). Recursive SPF lookup
+analysis now has its own bounded module, described below; authoritative cache lifetimes, provider
+resource binding, publication and worker integration remain required. The pure planner makes no
+deliverability or readiness claim.
+
+The separate SPF analyser binds its receipt to the exact proposed TXT, domain and source snapshot.
+It caps lookup terms, recursion, aliases, DNS questions and elapsed time, retaining actual positive
+TTL or SOA-derived negative lifetimes. Unsupported macros and PTR policies require review. Its 25
+tests pass with 95% line coverage, and the final mail-component composite passes 218 tests; the six
+PostgreSQL-only contention cases were also proven on PostgreSQL separately. This receipt describes a
+conservative lookup upper bound for the current external dependency graph, not SPF authorization or
+the graph after publication. A future publisher must compare the receipt's explicit dependency RRsets
+against every proposed and provider-managed DNS change, refusing or reanalysing intersections.
+
+The fixed mail playbook is admitted by the existing Ansible transport boundary. A real dispatch test
+first reproduced the missing allowlist entry, then proved that the fixed entry reaches enrolled-key
+lookup and still refuses key replacement, unknown playbooks, path traversal and caller transport
+overrides. Its 67-case native-receipt/SSH-boundary composite, scoped typing and Ruff pass. Bootstrap
+wiring remains deferred until the actual supported native profiles pass their setup gates.
+
 The repository's automatic deployment currently supports Ubuntu 26.04. The Debian 12/Dovecot 2.3 lab
-profile does not establish support for that deployment default. Ubuntu's Dovecot 2.4 configuration and
-actual native lifecycle remain required gates before bootstrap wiring can claim successful mail setup.
+profile does not establish support for that deployment default. Both profiles now have separate native
+configuration, with Ubuntu using Dovecot 2.4 named authentication databases and TLS settings. Actual
+Ubuntu probes reproduced and corrected configuration incompatibility and a pre-start guard permission
+failure under packaged Postfix hardening. Only the short root-owned preflight gains its own privilege
+scope; the mail daemon retains the packaged restrictions. Certificate preflight now follows the actual
+runtime TLS client's strict X.509 policy, rejecting unusable material before package changes.
+
+The preservation check also reproduced a false refusal when Virtualmin's internal scheduler updated
+`last_letsencrypt_mass_renewal`. Installed native source confirms that field records the collection time;
+it is now excluded alongside `last_check`. Tests retain checks for certificate-renewal policy, provider
+identity and similarly named unrelated fields. The fresh isolated Ubuntu production playbook now passes
+setup, repeated setup, submitter reconciliation and fresh inspection after an actual reboot. It reports
+configured/default-off capability and only public mail ports 25/465/993/995. Existing credentials, aging,
+global authentication files, domain mail flags and unrelated configuration are preserved. A new account
+using native default features stays mail-off; a valid unenrolled Unix owner cannot authenticate over
+993/995/465. Bootstrap integration and permanent native contract fixtures remain separate gates. The
+latest focused native-helper/boot/receipt/submitter composite passes 81 cases, and the error-handling
+scan has no high-severity findings. These checks do not establish completed node rollout.
+
+The execution primitives claim, renew, checkpoint and park an existing immutable owner operation under
+the current account/node/name/service locks. A 75-minute lease covers the supported SSH repair path.
+Expired or uncertain native work parks for review rather than repeating effects. Checkpoints retain
+only bounded immutable identity/digest/count evidence. Six real PostgreSQL races and the 63-case
+model/enrollment/execution composite pass. A future coordinator must give pristine queued refusals a
+bounded retry or terminal disposition; the primitives alone do not dispatch or activate mail.
+
+The signed read-only service API and lazy Portal status section are implemented. Active tenant members
+can read the current enrollment intent and bounded progress; no configuration row is created by a read.
+The API revalidates current tenant/service/account binding after projection. Missing enrollment does
+not claim that observed MX or native mail is external. Portal shows fixed localized status, a plain-text
+account name and the agreed ports, with no guessed login or consent controls. Authentication, rate-limit
+and unavailable responses keep their actual meaning. The final Portal/service composite passes 159
+tests and 304 subtests; 11 real resolver/signature/HMAC contracts, complete Portal typing and the
+template gate pass. Enrollment HTTP mutations, mailbox management and staff actions remain pending.
 
 The following files are proposed additions unless already named as existing. Each task starts with a behavioral RED test, then the smallest implementation, focused GREEN, sibling regression checks and fresh Makefile lint/types. Native proof gates remain separate from mocked application tests. Production/cloud/registrar writes are not part of this implementation session.
 
