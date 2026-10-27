@@ -59,11 +59,9 @@ Owner decisions for the remaining phases:
 - A moved legacy mailbox with ambiguous lock history stays locked until its intended state is explicitly confirmed.
 - Cancel a confirmed opt-in after 24 hours without prerequisites only while it has made no mail or DNS changes. Release its account reservation so the owner can try again. This policy's coordinator is not implemented yet; running or uncertain effects retain their evidence and exclusion.
 
-Phase 4's implementation and focused verification are recorded in
-[account-hostnames-phase4-execution.md](account-hostnames-phase4-execution.md).
-Its provider and UI workflows are implemented on a separate stack branch; final integration
-checks remain. Native mail setup and forwarding have been proven in the isolated lab, while
-the all-mailbox held-restore contract and Phase 5 application integration remain in progress.
+This document is the implementation plan and verification record for every phase. The ADR owns
+the architecture contract. Phase branches are local checkpoints for the same PR, and temporary
+debugging journals and raw test logs stay outside the repository documentation.
 
 Review findings to close, each with a failing regression and recorded green result:
 
@@ -146,8 +144,41 @@ Focused tests include real signed API requests, revocation, rollback, slow-rende
 lease expiry, malformed Portal receipts and concurrent PostgreSQL workers. These
 phase results do not replace final verification of the complete PR #749 tree.
 
-Phases 4 and 5 keep separate implementation and verification gates. The native
-mail lifecycle remains unfinished and mail-enabled migrations remain refused.
+### Phase 4 verification
+
+The typed customer-zone gateway, complete-file import revisions, fenced background operations,
+signed APIs, Portal pages and staff diagnostics are implemented. Customer-zone records share the
+name's publication lock, complete per-record TTL contract and migration/recovery ownership checks.
+Legacy moves now update the linked zone binding and invalidate readiness in the ownership transaction;
+both the missing update and missing rollback on ownership refusal were first reproduced by regressions.
+The latest integrated checkpoint passes 145 focused Platform cases, 59 Portal cases, 21 route/action
+contracts and 31 PostgreSQL cases with actual publication/ownership and admission contention.
+Full lint and typing pass for 650 Platform and 107 Portal modules; 122 checksums and both schema
+checks pass. Chromium has exercised signed upload, CSRF, preview, redirect, HTMX and responsive layout.
+The complete Phase 4 test pipeline and final combined-PR gates remain pending. Controlled provider
+tests do not prove live account permissions; no real customer zone or registrar delegation was changed.
+
+### Phase 5 verification
+
+Mail remains default-off, and mail-enabled migrations remain refused. These component results do
+not establish completed enrollment, mailbox migration or rollout:
+
+| Component | Implemented and verified | Remaining boundary |
+|---|---|---|
+| Native node capability | Actual selective setup, preservation, default-off account creation, valid Unix credential denials on 993/995/465, replay and reboot pass on Debian 12/Dovecot 2.3 and Ubuntu 26.04/Dovecot 2.4 | Durable bootstrap/existing-node scheduling; missing trusted TLS must not block web |
+| Routine node-certificate reconciliation | Private staging and durable applying/ready records, exact leaf verification, invalid-candidate preservation and non-rewinding completed UUIDs; 97 focused cases and the complete Debian native rotation contract pass | Ubuntu rotation run is pending; recovery when expired TLS prevents service startup is unfinished |
+| Enrollment persistence and consent | Immutable confirmed owner intent, submission identity, target generation, protected mode transitions and enrollment-specific retirement; 20 model/audit cases pass on SQLite/PostgreSQL and four real enrollment/admission races pass | Worker coordinator, actual native activation, consent HTTP mutations and the confirmed 24-hour pristine-attempt cancellation |
+| Execution ownership | Claim, renew, checkpoint and park under fresh account/name/service locks; 75-minute lease and six PostgreSQL claim/admission races | Dispatch and activation; expired or uncertain effects retain exclusion rather than replaying |
+| DNS/SPF planning | Exact complete source scope, revision and contents; preserve external senders/DMARC and require a native per-domain RSA DKIM key of at least 2048 bits; 21 planner and 25 bounded SPF cases pass | Checkpointed MX/SPF/DKIM publication and the shared node SPF writer; dependency receipts must be checked against every proposed/provider-managed change |
+| Managed DNS source | Complete typed provider inventory outside DB locks, fresh owner/zone/revision recheck and private provider-record-ID binding; 60 source/planner/SPF cases and 14 source cases on PostgreSQL pass | Bind the observation to exact confirmed consent and fenced publication outbox |
+| Public mail status | Signed, tenant-scoped, database-only API and lazy Portal section; 159 service/Portal cases, 304 subtests and 11 real HMAC/resolver contracts pass | Owner/staff mutations, mailbox/alias management and verified login details |
+| All-user private state | Strict original/frozen snapshot schema, immutable private store and credential-free identity projection; 19 cases and 24 subtests pass | Live native inventory, fencing, compensation, inert held restore and final activation |
+
+An integration regression also proved that waiting mail prerequisites were blocked by asynchronous
+name publication while direct publication could run during uncertain native mail work. Waiting
+prerequisites now pass; both publication phases freshly refuse running/uncertain native ownership.
+The affected composite passes 191 cases and 32 PostgreSQL cases. Scoped types, Ruff, FSM,
+123 migration checksums and both schema checks pass. Full combined verification remains pending.
 
 The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
 restricted to its source and admitted hostnames; HTTPS uses the customer's verified
@@ -397,6 +428,17 @@ These are live defects today. Each ships with a test that fails without it.
 
 ## Phase 3: watching customer DNS
 
+Implementation paths are `infrastructure/dns_probes.py`, `provisioning/hosted_domain_dns_*`,
+`api/services/dns_views.py` and the Portal service DNS card. One account probe shares a 90-second,
+96-query budget, bounded CNAME/authority walks and a 120-second task timeout. A five-minute dispatcher
+selects at most 50 due accounts, normally hourly; manual requests persist deduplicated intent and
+respect cooldowns. No page or API call performs probes. Active tenant members can read; owner/tech
+roles can request rechecks through the existing signed-body HMAC boundary. Unknown CDN/redirect
+origins and external MX are not invented failures. Optional validating-resolver evidence requires
+verified TLS and has no plaintext fallback. DNSSEC consistency remains explicitly distinct from
+cryptographic validation. One durable EmailLog per healthy-to-broken incident is committed with the
+observation; unknown states retain history and do not manufacture a healthy baseline or outage.
+
 1. **P3.1 Add the status model.** `HostedDomainDnsStatus`, OneToOne on `VirtualminAccount`:
    - `dns_path`, a results JSON;
    - `healthy`, `first_failed_at`, `notified_at`, `checked_at`;
@@ -416,6 +458,31 @@ These are live defects today. Each ships with a test that fails without it.
 
 ## Phase 4: our nameservers on Cloudflare
 
+Implementation paths are `infrastructure/dns_zone_gateway.py`, `dns_zone_cloudflare.py`,
+`domains/dns_zone_*`, `provisioning/managed_dns_service.py`, the signed DNS API and Portal `apps/dns`.
+The following limits and ownership rules apply to all tasks:
+
+- First import accepts a complete uploaded zone file for the customer's hosting primary domain.
+  Unsupported records refuse the whole import; SOA/apex NS replacements are visible in the diff.
+  Child delegations and signed material require a supported adapter or explicit refusal.
+- Parsing is bounded to 2 MiB, 2,000 records and 128 values per RRset. Only `$ORIGIN` and `$TTL`
+  directives are allowed. Capture each parsed owner, value and original TTL before dnspython union;
+  reject out-of-zone owners and conflicting RRset TTLs rather than silently dropping/normalizing them.
+- Exact revision/digest confirmation, complete provider readback, old-provider cross-check and DS
+  handover precede nameserver instructions. Verify parent delegation and provider activation separately.
+  A supported registrar change uses the existing durable registrar service; external registrars get instructions.
+- Use a distinct encrypted account-level token, never the restricted account-name token. Provider
+  success requires typed identity and complete pagination. Ambiguous creates retain intent and may
+  recover only from positive ownership; they never blindly repeat POST or adopt an unrelated zone.
+- Customer edits support A/AAAA/CNAME/MX/TXT/SRV/CAA with numeric DNS-only TTLs 60–86400. Protect managed
+  slots against shadow records and CNAME conflicts; preserve unrelated mail, verification and proxy state.
+- The zone belongs to its customer independently of hosting. Publication locks follow account → fresh
+  name → zones/records in UUID order. Ownership transfers invalidate readiness without transferring the zone.
+- Lower, confirm, wait and restore every managed web record's own TTL, including www CNAME, under the
+  name lock. Record replacement retains original cache evidence; routine sync preserves lowered TTLs.
+  Hosting termination withdraws only managed web slots. Whole-zone deletion requires explicit consent,
+  a current export and verified move-away/cache-age evidence.
+
 1. **P4.1 Add the zone provider interface and its Cloudflare implementation.**
    - Records: A, AAAA, CNAME, MX, TXT, SRV and CAA.
    - Operations: zone create, read and delete; activation check; record CRUD; DNSSEC status.
@@ -427,7 +494,7 @@ These are live defects today. Each ships with a test that fails without it.
    - Audit wiring.
    - Test: `tests/domains/test_hosted_zone_fsm.py`.
 3. **P4.3 Import the complete zone before activation.** Arbitrary subdomains, verification TXT records, uncommon DKIM selectors and custom service records cannot be found by lookups, so querying common names is not an import.
-   - Take the zone from its current provider (a zone-file export or the provider's API), or from a zone file the customer uploads.
+   - Take a complete zone-file export uploaded by the customer. Provider-account import is outside the first release.
    - Probing common names (apex, `www`, `mail`, `_dmarc`, `autodiscover`, common DKIM selectors and SRV names) only cross-checks the import; a probe answer missing from the import blocks activation.
    - The customer confirms the imported record inventory before the nameserver switch is offered.
    - Test with a fixture zone holding records no probe would find.
@@ -452,9 +519,13 @@ These are live defects today. Each ships with a test that fails without it.
 1. **P5.1 Do the lab work first.** Postfix and Dovecot in the lab image; confirm the mail and DKIM programs Virtualmin 8 provides.
 2. **P5.2 Update the node playbook.**
    - `virtualmin.yml` and the existing-node mail-only playbook install Postfix and Dovecot through Virtualmin's supported selective setup, make `mail` available but default-off, and set `myhostname` to the node FQDN. Existing domains retain external mail until an explicit owner opt-in completes.
-   - Extend the minimal-node feature test to prove mail capability and default-off enrollment. Preserve web previews, unrelated domains and provider credentials; do not rerun the full installer over an existing node.
+   - Extend the minimal-node feature test to prove mail capability and default-off enrollment. Keep previews off and preserve unrelated domains and provider credentials; do not rerun the full installer over an existing node.
+   - Wire durable capability and certificate jobs after web registration/activation without changing the four existing web deployment stages. Deduplicate per-node work, exclude it from generic blind retries, and park unknown native outcomes. Missing trusted node TLS defers mail only.
+   - Candidate validation precedes file changes. Journal applying state before a private certificate replacement, verify the actual served leaf before ready, and never let completed replay reinstall an earlier certificate. Expired-after-reboot recovery still needs a narrowly fenced start path.
 3. **P5.3 Allowlist the confirmed programs,** with the read-only ones in the read-only set.
 4. **P5.4 Publish the mail records (depends on P4.1).**
+   - Complete the owner-confirmed enrollment coordinator and its HTTP flow. Bind consent to the current customer/account/name/node generation and exact plan; a missing configuration makes no observed-MX claim. Pristine prerequisite waiting cancels after the confirmed 24-hour limit; running/uncertain effects retain evidence and account exclusion.
+   - Reuse the typed gateway, record ownership and durable outbox. Revalidate complete source/provider resource identity immediately before writes. Preserve external SPF senders, terminal policy and DMARC; no duplicate SPF. The bounded SPF dependency receipt describes the current graph only: intersect it with every proposed/provider-managed DNS change, then refuse or reanalyse affected dependencies.
    - A `_spf.<zone>` TXT record, rebuilt on node register and destroy.
    - DKIM published in our zones, or shown as records to add.
    - MX as a managed record.
@@ -462,9 +533,58 @@ These are live defects today. Each ships with a test that fails without it.
 5. **P5.5 Relay mail during the bridge.**
    - Inbound delivery uses a dedicated native Postfix transport with verified TLS to the fixed target and no plaintext fallback. Preserve full envelope recipients before Virtualmin's local alias expansion; a domain transport alone is insufficient. Prove the source writer/SMTP generation boundary, queued delivery, all-mailbox held restore and exact compensation before lifting the existing mail-migration refusal.
    - Mail clients: prove native Dovecot proxying and Postfix relay behavior in the lab before choosing a forwarding topology. Advertise implicit TLS ports 993, 995 and 465. A stale-DNS client must authenticate against the destination and use its single authoritative mailbox copy, with verified encryption between nodes. Source TLS termination is acceptable with an independently retained certificate; HAProxy is not a prerequisite.
-   - Preserve per-mailbox authentication throttling and source client-IP blocking during forwarding; an abusive login must not ban the whole forwarding node. The source Virtualmin domain is retained until client forwards and owned mail queues have drained, then mail routes are torn down before native source deletion. The web bridge and retained certificates remain until their own cleanup gates pass.
+   - Preserve per-mailbox authentication throttling and source client-IP blocking during forwarding; an abusive login must not ban the whole forwarding node. Retain the source Virtualmin domain until session/queue/cache/certificate gates permit removal. Keep protective recipient/routing fences through native deletion, then remove only the owned mail rules without local fallback, complete web cleanup and restore TTLs.
 6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
 7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.
+
+### Native mail and held-restore contract
+
+- Selective native setup configures and tests Postfix/Dovecot/Procmail; its `--test` option is not a
+  dry run. Inventory existing MTA, custom configuration and accepted queues before mutation. Refuse
+  unsupported versions/unmanaged state and prevent package-default public listeners before hardening.
+- Public clients use 993/995/465, with ordinary Internet SMTP on 25. Disable public 110/143/587 and
+  SMTP25 AUTH, including native service overrides. Dovecot forwards credentials to the target, which
+  owns the only writable mailbox. The target's implicit submission backend is loopback Postfix1465
+  with Dovecot SASL; its smtp password service must not accept proxy `nopassword` entries as local auth.
+  No master password, trusted proxy-auth network, shared relay credential or insecure certificate mode.
+- Inbound migration relay uses a dedicated native Postfix transport, fixed destination IP, verified
+  target name and mandatory TLS; missing/wrong trust defers accepted mail. Preserve full envelope
+  recipients before native alias expansion and keep an exact recipient map so unknown users reject.
+  Mailbox/alias changes during a retained bridge must update source maps synchronously or remain pending.
+- Scope a temporary RCPT gate, deny all moving login forms, flush/kick existing Dovecot sessions and
+  retire prior SMTP/local-delivery generations before backup. Accepted source queues must drain or
+  remain durably held; a domain disable alone is insufficient. Ordinary SMTP retry ambiguity after
+  delivery but before acknowledgment requires evidence, never disposal or an exactly-once promise.
+- Replace aggregate forwarding-node auth bans with native per-mailbox throttling, while retaining
+  real-client blocking at the source. Rate-control exceptions are restricted to verified bridge pairs,
+  reference-counted through final teardown, and convey no authentication or relay trust.
+- Capture every original per-login credential, all shadow aging and cron presence/bytes before parent
+  disable. Include actual native users and companions; deduplicate process UIDs only. Seal against
+  the observed frozen state; a mismatch requires review rather than stale automatic compensation.
+  Legacy ambiguous mailbox locks stay locked until explicitly confirmed.
+- User/cron-creating native callbacks must consume an inert archive derivative before restore,
+  including password and database/Usermin inputs. Bind target identities after the final base/diff
+  restore and finish private staging before ownership commit. Final per-user activation runs after
+  the last native mail callback under holds. Completed replay never restores old credentials/crons;
+  interrupted applying state remains held. Current billing policy stays separate from immutable compensation.
+- New P5 public barrier receipts must omit credential-derived SQL authentication/GRANTS digests;
+  comparisons remain node-private. Preserve old v1 read compatibility and small completion/deletion
+  tombstones, without storing raw credentials in Platform receipts, logs or fixture recordings.
+- Preserve each domain's DKIM key/selector through held restore and prove signed-message continuity.
+  Source cleanup requires owned queue/session/routing/cache/certificate evidence. Extension cannot
+  outlive source client TLS. All-user activation, target-only recovery, compensation, renewal,
+  multiple bridges and mixed-profile moves need native contracts before migration refusal is lifted.
+
+The isolated lab has proven credential forwarding/password changes, verified relay, queue preservation,
+recipient rejection, per-mailbox throttling and public per-domain DKIM extraction/signing. The actual
+mixed-user restore exposed lost child activation/cron and aging; these remain unfinished integration
+gates. Owner-only Phase 2 proofs do not close them. Debian 12 and Ubuntu 26.04 default-off setup and
+reboot contracts pass; the later certificate-rotation extension passes Debian while Ubuntu is pending.
+The runnable contract and cleanup instructions live with `tests/virtualmin_mail_lab/README.md`.
+
+Primary native contracts: [Dovecot proxying](https://doc.dovecot.org/2.3/configuration_manual/authentication/proxies/),
+[Dovecot extra fields](https://doc.dovecot.org/2.3/configuration_manual/authentication/password_database_extra_fields/),
+[Postfix SASL](https://www.postfix.org/SASL_README.html) and [Postfix TLS](https://www.postfix.org/TLS_README.html).
 
 ## Paths that must keep records in sync
 
@@ -490,4 +610,4 @@ These are live defects today. Each ships with a test that fails without it.
 - `make test-platform`, `make test-portal`, `make test-integration`, `make lint`, `make lint-fsm`, `make check-types` and `make check-types-portal` (cold caches), `make check-migrations`, `make lint-templates`.
 - `make test-virtualmin-lab` for node-side tasks.
 - e2e for the Portal pages.
-- A final review of each PR before merge.
+- A final review of the complete PR #749 tree before merge, including both native profiles and mixed-profile mail moves. Component or earlier-phase green results do not replace combined verification.

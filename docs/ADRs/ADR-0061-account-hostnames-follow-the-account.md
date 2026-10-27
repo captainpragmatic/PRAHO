@@ -7,7 +7,7 @@
 
 ## Implementation clarifications (2026-10-27)
 
-This ADR remains Proposed. Implementation is being reviewed in separate phase branches; that does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) records phase status and verification; [Phase 3](../architecture/account-hostnames-phase3-execution.md), [Phase 4](../architecture/account-hostnames-phase4-execution.md) and [Phase 5](../architecture/account-hostnames-phase5-execution.md) have separate implementation records.
+This ADR remains Proposed. Phases 2 through 5 are being delivered in PR #749, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
 
 The agreed first release imports a complete customer-uploaded zone file, keeps account-name previews disabled, and makes native mail available on eligible nodes without enabling it for existing or new domains until their owner opts in. Temporary forwarding stays on the account's source node using Apache for web and native Postfix/Dovecot for mail; HAProxy is not a prerequisite. The detailed cutover below distinguishes the ownership commit from later bridge retention and cleanup.
 

@@ -46,5 +46,3 @@ only when they help explain a changed product interface; generated diagram image
 - [Deployment guide](../deployment/DEPLOYMENT.md)
 - [Architecture decisions](../ADRs/)
 - [ADR-0061 execution plan](account-hostnames-dns-mail-plan.md)
-- [Phase 3 implementation record](account-hostnames-phase3-execution.md)
-- [Phase 4 implementation record](account-hostnames-phase4-execution.md)

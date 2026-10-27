@@ -140,7 +140,7 @@ they do not claim full cryptographic validation. External or null MX is valid wh
 Reads and manual recheck requests perform no DNS or provider network I/O. Saved results are invalidated against
 current tenant, routing generation, maintenance and freshness. Background workers commit fenced observations;
 verified deterioration from a healthy baseline may open one notification incident. Unknown observations do not
-manufacture a healthy baseline or an outage. See the [Phase 3 implementation record](account-hostnames-phase3-execution.md).
+manufacture a healthy baseline or an outage. See the [ADR-0061 implementation plan](account-hostnames-dns-mail-plan.md#phase-3-watching-customer-dns).
 
 ### Phase 4: independently owned customer DNS
 
@@ -162,7 +162,7 @@ CNAME, MX, TXT, SRV and CAA; PRAHO-managed records are protected.
 provider confirmation, convergence and restoration evidence. Account and name locks serialize hosting
 ownership transfers with publication; `HostedZone.customer` remains the independent DNS data owner.
 Hosting termination withdraws managed web records while unrelated DNS remains. Whole-zone deletion requires
-a current export and verified move-away/cache-age proof. See the [Phase 4 implementation record](account-hostnames-phase4-execution.md).
+a current export and verified move-away/cache-age proof. See the [ADR-0061 implementation plan](account-hostnames-dns-mail-plan.md#phase-4-our-nameservers-on-cloudflare).
 
 Portal's `apps/dns` contains forms, view orchestration and a bounded signed API client; staff diagnostics show
 saved private evidence on Platform. Neither interface runs customer DNS probes or provider calls inline.
