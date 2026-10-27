@@ -243,6 +243,15 @@
     "cluster": null
   },
   {
+    "name": "domains-dns-zones",
+    "func": "apps.domains.dns_zone_tasks.dispatch_zone_operations",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
     "name": "domains-reconcile-pending",
     "func": "apps.domains.tasks.reconcile_pending_domain_operations",
     "schedule_type": "H",

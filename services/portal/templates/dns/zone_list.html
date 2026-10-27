@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "DNS zones" %}{% endblock %}
+{% block content %}
+  <main class="mx-auto max-w-5xl space-y-6 px-4 py-8">
+    <h1 class="text-2xl font-semibold text-white">{% trans "DNS zones" %}</h1>
+    {% if can_edit %}<p class="text-slate-300">{% trans "To import a zone, open its hosting service and choose Import DNS." %} <a href="{% url 'services:list' %}" class="text-primary-400 underline">{% trans "Hosting services" %}</a></p>{% endif %}
+    <ul class="space-y-3">
+      {% for zone in zones %}<li class="rounded-lg border border-slate-700 p-4"><a href="{% url 'dns:detail' zone.id %}" class="text-primary-400 underline">{{ zone.name }}</a> <span class="text-sm text-slate-400">{{ zone.status_label }}</span></li>
+      {% empty %}<li class="text-slate-400">{% trans "You have no imported DNS zones." %}</li>{% endfor %}
+    </ul>
+    {% include "dns/partials/pagination.html" %}
+  </main>
+{% endblock %}

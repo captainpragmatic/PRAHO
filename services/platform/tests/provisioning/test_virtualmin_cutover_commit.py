@@ -10,6 +10,7 @@ from apps.audit.models import AuditEvent
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.dns_agreement import Agreement
 from apps.infrastructure.panel_cert_probes import AuthoritativeAnswer
+from apps.provisioning import managed_dns_service as managed
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.account_hostname_service import EnsureOutcome
 from apps.provisioning.migration_bridge_service import BridgePreparation
@@ -20,15 +21,42 @@ from apps.provisioning.virtualmin_migration_service import (
     VirtualminMigrationService,
     resolve_migration,
 )
+from apps.provisioning.virtualmin_models import VirtualminServer
 from tests.provisioning.test_virtualmin_migration_barrier_wiring import BarrierCase
 
 
 class CutoverCommitTests(BarrierCase):
+    def test_authoritative_generation_still_matches_when_completion_commits(self):
+        migration, token = self.committed_bridge()
+        bridge = MigrationBridge.objects.get(migration=migration)
+        bridge.activate()
+        bridge.save()
+        VirtualminMigration.objects.filter(pk=migration.pk).update(status="repointing")
+        migration.refresh_from_db()
+        original = managed.observe_routing
+
+        def observe_then_readdress(hostname):
+            result = original(hostname)
+            self.assertTrue(result.unwrap()["agreed"])
+            VirtualminServer.objects.filter(pk=migration.target_server_id).update(ipv4_address="95.217.0.30")
+            return result
+
+        with (
+            patch("apps.provisioning.account_hostname_service.sync_account_hostname", return_value=Ok("published")),
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch.object(managed, "observe_routing", side_effect=observe_then_readdress),
+            patch("apps.provisioning.migration_bridge_cleanup.schedule_bridge_cleanup"),
+            self.assertRaises(MigrationDeferredError),
+        ):
+            VirtualminMigrationService()._converge_cutover(migration, token)
+
     def setUp(self):
         super().setUp()
         self.server.ipv4_address = "95.217.0.10"
         self.server.save(update_fields=["ipv4_address"])
-        self.enterContext(patch("apps.provisioning.migration_routing.routing_agreement", return_value=Agreement(True, 300)))
+        self.enterContext(
+            patch("apps.provisioning.migration_routing.routing_agreement", return_value=Agreement(True, 300))
+        )
 
     def preparation(self):
         return Ok(BridgePreparation("origin-pem", timezone.now() + timedelta(days=30)))
@@ -121,9 +149,12 @@ class CutoverCommitTests(BarrierCase):
         ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
-            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=Ok(BridgePreparation(
-                "origin-pem", timezone.now() + timedelta(hours=49), (self.account.domain,)
-            ))),
+            patch(
+                "apps.provisioning.migration_bridge_service.prepare_bridge",
+                return_value=Ok(
+                    BridgePreparation("origin-pem", timezone.now() + timedelta(hours=49), (self.account.domain,))
+                ),
+            ),
             patch("apps.provisioning.migration_routing.routing_agreement", return_value=Agreement(True, 7200)),
         ):
             VirtualminMigrationService()._verify(migration, token)
@@ -139,7 +170,10 @@ class CutoverCommitTests(BarrierCase):
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
             patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
-            patch("apps.provisioning.migration_routing.routing_agreement", return_value=Agreement(False, detail="DNS query failed")),
+            patch(
+                "apps.provisioning.migration_routing.routing_agreement",
+                return_value=Agreement(False, detail="DNS query failed"),
+            ),
             patch.object(service, "_abort") as abort,
         ):
             service._verify(migration, token)
@@ -249,7 +283,9 @@ class CutoverCommitTests(BarrierCase):
         migration.transition(token, "needs_review", "needs_review", lease_token=None, worker_lease_expires_at=None)
         with patch.object(VirtualminMigrationService, "_enqueue"):
             resolved = resolve_migration(
-                migration, resolved_by=self.staff, note="Continue target after source failure",
+                migration,
+                resolved_by=self.staff,
+                note="Continue target after source failure",
                 source_fenced="Provider confirms the old instance is powered off and isolated",
             )
         self.assertTrue(resolved.is_ok(), resolved)
@@ -264,13 +300,21 @@ class CutoverCommitTests(BarrierCase):
         domain = service._domain
 
         def target_only(server, name):
-            self.assertEqual(server.pk, self.target.pk, "a fenced failed source must never be called for forward convergence")
+            self.assertEqual(
+                server.pk, self.target.pk, "a fenced failed source must never be called for forward convergence"
+            )
             return domain(server, name)
 
         with (
             patch.object(service, "_domain", side_effect=target_only),
-            patch("apps.provisioning.migration_bridge_service.install_bridge", side_effect=AssertionError("source bridge RPC")),
-            patch("apps.provisioning.migration_bridge_service.verify_bridge", side_effect=AssertionError("source bridge RPC")),
+            patch(
+                "apps.provisioning.migration_bridge_service.install_bridge",
+                side_effect=AssertionError("source bridge RPC"),
+            ),
+            patch(
+                "apps.provisioning.migration_bridge_service.verify_bridge",
+                side_effect=AssertionError("source bridge RPC"),
+            ),
             patch("apps.provisioning.account_hostname_service.sync_account_hostname", return_value=Ok("published")),
             patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
             patch("apps.provisioning.migration_bridge_cleanup.schedule_bridge_cleanup"),

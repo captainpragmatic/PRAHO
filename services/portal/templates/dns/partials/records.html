@@ -1,0 +1,38 @@
+{% load i18n %}
+<div data-testid="dns-record-cards" class="space-y-3 md:hidden">
+  {% for record in rows %}
+    <dl class="space-y-3 rounded-lg border border-slate-700 p-4 text-sm">
+      <div>
+        <dt class="font-medium text-slate-400">{% trans "Name" %}</dt>
+        <dd class="mt-1 break-all font-mono">{{ record.name }}{% if record.line %}<span class="block text-xs text-slate-400">{% trans "Line" %} {{ record.line }}</span>{% endif %}</dd>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><dt class="font-medium text-slate-400">{% trans "Type" %}</dt><dd class="mt-1">{{ record.record_type }}</dd></div>
+        <div><dt class="font-medium text-slate-400">{% trans "TTL" %}</dt><dd class="mt-1">{{ record.ttl }}</dd></div>
+      </div>
+      <div>
+        <dt class="font-medium text-slate-400">{% trans "Value" %}</dt>
+        <dd class="mt-1 break-all whitespace-pre-wrap font-mono">{{ record.rdata }}</dd>
+      </div>
+      <div>
+        <dt class="font-medium text-slate-400">{% trans "Control" %}</dt>
+        <dd class="mt-1">{% include "dns/partials/record_control.html" %}</dd>
+      </div>
+    </dl>
+  {% empty %}<p class="text-sm text-slate-400">{% trans "No records on this page." %}</p>{% endfor %}
+</div>
+<div data-testid="dns-record-table" class="hidden md:block overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead class="text-slate-400"><tr><th class="p-2">{% trans "Name" %}</th><th class="p-2">{% trans "Type" %}</th><th class="p-2">{% trans "TTL" %}</th><th class="p-2">{% trans "Value" %}</th><th class="p-2">{% trans "Control" %}</th></tr></thead>
+    <tbody>
+      {% for record in rows %}
+        <tr class="border-t border-slate-700 align-top">
+          <td class="break-all p-2">{{ record.name }}{% if record.line %}<span class="block text-xs text-slate-400">{% trans "Line" %} {{ record.line }}</span>{% endif %}</td>
+          <td class="p-2">{{ record.record_type }}</td><td class="p-2">{{ record.ttl }}</td>
+          <td class="max-w-xl break-all p-2 font-mono whitespace-pre-wrap">{{ record.rdata }}</td>
+          <td class="p-2">{% include "dns/partials/record_control.html" %}</td>
+        </tr>
+      {% empty %}<tr><td colspan="5" class="p-3 text-slate-400">{% trans "No records on this page." %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>

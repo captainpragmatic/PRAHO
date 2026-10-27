@@ -321,14 +321,15 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
 
         # Get associated domains
         domains = services_api.get_service_domains(customer_id, user_id, service_id)
+        role = _get_user_role_for_customer(request, str(customer_id))
 
         context = {
             "service": service,
             "service_id": service_id,  # Add service_id explicitly for URL reversing
             "usage": usage,
             "domains": domains,
-            "can_manage": service.get("status") in {"active", "suspended"}
-            and _get_user_role_for_customer(request, str(customer_id)) in {"owner", "billing", "tech"},
+            "can_manage": service.get("status") in {"active", "suspended"} and role in {"owner", "billing", "tech"},
+            "can_manage_dns": role in {"owner", "tech"},
             "usage_period": "30d",
             "usage_history_period_options": [
                 {"value": "7d", "label": _("Last 7 days")},

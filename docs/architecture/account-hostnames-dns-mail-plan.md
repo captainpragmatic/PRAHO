@@ -54,6 +54,12 @@ Owner decisions for the remaining phases:
   own retryable task owns retention and teardown, so backups and billing reconciliation resume.
 - Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
 
+Phase 4's implementation and focused verification are recorded in
+[account-hostnames-phase4-execution.md](account-hostnames-phase4-execution.md).
+Its provider and UI workflows are implemented on a separate stack branch; final integration
+checks remain. Native mail setup and forwarding have been proven in the isolated lab, while
+the all-mailbox held-restore contract and Phase 5 application integration remain in progress.
+
 Review findings to close, each with a failing regression and recorded green result:
 
 | Finding | State / evidence |
@@ -386,8 +392,8 @@ These are live defects today. Each ships with a test that fails without it.
 
 1. **P5.1 Do the lab work first.** Postfix and Dovecot in the lab image; confirm the mail and DKIM programs Virtualmin 8 provides.
 2. **P5.2 Update the node playbook.**
-   - `virtualmin.yml` installs Postfix and Dovecot, adds `mail` to the default features, and sets `myhostname` to the node FQDN.
-   - The failing-first test is `test_feature_set_matches_a_minimal_node`, which is replaced.
+   - `virtualmin.yml` and the existing-node mail-only playbook install Postfix and Dovecot through Virtualmin's supported selective setup, make `mail` available but default-off, and set `myhostname` to the node FQDN. Existing domains retain external mail until an explicit owner opt-in completes.
+   - Extend the minimal-node feature test to prove mail capability and default-off enrollment. Preserve web previews, unrelated domains and provider credentials; do not rerun the full installer over an existing node.
 3. **P5.3 Allowlist the confirmed programs,** with the read-only ones in the read-only set.
 4. **P5.4 Publish the mail records (depends on P4.1).**
    - A `_spf.<zone>` TXT record, rebuilt on node register and destroy.
@@ -395,9 +401,9 @@ These are live defects today. Each ships with a test that fails without it.
    - MX as a managed record.
    - PTR through a new optional `set_reverse_dns` on the cloud gateway (Hetzner API), and a checked manual step elsewhere.
 5. **P5.5 Relay mail during the bridge.**
-   - Inbound delivery: the bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
+   - Inbound delivery uses a dedicated native Postfix transport with verified TLS to the fixed target and no plaintext fallback. Preserve full envelope recipients before Virtualmin's local alias expansion; a domain transport alone is insufficient. Prove the source writer/SMTP generation boundary, queued delivery, all-mailbox held restore and exact compensation before lifting the existing mail-migration refusal.
    - Mail clients: prove native Dovecot proxying and Postfix relay behavior in the lab before choosing a forwarding topology. Advertise implicit TLS ports 993, 995 and 465. A stale-DNS client must authenticate against the destination and use its single authoritative mailbox copy, with verified encryption between nodes. Source TLS termination is acceptable with an independently retained certificate; HAProxy is not a prerequisite.
-   - The source is retired only after the client forwards are torn down at the end of the window.
+   - Preserve per-mailbox authentication throttling and source client-IP blocking during forwarding; an abusive login must not ban the whole forwarding node. The source Virtualmin domain is retained until client forwards and owned mail queues have drained, then mail routes are torn down before native source deletion. The web bridge and retained certificates remain until their own cleanup gates pass.
 6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
 7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.
 

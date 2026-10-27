@@ -385,10 +385,13 @@ class VirtualminMigrationService:
                 transaction.on_commit(lambda: _wake_drain(drain_id), robust=True)
 
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
+        from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
+
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
         if account_has_active_operation(account):
             raise ValueError("Account already has an active migration or backup/restore operation")
+        assert_move_ready(account)
         if (
             MigrationBridge.objects.filter(migration__account_id=account.pk)
             .exclude(status=MigrationBridge.Status.TORN_DOWN)
@@ -447,10 +450,10 @@ class VirtualminMigrationService:
                 # lock the source server out of pk order (PostgreSQL locks joined
                 # rows), deadlocking concurrent A→B / B→A admissions against the
                 # ordered server locks below.
-                account = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+                account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
                 servers = {
                     server.pk: server
-                    for server in VirtualminServer.objects.select_for_update()
+                    for server in VirtualminServer.objects.select_for_update(no_key=True)
                     .filter(pk__in=(account.server_id, target_server.pk))
                     .order_by("pk")
                 }
@@ -993,7 +996,7 @@ class VirtualminMigrationService:
             locked = VirtualminMigration.objects.select_for_update().get(pk=migration.pk)
             if locked.cancel_requested:
                 raise MigrationCancelledBeforeCommitError("Migration cancelled before the ownership commit")
-            account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
+            account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             hostname_id = (
                 AccountHostname.objects.filter(account=account, retired_at__isnull=True)
                 .values_list("pk", flat=True)
@@ -1012,6 +1015,9 @@ class VirtualminMigrationService:
             account.save(update_fields=["server", "updated_at"])
             hostname.target_server = migration.target_server
             hostname.save(update_fields=["target_server", "updated_at"])
+            from .managed_dns_service import advance_target_locked  # noqa: PLC0415  # Customer-zone ownership commit
+
+            advance_target_locked(hostname)
             MigrationBridge.objects.create(
                 migration=migration,
                 source_server=migration.source_server,
@@ -1150,6 +1156,23 @@ class VirtualminMigrationService:
             raise MigrationDeferredError(
                 timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), agreement.detail or "Waiting for DNS convergence"
             )
+        from .managed_dns_service import observe_routing  # noqa: PLC0415  # Worker-only managed frontend checks
+
+        managed = observe_routing(hostname)
+        if managed.is_err():
+            raise MigrationDeferredError(timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), managed.unwrap_err())
+        managed_records = managed.unwrap()
+        if managed_records["ipv4"] != str(ipv4) or managed_records["ipv6"] != (
+            str(target.ipv6_address) if target.ipv6_address else None
+        ):
+            raise MigrationDeferredError(
+                timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "The target changed during DNS convergence"
+            )
+        self._store_barrier_state(migration, token, {**migration.barrier_state, "managed_dns": managed_records})
+        if not managed_records["agreed"]:
+            raise MigrationDeferredError(
+                timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "Waiting for managed customer DNS convergence"
+            )
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             from .migration_routing import observe_frontends  # noqa: PLC0415
 
@@ -1161,7 +1184,28 @@ class VirtualminMigrationService:
                 bridge.evidence = {**bridge.evidence, "routing": routing}
                 bridge.save(update_fields=["evidence", "updated_at"])
         self._prepare_completion(migration, token)
+        self._complete_cutover(migration, token, hostname, managed_records)
+
+    def _complete_cutover(
+        self, migration: VirtualminMigration, token: UUID, hostname: AccountHostname, managed_records: dict[str, Any]
+    ) -> None:
+        """Complete only while the recorded routing generation remains fenced."""
         with transaction.atomic():
+            # Admission and ownership changes take Account -> Server -> Name.
+            # Hold the target row too: a staff IP edit must not commit between
+            # this last generation check and the completed migration transition.
+            VirtualminMigration.objects.select_for_update().get(pk=migration.pk)
+            VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
+            # A publisher can hold the Name while its deferred target FK check
+            # commits. Exclude address changes without blocking that KEY SHARE.
+            VirtualminServer.objects.select_for_update(no_key=True).get(pk=migration.target_server_id)
+            current_name = account_hostname_service.lock_for_publication(hostname.pk)
+            from .managed_dns_service import routing_is_current_locked  # noqa: PLC0415  # Last durable completion fence
+
+            if current_name is None or not routing_is_current_locked(current_name, managed_records):
+                raise MigrationDeferredError(
+                    timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "DNS ownership changed before completion"
+                )
             self._move(migration, token, "repointing", dns_converged_at=timezone.now())
             self._finish(migration, token, "completed")
             from .migration_bridge_cleanup import schedule_bridge_cleanup  # noqa: PLC0415
@@ -1188,7 +1232,7 @@ class VirtualminMigrationService:
             return
         with transaction.atomic():
             self._move(migration, token, "repointing")
-            account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
+            account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             if account.server_id not in {migration.source_server_id, migration.target_server_id}:
                 raise ValueError("Account ownership changed during migration")
             account.server = migration.target_server

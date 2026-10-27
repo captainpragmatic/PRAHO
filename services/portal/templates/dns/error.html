@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "DNS management" %}{% endblock %}
+{% block content %}
+  <div class="mx-auto max-w-4xl space-y-5 px-4 py-8">
+    {% if status == 403 %}
+      {% trans "You do not have permission to perform this DNS operation." as notice %}
+    {% elif status == 404 %}
+      {% trans "This DNS resource was not found." as notice %}
+    {% elif status == 409 %}
+      {% trans "The DNS configuration changed or this operation is not ready. Reload the zone and review the current information." as notice %}
+    {% elif status == 400 %}
+      {% trans "Review the form and its required confirmations before trying again." as notice %}
+    {% else %}
+      {% trans "DNS management is temporarily unavailable. Try again later." as notice %}
+    {% endif %}
+    {% alert notice variant="warning" %}
+    <a href="{% url 'dns:list' %}" class="text-primary-400 underline">{% trans "Return to DNS zones" %}</a>
+  </div>
+{% endblock %}

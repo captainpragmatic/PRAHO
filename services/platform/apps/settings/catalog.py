@@ -2074,6 +2074,31 @@ CATALOG: tuple[SettingDef, ...] = (
         sensitive=True,
     ),
     SettingDef(
+        key="dns.cloudflare_account_id",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Customer zones"),
+        label=_("Customer-zone Cloudflare account id"),
+        help_text=_(
+            "The Cloudflare account for hosted customer zones (32 hexadecimal characters). Existing zones retain their account binding."
+        ),
+        validation={"pattern": r"|[0-9a-f]{32}"},
+    ),
+    SettingDef(
+        key="dns.cloudflare_account_api_token",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Customer zones"),
+        label=_("Customer-zone Cloudflare API token"),
+        help_text=_(
+            "An account-scoped token for full-zone create/read/delete, activation, DNS read/write and DNSSEC status. Separate from node and account-name tokens; retained only on Platform."
+        ),
+        input_kind="secret",
+        sensitive=True,
+    ),
+    SettingDef(
         key="dns.account_record_ttl_seconds",
         data_type="integer",
         default=300,

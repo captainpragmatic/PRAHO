@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "DNS record" %} · {{ zone.name }}{% endblock %}
+{% block content %}
+  <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <a href="{% url 'dns:detail' zone.id %}" class="text-primary-400 underline">{{ zone.name }}</a>
+    <h1 class="text-2xl font-semibold text-white">{% if record_id %}{% trans "Edit DNS record" %}{% else %}{% trans "Add DNS record" %}{% endif %}</h1>
+    <p class="text-slate-300">{% trans "Enter the complete value in DNS notation. External mail is unchanged unless you explicitly edit its records. PRAHO manages the hosting address records separately." %}</p>
+    <form method="post" class="space-y-5">
+      {% csrf_token %}{% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      {% for error in form.non_field_errors %}{% alert error variant="danger" %}{% endfor %}
+      {% for field in form.visible_fields %}{% form_field field %}{% endfor %}
+      {% trans "Save record" as save_label %}{% button save_label type="submit" variant="primary" %}
+    </form>
+  </main>
+{% endblock %}

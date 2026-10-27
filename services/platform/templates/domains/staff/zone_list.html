@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Hosted DNS zones" %} - PRAHO{% endblock %}
+{% block content %}
+  <div class="mx-auto max-w-7xl space-y-6 px-4 py-6">
+    <h1 class="text-2xl font-bold text-slate-900 dark:text-white">{% trans "Hosted DNS zones" %}</h1>
+    <p class="text-sm text-slate-600 dark:text-slate-300">{% trans "Recorded import, activation and provider-operation status." %}</p>
+    <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+      <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+        <thead class="bg-slate-50 dark:bg-slate-800"><tr>
+          <th scope="col" class="px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-200">{% trans "Domain" %}</th>
+          <th scope="col" class="px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-200">{% trans "Customer" %}</th>
+          <th scope="col" class="px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-200">{% trans "State" %}</th>
+          <th scope="col" class="px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-200">{% trans "Revision" %}</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
+          {% for zone in zone_page %}<tr>
+            <td class="px-4 py-3"><a class="text-primary-600 hover:underline dark:text-primary-400" href="{% url 'domains:zone_detail' zone.pk %}">{{ zone.name }}</a></td>
+            <td class="px-4 py-3 text-slate-700 dark:text-slate-200">{{ zone.customer.name }}</td>
+            <td class="px-4 py-3 text-slate-700 dark:text-slate-200">{{ zone.status }}</td>
+            <td class="px-4 py-3 text-slate-700 dark:text-slate-200">{{ zone.current_revision }}</td>
+          </tr>{% empty %}<tr><td colspan="4" class="px-4 py-6 text-slate-600 dark:text-slate-300">{% trans "No hosted DNS zones." %}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav aria-label="{% trans 'DNS zone pages' %}" class="flex items-center gap-4 text-primary-600 dark:text-primary-400">
+      {% if zone_page.has_previous %}<a href="?page={{ zone_page.previous_page_number }}">{% trans "Previous" %}</a>{% endif %}
+      <span class="text-slate-600 dark:text-slate-300">{{ zone_page.number }} / {{ zone_page.paginator.num_pages }}</span>
+      {% if zone_page.has_next %}<a href="?page={{ zone_page.next_page_number }}">{% trans "Next" %}</a>{% endif %}
+    </nav>
+  </div>
+{% endblock %}

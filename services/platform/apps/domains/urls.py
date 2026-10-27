@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import views
+from . import dns_zone_views, views
 
 app_name = "domains"
 
@@ -17,6 +17,10 @@ urlpatterns = [
     path("<uuid:domain_id>/renew/", views.domain_renew, name="renew"),
     # Staff management views
     path("admin/", views.domain_admin_list, name="admin_list"),
+    path("admin/zones/", dns_zone_views.zone_list, name="zone_list"),
+    path("admin/zones/<uuid:zone_id>/", dns_zone_views.zone_detail, name="zone_detail"),
+    path("admin/zones/<uuid:zone_id>/crosscheck/", dns_zone_views.zone_crosscheck, name="zone_crosscheck"),
+    path("admin/zones/<uuid:zone_id>/retry/", dns_zone_views.zone_retry, name="zone_retry"),
     path("admin/tlds/", views.tld_list, name="tld_list"),
     path("admin/tlds/new/", views.tld_create, name="tld_create"),
     path("admin/tlds/<int:pk>/edit/", views.tld_edit, name="tld_edit"),

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Delete DNS record" %}{% endblock %}
+{% block content %}
+  <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <a href="{% url 'dns:detail' zone_id %}" class="text-primary-400 underline">{% trans "Back to zone" %}</a>
+    <h1 class="text-2xl font-semibold text-white">{% trans "Delete DNS record" %}</h1>
+    <p class="break-all font-mono text-slate-200">{{ record.name }} {{ record.ttl }} {{ record.record_type }} {{ record.rdata }}</p>
+    <p class="text-slate-300">{% trans "Deleting mail or verification records can interrupt other services. Review this exact record before confirming." %}</p>
+    <form method="post" class="space-y-5">
+      {% csrf_token %}{% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      {% form_checkbox form.confirmed %}
+      {% trans "Delete this record" as delete_label %}{% button delete_label type="submit" variant="danger" %}
+    </form>
+  </main>
+{% endblock %}

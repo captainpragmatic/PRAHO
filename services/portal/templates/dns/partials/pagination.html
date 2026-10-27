@@ -1,0 +1,6 @@
+{% load i18n %}
+<nav class="flex flex-wrap justify-between gap-3 text-sm" aria-label="{% trans 'DNS pages' %}">
+  {% if previous_page %}<a href="?page={{ previous_page }}" class="text-primary-400 underline">{% trans "Previous" %}</a>{% endif %}
+  <span class="text-slate-400">{% trans "Page" %} {{ page }} / {{ pages }}</span>
+  {% if next_page %}<a href="?page={{ next_page }}" class="text-primary-400 underline">{% trans "Next" %}</a>{% endif %}
+</nav>

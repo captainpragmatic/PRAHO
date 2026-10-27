@@ -38,6 +38,7 @@ LOCAL_APPS: list[str] = [
     "apps.billing",  # Customer billing views (API client)
     "apps.tickets",  # Customer support tickets (API client)
     "apps.services",  # Customer service management (API client)
+    "apps.dns",  # Customer DNS zones (signed Platform client)
     "apps.customers",  # Customer team, tax profile, and address management
     "apps.ui",  # Template tags and components
     "apps.api_client",  # Platform API integration service

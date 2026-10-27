@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django_fsm import TransitionNotAllowed
 
 from apps.billing.currency_models import Currency
@@ -537,7 +537,7 @@ class LifecycleServicePhase2Tests(TestCase):
         self.assertEqual(domain.registrar_domain_id, "gandi-999")
 
 
-class LifecycleServicePhase2FailureContractTests(TestCase):
+class LifecycleServicePhase2FailureContractTests(TransactionTestCase):
     """Phase 2 service methods must return Err on registrar failure (not Ok), and
     initiate_transfer must not strand the unique Domain name on a definite rejection."""
 
