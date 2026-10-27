@@ -1,4 +1,4 @@
-"""Real missing-node recovery keeps Unix/HTTP held and preserves native unsuspension."""
+"""Run virtualmin_recovery.yml through the real recovery service, preserving held Unix/HTTP and unsuspension."""
 
 from __future__ import annotations
 

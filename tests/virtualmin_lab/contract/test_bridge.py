@@ -1,4 +1,4 @@
-"""Real two-node bridge: TLS transport, original HTTP scheme, aliases and source deletion."""
+"""Run virtualmin_bridge.yml through the real bridge service: TLS, scheme, aliases and source deletion."""
 
 from __future__ import annotations
 
