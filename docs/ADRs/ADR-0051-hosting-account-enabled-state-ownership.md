@@ -50,8 +50,8 @@ ADR records the full design that replaced it.
    page, go through `HostingAccountStaffActions` (`apps/provisioning/services.py`). Suspend
    suspends the Service with the token `staff_account_suspend`; Activate lifts only that
    token, and refuses while the customer is suspended or inactive, or the subscription is
-   delinquent. Neither calls the gateway. Each re-reads the Service under a row lock and
-   locks nothing else, so there is no lock-order inversion against billing.
+   delinquent. Neither calls the gateway. Suspend locks the Service; Activate locks Customer
+   before Service, matching billing's order, then re-checks ownership and every resume guard.
 6. **Scope.** The reconciler owns active and suspended-family (`suspended`, `terminated`,
    `expired`) services. `pending`, `provisioning` and `failed` belong to the provisioning
    pipeline: an account only turns on when provisioning completes, which moves the service
@@ -69,8 +69,36 @@ ADR records the full design that replaced it.
 | Staff account page and bulk page | Change the Service through `HostingAccountStaffActions` |
 | Direct `unsuspend_virtualmin_account` task | Refuses unless the predicate says enabled |
 | Account creation, reprovisioning, create-job recovery | The one intentional exception: an account comes into existence enabled. The provisioning task's follow-up reconcile and sweep (d) apply any hold |
-| Disaster recovery, migration | Converged by the sweep; migration holds the lock |
+| Disaster recovery, migration activation | Re-read the same current predicate before releasing the target hold; the original compensation snapshot does not decide current policy |
+| Reconciler during a committed migration | A dedicated target-only policy path after verified one-time activation; original restore data is never replayed |
 | `enforce_praho_state` (drift) | Re-asserts the recorded state; no callers |
+
+## Cutover clarification (2026-10-27)
+
+ADR-0061 separates a move's ownership commit, one-time target activation, DNS convergence and
+later source cleanup. A service can be suspended or its bound domain can expire while DNS
+checks are waiting. Waiting until the migration finishes to apply that hold violates this ADR.
+
+Activation therefore re-reads the live Service/domain predicate and verifies the target's
+native state before releasing maintenance. It retains the original migration snapshot for
+precommit compensation; that snapshot is never rewritten to represent later billing policy.
+
+After one-time activation, the reconciler may change **only current enabled policy on the
+committed target**. This permission requires an activation receipt bound to the current
+account/server, native domain ID and owner, plus a `bridging` or `repointing` phase. A row
+parked for operator review qualifies only when it was parked from one of those phases.
+Restore holds, competing lifecycle operations, unactivated targets and identity drift still
+refuse. The native policy action cannot replay passwords, password aging or saved crons.
+An unchanged active policy must preserve customer changes made since activation.
+
+Migration and account locks keep the existing Migration → Account order. Gateway reads and
+the native policy action have bounded deadlines; an insufficient configured task budget
+refuses before external I/O. Policy is re-read after I/O and a changed predicate queues a
+follow-up reconcile. Other lifecycle writers gain no permission to bypass migration ownership.
+
+Successful migration completion also queues an immediate reconcile after commit; the regular
+sweep remains a recovery mechanism. A retained cleanup bridge alone does not lock billing
+reconciliation or routine backups.
 
 ## Consequences
 
@@ -80,9 +108,10 @@ ADR records the full design that replaced it.
   Billing is unchanged: renewals cover `active` and `suspended`.
 - The domain signal lost its direct Virtualmin calls, and with them a second retry owner
   and its ADR-0045 commit-boundary handling.
-- **The domain path is dormant today.** No production code creates `ServiceDomain` rows
-  (only tests do), so no domain currently holds any account off. The design takes effect
-  as soon as something binds domains to services.
+- The October 2026 source audit found reads and reconcile triggers for `ServiceDomain`,
+  but no automatic provisioning path that creates its bindings. This does not establish
+  that a deployed database has no operator-created bindings. The predicate applies to
+  every existing binding, however it was created.
 - **Out of scope:** a worker that dies after the gateway call succeeds but before
   `account.save` leaves the panel and the database disagreeing in a way only drift
   detection can see. This exposure predates the decision and is unchanged by it.

@@ -144,6 +144,14 @@ class BackupNodeFixture(task_tests.VirtualminTaskTestBase):
 
 
 class BackupTransportTests(BackupNodeFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        # These cases isolate transport after native source capture; that
+        # boundary and bound-archive validation have separate regression gates.
+        capture = patch.object(self.svc, "_capture_owner_shadow", return_value=Ok(None))
+        capture.start()
+        self.addCleanup(capture.stop)
+
     def _fake_fetch(self, deployment: Any, playbook: str, variables: dict[str, Any], **kwargs: Any) -> Any:
         self.assertEqual(playbook, "virtualmin_backup_fetch.yml")
         self.assertEqual(deployment.virtualmin_server_id, self.server.pk)

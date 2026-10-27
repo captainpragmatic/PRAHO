@@ -54,6 +54,7 @@ class NodeBridge:
         self.probes = root / "var/www/praho-bridge-probes"
         self.ca = root / "etc/ssl/certs/ca-certificates.crt"
         self.hosts = root / "etc/hosts"
+        self.credential_helper = root / "var/lib/praho/recovery/credentials.pl"
         self.execute = execute
         self.minimum_certificate_lifetime = 48 * 3600
 
@@ -538,7 +539,7 @@ class NodeBridge:
         activation = json.loads(marker.read_text()) if marker.exists() else {}
         if activation.get("phase") != "completed":
             self.write(marker, json.dumps({**activation, "phase": "removed"}), durable=True)
-        for name in ("activation.crontab", "activation.incoming"):
+        for name in ("activation.crontab", "activation.incoming", "activation.policy.crontab"):
             (directory / name).unlink(missing_ok=True)
 
     def retire_activation_data(self, identity: str) -> None:
@@ -563,7 +564,7 @@ class NodeBridge:
             mode = "LOCK" if account["locked"] else "UNLOCK"
             self.sql(f"ALTER USER '{user}'@'{host}' ACCOUNT {mode}")
 
-    def verify_accounts(self, record: dict[str, Any]) -> None:
+    def verify_accounts(self, record: dict[str, Any], *, verify_auth: bool = True) -> None:
         for account in record["accounts"]:
             user, host = account["user"], account["host"]
             predicate = f"User = '{user}' AND Host = '{host}'"
@@ -594,7 +595,7 @@ class NodeBridge:
             differences = [
                 name
                 for name, got, wanted in zip(("plugin", "authentication", "grants"), actual, expected, strict=True)
-                if got != wanted
+                if got != wanted and (verify_auth or name != "authentication")
             ]
             if differences:
                 raise ValueError(
@@ -658,7 +659,15 @@ class NodeBridge:
             finally:
                 incoming.unlink(missing_ok=True)
 
-    def activate_target(self, identity: str, domain: str, owner: str, record: dict[str, Any]) -> None:
+    def activate_target(
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        record: dict[str, Any],
+        *,
+        enabled: bool | None = None,
+    ) -> None:
         """Apply once on the target; replay may never overwrite state after writes were admitted."""
         with self.locked():
             binding = self.target_binding(domain, owner, record)
@@ -679,12 +688,44 @@ class NodeBridge:
                 )
             self.original_cron(kept, record)
             self.write(marker, json.dumps({**binding, "phase": "applying"}), durable=True)
-            self.restore_target_runtime(domain, owner, record, kept)
-            self.write(marker, json.dumps({**binding, "phase": "completed"}), durable=True)
+            self.restore_target_runtime(domain, owner, record, kept, enabled=enabled)
+            policy_record = {
+                "enabled": record["enabled"],
+                "accounts": [
+                    {key: account[key] for key in ("user", "host", "locked")} for account in record["accounts"]
+                ],
+                "databases": record["databases"],
+                "ids": {
+                    item["name"]: self.execute(
+                        ["virtualmin", "list-domains", "--domain", item["name"], "--id-only"]
+                    ).strip()
+                    for item in record["enabled"]
+                },
+            }
+            self.write(
+                marker, json.dumps({**binding, "phase": "completed", "policy_record": policy_record}), durable=True
+            )
             kept.unlink(missing_ok=True)
 
-    def restore_target_runtime(self, domain: str, owner: str, record: dict[str, Any], kept: Path) -> None:
+    def restore_target_runtime(  # noqa: C901, PLR0912, PLR0915  # One locked native activation with ordered verification.
+        self,
+        domain: str,
+        owner: str,
+        record: dict[str, Any],
+        kept: Path,
+        *,
+        enabled: bool | None = None,
+    ) -> None:
         """The caller holds the node lock and has persisted the applying marker."""
+        desired = record["enabled"][0]["enabled"] if enabled is None else enabled
+        if type(desired) is not bool:
+            raise ValueError("Current enabled policy must be boolean")
+        effective = json.loads(json.dumps(record))
+        for index, item in enumerate(effective["enabled"]):
+            item["enabled"] = desired if index == 0 else item["enabled"] and desired
+        for account in effective["accounts"]:
+            account["locked"] = account["locked"] or not desired
+        record = effective
         self.restore_accounts(record)
         for item in record["enabled"]:
             name = hostname(item["name"])
@@ -693,13 +734,38 @@ class NodeBridge:
             disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
             if (name not in disabled) != item["enabled"]:
                 action = "enable-domain" if item["enabled"] else "disable-domain"
-                self.execute(["virtualmin", action, "--domain", name, "--subservers"])
+                # This record restores each child separately. Cascading a parent enable
+                # would briefly expose a child that must remain disabled, including a
+                # provider-name child created after the pair hold captured its surfaces.
+                params = [] if item["enabled"] else ["--subservers"]
+                self.execute(["virtualmin", action, "--domain", name, *params])
         if record["has_crontab"]:
-            self.execute(["crontab", "-u", owner, str(kept)])
+            if desired:
+                self.execute(["crontab", "-u", owner, str(kept)])
+            else:
+                paused = kept.with_name("activation.policy.crontab")
+                content = self.suspended_cron(kept.read_text())
+                self.write(paused, content)
+                try:
+                    self.execute(["crontab", "-u", owner, str(paused)])
+                finally:
+                    paused.unlink(missing_ok=True)
         else:
             with suppress(subprocess.CalledProcessError):
                 self.execute(["crontab", "-u", owner, "-r"])
-        self.verify_accounts(record)
+        if not desired:
+            # Held Unix activation already completed, but this bridge marker is
+            # still applying. Use that completed identity to close every native
+            # policy surface without replaying its archived credential fields.
+            self.policy_native(
+                self._activation_identity(kept),
+                domain,
+                owner,
+                self.execute(["virtualmin", "list-domains", "--domain", domain, "--id-only"]).strip(),
+                False,
+                scope="recovery",
+            )
+        self.verify_accounts(record, verify_auth=desired)
         disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
         if any((item["name"] not in disabled) != item["enabled"] for item in record["enabled"]):
             raise ValueError("The target's enabled states do not match the original barrier record")
@@ -712,10 +778,165 @@ class NodeBridge:
         else:
             if not record["has_crontab"]:
                 raise ValueError("The target still has a crontab that was originally absent")
-        if self.active_cron_digest(cron) != record["active_sha"]:
+        expected_active = (
+            record["active_sha"] if desired else self.active_cron_digest(self.suspended_cron(kept.read_text()))
+        )
+        if self.active_cron_digest(cron) != expected_active:
             raise ValueError("The target cron differs from the original barrier record")
         if record["databases"]:
             self.probe_target_write(domain, record)
+
+    @staticmethod
+    def _activation_identity(kept: Path) -> str:
+        return str(UUID(kept.parent.name))
+
+    @staticmethod
+    def suspended_cron(content: str) -> str:
+        result = []
+        for line in content.splitlines(keepends=True):
+            stripped = line.lstrip()
+            if not stripped.strip() or stripped.startswith("#") or re.match(r"[A-Za-z_][A-Za-z0-9_]*\s*=", stripped):
+                result.append(line)
+            else:
+                ending = "\n" if line.endswith("\n") else ""
+                job = line.rstrip("\r\n")
+                suffix = "" if re.search(r"#\s+VIRTUALMIN\s+DISABLE", job) else " # VIRTUALMIN DISABLE"
+                result.append("# " + job + suffix + ending)
+        return "".join(result)
+
+    def policy_native(  # noqa: PLR0913  # Public immutable target identity plus current policy and activation scope.
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        domain_id: str,
+        enabled: bool,
+        *,
+        scope: str = "bridge",
+    ) -> dict[str, Any]:
+        info = self.credential_helper.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != self.owner_uid or info.st_mode & 0o077:
+            raise ValueError("The native current-policy helper is not private owned code")
+        request = {
+            "action": "reconcile-policy",
+            "operation_id": identity,
+            "activation_scope": scope,
+            "domain": domain,
+            "owner": owner,
+            "domain_id": domain_id,
+            "enabled": enabled,
+        }
+        output = subprocess.run(  # noqa: S603  # Fixed helper; public identity JSON only on stdin.
+            ["/usr/bin/perl", str(self.credential_helper)],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=120,
+        ).stdout
+        matches = re.findall(r"PRAHO_POLICY_RESULT=([A-Za-z0-9+/=]+)", output)
+        proof = json.loads(base64.b64decode(matches[0], validate=True)) if len(matches) == 1 else None
+        if (
+            not isinstance(proof, dict)
+            or type(proof.get("enabled")) is not bool
+            or proof
+            != {
+                "domain_id": domain_id,
+                "owner": owner,
+                "enabled": enabled,
+            }
+        ):
+            raise ValueError("The native current-policy proof does not match the target")
+        return proof
+
+    def reconcile_policy(  # noqa: C901, PLR0912, PLR0915  # One locked policy transition preserves customer state across native callbacks.
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        domain_id: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Current policy is independent of the immutable original cron/credential replay."""
+        if type(enabled) is not bool:
+            raise ValueError("Current enabled policy must be boolean")
+        with self.locked():
+            directory = self.directory(identity)
+            marker = directory / "activation.json"
+            if not marker.exists() or (directory / "origin-removed").exists():
+                raise ValueError("Current policy requires completed target activation")
+            previous = json.loads(marker.read_text())
+            if previous.get("phase") != "completed":
+                raise ValueError("Current policy requires completed target activation")
+            expected = {"domain": hostname(domain), "owner": owner, "target_domain_id": domain_id}
+            if any(previous.get(key) != value for key, value in expected.items()):
+                raise ValueError("Current policy target identity changed")
+            if (
+                self.execute(["virtualmin", "list-domains", "--domain", domain, "--user-only"]).strip() != owner
+                or self.execute(["virtualmin", "list-domains", "--domain", domain, "--id-only"]).strip() != domain_id
+            ):
+                raise ValueError("Current policy target identity changed")
+            disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
+            policy_file = directory / "policy.json"
+            current_policy = json.loads(policy_file.read_text()) if policy_file.exists() else {}
+            if enabled and domain not in disabled and current_policy.get("enabled", True):
+                return {"domain_id": domain_id, "owner": owner, "enabled": True}
+            record = previous.get("policy_record")
+            if not isinstance(record, dict):
+                raise ValueError("Completed activation lacks retained current-policy scope")
+            resume = current_policy.get("resume") or record
+            if not enabled and domain not in disabled:
+                resume = json.loads(json.dumps(record))
+                for item in resume["enabled"]:
+                    item["enabled"] = item["name"] not in disabled
+                for account in resume["accounts"]:
+                    user, host = account["user"], account["host"]
+                    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", user) or not re.fullmatch(
+                        r"[A-Za-z0-9.%_:-]{1,255}", host
+                    ):
+                        raise ValueError("Invalid current-policy database scope")
+                    account["locked"] = self.sql(
+                        "SELECT IFNULL(JSON_VALUE(Priv, '$.account_locked'), 'false') "  # noqa: S608  # Both scope identifiers validated above.
+                        f"FROM mysql.global_priv WHERE User = '{user}' AND Host = '{host}'"
+                    ).strip() in {"true", "1"}
+            # Save resume state BEFORE forcing native suspension; a retry must
+            # never mistake our own lock states for the customer's prior state.
+            self.write(policy_file, json.dumps({"enabled": False, "resume": resume}), durable=True)
+            proof = self.policy_native(identity, domain, owner, domain_id, enabled)
+            latest_disabled = set(
+                self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines()
+            )
+            for item in resume["enabled"][1:]:
+                name = hostname(item["name"])
+                if (
+                    self.execute(["virtualmin", "list-domains", "--domain", name, "--user-only"]).strip() != owner
+                    or self.execute(["virtualmin", "list-domains", "--domain", name, "--id-only"]).strip()
+                    != record["ids"][name]
+                ):
+                    raise ValueError("Current policy child identity changed")
+                desired = bool(item["enabled"] and enabled)
+                if (name not in latest_disabled) != desired:
+                    self.execute(["virtualmin", "enable-domain" if desired else "disable-domain", "--domain", name])
+            accounts = json.loads(json.dumps(resume["accounts"]))
+            if not enabled:
+                for account in accounts:
+                    account["locked"] = True
+            self.restore_accounts({"accounts": accounts})
+            final_disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
+            for item in resume["enabled"]:
+                desired = enabled if item["name"] == domain else bool(item["enabled"] and enabled)
+                if (item["name"] not in final_disabled) != desired:
+                    raise ValueError("The target's current enabled policy did not converge")
+            for account in accounts:
+                user, host = account["user"], account["host"]
+                actual = self.sql(
+                    "SELECT IFNULL(JSON_VALUE(Priv, '$.account_locked'), 'false') "  # noqa: S608  # Scope validated by restore_accounts above.
+                    f"FROM mysql.global_priv WHERE User = '{user}' AND Host = '{host}'"
+                ).strip() in {"true", "1"}
+                if actual != account["locked"]:
+                    raise ValueError("The target's current database lock policy did not converge")
+            self.write(policy_file, json.dumps({"enabled": enabled, "resume": resume}), durable=True)
+            return proof
 
     def probe_target_write(self, domain: str, record: dict[str, Any]) -> None:
         listing = self.execute(["virtualmin", "list-domains", "--domain", domain, "--multiline"])
@@ -754,11 +975,15 @@ class NodeBridge:
             raise ValueError("The target owner's write/login probe does not match its intended enabled state")
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901, PLR0912  # Explicit allowlisted node-operation dispatch.
     node = NodeBridge()
     node.minimum_certificate_lifetime = int(os.environ.get("PRAHO_BRIDGE_CERT_MIN_SECONDS", str(48 * 3600)))
     identity = os.environ["PRAHO_BRIDGE_ID"]
     action = os.environ["PRAHO_BRIDGE_ACTION"]
+    enabled_value = os.environ.get("PRAHO_BRIDGE_ENABLED", "")
+    if enabled_value not in {"", "0", "1"}:
+        raise ValueError("Current enabled policy must be boolean")
+    enabled = None if enabled_value == "" else enabled_value == "1"
     payload: Any = ""
     if action == "prepare":
         payload = node.prepare(
@@ -802,6 +1027,17 @@ def main() -> None:
             os.environ["PRAHO_BRIDGE_DOMAIN"],
             os.environ["PRAHO_BRIDGE_OWNER"],
             json.loads(os.environ["PRAHO_BARRIER_RECORD"]),
+            enabled=enabled,
+        )
+    elif action == "reconcile_policy":
+        if enabled is None:
+            raise ValueError("Current enabled policy is required")
+        payload = node.reconcile_policy(
+            identity,
+            os.environ["PRAHO_BRIDGE_DOMAIN"],
+            os.environ["PRAHO_BRIDGE_OWNER"],
+            os.environ["PRAHO_BRIDGE_DOMAIN_ID"],
+            enabled,
         )
     else:
         raise ValueError("Invalid bridge action")

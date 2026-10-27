@@ -1368,6 +1368,17 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
         return {"success": False, "error": f"Service {service_id} not found"}
 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+    if account is not None:
+        from .migration_enabled_state import (  # noqa: PLC0415  # Narrow ADR-0051 target permission.
+            reconcile_committed_target,
+        )
+
+        committed_policy = reconcile_committed_target(
+            str(service_id),
+            task_budget_seconds=task_budget_seconds if task_budget_seconds is not None else get_task_soft_time_limit(),
+        )
+        if committed_policy is not None:
+            return committed_policy
     if account is not None and _migration_locked(account):
         return {"success": True, "action": "migration_locked"}
     # A restore, a delete or any running job owns the account: converging its enabled state

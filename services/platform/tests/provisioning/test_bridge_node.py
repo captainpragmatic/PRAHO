@@ -59,15 +59,22 @@ class BridgeNodeTests(SimpleTestCase):
         key = ec.generate_private_key(ec.SECP256R1())
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, DOMAIN)])
         cert = (
-            x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
-            .serial_number(x509.random_serial_number()).not_valid_before(datetime.now(UTC) - timedelta(minutes=1))
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(UTC) - timedelta(minutes=1))
             .not_valid_after(datetime.now(UTC) + timedelta(days=30))
             .add_extension(x509.SubjectAlternativeName([x509.DNSName(DOMAIN), x509.DNSName(f"www.{DOMAIN}")]), False)
             .sign(key, hashes.SHA256())
         )
         self.certificate.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-        self.key.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                               serialization.NoEncryption()))
+        self.key.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+            )
+        )
         self.site = self.node.sites / f"{DOMAIN}.conf"
         self.site.write_text(
             f"<VirtualHost *:80>\nServerName {DOMAIN}\nServerAlias www.{DOMAIN}\n</VirtualHost>\n"
@@ -94,6 +101,39 @@ class BridgeNodeTests(SimpleTestCase):
         self.assertTrue((self.node.state / BRIDGE_ID / "source-1-chain.pem").exists())
         self.assertGreater(f"praho-migration-{BRIDGE_ID}.conf", "praho-default-site.conf")
 
+    def test_node_entrypoint_passes_current_policy_without_rewriting_original_record(self) -> None:
+        original = {"enabled": [{"name": DOMAIN, "enabled": True}]}
+        environment = {
+            "PRAHO_BRIDGE_ID": BRIDGE_ID,
+            "PRAHO_BRIDGE_DOMAIN": DOMAIN,
+            "PRAHO_BRIDGE_OWNER": "shop",
+            "PRAHO_BRIDGE_DOMAIN_ID": "42",
+            "PRAHO_BRIDGE_ENABLED": "0",
+            "PRAHO_BARRIER_RECORD": json.dumps(original),
+        }
+        with (
+            patch.dict(os.environ, {**environment, "PRAHO_BRIDGE_ACTION": "activate"}),
+            patch.object(self.module, "NodeBridge", return_value=Mock()) as factory,
+            patch("builtins.print"),
+        ):
+            self.module.main()
+            factory.return_value.activate_target.assert_called_once_with(
+                BRIDGE_ID,
+                DOMAIN,
+                "shop",
+                original,
+                enabled=False,
+            )
+        node = Mock()
+        node.reconcile_policy.return_value = {"domain_id": "42", "owner": "shop", "enabled": False}
+        with (
+            patch.dict(os.environ, {**environment, "PRAHO_BRIDGE_ACTION": "reconcile_policy"}),
+            patch.object(self.module, "NodeBridge", return_value=node),
+            patch("builtins.print"),
+        ):
+            self.module.main()
+        node.reconcile_policy.assert_called_once_with(BRIDGE_ID, DOMAIN, "shop", "42", False)
+
     def test_target_origin_preserves_http_and_carries_an_identity_outside_customer_content(self) -> None:
         manifest = self.node.prepare(BRIDGE_ID, DOMAIN, "", "192.0.2.20", "192.0.2.10")
         self.node.install_origin(BRIDGE_ID, manifest)
@@ -113,8 +153,11 @@ class BridgeNodeTests(SimpleTestCase):
         conf = (self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").read_text()
         # Installed Virtualmin get_apache_virtual compares literal ServerName/ServerAlias words.
         # Apache expands Define variables; the Webmin parser intentionally leaves them literal.
-        selected = [words[1:] for line in conf.splitlines() if (words := shlex.split(line))
-                    and words[0].lower() in {"servername", "serveralias"}]
+        selected = [
+            words[1:]
+            for line in conf.splitlines()
+            if (words := shlex.split(line)) and words[0].lower() in {"servername", "serveralias"}
+        ]
         self.assertTrue(selected)
         self.assertFalse(any(DOMAIN in names or f"www.{DOMAIN}" in names for names in selected))
 
@@ -139,8 +182,11 @@ class BridgeNodeTests(SimpleTestCase):
         self.node.execute = Mock(return_value="another target")
         with self.assertRaisesRegex(ValueError, "identity"):
             self.node.verify(BRIDGE_ID)
-        self.node.execute = Mock(side_effect=lambda argv: f"HTTP/1.1 200 OK\nX-Praho-Bridge: {BRIDGE_ID}\n"
-                                 if "--dump-header" in argv else BRIDGE_ID)
+        self.node.execute = Mock(
+            side_effect=lambda argv: (
+                f"HTTP/1.1 200 OK\nX-Praho-Bridge: {BRIDGE_ID}\n" if "--dump-header" in argv else BRIDGE_ID
+            )
+        )
         self.node.verify(BRIDGE_ID)
         calls = self.node.execute.call_args_list
         self.assertEqual(len(calls), 6)
@@ -199,10 +245,14 @@ class BridgeNodeTests(SimpleTestCase):
         kept = self.node.directory(BRIDGE_ID) / "activation.crontab"
         kept.write_text(cron)
         kept.chmod(0o600)
-        record = {"enabled": [{"name": DOMAIN, "enabled": True}, {"name": child, "enabled": False}],
-                  "accounts": [], "databases": [], "has_crontab": True,
-                  "active_sha": hashlib.sha256(cron.encode()).hexdigest(),
-                  "crontab_sha": hashlib.sha256(cron.encode().rstrip(b"\n")).hexdigest()}
+        record = {
+            "enabled": [{"name": DOMAIN, "enabled": True}, {"name": child, "enabled": False}],
+            "accounts": [],
+            "databases": [],
+            "has_crontab": True,
+            "active_sha": hashlib.sha256(cron.encode()).hexdigest(),
+            "crontab_sha": hashlib.sha256(cron.encode().rstrip(b"\n")).hexdigest(),
+        }
 
         def target(argv):
             nonlocal target_cron
@@ -212,7 +262,12 @@ class BridgeNodeTests(SimpleTestCase):
                     return "\n".join(sorted(disabled))
                 return "1001" if "--id-only" in argv else "shop"
             if argv[:2] == ["virtualmin", "enable-domain"]:
-                disabled.clear()
+                name = argv[argv.index("--domain") + 1]
+                disabled.discard(name)
+                if name == DOMAIN and "--subservers" in argv:
+                    disabled.discard(child)
+                if name == DOMAIN:
+                    self.assertIn(child, disabled, "An originally disabled name became enabled before activation finished")
             if argv[:2] == ["virtualmin", "disable-domain"]:
                 disabled.add(argv[argv.index("--domain") + 1])
             if argv[:3] == ["crontab", "-u", "shop"]:
@@ -244,8 +299,13 @@ class BridgeNodeTests(SimpleTestCase):
 
     def test_a_target_owner_mismatch_stops_before_any_enable_or_cron_install(self) -> None:
         self.node.execute = Mock(return_value="another-customer")
-        record = {"enabled": [{"name": DOMAIN, "enabled": True}], "accounts": [], "databases": [],
-                  "has_crontab": False, "active_sha": hashlib.sha256(b"").hexdigest()}
+        record = {
+            "enabled": [{"name": DOMAIN, "enabled": True}],
+            "accounts": [],
+            "databases": [],
+            "has_crontab": False,
+            "active_sha": hashlib.sha256(b"").hexdigest(),
+        }
         with self.assertRaisesRegex(ValueError, "owner"):
             self.node.activate_target(BRIDGE_ID, DOMAIN, "shop", record)
         self.assertEqual(self.node.execute.call_count, 1)
@@ -255,11 +315,96 @@ class BridgeNodeTests(SimpleTestCase):
         incoming = self.node.directory(BRIDGE_ID) / "activation.incoming"
         incoming.write_text(cron)
         incoming.chmod(0o600)
-        record = {"enabled": [{"name": DOMAIN, "enabled": True}], "accounts": [], "databases": [],
-                  "has_crontab": True, "crontab_sha": hashlib.sha256(cron.encode().rstrip(b"\n")).hexdigest(),
-                  "active_sha": hashlib.sha256(cron.encode()).hexdigest()}
+        record = {
+            "enabled": [{"name": DOMAIN, "enabled": True}],
+            "accounts": [],
+            "databases": [],
+            "has_crontab": True,
+            "crontab_sha": hashlib.sha256(cron.encode().rstrip(b"\n")).hexdigest(),
+            "active_sha": hashlib.sha256(cron.encode()).hexdigest(),
+        }
         self.node.stage_activation(BRIDGE_ID, DOMAIN, "shop", record)
         return record
+
+    def test_policy_on_unactivated_or_replaced_target_never_calls_native_mutation(self):
+        self.node.execute = Mock(side_effect=lambda argv: "1001" if "--id-only" in argv else "shop")
+        record = self.stage_original_cron()
+        with (
+            patch.object(self.node, "policy_native", create=True) as native,
+            self.assertRaisesRegex(ValueError, "completed"),
+        ):
+            self.node.reconcile_policy(BRIDGE_ID, DOMAIN, "shop", "1001", False)
+        native.assert_not_called()
+        self.assertEqual(record["enabled"], [{"name": DOMAIN, "enabled": True}])
+
+    def test_completed_policy_active_replay_preserves_customer_cron_and_original_record(self):
+        disabled = set()
+
+        def target(argv):
+            self.commands.append(argv)
+            if argv[:2] == ["virtualmin", "list-domains"]:
+                if "--disabled" in argv:
+                    return "\n".join(disabled)
+                return "1001" if "--id-only" in argv else "shop"
+            return ""
+
+        self.node.execute = target
+        record = self.stage_original_cron()
+        saved = json.dumps(record, sort_keys=True)
+        with patch.object(self.node, "restore_target_runtime"):
+            self.node.activate_target(BRIDGE_ID, DOMAIN, "shop", record)
+        self.commands.clear()
+        with patch.object(self.node, "policy_native", create=True) as native:
+            proof = self.node.reconcile_policy(BRIDGE_ID, DOMAIN, "shop", "1001", True)
+        self.assertEqual(proof, {"domain_id": "1001", "owner": "shop", "enabled": True})
+        native.assert_not_called()
+        self.assertFalse(any(argv[0] in {"mysql", "crontab"} for argv in self.commands))
+        self.assertEqual(json.dumps(record, sort_keys=True), saved)
+        # Enabled-only variation of a completed initial RPC also never replays cron/grants.
+        with patch.object(self.node, "restore_target_runtime") as runtime:
+            self.node.activate_target(BRIDGE_ID, DOMAIN, "shop", record, enabled=False)
+        runtime.assert_not_called()
+
+    def test_policy_release_preserves_original_and_customer_disabled_children(self):
+        child = "preview.example.com"
+        disabled = {child}
+
+        def target(argv):
+            self.commands.append(argv)
+            if argv[:2] == ["virtualmin", "list-domains"]:
+                if "--disabled" in argv:
+                    return "\n".join(disabled)
+                if "--id-only" in argv:
+                    return "1002" if child in argv else "1001"
+                return "shop"
+            raise AssertionError("A retained disabled child needs no native enable or credential/cron mutation")
+
+        def native(identity, domain, owner, domain_id, enabled):
+            if enabled:
+                disabled.discard(domain)
+            else:
+                disabled.add(domain)
+            return {"domain_id": domain_id, "owner": owner, "enabled": enabled}
+
+        self.node.execute = target
+        record = self.stage_original_cron()
+        with patch.object(self.node, "restore_target_runtime"):
+            self.node.activate_target(BRIDGE_ID, DOMAIN, "shop", record)
+        directory = self.node.directory(BRIDGE_ID)
+        marker = directory / "activation.json"
+        completed = json.loads(marker.read_text())
+        for originally_enabled in (False, True):
+            with self.subTest(originally_enabled=originally_enabled):
+                completed["policy_record"]["enabled"] = [
+                    {"name": DOMAIN, "enabled": True}, {"name": child, "enabled": originally_enabled},
+                ]
+                completed["policy_record"]["ids"][child] = "1002"
+                marker.write_text(json.dumps(completed))
+                (directory / "policy.json").unlink(missing_ok=True)
+                with patch.object(self.node, "policy_native", side_effect=native):
+                    self.node.reconcile_policy(BRIDGE_ID, DOMAIN, "shop", "1001", False)
+                    self.node.reconcile_policy(BRIDGE_ID, DOMAIN, "shop", "1001", True)
+                self.assertEqual(disabled, {child})
 
     def test_interrupted_activation_keeps_applying_evidence_and_replay_never_reapplies_original_state(self) -> None:
         mutations = []
@@ -346,8 +491,11 @@ class BridgeNodeTests(SimpleTestCase):
         self.node.install_source(BRIDGE_ID, self.node.install_origin(BRIDGE_ID, manifest))
 
         self.assertIn("<VirtualHost", (self.node.conf / f"praho-migration-{BRIDGE_ID}.conf").read_text())
-        self.node.execute = Mock(side_effect=lambda argv: f"HTTP/1.1 200 OK\nX-Praho-Bridge: {BRIDGE_ID}\n"
-                                 if "--dump-header" in argv else BRIDGE_ID)
+        self.node.execute = Mock(
+            side_effect=lambda argv: (
+                f"HTTP/1.1 200 OK\nX-Praho-Bridge: {BRIDGE_ID}\n" if "--dump-header" in argv else BRIDGE_ID
+            )
+        )
         self.node.verify(BRIDGE_ID)
         self.assertTrue(any(ORIGIN in call.args[0][-1] for call in self.node.execute.call_args_list))
 
@@ -411,7 +559,9 @@ class BridgeNodeTests(SimpleTestCase):
         marker = record.parent / f"migration-42.cancelled.{BRIDGE_ID}"
         self.assertTrue(marker.exists(), "retiring the original record must permanently fence its late apply RPC")
         self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
-        self.assertIn(["virtualmin", "list-domains", "--name-only"], [call.args[0] for call in self.node.execute.call_args_list])
+        self.assertIn(
+            ["virtualmin", "list-domains", "--name-only"], [call.args[0] for call in self.node.execute.call_args_list]
+        )
 
     def test_final_source_cleanup_keeps_the_original_cron_when_durable_cancellation_cannot_be_written(self) -> None:
         record = self.node.barrier_state / f"migration-42.{BRIDGE_ID}.crontab"

@@ -145,6 +145,11 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.ansible = ansible_patch.start()
         self.addCleanup(ansible_patch.stop)
         self.ansible.return_value.run_playbook.side_effect = self._transport
+        # Numeric owner capture is a separate node boundary; its archive binding,
+        # lease refusal and native restoration have focused unit/lab coverage.
+        capture_patch = patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow")
+        self.owner_capture = capture_patch.start()
+        self.addCleanup(capture_patch.stop)
         enqueue_patch = patch("apps.provisioning.virtualmin_tasks.async_task", return_value="migration-task")
         self.enqueue = enqueue_patch.start()
         self.addCleanup(enqueue_patch.stop)
@@ -409,6 +414,18 @@ class MigrationTests(MigrationTestBase):
         self.assertEqual(migration.status, "rolled_back")
         self.assertEqual(self._programs("source")[-2:], ["enable-domain", "list-domains"])
         self.assertTrue(self.source_gateway.domain_state_of(self.account.domain).enabled)
+
+    def test_owner_capture_that_outlives_the_lease_never_dispatches_a_backup(self) -> None:
+        migration = self._start()
+
+        def expire_during_capture(*args: Any, **kwargs: Any) -> None:
+            VirtualminMigration.objects.filter(pk=migration.pk).update(
+                worker_lease_expires_at=timezone.now() - timedelta(seconds=1)
+            )
+
+        self.owner_capture.side_effect = expire_during_capture
+        virtualmin_tasks.run_virtualmin_migration(str(migration.pk))
+        self.assertNotIn("backup-domain", self._programs("source"))
 
     def test_backup_unknown_retains_quiesce_without_retry(self) -> None:
         self.effects[("source", "backup-domain")] = self._error("source", "backup-domain", unknown=True)

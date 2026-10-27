@@ -249,14 +249,23 @@ class RecoverySelectionTests(BarrierCase):
             barrier_state={"target_domain_id": "17919754553304"},
         )
         self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
+        # A committed activation checkpoint already owns the target in PRAHO.
+        self.account.server = self.target
+        self.account.save(update_fields=["server", "updated_at"])
+        migration.barrier_state["target_domain_id"] = str(
+            VirtualminRecoveryService()._domain(self.target, self.account.domain)["attributes"]["ID"]
+        )
+        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=migration.barrier_state)
         service = VirtualminRecoveryService()
         released = PairStepResult(outcome="released", reason="barrier_removed", ran=False, checkpoints=())
         with (
             patch.object(service, "_node"),
+            patch("apps.provisioning.migration_target_hold.run_held_target_node") as policy,
             patch.object(service, "_command", side_effect=AssertionError("Target activation must not be repeated")),
             patch("apps.provisioning.virtualmin_recovery_service.run_pair_step", return_value=Ok(released)),
         ):
             service._activate(migration, token)
+        policy.assert_called_once_with(migration, "reconcile_policy", enabled=True)
         migration.refresh_from_db()
         self.assertEqual(migration.status, "repointing")
 

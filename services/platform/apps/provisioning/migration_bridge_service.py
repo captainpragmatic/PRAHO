@@ -73,8 +73,10 @@ def _variables(migration: VirtualminMigration, action: str) -> Result[dict[str, 
     )
 
 
-def _step(deployment: NodeDeployment, variables: dict[str, Any]) -> Result[Any, str]:
-    result = _runner().run_playbook(deployment, BRIDGE_PLAYBOOK, variables, timeout_seconds=BRIDGE_TIMEOUT_SECONDS)
+def _step(
+    deployment: NodeDeployment, variables: dict[str, Any], *, timeout_seconds: int = BRIDGE_TIMEOUT_SECONDS
+) -> Result[Any, str]:
+    result = _runner().run_playbook(deployment, BRIDGE_PLAYBOOK, variables, timeout_seconds=timeout_seconds)
     if result.is_err():
         return Err(
             f"Bridge {variables['bridge_action']} could not run: {result.unwrap_err()}",
@@ -272,7 +274,7 @@ def remove_bridge(migration: VirtualminMigration, *, source_removed: bool = Fals
     return Ok("removed")
 
 
-def activate_target(migration: VirtualminMigration) -> Result[str, str]:
+def activate_target(migration: VirtualminMigration, *, enabled: bool | None = None) -> Result[str, str]:
     """After commit, activate only the target using its precommit-staged, domain-id-bound record."""
     if migration.cutover_committed_at is None:
         return Err("The target cannot be activated before the cutover commit")
@@ -290,11 +292,47 @@ def activate_target(migration: VirtualminMigration) -> Result[str, str]:
             "bridge_domain": migration.account.domain,
             "bridge_owner": migration.account.virtualmin_username,
             "bridge_barrier_record": record.unwrap(),
+            **({"bridge_enabled": enabled} if enabled is not None else {}),
         },
     )
     if activated.is_err():
         return Err(activated.unwrap_err(), retriability=retriability_of(activated))
     return Ok("activated")
+
+
+def enforce_target_policy(migration: VirtualminMigration, enabled: bool) -> Result[str, str]:
+    """Apply only current native enabled policy after one-time activation; no original data replay."""
+    target = getattr(migration.target_server, "node_deployment", None)
+    domain_id = str(migration.barrier_state.get("target_domain_id", ""))
+    if target is None or migration.cutover_committed_at is None or not domain_id.isdigit():
+        return Err(
+            "The current target policy needs committed, bound node ownership", retriability=Retriability.NOT_RETRIABLE
+        )
+    result = _step(
+        target,
+        {
+            "bridge_action": "reconcile_policy",
+            "bridge_id": str(migration.pk),
+            "bridge_domain": migration.account.domain,
+            "bridge_owner": migration.account.virtualmin_username,
+            "bridge_domain_id": domain_id,
+            "bridge_enabled": enabled,
+        },
+        timeout_seconds=300,
+    )
+    if result.is_err():
+        return Err(result.unwrap_err(), retriability=retriability_of(result))
+    proof = result.unwrap()
+    if (
+        not isinstance(proof, dict)
+        or proof.get("domain_id") != domain_id
+        or proof.get("owner") != migration.account.virtualmin_username
+        or proof.get("enabled") is not enabled
+    ):
+        return Err(
+            "The target policy did not return its exact identity and enabled proof", retriability=Retriability.UNKNOWN
+        )
+    return Ok("reconciled")
 
 
 def retire_target_activation_data(migration: VirtualminMigration) -> Result[str, str]:

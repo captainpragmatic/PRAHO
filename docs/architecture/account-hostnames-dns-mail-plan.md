@@ -84,6 +84,19 @@ Review findings to close, each with a failing regression and recorded green resu
 | Recovery refuses a missing account name before changing nodes | Admission regression green; source remains eligible when admission is refused |
 | Cancellation and completed releases survive replay and reboot | Source/pair script suites: 59 tests with 38 subtests; additional bridge/pair batch: 59 tests with 17 subtests |
 | External webmail/admin aliases do not require a false target-origin statement | Explicit independent-service declarations, fresh route/cache checks and historical source-IP guards; 52 tests green |
+| Current billing/domain policy applies to a fully activated committed target | Dedicated identity-bound policy writer preserves current credentials and cron; focused SQLite/PostgreSQL and native active/suspended proofs green |
+| Owner aging is bound to the credential actually carried by its archive | Native capture/serialization race reproduced; changed credentials refuse the archive rather than reuse stale aging; full native contract 37 cases green |
+| Parent activation never briefly enables a disabled child | Native RED exposed a late-created linked child while its parent remained held; parent-only activation and explicit per-child restoration pass the same observer and 30 node tests |
+| Account names never serve tenant content while previews are off | **Open:** exact production child creation, without a symlink, serves a tenant-written file. Skipping the symlink does not enforce this policy; a node-controlled neutral response is still required |
+
+The latest Phase 2 integrated checkpoint passes `make lint` and the full `make test`
+pipeline: 14,107 Platform tests, 1,978 Portal passes, 1,038 integration passes,
+and the database-cache/security isolation phases. The subsequent parent-only activation
+change has focused unit and real-node evidence. These results do not close the newly
+reproduced preview-policy gap: the historical Phase 1 claims below that skipping the
+web-root link guarantees neutral content are superseded by that finding until its
+HTTP behavior is corrected and proven. The owner has already decided that previews
+remain off even after the factual PSL-shipped setting becomes true.
 
 The audit CI failures mentioning `virtualmin_migration_apply` and
 `virtualmin_migration_verify` are scanner false positives: unrelated barrier loop
@@ -109,6 +122,26 @@ Native existing-domain restore also creates database users from the placeholder'
 metadata. Before activation, the target therefore needs the archived native credential metadata
 as well as its Unix hash. The real-node acceptance checks use the original database login and
 grants for both active and suspended accounts; matching table contents alone is insufficient.
+
+Virtualmin's native archive does not include the owner's shadow aging and expiry fields.
+New full/configuration and differential-chain backups capture those numeric fields under the
+source identity and lock, bind them to the exact archive, and include them in its native domain
+metadata before checksums or storage. Held activation restores them once and refuses archives
+whose aging is unknown; an operator must take a newly captured backup or review that legacy
+account's expiry policy. A nonempty reserved shadow flag is unsupported and refused explicitly.
+The private profile also binds aging to the exact credential selected by native restore. A
+password change between live capture and backup therefore refuses publication or held
+activation; a fresh backup uses a new archive identity. No credential fingerprint is returned
+to Platform metadata, audit events or logs.
+Completed backups already require managed SSH archive transport, including on master and the
+original Phase 2 branch. The internal full/configuration capture seam now enforces that same
+capability with an actionable refusal: enroll an API-only or manually registered server with
+verified SSH transport first. This does not remove public completed-backup support. Existing
+archive listing and download remain available; unknown metadata never implies safe held activation.
+
+After activation, current billing/domain policy uses a separate native action. Suspension fences
+Unix login, web, cron and SQL even when the domain's disabled flag was already set. Active replay
+does not reapply archived credentials, cron or aging, so customer changes survive retries.
 
 - **Phase 1 v3 (sub-server design):** two adversarial plan reviews. Pass 1 REWORK (0 CRITICAL, 5 HIGH, 3 MEDIUM, 1 LOW), all folded in with two extra lab checks (S10, S11); pass 2 APPROVE (0 CRITICAL, 0 HIGH, 1 MEDIUM, 1 LOW), both folded in.
 

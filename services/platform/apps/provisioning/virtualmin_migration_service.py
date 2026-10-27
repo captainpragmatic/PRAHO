@@ -33,6 +33,7 @@ from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
+    get_virtualmin_timeouts,
     is_customer_domain_row,
     listing_attribute,
     listing_enabled,
@@ -174,7 +175,9 @@ def snapshot_attributes(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if key in _SNAPSHOT_KEYS}
 
 
-def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
+def list_migration_domains(
+    gateway: VirtualminGateway, *, strict: bool = True, deadline: float | None = None
+) -> Result[list[dict[str, Any]], str]:
     """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes.
 
     strict=True (migration admission) treats any malformed row as fatal — a
@@ -182,7 +185,11 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
     strict=False (account sync) skips malformed rows so one odd header or
     separator row cannot abort a whole server's sync.
     """
-    result = gateway.call("list-domains", {"multiline": ""})
+    result = (
+        gateway.call("list-domains", {"multiline": ""}, deadline=deadline)
+        if deadline is not None
+        else gateway.call("list-domains", {"multiline": ""})
+    )
     if result.is_err():
         return Err(str(result.unwrap_err()))
     response = result.unwrap()
@@ -529,7 +536,12 @@ class VirtualminMigrationService:
         program: str,
         **params: object,
     ) -> None:
-        timeout = self.backup_timeout if program in {"backup-domain", "restore-domain"} else 30
+        if program in {"backup-domain", "restore-domain"}:
+            timeout = self.backup_timeout
+        elif program == "create-domain":
+            timeout = get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"]
+        else:
+            timeout = 30
         domain = migration.account.domain
         base = domain_state_params(domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": domain}
         result = self._gateway(server).call(program, {**base, **params}, timeout_seconds=timeout)
@@ -833,7 +845,22 @@ class VirtualminMigrationService:
         )
 
     def _backup(self, migration: VirtualminMigration, token: UUID) -> None:
+        from .migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
         try:
+            self._move(migration, token, "backing_up")
+            source = self._domain(migration.source_server, migration.account.domain)
+            self._move(migration, token, "backing_up")
+            capture_backup_owner_shadow(
+                migration.source_server,
+                domain=migration.account.domain,
+                owner=migration.account.virtualmin_username,
+                domain_id=str(listing_attribute(source["attributes"], "ID")),
+                archive_name=migration.archive_name,
+                operation_id=migration.pk,
+                require_fenced=migration.contract == VirtualminMigration.Contract.CUTOVER,
+            )
+            self._move(migration, token, "backing_up")
             self._command(
                 migration,
                 migration.source_server,
@@ -1031,22 +1058,28 @@ class VirtualminMigrationService:
             if migration.cutover_committed_at is None:
                 raise ValueError("The ownership commit must precede target activation")
             from .migration_bridge_service import activate_target  # noqa: PLC0415
+            from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
+                activation_guard,
+                converge_before_release,
+                current_policy,
+                record_activation,
+            )
             from .migration_target_hold import run_held_target_node  # noqa: PLC0415
 
-            run_held_target_node(migration, "activate")
-
-            activated = activate_target(migration)
-            if activated.is_err():
-                if retriability_of(activated) is not Retriability.NOT_RETRIABLE:
-                    raise MigrationDeferredError(
-                        timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), activated.unwrap_err()
-                    )
-                raise ValueError(f"Target activation failed: {activated.unwrap_err()}")
-            expected = migration.pre_migration_snapshot["status"] != "suspended"
-            if self._domain(migration.target_server, migration.account.domain)["enabled"] is not expected:
-                raise ValueError("Target activation did not preserve the intended state")
-            self._release_target_hold(migration)
-            self._move(migration, token, "bridging")
+            with activation_guard(migration, token) as account:
+                enabled = current_policy(account).enabled
+                run_held_target_node(migration, "activate", enabled=enabled)
+                self._move(migration, token, "activating")
+                activated = activate_target(migration, enabled=enabled)
+                if activated.is_err():
+                    if retriability_of(activated) is not Retriability.NOT_RETRIABLE:
+                        raise MigrationDeferredError(
+                            timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), activated.unwrap_err()
+                        )
+                    raise ValueError(f"Target activation failed: {activated.unwrap_err()}")
+                policy = converge_before_release(self, migration, token, account)
+                self._release_target_hold(migration)
+                record_activation(self, migration, token, policy, "bridging")
             return
         if migration.pre_migration_snapshot["status"] != "suspended":
             self._command(migration, migration.target_server, "enable-domain")

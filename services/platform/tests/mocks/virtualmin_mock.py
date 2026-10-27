@@ -170,13 +170,15 @@ class MockVirtualminGateway:
     # Main API: call()
     # ---------------------------------------------------------------
 
-    def call(
+    def call(  # noqa: PLR0913  # Match the production gateway's explicit call/deadline contract.
         self,
         program: str,
         params: dict[str, Any] | None = None,
         response_format: str = "json",
         correlation_id: str = "",
         timeout_seconds: int | None = None,
+        *,
+        deadline: float | None = None,
     ) -> Result[VirtualminResponse, VirtualminAPIError]:
         """
         Main entry point - matches VirtualminGateway.call() signature.
@@ -184,6 +186,8 @@ class MockVirtualminGateway:
         Dispatches to program-specific handlers, generates fixture responses,
         parses them through VirtualminResponseParser, and wraps in VirtualminResponse.
         """
+        if deadline is not None and time.perf_counter() >= deadline:
+            return Err(VirtualminAPIError("Virtualmin call deadline exceeded", self.server_hostname, program))
         params = params or {}
         start = time.monotonic()
 

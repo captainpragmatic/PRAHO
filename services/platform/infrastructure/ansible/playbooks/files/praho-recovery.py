@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import fcntl
 import hashlib
 import json
@@ -10,17 +11,33 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
+# The same pure schema is shipped privately to the node; tests use the application module.
+sys.path.insert(0, "/var/lib/praho/recovery")
+try:
+    from praho_owner_shadow import (
+        decode_owner_shadow,  # type: ignore[import-not-found]  # Fixed playbook-staged sibling.
+    )
+except ModuleNotFoundError:
+    from apps.provisioning.backup_owner_shadow import decode_owner_shadow
+
 CRON_LIMIT = 1024 * 1024
 HASH_LIMIT = 1024
 NATIVE_CREDENTIAL_LIMIT = 4096
 CREDENTIAL_HELPER = Path("/var/lib/praho/recovery/credentials.pl")
 HASH_PATTERN = re.compile(r"(?:[!*]+|[!*]*\$[A-Za-z0-9][A-Za-z0-9./+_$=-]*|[!*]*[A-Za-z0-9./]{13})")
+
+
+def owner_shadow_fields(content: bytes, *, domain: str, owner: str, archive_name: str) -> dict[str, str]:
+    """Only a source-captured, archive-bound profile can describe the missing shadow columns."""
+    fields = credential_fields(content, domain=domain, owner=owner)
+    return decode_owner_shadow(fields, domain=domain, owner=owner, archive_name=archive_name)
 
 
 def archive_members(archive: Path, domain: str, features: tuple[str, ...]) -> dict[str, bytes]:
@@ -162,6 +179,9 @@ def stage_cron(archive: Path, checksum: str, cron: Path, metadata: Path, identit
     content = members["unix"]
     password = credential_hash(members["virtualmin"], domain=identity["domain"], owner=identity["owner"])
     credentials = native_credentials(members["virtualmin"], domain=identity["domain"], owner=identity["owner"])
+    owner_shadow = owner_shadow_fields(
+        members["virtualmin"], domain=identity["domain"], owner=identity["owner"], archive_name=archive.name
+    )
     write(cron, content)
     write(
         metadata,
@@ -171,6 +191,7 @@ def stage_cron(archive: Path, checksum: str, cron: Path, metadata: Path, identit
                 "sha256": hashlib.sha256(content).hexdigest(),
                 "credential_hash": password,
                 "native_credentials": credentials,
+                "owner_shadow": owner_shadow,
             }
         ).encode(),
     )
@@ -193,14 +214,22 @@ def apply_activation(payload: dict[str, Any], cron: Path) -> None:
 
 def activate_once(marker: Path, payload: dict[str, Any], cron: Path) -> None:
     """A durable intent precedes activation; completed replays never rewrite exposed credentials or jobs."""
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    immutable = {key: value for key, value in payload.items() if key != "enabled"}
+    digest = hashlib.sha256(json.dumps(immutable, sort_keys=True).encode()).hexdigest()
     intent = {"state": "applying", "payload_sha256": digest}
     if marker.exists() or marker.is_symlink():
         checked(marker)
         previous = json.loads(marker.read_text())
-        if previous == {**intent, "state": "completed"}:
+        compatible = {digest}
+        # Historical completed markers included policy; either boolean still
+        # has to match every immutable staged field exactly.
+        for enabled in (False, True):
+            compatible.add(
+                hashlib.sha256(json.dumps({**immutable, "enabled": enabled}, sort_keys=True).encode()).hexdigest()
+            )
+        if previous.get("payload_sha256") in compatible and previous.get("state") == "completed":
             return
-        if previous == intent:
+        if previous.get("payload_sha256") in compatible and previous.get("state") == "applying":
             raise ValueError("Recovery activation was interrupted; verify the node before retrying")
         raise ValueError("Recovery activation identity changed")
     write(marker, json.dumps(intent).encode())
@@ -217,6 +246,46 @@ def activate_staged(cron: Path, metadata: Path, marker: Path, identity: dict[str
         raise ValueError("Invalid recovery enabled state")
     payload["enabled"] = enabled == "1"
     activate_once(marker, payload, cron)
+
+
+def reconcile_policy(directory: Path, operation: str, identity: dict[str, str], enabled: bool) -> dict[str, Any]:
+    """Converge current policy only after activation; never replay staged credentials or jobs."""
+    marker = directory / f"{operation}.activation"
+    if not marker.exists():
+        raise ValueError("Current policy requires completed target activation")
+    checked(marker)
+    if json.loads(marker.read_text()).get("state") != "completed":
+        raise ValueError("Current policy requires completed target activation")
+    metadata = directory / f"{operation}.json"
+    binding = metadata if metadata.exists() else directory / f"{operation}.cleaned"
+    checked(binding)
+    surface = json.loads(binding.read_text())
+    if any(surface.get(key) != value for key, value in identity.items()):
+        raise ValueError("Current policy target identity changed")
+    checked(CREDENTIAL_HELPER)
+    output = run(
+        ["perl", str(CREDENTIAL_HELPER)],
+        content=json.dumps(
+            {
+                **identity,
+                "action": "reconcile-policy",
+                "enabled": enabled,
+                "operation_id": operation,
+                "activation_scope": "recovery",
+            }
+        ).encode(),
+    )
+    matches = re.findall(rb"PRAHO_POLICY_RESULT=([A-Za-z0-9+/=]+)", output)
+    if len(matches) != 1:
+        raise ValueError("Current policy proof is missing")
+    proof = json.loads(base64.b64decode(matches[0], validate=True))
+    if (
+        not isinstance(proof, dict)
+        or type(proof.get("enabled")) is not bool
+        or proof != {"domain_id": identity["domain_id"], "owner": identity["owner"], "enabled": enabled}
+    ):
+        raise ValueError("Current policy proof does not match the requested state")
+    return proof
 
 
 def verify_held(identity: dict[str, str]) -> None:
@@ -269,16 +338,16 @@ def validate_request(surface: dict[str, str], identity: str, action: str, name: 
         r"[0-9]{1,30}", surface["domain_id"]
     ):
         raise ValueError("Invalid owner or node domain identity")
-    if action not in {"stage", "activate", "verify-held", "cleanup"}:
+    if action not in {"capture-owner", "stage", "activate", "verify-held", "cleanup", "reconcile_policy"}:
         raise ValueError("Invalid recovery action")
-    if action != "cleanup" and (
+    if action not in {"cleanup", "reconcile_policy"} and (
         not (re.fullmatch(r"virtualmin_backup_[0-9a-f]{32}\.tar\.gz", name) or name == f"migration_{identity}.tar.gz")
-        or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+        or (action != "capture-owner" and not re.fullmatch(r"[0-9a-f]{64}", checksum))
     ):
         raise ValueError("Invalid archive identity")
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915  # Explicit allowlisted node-operation dispatch under its domain lock.
     if os.geteuid() != 0:
         raise ValueError("Recovery requires root")
     identity = str(UUID(os.environ["PRAHO_RECOVERY_ID"]))
@@ -298,7 +367,30 @@ def main() -> None:
     lock = Path(f"/run/praho/chain-{domain_id}.lock")
     lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with lock.open("a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB if action == "reconcile_policy" else fcntl.LOCK_EX)
+        if action == "capture-owner":
+            checked(CREDENTIAL_HELPER)
+            run(
+                ["perl", str(CREDENTIAL_HELPER)],
+                content=json.dumps(
+                    {
+                        **surface,
+                        "action": action,
+                        "archive": name,
+                        "require_fenced": os.environ.get("PRAHO_REQUIRE_FENCED") == "1",
+                    }
+                ).encode(),
+            )
+            print("PRAHO_RECOVERY_OK")
+            return
+        if action == "reconcile_policy":
+            raw_enabled = os.environ["PRAHO_ENABLED"]
+            if raw_enabled not in {"0", "1"}:
+                raise ValueError("Invalid current policy")
+            proof = reconcile_policy(directory, identity, surface, raw_enabled == "1")
+            print("PRAHO_POLICY_RESULT=" + base64.b64encode(json.dumps(proof).encode()).decode())
+            print("PRAHO_RECOVERY_OK")
+            return
         if action == "cleanup":
             # The target may have been conclusively deleted during abandonment. Cleanup only
             # touches this UUID's root-private files, after checking any staged owner metadata.
@@ -326,4 +418,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        if b"(owner_shadow_reserved_flag;" in (error.stderr or b""):
+            print("PRAHO_OWNER_SHADOW_RESERVED_FLAG", flush=True)
+        elif b"(owner_shadow_credential_binding;" in (error.stderr or b""):
+            print("PRAHO_OWNER_SHADOW_CREDENTIAL_CHANGED", flush=True)
+        raise
+    except ValueError as error:
+        if str(error).startswith("Archive owner shadow aging is unknown"):
+            print("PRAHO_OWNER_SHADOW_UNKNOWN", flush=True)
+        elif str(error).startswith("Archive owner shadow credential changed"):
+            print("PRAHO_OWNER_SHADOW_CREDENTIAL_CHANGED", flush=True)
+        raise

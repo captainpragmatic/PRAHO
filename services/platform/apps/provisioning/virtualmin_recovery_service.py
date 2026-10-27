@@ -246,8 +246,8 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         return held_pair_variables(migration)
 
     @staticmethod
-    def _node(migration: VirtualminMigration, action: str) -> None:
-        run_held_target_node(migration, action)
+    def _node(migration: VirtualminMigration, action: str, *, enabled: bool | None = None) -> None:
+        run_held_target_node(migration, action, enabled=enabled)
 
     def _verify(self, migration: VirtualminMigration, token: UUID) -> None:
         target = self._domain(migration.target_server, migration.account.domain)
@@ -301,27 +301,28 @@ class VirtualminRecoveryService(VirtualminMigrationService):
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
         if migration.cutover_committed_at is None:
             raise ValueError("Recovery activation requires the ownership commit")
-        self._move(migration, token, "activating")
-        self._node(migration, "activate")
-        variables = {**self._pair_variables(migration), "pair_action": "release"}
-        released = run_pair_step(
-            migration.target_server,
-            variables,
-            token=str(migration.pk),
-            domain_id=str(migration.barrier_state["target_domain_id"]),
-            timeout_seconds=180,
+        from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
+            activation_guard,
+            converge_before_release,
+            current_policy,
+            record_activation,
         )
-        if released.is_err() or released.unwrap().outcome != "released":
-            raise RuntimeError("The recovery maintenance barrier could not be released")
-        intended = migration.pre_migration_snapshot["status"] == "active"
-        current = self._domain(migration.target_server, migration.account.domain)["enabled"]
-        if current is None:
-            raise ValueError("The recovered domain's enabled state cannot be read")
-        if intended and not current:
-            self._command(migration, migration.target_server, "enable-domain")
-        if self._domain(migration.target_server, migration.account.domain)["enabled"] is not intended:
-            raise ValueError("Recovery did not preserve the account's intended state")
-        self._move(migration, token, "repointing")
+
+        with activation_guard(migration, token) as account:
+            self._move(migration, token, "activating")
+            self._node(migration, "activate", enabled=current_policy(account).enabled)
+            policy = converge_before_release(self, migration, token, account)
+            variables = {**self._pair_variables(migration), "pair_action": "release"}
+            released = run_pair_step(
+                migration.target_server,
+                variables,
+                token=str(migration.pk),
+                domain_id=str(migration.barrier_state["target_domain_id"]),
+                timeout_seconds=180,
+            )
+            if released.is_err() or released.unwrap().outcome != "released":
+                raise RuntimeError("The recovery maintenance barrier could not be released")
+            record_activation(self, migration, token, policy, "repointing")
 
     def _repoint(self, migration: VirtualminMigration, token: UUID) -> None:
         self._converge_cutover(migration, token)
