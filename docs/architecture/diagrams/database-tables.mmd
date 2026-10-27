@@ -1,5 +1,5 @@
-%% Source snapshot: 2026-10-27, including ADR-0061 Phase 3/4 branches.
-%% 166 concrete, non-proxy local Platform models from installed Django metadata.
+%% Source snapshot: 2026-10-27, including ADR-0061 Phase 3/4 and initial Phase 5 persistence.
+%% 168 concrete, non-proxy local Platform models from installed Django metadata.
 %% Excludes framework models, automatically created M2M tables and django_cache_table.
 %% Model/table names are a source snapshot, not a claim about a deployed database.
 %% Naming contract: docs/ADRs/ADR-0023-database-structure.md.
@@ -173,7 +173,7 @@ flowchart LR
         promotions_21["promotions_tenderrefundleg"]
     end
 
-    subgraph app_provisioning["provisioning (24 model tables)"]
+    subgraph app_provisioning["provisioning (26 model tables)"]
         direction TB
         provisioning_0["provisioning_account_hostnames"]
         provisioning_1["provisioning_account_name_certificate_budgets"]
@@ -197,6 +197,8 @@ flowchart LR
         provisioning_19["provisioning_virtualmin_accounts"]
         provisioning_20["provisioning_virtualmin_drift_records"]
         provisioning_21["provisioning_virtualmin_jobs"]
+        provisioning_mail_configuration["provisioning_virtualmin_mail_configuration"]
+        provisioning_mail_operations["provisioning_virtualmin_mail_operations"]
         provisioning_22["provisioning_virtualmin_migrations"]
         provisioning_23["provisioning_virtualmin_servers"]
     end

@@ -149,6 +149,25 @@ erDiagram
         int previous_ttl
     }
 
+    provisioning_virtualmin_mail_configuration {
+        uuid id PK
+        uuid account_id FK
+        string mode
+        uuid enrollment_id
+        datetime verified_at
+    }
+
+    provisioning_virtualmin_mail_operations {
+        uuid id PK
+        uuid configuration_id FK
+        bigint requested_customer_id FK
+        bigint requested_by_id FK
+        uuid submission_id
+        string intent
+        string status
+        string target_generation
+    }
+
     provisioning_account_name_certificates {
         uuid id PK
         uuid hostname_id FK
@@ -295,6 +314,10 @@ erDiagram
     provisioning_virtualmin_servers ||--o{ provisioning_migration_bridges : "source_server"
     provisioning_virtualmin_servers ||--o{ provisioning_migration_bridges : "target_server"
     provisioning_virtualmin_accounts ||--o| provisioning_hosted_domain_dns_status : "account"
+    provisioning_virtualmin_accounts ||--o| provisioning_virtualmin_mail_configuration : "account"
+    provisioning_virtualmin_mail_configuration ||--o{ provisioning_virtualmin_mail_operations : "configuration"
+    customers ||--o{ provisioning_virtualmin_mail_operations : "requested_customer"
+    users ||--o{ provisioning_virtualmin_mail_operations : "requested_by"
     customers ||--o{ domains : "customer"
     domain_tlds ||--o{ domains : "tld"
     domain_registrars ||--o{ domains : "registrar"
