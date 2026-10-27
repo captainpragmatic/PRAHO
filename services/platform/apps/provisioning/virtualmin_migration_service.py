@@ -390,7 +390,7 @@ class VirtualminMigrationService:
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
         if account_has_active_operation(account):
-            raise ValueError("Account already has an active migration or backup/restore operation")
+            raise ValueError("Account already has another active operation")
         assert_move_ready(account)
         if (
             MigrationBridge.objects.filter(migration__account_id=account.pk)

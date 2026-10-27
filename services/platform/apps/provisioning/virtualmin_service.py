@@ -1183,7 +1183,7 @@ class VirtualminProvisioningService:
                 account.refresh_from_db()  # decisions below use the locked, current row
                 admission_refusal: Result[bool, str] | None
                 if account_has_active_operation(account):
-                    admission_refusal = Err("Account has an active migration or backup/restore/delete operation")
+                    admission_refusal = Err("Account already has another active operation")
                 else:
                     admission_refusal = self._delete_refusal(account)
                 if admission_refusal is None:
@@ -1380,7 +1380,7 @@ class VirtualminProvisioningService:
         if not busy:
             return None
         logger.info("✅ [VirtualminService] Active operation blocks lifecycle retry: %s", account.pk)
-        message = "Account has an active migration or backup/restore/delete operation"
+        message = "Account already has another active operation"
         job.mark_failed(message, retriability=Retriability.RETRIABLE)
         return Err(message, retriability=Retriability.RETRIABLE)
 
@@ -1880,7 +1880,7 @@ class VirtualminBackupManagementService:
             if source_bound and locked.server_id != self.server.pk:
                 return Err("Account moved to another server since this request began; retry")
             if account_has_active_operation(locked):
-                return Err("Account already has an active migration or backup/restore operation")
+                return Err("Account already has another active operation")
             role = str(parameters.get("chain_role", ROLE_STANDALONE))
             if operation == "restore_domain":
                 invalidate_chain(locked)  # a restore deletes the node's snapshot (contract Q8)

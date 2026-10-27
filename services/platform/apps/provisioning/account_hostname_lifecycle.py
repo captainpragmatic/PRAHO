@@ -245,7 +245,7 @@ def _sweep_one(pk: UUID) -> str:
         previous_sweep = hostname.last_swept_at
         AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
         account = hostname.account
-        busy = account is None or account_has_active_operation(account)
+        busy = account is None or account_has_active_operation(account, allow_waiting_mail=True)
     if account is None or busy:
         return "skipped"
     # A name never reconciled, or one whose certificate is no longer on its node (a restore that recreated

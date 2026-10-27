@@ -143,7 +143,7 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
         management = VirtualminBackupManagementService(self.server)
         backup = management.create_backup_job(account)
         restore = management.create_restore_job(account, RestoreConfig(backup_id="previous-backup"))
-        expected = "Account already has an active migration or backup/restore operation"
+        expected = "Account already has another active operation"
         self.assertEqual(backup.unwrap_err(), expected)
         self.assertEqual(restore.unwrap_err(), expected)
         self.assertEqual(list(VirtualminProvisioningJob.objects.values_list("pk", flat=True)), [existing.pk])

@@ -361,7 +361,7 @@ def _admission_refusal(account: VirtualminAccount) -> Err[str] | None:
     """None when a caller owning no operation may change the node now; the refusal otherwise."""
     from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
-    if account_has_active_operation(account):
+    if account_has_active_operation(account, allow_waiting_mail=True):
         return Err("An operation owns the account; its name is left to the sweep", retriability=Retriability.UNKNOWN)
     if account.status not in SYNCABLE_STATUSES:
         return Err(f"The account is {account.status}", retriability=Retriability.NOT_RETRIABLE)

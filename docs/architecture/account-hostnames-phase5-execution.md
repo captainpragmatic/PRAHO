@@ -105,7 +105,23 @@ Verification: 20 focused model/audit regressions pass on SQLite and PostgreSQL, 
 Ruff plus import/FSM/audit guards pass. Independent review reproduced two persistence edges before their
 fixes: partial-save FSM state and prior-enrollment retirement replay. QuerySet mode writes also refuse a
 bypass of the verified transition. The real migration-backed gate passes, 123 migration checksums match,
-and neither service has schema drift. PostgreSQL race tests remain a separate requirement.
+and neither service has schema drift. The PostgreSQL race proofs are recorded separately below.
+
+The offline enrollment service now stages a bounded, expiring proposal and records only the current
+owner's exact confirmed intent. Twenty behavioral cases cover current membership, ownership/generation
+changes, service/domain holds, immutable consent, retries and unknown outcomes, with no backend or queue
+calls. Four real PostgreSQL contention tests prove same-submission deduplication, one distinct admitted
+attempt, and both orderings against public migration admission.
+
+Reverse admission also reserves the account against a later move, deletion, backup or restore. Waiting
+mail work still permits name/certificate prerequisites; running or uncertain native work refuses them.
+Ordinary billing reconciliation keeps its separate permission. Model/enrollment/exclusion, public
+deletion/backup/restore guards, existing operation callers and all four contention cases pass together
+on PostgreSQL (77 cases). Final stack gates remain separate.
+
+The repository's automatic deployment currently supports Ubuntu 26.04. The Debian 12/Dovecot 2.3 lab
+profile does not establish support for that deployment default. Ubuntu's Dovecot 2.4 configuration and
+actual native lifecycle remain required gates before bootstrap wiring can claim successful mail setup.
 
 The following files are proposed additions unless already named as existing. Each task starts with a behavioral RED test, then the smallest implementation, focused GREEN, sibling regression checks and fresh Makefile lint/types. Native proof gates remain separate from mocked application tests. Production/cloud/registrar writes are not part of this implementation session.
 
