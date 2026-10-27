@@ -2120,6 +2120,17 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     """Set up all Virtualmin scheduled tasks."""
     tasks_created = {}
 
+    _, created = ScheduleModel.objects.update_or_create(
+        name="hosted-domain-dns-dispatch",
+        defaults={
+            "func": "apps.provisioning.hosted_domain_dns_tasks.dispatch_due_dns_checks",
+            "schedule_type": "I",
+            "minutes": 5,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosted_dns_checks"] = "created" if created else "updated"
+
     # Check for existing tasks first
     existing_tasks = list(
         ScheduleModel.objects.filter(

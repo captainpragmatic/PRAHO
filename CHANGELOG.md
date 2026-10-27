@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hosting DNS checks appear in the customer Portal and staff account pages.** Background checks record website routing, IPv6, CAA policy, mail routing and DS/DNSKEY consistency. Customers see the last check and can request a recheck as an owner or technical contact. A confirmed healthy-to-broken change queues one notification per incident; unknown results and planned bridge maintenance do not create outage emails. The DNSSEC check compares delegation keys and does not claim signature validation.
+
 - **Hosting moves carry their account name and traffic.** Managed cutovers keep restored targets held until ownership commits, converge DNS forward, and retain a verified encrypted web bridge until customer DNS caches have expired. Staff can retry cleanup and recover a fenced unavailable node from retained backups while preserving suspension and current quotas.
 
 - **Every hosting account can get a provider hostname that follows it** (ADR-0061 Phase 1). Off by default behind `dns.account_hostnames_enabled`; with it off nothing new happens.

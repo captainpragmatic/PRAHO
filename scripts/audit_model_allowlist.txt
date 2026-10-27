@@ -82,6 +82,7 @@ provisioning.NodeDrain                  # lifecycle audited explicitly by NodeDr
 provisioning.SpoolReservation           # transient capacity accounting rows; no business lifecycle
 provisioning.SpoolRoot                  # singleton serialization lock row; no business lifecycle
 provisioning.VirtualminDriftRecord      # internal drift detection
+provisioning.HostedDomainDnsStatus      # derived DNS observations and work leases; meaningful health transitions and rechecks audited explicitly by hosted_domain_dns_service
 provisioning.VirtualminMigration        # internal lease/reservation state; lifecycle audited by the migration orchestration
 provisioning.VirtualminServer           # mirrors Server model
 

@@ -506,6 +506,8 @@ class AuditEvent(models.Model):
         ("virtualmin_bridge_failed", "Virtualmin Bridge Failed"),
         ("virtualmin_bridge_extended", "Virtualmin Bridge Extended"),
         ("virtualmin_bridge_origin_attested", "Virtualmin Bridge Origin Attested"),
+        ("hosting_dns_state_changed", "Hosting DNS State Changed"),
+        ("hosting_dns_recheck_requested", "Hosting DNS Recheck Requested"),
         ("service_configuration_updated", "Service Configuration Updated"),
         ("domain_associated", "Domain Associated"),
         ("domain_dissociated", "Domain Dissociated"),

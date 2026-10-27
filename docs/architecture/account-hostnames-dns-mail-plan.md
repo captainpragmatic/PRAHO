@@ -90,8 +90,27 @@ The audit CI failures mentioning `virtualmin_migration_apply` and
 variables were mistaken for audit wrapper parameters. Fix the scanner's lexical
 scope handling rather than registering events that no operation emits.
 
-Remaining P2.6-P2.11 and Phases 3-5 are not complete until their unit, integration,
-PostgreSQL and applicable real-node/Portal checks below have passed.
+Phase 2 now has two signed implementation commits. Its complete two-node native
+contract passed all 37 tests, including active and suspended cutovers/recoveries;
+the PostgreSQL gate passed 743 tests. The final full-suite and lint runs remain
+the publication gates. Earlier "pending" entries above retain the investigation
+history; these fresh complete gates supersede the individual lab rerun notes.
+
+Phase 3 is implemented on its own branch. The transport shares a 90-second/96-query
+budget, records five independent component results and explicitly limits DNSSEC to
+DS/DNSKEY consistency. Offline reads invalidate old results against current ownership,
+tenant and bridge maintenance state. Manual rechecks persist intent; a bounded
+dispatcher queues probes outside requests. EmailLog creation, incident state and
+the observation commit share one transaction, with delivery dispatched after commit.
+Per-component definitive history prevents unknown observations from inventing a
+healthy baseline or hiding a later healthy-to-broken transition. Customer output
+excludes private evidence, while staff see bounded, escaped recorded observations.
+Focused tests include real signed API requests, revocation, rollback, slow-render
+lease expiry, malformed Portal receipts and concurrent PostgreSQL workers. Final
+combined, UI, schema, lint and type gates remain before the Phase 3 draft PR.
+
+Phases 4 and 5 remain in progress. Their implementation is incomplete until the
+unit, integration, PostgreSQL and applicable real-node/Portal checks below pass.
 
 The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
 restricted to its source and admitted hostnames; HTTPS uses the customer's verified
@@ -320,7 +339,7 @@ These are live defects today. Each ships with a test that fails without it.
 2. **P3.2 Write probes that follow CNAMEs.**
    - New `apps/infrastructure/dns_probes.py`. Checks: `www` reaching the account name, the apex, MX, stray AAAA, CAA allowing Let's Encrypt, and DNSSEC (DS against DNSKEY).
    - Test: `tests/infrastructure/test_dns_probes.py`.
-3. **P3.3 Classify and schedule.** An hourly batched task. Email template `hosting_dns_broken`, sent once per healthy-to-broken change. Test: `tests/provisioning/test_dns_check_task.py`.
+3. **P3.3 Classify and schedule.** Hourly observations, dispatched in bounded batches every five minutes. Email template `hosting_dns_broken`, sent once per healthy-to-broken incident. Tests: `tests/provisioning/test_hosted_domain_dns_status.py`.
 4. **P3.4 Add the API and the Portal status card.**
    - `TECH_ROLES = {"owner", "tech"}` in `api/secure_auth.py`.
    - Platform `services/<id>/dns-status/` and `.../recheck/`.
@@ -328,7 +347,7 @@ These are live defects today. Each ships with a test that fails without it.
    - Tests:
      - `tests/api/test_service_dns_status_api.py`: another customer gets 404; a viewer cannot recheck;
      - Portal `tests/services/test_service_dns_status_card.py`.
-4. **P3.5 Add the staff check results.** A panel on account detail and a list of broken domains.
+5. **P3.5 Add the staff check results.** A panel on account detail and a list of recorded broken/unknown domains. Tests: `tests/provisioning/test_hosted_domain_dns_views.py`.
 
 ## Phase 4: our nameservers on Cloudflare
 

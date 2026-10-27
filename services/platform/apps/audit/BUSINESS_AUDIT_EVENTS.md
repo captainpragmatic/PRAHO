@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-566 actions, in 9 categories.
+568 actions, in 9 categories.
 
 ## Account management
 
@@ -190,6 +190,8 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `gift_card_status_changed` | low | no | no | promotions |
 | `grace_periods_processed` | low | no | no | billing |
 | `grandfathering_expired` | low | no | no | billing |
+| `hosting_dns_recheck_requested` | low | no | no | provisioning |
+| `hosting_dns_state_changed` | low | no | no | provisioning |
 | `illegal_invoice_deletion` | low | no | no | billing |
 | `integration_connection_test` | low | no | no | settings |
 | `invitation_email_sent` | low | no | no | users |
