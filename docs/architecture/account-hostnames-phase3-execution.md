@@ -6,7 +6,11 @@ Integration refresh onto Phase 2 `04985396`: the ordinary merge preserves the P2
 certificate/publication code byte-for-byte, and preserves the Phase 3 probe/service modules. The merged
 tree passes 204 focused Platform tests, 19 Portal tests, 21 coverage/route contracts and eight PostgreSQL
 transaction/race checks. Full typing passes for 631 Platform and 101 Portal modules; 120 checksums and
-both schema checks pass. Complete combined lint/test publication gates remain separate.
+both schema checks pass. Full lint also passes. The complete local `make test` run passes all five
+phases: Platform runs 14,314 tests with 136 skipped; Portal passes 1,997 with three skipped; integration
+passes 1,038 with 11 skipped and 944 subtests; cache passes nine with one skipped; service isolation
+passes. The later ordinary merge of Phase 2 `98c28420` changes only two recorded native default-site
+values to reflect the neutral default site. Live CI and draft-PR publication remain separate gates.
 
 ## Source findings and decisions
 
