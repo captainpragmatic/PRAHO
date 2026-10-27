@@ -35,6 +35,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'common_node_resource_hourly',
+                'db_table_comment': 'Hourly node resource sums, counts and peaks retained for thirty days; no raw samples.',
                 'constraints': [models.UniqueConstraint(fields=('node', 'hour'), name='status_node_hour')],
             },
         ),
@@ -63,6 +64,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'common_system_check_state',
+                'db_table_comment': 'Latest configuration-bound health evidence and execution claim per check or node.',
                 'constraints': [models.UniqueConstraint(condition=models.Q(('node__isnull', True)), fields=('check_key',), name='status_global_key'), models.UniqueConstraint(condition=models.Q(('node__isnull', False)), fields=('check_key', 'node'), name='status_node_key')],
             },
         ),

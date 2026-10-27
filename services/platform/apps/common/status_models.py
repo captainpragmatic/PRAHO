@@ -37,6 +37,7 @@ class SystemCheckState(models.Model):
 
     class Meta:
         db_table = "common_system_check_state"
+        db_table_comment = "Latest configuration-bound health evidence and execution claim per check or node."
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=("check_key",), condition=Q(node__isnull=True), name="status_global_key"),
             models.UniqueConstraint(
@@ -65,6 +66,7 @@ class NodeResourceHourlySummary(models.Model):
 
     class Meta:
         db_table = "common_node_resource_hourly"
+        db_table_comment = "Hourly node resource sums, counts and peaks retained for thirty days; no raw samples."
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=("node", "hour"), name="status_node_hour")
         ]
