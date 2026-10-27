@@ -1,12 +1,8 @@
-"""Workflow: disaster recovery. What it can honestly report, what it refuses, and the recovery that exists today.
+"""Legacy recovery planning and lower-level backup restore workflows.
 
-PRAHO as the source of truth (docs/domain, ADR-0061 phase 0): the integrity report says whether every account
-could be rebuilt from PRAHO's rows, and the legacy rebuild produces a plan but refuses to run, because it would
-recreate empty domains and lose the customers' data. The recovery that exists today is a restore from a backup:
-onto the same node when the domain is lost, or onto another node (`create_restore_job(target_server=...)`,
-reachable from `virtualmin_backup restore --target-server`). Nothing repoints the account afterwards: it keeps
-naming the lost node while the data lives on the replacement. Recovery that also repoints is the ADR-0061 phase 2
-service and does not exist yet.
+The legacy rebuild refuses real execution because it would recreate empty domains. These tests also cover
+ordinary backup jobs restoring data to another node without changing account ownership. ADR-0061's separate
+virtualmin_recover_node service performs held recovery and ownership cutover under its native contracts.
 """
 
 from __future__ import annotations
@@ -28,6 +24,8 @@ DOMAIN = "wfrecover.example.com"
 @pytest.fixture(scope="module")
 def account(bench: Bench) -> Iterator[VirtualminAccount]:
     with bench.hosted(DOMAIN) as hosted:
+        assert hosted.status == "active", "Recovery requires a successfully provisioned workflow account"
+        assert bench.lab_of(hosted).domain_exists(DOMAIN), "The recovery fixture must exist on its recorded node"
         yield hosted
 
 
@@ -41,10 +39,12 @@ def test_integrity_report_matches_what_the_rows_support(bench: Bench, account: V
     assert DOMAIN not in flagged, "an account provisioned by the pipeline carries its recovery seed"
     assert seedless <= flagged, "every account without a recovery seed is reported"
     assert report["total_accounts"] == VirtualminAccount.objects.count()
-    assert report["disaster_recovery_ready"] is (not report["missing_data_issues"] and (
-        report["recoverable_accounts"] == report["total_accounts"]
-    )), "readiness is never claimed beside an issue"
-    assert not [issue for issue in report["missing_data_issues"] if issue["issue"] == "servers_without_usable_credentials"]
+    assert report["disaster_recovery_ready"] is (
+        not report["missing_data_issues"] and (report["recoverable_accounts"] == report["total_accounts"])
+    ), "readiness is never claimed beside an issue"
+    assert not [
+        issue for issue in report["missing_data_issues"] if issue["issue"] == "servers_without_usable_credentials"
+    ]
     assert report["transport_warnings"] == [], "both lab servers have a managed deployment"
 
 
@@ -71,7 +71,9 @@ def test_recovery_capability_plans_for_the_node_and_the_rebuild_refuses_to_run(
     assert plan["dry_run"] is True and plan["accounts_to_rebuild"] == len(live)
 
     refused = service.rebuild_server_from_praho(server, dry_run=False)
-    assert refused.is_err() and "only a dry run is available" in refused.unwrap_err()
+    assert refused.is_err()
+    assert "dry run" in refused.unwrap_err().lower()
+    assert "virtualmin_recover_node" in refused.unwrap_err()
     # Planning and refusing touched neither side.
     assert bench.lab("vm-a").domain_names() == domains_on_node
     assert list(VirtualminAccount.objects.order_by("pk").values_list("pk", "status", "server_id")) == rows_before
