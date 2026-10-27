@@ -268,6 +268,8 @@ class MailBootGuard:
         }.items():
             if [value for name, separator, value in environment if name == key and separator] != [expected]:
                 raise ValueError("unrelated owner environment")
+
+    def service_unit(self) -> None:
         groups = self.proc_bytes("self/cgroup").decode().splitlines()
         if len(groups) != 1 or not groups[0].startswith("0::/") or groups[0].rsplit("/", 1)[-1] not in START_UNITS:
             raise ValueError("unapproved service unit")
@@ -297,10 +299,14 @@ class MailBootGuard:
         ]:
             raise ValueError("owner does not hold exclusive lock")
 
-    def start_owner(self, record: dict[str, Any]) -> None:
+    def operation_owner(self, record: dict[str, Any]) -> None:
         permit = self.start_permit(record)
         self.owner_process(record, permit)
         self.owner_lock(permit)
+
+    def start_owner(self, record: dict[str, Any]) -> None:
+        self.operation_owner(record)
+        self.service_unit()
 
     def certificate_original(self, record: dict[str, Any]) -> dict[str, Any]:
         stage = "/var/lib/praho/mail/certificate-operations/" + record["identity"] + ".stage"

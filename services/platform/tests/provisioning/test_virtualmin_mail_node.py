@@ -965,12 +965,15 @@ passdb praho-proxy {
         operation_id = str(uuid4())
         native = SimpleNamespace(reconcile_node_certificate=Mock(return_value={"configured": True}))
         output = io.StringIO()
+        events = []
         with (
             tempfile.TemporaryFile(mode="w+") as lock,
             patch.object(self.module, "operation_lock", return_value=lock),
-            patch.object(self.module, "MailNode", return_value=native),
+            patch.object(
+                self.module, "MailNode", side_effect=lambda **kwargs: events.append("constructed") or native
+            ) as constructor,
             patch.object(self.module.os, "geteuid", return_value=0),
-            patch.object(self.module.fcntl, "flock") as flock,
+            patch.object(self.module.fcntl, "flock", side_effect=lambda *args: events.append("locked")) as flock,
             patch.dict(
                 os.environ,
                 {
@@ -981,7 +984,10 @@ passdb praho-proxy {
             ),
             patch("sys.stdout", output),
         ):
+            descriptor = lock.fileno()
             self.module.main()
+        self.assertEqual(events, ["locked", "constructed"])
+        constructor.assert_called_once_with(operation_fd=descriptor)
         self.assertEqual(flock.call_args.args[1], fcntl.LOCK_EX | fcntl.LOCK_NB)
         native.reconcile_node_certificate.assert_called_once_with("node.example", operation_id)
         envelope = json.loads(base64.b64decode(output.getvalue().partition("MAIL_RESULT=")[2]))

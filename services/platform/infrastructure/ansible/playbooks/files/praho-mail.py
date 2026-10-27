@@ -19,7 +19,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 from uuid import UUID
 
 PROFILES = {
@@ -117,8 +117,9 @@ def tls_observations(name: str) -> list[dict[str, str]]:
                     client.ehlo()
                     if client.has_extn("auth"):
                         raise ValueError("public SMTP authentication must be disabled")
-                    wire = client.sock.getpeercert(binary_form=True)
-                    certificate = client.sock.getpeercert()
+                    secured_socket = cast(ssl.SSLSocket, client.sock)
+                    wire = secured_socket.getpeercert(binary_form=True)
+                    certificate = secured_socket.getpeercert()
                 finally:
                     client.close()
             else:
@@ -129,7 +130,7 @@ def tls_observations(name: str) -> list[dict[str, str]]:
                     wire = secured.getpeercert(binary_form=True)
                     certificate = secured.getpeercert()
             if wire and certificate:
-                expiry = datetime.fromtimestamp(ssl.cert_time_to_seconds(certificate["notAfter"]), UTC)
+                expiry = datetime.fromtimestamp(ssl.cert_time_to_seconds(cast(str, certificate["notAfter"])), UTC)
                 result.append(
                     {
                         "service": service,
@@ -151,11 +152,13 @@ class MailNode:
         *,
         execute: Callable[..., str] = command,
         probe: Callable[[str], list[dict[str, str]]] = tls_observations,
+        operation_fd: int | None = None,
     ) -> None:
         self.root = root
         self.state = self.path("/var/lib/praho/mail")
         self.execute = execute
         self.probe = probe
+        self.operation_fd = operation_fd
         self.native_helper = Path(__file__).with_name("praho-mail-native.pl")
 
     def setup_driver(self) -> Any:
@@ -163,6 +166,8 @@ class MailNode:
         spec = importlib.util.spec_from_file_location(
             "praho_mail_setup", Path(__file__).with_name("praho_mail_setup.py")
         )
+        if spec is None or spec.loader is None:
+            raise MailError("mail_native_inspection_failed")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.MailSetup(self, MailError)
@@ -206,10 +211,10 @@ class MailNode:
         return normalized
 
     def setup(self, expected: str) -> dict[str, Any]:
-        return self.setup_driver().run(expected)
+        return cast(dict[str, Any], self.setup_driver().run(expected))
 
     def reconcile_node_certificate(self, expected: str, identity: str) -> dict[str, Any]:
-        return self.setup_driver().reconcile_certificate(expected, identity)
+        return cast(dict[str, Any], self.setup_driver().reconcile_certificate(expected, identity))
 
     def path(self, path: str) -> Path:
         return self.root / path.lstrip("/")
@@ -519,7 +524,7 @@ def main() -> None:
                 )
             except BlockingIOError as error:
                 raise MailError("mail_operation_busy") from error
-            node = MailNode()
+            node = MailNode(operation_fd=lock.fileno())
             if action == "inspect_node":
                 payload = node.inspect_node(expected)
             elif action == "inspect_domain":

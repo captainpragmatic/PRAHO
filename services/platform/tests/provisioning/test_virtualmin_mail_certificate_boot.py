@@ -172,6 +172,13 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 self.private("proc/self/cgroup", "0::/system.slice/" + unit + "\n")
                 self.assertEqual(self.guard.allowed(), unit != "unrelated.service")
 
+    def test_the_fixed_worker_can_prove_ownership_without_gaining_service_start_permission(self):
+        self.assertTrue(self.guard.allowed())
+        self.private("proc/self/cgroup", "0::/system.slice/ssh.service\n")
+        self.guard.owner_process(self.record, self.record["start"])
+        self.guard.operation_owner(self.record)
+        self.assertFalse(self.guard.allowed())
+
     def test_expiry_is_checked_at_the_exact_monotonic_deadline(self):
         self.assertTrue(self.guard.allowed())
         for value, expected in ((219.999999, True), (220.0, False), (220.000001, False)):
