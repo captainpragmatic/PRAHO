@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% block title %}{% trans "Move away from DNS hosting" %}{% endblock %}
+{% block title %}{% trans "Move away from DNS hosting" %} - {{ company.brand_name }}{% endblock %}
 {% block content %}
   <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
     <a href="{% url 'dns:detail' zone.id %}" class="text-primary-400 underline">{{ zone.name }}</a>

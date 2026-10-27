@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% block title %}{% trans "DNS record" %} · {{ zone.name }}{% endblock %}
+{% block title %}{% trans "DNS record" %} · {{ zone.name }} - {{ company.brand_name }}{% endblock %}
 {% block content %}
   <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
     <a href="{% url 'dns:detail' zone.id %}" class="text-primary-400 underline">{{ zone.name }}</a>

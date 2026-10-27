@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% block title %}{% trans "DNS management" %}{% endblock %}
+{% block title %}{% trans "DNS management" %} - {{ company.brand_name }}{% endblock %}
 {% block content %}
   <div class="mx-auto max-w-4xl space-y-5 px-4 py-8">
     {% if status == 403 %}

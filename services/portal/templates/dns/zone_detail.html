@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% block title %}{{ zone.name }} · {% trans "DNS" %}{% endblock %}
+{% block title %}{{ zone.name }} · {% trans "DNS" %} - {{ company.brand_name }}{% endblock %}
 {% block content %}
   <main id="dns-zone" class="mx-auto max-w-6xl space-y-6 px-4 py-8"
     {% if poll_again %}hx-get="{% url 'dns:detail' zone.id %}?page={{ zone.page }}&amp;poll={{ poll }}" hx-trigger="load delay:10s" hx-select="#dns-zone" hx-target="this" hx-swap="outerHTML"{% endif %}>
