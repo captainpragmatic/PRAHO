@@ -59,6 +59,8 @@ Configure private off-server S3 settings under **Backup Storage**, then enable
 `node_deployment.backup_storage=platform`, an enabled backup flag and a valid five-field schedule.
 Existing local/direct-S3 modes are retained until explicitly changed. Applying the node backup
 playbook retires only PRAHO-owned duplicate schedules. S3 credentials stay on Platform.
+Central admission covers Virtualmin accounts. Other panels, including Blesta, retain their local
+backup and retention policy when the global storage selection is Platform-managed.
 
 Native deployment installs `praho-backup.service` and `praho-backup.timer`, removes the replaced
 named cron job and records the applied runner. Run a manual backup with:

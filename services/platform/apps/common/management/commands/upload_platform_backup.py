@@ -253,8 +253,9 @@ class Command(BaseCommand):
             row.save(update_fields=["details", "updated_at"])
             return claim
 
+    @transaction.atomic
     def _report(self, claim: CheckClaim, run_id: UUID, *, success: bool) -> None:
-        row = SystemCheckState.objects.get(pk=claim.state_id)
+        row = SystemCheckState.objects.select_for_update().get(pk=claim.state_id)
         details = {**row.details, "run_id": str(run_id)}
         if success:
             details["offsite_completed_at"] = timezone.now().isoformat()

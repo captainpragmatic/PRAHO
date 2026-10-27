@@ -1991,7 +1991,7 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Backups"),
         label=_("Backup storage"),
         help_text=_(
-            "Platform-managed: fetch and upload through PRAHO using Backup Storage settings. Local and direct S3 modes preserve existing installations."
+            "Platform-managed: fetch Virtualmin backups through PRAHO using Backup Storage settings. Other panels retain local backups. Local and direct S3 modes preserve existing installations."
         ),
         input_kind="select",
         validation={"choices": ["platform", "local", "s3"]},

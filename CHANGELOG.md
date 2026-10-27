@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Health evidence follows edits to existing settings, backup completion preserves concurrently registered runner configuration, and non-Virtualmin panels retain their local backups under the Platform-managed default.
 - Existing health schedules adopt the ten-minute cadence immediately instead of retaining a daily or hourly next-run deadline.
 - Unreadable stored credentials leave setup and settings repair pages accessible, with an explicit warning and write-only replacement controls.
 - Product filters wait for the initial table load and keep the latest submitted selection, avoiding aborted requests and stale results.

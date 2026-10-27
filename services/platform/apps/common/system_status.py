@@ -680,9 +680,13 @@ def runtime_input_identity() -> str:
     )
     data = (
         [str(getattr(settings, name, "")) for name in runtime],
-        list(SystemSetting.objects.order_by("key").values_list("key", "revision")),
+        list(
+            SystemSetting.objects.order_by("key").values_list(
+                "key", "revision", "value", "default_value", "data_type", "is_sensitive", "is_active"
+            )
+        ),
     )
-    return salted_hmac("praho.system-check.v1", json.dumps(data), algorithm="sha256").hexdigest()
+    return salted_hmac("praho.system-check.v2", json.dumps(data, sort_keys=True), algorithm="sha256").hexdigest()
 
 
 def run_status_refresh(*, force: bool = False) -> StatusSnapshot:

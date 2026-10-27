@@ -687,6 +687,10 @@ ansible_python_interpreter=/usr/bin/python3
         # Get settings
         backup_enabled = SettingsService.get_setting("node_deployment.backup_enabled", True)
         backup_storage = SettingsService.get_setting("node_deployment.backup_storage", "platform")
+        central_backups = backup_storage == "platform" and deployment.panel_type.panel_type == "virtualmin"
+        if backup_storage == "platform" and not central_backups:
+            # Other panels retain their existing local backup and retention playbooks.
+            backup_storage = "local"
         backup_retention = SettingsService.get_setting("node_deployment.backup_retention_days", 7)
         backup_schedule = SettingsService.get_setting("node_deployment.backup_schedule", "0 2 * * *")
 
@@ -701,7 +705,7 @@ ansible_python_interpreter=/usr/bin/python3
             "node_fqdn": deployment.fqdn,
             # Backup settings
             # Platform-managed backups use the central durable job service, not a second node cron.
-            "backup_enabled": backup_enabled and backup_storage != "platform",
+            "backup_enabled": backup_enabled and not central_backups,
             "backup_storage": backup_storage,
             "backup_retention_days": backup_retention,
             "backup_schedule": backup_schedule,
