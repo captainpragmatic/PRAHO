@@ -53,6 +53,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "provisioning_hosted_domain_dns_status",
+                "db_table_comment": "Lease-fenced customer DNS observations and incident notification evidence for a hosting account",
                 "constraints": [
                     models.CheckConstraint(
                         condition=models.Q(

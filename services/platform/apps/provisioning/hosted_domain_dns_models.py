@@ -36,6 +36,9 @@ class HostedDomainDnsStatus(models.Model):
 
     class Meta:
         db_table = "provisioning_hosted_domain_dns_status"
+        db_table_comment = (
+            "Lease-fenced customer DNS observations and incident notification evidence for a hosting account"
+        )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=(

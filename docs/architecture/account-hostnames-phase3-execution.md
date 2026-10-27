@@ -1,6 +1,6 @@
 # ADR-0061 Phase 3: persisted customer DNS monitoring
 
-Execution record, 2026-10-27. Phase 3 is implemented on `codex/adr61-phase3-dns-monitoring`, split after the signed Phase 2 implementation. The research and task breakdown below guided the implementation. Provisioning migration `0017_hosted_domain_dns_status` and audit migration `0017_alter_auditevent_action` follow Phase 2's actual leaves. Fresh verification results are recorded in the main ADR-0061 plan's execution ledger.
+Execution record, 2026-10-27. Phase 3 is implemented on `codex/adr61-phase3-dns-monitoring`, split after the signed Phase 2 implementation. The research and task breakdown below guided the implementation. Provisioning migration `0018_hosted_domain_dns_status` follows `0017_merge_ssh_cutover`, which joins the released SSH transport and cutover histories without editing either. Audit migration `0017_alter_auditevent_action` follows Phase 2's audit leaf. Fresh verification results are recorded in the main ADR-0061 plan's execution ledger.
 
 ## Source findings and decisions
 
