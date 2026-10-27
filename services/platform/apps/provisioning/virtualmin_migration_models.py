@@ -30,7 +30,7 @@ PRE_COMMIT_STATUSES = (
 # The forward graph. Any live row may also park for review, and any write may keep its state (a
 # lease release); a terminal row never moves.
 TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending": frozenset({"lowering_ttl", "quiescing", "failed"}),
+    "pending": frozenset({"lowering_ttl", "quiescing", "fetching", "failed"}),
     "lowering_ttl": frozenset({"quiescing", "compensating", "rolled_back"}),
     "quiescing": frozenset({"backing_up", "compensating", "rolled_back"}),
     "backing_up": frozenset({"fetching", "compensating", "rolled_back"}),
@@ -43,7 +43,7 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "repointing": frozenset({"completed"}),
     "compensating": frozenset({"rolled_back"}),
     "fencing": frozenset(),
-    "needs_review": frozenset({"failed", "compensating"}),
+    "needs_review": frozenset({"failed", "compensating", "activating", "bridging", "repointing"}),
 }
 
 
@@ -79,6 +79,7 @@ class VirtualminMigration(models.Model):
     class Reason(models.TextChoices):
         MANUAL = "manual", _("Manual")
         DRAIN = "drain", _("Drain")
+        RECOVERY = "recovery", _("Recovery")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey("provisioning.VirtualminAccount", on_delete=models.PROTECT, related_name="migrations")
@@ -106,6 +107,7 @@ class VirtualminMigration(models.Model):
     class Contract(models.TextChoices):
         CUTOVER = "cutover", _("Cutover")  # The account has a live published name: DNS and bridge steps run
         LEGACY = "legacy", _("Legacy")
+        RECOVERY = "recovery", _("Recovery from backup")
 
     # ADR-0061 Phase 2: the cutover's own evidence.
     contract = models.CharField(max_length=10, choices=Contract.choices, blank=True)
@@ -172,8 +174,12 @@ class VirtualminMigration(models.Model):
         if not migration_transition_allowed(from_status, to_status):
             return False
         rows = type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status)
+        if from_status == "pending" and to_status == "fetching":
+            rows = rows.filter(contract="recovery")
         if to_status == "compensating":
             rows = rows.filter(cutover_committed_at__isnull=True)
+        if from_status == "needs_review" and to_status in {"activating", "bridging", "repointing"}:
+            rows = rows.filter(cutover_committed_at__isnull=False)
         fields.update(status=to_status, updated_at=timezone.now())  # fsm-bypass: a dict for the guarded UPDATE
         return bool(rows.update(**fields))  # fsm-bypass: this method is the guarded writer (graph + commit check)
 
@@ -267,6 +273,10 @@ class MigrationBridge(ConcurrentTransitionMixin, models.Model):
     )
     def fail(self) -> None:
         """A bridge whose state cannot be proven or removed; it blocks a new move until resolved."""
+
+    @transition(field=status, source=Status.FAILED, target=Status.ACTIVE)
+    def retry_cleanup(self) -> None:
+        """Staff retries forward cleanup, retaining every previously verified checkpoint."""
 
 
 class NodeDrain(models.Model):

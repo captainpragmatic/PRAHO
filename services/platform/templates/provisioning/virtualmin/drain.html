@@ -12,11 +12,15 @@
       {% csrf_token %}
       <input type="hidden" name="drain_id" value="{{ drain.pk }}">
       {% if drain.status == "completed" and not drain.routing_confirmed %}
+        {% if managed_routing %}
+        <p>{% trans "Accounts have moved. This server stays excluded from placement while the retained bridges await cleanup. Routing is checked and the drain is finalized automatically after every bridge is torn down." %}</p>
+        {% else %}
         <p>{% trans "Migration is complete. This server remains excluded from placement until routing is confirmed." %}</p>
         {% trans "I confirm routing and DNS no longer use this server." as routing_confirmed_label %}
         {% checkbox_field "routing_confirmed" required=True label=routing_confirmed_label %}
         {% trans "Finalize drain" as finalize_label %}{% trans 'Finalize this drain and disable the server?' as finalize_confirm %}
         {% button finalize_label type="submit" attrs='name="action" value="finalize"' hx_confirm=finalize_confirm %}
+        {% endif %}
       {% elif drain.status == "pending" or drain.status == "running" or drain.status == "paused_needs_review" %}
         {% trans "Cancel drain" as cancel_drain_label %}{% trans 'Cancel after the current account finishes?' as cancel_drain_confirm %}
         {% button cancel_drain_label type="submit" variant="secondary" attrs='name="action" value="cancel"' hx_confirm=cancel_drain_confirm %}

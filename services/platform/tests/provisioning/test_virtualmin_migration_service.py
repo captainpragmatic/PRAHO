@@ -24,6 +24,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
 from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeRegion, NodeSize, PanelType
 from apps.provisioning import virtualmin_tasks
+from apps.provisioning.migration_barrier import BarrierStep
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_gateway import VirtualminAPIError, VirtualminGateway
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration, account_has_active_migration
@@ -113,7 +114,10 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.addCleanup(settings_patch.stop)
         self.source_gateway = MockVirtualminGateway(server_hostname=self.server.hostname)
         self.target_gateway = MockVirtualminGateway(server_hostname=self.target.hostname)
-        self.source_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
+        source_domain = self.source_gateway.seed_domain(
+            self.account.domain, username=self.account.virtualmin_username, enabled=True
+        )
+        source_domain.features = ["unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"]
         self.gateways = {"source": self.source_gateway, "target": self.target_gateway}
         self.events: list[tuple[str, str, dict[str, Any], int | None]] = []
         self.effects: dict[tuple[str, str], Any] = {}
@@ -144,6 +148,13 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         enqueue_patch = patch("apps.provisioning.virtualmin_tasks.async_task", return_value="migration-task")
         self.enqueue = enqueue_patch.start()
         self.addCleanup(enqueue_patch.stop)
+        # Node-idle proof is an external boundary; its real process checks have script/lab coverage.
+        idle_patch = patch(
+            "apps.provisioning.virtualmin_migration_service.run_barrier",
+            return_value=Ok(BarrierStep("ok", "idle")),
+        )
+        idle_patch.start()
+        self.addCleanup(idle_patch.stop)
 
     def _call(self, side: str, program: str, params: dict[str, Any], **kwargs: Any) -> Any:
         self.events.append((side, program, params, kwargs.get("timeout_seconds")))
@@ -487,8 +498,8 @@ class MigrationTests(MigrationTestBase):
         self.effects[("source", "backup-domain")] = self._error("source", "backup-domain")
         self.effects[("source", "enable-domain")] = self._error("source", "enable-domain")
         migration = self._run(self._start())
-        self.assertEqual(migration.status, "needs_review")
-        event = AuditEvent.objects.get(action="virtualmin_migration_needs_review", object_id=str(migration.pk))
+        self.assertEqual((migration.status, migration.parked_phase), ("compensating", "compensating"))
+        event = AuditEvent.objects.get(action="virtualmin_migration_compensation_parked", object_id=str(migration.pk))
         self.assertTrue(event.metadata["compensation_failure"])
 
     def test_resume_busy_and_interrupted_states(self) -> None:

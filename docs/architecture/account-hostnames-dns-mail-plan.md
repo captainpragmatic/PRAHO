@@ -34,6 +34,80 @@ Every task: a test that fails first (quote the failure line), the fix, green, `m
 
 ## Review record
 
+### Execution ledger (2026-10-27)
+
+The implementation continues from PR #749 at `66e31447`, on
+`codex/adr61-phase2-complete`. The Phase 2 gates below are recorded separately
+from the later phases so a passing bridge test cannot be mistaken for a completed plan.
+
+Owner decisions for the remaining phases:
+
+- Finish Phases 2 through 5, keeping each phase in its own PR series.
+- Keep website previews off. Use complete zone-file uploads for the first zone import.
+- Install mail on all eligible existing and new nodes through Virtualmin's supported setup.
+  Existing external mail stays external until the domain's owner enables hosted mail.
+- Advertise implicit TLS client ports 993, 995 and 465.
+- Investigate native Postfix/Dovecot forwarding in the mail lab before adding a proxy dependency.
+  Native proxying may terminate TLS at the source and use a verified encrypted onward connection;
+  the invariant is one authoritative writable mailbox copy, with credentials checked at the target.
+- Finish a migration after target activation, bridge verification and DNS convergence. The bridge's
+  own retryable task owns retention and teardown, so backups and billing reconciliation resume.
+- Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
+
+Review findings to close, each with a failing regression and recorded green result:
+
+| Finding | State / evidence |
+|---|---|
+| Original barrier record and saved-crontab token survive replay | Regression green; migration review suite: 100 tests + 90 subtests |
+| Compensation preserves each child's enabled state | Regression green in the migration review suite |
+| Cancellation removes only the owned, idle target copy | Regression green in the migration review suite |
+| Compensation resumes safely and parked rows have staff actions | Regression green in the migration review suite |
+| Scheduled wakes keep the migration task timeout | Regression green in the migration review suite |
+| Wait the old record TTL after all lower TTLs confirm | Seven regressions reproduced; 46 tests + 16 subtests green |
+| Every TTL restoration decision uses fresh publication-locked state | Regression green; 81 neighboring tests green, two PostgreSQL-only tests require PostgreSQL |
+| Cloudflare cutover TTL minimum is 60 seconds | Settings regression green |
+| Web-only accounts do not issue an empty database-union query | Barrier suite: 47 tests + 20 subtests green |
+| Bridge runner allowlist and failed-curl verification | Bridge suite: 35 tests + 2 subtests green |
+| Encrypted bridge, aliases, full chain and neutral-default ordering | Real two-node contract green, including continued traffic after source deletion |
+| Bridge lifecycle audit coverage | Audit/scanner/model suite: 27 tests green |
+| Audit scanner respects lexical scopes | Two scope regressions reproduced; scanner tests green |
+| New bridge migration checksum matches its file | 0014 digest corrected; final manifest/schema gate pending new recovery migration |
+| Bridge playbook has production-path lab coverage | Focused two-node contract passed in 203.92 seconds; full contract rerun remains |
+| A restored target stays held before ownership commits | Shared disabled-placeholder restore; real Unix-lock proof passed; database identity proof is being rerun |
+| Native API children count as running operations during cleanup | Remote CGI and argument-free native-child regressions green; CLI commands for other domains remain independent |
+| Cancellation arriving during bridge preparation cannot commit | Fresh-row cancellation regression green; compensation runs outside the ownership transaction |
+| A fenced, unavailable source cannot trap an already committed cutover | Audited staff-only fencing control; target-only convergence regression green; failed bridge retains separate cleanup exclusion |
+| Customer frontend records and old cache lifetimes gate source deletion | Precommit inventory and TTL evidence, fresh authoritative checks, and per-name retention clocks; 39 tests and five subtests green |
+| Opaque proxy origins require explicit staff evidence | Expiring attestation binds target, addresses and full inventory; source addresses and failed DNS cannot be overridden |
+| Completed or conclusively abandoned moves remove temporary transport data | UUID-scoped archive and private target-data cleanup, retryable per location, permanent replay markers retained |
+| Backup recovery keeps current billing quotas | Two regressions reproduced; current quotas reapplied on target before ownership commits; 32 neighboring checks green |
+| Recovery refuses a missing account name before changing nodes | Admission regression green; source remains eligible when admission is refused |
+
+The audit CI failures mentioning `virtualmin_migration_apply` and
+`virtualmin_migration_verify` are scanner false positives: unrelated barrier loop
+variables were mistaken for audit wrapper parameters. Fix the scanner's lexical
+scope handling rather than registering events that no operation emits.
+
+Remaining P2.6-P2.11 and Phases 3-5 are not complete until their unit, integration,
+PostgreSQL and applicable real-node/Portal checks below have passed.
+
+The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
+restricted to its source and admitted hostnames; HTTPS uses the customer's verified
+target vhost. No new proxy service, provider firewall rule or listening port is needed.
+The retained frontend certificates bound the bridge deadline and any staff extension.
+
+Recovery uses a disabled placeholder and the existing-domain restore path, with Unix
+restore excluded and the inherited maintenance barrier retained until ownership commits.
+Review against Virtualmin 8.3 identified additional gates: restore the archive's Unix
+hash through native `modify_unix` so `disabled_oldpass` is correct, use reversible native
+cron markers, and persist node activation before exposing the target so replay cannot
+overwrite a customer's new cron. These recovery gates require their own lab proof.
+
+Native existing-domain restore also creates database users from the placeholder's domain
+metadata. Before activation, the target therefore needs the archived native credential metadata
+as well as its Unix hash. The real-node acceptance checks use the original database login and
+grants for both active and suspended accounts; matching table contents alone is insufficient.
+
 - **Phase 1 v3 (sub-server design):** two adversarial plan reviews. Pass 1 REWORK (0 CRITICAL, 5 HIGH, 3 MEDIUM, 1 LOW), all folded in with two extra lab checks (S10, S11); pass 2 APPROVE (0 CRITICAL, 0 HIGH, 1 MEDIUM, 1 LOW), both folded in.
 
 - **Reviewed:** plan v1, phases 0 to 2, by an adversarial plan review (REWORK: 6 HIGH, 4 MEDIUM, 1 LOW, 0 CRITICAL) and a code review of the files it touches (14 findings on existing code: 6 HIGH, 7 MEDIUM, 1 LOW).
@@ -301,7 +375,7 @@ These are live defects today. Each ships with a test that fails without it.
    - PTR through a new optional `set_reverse_dns` on the cloud gateway (Hetzner API), and a checked manual step elsewhere.
 5. **P5.5 Relay mail during the bridge.**
    - Inbound delivery: the bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
-   - Mail clients: during the bridge window, clients that still resolve the account name to the source connect there for IMAP, POP3 and submission. The bridge forwards each advertised client port to B as TCP passthrough, so TLS terminates on B with B's certificate and the client authenticates against B; the source never holds a mailbox copy that accepts writes.
+   - Mail clients: prove native Dovecot proxying and Postfix relay behavior in the lab before choosing a forwarding topology. Advertise implicit TLS ports 993, 995 and 465. A stale-DNS client must authenticate against the destination and use its single authoritative mailbox copy, with verified encryption between nodes. Source TLS termination is acceptable with an independently retained certificate; HAProxy is not a prerequisite.
    - The source is retired only after the client forwards are torn down at the end of the window.
 6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
 7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.

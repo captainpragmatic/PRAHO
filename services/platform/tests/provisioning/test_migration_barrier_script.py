@@ -107,7 +107,9 @@ if [[ -n $user ]]; then
   echo 1; exit 0
 fi
 case $q in
-  "SELECT DISTINCT User, Host FROM ("*) cat "$state/accounts" ;;
+  "SELECT DISTINCT User, Host FROM ("*)
+    [[ $q != *"FROM ()"* ]] || { echo "ERROR 1064: empty derived table" >&2; exit 1; }
+    cat "$state/accounts" ;;
   *account_locked*) if [[ -e $state/locked.$(field User)@$(field Host) ]]; then echo 1; else echo false; fi ;;
   *'$.plugin'*) echo mysql_native_password ;;
   *authentication_string*) echo "*HASH-$(field User)" ;;
@@ -282,6 +284,20 @@ class BarrierScriptCase(SimpleTestCase):
 
 
 class RecordTests(BarrierScriptCase):
+    def test_a_web_only_account_can_record_apply_verify_and_release_without_database_queries(self) -> None:
+        recorded = self.record(FAKE_DB="")
+
+        self.assertEqual(recorded["databases"], [])
+        self.assertEqual(recorded["accounts"], [])
+        applied = self.apply(recorded, FAKE_DB="")
+        self.assertEqual(applied["outcome"], "ok", applied)
+        held = self.step("verify", **self.inputs(recorded), FAKE_DB="", PRAHO_KILLED_AT=str(applied["killed_at"]))
+        self.assertEqual(held["outcome"], "ok", held)
+        released = self.step("release", **self.inputs(recorded), FAKE_DB="")
+        self.assertEqual(released["outcome"], "ok", released)
+        self.assertFalse([call for call in self.calls() if call.startswith("ALTER USER ")])
+        self.assertEqual((self.state / "crontab").read_text(), CRONTAB)
+
     def test_the_record_lists_what_a_release_needs_and_keeps_the_crontab_on_the_node(self) -> None:
         recorded = self.record()
 
@@ -573,9 +589,61 @@ class ReleaseTests(BarrierScriptCase):
 
         self.assertEqual(released["outcome"], "busy")
         self.assertTrue((self.run_dir / f"migration-{DOMAIN_ID}.cancelled.{PREVIOUS}").exists())
+        self.assertTrue((self.state_dir / f"migration-{DOMAIN_ID}.cancelled.{PREVIOUS}").exists())
+
+    def test_completed_release_replay_preserves_customer_changes_and_blocks_old_apply_after_reboot(self) -> None:
+        recorded = self.record()
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
+        self.assertEqual(self.release(recorded)["outcome"], "ok")
+        changed = "MAILTO=changed@example.com\n0 8 * * * /home/shop/new-job\n"
+        (self.state / "crontab").write_text(changed)
+        (self.state / f"locked.{OWNER}@localhost").touch()
+        calls = self.calls()
+        for path in self.run_dir.iterdir():
+            path.unlink()
+        replay = self.release(recorded)
+        self.assertEqual((replay["outcome"], replay["reason"]), ("ok", "released"))
+        self.assertEqual((self.state / "crontab").read_text(), changed)
+        self.assertTrue((self.state / f"locked.{OWNER}@localhost").exists())
+        self.assertEqual(self.calls(), calls)
+        applied = self.apply(recorded)
+        self.assertEqual((applied["outcome"], applied["reason"]), ("refused", "cancelled"))
+        self.assertEqual(self.calls(), calls)
+
+    def test_an_interrupted_release_never_reapplies_its_original_record(self) -> None:
+        recorded = self.record()
+        self.assertEqual(self.apply(recorded)["outcome"], "ok")
+        self.assertEqual(self.release(recorded, FAKE_PROBE_FAILS="1")["reason"], "probe_write_failed")
+        changed = "0 8 * * * /home/shop/new-job\n"
+        (self.state / "crontab").write_text(changed)
+        calls = self.calls()
+        replay = self.release(recorded)
+        self.assertEqual((replay["outcome"], replay["reason"]), ("failed", "release_interrupted"))
+        self.assertEqual((self.state / "crontab").read_text(), changed)
+        self.assertEqual(self.calls(), calls)
 
 
 class IdleTests(BarrierScriptCase):
+    def test_native_http_children_without_domain_arguments_and_their_cgi_parent_keep_it_busy(self) -> None:
+        for arguments in (
+            "/usr/share/webmin/virtual-server/delete-domain.pl\n",
+            "/usr/share/webmin/virtual-server/restore-domain.pl\n",
+            "/usr/share/webmin/virtual-server/remote.cgi\n",
+        ):
+            with self.subTest(arguments=arguments):
+                (self.state / "ps_args").write_text(arguments)
+                busy = self.step("idle")
+                self.assertEqual((busy["outcome"], busy["reason"]), ("busy", "operation_running"))
+
+    def test_creation_and_deletion_of_the_domain_also_keep_it_busy(self) -> None:
+        for program in ("create", "delete"):
+            with self.subTest(program=program):
+                (self.state / "ps_args").write_text(
+                    f"/usr/bin/perl /usr/share/webmin/virtual-server/{program}-domain.pl --domain {DOMAIN}\n"
+                )
+                busy = self.step("idle")
+                self.assertEqual((busy["outcome"], busy["reason"]), ("busy", "operation_running"))
+
     def test_a_restore_of_the_domain_running_on_the_node_keeps_it_busy(self) -> None:
         (self.state / "ps_args").write_text(
             f"/usr/bin/perl /usr/share/webmin/virtual-server/restore-domain.pl --domain {DOMAIN} --source /x\n"

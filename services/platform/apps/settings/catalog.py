@@ -2054,7 +2054,7 @@ CATALOG: tuple[SettingDef, ...] = (
             "The lower TTL every A and AAAA record is moved to before a hosting account migrates. "
             "It bounds how long the old routing survives after the move."
         ),
-        validation={"min": 30, "max": 300},
+        validation={"min": 60, "max": 300},
     ),
     SettingDef(
         key="dns.bridge_window_hours",

@@ -1,0 +1,46 @@
+---
+- name: Stage, verify, activate or clean a held restore on its target
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Require a single recovery target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - recovery_action in ['stage', 'verify-held', 'activate', 'cleanup']
+    - name: Keep recovery artifacts private on the target
+      ansible.builtin.file:
+        path: /var/lib/praho/recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Install the native Unix credential callback
+      ansible.builtin.copy:
+        src: files/praho-recovery-credentials.pl
+        dest: /var/lib/praho/recovery/credentials.pl
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Run the recovery step under the node domain lock
+      ansible.builtin.script:
+        cmd: files/praho-recovery.py
+        executable: /usr/bin/python3
+      environment:
+        PRAHO_RECOVERY_ID: "{{ recovery_id }}"
+        PRAHO_DOMAIN: "{{ recovery_domain }}"
+        PRAHO_USERNAME: "{{ recovery_username }}"
+        PRAHO_DOMAIN_ID: "{{ recovery_domain_id }}"
+        PRAHO_RECOVERY_ACTION: "{{ recovery_action }}"
+        PRAHO_ARCHIVE: "{{ recovery_archive }}"
+        PRAHO_SHA256: "{{ recovery_sha256 }}"
+        PRAHO_ENABLED: "{{ (recovery_enabled | bool) | ternary('1', '0') }}"
+      register: recovery_step
+      changed_when: true
+      no_log: true
+    - name: Require successful recovery proof
+      ansible.builtin.assert:
+        that:
+          - recovery_step.rc == 0
+          - "'PRAHO_RECOVERY_OK' in recovery_step.stdout_lines"

@@ -272,7 +272,7 @@ class TestScannerSeesTheRealCode:
         assert ("provisioning/virtualmin_migration_service.py", "enable-domain") in found  # self._command(m, s, "p")
         assert ("provisioning/virtualmin_disaster_recovery.py", "modify-domain") in found
         assert ("provisioning/virtualmin_gateway.py", "list-bandwidth") in found
-        assert len([site for site in sites if site.program]) == 45, "a new call site: add it, then update this count"
+        assert len([site for site in sites if site.program]) == 51, "a new call site: add it, then update this count"
 
     def test_the_loyalty_program_keyword_is_not_a_virtualmin_program(self, sites: list[CallSite]) -> None:
         assert not [site for site in sites if site.path.startswith("promotions/")]
@@ -313,7 +313,7 @@ class TestEveryActionIsCovered:
 
     def test_every_node_playbook_is_named_by_a_lab_test(self) -> None:
         playbooks = [path.name for path in PLAYBOOKS.glob("virtualmin_*.yml")] + ["virtualmin.yml"]
-        assert len(playbooks) == 13, "a new playbook: it needs a lab test, then update this count"
+        assert len(playbooks) == 15, "a new playbook: it needs a lab test, then update this count"
         assert unreferenced_playbooks(playbooks, lab_test_sources()) == []
 
 

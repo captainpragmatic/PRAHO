@@ -480,6 +480,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "can_backup": account.is_active,
         "can_restore": len(recent_backups) > 0,
         "migration": migration,
+        "migration_bridge": migration.bridge if migration is not None and hasattr(migration, "bridge") else None,
         "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
@@ -521,7 +522,9 @@ def virtualmin_account_migrate(request: HttpRequest, account_id: str) -> HttpRes
             account, form.cleaned_data["target_server"], initiated_by=cast(User, request.user)
         )
         if result.is_ok():
-            messages.success(request, _("Migration queued. Follow its status before changing routing/DNS."))
+            messages.success(
+                request, _("Migration queued. Follow the cutover status for routing and recovery progress.")
+            )
             return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
         form.add_error(None, result.unwrap_err())
     return render(
@@ -552,16 +555,57 @@ def virtualmin_migration_resolve(request: HttpRequest, account_id: str) -> HttpR
         migration_id = UUID(str(request.POST.get("migration_id", "")))
     except ValueError:
         migration_id = None
-    migration = account.migrations.filter(pk=migration_id, status="needs_review").first() if migration_id else None
+    migration = (
+        account.migrations.filter(pk=migration_id, status__in=("needs_review", "compensating")).first()
+        if migration_id
+        else None
+    )
     if migration is None:
         messages.error(request, _("That migration is no longer awaiting review; re-check the current status."))
     else:
-        result = resolve_migration(migration, resolved_by=cast(User, request.user), note=request.POST.get("note", ""))
+        result = resolve_migration(
+            migration,
+            resolved_by=cast(User, request.user),
+            note=request.POST.get("note", ""),
+            source_fenced=request.POST.get("source_fenced", ""),
+        )
         if result.is_ok():
-            messages.success(request, _("Migration marked resolved. The account is unlocked."))
+            if result.unwrap().status == "compensating":
+                messages.success(
+                    request, _("Compensation queued. The account stays locked until the source is verified.")
+                )
+            elif result.unwrap().cutover_committed_at is not None:
+                messages.success(request, _("Target recovery queued. The account stays locked until DNS converges."))
+            else:
+                messages.success(request, _("Migration marked resolved. The account is unlocked."))
         else:
             messages.error(request, result.unwrap_err())
     return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+def virtualmin_bridge_control(request: HttpRequest, account_id: str) -> HttpResponse:
+    from .migration_bridge_cleanup import control_bridge  # noqa: PLC0415
+    from .virtualmin_migration_models import MigrationBridge  # noqa: PLC0415
+
+    try:
+        migration_id = UUID(str(request.POST.get("migration_id", "")))
+    except ValueError:
+        return HttpResponse(_("Invalid bridge reference."), status=400)
+    bridge = get_object_or_404(MigrationBridge, migration_id=migration_id, migration__account_id=account_id)
+    result = control_bridge(
+        bridge.migration_id,
+        action=request.POST.get("action", ""),
+        actor=cast(User, request.user),
+        attestation={key: request.POST.get(key, "") for key in ("note", "target_id", "ipv4", "ipv6")},
+    )
+    if result.is_ok():
+        messages.success(request, _("Bridge updated. Refresh this page for cleanup progress."))
+    else:
+        messages.error(request, result.unwrap_err())
+    return redirect("provisioning:virtualmin_account_detail", account_id=account_id)
 
 
 @login_required

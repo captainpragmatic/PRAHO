@@ -1062,6 +1062,13 @@ class VirtualminBackupService:
         )
         if pinned.exists():
             return f"Backup {backup_id} is named by a restore that has not finished"
+        from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+
+        recoveries = VirtualminMigration.objects.filter(contract="recovery").exclude(
+            status__in=("completed", "failed", "rolled_back")
+        )
+        if any(backup_id in row.barrier_state.get("recovery_backups", []) for row in recoveries.iterator()):
+            return f"Backup {backup_id} is pinned by an unfinished node recovery"
         if account is not None and account.restore_hold_safety_backup_id == backup_id:
             return f"Backup {backup_id} is the safety backup of a half-restored domain; resolve the hold first"
         if (

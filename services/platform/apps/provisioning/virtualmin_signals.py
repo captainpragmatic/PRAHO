@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from django.db.models.signals import post_save, pre_delete
+from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from apps.audit.services import (
@@ -24,6 +24,7 @@ from apps.audit.services import (
 from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
+from .virtualmin_migration_models import MigrationBridge
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,42 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 # VIRTUALMIN INTEGRATION SIGNALS
 # ===============================================================================
+
+
+@receiver(pre_save, sender=MigrationBridge)
+def remember_bridge_status(sender: type[MigrationBridge], instance: MigrationBridge, **kwargs: Any) -> None:
+    instance.__dict__["_previous_bridge_status"] = (
+        sender.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
+        if not instance._state.adding
+        else None
+    )
+
+
+@receiver(post_save, sender=MigrationBridge)
+def audit_bridge_lifecycle(
+    sender: type[MigrationBridge], instance: MigrationBridge, created: bool, **kwargs: Any
+) -> None:
+    """A bridge outlives its cutover; evidence and lease updates are not business transitions."""
+    if audit_signals_disabled() or (
+        not created and instance.__dict__.get("_previous_bridge_status") == instance.status
+    ):
+        return
+    action = {
+        "pending": "virtualmin_bridge_pending",
+        "active": "virtualmin_bridge_active",
+        "removing_source": "virtualmin_bridge_removing_source",
+        "torn_down": "virtualmin_bridge_torn_down",
+        "failed": "virtualmin_bridge_failed",
+    }[instance.status]
+    _log_optional_virtualmin_event(
+        lambda: AuditEventData(
+            event_type=action,
+            content_object=instance,
+            description=f"Migration bridge {instance.pk}: {instance.status}",
+            new_values={"status": instance.status, "migration_id": str(instance.migration_id)},
+        ),
+        context=lambda: AuditContext(actor_type="system", metadata={"source_app": "provisioning"}),
+    )
 
 
 def _log_optional_virtualmin_event(

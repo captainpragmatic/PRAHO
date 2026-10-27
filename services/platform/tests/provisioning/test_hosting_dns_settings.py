@@ -159,6 +159,7 @@ class HostingDnsDefaultsTests(TestCase):
     def test_the_cutover_defaults_are_bounded(self) -> None:
         self.assertEqual(config.account_cutover_ttl_seconds(), 60)
         self.assertEqual(config.bridge_window_hours(), 48)
+        self.assertIsNone(_write("dns.cutover_ttl_seconds", 60))
 
     def test_the_cutover_settings_take_effect(self) -> None:
         self.assertIsNone(_write("dns.cutover_ttl_seconds", 120))
@@ -169,6 +170,7 @@ class HostingDnsDefaultsTests(TestCase):
     def test_out_of_range_cutover_settings_are_refused(self) -> None:
         for key, value in (
             ("dns.cutover_ttl_seconds", 10),
+            ("dns.cutover_ttl_seconds", 59),
             ("dns.cutover_ttl_seconds", 1000),
             ("dns.bridge_window_hours", 0),
             ("dns.bridge_window_hours", 200),

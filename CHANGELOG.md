@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hosting moves carry their account name and traffic.** Managed cutovers keep restored targets held until ownership commits, converge DNS forward, and retain a verified encrypted web bridge until customer DNS caches have expired. Staff can retry cleanup and recover a fenced unavailable node from retained backups while preserving suspension and current quotas.
+
 - **Every hosting account can get a provider hostname that follows it** (ADR-0061 Phase 1). Off by default behind `dns.account_hostnames_enabled`; with it off nothing new happens.
   - **The name.** Each account gets `<label>.<zone>`, a short random label in a separate account zone (Settings → Hosting DNS), as a Virtualmin sub-server of the customer's domain. A label is never reused; a terminated account's name is retired, not deleted. The settings refuse a zone that shares a registrable domain with the brand, the Portal or the company email domains.
   - **DNS and certificates.** PRAHO publishes its A and AAAA records through the Cloudflare gateway and gives it a certificate of its own through DNS-01, ordered on Platform under a durable weekly budget (default 40), renewed daily under 30 days left. One worker drives an attempt at a time, a key is never overwritten, and a certificate is put in force and installed only when it matches its key and name. An install is recorded only when the node reports serving that certificate. A name is published and announced only once its certificate is installed on the node it points at.

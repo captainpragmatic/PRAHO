@@ -62,8 +62,8 @@
         fail_on_missing: true
         validate_checksum: true
 
-    # The source archive itself is retained by design (manual removal after a
-    # verified migration). Its sidecars hold the domain's database passwords
+    # The source archive stays until a determinate terminal migration exit.
+    # Its sidecars hold the domain's database passwords
     # and are not needed to restore, so they go once the fetch is verified.
     - name: Remove the archive's sidecars
       ansible.builtin.file:

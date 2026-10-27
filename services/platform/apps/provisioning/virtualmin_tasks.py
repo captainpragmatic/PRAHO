@@ -802,6 +802,8 @@ def schedule_migration_wake(migration_id: UUID, until: datetime) -> bool:
 
     The name carries the wake time, so a later deferral of the same row never collides with this one.
     """
+    from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
     try:
         schedule(
             "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
@@ -809,6 +811,7 @@ def schedule_migration_wake(migration_id: UUID, until: datetime) -> bool:
             name=f"migration-wake-{migration_id}-{int(until.timestamp())}",
             schedule_type=ScheduleModel.ONCE,
             next_run=until,
+            q_options={"timeout": migration_task_timeout()},
         )
     except Exception:
         logger.exception(
@@ -1252,8 +1255,13 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     sweep such rows strand non-terminal forever — holding the account lock and
     the capacity reservation while the source domain stays disabled.
     """
+    from .migration_artifact_cleanup import reclaim_migration_artifacts  # noqa: PLC0415  # Circular
+    from .migration_bridge_cleanup import reclaim_bridges  # noqa: PLC0415  # Circular
     from .virtualmin_migration_models import _TERMINAL_STATUSES, VirtualminMigration  # noqa: PLC0415  # Circular
     from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    reclaim_bridges()
+    reclaim_migration_artifacts()
 
     stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
     counts = {
@@ -1269,6 +1277,7 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         # Oldest-first so newer stalls never starve older rows; the updated_at
         # bump after each dispatch is the per-row retry backoff.
         VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
+        .filter(parked_phase="")
         .filter(updated_at__lt=stale)
         .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
         .exclude(resume_after__gt=timezone.now())  # Waiting on a deferral; its wake, or this sweep once due

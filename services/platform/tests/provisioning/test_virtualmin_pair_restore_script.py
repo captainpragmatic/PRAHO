@@ -79,6 +79,11 @@ case $cmd in
     fi
     ;;
   restore-domain)
+    printf '%s\n' "$*" >>"$state/restore_args"
+    if [[ " $* " == *" --feature ssl "* ]]; then
+      echo ssl_restore >>"$state/calls"
+      exit 0
+    fi
     source=""
     while (($#)); do case $1 in --source) source=$2; shift ;; esac; shift; done
     n=$(($(cat "$state/restore_count" 2>/dev/null || echo 0) + 1)); echo $n >"$state/restore_count"
@@ -133,6 +138,11 @@ if [[ $covered == 1 ]]; then answer 503; else answer 200; fi
         "#!/bin/bash\n"
         'while (($#)); do case $1 in -out) printf pem >"$2"; shift ;; esac; shift; done\n'
     ),
+    "recovery-ssl": (
+        "#!/bin/bash\n"
+        'while (($#)); do case $1 in --source) src=$2; shift ;; --destination) dest=$2; shift ;; esac; shift; done\n'
+        'cp "$src" "$dest"\n'
+    ),
 }
 
 
@@ -157,6 +167,8 @@ class PairRestoreScriptTests(SimpleTestCase):
             (self.staging / name).write_bytes(content)
             self.shas[name] = hashlib.sha256(content).hexdigest()
         self.maint = self.apache / f"zz-praho-maint-{DOMAIN_ID}.conf"
+        self.durable = self.root / "durable"
+        self.held_state = self.root / "held"
 
     def run_script(self, **overrides: str) -> subprocess.CompletedProcess[str]:
         env = {
@@ -172,11 +184,14 @@ class PairRestoreScriptTests(SimpleTestCase):
             "PRAHO_BASE_SHA": self.shas[BASE],
             "PRAHO_DIFF_SHA": self.shas[DIFF],
             "PRAHO_RUN_DIR": str(self.run_dir),
+            "PRAHO_PAIR_STATE_DIR": str(self.durable),
+            "PRAHO_HELD_STATE_DIR": str(self.held_state),
             "PRAHO_APACHE_DIR": str(self.apache),
             "FAKE_STATE": str(self.state),
             "FAKE_DOMAIN": DOMAIN,
             "FAKE_DOMAIN_ID": DOMAIN_ID,
             "FAKE_TOKEN": TOKEN,
+            "PRAHO_RECOVERY_SSL_HELPER": str(self.bin / "recovery-ssl"),
             **overrides,
         }
         return subprocess.run(["/bin/bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False)  # noqa: S603  # Fixed argv
@@ -219,6 +234,38 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(result.outcome, "ok")
         self.assertEqual(self.calls().count("disable"), 3, "once for the barrier, once after each restore")
         self.assertTrue(all(c.disabled for c in result.checkpoints))
+
+    def test_recovery_restores_without_unix_and_leaves_maintenance_until_commit(self) -> None:
+        result = self.step(PRAHO_RECOVERY="1")
+        self.assertEqual(result.outcome, "ok")
+        self.assertTrue(self.maint.exists())
+        self.assertTrue(self.disabled())
+        self.assertNotIn("barrier_down", [c.step for c in result.checkpoints])
+        args = (self.state / "restore_args").read_text().splitlines()
+        self.assertEqual(len(args), 4)
+        data = [call for call in args if "--all-features" in call]
+        self.assertEqual(len(data), 2)
+        self.assertTrue(all("--except-feature unix" in call and "--except-feature ssl" in call for call in data))
+        self.assertEqual(sum("--feature virtualmin --feature ssl" in call for call in args), 2)
+
+    def test_recovery_accepts_a_single_standalone_archive(self) -> None:
+        result = self.step(PRAHO_RECOVERY="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        self.assertEqual(result.outcome, "ok")
+        self.assertEqual(len(self.restores()), 1)
+        self.assertTrue(self.maint.exists())
+
+    def test_held_cutover_accepts_only_its_own_migration_archive(self) -> None:
+        archive = f"migration_{TOKEN}.tar.gz"
+        (self.staging / archive).write_bytes(b"migration-bytes")
+        checksum = hashlib.sha256(b"migration-bytes").hexdigest()
+        result = self.step(PRAHO_RECOVERY="1", PRAHO_BASE_ARCHIVE=archive, PRAHO_BASE_SHA=checksum,
+                           PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        self.assertEqual(result.outcome, "ok")
+        self.assertTrue(self.maint.exists())
+        foreign = "migration_22222222-2222-4222-8222-222222222222.tar.gz"
+        refused = self.run_script(PRAHO_RECOVERY="1", PRAHO_BASE_ARCHIVE=foreign, PRAHO_BASE_SHA=checksum,
+                                  PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        self.assertEqual(refused.returncode, 64)
 
     def test_a_stop_between_the_restores_keeps_both_layers_and_reports_where_it_stopped(self) -> None:
         result = self.step(FAKE_CANCEL_AFTER="1")
@@ -429,6 +476,58 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertFalse(self.maint.exists())
         self.assertTrue(self.disabled())
         self.assertTrue((self.run_dir / f"chain-{DOMAIN_ID}.cancelled.{TOKEN}").exists())
+
+    def test_a_released_restore_stays_cancelled_after_reboot_and_a_fresh_uuid_can_run(self) -> None:
+        self.assertEqual(self.step("release").outcome, "released")
+        for path in self.run_dir.iterdir():
+            path.unlink()
+        self.state_reset()  # A completed live target must not be disabled by the old RPC.
+        replay = self.step()
+        self.assertEqual((replay.outcome, replay.reason, replay.ran), ("refused", "cancelled", False))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.maint.exists())
+        self.assertFalse(self.disabled())
+        fresh = "22222222-2222-4222-8222-222222222222"
+        completed = self.run_script(PRAHO_CHAIN_TOKEN=fresh, FAKE_TOKEN=fresh)
+        parsed = parse_pair_step_result(completed.stdout, token=fresh, domain_id=DOMAIN_ID, action="restore")
+        self.assertTrue(parsed.is_ok(), completed.stderr)
+        self.assertEqual(parsed.unwrap().outcome, "ok")
+
+    def test_release_fences_its_uuid_durably_before_waiting_for_a_running_restore(self) -> None:
+        refused = self.step("release", FAKE_LOCK_HELD="1")
+        self.assertEqual((refused.outcome, refused.reason), ("refused", "lock_busy"))
+        self.assertTrue((self.durable / f"chain-{DOMAIN_ID}.cancelled.{TOKEN}").exists())
+
+    def test_a_completed_release_replay_never_removes_a_new_operations_maintenance(self) -> None:
+        self.assertEqual(self.step("release").outcome, "released")
+        self.maint.write_text("new operation's maintenance rules\n")
+        apache_calls = (self.state / "apache").read_text()
+        self.assertEqual(self.step("release").outcome, "released")
+        self.assertTrue(self.maint.exists(), "a completed old release must not tear down a new operation's hold")
+        self.assertEqual(self.maint.read_text(), "new operation's maintenance rules\n")
+        self.assertEqual((self.state / "apache").read_text(), apache_calls)
+
+    def test_a_successful_normal_pair_cannot_replay_retained_archives_after_reboot(self) -> None:
+        self.assertEqual(self.step().outcome, "ok")
+        for path in self.run_dir.iterdir():
+            path.unlink()
+        self.state_reset()
+        replay = self.step()
+        self.assertEqual((replay.outcome, replay.reason, replay.ran), ("refused", "cancelled", False))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.maint.exists())
+
+    def test_a_held_restore_is_fenced_as_soon_as_activation_starts_before_the_release_rpc(self) -> None:
+        self.held_state.mkdir(mode=0o700)
+        for suffix in ("activation", "cleaned"):
+            with self.subTest(suffix=suffix):
+                marker = self.held_state / f"{TOKEN}.{suffix}"
+                marker.write_text("durable intent")
+                replay = self.step(PRAHO_RECOVERY="1")
+                self.assertEqual((replay.outcome, replay.reason, replay.ran), ("refused", "cancelled", False))
+                self.assertEqual(self.calls(), [])
+                self.assertFalse(self.maint.exists())
+                marker.unlink()
 
     def test_a_domain_id_that_is_not_this_domains_is_refused(self) -> None:
         result = self.step(FAKE_DOMAIN_ID="999")

@@ -76,6 +76,9 @@ host_ok='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 
 lock_file="$RUN_DIR/migration-$domain_id.lock"
 cancel_marker="$RUN_DIR/migration-$domain_id.cancelled.$token"
+durable_cancel_marker="$STATE_DIR/migration-$domain_id.cancelled.$token"
+release_started="$STATE_DIR/migration-$domain_id.$saved.release-started"
+release_completed="$STATE_DIR/migration-$domain_id.$saved.release-completed"
 kept_crontab="$STATE_DIR/migration-$domain_id.$saved.crontab"
 account_ok='^[A-Za-z0-9._@-]{1,80}$'
 account_host_ok='^[A-Za-z0-9.%_:-]{1,255}$'
@@ -97,6 +100,23 @@ emit() {
 stop() {
   emit "$1" "$2"
   exit 0
+}
+
+# Persist fence evidence before exposing a writer; IO::Handle sync flushes the file and parent
+# directory on both Linux nodes and the macOS fixtures, without a GNU-only sync command.
+durable_marker() {
+  perl -MFcntl=:DEFAULT,:mode -MIO::Handle -e '
+    my $path = shift;
+    sysopen(my $file, $path, O_WRONLY | O_CREAT | O_NOFOLLOW, 0600) or die "Cannot open durable fence\n";
+    my @info = stat($file);
+    die "Unsafe durable fence\n" unless S_ISREG($info[2]) && $info[4] == $> && !($info[2] & 077);
+    $file->sync or die "Cannot flush durable fence\n";
+    close($file) or die "Cannot close durable fence\n";
+    $path =~ s{/[^/]+$}{};
+    sysopen(my $directory, $path, O_RDONLY | O_NOFOLLOW) or die "Cannot open fence directory\n";
+    $directory->sync or die "Cannot flush fence directory\n";
+    close($directory) or die "Cannot close fence directory\n";
+  ' "$1"
 }
 
 sha() { sha256sum | cut -d' ' -f1; }
@@ -155,7 +175,7 @@ read_databases() {
 
 in_list() { # ITEM : the SQL list of the domain's databases, quoted
   local out="" db
-  for db in "${databases[@]}"; do out+="'$db',"; done
+  for db in "${databases[@]-}"; do [[ -z $db ]] || out+="'$db',"; done
   printf '%s' "${out%,}"
 }
 
@@ -163,6 +183,8 @@ in_list() { # ITEM : the SQL list of the domain's databases, quoted
 # resolved by MariaDB itself (database-level grants may be name patterns).
 db_accounts() {
   local db q=""
+  # A web-only account has no database grants to fence. An empty derived table is not SQL.
+  [[ -n ${databases[*]:-} ]] || return 0
   for db in "${databases[@]}"; do
     q+="SELECT User, Host FROM mysql.db WHERE '$db' LIKE Db UNION "
     q+="SELECT User, Host FROM mysql.tables_priv WHERE Db = '$db' UNION "
@@ -215,7 +237,7 @@ refusal() {
   if sshd -T 2>/dev/null | grep -qiE '^subsystem sftp internal-sftp'; then echo "internal_sftp"; return 0; fi
   count=$(sql "SELECT COUNT(*) FROM mysql.user WHERE is_role = 'Y'") || { echo "database_unreadable"; return 0; }
   [[ $count == 0 ]] || { echo "database_roles"; return 0; }
-  if [[ ${#databases[@]} -gt 0 ]]; then
+  if [[ -n ${databases[*]:-} ]]; then
     count=$(sql "SELECT IF(@@event_scheduler = 'ON', (SELECT COUNT(*) FROM information_schema.events WHERE EVENT_SCHEMA IN ($(in_list))), 0)") || { echo "database_unreadable"; return 0; }
     [[ $count == 0 ]] || { echo "database_events"; return 0; }
   fi
@@ -230,7 +252,7 @@ refusal() {
     count=$(sql "SELECT (SELECT COUNT(*) FROM mysql.db WHERE User = '$user' AND Host = '$host' AND Db NOT IN ($(in_list))) + (SELECT COUNT(*) FROM mysql.tables_priv WHERE User = '$user' AND Host = '$host' AND Db NOT IN ($(in_list))) + (SELECT COUNT(*) FROM mysql.procs_priv WHERE User = '$user' AND Host = '$host' AND Db NOT IN ($(in_list)))") || { echo "database_unreadable"; return 0; }
     [[ $count == 0 ]] || { echo "shared_account"; return 0; }
   done <<<"$account_lines"
-  if [[ ${#databases[@]} -gt 0 && -n $owner_db_user ]]; then
+  if [[ -n ${databases[*]:-} && -n $owner_db_user ]]; then
     db=${databases[0]}
     count=$(sql "SELECT COUNT(*) FROM mysql.db WHERE User = '$owner_db_user' AND '$db' LIKE Db AND Create_priv = 'Y' AND Insert_priv = 'Y' AND Drop_priv = 'Y'") || { echo "database_unreadable"; return 0; }
     [[ $count != 0 ]] || { echo "owner_cannot_probe"; return 0; }
@@ -270,9 +292,20 @@ owner_requests() { # prints how many processes carry the owner's Webmin login in
 
 # The domain's restores and backups running here (the remote API runs each as virtual-server/<program>.pl).
 domain_operations() {
-  # shellcheck disable=SC2009  # each process's arguments are matched, not only its name
-  ps -eo args= 2>/dev/null | grep -E 'virtual-server/(restore|backup)-domain\.pl' \
-    | grep -cE -- "--domain ${domain//./\\.}( |$)" || true
+  local arguments line count=0 domain_arg
+  domain_arg="--domain[[:space:]]+${domain//./\\.}([[:space:]]|$)"
+  # HTTP execution sets the child process title to the native program but keeps its
+  # arguments only in Perl's @ARGV. Neither that child nor remote.cgi can be attributed
+  # to a domain from ps. Refuse conservatively until the whole unknown cohort is idle.
+  if ! arguments=$(ps -eo args= 2>/dev/null); then printf '1\n'; return; fi
+  while IFS= read -r line; do
+    if [[ $line =~ virtual-server/remote[.]cgi([[:space:]]|$) ]]; then
+      count=$((count + 1))
+    elif [[ $line =~ virtual-server/(restore|backup|create|delete)-domain[.]pl([[:space:]]|$) ]]; then
+      if [[ $line != *" --domain "* || $line =~ $domain_arg ]]; then count=$((count + 1)); fi
+    fi
+  done <<<"$arguments"
+  printf '%s\n' "$count"
 }
 
 # barrier_broken : why the barrier does not hold, or nothing. Read-only.
@@ -314,15 +347,30 @@ barrier_broken() {
 
 # ---- the lock, and the cancel marker ---------------------------------------------------------------
 install -d -m 0700 -o root -g root "$RUN_DIR"
+if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
+  [[ -d $STATE_DIR && ! -L $STATE_DIR && $(stat -c '%u:%a' -- "$STATE_DIR") == "0:700" ]] || exit 64
+else
+  install -d -m 0700 -o root -g root "$STATE_DIR"
+fi
 if [[ -n $previous ]]; then
   # The previous attempt may still be running here: mark it cancelled before waiting for the lock.
+  durable_marker "$STATE_DIR/migration-$domain_id.cancelled.$previous"
   install -m 0600 /dev/null "$RUN_DIR/migration-$domain_id.cancelled.$previous"
+fi
+if [[ $action == release ]]; then
+  durable_marker "$STATE_DIR/migration-$domain_id.cancelled.$saved"
 fi
 exec 9>"$lock_file"
 if ! flock -w "$lock_wait" 9; then
   stop busy lock_busy
 fi
-[[ ! -e $cancel_marker ]] || stop refused cancelled
+if [[ $action == release ]]; then
+  [[ ! -e $release_completed ]] || stop ok released
+  [[ ! -e $release_started ]] || stop failed release_interrupted
+else
+  [[ ! -e $cancel_marker && ! -e $durable_cancel_marker && ! -e $release_started && ! -e $release_completed ]] \
+    || stop refused cancelled
+fi
 
 if [[ $action == idle ]]; then
   for ((i = 0; i <= drain_wait; i++)); do
@@ -351,6 +399,7 @@ case $action in
       # Kept once: a replay after the fence must never keep the commented crontab instead.
       crontab_text >"$kept_crontab.tmp.$$"
       mv -f -- "$kept_crontab.tmp.$$" "$kept_crontab"
+      durable_marker "$kept_crontab"
     fi
     text=$(<"$kept_crontab")
     enabled=""
@@ -358,7 +407,7 @@ case $action in
       enabled+=$(printf '{"name":"%s","enabled":%s},' "$name" "$(is_disabled "$name" && echo false || echo true)")
     done
     dbs=""
-    for db in "${databases[@]}"; do dbs+="\"$db\","; done
+    for db in "${databases[@]-}"; do [[ -z $db ]] || dbs+="\"$db\","; done
     add has_crontab "$has_crontab"
     add crontab_sha "\"$(printf '%s' "$text" | sha)\""
     add active_sha "\"$(printf '%s' "$text" | active_lines | sha)\""
@@ -406,6 +455,7 @@ case $action in
     ;;
 
   release)
+    durable_marker "$release_started"
     # Exactly what was recorded: lock states, then the enabled states, then the crontab.
     while IFS=$'\t' read -r user host locked; do
       [[ -n $user ]] || continue
@@ -455,7 +505,7 @@ case $action in
       [[ $now_locked == true || $now_locked == 1 ]] && now_locked=1 || now_locked=0
       [[ $now_locked == "$locked" ]] || stop failed "lock_state_differs:$user@$host"
     done <<<"$(unb64 <<<"$accounts_b64")"
-    if [[ ${#databases[@]} -gt 0 && -n $owner_db_user ]]; then
+    if [[ -n ${databases[*]:-} && -n $owner_db_user ]]; then
       probe="praho_barrier_probe_${token:0:8}"
       if is_disabled "$domain"; then
         # Suspended: the owner's login must still be refused.
@@ -468,6 +518,7 @@ case $action in
           || stop failed probe_write_failed
       fi
     fi
+    durable_marker "$release_completed"
     rm -f -- "$kept_crontab"
     stop ok released
     ;;

@@ -1,90 +1,76 @@
 ---
-# The source node's reverse proxy to the target during a cutover (ADR-0061 Phase 2, contract step 6).
-#
-#   bridge_action=install   write the vhost in conf-enabled (before sites-enabled), reload, verify
-#   bridge_action=verify    answer the domain locally with a status below 400
-#   bridge_action=remove    delete the vhost and reload; the disabled Virtualmin vhost answers again
-#
-# The source terminates TLS with the domain's existing certificate and proxies over HTTP inside the
-# provider's network, preserving the Host header. Proxying HTTPS by address would select the target's
-# default vhost on SNI, not the customer's site; HTTP plus Host is deterministic.
-- name: Install, verify or remove a cutover bridge
+# The node helper locks config validation, reload and migration-owned hosts entries together.
+- name: Prepare, install, verify or remove a migration-owned bridge
   hosts: all
   gather_facts: false
   become: false
-  vars:
-    bridge_target_port: 80
-    bridge_conf: "/etc/apache2/conf-enabled/praho-bridge-{{ bridge_domain }}.conf"
   tasks:
-    - name: Validate bridge inputs
+    - name: Validate single-host bridge inputs
       ansible.builtin.assert:
         that:
-          - bridge_action in ['install', 'verify', 'remove']
+          - ansible_play_hosts_all | length == 1
+          - bridge_action in ['prepare', 'origin_install', 'origin_verify', 'install', 'verify', 'remove', 'origin_remove', 'fetch_crontab', 'stage_activation', 'activate', 'retire_activation']
+          - bridge_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - bridge_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
-          - bridge_domain_id is match('^[0-9]{1,30}$')
-          - bridge_target_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
-          - bridge_target_port | string is match('^[0-9]{1,5}$')
-          - bridge_certificate is match('^/[A-Za-z0-9._/-]+$')
-          - bridge_certificate_key is match('^/[A-Za-z0-9._/-]+$')
+          - bridge_action in ['activate', 'retire_activation'] or bridge_source_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
+          - bridge_action in ['activate', 'retire_activation'] or bridge_target_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
 
-    - name: Install the bridge vhost
-      when: bridge_action == 'install'
-      block:
-        - name: Write the bridge vhost before the site vhosts
-          ansible.builtin.template:
-            src: templates/praho_bridge.conf.j2
-            dest: "{{ bridge_conf }}"
-            owner: root
-            group: root
-            mode: "0644"
-          notify: Reload Apache
+    - name: Fetch the original cron directly into the private controller spool
+      when: bridge_action == 'fetch_crontab'
+      ansible.builtin.fetch:
+        src: "{{ bridge_crontab_source }}"
+        dest: "{{ bridge_crontab_spool }}"
+        flat: true
+        fail_on_missing: true
+        validate_checksum: true
+      no_log: true
 
-        - name: Apply the vhost change
-          ansible.builtin.meta: flush_handlers
+    - name: Create the target's private activation directory
+      when: bridge_action == 'stage_activation'
+      ansible.builtin.file:
+        path: "/var/lib/praho/bridges/{{ bridge_id }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
 
-    - name: Verify Apache's configuration
-      when: bridge_action in ['install', 'verify']
-      ansible.builtin.command:
-        argv: [apache2ctl, configtest]
-      changed_when: false
+    - name: Copy the original cron into the target's private activation directory
+      when: bridge_action == 'stage_activation'
+      ansible.builtin.copy:
+        src: "{{ bridge_crontab_spool }}"
+        dest: "/var/lib/praho/bridges/{{ bridge_id }}/activation.incoming"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
 
-    - name: Verify the bridge answers the domain
-      when: bridge_action in ['install', 'verify']
-      ansible.builtin.command:
-        argv:
-          - curl
-          - -sS
-          - -k
-          - -o
-          - /dev/null
-          - -w
-          - "%{http_code}"
-          - --resolve
-          - "{{ bridge_domain }}:443:127.0.0.1"
-          - "https://{{ bridge_domain }}/"
-      register: bridge_answer
-      changed_when: false
-      failed_when: bridge_answer.stdout | int >= 400
+    - name: Run the migration-owned node operation
+      ansible.builtin.script:
+        cmd: files/praho-bridge.py
+        executable: python3
+      environment:
+        PRAHO_BRIDGE_ID: "{{ bridge_id }}"
+        PRAHO_BRIDGE_ACTION: "{{ bridge_action }}"
+        PRAHO_BRIDGE_DOMAIN: "{{ bridge_domain }}"
+        PRAHO_ACCOUNT_NAME: "{{ bridge_account_name | default('') }}"
+        PRAHO_BRIDGE_TARGET: "{{ bridge_target_ipv4 | default('') }}"
+        PRAHO_BRIDGE_SOURCE: "{{ bridge_source_ipv4 | default('') }}"
+        PRAHO_BRIDGE_MANIFEST: "{{ bridge_manifest | default({}) | to_json }}"
+        PRAHO_BRIDGE_ORIGIN_CERTIFICATE: "{{ bridge_origin_certificate | default('') }}"
+        PRAHO_BRIDGE_OWNER: "{{ bridge_owner | default('') }}"
+        PRAHO_BARRIER_RECORD: "{{ bridge_barrier_record | default({}) | to_json }}"
+        PRAHO_BRIDGE_CERT_MIN_SECONDS: "{{ bridge_certificate_min_seconds | default(172800) }}"
+        PRAHO_CLEANUP_SOURCE_RECORD: "{{ cleanup_source_record | default('') }}"
+      register: bridge_step
+      changed_when: bridge_action != 'verify'
 
-    - name: Remove the bridge vhost
-      when: bridge_action == 'remove'
-      block:
-        - name: Delete the bridge vhost
-          ansible.builtin.file:
-            path: "{{ bridge_conf }}"
-            state: absent
-          notify: Reload Apache
+    - name: Require exactly one structured result
+      vars:
+        bridge_results: "{{ bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - bridge_results | length == 1
 
-        - name: Apply the vhost change
-          ansible.builtin.meta: flush_handlers
-
-        - name: Verify Apache's configuration
-          ansible.builtin.command:
-            argv: [apache2ctl, configtest]
-          changed_when: false
-
-  handlers:
-    - name: Reload Apache
-      ansible.builtin.command:
-        argv: [apache2ctl, graceful]
-      changed_when: true
+    - name: Emit the bridge's structured result
+      ansible.builtin.debug:
+        msg: "{{ bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | first }}"

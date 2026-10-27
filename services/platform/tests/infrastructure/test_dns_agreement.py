@@ -67,6 +67,14 @@ class AgreementTests(SimpleTestCase):
         self.assertTrue(self.check(_answers(("95.217.0.10",), ()), v6=None).agreed)
         self.assertFalse(self.check(*[_answers(("95.217.0.10",), ("2a01:4f8::1",))] * 3, v6=None).agreed)
 
+    def test_a_missing_negative_aaaa_answer_is_not_agreement(self) -> None:
+        incomplete = [answer for answer in _answers(("95.217.0.10",), ()) if answer.record_type == "A"]
+        self.assertFalse(self.check(incomplete, incomplete, incomplete, v6=None).agreed)
+
+    def test_an_unexpected_record_type_is_not_authoritative_address_agreement(self) -> None:
+        answers = [AuthoritativeAnswer("ns1.example.net", "NS", ())]
+        self.assertFalse(self.check(answers, answers, answers, v6=None).agreed)
+
     def test_the_highest_ttl_any_server_answered_is_reported(self) -> None:
         answers = _answers(("95.217.0.10",), ("2a01:4f8::1",), ttl=60)
         answers[0] = AuthoritativeAnswer("ns1.example.net", "A", ("95.217.0.10",), "198.51.100.1", ttl=300)

@@ -43,12 +43,16 @@ set -euo pipefail
 umask 077
 
 RUN_DIR=${PRAHO_RUN_DIR:-/run/praho}
+STATE_DIR=${PRAHO_PAIR_STATE_DIR:-/var/lib/praho/pair-restore}
+HELD_STATE_DIR=${PRAHO_HELD_STATE_DIR:-/var/lib/praho/recovery}
 APACHE_DIR=${PRAHO_APACHE_DIR:-/etc/apache2/conf-enabled}
 HTTP_PORT=${PRAHO_HTTP_PORT:-80}
 HTTPS_PORT=${PRAHO_HTTPS_PORT:-443}
-readonly RUN_DIR APACHE_DIR HTTP_PORT HTTPS_PORT
+readonly RUN_DIR STATE_DIR HELD_STATE_DIR APACHE_DIR HTTP_PORT HTTPS_PORT
 safe_dir='^/[A-Za-z0-9._/-]+$'
 [[ $RUN_DIR =~ $safe_dir && $RUN_DIR != *..* ]] || exit 64
+[[ $STATE_DIR =~ $safe_dir && $STATE_DIR != / && $STATE_DIR != *..* ]] || exit 64
+[[ $HELD_STATE_DIR =~ $safe_dir && $HELD_STATE_DIR != / && $HELD_STATE_DIR != *..* ]] || exit 64
 [[ $APACHE_DIR =~ $safe_dir && $APACHE_DIR != *..* ]] || exit 64
 [[ $HTTP_PORT =~ ^[0-9]{1,5}$ && $HTTPS_PORT =~ ^[0-9]{1,5}$ ]] || exit 64
 
@@ -63,6 +67,8 @@ diff_archive=${PRAHO_DIFF_ARCHIVE:-}
 base_sha=${PRAHO_BASE_SHA:-}
 diff_sha=${PRAHO_DIFF_SHA:-}
 step_hold=${PRAHO_STEP_HOLD:-0}
+recovery=${PRAHO_RECOVERY:-0}
+ssl_helper=${PRAHO_RECOVERY_SSL_HELPER:-/var/lib/praho/recovery/ssl.py}
 
 [[ $action =~ ^(restore|release)$ ]] || exit 64
 [[ $domain =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] || exit 64
@@ -70,15 +76,26 @@ step_hold=${PRAHO_STEP_HOLD:-0}
 [[ $token =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 64
 [[ $lock_wait =~ ^[0-9]{1,4}$ ]] || exit 64
 [[ $step_hold =~ ^[0-9]{1,2}$ ]] || exit 64
+[[ $recovery =~ ^[01]$ ]] || exit 64
+valid_archive_name() {
+  [[ $1 =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ ]] || \
+    [[ $recovery == 1 && $1 == "migration_$token.tar.gz" ]]
+}
 if [[ $action == restore ]]; then
-  [[ $base_archive =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ ]] || exit 64
-  [[ $diff_archive =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ ]] || exit 64
-  [[ $base_sha =~ ^[0-9a-f]{64}$ && $diff_sha =~ ^[0-9a-f]{64}$ ]] || exit 64
-  [[ $base_archive != "$diff_archive" ]] || exit 64
+  valid_archive_name "$base_archive" || exit 64
+  [[ $base_sha =~ ^[0-9a-f]{64}$ ]] || exit 64
+  if [[ $recovery == 0 || -n $diff_archive ]]; then
+    [[ $diff_archive =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ && $base_archive != migration_* ]] || exit 64
+    [[ $diff_sha =~ ^[0-9a-f]{64}$ && $base_archive != "$diff_archive" ]] || exit 64
+  else
+    [[ -z $diff_sha ]] || exit 64
+  fi
 fi
 
 lock_file="$RUN_DIR/chain-$domain_id.lock"
 cancel_marker="$RUN_DIR/chain-$domain_id.cancelled.$token"
+durable_cancel_marker="$STATE_DIR/chain-$domain_id.cancelled.$token"
+release_completed="$STATE_DIR/chain-$domain_id.released.$token"
 maint_conf="$APACHE_DIR/zz-praho-maint-$domain_id.conf"
 progress="$RUN_DIR/pair-$domain_id.progress"
 checkpoints=""
@@ -100,6 +117,28 @@ emit() {
   json=$(printf '{"outcome":"%s","reason":"%s","ran":%s,"action":"%s","domain_id":"%s","token":"%s","checkpoints":[%s]}' \
     "$1" "$2" "$3" "$action" "$domain_id" "$token" "$checkpoints")
   printf 'PAIR_RESULT=%s\n' "$(printf '%s' "$json" | base64 | tr -d '\n')"
+}
+
+# Flush both the marker and its directory before releasing any write hold. Perl is already
+# required by Virtualmin and its IO::Handle sync is portable across Linux and the macOS fixtures.
+durable_marker() {
+  perl -MFcntl=:DEFAULT,:mode -MIO::Handle -e '
+    my $path = shift;
+    sysopen(my $file, $path, O_WRONLY | O_CREAT | O_NOFOLLOW, 0600) or die "Cannot open durable fence\n";
+    my @info = stat($file);
+    die "Unsafe durable fence\n" unless S_ISREG($info[2]) && $info[4] == $> && !($info[2] & 077);
+    $file->sync or die "Cannot flush durable fence\n";
+    close($file) or die "Cannot close durable fence\n";
+    $path =~ s{/[^/]+$}{};
+    sysopen(my $directory, $path, O_RDONLY | O_NOFOLLOW) or die "Cannot open fence directory\n";
+    $directory->sync or die "Cannot flush fence directory\n";
+    close($directory) or die "Cannot close fence directory\n";
+  ' "$1"
+}
+
+cancelled() {
+  [[ -e $cancel_marker || -e $durable_cancel_marker ||
+    ( $recovery == 1 && ( -e $HELD_STATE_DIR/$token.activation || -e $HELD_STATE_DIR/$token.cleaned ) ) ]]
 }
 
 # domain_disabled : the domain itself is disabled, whatever its sub-servers are. What "as it was"
@@ -200,6 +239,17 @@ barrier_down() {
 }
 
 install -d -m 0700 -o root -g root "$RUN_DIR"
+if [[ -e $STATE_DIR || -L $STATE_DIR ]]; then
+  [[ -d $STATE_DIR && ! -L $STATE_DIR && $(stat -c '%u:%a' -- "$STATE_DIR") == "0:700" ]] || exit 64
+else
+  install -d -m 0700 -o root -g root "$STATE_DIR"
+fi
+if [[ $action == release ]]; then
+  # Fence a still-running or delayed invocation before waiting for its lock; reboot must not
+  # turn a completed operation into permission to restore or disable a live account again.
+  durable_marker "$durable_cancel_marker"
+  install -m 0600 /dev/null "$cancel_marker"
+fi
 exec 9>"$lock_file"
 if ! flock -w "$lock_wait" 9; then
   emit refused lock_busy false
@@ -209,14 +259,18 @@ fi
 if [[ $action == release ]]; then
   # An operator's decision: the pair restore is over. The marker keeps a late invocation from
   # starting, the barrier comes down, and the domain stays disabled for reconcile to enable.
-  install -m 0600 /dev/null "$cancel_marker"
+  if [[ -e $release_completed ]]; then
+    emit released barrier_removed false
+    exit 0
+  fi
   barrier_down
+  durable_marker "$release_completed"
   rm -f -- "$progress"
   emit released barrier_removed false
   exit 0
 fi
 
-if [[ -e $cancel_marker ]]; then
+if cancelled; then
   emit refused cancelled false
   exit 0
 fi
@@ -231,7 +285,7 @@ verify_archive() { # NAME SHA
   sum=$(sha256sum -- "$path")
   [[ ${sum%% *} == "$2" ]]
 }
-if ! verify_archive "$base_archive" "$base_sha" || ! verify_archive "$diff_archive" "$diff_sha"; then
+if ! verify_archive "$base_archive" "$base_sha" || { [[ -n $diff_archive ]] && ! verify_archive "$diff_archive" "$diff_sha"; }; then
   emit refused archive_not_verified false
   exit 0
 fi
@@ -367,10 +421,19 @@ reapply() {
 }
 
 restore_step() { # LABEL ARCHIVE SHA
-  [[ ! -e $cancel_marker ]] || fail "cancelled_before_$1"
+  local -a restore_flags=(--all-features)
+  local ssl_archive="$staging/recovery-ssl-$token-$1.tar.gz"
+  # Recovery creates a disabled placeholder first. Suppress Unix restore so neither the
+  # archived password nor cron becomes usable before PRAHO's ownership commit.
+  if [[ $recovery == 1 ]]; then
+    restore_flags+=(--except-feature unix --except-feature ssl)
+    "$ssl_helper" --source "$staging/$2" --destination "$ssl_archive" --domain "$domain" \
+      --domain-id "$domain_id" --sha256 "$3" || fail "ssl_paths_not_prepared_before_$1"
+  fi
+  ! cancelled || fail "cancelled_before_$1"
   verify_archive "$2" "$3" || fail "archive_not_verified_before_$1"
   printf '%s\n' "$1" >"$progress.step"
-  if ! virtualmin restore-domain --domain "$domain" --source "$staging/$2" --all-features >"$RUN_DIR/pair-$domain_id.log" 2>&1; then
+  if ! virtualmin restore-domain --domain "$domain" --source "$staging/$2" "${restore_flags[@]}" >"$RUN_DIR/pair-$domain_id.log" 2>&1; then
     # A restore that stops midway may already have rewritten the Apache configuration: cover what it
     # left (best effort, the job is parked either way) before the checkpoint probes it.
     read_surface || true
@@ -378,17 +441,36 @@ restore_step() { # LABEL ARCHIVE SHA
     checkpoint "${1}_failed"
     fail "restore_${1}_failed"
   fi
+  if [[ $recovery == 1 ]]; then
+    # SSL restore otherwise copies source-ID certificate directives and writes into that namespace.
+    # The bounded derivative keeps the original SSL vhost settings but forces every certificate
+    # directive into the existing target-ID directory before Virtualmin's native callback sees it.
+    if ! virtualmin restore-domain --domain "$domain" --source "$ssl_archive" --feature virtualmin --feature ssl \
+        >>"$RUN_DIR/pair-$domain_id.log" 2>&1; then
+      read_surface || true
+      barrier_up
+      checkpoint "${1}_ssl_failed"
+      fail "restore_${1}_ssl_failed"
+    fi
+    rm -f -- "$ssl_archive"
+  fi
   reapply "after_$1"
 }
 
 restore_step base "$base_archive" "$base_sha"
 if ((step_hold > 0)); then sleep "$step_hold"; fi
-restore_step differential "$diff_archive" "$diff_sha"
+if [[ -n $diff_archive ]]; then restore_step differential "$diff_archive" "$diff_sha"; fi
 
 # ---- verification, then the barrier comes down; the domain stays disabled ----------------------
 virtualmin list-domains --domain "$domain" --name-only 2>/dev/null | grep -qxF -- "$domain" || fail domain_missing_after_restore
 is_disabled || fail domain_enabled_after_restore
-barrier_down
-checkpoint barrier_down
+if [[ $recovery == 0 ]]; then
+  # This normal pair completes its hold here without a separate release RPC. Retained archive
+  # bytes must not authorize this UUID to overwrite a subsequently live account after reboot.
+  durable_marker "$durable_cancel_marker"
+  barrier_down
+  checkpoint barrier_down
+  durable_marker "$release_completed"
+fi
 rm -f -- "$progress" "$progress.step" "$RUN_DIR/pair-$domain_id.log"
 emit ok completed true

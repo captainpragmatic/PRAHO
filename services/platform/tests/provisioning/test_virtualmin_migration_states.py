@@ -136,6 +136,7 @@ class DeferralTests(StatesCase):
             name=f"migration-wake-{migration.pk}-{int(until.timestamp())}",
             schedule_type=Schedule.ONCE,
             next_run=until,
+            q_options={"timeout": VirtualminMigrationService().task_timeout},
         )
 
     def test_a_wake_that_cannot_be_scheduled_is_not_fatal(self) -> None:

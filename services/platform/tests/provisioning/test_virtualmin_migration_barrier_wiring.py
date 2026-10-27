@@ -196,8 +196,8 @@ class CompensationTests(BarrierCase):
             VirtualminMigrationService()._rollback(migration, token, target_delete_allowed=False)
 
         migration.refresh_from_db()
-        self.assertEqual(migration.status, "needs_review")
-        self.assertIn("Compensation failed", migration.error_detail)
+        self.assertEqual((migration.status, migration.parked_phase), ("compensating", "compensating"))
+        self.assertIn("Barrier release not confirmed", migration.error_detail)
 
 
 class CancelTests(BarrierCase):

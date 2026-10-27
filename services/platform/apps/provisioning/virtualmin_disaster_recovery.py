@@ -50,8 +50,8 @@ class VirtualminDisasterRecoveryService:
 
         The rebuild recreates *empty* domains: the account records come back but the customers'
         files, databases and mail do not, which reads as a recovery while losing the data. A real
-        run is therefore refused until the recover-to-node service (ADR-0061, phase 2) restores
-        accounts from their backups and replaces this method.
+        run is therefore refused. Use ``virtualmin_recover_node`` to restore retained backups
+        onto a fenced replacement node instead.
 
         Args:
             target_server: Clean Virtualmin server to rebuild
@@ -64,7 +64,7 @@ class VirtualminDisasterRecoveryService:
             logger.warning(f"⚠️ [DisasterRecovery] Refused a real rebuild of {target_server.hostname}: dry run only")
             return Err(
                 "Rebuilding a server from PRAHO data recreates empty domains and loses the customers' "
-                "data, so only a dry run is available until backup-based recovery replaces it."
+                "data. Use virtualmin_recover_node for backup-based recovery; this legacy rebuild is dry-run only."
             )
         return self._legacy_rebuild(target_server, dry_run=True)
 

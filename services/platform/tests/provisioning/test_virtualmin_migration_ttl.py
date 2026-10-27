@@ -82,6 +82,12 @@ class MigrationTtlCase(MigrationTestBase):
         return hostname
 
     def _lowered(self, hostname: AccountHostname) -> None:
+        self.assertEqual(hostname_service.lower_account_hostname_ttl(hostname), Ok("waiting"))
+        hostname.refresh_from_db()
+        self.assertIsNotNone(hostname.ttl_confirmed_at)
+        AccountHostname.objects.filter(pk=hostname.pk).update(
+            ttl_confirmed_at=timezone.now() - timedelta(seconds=ORIGINAL_TTL + 1)
+        )
         self.assertEqual(hostname_service.lower_account_hostname_ttl(hostname), Ok("converged"))
         hostname.refresh_from_db()
 
@@ -125,11 +131,26 @@ class LoweringStepTests(MigrationTtlCase):
 
         return quiesce
 
-    def test_the_pending_step_lowers_the_ttl_before_quiescing(self) -> None:
-        self._published_name()
+    def test_the_pending_step_waits_for_old_cached_answers_before_quiescing(self) -> None:
+        hostname = self._published_name()
         migration, token = self._held("pending")
         seen: dict[str, int] = {}
 
+        with (
+            patch.object(VirtualminMigrationService, "_quiesce", self._stop_after_quiescing(seen)),
+            patch.object(virtualmin_tasks, "schedule"),
+        ):
+            VirtualminMigrationService().execute(migration, token)
+
+        migration.refresh_from_db()
+        hostname.refresh_from_db()
+        self.assertEqual(migration.status, "lowering_ttl")
+        self.assertEqual(seen, {}, "the source stays live while old cached answers expire")
+        self.assertIsNotNone(hostname.ttl_confirmed_at)
+        self.assertEqual(migration.resume_after, hostname.ttl_confirmed_at + timedelta(seconds=ORIGINAL_TTL))
+        AccountHostname.objects.filter(pk=hostname.pk).update(
+            ttl_confirmed_at=timezone.now() - timedelta(seconds=ORIGINAL_TTL + 1)
+        )
         with (
             patch.object(VirtualminMigrationService, "_quiesce", self._stop_after_quiescing(seen)),
             patch.object(virtualmin_tasks, "schedule"),
@@ -171,7 +192,10 @@ class CompensationTests(MigrationTtlCase):
 
     def test_a_ttl_that_never_confirms_rolls_back_and_restores(self) -> None:
         hostname = self._published_name()
-        self._lowered(hostname)
+        with patch.object(FakeDnsGateway, "reconcile_records", _stale_ttl):
+            self.assertEqual(hostname_service.lower_account_hostname_ttl(hostname), Ok("waiting"))
+        hostname.refresh_from_db()
+        self.assertIsNone(hostname.ttl_confirmed_at, "the provider has never confirmed the lower TTL")
         AccountHostname.objects.filter(pk=hostname.pk).update(
             ttl_lowered_at=timezone.now() - hostname_service.TTL_LOWER_DEADLINE - timedelta(seconds=1)
         )

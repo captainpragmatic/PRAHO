@@ -156,13 +156,14 @@ class AccountReadyTests(LifecycleCase):
 
 
 class MigrationTargetTests(LifecycleCase):
-    def test_the_name_is_put_back_on_the_target_disabled_before_activation(self) -> None:
+    def test_a_legacy_move_puts_the_name_on_the_target_disabled_before_activation(self) -> None:
         _configure(enabled=True)
         account = self._account()
         service.allocate_account_hostname(account)
         target = self.server.__class__.objects.create(name="Target", hostname="vm-target.example.com")
         order: list[str] = []
         migration = SimpleNamespace(
+            contract="legacy",
             account=account,
             target_server=target,
             pre_migration_snapshot={"remote": {"username": account.virtualmin_username, "attributes": {}}},
@@ -186,7 +187,6 @@ class MigrationTargetTests(LifecycleCase):
             migrator._verify(migration, uuid4())  # type: ignore[arg-type]  # a stand-in migration
         self.assertEqual(order, ["ensure vm-target.example.com enabled=False owner=True", "move activating"])
 
-
     def test_the_recreate_hook_hands_back_what_the_node_now_serves(self) -> None:
         # The cutover gates its next step on this outcome (ADR-0061 P2.4), so it must not be dropped.
         _configure(enabled=True)
@@ -195,6 +195,7 @@ class MigrationTargetTests(LifecycleCase):
         served = service.EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
         with patch.object(service, "ensure_node_account_name", return_value=Ok(served)):
             self.assertEqual(lifecycle.ensure_on_recreated_node(account, self.server, enabled=False), Ok(served))
+
 
 class TerminationTests(LifecycleCase):
     def _named_account(self) -> tuple[VirtualminAccount, AccountHostname]:

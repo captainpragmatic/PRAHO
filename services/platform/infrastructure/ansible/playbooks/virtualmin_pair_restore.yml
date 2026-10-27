@@ -21,6 +21,7 @@
     pair_diff_archive: ""
     pair_base_sha: ""
     pair_diff_sha: ""
+    pair_recovery: false
   tasks:
     - name: Validate pair restore inputs
       ansible.builtin.assert:
@@ -32,10 +33,36 @@
           - chain_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - pair_lock_wait_seconds | string is match('^[0-9]{1,4}$')
           - pair_step_hold_seconds | string is match('^[0-9]{1,2}$')
-          - pair_action == 'release' or pair_base_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
-          - pair_action == 'release' or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - pair_action == 'release' or pair_base_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$') or (pair_recovery | bool and pair_base_archive == 'migration_' ~ chain_token ~ '.tar.gz' and pair_diff_archive == '')
+          - pair_action == 'release' or (pair_recovery | bool and pair_diff_archive == '') or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
           - pair_action == 'release' or pair_base_sha is match('^[0-9a-f]{64}$')
-          - pair_action == 'release' or pair_diff_sha is match('^[0-9a-f]{64}$')
+          - pair_action == 'release' or (pair_recovery | bool and pair_diff_archive == '' and pair_diff_sha == '') or pair_diff_sha is match('^[0-9a-f]{64}$')
+
+    - name: Keep the recovery certificate adapter private
+      ansible.builtin.file:
+        path: /var/lib/praho/recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: pair_recovery | bool
+
+    - name: Keep pair cancellation evidence across node reboots
+      ansible.builtin.file:
+        path: /var/lib/praho/pair-restore
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the bounded recovery certificate adapter
+      ansible.builtin.copy:
+        src: files/praho-recovery-ssl.py
+        dest: /var/lib/praho/recovery/ssl.py
+        owner: root
+        group: root
+        mode: '0700'
+      when: pair_recovery | bool
 
     - name: Run the pair step under the per-domain lock
       ansible.builtin.script:
@@ -52,6 +79,7 @@
         PRAHO_BASE_SHA: "{{ pair_base_sha }}"
         PRAHO_DIFF_SHA: "{{ pair_diff_sha }}"
         PRAHO_STEP_HOLD: "{{ pair_step_hold_seconds }}"
+        PRAHO_RECOVERY: "{{ (pair_recovery | bool) | ternary('1', '0') }}"
       register: pair_step
       changed_when: true
 

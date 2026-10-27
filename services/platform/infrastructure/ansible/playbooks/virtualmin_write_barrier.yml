@@ -43,6 +43,14 @@
           - barrier_has_crontab | string is match('^[01]?$')
           - barrier_crontab_active_sha == '' or barrier_crontab_active_sha is match('^[0-9a-f]{64}$')
 
+    - name: Keep cancellation and completed release evidence across node reboots
+      ansible.builtin.file:
+        path: /var/lib/praho/migration
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
     - name: Run the barrier action under the per-domain migration lock
       ansible.builtin.script:
         cmd: files/praho-write-barrier.sh
