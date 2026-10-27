@@ -16,7 +16,7 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn, cast
 from uuid import UUID
 
 CHAIN = "PRAHO_MAIL_SETUP"
@@ -130,7 +130,7 @@ class MailSetup:
         self.state = node.state
         self.templates = Path(__file__).with_name("mail-templates")
 
-    def refuse(self, code: str) -> None:
+    def refuse(self, code: str) -> NoReturn:
         raise self.error(code)
 
     def certificate_verify_command(self, expected: str, certificate: Path) -> list[str]:
@@ -216,6 +216,8 @@ class MailSetup:
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
                 self.refuse("mail_setup_review_required")
             data = json.loads(path.read_text())
+            if not isinstance(data, dict):
+                self.refuse("mail_setup_review_required")
             if (type(data.get("version")), data.get("version")) != (int, 1) or (
                 data.get("profile"),
                 data.get("node"),
@@ -460,6 +462,9 @@ class MailSetup:
     def security_configuration(self, expected: str) -> None:
         if self.marker(expected) is None:
             self.refuse("mail_setup_review_required")
+        self._security_settings()
+
+    def _security_settings(self) -> None:
         self.node.stage = "verification_native_backend"
         inventory = self.node.native("inventory")
         if (
@@ -747,7 +752,7 @@ class MailSetup:
             if not self.security(expected, allow_fence=True):
                 self.refuse("mail_setup_review_required")
             self.cleanup_fence()
-            return self.node.inspect_node(expected)
+            return cast(dict[str, Any], self.node.inspect_node(expected))
         admission = self.node.preflight_setup(expected)
         zones = self.node.reserved_zones()
         if admission["mta"] == "postfix" and "texthash" not in self.execute(["postconf", "-m"]).split():
@@ -806,7 +811,7 @@ class MailSetup:
                 self.refuse("mail_setup_review_required")
             self.node.stage = "remove_fence"
             self.cleanup_fence()
-            observation = self.node.inspect_node(expected)
+            observation = cast(dict[str, Any], self.node.inspect_node(expected))
             completed = True
             return observation
         finally:

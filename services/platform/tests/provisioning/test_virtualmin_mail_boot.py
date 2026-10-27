@@ -13,7 +13,7 @@ from django.test import SimpleTestCase
 HELPER = Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files/praho-mail-boot.py"
 
 
-class MailBootGuardTests(SimpleTestCase):
+class MailBootGuardFixture:
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
@@ -49,6 +49,8 @@ class MailBootGuardTests(SimpleTestCase):
         self.write("proc/sys/kernel/random/boot_id", "boot-a\n")
         return values
 
+
+class MailBootGuardTests(MailBootGuardFixture, SimpleTestCase):
     def test_interrupted_or_reused_setup_pid_refuses_boot_even_with_old_fence_marker(self):
         self.marker()
         self.assertFalse(self.guard.allowed())
