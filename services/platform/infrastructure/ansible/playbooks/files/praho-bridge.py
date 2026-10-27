@@ -7,10 +7,12 @@ synthetic name on the target's existing 443, then local HTTP. HTTPS reaches the 
 
 from __future__ import annotations
 
+import _ssl
 import base64
 import errno
 import fcntl
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -25,12 +27,13 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 HTTPS_PORT = 443
 HTTP_PORT = 80
 MAX_HOSTNAME_LENGTH = 253
+NEUTRAL_BODY = "Not Found"
 
 
 def command(argv: list[str]) -> str:
@@ -46,6 +49,7 @@ def hostname(value: str) -> str:
 
 class NodeBridge:
     def __init__(self, root: Path = Path("/"), *, execute: Callable[[list[str]], str] = command) -> None:
+        self.root = root
         self.state = root / "var/lib/praho/bridges"
         self.barrier_state = root / "var/lib/praho/migration"
         self.owner_uid = 0
@@ -54,8 +58,74 @@ class NodeBridge:
         self.probes = root / "var/www/praho-bridge-probes"
         self.ca = root / "etc/ssl/certs/ca-certificates.crt"
         self.hosts = root / "etc/hosts"
+        self.credential_helper = root / "var/lib/praho/recovery/credentials.pl"
         self.execute = execute
         self.minimum_certificate_lifetime = 48 * 3600
+        self.binding_policy = None
+
+    def bindings(self) -> Any:
+        if self.binding_policy is None:
+            library = Path(__file__).with_name("praho-apache-bindings.py")
+            if not library.exists():
+                library = self.root / "var/lib/praho/apache-bindings/library.py"
+                for path in (library.parent, library):
+                    info = path.lstat()
+                    if (
+                        info.st_uid != self.owner_uid
+                        or info.st_mode & 0o077
+                        or (
+                            not stat.S_ISDIR(info.st_mode) if path == library.parent else not stat.S_ISREG(info.st_mode)
+                        )
+                    ):
+                        raise ValueError("The shared Apache binding library is not private owned state")
+            spec = importlib.util.spec_from_file_location("praho_apache_bindings", library)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.binding_policy = module.ApacheBindings(self.root, execute=self.execute, owner_uid=self.owner_uid)
+        return self.binding_policy
+
+    @contextmanager
+    def configuration_locked(self, identity: str) -> Iterator[None]:
+        with self.locked():
+            directory = self.directory(identity)
+            paths = {self.conf / f"praho-{prefix}-{identity}.conf": 0o644 for prefix in ("origin", "migration")}
+            paths.update(
+                {
+                    directory / name: 0o600
+                    for name in (
+                        "source.json",
+                        "origin.json",
+                        "origin-target.json",
+                        "source-removed",
+                        "origin-removed",
+                        "origin-ca.pem",
+                        "upstream-ca.pem",
+                    )
+                }
+            )
+            self.after_config_commit = []
+            try:
+                with self.bindings().transaction(paths):
+                    yield
+                for operation in self.after_config_commit:
+                    operation()
+            finally:
+                self.after_config_commit = None
+
+    def remove_after_config_commit(self, path: Path) -> None:
+        self.after_config_commit.append(lambda: path.unlink(missing_ok=True))
+
+    def target_http_bindings(self, domain: str) -> list[str]:
+        result = set()
+        for site in sorted(self.sites.glob("*.conf")):
+            for ports, body in re.findall(r"<VirtualHost\s+([^>]+)>(.*?)</VirtualHost>", site.read_text(), re.S | re.I):
+                names = re.findall(r"^\s*ServerName\s+(\S+)\s*$", body, re.I | re.M)
+                if names == [domain]:
+                    result.update(self.bindings().parse(ports).get("80", []))
+        if not result:
+            raise ValueError("The current target HTTP vhost bindings could not be identified")
+        return sorted(result)
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -100,7 +170,18 @@ class NodeBridge:
         default = self.conf / "praho-default-site.conf"
         if not default.is_file() or "ServerName praho-default.invalid" not in default.read_text():
             raise ValueError("The node needs PRAHO's neutral default site before a bridge can be prepared")
-        for scheme, port in (("http", HTTP_PORT), ("https", HTTPS_PORT)):
+        if self.bindings().refresh():
+            self.reload()
+        policy = self.bindings()
+        groups = policy.current()
+        probes = [
+            (scheme, port, address)
+            for scheme, port in (("http", HTTP_PORT), ("https", HTTPS_PORT))
+            for address in policy.probe_addresses(groups, str(port))
+        ]
+        if not probes:
+            raise ValueError("The neutral default has no local binding destinations")
+        for scheme, port, address in probes:
             argv = [
                 "curl",
                 "--silent",
@@ -120,7 +201,7 @@ class NodeBridge:
             ]
             if port == HTTPS_PORT:
                 argv.append("--insecure")  # The neutral default deliberately uses the node's self-signed snakeoil cert.
-            argv.append(f"{scheme}://127.0.0.1:{port}/")
+            argv.append(f"{scheme}://{policy.endpoint(address, str(port))}/")
             if self.execute(argv).strip() != "404":
                 raise ValueError("The node's neutral default site does not answer unknown hosts with 404")
 
@@ -160,7 +241,7 @@ class NodeBridge:
                 os.fsync(stream.fileno())
 
     def prepare(self, identity: str, domain: str, account_name: str, target: str, source: str) -> dict[str, Any]:
-        with self.locked():
+        with self.configuration_locked(identity):
             directory = self.directory(identity)
             if (directory / "source-removed").exists():
                 raise ValueError("The source bridge was removed")
@@ -171,18 +252,14 @@ class NodeBridge:
                 "target": str(ipaddress.IPv4Address(target)),
                 "source": str(ipaddress.IPv4Address(source)),
             }
+            account_name = hostname(account_name) if account_name else ""
             kept = directory / "source.json"
             if kept.exists():
-                manifest = json.loads(kept.read_text())
-                if any(manifest.get(key) != value for key, value in expected.items()):
-                    raise ValueError("Bridge identity belongs to a different account or target")
-                self.recheck_frontend_lifetimes(manifest)
-                self.pin_origin(identity, manifest["target"])
-                return manifest
+                return self.resume_preparation(kept, identity, account_name, expected)
             wanted = {expected["domain"]}
             if account_name:
                 wanted.add(hostname(account_name))
-            vhosts = []
+            vhosts: list[dict[str, Any]] = []
             for site in sorted(self.sites.glob("*.conf")):
                 for ports, body in re.findall(
                     r"<VirtualHost\s+([^>]+)>(.*?)</VirtualHost>", site.read_text(), re.S | re.I
@@ -195,9 +272,18 @@ class NodeBridge:
                     name = (directives.get("servername") or [""])[0].lower()
                     if name not in wanted:
                         continue
-                    port = HTTPS_PORT if any(part.endswith(":443") for part in ports.split()) else HTTP_PORT
+                    groups = self.bindings().parse(ports)
+                    if len(groups) != 1:
+                        raise ValueError("The native bridge vhost mixes HTTP and HTTPS bindings")
+                    port = int(next(iter(groups)))
                     names = list(dict.fromkeys(hostname(item) for item in [name, *directives.get("serveralias", [])]))
-                    item: dict[str, Any] = {"name": name, "names": names, "port": port}
+                    item: dict[str, Any] = {
+                        "name": name,
+                        "names": names,
+                        "port": port,
+                        "neutral": bool(account_name and name == account_name),
+                        "bindings": groups[str(port)],
+                    }
                     if port == HTTPS_PORT:
                         self.keep_certificate(directory, item, directives, len(vhosts))
                     else:
@@ -205,10 +291,79 @@ class NodeBridge:
                     vhosts.append(item)
             if not any(item["name"] == expected["domain"] and item["port"] == HTTP_PORT for item in vhosts):
                 raise ValueError("The customer HTTP vhost could not be identified")
-            manifest = {**expected, "identity": identity, "origin": self.origin_hostname(identity), "vhosts": vhosts}
+            manifest = self.bound_manifest(
+                {
+                    **expected,
+                    "identity": identity,
+                    "origin": self.origin_hostname(identity),
+                    "account_name": account_name,
+                    "vhosts": vhosts,
+                },
+                identity,
+            )
             self.pin_origin(identity, expected["target"])
             self.write(kept, json.dumps(manifest))
             return manifest
+
+    def resume_preparation(
+        self, kept: Path, identity: str, account_name: str, expected: dict[str, str]
+    ) -> dict[str, Any]:
+        manifest = json.loads(kept.read_text())
+        if any(manifest.get(key) != value for key, value in expected.items()):
+            raise ValueError("Bridge identity belongs to a different account or target")
+        if "account_name" not in manifest and (self.conf / f"praho-migration-{identity}.conf").exists():
+            raise ValueError("An installed legacy bridge needs explicit retirement before its policy can change")
+        manifest = self.bound_manifest(manifest, identity, account_name=account_name, allow_legacy=True)
+        self.recheck_frontend_lifetimes(manifest)
+        self.pin_origin(identity, manifest["target"])
+        self.write(kept, json.dumps(manifest))
+        return manifest
+
+    def bound_manifest(
+        self,
+        manifest: dict[str, Any],
+        identity: str,
+        *,
+        account_name: str | None = None,
+        allow_legacy: bool = False,
+    ) -> dict[str, Any]:
+        """Bind the neutral policy to a captured primary name; downstream steps never infer it."""
+        legacy = "account_name" not in manifest
+        if legacy and (not allow_legacy or account_name is None):
+            raise ValueError("The bridge manifest has no bound account-name policy; prepare it again")
+        captured = manifest.get("account_name", account_name)
+        captured = hostname(captured) if captured else ""
+        if account_name is not None and captured != account_name:
+            raise ValueError("The bridge manifest belongs to another account name")
+        domain = hostname(manifest["domain"])
+        if (
+            captured == domain
+            or manifest["identity"] != identity
+            or manifest["origin"] != self.origin_hostname(identity)
+        ):
+            raise ValueError("The bridge manifest belongs to another account or migration")
+        vhosts = []
+        for original in manifest["vhosts"]:
+            item = dict(original)
+            port = str(item["port"])
+            if not item.get("bindings") or port not in {"80", "443"}:
+                raise ValueError("The bridge manifest has no captured literal source bindings; prepare a fresh bridge")
+            normalized = self.bindings().parse(
+                " ".join(self.bindings().endpoint(value, port) for value in item["bindings"])
+            )
+            if normalized != {port: item["bindings"]}:
+                raise ValueError("The bridge source binding snapshot changed")
+            name = hostname(item["name"])
+            neutral = bool(captured and name == captured)
+            if name not in {domain, captured} or (not legacy and item.get("neutral") is not neutral):
+                raise ValueError("The bridge manifest has an inconsistent account-name policy")
+            names = [hostname(value) for value in item["names"]]
+            if name not in names or (domain if neutral else captured) in names:
+                raise ValueError("The bridge manifest mixes customer and neutral account names")
+            vhosts.append({**item, "neutral": neutral})
+        if captured and {item["port"] for item in vhosts if item["name"] == captured} != {HTTP_PORT, HTTPS_PORT}:
+            raise ValueError("The bridge manifest is missing the account-name HTTP or HTTPS vhost")
+        return {**manifest, "account_name": captured, "vhosts": vhosts}
 
     def keep_certificate(
         self, directory: Path, item: dict[str, Any], directives: dict[str, list[str]], index: int
@@ -241,7 +396,8 @@ class NodeBridge:
         item["public_certificate"] = certificate
 
     def certificate_metadata(self, certificate: Path) -> dict[str, Any]:
-        decoded = ssl._ssl._test_decode_cert(str(certificate))
+        decode: Callable[[str], dict[str, Any]] = cast(Any, _ssl)._test_decode_cert
+        decoded = decode(str(certificate))
         if ssl.cert_time_to_seconds(decoded["notAfter"]) < time.time() + self.minimum_certificate_lifetime:
             raise ValueError("The frontend certificate expires before the bridge window ends; renew it before moving")
         return decoded
@@ -252,15 +408,25 @@ class NodeBridge:
                 self.certificate_metadata(Path(item["certificate"]))
 
     def install_origin(self, identity: str, manifest: dict[str, Any]) -> str:
-        with self.locked():
+        with self.configuration_locked(identity):
             directory = self.directory(identity)
             if (directory / "origin-removed").exists():
                 raise ValueError("The target origin was removed")
+            manifest = self.bound_manifest(manifest, identity)
             self.require_neutral_default()
+            target_bindings = self.target_http_bindings(manifest["domain"])
+            backend = self.bindings().http_backend(target_bindings, self.bindings().current())
+            target_record = directory / "origin-target.json"
+            target_mapping = {"domain": manifest["domain"], "bindings": target_bindings, "backend": backend}
+            if target_record.exists() and json.loads(target_record.read_text()) != target_mapping:
+                raise ValueError("The target origin HTTP binding changed")
+            self.write(target_record, json.dumps(target_mapping))
             if manifest["identity"] != identity:
                 raise ValueError("Origin belongs to a different migration")
             source = str(ipaddress.IPv4Address(manifest["source"]))
-            names = sorted({hostname(name) for item in manifest["vhosts"] for name in item["names"]})
+            names = sorted(
+                {hostname(name) for item in manifest["vhosts"] if not item["neutral"] for name in item["names"]}
+            )
             origin = self.origin_hostname(identity)
             if manifest["origin"] != origin:
                 raise ValueError("The synthetic origin belongs to another migration")
@@ -289,8 +455,15 @@ class NodeBridge:
                 key.chmod(0o600)
                 certificate.chmod(0o600)
             origin_record = directory / "origin.json"
-            if origin_record.exists() and json.loads(origin_record.read_text()) != manifest:
-                raise ValueError("Origin belongs to a different account or source")
+            if origin_record.exists():
+                previous = self.bound_manifest(
+                    json.loads(origin_record.read_text()),
+                    identity,
+                    account_name=manifest["account_name"],
+                    allow_legacy=True,
+                )
+                if previous != manifest:
+                    raise ValueError("Origin belongs to a different account or source")
             self.write(origin_record, json.dumps(manifest))
             self.conf.mkdir(parents=True, exist_ok=True)
             self.probes.mkdir(parents=True, mode=0o755, exist_ok=True)
@@ -299,7 +472,7 @@ class NodeBridge:
             text = (
                 f"Alias {probe} {self.probes / identity}\n"
                 f"<Location {probe}>\nSetHandler default-handler\nRequire ip {source} 127.0.0.1\n</Location>\n"
-                f"<VirtualHost *:443>\nServerName {origin}\n"
+                f"<VirtualHost {' '.join(self.bindings().endpoint(value, '443') for value in self.bindings().current()['443'])}>\nServerName {origin}\n"
                 f"SSLEngine on\nSSLCertificateFile {certificate}\nSSLCertificateKeyFile {key}\n"
                 f"ProxyRequests Off\nProxyPreserveHost On\nProxyAddHeaders Off\n"
                 f"<Location />\n<RequireAll>\nRequire ip {source}\n"
@@ -308,19 +481,20 @@ class NodeBridge:
                 'RequestHeader set Host "expr=%{req:X-Praho-Original-Host}"\n'
                 "RequestHeader unset X-Praho-Original-Host\n"
                 f"ProxyPass {probe} !\nAlias {probe} {self.probes / identity}\n"
-                "ProxyPass / http://127.0.0.1:80/ retry=0 connectiontimeout=5 timeout=60\n"
-                "ProxyPassReverse / http://127.0.0.1:80/\n</VirtualHost>\n"
+                f"ProxyPass / http://{self.bindings().endpoint(backend, '80')}/ retry=0 connectiontimeout=5 timeout=60\n"
+                f"ProxyPassReverse / http://{self.bindings().endpoint(backend, '80')}/\n</VirtualHost>\n"
             )
             self.write(self.conf / f"praho-origin-{identity}.conf", text, 0o644)
+            self.bindings().refresh()
             self.reload()
             return certificate.read_text()
 
     def install_source(self, identity: str, origin_certificate: str) -> None:
-        with self.locked():
+        with self.configuration_locked(identity):
             directory = self.directory(identity)
             if (directory / "source-removed").exists():
                 raise ValueError("The source bridge was removed")
-            manifest = json.loads((directory / "source.json").read_text())
+            manifest = self.bound_manifest(json.loads((directory / "source.json").read_text()), identity)
             ssl.PEM_cert_to_DER_cert(origin_certificate)
             self.write(directory / "origin-ca.pem", origin_certificate)
             self.keep_upstream_trust(directory, manifest)
@@ -338,7 +512,7 @@ class NodeBridge:
                 ]
                 body = [
                     *(f"Define {variable} {name}" for variable, name in zip(variables, item["names"], strict=True)),
-                    f"<VirtualHost *:{port}>",
+                    f"<VirtualHost {' '.join(self.bindings().endpoint(value, str(port)) for value in item['bindings'])}>",
                     f"ServerName ${{{variables[0]}}}",
                 ]
                 if len(item["names"]) > 1:
@@ -351,6 +525,23 @@ class NodeBridge:
                             f"SSLCertificateKeyFile {item['key']}",
                         ]
                     )
+                if item["neutral"]:
+                    self.probes.mkdir(parents=True, mode=0o755, exist_ok=True)
+                    body.extend(
+                        [
+                            f"DocumentRoot {self.probes}",
+                            "RewriteEngine Off",
+                            "Redirect 404 /",
+                            f'ErrorDocument 404 "{NEUTRAL_BODY}"',
+                            f"<Directory {self.probes}>",
+                            "AllowOverride None",
+                            "Require all denied",
+                            "</Directory>",
+                            "</VirtualHost>",
+                        ]
+                    )
+                    blocks.append("\n".join(body))
+                    continue
                 body.extend(
                     [
                         "ProxyRequests Off",
@@ -371,17 +562,22 @@ class NodeBridge:
                 )
                 blocks.append("\n".join(body))
             self.write(self.conf / f"praho-migration-{identity}.conf", "\n".join(blocks) + "\n", 0o644)
+            self.bindings().refresh()
             self.reload()
 
     def verify_origin(self, identity: str, certificate: str) -> None:
         with self.locked():
             directory = self.directory(identity)
-            manifest = json.loads((directory / "source.json").read_text())
+            manifest = self.bound_manifest(json.loads((directory / "source.json").read_text()), identity)
             ssl.PEM_cert_to_DER_cert(certificate)
             self.write(directory / "origin-ca.pem", certificate)
             self.check_origin(identity, directory, manifest)
             self.keep_upstream_trust(directory, manifest)
             for item in manifest["vhosts"]:
+                if item["neutral"]:
+                    for name in item["verify_names"]:
+                        self.verify_neutral(name, int(item["port"]), manifest["target"], directory, identity)
+                    continue
                 if item["port"] != HTTPS_PORT:
                     continue
                 for name in item["verify_names"]:
@@ -417,7 +613,7 @@ class NodeBridge:
         self.write(directory / "upstream-ca.pem", trust)
 
     def check_origin(self, identity: str, directory: Path, manifest: dict[str, Any]) -> None:
-        names = sorted({name for item in manifest["vhosts"] for name in item["names"]})
+        names = sorted({name for item in manifest["vhosts"] if not item["neutral"] for name in item["names"]})
         for name in names:
             direct = [
                 "curl",
@@ -441,14 +637,45 @@ class NodeBridge:
             if self.execute(direct).strip() != identity:
                 raise ValueError(f"The target origin returned another migration's identity for {name}")
 
+    def verify_neutral(self, name: str, port: int, target: str, directory: Path, identity: str) -> None:
+        argv = [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--noproxy",
+            "*",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "30",
+            "--resolve",
+            f"{name}:{port}:{target}",
+            "--output",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+        ]
+        if port == HTTPS_PORT:
+            argv.extend(["--cacert", str(directory / "upstream-ca.pem")])
+        argv.append(f"{'https' if port == HTTPS_PORT else 'http'}://{name}/.__praho_bridge_{identity}")
+        if self.execute(argv) != f"{NEUTRAL_BODY}\n404":
+            raise ValueError(f"The account-name route is not neutral for {name}:{port}")
+
     def verify(self, identity: str) -> None:
         with self.locked():
             directory = self.directory(identity)
-            manifest = json.loads((directory / "source.json").read_text())
+            manifest = self.bound_manifest(json.loads((directory / "source.json").read_text()), identity)
             self.check_origin(identity, directory, manifest)
             for item in manifest["vhosts"]:
                 port = int(item["port"])
-                for name in item["verify_names"]:
+                addresses = self.bindings().probe_addresses({str(port): item["bindings"]}, str(port))
+                if not addresses:
+                    raise ValueError("The source bridge has no binding probe destinations")
+                for name, address in ((name, address) for name in item["verify_names"] for address in addresses):
+                    resolved = f"[{address}]" if ":" in address else address
+                    if item["neutral"]:
+                        self.verify_neutral(name, port, resolved, directory, identity)
+                        continue
                     argv = [
                         "curl",
                         "--silent",
@@ -465,7 +692,7 @@ class NodeBridge:
                         "--output",
                         "/dev/null",
                         "--resolve",
-                        f"{name}:{port}:127.0.0.1",
+                        f"{name}:{port}:{resolved}",
                     ]
                     if port == HTTPS_PORT:
                         argv.extend(["--cacert", str(directory / "upstream-ca.pem")])
@@ -501,35 +728,38 @@ class NodeBridge:
         return path
 
     def remove_source(self, identity: str, *, domain: str = "", cleanup_source_record: str = "") -> None:
-        with self.locked():
+        with self.configuration_locked(identity):
             record = self.source_record_for_cleanup(domain, cleanup_source_record) if cleanup_source_record else None
             if record is not None:
                 record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 prefix, saved = record.stem.split(".", 1)
                 self.write(record.with_name(f"{prefix}.cancelled.{saved}"), b"", durable=True)
-            self.write(self.directory(identity) / "source-removed", "removed\n")
+            self.write(self.directory(identity) / "source-removed", "removed\n", durable=True)
             (self.conf / f"praho-migration-{identity}.conf").unlink(missing_ok=True)
+            self.bindings().refresh()
             self.reload()
-            self.pin_origin(identity, None)
+            self.after_config_commit.append(lambda: self.pin_origin(identity, None))
             directory = self.directory(identity)
             for pattern in ("source-*-*.pem", "upstream-ca.pem", "origin-ca.pem", "source.json"):
                 for path in directory.glob(pattern):
-                    path.unlink()
+                    self.remove_after_config_commit(path)
             if record is not None:
-                record.unlink(missing_ok=True)
+                self.remove_after_config_commit(record)
 
     def remove_origin(self, identity: str) -> None:
-        with self.locked():
+        with self.configuration_locked(identity):
             directory = self.directory(identity)
-            self.write(directory / "origin-removed", "removed\n")
+            self.write(directory / "origin-removed", "removed\n", durable=True)
             record = directory / "origin.json"
             (self.conf / f"praho-origin-{identity}.conf").unlink(missing_ok=True)
+            self.bindings().refresh()
             self.reload()
-            record.unlink(missing_ok=True)
-            (self.probes / identity).unlink(missing_ok=True)
+            self.remove_after_config_commit(record)
+            self.remove_after_config_commit(directory / "origin-target.json")
+            self.remove_after_config_commit(self.probes / identity)
             for name in ("origin.pem", "origin-key.pem"):
-                (directory / name).unlink(missing_ok=True)
-            self.retire_activation_directory(directory)
+                self.remove_after_config_commit(directory / name)
+            self.after_config_commit.append(lambda: self.retire_activation_directory(directory))
 
     def retire_activation_directory(self, directory: Path) -> None:
         """Called under the node lock; never changes a customer domain or its live runtime state."""
@@ -538,7 +768,7 @@ class NodeBridge:
         activation = json.loads(marker.read_text()) if marker.exists() else {}
         if activation.get("phase") != "completed":
             self.write(marker, json.dumps({**activation, "phase": "removed"}), durable=True)
-        for name in ("activation.crontab", "activation.incoming"):
+        for name in ("activation.crontab", "activation.incoming", "activation.policy.crontab"):
             (directory / name).unlink(missing_ok=True)
 
     def retire_activation_data(self, identity: str) -> None:
@@ -563,7 +793,7 @@ class NodeBridge:
             mode = "LOCK" if account["locked"] else "UNLOCK"
             self.sql(f"ALTER USER '{user}'@'{host}' ACCOUNT {mode}")
 
-    def verify_accounts(self, record: dict[str, Any]) -> None:
+    def verify_accounts(self, record: dict[str, Any], *, verify_auth: bool = True) -> None:
         for account in record["accounts"]:
             user, host = account["user"], account["host"]
             predicate = f"User = '{user}' AND Host = '{host}'"
@@ -594,7 +824,7 @@ class NodeBridge:
             differences = [
                 name
                 for name, got, wanted in zip(("plugin", "authentication", "grants"), actual, expected, strict=True)
-                if got != wanted
+                if got != wanted and (verify_auth or name != "authentication")
             ]
             if differences:
                 raise ValueError(
@@ -658,7 +888,15 @@ class NodeBridge:
             finally:
                 incoming.unlink(missing_ok=True)
 
-    def activate_target(self, identity: str, domain: str, owner: str, record: dict[str, Any]) -> None:
+    def activate_target(
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        record: dict[str, Any],
+        *,
+        enabled: bool | None = None,
+    ) -> None:
         """Apply once on the target; replay may never overwrite state after writes were admitted."""
         with self.locked():
             binding = self.target_binding(domain, owner, record)
@@ -679,12 +917,44 @@ class NodeBridge:
                 )
             self.original_cron(kept, record)
             self.write(marker, json.dumps({**binding, "phase": "applying"}), durable=True)
-            self.restore_target_runtime(domain, owner, record, kept)
-            self.write(marker, json.dumps({**binding, "phase": "completed"}), durable=True)
+            self.restore_target_runtime(domain, owner, record, kept, enabled=enabled)
+            policy_record = {
+                "enabled": record["enabled"],
+                "accounts": [
+                    {key: account[key] for key in ("user", "host", "locked")} for account in record["accounts"]
+                ],
+                "databases": record["databases"],
+                "ids": {
+                    item["name"]: self.execute(
+                        ["virtualmin", "list-domains", "--domain", item["name"], "--id-only"]
+                    ).strip()
+                    for item in record["enabled"]
+                },
+            }
+            self.write(
+                marker, json.dumps({**binding, "phase": "completed", "policy_record": policy_record}), durable=True
+            )
             kept.unlink(missing_ok=True)
 
-    def restore_target_runtime(self, domain: str, owner: str, record: dict[str, Any], kept: Path) -> None:
+    def restore_target_runtime(  # noqa: C901, PLR0912, PLR0915  # One locked native activation with ordered verification.
+        self,
+        domain: str,
+        owner: str,
+        record: dict[str, Any],
+        kept: Path,
+        *,
+        enabled: bool | None = None,
+    ) -> None:
         """The caller holds the node lock and has persisted the applying marker."""
+        desired = record["enabled"][0]["enabled"] if enabled is None else enabled
+        if type(desired) is not bool:
+            raise ValueError("Current enabled policy must be boolean")
+        effective = json.loads(json.dumps(record))
+        for index, item in enumerate(effective["enabled"]):
+            item["enabled"] = desired if index == 0 else item["enabled"] and desired
+        for account in effective["accounts"]:
+            account["locked"] = account["locked"] or not desired
+        record = effective
         self.restore_accounts(record)
         for item in record["enabled"]:
             name = hostname(item["name"])
@@ -693,13 +963,38 @@ class NodeBridge:
             disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
             if (name not in disabled) != item["enabled"]:
                 action = "enable-domain" if item["enabled"] else "disable-domain"
-                self.execute(["virtualmin", action, "--domain", name, "--subservers"])
+                # This record restores each child separately. Cascading a parent enable
+                # would briefly expose a child that must remain disabled, including a
+                # provider-name child created after the pair hold captured its surfaces.
+                params = [] if item["enabled"] else ["--subservers"]
+                self.execute(["virtualmin", action, "--domain", name, *params])
         if record["has_crontab"]:
-            self.execute(["crontab", "-u", owner, str(kept)])
+            if desired:
+                self.execute(["crontab", "-u", owner, str(kept)])
+            else:
+                paused = kept.with_name("activation.policy.crontab")
+                content = self.suspended_cron(kept.read_text())
+                self.write(paused, content)
+                try:
+                    self.execute(["crontab", "-u", owner, str(paused)])
+                finally:
+                    paused.unlink(missing_ok=True)
         else:
             with suppress(subprocess.CalledProcessError):
                 self.execute(["crontab", "-u", owner, "-r"])
-        self.verify_accounts(record)
+        if not desired:
+            # Held Unix activation already completed, but this bridge marker is
+            # still applying. Use that completed identity to close every native
+            # policy surface without replaying its archived credential fields.
+            self.policy_native(
+                self._activation_identity(kept),
+                domain,
+                owner,
+                self.execute(["virtualmin", "list-domains", "--domain", domain, "--id-only"]).strip(),
+                False,
+                scope="recovery",
+            )
+        self.verify_accounts(record, verify_auth=desired)
         disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
         if any((item["name"] not in disabled) != item["enabled"] for item in record["enabled"]):
             raise ValueError("The target's enabled states do not match the original barrier record")
@@ -712,10 +1007,165 @@ class NodeBridge:
         else:
             if not record["has_crontab"]:
                 raise ValueError("The target still has a crontab that was originally absent")
-        if self.active_cron_digest(cron) != record["active_sha"]:
+        expected_active = (
+            record["active_sha"] if desired else self.active_cron_digest(self.suspended_cron(kept.read_text()))
+        )
+        if self.active_cron_digest(cron) != expected_active:
             raise ValueError("The target cron differs from the original barrier record")
         if record["databases"]:
             self.probe_target_write(domain, record)
+
+    @staticmethod
+    def _activation_identity(kept: Path) -> str:
+        return str(UUID(kept.parent.name))
+
+    @staticmethod
+    def suspended_cron(content: str) -> str:
+        result = []
+        for line in content.splitlines(keepends=True):
+            stripped = line.lstrip()
+            if not stripped.strip() or stripped.startswith("#") or re.match(r"[A-Za-z_][A-Za-z0-9_]*\s*=", stripped):
+                result.append(line)
+            else:
+                ending = "\n" if line.endswith("\n") else ""
+                job = line.rstrip("\r\n")
+                suffix = "" if re.search(r"#\s+VIRTUALMIN\s+DISABLE", job) else " # VIRTUALMIN DISABLE"
+                result.append("# " + job + suffix + ending)
+        return "".join(result)
+
+    def policy_native(  # noqa: PLR0913  # Public immutable target identity plus current policy and activation scope.
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        domain_id: str,
+        enabled: bool,
+        *,
+        scope: str = "bridge",
+    ) -> dict[str, Any]:
+        info = self.credential_helper.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != self.owner_uid or info.st_mode & 0o077:
+            raise ValueError("The native current-policy helper is not private owned code")
+        request = {
+            "action": "reconcile-policy",
+            "operation_id": identity,
+            "activation_scope": scope,
+            "domain": domain,
+            "owner": owner,
+            "domain_id": domain_id,
+            "enabled": enabled,
+        }
+        output = subprocess.run(  # noqa: S603  # Fixed helper; public identity JSON only on stdin.
+            ["/usr/bin/perl", str(self.credential_helper)],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=120,
+        ).stdout
+        matches = re.findall(r"PRAHO_POLICY_RESULT=([A-Za-z0-9+/=]+)", output)
+        proof = json.loads(base64.b64decode(matches[0], validate=True)) if len(matches) == 1 else None
+        if (
+            not isinstance(proof, dict)
+            or type(proof.get("enabled")) is not bool
+            or proof
+            != {
+                "domain_id": domain_id,
+                "owner": owner,
+                "enabled": enabled,
+            }
+        ):
+            raise ValueError("The native current-policy proof does not match the target")
+        return proof
+
+    def reconcile_policy(  # noqa: C901, PLR0912, PLR0915  # One locked policy transition preserves customer state across native callbacks.
+        self,
+        identity: str,
+        domain: str,
+        owner: str,
+        domain_id: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Current policy is independent of the immutable original cron/credential replay."""
+        if type(enabled) is not bool:
+            raise ValueError("Current enabled policy must be boolean")
+        with self.locked():
+            directory = self.directory(identity)
+            marker = directory / "activation.json"
+            if not marker.exists() or (directory / "origin-removed").exists():
+                raise ValueError("Current policy requires completed target activation")
+            previous = json.loads(marker.read_text())
+            if previous.get("phase") != "completed":
+                raise ValueError("Current policy requires completed target activation")
+            expected = {"domain": hostname(domain), "owner": owner, "target_domain_id": domain_id}
+            if any(previous.get(key) != value for key, value in expected.items()):
+                raise ValueError("Current policy target identity changed")
+            if (
+                self.execute(["virtualmin", "list-domains", "--domain", domain, "--user-only"]).strip() != owner
+                or self.execute(["virtualmin", "list-domains", "--domain", domain, "--id-only"]).strip() != domain_id
+            ):
+                raise ValueError("Current policy target identity changed")
+            disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
+            policy_file = directory / "policy.json"
+            current_policy = json.loads(policy_file.read_text()) if policy_file.exists() else {}
+            if enabled and domain not in disabled and current_policy.get("enabled", True):
+                return {"domain_id": domain_id, "owner": owner, "enabled": True}
+            record = previous.get("policy_record")
+            if not isinstance(record, dict):
+                raise ValueError("Completed activation lacks retained current-policy scope")
+            resume = current_policy.get("resume") or record
+            if not enabled and domain not in disabled:
+                resume = json.loads(json.dumps(record))
+                for item in resume["enabled"]:
+                    item["enabled"] = item["name"] not in disabled
+                for account in resume["accounts"]:
+                    user, host = account["user"], account["host"]
+                    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,80}", user) or not re.fullmatch(
+                        r"[A-Za-z0-9.%_:-]{1,255}", host
+                    ):
+                        raise ValueError("Invalid current-policy database scope")
+                    account["locked"] = self.sql(
+                        "SELECT IFNULL(JSON_VALUE(Priv, '$.account_locked'), 'false') "  # noqa: S608  # Both scope identifiers validated above.
+                        f"FROM mysql.global_priv WHERE User = '{user}' AND Host = '{host}'"
+                    ).strip() in {"true", "1"}
+            # Save resume state BEFORE forcing native suspension; a retry must
+            # never mistake our own lock states for the customer's prior state.
+            self.write(policy_file, json.dumps({"enabled": False, "resume": resume}), durable=True)
+            proof = self.policy_native(identity, domain, owner, domain_id, enabled)
+            latest_disabled = set(
+                self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines()
+            )
+            for item in resume["enabled"][1:]:
+                name = hostname(item["name"])
+                if (
+                    self.execute(["virtualmin", "list-domains", "--domain", name, "--user-only"]).strip() != owner
+                    or self.execute(["virtualmin", "list-domains", "--domain", name, "--id-only"]).strip()
+                    != record["ids"][name]
+                ):
+                    raise ValueError("Current policy child identity changed")
+                desired = bool(item["enabled"] and enabled)
+                if (name not in latest_disabled) != desired:
+                    self.execute(["virtualmin", "enable-domain" if desired else "disable-domain", "--domain", name])
+            accounts = json.loads(json.dumps(resume["accounts"]))
+            if not enabled:
+                for account in accounts:
+                    account["locked"] = True
+            self.restore_accounts({"accounts": accounts})
+            final_disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
+            for item in resume["enabled"]:
+                desired = enabled if item["name"] == domain else bool(item["enabled"] and enabled)
+                if (item["name"] not in final_disabled) != desired:
+                    raise ValueError("The target's current enabled policy did not converge")
+            for account in accounts:
+                user, host = account["user"], account["host"]
+                actual = self.sql(
+                    "SELECT IFNULL(JSON_VALUE(Priv, '$.account_locked'), 'false') "  # noqa: S608  # Scope validated by restore_accounts above.
+                    f"FROM mysql.global_priv WHERE User = '{user}' AND Host = '{host}'"
+                ).strip() in {"true", "1"}
+                if actual != account["locked"]:
+                    raise ValueError("The target's current database lock policy did not converge")
+            self.write(policy_file, json.dumps({"enabled": enabled, "resume": resume}), durable=True)
+            return proof
 
     def probe_target_write(self, domain: str, record: dict[str, Any]) -> None:
         listing = self.execute(["virtualmin", "list-domains", "--domain", domain, "--multiline"])
@@ -754,11 +1204,15 @@ class NodeBridge:
             raise ValueError("The target owner's write/login probe does not match its intended enabled state")
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901, PLR0912  # Explicit allowlisted node-operation dispatch.
     node = NodeBridge()
     node.minimum_certificate_lifetime = int(os.environ.get("PRAHO_BRIDGE_CERT_MIN_SECONDS", str(48 * 3600)))
     identity = os.environ["PRAHO_BRIDGE_ID"]
     action = os.environ["PRAHO_BRIDGE_ACTION"]
+    enabled_value = os.environ.get("PRAHO_BRIDGE_ENABLED", "")
+    if enabled_value not in {"", "0", "1"}:
+        raise ValueError("Current enabled policy must be boolean")
+    enabled = None if enabled_value == "" else enabled_value == "1"
     payload: Any = ""
     if action == "prepare":
         payload = node.prepare(
@@ -802,6 +1256,17 @@ def main() -> None:
             os.environ["PRAHO_BRIDGE_DOMAIN"],
             os.environ["PRAHO_BRIDGE_OWNER"],
             json.loads(os.environ["PRAHO_BARRIER_RECORD"]),
+            enabled=enabled,
+        )
+    elif action == "reconcile_policy":
+        if enabled is None:
+            raise ValueError("Current enabled policy is required")
+        payload = node.reconcile_policy(
+            identity,
+            os.environ["PRAHO_BRIDGE_DOMAIN"],
+            os.environ["PRAHO_BRIDGE_OWNER"],
+            os.environ["PRAHO_BRIDGE_DOMAIN_ID"],
+            enabled,
         )
     else:
         raise ValueError("Invalid bridge action")

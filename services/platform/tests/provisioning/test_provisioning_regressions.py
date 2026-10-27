@@ -335,6 +335,7 @@ class ProvisioningRegressionTests(VirtualminTaskTestBase):
                 )
 
             with (
+                patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
                 patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http_transport),
                 patch("apps.infrastructure.ansible_service.AnsibleService", autospec=True) as ssh,
             ):

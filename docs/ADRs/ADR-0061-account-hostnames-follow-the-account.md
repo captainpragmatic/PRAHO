@@ -5,7 +5,17 @@
 - Authors: PRAHO maintainers
 - Related: ADR-0044 (placement policy), ADR-0051 (enabled-state ownership), ADR-0058 to ADR-0060 (#689/#498), ADR-0059 (differential backups), ADR-0062 (deployment branding)
 
-## Context
+## Implementation clarifications (2026-10-27)
+
+This ADR remains Proposed. Phase 2 is under review in PR #749; implementation and lab
+proofs do not mean it is deployed. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md)
+records the current behavior, outstanding gates and later customer-DNS/mail phases.
+Account-name website previews remain disabled even after PSL inclusion. Apache supplies
+the temporary web bridge, with root-owned neutral account-name sites and independently
+observed source/target bindings. Mail-enabled moves remain refused until the later
+native Postfix/Dovecot lifecycle and all-mailbox safety gates pass.
+
+## Context at proposal (2026-10-14)
 
 PRAHO moves hosting accounts between Virtualmin nodes: planned migration, node drain, and recovery when a node is lost. Nodes deliberately sit with different providers (Hetzner, others, AWS), so no IP address can follow an account from one node to another. A floating IP stays inside one provider and region, and a shared edge proxy would put every customer's traffic, latency and uptime behind one layer.
 
@@ -21,8 +31,8 @@ Customers may keep DNS anywhere: our nameservers, Cloudflare, their registrar. A
 
 ### 1. Every hosting account has a provider-controlled hostname
 
-- **Name.** `<id>.<zone>`, where `<id>` is a short opaque random label (for example `h7k3p2q`), unique and never reused. It is stable through renames, reveals nothing about the customer, and cannot be enumerated.
-- **Zone.** A setting (`dns.account_hostname_zone`), never hard-coded. It must be a separate registered domain from the brand and Portal domains. Customer sites under the brand's registrable domain could set cookies for it and attack Portal sessions. The zone is submitted to the Public Suffix List, as `github.io` and `netlify.app` are. Submission alone protects nothing: until the entry is accepted and shipped in current browsers, a customer site on `<id>.<zone>` could set a cookie for the whole zone and have it sent to other customers' account names. So PRAHO serves no customer content on account names (previews stay off) until that inclusion is confirmed.
+- **Name.** `<id>.<zone>`, where `<id>` is a short opaque random label (for example `h7k3p2q9`), unique and never reused. It is stable through renames and embeds no customer identity. Account names are public connection identifiers.
+- **Zone.** A setting (`dns.account_hostname_zone`), never hard-coded. It must be a separate registered domain from the brand and Portal domains. Customer sites under the brand's registrable domain could set cookies for it and attack Portal sessions. The zone is submitted to the Public Suffix List, as `github.io` and `netlify.app` are. Submission alone protects nothing: until the entry is accepted and shipped in current browsers, a customer site on `<id>.<zone>` could set a cookie for the whole zone and have it sent to other customers' account names. The agreed first release keeps previews off even after inclusion: account names and their descendants receive a node-controlled neutral HTTP response. The factual PSL-shipped setting does not enable customer content.
 - **Records.** PRAHO owns them: `A`, and `AAAA` when the node has IPv6, pointing at the node that currently hosts the account. They are never a CNAME, because MX and SRV targets must not be aliases (RFC 2181 §10.3) and mail uses this name. The records live in our Cloudflare zone through the existing DNS gateway, with an owner tag `praho:account:<id>` and a 300 s TTL.
 - **Lifecycle.** Created when the account is provisioned; moved by migration, drain and recovery (section 4); deleted at termination. A reconcile sweep compares the records with `VirtualminAccount.server` and repairs drift.
 
@@ -38,7 +48,7 @@ A raw node IP is not offered, so no customer ever holds an address that a move m
 
 ### 3. Certificates
 
-- **Account names and previews.** Each account name is a Virtualmin sub-server of the customer's domain, with its web root linked to the customer's, so it has its own vhost and its own certificate (lab contract: `docs/domain/virtualmin-account-subserver-contract.md`). The certificate is per name, issued by DNS-01 through our Cloudflare zone on Platform. A wildcard is not used: a sub-server's key travels with any archive that carries it, and one key for every customer's name must not. Per-name issuance is bounded by Let's Encrypt's weekly limit per registered domain, which the issuer budgets.
+- **Account names and previews.** Each account name remains a Virtualmin sub-server with its own certificate (historical lab contract: `docs/domain/virtualmin-account-subserver-contract.md`). The first release never links its web root to customer content. Root-owned neutral Apache vhosts load before Virtualmin's tenant vhosts and serve fixed content independently of tenant files, `.htaccess`, suspension pages and parent enablement. A per-name neutral vhost uses a local private copy of that name's certificate; a zone fallback covers names not yet created and uses the existing neutral site's certificate. All private copies stay on the node outside Native deletion paths, and are removed only after the Native child is absent. No wildcard account certificate is introduced. The per-name certificate is issued by DNS-01 through our Cloudflare zone on Platform; per-name issuance remains bounded by Let's Encrypt's weekly limit per registered domain, which the issuer budgets.
 - **The customer's own domain.** Virtualmin requests it by HTTP-01 once the domain points at the account. No certificate is issued before the switch, so HTTPS starts a few minutes after cutover. That trade-off was accepted.
 - **Moves.** Nothing is reissued (the Let's Encrypt duplicate-certificate limit is 5 per week). The customer domain's certificate travels with the account in the backup. The account name's sub-server is kept out of that backup, so its certificate and key are fetched from their vault references and installed on the new node.
 - **CAA.** The DNS check (section 6) flags a customer CAA record that excludes Let's Encrypt.

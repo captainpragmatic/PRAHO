@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 
 from apps.provisioning.management.commands._virtualmin_lab import load_state
+from apps.provisioning.migration_target_hold import capture_backup_owner_shadow
 from apps.provisioning.virtualmin_gateway import VirtualminConfig
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 from apps.provisioning.virtualmin_migration_service import migration_backup_params
@@ -20,7 +21,7 @@ from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_pair_restore import run_pair_step
 from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService
 from apps.provisioning.virtualmin_service import create_domain_params
-from tests.virtualmin_lab.contract.harness import BACKUP_TIMEOUT, Lab, RecordingGateway, assert_accepted
+from tests.virtualmin_lab.contract.harness import BACKUP_TIMEOUT, CREATE_TIMEOUT, Lab, RecordingGateway, assert_accepted
 
 DOMAIN = "contractrecovery.praho.test"
 OWNER = "contractrecovery"
@@ -34,9 +35,14 @@ def _shadow_digest(node: Lab) -> str:
     return node.exec("sh", "-c", f"getent shadow {OWNER} | cut -d: -f2 | sha256sum").strip()
 
 
+def _shadow_aging(node: Lab) -> str:
+    """Only numeric aging/expiry fields, never the stored credential."""
+    return node.exec("sh", "-c", f"getent shadow {OWNER} | cut -d: -f3-9").strip()
+
+
 def _install_database_probe(source: Lab, domain_id: str) -> None:
     """The archived app retains its original login; neither passwords nor hashes enter argv/output."""
-    program = '''import base64, os, pwd
+    program = """import base64, os, pwd
 from pathlib import Path
 fields = dict(line.split("=", 1) for line in Path("/etc/webmin/virtual-server/domains/DOMAIN_ID").read_text().splitlines() if "=" in line)
 encode = lambda value: base64.b64encode(value.encode()).decode()
@@ -50,7 +56,7 @@ path.write_text(php)
 owner = pwd.getpwnam(fields["user"])
 os.chown(path, owner.pw_uid, owner.pw_gid)
 path.chmod(0o600)
-'''
+"""
     source.exec("python3", "-c", program.replace("DOMAIN_ID", domain_id))
 
 
@@ -73,24 +79,70 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
     ca_dir = ""
     try:
         source.create_domain(DOMAIN, OWNER)
+        source.exec("chage", "-m", "2", "-M", "80", "-W", "8", "-I", "40", "-E", "2027-01-31", OWNER)
+        original_aging = _shadow_aging(source)
         ca_dir = source.exec("mktemp", "-d", "/tmp/praho-recovery-ca.XXXXXX").strip()  # noqa: S108  # Private disposable lab CA
         source.exec(
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj",
-            "/CN=PRAHO Recovery Contract CA", "-keyout", f"{ca_dir}/ca.key", "-out", f"{ca_dir}/ca.pem",
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "2",
+            "-subj",
+            "/CN=PRAHO Recovery Contract CA",
+            "-keyout",
+            f"{ca_dir}/ca.key",
+            "-out",
+            f"{ca_dir}/ca.pem",
         )
         source.exec(
-            "openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={DOMAIN}",
-            "-keyout", f"{ca_dir}/site.key", "-out", f"{ca_dir}/site.csr",
+            "openssl",
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            f"/CN={DOMAIN}",
+            "-keyout",
+            f"{ca_dir}/site.key",
+            "-out",
+            f"{ca_dir}/site.csr",
         )
         source.exec(
-            "openssl", "x509", "-req", "-in", f"{ca_dir}/site.csr", "-CA", f"{ca_dir}/ca.pem",
-            "-CAkey", f"{ca_dir}/ca.key", "-CAcreateserial", "-days", "2", "-out", f"{ca_dir}/site.pem",
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            f"{ca_dir}/site.csr",
+            "-CA",
+            f"{ca_dir}/ca.pem",
+            "-CAkey",
+            f"{ca_dir}/ca.key",
+            "-CAcreateserial",
+            "-days",
+            "2",
+            "-out",
+            f"{ca_dir}/site.pem",
         )
-        assert_accepted(source.quiet("install-cert", {
-            "domain": DOMAIN, "cert": f"{ca_dir}/site.pem", "key": f"{ca_dir}/site.key", "ca": f"{ca_dir}/ca.pem",
-        }))
+        assert_accepted(
+            source.quiet(
+                "install-cert",
+                {
+                    "domain": DOMAIN,
+                    "cert": f"{ca_dir}/site.pem",
+                    "key": f"{ca_dir}/site.key",
+                    "ca": f"{ca_dir}/ca.pem",
+                },
+            )
+        )
         source_chain = source.exec(
-            "sh", "-c", f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} -showcerts </dev/null 2>/dev/null",
+            "sh",
+            "-c",
+            f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} -showcerts </dev/null 2>/dev/null",
         ).count("-----BEGIN CERTIFICATE-----")
         assert source_chain == 2, "the backup fixture must really serve its complete certificate chain"
         original_hash = _shadow_digest(source)
@@ -108,6 +160,15 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
         original_certificate = source.exec(
             "openssl", "x509", "-in", f"/etc/ssl/virtualmin/{source_id}/ssl.cert", "-noout", "-fingerprint", "-sha256"
         ).strip()
+        # Numeric source state is part of the exact archive, before checksums/storage.
+        capture_backup_owner_shadow(
+            server,
+            domain=DOMAIN,
+            owner=OWNER,
+            domain_id=source_id,
+            archive_name=archive,
+            operation_id=identity,
+        )
         assert_accepted(
             source.quiet(
                 "backup-domain", {"domain": DOMAIN, **migration_backup_params(archive)}, timeout_seconds=BACKUP_TIMEOUT
@@ -132,6 +193,7 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
                     disk_quota_mb=1024,
                     bandwidth_quota_mb=10240,
                 ),
+                timeout_seconds=CREATE_TIMEOUT,
             )
         )
         assert_accepted(lab.quiet("disable-domain", {"domain": DOMAIN, "subservers": ""}))
@@ -140,7 +202,9 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
         # The archived namespace is occupied: a native restore must never write another tenant's
         # certificate files. Only this test's synthetic sentinels are created and removed here.
         candidate_cert_dir = f"/etc/ssl/virtualmin/{source_id}"
-        exists = lab.exec("python3", "-c", f"from pathlib import Path; print(int(Path('{candidate_cert_dir}').exists()))")
+        exists = lab.exec(
+            "python3", "-c", f"from pathlib import Path; print(int(Path('{candidate_cert_dir}').exists()))"
+        )
         assert exists.strip() == "0", "refuse to alter a pre-existing target certificate namespace"
         lab.exec("install", "-d", "-m", "0700", candidate_cert_dir)
         foreign_cert_dir = candidate_cert_dir
@@ -182,7 +246,10 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
             "curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "-H", f"Host: {DOMAIN}", "http://127.0.0.1/"
         )
         assert code == "503"
-        recovery._node(migration, "activate")
+        # Current policy may have changed since the immutable backup snapshot.
+        # Even an originally active archive must stay fully suspended now.
+        recovery._node(migration, "activate", enabled=False)
+        recovery._node(migration, "reconcile_policy", enabled=False)
         released = run_pair_step(
             lab.server,
             {**recovery._pair_variables(migration), "pair_action": "release"},
@@ -191,28 +258,50 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
             timeout_seconds=180,
         )
         assert released.is_ok() and released.unwrap().outcome == "released"
-        if suspended:
-            assert _shadow_digest(lab) != original_hash
-            assert "# VIRTUALMIN DISABLE" in lab.exec("crontab", "-u", OWNER, "-l")
-        assert_accepted(lab.quiet("enable-domain", {"domain": DOMAIN, "subservers": ""}))
-        assert _database_probe(lab) == "DB-OK", "the restored app keeps its original database credential and write grants"
+        assert _shadow_digest(lab) != original_hash
+        assert "# VIRTUALMIN DISABLE" in lab.exec("crontab", "-u", OWNER, "-l")
+        assert lab.exec("runuser", "-u", OWNER, "--", "php", f"/home/{OWNER}/public_html/db-proof.php") == "DB-FAIL"
+        assert _shadow_aging(lab) == original_aging
+        recovery._node(migration, "reconcile_policy", enabled=True)
+        assert _database_probe(lab) == "DB-OK", (
+            "the restored app keeps its original database credential and write grants"
+        )
         served_certificate = lab.exec(
-            "sh", "-c", f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} </dev/null 2>/dev/null "
+            "sh",
+            "-c",
+            f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} </dev/null 2>/dev/null "
             "| openssl x509 -noout -fingerprint -sha256",
         ).strip()
         assert served_certificate == original_certificate
         served_chain = lab.exec(
-            "sh", "-c", f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} -showcerts </dev/null 2>/dev/null",
+            "sh",
+            "-c",
+            f"openssl s_client -connect 127.0.0.1:443 -servername {DOMAIN} -showcerts </dev/null 2>/dev/null",
         ).count("-----BEGIN CERTIFICATE-----")
         assert served_chain == source_chain, "recovery preserves the customer certificate's full served chain"
         assert _shadow_digest(lab) == original_hash
+        assert _shadow_aging(lab) == original_aging, "recovery preserves the original owner shadow aging and expiry"
         cron = lab.exec("crontab", "-u", OWNER, "-l")
         assert "MAILTO=owner@example.test" in cron
         assert "# VIRTUALMIN DISABLE" not in cron
         assert "# 0 0 1 1 * /bin/false" in cron
         lab.exec("sh", "-c", f"printf '%s\\n' '# customer changed cron' | crontab -u {OWNER} -")
-        recovery._node(migration, "activate")
+        lab.exec("chage", "-m", "3", "-M", "91", "-W", "9", "-I", "41", "-E", "2027-02-28", OWNER)
+        changed_aging = _shadow_aging(lab)
+        recovery._node(migration, "activate", enabled=False)
+        recovery._node(migration, "reconcile_policy", enabled=True)
         assert lab.exec("crontab", "-u", OWNER, "-l").strip() == "# customer changed cron"
+        assert _shadow_aging(lab) == changed_aging, "activation replay preserves customer aging/expiry changes"
+        # Policy uses only retained public identity after private activation data
+        # has been retired, and restores the customer's current state on release.
+        recovery._node(migration, "cleanup")
+        recovery._node(migration, "reconcile_policy", enabled=False)
+        assert lab.exec("passwd", "-S", OWNER).split()[1] == "L"
+        assert _shadow_aging(lab) == changed_aging
+        recovery._node(migration, "reconcile_policy", enabled=True)
+        assert lab.exec("crontab", "-u", OWNER, "-l").strip() == "# customer changed cron"
+        assert _shadow_aging(lab) == changed_aging
+        assert _database_probe(lab) == "DB-OK"
     finally:
         source.remove_domain(DOMAIN)
         lab.remove_domain(DOMAIN)
