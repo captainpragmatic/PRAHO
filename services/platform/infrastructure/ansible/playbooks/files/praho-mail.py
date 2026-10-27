@@ -208,6 +208,9 @@ class MailNode:
     def setup(self, expected: str) -> dict[str, Any]:
         return self.setup_driver().run(expected)
 
+    def reconcile_node_certificate(self, expected: str, identity: str) -> dict[str, Any]:
+        return self.setup_driver().reconcile_certificate(expected, identity)
+
     def path(self, path: str) -> Path:
         return self.root / path.lstrip("/")
 
@@ -507,7 +510,12 @@ def main() -> None:
             try:
                 fcntl.flock(
                     lock,
-                    (fcntl.LOCK_EX if action in {"setup", "reconcile_submitters"} else fcntl.LOCK_SH) | fcntl.LOCK_NB,
+                    (
+                        fcntl.LOCK_EX
+                        if action in {"setup", "reconcile_submitters", "reconcile_node_certificate"}
+                        else fcntl.LOCK_SH
+                    )
+                    | fcntl.LOCK_NB,
                 )
             except BlockingIOError as error:
                 raise MailError("mail_operation_busy") from error
@@ -525,6 +533,8 @@ def main() -> None:
                 payload = node.reconcile_submitters(expected, node.reserved_zones())
             elif action == "setup":
                 payload = node.setup(expected)
+            elif action == "reconcile_node_certificate":
+                payload = node.reconcile_node_certificate(expected, identity)
             else:
                 raise MailError("mail_setup_incomplete")
         encoded = json.dumps(payload)

@@ -9,6 +9,7 @@ import subprocess
 import traceback
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from cryptography import x509
@@ -54,6 +55,10 @@ class FakeDocker:
                 "default_mail_off": True,
                 "public_ports": [25, 465, 993, 995],
                 "maps_sha256": "a" * 64,
+                "outcome": "unchanged",
+                "certificate_sha256": "b" * 64,
+                "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+                "pending_code": "",
                 **self.payload_override,
             }
             envelope = {
@@ -179,6 +184,71 @@ def test_refused_playbook_keeps_only_bounded_public_failure_metadata(clone, secr
     assert metadata["envelope_bound"] is True
     assert SECRET not in path.read_text()
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_certificate_reconciliation_uses_the_same_operation_and_checks_typed_proof(clone):
+    value, runner = clone
+    identity = uuid4()
+    result = value.playbook("reconcile_node_certificate", operation_id=identity)
+    assert result["outcome"] == "unchanged"
+    assert result["certificate_sha256"] == "b" * 64
+    call = next(argv for argv, _kwargs in runner.calls if Path(argv[0]).name == "ansible-playbook")
+    assert json.loads(call[call.index("--extra-vars") + 1])["mail_operation_id"] == str(identity)
+
+
+@pytest.mark.parametrize("identity", [False, 0, ""])
+def test_explicit_invalid_operation_identity_refuses_before_any_docker_or_ansible_call(clone, identity):
+    value, runner = clone
+    before = len(runner.calls)
+    with pytest.raises(MailLabError):
+        value.playbook("reconcile_node_certificate", operation_id=identity)
+    assert runner.calls[before:] == []
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"certificate_sha256": "unknown"},
+        {"outcome": "guessed"},
+        {"not_after": "2000-01-01T00:00:00+00:00"},
+        {"pending_code": "private unknown detail"},
+    ],
+)
+def test_certificate_reconciliation_refuses_unproven_native_certificate_fields(clone, changes):
+    value, runner = clone
+    runner.payload_override.update(changes)
+    with pytest.raises(MailLabError):
+        value.playbook("reconcile_node_certificate", operation_id=uuid4())
+
+
+def test_repeated_valid_renewal_fixture_preserves_the_prior_fake_ca(monkeypatch, tmp_path):
+    actual_path = Path
+
+    def local_path(*parts):
+        path = actual_path(*parts)
+        return tmp_path / str(path).lstrip("/") if path.is_absolute() else path
+
+    directory = tmp_path / ("a" * 32)
+    directory.mkdir()
+    material = _certificate("node.mail-lab.praho.test")
+    for relative, content in {
+        "etc/praho-mail/node.pem": material["pem"],
+        "etc/praho-mail/node.key": "fixture",
+        "var/lib/praho/mail/node.json": "{}",
+        "etc/webmin/miniserv.pem": material["pem"],
+    }.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    trust = tmp_path / "usr/local/share/ca-certificates"
+    trust.mkdir(parents=True)
+    monkeypatch.setattr(node_checks, "Path", local_path)
+    monkeypatch.setattr(node_checks, "command", lambda *_args, **_kwargs: "")
+    for _ in range(2):
+        node_checks.certificate_candidate(
+            {"case": "valid", "material": _certificate("node.mail-lab.praho.test")}, directory
+        )
+    assert len(list(trust.glob("*.crt"))) == 2
 
 
 def test_owned_cleanup_uses_recorded_ids_and_refuses_other_network_endpoints(clone):

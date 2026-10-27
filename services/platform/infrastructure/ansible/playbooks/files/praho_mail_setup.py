@@ -9,12 +9,15 @@ import os
 import re
 import secrets
 import ssl
+import stat
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 CHAIN = "PRAHO_MAIL_SETUP"
 PORTS = "25,110,143,465,587,993,995"
@@ -24,6 +27,9 @@ MAX_AUTH_SECONDS = 3600
 MIN_AUTH_SECONDS = 60
 MAX_CERTIFICATE_BYTES = 1024 * 1024
 MAX_CHAIN_CERTIFICATES = 16
+MAX_CERTIFICATE_OPERATION_BYTES = 4096
+CERTIFICATE_RELOAD_WAIT_SECONDS = 30
+CERTIFICATE_RELOAD_POLL_SECONDS = 0.25
 NATIVE_FILES = (
     "praho-mail.py",
     "praho_mail_setup.py",
@@ -206,25 +212,234 @@ class MailSetup:
         if not path.exists():
             return None
         try:
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+                self.refuse("mail_setup_review_required")
             data = json.loads(path.read_text())
-            if (data.get("version"), data.get("profile"), data.get("node"), data.get("status")) != (
-                1,
+            if (type(data.get("version")), data.get("version")) != (int, 1) or (
+                data.get("profile"),
+                data.get("node"),
+                data.get("status"),
+            ) != (
                 self.node.profile_id,
                 expected,
                 "ready",
             ):
                 self.refuse("mail_setup_review_required")
-            if not isinstance(data.get("files"), dict) or set(data["files"]) != set(CONFIG_PATHS):
-                self.refuse("mail_setup_review_required")
-            for name, digest in data["files"].items():
-                file = self.path(name)
-                if not file.is_file() or file.is_symlink() or file.stat().st_uid != 0 or file.stat().st_mode & 0o022:
-                    self.refuse("mail_setup_review_required")
-                if hashlib.sha256(file.read_bytes()).hexdigest() != digest:
-                    self.refuse("mail_setup_review_required")
+            self.check_files(data)
             return data
         except (ValueError, OSError, TypeError, AttributeError) as error:
             raise self.error("mail_setup_review_required") from error
+
+    def check_files(self, record: dict[str, Any]) -> None:
+        if not isinstance(record.get("files"), dict) or set(record["files"]) != set(CONFIG_PATHS):
+            self.refuse("mail_setup_review_required")
+        for name, digest in record["files"].items():
+            file = self.path(name)
+            metadata = file.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o022:
+                self.refuse("mail_setup_review_required")
+            if hashlib.sha256(file.read_bytes()).hexdigest() != digest:
+                self.refuse("mail_setup_review_required")
+
+    def private_directory(self, directory: Path) -> None:
+        directory.mkdir(mode=0o700, exist_ok=True)
+        metadata = directory.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+            self.refuse("mail_setup_review_required")
+
+    def leaf_digest(self, chain: bytes) -> str:
+        block = re.search(rb"-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+?-----END CERTIFICATE-----", chain)
+        if block is None:
+            self.refuse("mail_node_certificate_unproven")
+        return hashlib.sha256(ssl.PEM_cert_to_DER_cert(block[0].decode("ascii"))).hexdigest()
+
+    def certificate_proof(self, expected: str, digest: str) -> str:
+        rows = self.node.probe(expected)
+        services = {"imap", "pop3", "submission", "smtp"}
+        if set(self.node.public_ports()) != {25, 465, 993, 995} or len(rows) != len(services):
+            self.refuse("mail_node_certificate_unproven")
+        if {row.get("service") for row in rows} != services:
+            self.refuse("mail_node_certificate_unproven")
+        expiries = []
+        for row in rows:
+            if row.get("hostname") != expected or row.get("sha256") != digest:
+                self.refuse("mail_node_certificate_unproven")
+            expiry = datetime.fromisoformat(row["not_after"])
+            if expiry.tzinfo is None or expiry <= datetime.now(UTC):
+                self.refuse("mail_node_certificate_unproven")
+            expiries.append(expiry)
+        return min(expiries).isoformat()
+
+    def certificate_result(self, expected: str, digest: str, outcome: str, *, pending: str = "") -> dict[str, Any]:
+        return {
+            "node_hostname": expected,
+            "profile": self.node.profile_id,
+            "configured": True,
+            "default_mail_off": True,
+            "public_ports": [25, 465, 993, 995],
+            "outcome": outcome,
+            "certificate_sha256": digest,
+            "not_after": self.certificate_proof(expected, digest),
+            "pending_code": pending,
+        }
+
+    def wait_for_certificate(self, expected: str, digest: str) -> dict[str, Any]:
+        deadline = time.monotonic() + CERTIFICATE_RELOAD_WAIT_SECONDS
+        while True:
+            try:
+                return self.certificate_result(expected, digest, "replaced")
+            except self.error as error:
+                if str(error) != "mail_node_certificate_unproven" or time.monotonic() >= deadline:
+                    raise
+                time.sleep(CERTIFICATE_RELOAD_POLL_SECONDS)
+                if time.monotonic() >= deadline:
+                    raise
+
+    def completed_certificate_operation(self, path: Path, expected: str, identity: str) -> bool:
+        if not path.exists() and not path.is_symlink():
+            return False
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+            self.refuse("mail_setup_review_required")
+        if metadata.st_size > MAX_CERTIFICATE_OPERATION_BYTES:
+            self.refuse("mail_setup_review_required")
+        record = json.loads(path.read_text())
+        if (type(record.get("version")), record.get("version")) != (int, 1) or (
+            record.get("node"),
+            record.get("profile"),
+            record.get("identity"),
+            record.get("status"),
+        ) != (expected, self.node.profile_id, identity, "completed"):
+            self.refuse("mail_setup_review_required")
+        return True
+
+    def retire_certificate_stage(self, stage: Path) -> None:
+        if not stage.exists() and not stage.is_symlink():
+            return
+        self.private_directory(stage)
+        entries = tuple(stage.iterdir())
+        if {entry.name for entry in entries} - {"old.pem", "old.key", "new.pem", "new.key", "before.json"}:
+            self.refuse("mail_setup_review_required")
+        for entry in entries:
+            metadata = entry.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+                self.refuse("mail_setup_review_required")
+        for entry in entries:
+            entry.unlink()
+        stage.rmdir()
+        descriptor = os.open(stage.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def certificate_record(self, before: dict[str, Any], identity: str, old: str, new: str) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "node": before["node"],
+            "profile": before["profile"],
+            "identity": identity,
+            "status": "certificate_applying",
+            "old_certificate_sha256": old,
+            "new_certificate_sha256": new,
+            "before_sha256": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
+        }
+
+    def reconcile_certificate(self, expected: str, identity: str) -> dict[str, Any]:
+        self.node.stage = "certificate_preflight"
+        self.node.profile(expected)
+        if str(UUID(identity)) != identity:
+            self.refuse("mail_native_inspection_failed")
+        before = self.marker(expected)
+        if before is None:
+            self.refuse("mail_setup_review_required")
+        self.private_directory(self.state)
+        self.security_configuration(expected)
+        if any(chain or jump for chain, jump in self.read_fences().values()):
+            self.refuse("mail_setup_review_required")
+        certificate, key = self.path("/etc/praho-mail/node.pem"), self.path("/etc/praho-mail/node.key")
+        if key.stat().st_mode & 0o077:
+            self.refuse("mail_setup_review_required")
+        current = self.leaf_digest(certificate.read_bytes())
+        operations = self.state / "certificate-operations"
+        tombstone = operations / (identity + ".json")
+        stage = operations / (identity + ".stage")
+        if operations.exists() or operations.is_symlink():
+            self.private_directory(operations)
+            if self.completed_certificate_operation(tombstone, expected, identity):
+                result = self.certificate_result(expected, current, "unchanged")
+                self.retire_certificate_stage(stage)
+                return result
+        self.node.stage = "certificate_candidate"
+        try:
+            chain, private_key = self.certificate(expected)
+        except self.error:
+            return self.certificate_result(
+                expected, current, "retained_previous", pending="mail_node_certificate_unproven"
+            )
+        if (certificate.read_bytes(), key.read_bytes()) == (chain, private_key):
+            result = self.certificate_result(expected, current, "unchanged")
+            self.private_directory(operations)
+            record = self.certificate_record(before, identity, current, current)
+            atomic(tombstone, json.dumps({**record, "status": "completed"}).encode())
+            return result
+        return self.install_certificate(before, identity, chain, private_key)
+
+    def install_certificate(
+        self, before: dict[str, Any], identity: str, chain: bytes, private_key: bytes
+    ) -> dict[str, Any]:
+        expected = before["node"]
+        self.check_files(before)
+        certificate, key = self.path("/etc/praho-mail/node.pem"), self.path("/etc/praho-mail/node.key")
+        current, candidate = self.leaf_digest(certificate.read_bytes()), self.leaf_digest(chain)
+        operations = self.state / "certificate-operations"
+        tombstone, stage = operations / (identity + ".json"), operations / (identity + ".stage")
+        self.private_directory(operations)
+        if stage.exists() or stage.is_symlink():
+            self.refuse("mail_setup_review_required")
+        stage.mkdir(mode=0o700)
+        record = self.certificate_record(before, identity, current, candidate)
+        completed = False
+        try:
+            self.node.stage = "certificate_staging"
+            atomic(self.state / "node.json", json.dumps(record).encode())
+            atomic(tombstone, json.dumps({**record, "status": "applying"}).encode())
+            for name, content in {
+                "old.pem": certificate.read_bytes(),
+                "old.key": key.read_bytes(),
+                "new.pem": chain,
+                "new.key": private_key,
+                "before.json": json.dumps(before, sort_keys=True).encode(),
+            }.items():
+                atomic(stage / name, content)
+            self.node.stage = "certificate_installing"
+            atomic(certificate, chain)
+            atomic(key, private_key)
+            self.execute(["doveconf", "-n"])
+            self.execute(["postfix", "check"])
+            self.node.stage = "certificate_reload"
+            self.execute(["systemctl", "reload", "dovecot"])
+            self.execute(["postfix", "reload"])
+            self.node.stage = "certificate_verification"
+            response = self.wait_for_certificate(expected, candidate)
+            ready = {
+                **before,
+                "files": {
+                    **before["files"],
+                    "/etc/praho-mail/node.pem": hashlib.sha256(chain).hexdigest(),
+                    "/etc/praho-mail/node.key": hashlib.sha256(private_key).hexdigest(),
+                },
+            }
+            self.check_files(ready)
+            atomic(tombstone, json.dumps({**record, "status": "completed"}).encode())
+            atomic(self.state / "node.json", json.dumps(ready).encode())
+            self.retire_certificate_stage(stage)
+            completed = True
+            return response
+        finally:
+            if not completed:
+                atomic(self.state / "node.json", json.dumps({**record, "status": "review_required"}).encode())
 
     def security(self, expected: str, *, allow_fence: bool = False) -> bool:
         self.node.stage = "verification_owned_files"

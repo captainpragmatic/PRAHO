@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -64,6 +64,12 @@ _PUBLIC_STAGES = {
     "verification_postfix_listeners",
     "verification_dovecot_auth",
     "verification_dovecot_tls",
+    "certificate_preflight",
+    "certificate_candidate",
+    "certificate_staging",
+    "certificate_installing",
+    "certificate_reload",
+    "certificate_verification",
 }
 
 
@@ -97,6 +103,21 @@ def _private_json(path: Path, value: object) -> None:
     os.fchmod(descriptor, 0o600)
     with os.fdopen(descriptor, "w") as stream:
         json.dump(value, stream, sort_keys=True)
+
+
+def _certificate_receipt(payload: dict[str, Any]) -> dict[str, Any]:
+    expiry = datetime.fromisoformat(payload["not_after"])
+    if expiry.tzinfo is None or expiry <= datetime.now(UTC):
+        raise ValueError
+    if re.fullmatch(r"[a-f0-9]{64}", payload["certificate_sha256"]) is None:
+        raise ValueError
+    if (payload["outcome"], payload["pending_code"]) not in {
+        ("unchanged", ""),
+        ("replaced", ""),
+        ("retained_previous", "mail_node_certificate_unproven"),
+    }:
+        raise ValueError
+    return {key: payload[key] for key in ("outcome", "pending_code", "certificate_sha256", "not_after")}
 
 
 def _certificate(hostname: str) -> dict[str, str]:
@@ -328,8 +349,18 @@ class MailClone:
         if type(facts.get("domain_count")) is not int or facts["domain_count"] != 0:
             raise MailLabError("Clean test image already contains customer domains")
 
-    def node(self, action: str, *, material: dict[str, str] | None = None) -> dict[str, Any]:
-        if action not in {"profile", "prepare", "preserved", "new_default", "denied", "boot_state"}:
+    def node(self, action: str, *, material: dict[str, str] | None = None, case: str = "") -> dict[str, Any]:
+        if action not in {
+            "profile",
+            "prepare",
+            "preserved",
+            "new_default",
+            "denied",
+            "boot_state",
+            "certificate_candidate",
+            "certificate_unchanged",
+            "certificate_replaced",
+        }:
             raise MailLabError("Unknown fixed test action")
         self._owned()
         request = {
@@ -337,6 +368,7 @@ class MailClone:
             "run_id": self.run_id,
             "hostname": self.hostname,
             **({"material": material} if material else {}),
+            **({"case": case} if case else {}),
         }
         result = self._docker(
             ["exec", "-i", self.container_id, "python3", self.directory + "/node_checks.py"],
@@ -353,15 +385,20 @@ class MailClone:
         _private_json(self.artifacts / "facts.json", self.facts)
         return facts
 
-    def playbook(self, action: str) -> dict[str, Any]:
-        if action not in {"setup", "inspect_node", "reconcile_submitters"}:
+    def playbook(self, action: str, *, operation_id: UUID | None = None) -> dict[str, Any]:
+        if action not in {"setup", "inspect_node", "reconcile_submitters", "reconcile_node_certificate"}:
             raise MailLabError("Unknown production mail action")
+        identity = str(uuid4() if operation_id is None else operation_id)
+        try:
+            if str(UUID(identity)) != identity:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise MailLabError("Invalid production mail operation identity") from None
         self._owned()
-        operation_id = str(uuid4())
         binary = Path(sys.executable).with_name("ansible-playbook")
         values = {
             "mail_action": action,
-            "mail_operation_id": operation_id,
+            "mail_operation_id": identity,
             "mail_expected_node_hostname": self.hostname,
             "mail_reserved_account_zones": json.dumps(["accounts.mail-lab.praho.test"]),
             "mail_account_zone": "accounts.mail-lab.praho.test",
@@ -396,7 +433,7 @@ class MailClone:
                 {
                     "envelope_bound": (type(envelope.get("version")), envelope.get("version")) == (int, 1)
                     and (envelope.get("action"), envelope.get("identity"), envelope.get("node_hostname"))
-                    == (action, operation_id, self.hostname),
+                    == (action, identity, self.hostname),
                     "payload_bound": payload.get("node_hostname") == self.hostname,
                     "profile_bound": payload.get("profile") == self.profile.native_profile,
                     "code": code if isinstance(code, str) and code in _PUBLIC_CODES else "unknown",
@@ -407,7 +444,7 @@ class MailClone:
                 raise ValueError
             if (envelope["action"], envelope["identity"], envelope.get("node_hostname")) != (
                 action,
-                operation_id,
+                identity,
                 self.hostname,
             ):
                 raise ValueError
@@ -419,8 +456,11 @@ class MailClone:
                 or payload.get("default_mail_off") is not True
             ):
                 raise ValueError
-            if action in {"setup", "inspect_node"} and set(payload.get("public_ports", [])) != {25, 465, 993, 995}:
+            if action in {"setup", "inspect_node", "reconcile_node_certificate"} and set(
+                payload.get("public_ports", [])
+            ) != {25, 465, 993, 995}:
                 raise ValueError
+            proof = _certificate_receipt(payload) if action == "reconcile_node_certificate" else {}
             if (
                 action == "reconcile_submitters"
                 and re.fullmatch(r"[a-f0-9]{64}", payload.get("maps_sha256", "")) is None
@@ -430,10 +470,16 @@ class MailClone:
             raise MailLabError("Production playbook did not prove ready mail capability") from None
         self.facts.append({"stage": action, "ok": True, "profile": self.profile.native_profile})
         _private_json(self.artifacts / "facts.json", self.facts)
-        return {"configured": True, "profile": self.profile.native_profile}
+        return {"configured": True, "profile": self.profile.native_profile, **proof}
 
     def prepare(self) -> None:
         self.node("prepare", material=_certificate(self.hostname))
+
+    def certificate_candidate(self, case: str) -> None:
+        if case not in {"valid", "wrong_name"}:
+            raise MailLabError("Unknown fixed certificate fixture")
+        name = self.hostname if case == "valid" else "foreign." + self.hostname
+        self.node("certificate_candidate", material=_certificate(name), case=case)
 
     def reboot(self) -> None:
         before = self._owned()["State"]["StartedAt"]

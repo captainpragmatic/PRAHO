@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import configparser
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import ssl
@@ -13,7 +15,8 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from uuid import uuid4
 
 from django.conf import settings
 from django.test import SimpleTestCase
@@ -699,3 +702,288 @@ passdb praho-proxy {
         with self.assertRaisesRegex(self.module.MailError, "mail_unmanaged_mta"):
             self.node.preflight_setup("node.example")
         self.assert_no_node_mutation()
+
+    def rotation_fixture(self):
+        driver = self.node.setup_driver()
+        old = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(b"old leaf") + b"\n-----END CERTIFICATE-----\n"
+        new = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(b"new leaf") + b"\n-----END CERTIFICATE-----\n"
+        for name in driver.marker.__globals__["CONFIG_PATHS"]:
+            file = self.write(name.lstrip("/"), "owned fixture")
+            file.chmod(0o600)
+        (self.root / "etc/praho-mail/node.pem").write_bytes(old)
+        (self.root / "etc/praho-mail/node.key").write_bytes(b"old fixture key")
+        marker = {
+            "version": 1,
+            "profile": self.node.profile_id,
+            "node": "node.example",
+            "status": "ready",
+            "files": {
+                name: hashlib.sha256(self.node.path(name).read_bytes()).hexdigest()
+                for name in driver.marker.__globals__["CONFIG_PATHS"]
+            },
+        }
+        self.write("var/lib/praho/mail/node.json", json.dumps(marker)).chmod(0o600)
+        driver.state.chmod(0o700)
+        self.enterContext(patch.object(driver, "security_configuration"))
+        self.enterContext(patch.object(driver, "read_fences", return_value={}))
+        self.node.public_ports = lambda: [25, 465, 993, 995]
+        self.node.probe = self.rotation_proof
+        return driver, old, new
+
+    def rotation_proof(self, name):
+        pem = (self.root / "etc/praho-mail/node.pem").read_text()
+        fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+        return [
+            {
+                "service": service,
+                "hostname": name,
+                "sha256": fingerprint,
+                "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+            }
+            for service in ("imap", "pop3", "submission", "smtp")
+        ]
+
+    def test_certificate_reconcile_preserves_verified_old_copy_when_candidate_is_untrusted(self):
+        driver, old, _new = self.rotation_fixture()
+        before = (driver.state / "node.json").read_bytes()
+        with patch.object(driver, "certificate", side_effect=self.module.MailError("mail_node_certificate_unproven")):
+            result = driver.reconcile_certificate("node.example", str(uuid4()))
+        self.assertEqual(result["outcome"], "retained_previous")
+        self.assertTrue(result["configured"])
+        self.assertEqual(result["pending_code"], "mail_node_certificate_unproven")
+        self.assertEqual((driver.state / "node.json").read_bytes(), before)
+        self.assertEqual((self.root / "etc/praho-mail/node.pem").read_bytes(), old)
+        self.assertFalse(any(command[:1] == ["systemctl"] for command in self.commands))
+
+    def test_certificate_reconcile_journals_and_verifies_new_leaf_without_reconfiguring_domains(self):
+        driver, _old, new = self.rotation_fixture()
+        operation_id = str(uuid4())
+        with patch.object(driver, "certificate", return_value=(new, b"new fixture key")):
+            result = driver.reconcile_certificate("node.example", operation_id)
+        self.assertEqual(result["outcome"], "replaced")
+        self.assertEqual(result["certificate_sha256"], hashlib.sha256(b"new leaf").hexdigest())
+        self.assertEqual((self.root / "etc/praho-mail/node.key").read_bytes(), b"new fixture key")
+        self.assertEqual(driver.marker("node.example")["status"], "ready")
+        self.assertIn(["systemctl", "reload", "dovecot"], self.commands)
+        self.assertIn(["postfix", "reload"], self.commands)
+        self.assertFalse(any(command[0] in {"virtualmin", "apt-get", "iptables"} for command in self.commands))
+        tombstone = json.loads((driver.state / "certificate-operations" / (operation_id + ".json")).read_text())
+        self.assertEqual(tombstone["status"], "completed")
+        self.assertNotIn("fixture key", str(tombstone))
+        self.assertFalse((driver.state / "certificate-operations" / (operation_id + ".stage")).exists())
+
+    def test_certificate_reconcile_completed_replay_never_installs_a_later_candidate(self):
+        driver, _old, new = self.rotation_fixture()
+        operation_id = str(uuid4())
+        with patch.object(driver, "certificate", return_value=(new, b"new fixture key")):
+            driver.reconcile_certificate("node.example", operation_id)
+        before = (driver.state / "node.json").read_bytes()
+        self.commands.clear()
+        with patch.object(driver, "certificate", side_effect=AssertionError("completed replay consulted Webmin")):
+            result = driver.reconcile_certificate("node.example", operation_id)
+        self.assertEqual(result["outcome"], "unchanged")
+        self.assertEqual((driver.state / "node.json").read_bytes(), before)
+        self.assertFalse(any(command[:1] == ["systemctl"] for command in self.commands))
+
+    def test_certificate_reconcile_unchanged_is_also_a_completed_no_mutation_identity(self):
+        driver, old, _new = self.rotation_fixture()
+        operation_id = str(uuid4())
+        with patch.object(driver, "certificate", return_value=(old, b"old fixture key")):
+            self.assertEqual(driver.reconcile_certificate("node.example", operation_id)["outcome"], "unchanged")
+        with patch.object(driver, "certificate", side_effect=AssertionError("old UUID reconsidered a new candidate")):
+            self.assertEqual(driver.reconcile_certificate("node.example", operation_id)["outcome"], "unchanged")
+
+    def test_certificate_reconcile_completed_replay_retires_only_its_leftover_private_stage(self):
+        driver, _old, new = self.rotation_fixture()
+        operation_id = str(uuid4())
+        with patch.object(driver, "certificate", return_value=(new, b"new fixture key")):
+            driver.reconcile_certificate("node.example", operation_id)
+        stage = driver.state / "certificate-operations" / (operation_id + ".stage")
+        stage.mkdir(mode=0o700)
+        (stage / "old.key").write_bytes(b"leftover fixture key")
+        (stage / "old.key").chmod(0o600)
+        before = (driver.state / "node.json").read_bytes()
+        driver.reconcile_certificate("node.example", operation_id)
+        self.assertFalse(stage.exists())
+        self.assertEqual((driver.state / "node.json").read_bytes(), before)
+
+    def test_certificate_reconcile_wrong_served_leaf_parks_and_cannot_be_replayed(self):
+        driver, old, new = self.rotation_fixture()
+        operation_id = str(uuid4())
+        old_proof = self.rotation_proof("node.example")
+        self.node.probe = lambda _name: old_proof
+        clock = SimpleNamespace(monotonic=Mock(side_effect=[0, 31]), sleep=Mock())
+        with (
+            patch.object(driver, "certificate", return_value=(new, b"new fixture key")),
+            patch.dict(driver.reconcile_certificate.__globals__, time=clock),
+            self.assertRaisesRegex(self.module.MailError, "mail_node_certificate_unproven"),
+        ):
+            driver.reconcile_certificate("node.example", operation_id)
+        self.assertEqual(json.loads((driver.state / "node.json").read_text())["status"], "review_required")
+        stage = driver.state / "certificate-operations" / (operation_id + ".stage")
+        self.assertEqual((stage / "old.pem").read_bytes(), old)
+        self.assertEqual((stage / "old.key").stat().st_mode & 0o777, 0o600)
+        self.commands.clear()
+        with (
+            patch.object(driver, "certificate", side_effect=AssertionError("review retried mutation")),
+            self.assertRaisesRegex(self.module.MailError, "mail_setup_review_required"),
+        ):
+            driver.reconcile_certificate("node.example", str(uuid4()))
+        self.assertEqual(self.commands, [["hostname", "-f"]])
+
+    def test_certificate_reconcile_waits_boundedly_for_asynchronous_reload_to_serve_new_leaf(self):
+        driver, _old, new = self.rotation_fixture()
+        old_proof = self.rotation_proof("node.example")
+        proof_calls = []
+
+        def later_proof(name):
+            proof_calls.append(True)
+            return old_proof if len(proof_calls) == 1 else self.rotation_proof(name)
+
+        clock = SimpleNamespace(monotonic=Mock(side_effect=[0, 1, 2]), sleep=Mock())
+        self.node.probe = later_proof
+        with (
+            patch.object(driver, "certificate", return_value=(new, b"new fixture key")),
+            patch.dict(driver.reconcile_certificate.__globals__, time=clock),
+        ):
+            result = driver.reconcile_certificate("node.example", str(uuid4()))
+        self.assertEqual(result["outcome"], "replaced")
+        self.assertEqual(len(proof_calls), 2)
+        clock.sleep.assert_called_once()
+
+    def test_certificate_reconcile_requires_every_exact_fresh_frontend_before_retaining_old(self):
+        driver, old, _new = self.rotation_fixture()
+        before = (driver.state / "node.json").read_bytes()
+        proof = self.rotation_proof("node.example")
+        for rows in (
+            [],
+            proof[:-1],
+            [proof[0]] * 4,
+            [{**row, "sha256": "f" * 64} for row in proof],
+            [{**row, "hostname": "other.example"} for row in proof],
+            [{**row, "not_after": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()} for row in proof],
+        ):
+            with (
+                self.subTest(rows=rows),
+                patch.object(
+                    driver, "certificate", side_effect=self.module.MailError("mail_node_certificate_unproven")
+                ),
+                self.assertRaisesRegex(self.module.MailError, "mail_node_certificate_unproven"),
+            ):
+                self.node.probe = lambda _name, proof=rows: proof
+                driver.reconcile_certificate("node.example", str(uuid4()))
+            self.assertEqual((driver.state / "node.json").read_bytes(), before)
+            self.assertEqual((self.root / "etc/praho-mail/node.pem").read_bytes(), old)
+
+    def test_certificate_reconcile_faults_preserve_durable_review_and_private_original_material(self):
+        for boundary in ("applying", "old.key", "node.pem", "node.key", "reload", "completed", "ready"):
+            with self.subTest(boundary=boundary):
+                driver, old, new = self.rotation_fixture()
+                operation_id = str(uuid4())
+                globals_ = driver.reconcile_certificate.__globals__
+                original_atomic = globals_["atomic"]
+                triggered = []
+                context = SimpleNamespace(
+                    write=original_atomic, identity=operation_id, boundary=boundary, triggered=triggered, driver=driver
+                )
+
+                def write_fault(path, content, *args, state=context):
+                    state.write(path, content, *args)
+                    target = None
+                    if path.name == "node.json":
+                        target = {"certificate_applying": "applying", "ready": "ready"}.get(
+                            json.loads(content)["status"]
+                        )
+                    elif path.name == state.identity + ".json" and json.loads(content)["status"] == "completed":
+                        target = "completed"
+                    elif path.name in {"old.key", "node.pem", "node.key"}:
+                        target = path.name
+                    if target == state.boundary and not state.triggered:
+                        state.triggered.append(True)
+                        raise KeyboardInterrupt("simulated worker interruption")
+
+                def execute_fault(argv, state=context, **kwargs):
+                    if argv == ["systemctl", "reload", "dovecot"]:
+                        self.assertEqual(
+                            json.loads((state.driver.state / "node.json").read_text())["status"], "certificate_applying"
+                        )
+                        if state.boundary == "reload":
+                            state.triggered.append(True)
+                            raise KeyboardInterrupt("simulated worker interruption")
+                    return self.execute(argv, **kwargs)
+
+                driver.execute = execute_fault
+                with (
+                    patch.dict(globals_, atomic=write_fault),
+                    patch.object(driver, "certificate", return_value=(new, b"new fixture key")),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    driver.reconcile_certificate("node.example", operation_id)
+                self.assertEqual(triggered, [True])
+                self.assertEqual(json.loads((driver.state / "node.json").read_text())["status"], "review_required")
+                if boundary not in {"applying", "old.key"}:
+                    stage = driver.state / "certificate-operations" / (operation_id + ".stage")
+                    self.assertEqual((stage / "old.pem").read_bytes(), old)
+                    self.assertEqual((stage / "old.key").read_bytes(), b"old fixture key")
+
+    def test_certificate_reconcile_refuses_foreign_modified_and_nonready_manifest_before_candidate(self):
+        for change in (
+            {"node": "other.example"},
+            {"profile": "unknown"},
+            {"version": True},
+            {"status": "certificate_applying"},
+            {"status": "review_required"},
+        ):
+            with self.subTest(change=change):
+                driver, _old, _new = self.rotation_fixture()
+                path = driver.state / "node.json"
+                path.write_text(json.dumps({**json.loads(path.read_text()), **change}))
+                with (
+                    patch.object(driver, "certificate", side_effect=AssertionError("unsafe candidate read")),
+                    self.assertRaisesRegex(self.module.MailError, "mail_setup_review_required"),
+                ):
+                    driver.reconcile_certificate("node.example", str(uuid4()))
+        driver, _old, _new = self.rotation_fixture()
+        self.write("etc/dovecot/conf.d/10-auth.conf", "unexpected native PAM fallback")
+        with self.assertRaisesRegex(self.module.MailError, "mail_setup_review_required"):
+            driver.reconcile_certificate("node.example", str(uuid4()))
+
+    def test_certificate_reconcile_private_state_symlinks_never_escape_owned_stage(self):
+        driver, _old, new = self.rotation_fixture()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (driver.state / "certificate-operations").symlink_to(outside, target_is_directory=True)
+        with (
+            patch.object(driver, "certificate", return_value=(new, b"new fixture key")),
+            self.assertRaisesRegex(self.module.MailError, "mail_setup_review_required"),
+        ):
+            driver.reconcile_certificate("node.example", str(uuid4()))
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(driver.marker("node.example")["status"], "ready")
+
+    def test_certificate_reconcile_public_action_takes_exclusive_lock_and_keeps_operation_identity(self):
+        operation_id = str(uuid4())
+        native = SimpleNamespace(reconcile_node_certificate=Mock(return_value={"configured": True}))
+        output = io.StringIO()
+        with (
+            tempfile.TemporaryFile(mode="w+") as lock,
+            patch.object(self.module, "operation_lock", return_value=lock),
+            patch.object(self.module, "MailNode", return_value=native),
+            patch.object(self.module.os, "geteuid", return_value=0),
+            patch.object(self.module.fcntl, "flock") as flock,
+            patch.dict(
+                os.environ,
+                {
+                    "PRAHO_MAIL_ACTION": "reconcile_node_certificate",
+                    "PRAHO_MAIL_ID": operation_id,
+                    "PRAHO_MAIL_NODE": "node.example",
+                },
+            ),
+            patch("sys.stdout", output),
+        ):
+            self.module.main()
+        self.assertEqual(flock.call_args.args[1], fcntl.LOCK_EX | fcntl.LOCK_NB)
+        native.reconcile_node_certificate.assert_called_once_with("node.example", operation_id)
+        envelope = json.loads(base64.b64decode(output.getvalue().partition("MAIL_RESULT=")[2]))
+        self.assertEqual(envelope["identity"], operation_id)
+        self.assertEqual(envelope["action"], "reconcile_node_certificate")

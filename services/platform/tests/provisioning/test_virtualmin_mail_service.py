@@ -326,3 +326,59 @@ class MailNativeReceiptTests(SimpleTestCase):
         with patch.object(mail, "_mail_zones", side_effect=ValueError("overflow"), create=True):
             self.assertEqual(mail.reconcile_mail_submitters(self.server).unwrap_err(), "mail_reserved_zones_unproven")
         self.runner.run_playbook.assert_not_called()
+
+    def test_certificate_reconcile_is_typed_and_bound_to_the_durable_operation(self):
+        operation_id = uuid4()
+        self.payload = {
+            "node_hostname": self.server.hostname,
+            "profile": mail.MAIL_PROFILE,
+            "configured": True,
+            "default_mail_off": True,
+            "public_ports": [25, 465, 993, 995],
+            "outcome": "replaced",
+            "certificate_sha256": "a" * 64,
+            "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+            "pending_code": "",
+            "private_key": "secret fixture",
+        }
+        observed = mail.reconcile_mail_node_certificate(self.server, operation_id=operation_id).unwrap()
+        self.assertEqual(observed.outcome, "replaced")
+        self.assertEqual(observed.certificate_sha256, "a" * 64)
+        self.assertEqual(self.variables["mail_operation_id"], str(operation_id))
+        self.assertEqual(self.variables["mail_action"], "reconcile_node_certificate")
+        self.assertNotIn("secret fixture", str(asdict(observed)))
+        self.assertGreater(self.runner.run_playbook.call_args.kwargs["timeout_seconds"], 120)
+
+    def test_certificate_reconcile_explicit_falsy_identity_refuses_before_runner_construction(self):
+        for identity in (False, 0, ""):
+            with self.subTest(identity=identity), patch.object(mail, "_runner") as runner:
+                result = mail.reconcile_mail_node_certificate(self.server, operation_id=identity)
+                self.assertTrue(result.is_err())
+                runner.assert_not_called()
+        self.runner.run_playbook.assert_not_called()
+
+    def test_certificate_reconcile_refuses_false_readiness_and_unknown_pending_reasons(self):
+        base = {
+            "node_hostname": self.server.hostname,
+            "profile": mail.MAIL_PROFILE,
+            "configured": True,
+            "default_mail_off": True,
+            "public_ports": [25, 465, 993, 995],
+            "outcome": "retained_previous",
+            "certificate_sha256": "a" * 64,
+            "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+            "pending_code": "mail_node_certificate_unproven",
+        }
+        self.payload = dict(base)
+        self.assertEqual(mail.reconcile_mail_node_certificate(self.server).unwrap().outcome, "retained_previous")
+        for changes in (
+            {"configured": False},
+            {"pending_code": "raw provider detail"},
+            {"certificate_sha256": "not a fingerprint"},
+            {"not_after": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()},
+            {"outcome": "replaced"},
+            {"outcome": "unknown"},
+        ):
+            with self.subTest(changes=changes):
+                self.payload = {**base, **changes}
+                self.assertTrue(mail.reconcile_mail_node_certificate(self.server).is_err())

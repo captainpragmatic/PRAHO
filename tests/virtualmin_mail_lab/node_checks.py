@@ -275,6 +275,92 @@ def boot_state(_request: dict[str, Any], directory: Path) -> dict[str, Any]:
     return {"runtime_recreated": True, "mail_services_active": True, "persistent_mail_journal_ready": True}
 
 
+def leaf_digest(content: str) -> str:
+    block = re.search(r"-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+?-----END CERTIFICATE-----", content)
+    if block is None:
+        raise CheckError("fixture_certificate_missing")
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(block[0])).hexdigest()
+
+
+def certificate_files() -> dict[str, str]:
+    return {
+        name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+        for name in ("/etc/praho-mail/node.pem", "/etc/praho-mail/node.key", "/var/lib/praho/mail/node.json")
+    }
+
+
+def certificate_candidate(request: dict[str, Any], directory: Path) -> dict[str, Any]:
+    case = request.get("case")
+    if case not in {"valid", "wrong_name"}:
+        raise CheckError("unknown_certificate_fixture")
+    material = request["material"]
+    save(
+        directory / "certificate-baseline.json",
+        json.dumps(
+            {
+                "before": certificate_files(),
+                "before_sha256": leaf_digest(Path("/etc/praho-mail/node.pem").read_text()),
+                "candidate_sha256": leaf_digest(material["pem"]),
+            }
+        ),
+    )
+    # Clone-only trust preserves the prior CA while introducing another fake renewal CA.
+    ca_digest = hashlib.sha256(material["ca"].encode()).hexdigest()
+    save(
+        Path("/usr/local/share/ca-certificates/praho-mail-lab-" + directory.name + "-" + ca_digest + ".crt"),
+        material["ca"],
+    )
+    command(["update-ca-certificates"], timeout=180)
+    save(Path("/etc/webmin/miniserv.pem"), material["pem"])
+    return {"certificate_candidate_prepared": True}
+
+
+def verify_certificate_frontends(hostname: str, digest: str) -> None:
+    context = ssl.create_default_context()
+    for port in (993, 995, 465):
+        with (
+            socket.create_connection(("127.0.0.1", port), timeout=15) as raw,
+            context.wrap_socket(raw, server_hostname=hostname) as client,
+        ):
+            wire = client.getpeercert(binary_form=True)
+            if not wire or hashlib.sha256(wire).hexdigest() != digest:
+                raise CheckError("unexpected_certificate_leaf")
+
+    class SMTP(smtplib.SMTP):
+        def _get_socket(self, _host, port, timeout):
+            return socket.create_connection(("127.0.0.1", port), timeout=timeout)
+
+    smtp = SMTP(hostname, 25, timeout=15)
+    try:
+        smtp.ehlo()
+        smtp.starttls(context=context)
+        smtp.ehlo()
+        if not isinstance(smtp.sock, ssl.SSLSocket):
+            raise CheckError("smtp_tls_not_established")
+        wire = smtp.sock.getpeercert(binary_form=True)
+        if smtp.has_extn("auth") or not wire or hashlib.sha256(wire).hexdigest() != digest:
+            raise CheckError("unexpected_smtp_certificate_or_auth")
+    finally:
+        smtp.close()
+
+
+def check_certificate(request: dict[str, Any], directory: Path, *, changed: bool) -> dict[str, Any]:
+    baseline = json.loads((directory / "certificate-baseline.json").read_text())
+    current = certificate_files()
+    expected = baseline["candidate_sha256"] if changed else baseline["before_sha256"]
+    if leaf_digest(Path("/etc/praho-mail/node.pem").read_text()) != expected:
+        raise CheckError("unexpected_installed_certificate")
+    if not changed and current != baseline["before"]:
+        raise CheckError("unchanged_certificate_mutated_owned_files")
+    marker = json.loads(Path("/var/lib/praho/mail/node.json").read_text())
+    if marker["status"] != "ready" or any(
+        marker["files"][name] != digest for name, digest in current.items() if name != "/var/lib/praho/mail/node.json"
+    ):
+        raise CheckError("certificate_journal_not_current")
+    verify_certificate_frontends(request["hostname"], expected)
+    return {"exact_certificate_frontends_verified": True, "certificate_changed": changed}
+
+
 def main() -> int:
     action = "invalid"
     try:
@@ -285,13 +371,16 @@ def main() -> int:
         directory = Path("/var/lib/praho-mail-lab", run_id)
         if directory.resolve() != Path(__file__).resolve().parent or directory.stat().st_mode & 0o077:
             raise CheckError("invalid_private_test_directory")
-        actions = {
+        actions: dict[str, Callable[[dict[str, Any], Path], dict[str, Any]]] = {
             "profile": profile,
             "prepare": prepare,
             "preserved": preserved,
             "new_default": new_default,
             "denied": denied,
             "boot_state": boot_state,
+            "certificate_candidate": certificate_candidate,
+            "certificate_unchanged": partial(check_certificate, changed=False),
+            "certificate_replaced": partial(check_certificate, changed=True),
         }
         action = request.get("action", "invalid")
         if action not in actions:
@@ -307,7 +396,18 @@ def main() -> int:
                     "ok": False,
                     "code": "mail_lab_node_check_failed",
                     "stage": action
-                    if action in {"profile", "prepare", "preserved", "new_default", "denied", "boot_state"}
+                    if action
+                    in {
+                        "profile",
+                        "prepare",
+                        "preserved",
+                        "new_default",
+                        "denied",
+                        "boot_state",
+                        "certificate_candidate",
+                        "certificate_unchanged",
+                        "certificate_replaced",
+                    }
                     else "invalid",
                 }
             )

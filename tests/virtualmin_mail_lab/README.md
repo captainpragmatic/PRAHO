@@ -51,6 +51,13 @@ stays mail-off. Real TLS clients must reject the valid, unexpired, unenrolled Un
 and after an actual container restart. A fresh runtime marker and Docker start time prove the restart occurred.
 There are no enrollment, mailbox-move, DKIM, queue-forwarding or teardown-readiness claims.
 
+The routine certificate extension stages a trusted-but-wrong-name renewal and requires the previous service
+copy/journal to remain exact. It then installs two validated replacement leaves, checks every actual TLS frontend,
+and replays the first completed UUID against the later generation without replacing it. Both fake renewal CAs stay
+trusted only inside that disposable clone. The ordinary preservation/default-off/reboot checks still follow.
+These cases cover live-service reload; they do not claim expired-certificate recovery after bootguard has stopped
+the services, and they do not reset a review/applying journal.
+
 An ephemeral strict CA/leaf and random fake passwords live only in clone/private memory or private test state.
 Secrets travel over stdin, never into host argv or saved console logs. The fixed in-clone dispatcher suppresses
 native command/timeout tracebacks. Public output and private host facts contain only identity/status evidence.

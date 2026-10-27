@@ -8,8 +8,8 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
+from typing import TYPE_CHECKING, Any, Literal, cast
+from uuid import UUID, uuid4
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
@@ -26,6 +26,7 @@ MAIL_PROFILE = "debian12-dovecot23"
 MAIL_PROFILES = frozenset({MAIL_PROFILE, "ubuntu2604-dovecot24"})
 MAIL_INSPECT_TIMEOUT_SECONDS = 120
 MAIL_SETUP_TIMEOUT_SECONDS = 900
+MAIL_CERTIFICATE_TIMEOUT_SECONDS = 900
 MAX_MAIL_USERS = 1000
 MAX_RESERVED_ACCOUNT_ZONES = 64
 MAX_MAIL_ALIASES = 2000
@@ -75,6 +76,19 @@ class MailNodeObservation:
     configured: bool
     default_mail_off: bool
     public_ports: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class MailNodeCertificateObservation:
+    node_hostname: str
+    profile: str
+    configured: bool
+    default_mail_off: bool
+    public_ports: tuple[int, ...]
+    outcome: Literal["unchanged", "replaced", "retained_previous"]
+    certificate_sha256: str
+    not_after: datetime
+    pending_code: str
 
 
 @dataclass(frozen=True)
@@ -250,7 +264,9 @@ def _read_receipt(stdout: str, identity: str, action: str, hostname: str) -> Res
         return Err("mail_native_result_uncertain", retriability=Retriability.UNKNOWN)
 
 
-def _run(server: VirtualminServer, action: str, **extra: str) -> Result[dict[str, Any], str]:
+def _run(
+    server: VirtualminServer, action: str, extra: dict[str, str] | None = None, *, operation_id: UUID | None = None
+) -> Result[dict[str, Any], str]:
     deployment = getattr(server, "node_deployment", None)
     if deployment is None:
         return Err("mail_managed_deployment_required", retriability=Retriability.NOT_RETRIABLE)
@@ -258,22 +274,41 @@ def _run(server: VirtualminServer, action: str, **extra: str) -> Result[dict[str
         hostname = _hostname(server.hostname)
     except ValueError:
         return Err("mail_node_identity_mismatch", retriability=Retriability.NOT_RETRIABLE)
-    identity = str(uuid4())
+    identity = str(uuid4() if operation_id is None else operation_id)
+    try:
+        if str(UUID(identity)) != identity:
+            raise ValueError("noncanonical operation")
+    except (ValueError, TypeError):
+        return Err("mail_native_result_uncertain", retriability=Retriability.NOT_RETRIABLE)
     variables = {
         "mail_operation_id": identity,
         "mail_action": action,
         "mail_expected_node_hostname": hostname,
-        **extra,
+        **(extra or {}),
     }
     result = _runner().run_playbook(
         deployment,
         MAIL_PLAYBOOK,
         variables,
-        timeout_seconds=MAIL_SETUP_TIMEOUT_SECONDS if action == "setup" else MAIL_INSPECT_TIMEOUT_SECONDS,
+        timeout_seconds={
+            "setup": MAIL_SETUP_TIMEOUT_SECONDS,
+            "reconcile_node_certificate": MAIL_CERTIFICATE_TIMEOUT_SECONDS,
+        }.get(action, MAIL_INSPECT_TIMEOUT_SECONDS),
     )
     if result.is_err() or not result.unwrap().success:
         return Err("mail_native_execution_failed", retriability=Retriability.UNKNOWN)
     return _read_receipt(result.unwrap().stdout, identity, action, hostname)
+
+
+def _node_observation(data: dict[str, Any]) -> MailNodeObservation:
+    configured, default_off = _boolean(data.get("configured")), _boolean(data.get("default_mail_off"))
+    raw_ports = _rows(data.get("public_ports"), len(PUBLIC_MAIL_PORTS))
+    if any(type(port) is not int or port not in PUBLIC_MAIL_PORTS for port in raw_ports):
+        raise ValueError("unsafe listener")
+    ports = tuple(sorted(set(raw_ports)))
+    if len(ports) != len(raw_ports) or (configured and (not default_off or set(ports) != PUBLIC_MAIL_PORTS)):
+        raise ValueError("unsafe node readiness")
+    return MailNodeObservation(_hostname(data["node_hostname"]), _text(data["profile"]), configured, default_off, ports)
 
 
 def _node(server: VirtualminServer, action: str) -> Result[MailNodeObservation, str]:
@@ -282,25 +317,14 @@ def _node(server: VirtualminServer, action: str) -> Result[MailNodeObservation, 
         extra = {"mail_reserved_account_zones": json.dumps(zones), "mail_account_zone": zones[0]} if zones else {}
     except (ValueError, TypeError):
         return Err("mail_reserved_zones_unproven", retriability=Retriability.NOT_RETRIABLE)
-    response = _run(server, action, **extra)
+    response = _run(server, action, extra)
     if response.is_err():
         return Err(response.unwrap_err(), retriability=retriability_of(response))
     try:
-        data = response.unwrap()
-        configured, default_off = _boolean(data.get("configured")), _boolean(data.get("default_mail_off"))
-        raw_ports = _rows(data.get("public_ports"), len(PUBLIC_MAIL_PORTS))
-        if any(type(port) is not int or port not in PUBLIC_MAIL_PORTS for port in raw_ports):
-            raise ValueError("unsafe listener")
-        ports = tuple(sorted(set(raw_ports)))
-        if len(ports) != len(raw_ports) or (configured and (not default_off or set(ports) != PUBLIC_MAIL_PORTS)):
-            raise ValueError("unsafe node readiness")
-        if action == "setup" and not configured:
+        observed = _node_observation(response.unwrap())
+        if action == "setup" and not observed.configured:
             raise ValueError("incomplete setup")
-        return Ok(
-            MailNodeObservation(
-                _hostname(data["node_hostname"]), _text(data["profile"]), configured, default_off, ports
-            )
-        )
+        return Ok(observed)
     except (ValueError, TypeError, KeyError):
         return Err("mail_native_result_uncertain", retriability=Retriability.UNKNOWN)
 
@@ -313,6 +337,47 @@ def setup_mail_capability(server: VirtualminServer) -> Result[MailNodeObservatio
 def inspect_mail_node(server: VirtualminServer) -> Result[MailNodeObservation, str]:
     """Observe the supported node profile independently of customer-domain readiness."""
     return _node(server, "inspect_node")
+
+
+def reconcile_mail_node_certificate(
+    server: VirtualminServer, *, operation_id: UUID | None = None
+) -> Result[MailNodeCertificateObservation, str]:
+    """Reconcile only verified node TLS; a completed identity cannot reinstall an old certificate."""
+    response = _run(server, "reconcile_node_certificate", operation_id=operation_id)
+    if response.is_err():
+        return Err(response.unwrap_err(), retriability=retriability_of(response))
+    try:
+        data = response.unwrap()
+        observed = _node_observation(data)
+        outcome = _text(data.get("outcome"), 32)
+        digest = _text(data.get("certificate_sha256"), 64)
+        expiry = datetime.fromisoformat(_text(data.get("not_after"), 40))
+        pending = _text(data.get("pending_code"), 64)
+        if not observed.configured or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("unproven node TLS")
+        if expiry.tzinfo is None or expiry <= datetime.now(UTC):
+            raise ValueError("expired node TLS")
+        if (outcome, pending) not in {
+            ("unchanged", ""),
+            ("replaced", ""),
+            ("retained_previous", "mail_node_certificate_unproven"),
+        }:
+            raise ValueError("unproven certificate outcome")
+        return Ok(
+            MailNodeCertificateObservation(
+                observed.node_hostname,
+                observed.profile,
+                True,
+                True,
+                observed.public_ports,
+                cast(Literal["unchanged", "replaced", "retained_previous"], outcome),
+                digest,
+                expiry.astimezone(UTC),
+                pending,
+            )
+        )
+    except (ValueError, TypeError, KeyError):
+        return Err("mail_native_result_uncertain", retriability=Retriability.UNKNOWN)
 
 
 def _mail_zones() -> tuple[str, ...]:
@@ -336,7 +401,9 @@ def reconcile_mail_submitters(server: VirtualminServer) -> Result[MailSubmitterO
     except (ValueError, TypeError):
         return Err("mail_reserved_zones_unproven", retriability=Retriability.NOT_RETRIABLE)
     response = _run(
-        server, "reconcile_submitters", mail_reserved_account_zones=json.dumps(zones), mail_account_zone=zones[0]
+        server,
+        "reconcile_submitters",
+        {"mail_reserved_account_zones": json.dumps(zones), "mail_account_zone": zones[0]},
     )
     if response.is_err():
         return Err(response.unwrap_err(), retriability=retriability_of(response))
@@ -470,9 +537,7 @@ def inspect_mail_domain(account: VirtualminAccount) -> Result[MailDomainObservat
     result = _run(
         account.server,
         "inspect_domain",
-        mail_domain=domain,
-        mail_expected_owner=owner,
-        mail_account_hostname=account_name,
+        {"mail_domain": domain, "mail_expected_owner": owner, "mail_account_hostname": account_name},
     )
     if result.is_err():
         return Err(result.unwrap_err(), retriability=retriability_of(result))
