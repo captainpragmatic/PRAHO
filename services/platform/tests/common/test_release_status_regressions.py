@@ -6,6 +6,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.cache import cache
+from django.core.management.base import CommandError
 from django.db import connection, connections, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 
@@ -22,6 +23,23 @@ class ExistingSettingEvidenceTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
+
+    def test_rejected_backup_releases_claim_before_storage_is_restored(self) -> None:
+        key = "backup.s3_bucket_name"
+        SettingsService.update_setting(key, "original-fixture-backups").unwrap()
+        command = Command()
+        run_id = uuid4()
+        claim = command._claim(run_id, start=True)
+        SettingsService.update_setting(key, "replacement-fixture-backups").unwrap()
+        with self.assertRaisesMessage(CommandError, "superseded"):
+            command._report(claim, run_id, success=True)
+        row = SystemCheckState.objects.get(pk=claim.state_id)
+        self.assertIsNone(row.claim_token)
+        self.assertIsNone(row.lease_until)
+        self.assertNotEqual(row.level, "green")
+        SettingsService.update_setting(key, "original-fixture-backups").unwrap()
+        retry = command._claim(uuid4(), start=True)
+        self.assertNotEqual(retry.token, claim.token)
 
     def test_replacing_existing_credential_invalidates_green_cache(self) -> None:
         key = "integrations.stripe_secret_key"

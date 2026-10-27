@@ -253,19 +253,20 @@ class Command(BaseCommand):
             row.save(update_fields=["details", "updated_at"])
             return claim
 
-    @transaction.atomic
     def _report(self, claim: CheckClaim, run_id: UUID, *, success: bool) -> None:
-        row = SystemCheckState.objects.select_for_update().get(pk=claim.state_id)
-        details = {**row.details, "run_id": str(run_id)}
-        if success:
-            details["offsite_completed_at"] = timezone.now().isoformat()
-        accepted = finish_check(
-            claim,
-            identity=storage_identity,
-            observation=Observation(
-                "green" if success else "red", "backup_completed" if success else "backup_failed", details
-            ),
-        )
+        with transaction.atomic():
+            row = SystemCheckState.objects.select_for_update().get(pk=claim.state_id)
+            details = {**row.details, "run_id": str(run_id)}
+            if success:
+                details["offsite_completed_at"] = timezone.now().isoformat()
+            accepted = finish_check(
+                claim,
+                identity=storage_identity,
+                observation=Observation(
+                    "green" if success else "red", "backup_completed" if success else "backup_failed", details
+                ),
+            )
+        # Rejection may invalidate the old configuration; commit that before raising.
         if not accepted:
             raise CommandError("Backup result was superseded; no success was recorded")
         transaction.on_commit(clear_setup_cache)
