@@ -1,15 +1,17 @@
 """
 Scheduled tasks for PRAHO common app.
 
-Includes the daily system status check task.
+Includes the ten-minute system status check task.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from django.core.cache import cache
+from django.utils import timezone
 from django_q.models import Schedule
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ _FX_FRESHNESS_ALERT_KEY = "fx_freshness_alert_level"
 def _alert_on_fx_freshness(results: list[SubsystemStatus], ttl: int) -> None:
     """Alert staff when the FX-rates subsystem is RED/AMBER (#103).
 
-    Runs only from the daily task (never in the request-path check functions). Dedups on
+    Runs only from the scheduled task (never in the request-path check functions). Dedups on
     the current level so a persistent state alerts once; a level change re-alerts; recovery
     (GREEN/GREY) clears the dedup so the next degradation alerts again.
     """
@@ -111,7 +113,7 @@ def setup_system_status_scheduled_tasks() -> dict[str, str]:
     """
     results: dict[str, str] = {}
 
-    _, created = Schedule.objects.update_or_create(
+    schedule, created = Schedule.objects.update_or_create(
         name="system_status_check",
         defaults={
             "func": "apps.common.tasks.system_status_check",
@@ -121,6 +123,9 @@ def setup_system_status_scheduled_tasks() -> dict[str, str]:
             "cluster": "praho-cluster",
         },
     )
+    # Changing the cadence does not recalculate an existing Q2 next_run deadline.
+    now = timezone.now()
+    Schedule.objects.filter(pk=schedule.pk, next_run__gt=now + timedelta(minutes=10)).update(next_run=now)
     results["system_status_check"] = "created" if created else "already_exists"
 
     for task_name, func_path in (("counter_cull", "apps.common.tasks.cull_counters"),):

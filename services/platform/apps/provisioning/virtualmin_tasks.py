@@ -2110,7 +2110,7 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     # Health check every 10 minutes. UPSERT by name: skip-if-exists left
     # deployed installations on the old hourly cadence forever, starving
     # placement (is_healthy freshness << cadence).
-    _, created = ScheduleModel.objects.update_or_create(
+    health_schedule, created = ScheduleModel.objects.update_or_create(
         name="virtualmin-health-check",
         defaults={
             "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
@@ -2119,6 +2119,9 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
             "cluster": "praho-cluster",
         },
     )
+    # Preserve imminent runs, but do not retain the old hourly deadline on upgrade.
+    now = timezone.now()
+    ScheduleModel.objects.filter(pk=health_schedule.pk, next_run__gt=now + timedelta(minutes=10)).update(next_run=now)
     tasks_created["health_check"] = "created" if created else "updated"
 
     # Divergence backstop every 15 minutes (durable recovery for lost
