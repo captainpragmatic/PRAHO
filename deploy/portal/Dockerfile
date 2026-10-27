@@ -2,7 +2,7 @@
 # PRAHO PORTAL SERVICE - PRODUCTION DOCKERFILE
 # ===============================================================================
 # Multi-stage build: builder stage compiles dependencies, final stage is minimal.
-# Customer portal — uses local SQLite for session storage only (no business DB).
+# Customer portal — local SQLite holds only sessions and counters (no business DB).
 
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — install build tools + compile Python dependencies
@@ -78,7 +78,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # settings package (config/settings/{base,dev,prod}.py), same as platform.
 
 # Runtime-only system packages (no build tools, no uv)
-# Note: NO postgresql-client, NO libpq-dev - portal uses SQLite for sessions only
+# Note: NO postgresql-client, NO libpq-dev - portal's SQLite holds only sessions and counters
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \

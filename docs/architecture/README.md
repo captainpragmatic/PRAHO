@@ -11,7 +11,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 **Purpose**: High-level view of all services, databases, and external integrations.
 
 **Shows**:
-- Portal service (customer-facing, SQLite sessions only)
+- Portal service (customer-facing, no business data; SQLite sessions and counters)
 - Platform service (business logic, PostgreSQL)
 - External integrations (Virtualmin, Stripe, ANAF, ROTLD)
 - Network boundaries and data flows

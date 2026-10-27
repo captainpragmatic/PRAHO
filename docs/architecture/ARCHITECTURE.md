@@ -43,7 +43,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  │  │  └─ ... (17 total)     # See ls services/platform/apps/
 │  │  ├─ config/               # Django configuration
 │  │  └─ manage.py             # Django management
-│  └─ portal/                  # 🌐 Customer API service (stateless, session-only DB)
+│  └─ portal/                  # 🌐 Customer API service (no business data; SQLite for sessions and counters)
 │     ├─ apps/                 # 9 Django apps (API proxies, no business models)
 │     │  ├─ api_client/        # HMAC authentication client
 │     │  ├─ users/             # User API proxy
@@ -116,13 +116,14 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 
 ### Database Isolation
 
-Portal uses a **minimal SQLite database for Django session storage only**. It has:
-- ✅ Session storage (required by Django's session framework)
+Portal uses a **local SQLite file for sessions and counters only** (`portal.sqlite3`). It has:
+- ✅ Session storage (server-side sessions, ADR-0017 and ADR-0055)
+- ✅ A counter table for rate limits and replay/idempotency claims (ADR-0050)
 - ❌ NO business models (no User, Customer, Invoice, etc.)
 - ❌ NO PostgreSQL access (no connection to platform database)
 - ❌ NO direct data queries (all business data fetched via Platform API)
 
-This maintains stateless architecture while leveraging Django's built-in session management.
+None of it is business data, and losing the file only logs everyone out. Session rows are live credentials, so the file is never backed up. See `services/portal/PORTAL_STATE.md`.
 
 ### API Endpoints
 
@@ -153,9 +154,9 @@ POST /api/v1/tickets/{id}/comments/ # Add comment
 - ❌ **NO PostgreSQL access** (no psycopg driver, no connection to business database)
 - ❌ **NO direct model imports** from platform (enforced by pre-commit hooks)
 - ❌ **NO business data models** (apps have no models.py with domain entities)
-- ✅ **SQLite for sessions only** (minimal local storage, no business data)
+- ✅ **SQLite for sessions and counters only** (no business data, never backed up)
 - ✅ **HMAC-signed API communication** with platform for all business operations
-- ✅ **Stateless design** - can be destroyed/recreated without data loss
+- ✅ **No business data** - can be destroyed and recreated; customers simply log in again
 
 ---
 
@@ -194,7 +195,7 @@ Portal Service                Platform Service
 
 ### Service Isolation
 1. **Import Prevention**: Portal cannot import platform models
-2. **Database Blocking**: Portal has no database drivers
+2. **Database Blocking**: Portal has no external database drivers
 3. **Network Isolation**: Docker networks separate concerns
 4. **Session Separation**: Different cookie names prevent conflicts
 

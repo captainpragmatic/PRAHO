@@ -102,11 +102,12 @@ class TestPlatformPortalIntegration:
         # In production, portal is deployed without database credentials
         # This test validates our architecture documentation is correct
 
-        # Portal architecture should be stateless (see STATELESS_ARCHITECTURE.md)
-        # The actual enforcement happens through:
-        # 1. Portal has no DATABASE_URL in production
-        # 2. Portal requirements.txt has no psycopg driver
-        # 3. Portal settings use in-memory dummy DB
+        # Portal holds no business data (see services/portal/PORTAL_STATE.md). Its SQLite file holds
+        # only sessions and counters. The actual enforcement happens through:
+        # 1. Portal has no business DATABASE_URL in production
+        # 2. The model inventory test pins sessions.Session and common.Counter, see
+        #    services/portal/tests/common/test_portal_counter_sites.py
+        # 3. Portal CI refuses external database drivers (.github/workflows/portal.yml)
 
         # Verify portal requirements don't include database drivers
         import os

@@ -1,172 +1,175 @@
-# ADR-0017: Portal Authentication Fail-Open Strategy
+# ADR-0017: Portal Sessions and Authentication Fail-Open
 
 **Status:** Accepted
 **Date:** 2026-02-28
+**Revised:** 2026-10-28 (rewritten to match the code; session policy added)
 **Authors:** Development Team
-**Supersedes:** N/A
-**Related:** ADR-0004 (Custom 2FA Implementation), ADR-0018 (Django Encryption Key Management), ADR-0021 (Email Enumeration Prevention)
+**Related:** ADR-0004 (Custom 2FA), ADR-0032 (Dual HMAC), ADR-0050 (Portal Infrastructure Tables),
+ADR-0055 (Portal Sessions Merge Concurrent Writes), ADR-0058 (Pending TOTP Enrolment)
+
+This ADR owns every decision about the customer's portal session: where it lives, what binds it to
+the customer, how it is validated, what happens when Platform is unreachable, and how long it lasts.
 
 ## Context
 
-PRAHO uses a **two-service architecture**: Platform (`:8700`, has PostgreSQL) and Portal (`:8701`, fully stateless — no database, no local user store). Portal authenticates customers by calling Platform's `/users/session/validate/` endpoint via HMAC-signed HTTP requests.
+PRAHO runs two services. Platform (`:8700`, PostgreSQL) owns every business record. Portal (`:8701`)
+is the customer-facing service and **holds no business data**: customers, users, invoices, orders,
+services and tickets reach it only through HMAC-signed calls to Platform (ADR-0032).
 
-`PortalAuthenticationMiddleware` re-validates each customer's session every 10–12 minutes (jittered) by calling Platform. This raises a critical question: **what should Portal do when Platform is unreachable?**
+Portal does hold disposable, per-visitor state in its local SQLite file, `portal.sqlite3`: the
+server-side sessions described here and the counter table of ADR-0050. A session row is a live
+credential for its customer until it expires or its binding changes, so the file is treated as a
+credential store: owner-only permissions, never backed up. Losing it logs everyone out and loses
+nothing else. `services/portal/PORTAL_STATE.md` describes that state and what enforces the invariant.
 
-There are exactly two options:
-
-### Option A: Fail-Closed (reject access)
-
-Every request whose validation timer fires during a Platform outage gets rejected. The session is flushed and the user is redirected to `/login/`. Since login itself requires a Platform API call (`authenticate_customer`), the user cannot log back in either.
-
-**Consequence:** A 30-second Platform restart causes a rolling wave of customer logouts. With typical session jitter, ~5% of active users hit their validation window per minute. A 5-minute maintenance window logs out ~25% of concurrent users, and none can return until Platform recovers. This creates a **total customer-facing outage** that is indistinguishable from Portal being down.
-
-### Option B: Fail-Open (allow access temporarily)
-
-Already-authenticated users with a previous successful validation continue to use Portal during the outage. New logins still fail (no way to verify credentials). Sessions that have never been validated are rejected.
-
-**Consequence:** Users continue browsing invoices, viewing tickets, checking hosting status. The trade-off is that if an account is disabled on Platform *during* the outage, Portal has no way to know and continues granting access until the next successful validation.
+Platform holds the credential each portal session is bound to, and the portal re-checks it
+periodically. The original question of this ADR still stands: what should the portal do when it
+cannot reach Platform to re-check?
 
 ## Decision
 
-PRAHO adopts **Option B: Fail-Open** with bounded safeguards.
+### 1. Where the session lives
 
-The fail-open applies **only** to `PlatformAPIError` (network failures: connection refused, timeout, DNS failure). Unexpected `Exception` types (programming bugs) **always fail closed** — a logic error must never silently grant access.
+- Server-side sessions in `portal.sqlite3`, through `apps.common.session_store`, Django's database
+  session store with merge-on-save (ADR-0055). Signed-cookie sessions were tried first and rejected
+  (History).
+- Logout deletes the session row on the portal. Platform is not told (see the gaps in section 5).
+- `portal.sqlite3` is never backed up.
 
-### Safeguards
+### 2. What binds a session to the customer
 
-| Safeguard | Bound | Mechanism |
-|-----------|-------|-----------|
-| **Hard TTL deadline** | 6 hours | `HARD_TTL_GRACE = 21600`. After 6 hours past the last successful validation, `validate_customer_with_timing` returns `False` unconditionally — no Platform call attempted, no fail-open possible. User is force-logged-out. |
-| **No metadata update** | Next request | When failing open, `validated_at` and `next_validate_at` are **not updated**. The very next request re-enters the validation path and retries the Platform call. Fail-open does not grant a free 10-minute window. |
-| **Independent session security** | 1 hour idle / IP+UA binding | `SessionSecurityMiddleware` (separate middleware, `apps.common.middleware`) enforces a 1-hour activity timeout and IP/User-Agent fingerprint binding. It fails **closed** on all exceptions, including its own bugs. |
-| **Error type split** | Immediate | `except PlatformAPIError` → fail open. `except Exception` → fail closed. This ensures only infrastructure failures (not code bugs) trigger the open path. |
-| **Thundering herd protection** | 30s lock | `cache.set(f"validating:{customer_id}", ...)` single-flight lock prevents concurrent validation storms during recovery. |
+- Login (`POST /api/users/login/`) returns `session_auth_hash`, Django's session hash over the
+  password and, once the customer's 2FA state has changed, the MFA credential version
+  (`User._get_session_auth_hash`, ADR-0004). The portal keeps it in the session's identity key group
+  (ADR-0055) and sends it with every validation.
+- A password change or reset, or any 2FA enable or disable, changes the hash, so every portal session
+  of that customer is refused at its next validation. A password change made through the portal
+  stores the new hash in the session that made it, so that session continues.
+- Platform also accepts a hash computed under `SECRET_KEY_FALLBACKS` and returns the current one, so
+  rotating the secret key logs nobody out.
 
-### Accepted Risk
+### 3. Validation and fail-open, as implemented
 
-If a customer account is **disabled or deleted on Platform** while Platform is simultaneously **unreachable from Portal**, that customer retains access for up to 6 hours (hard deadline) or 1 hour (idle timeout), whichever comes first.
+`PortalAuthenticationMiddleware` (`services/portal/apps/users/middleware.py`) calls
+`POST /api/users/session/validate/` on this schedule:
 
-This requires two simultaneous conditions:
-1. The account is actively being disabled (administrative action)
-2. Platform is unreachable from Portal at that exact moment
+| Step | Behaviour |
+|------|-----------|
+| Schedule | Every 600 s plus 0-120 s of jitter (`REVALIDATE_EVERY`, `JITTER_MAX`). A session with no validation record or no binding validates on its next request; login records none, so the first request after login validates. |
+| Soft grace | Up to 300 s past due (`SOFT_TTL_GRACE`), one request per session validates under a single-flight lease (the longest Platform call plus 5 s) while the session's other requests continue. |
+| Hard deadline | 6 h after the scheduled validation (`HARD_TTL_GRACE`, counted from `next_validate_at`), the session ends without calling Platform. |
+| Authoritative denial | A 401 or 403 whose body says `"active": false` ends the session at once. |
+| Fail-open | Any other `PlatformAPIError` (a transport error, a 5xx, a 429, a 401 or 403 without `"active": false` such as an HMAC fault) lets the request through. Nothing is recorded, so the next request tries again. |
+| Breaker | Each fail-open increments `auth:fail_open:{user_id}` in the counter table, with a one-hour window; the fifth ends the session (`_MAX_FAIL_OPEN_COUNT = 5`). If the counter store itself fails, access is denied. A successful validation resets the breaker. |
+| Programming errors | Any other exception fails closed. |
 
-In practice, account disablement is a staff action performed on Platform. If Platform is down, staff cannot disable accounts either. The risk window is therefore limited to the scenario where Platform becomes unreachable *after* the disable action but *before* Portal's next validation — a narrow race condition.
+In plain terms: during a Platform outage an authenticated customer gets about four more requests in
+the hour before being logged out. Pages need Platform for their data anyway, so fail-open smooths
+over brief faults (a restart, a slow call); it does not keep customers working through a long outage.
+New logins fail whenever Platform is unreachable.
 
-### Why Not a Circuit Breaker?
+### 4. Session checks that do not depend on Platform
 
-A circuit breaker would add:
-- Local state tracking (open/closed/half-open) per endpoint
-- Configuration complexity (thresholds, timeouts, recovery probes)
-- A dependency on shared state (cache or in-memory) for the circuit status
+`SessionSecurityMiddleware` (`services/portal/apps/common/middleware.py`) runs on every authenticated
+request and fails closed on any error:
 
-For a single validation endpoint with 10-minute jittered intervals, the existing stale-while-revalidate pattern with hard TTL provides equivalent protection with less complexity. If PRAHO scales to multiple Platform API dependencies, a circuit breaker should be reconsidered.
+- idle timeout 1 h (`SESSION_TIMEOUT_SECONDS`), with the activity stamp written at most every 60 s;
+- absolute limit 8 h (`MAX_SESSION_AGE_SECONDS`), counted from the first request after login;
+- binding to the IP address and the user agent seen on that first request (`IP_CHANGE_TOLERANCE = False`);
+- it decides whether a session is authenticated from `user_id` in the session, never from
+  `session_key` (History).
 
-## Implementation
+The authentication middleware separately ends a session 24 h after login, or 30 days with
+"remember me" (`SESSION_COOKIE_AGE_DEFAULT`, `SESSION_COOKIE_AGE_REMEMBER_ME`); the 8 h limit above
+ends every session first.
 
-### Code Location
+### 5. Session policy (decided 2026-10-28)
 
-`services/portal/apps/users/middleware.py` — `PortalAuthenticationMiddleware._perform_validation()`
+Session lifetimes follow NIST SP 800-63B-4 (Sec. 2.1.3 and 2.2.3) and the OWASP Session Management
+Cheat Sheet. The same policy applies in PRAHO and appstractor-platform, and a change to it lands in
+both.
 
-```python
-except PlatformAPIError as e:
-    logger.error(f"🔥 [Auth] Platform API error during validation for {customer_id}: {e}")
-    logger.info(f"🛡️ [Auth] Failing open for customer {customer_id} due to API unavailability")
-    return True  # praho-security: ignore[PRAHO-006] — ADR-0017 fail-open strategy
+| Tier | Who | Absolute | Idle | Browser cookie | NIST SP 800-63B-4 |
+|------|-----|----------|------|----------------|-------------------|
+| `standard` | "Remember me" unticked, and every staff account | 24 h | 1 h | Ends with the browser | AAL2: overall <= 24 h, inactivity <= 1 h |
+| `remember` | "Remember me" ticked, customers only | 30 days | 7 days | Kept 30 days | AAL1: overall <= 30 days, inactivity optional |
 
-except Exception as e:
-    logger.error(f"🔥 [Auth] Unexpected validation error for {customer_id}: {e}", exc_info=True)
-    # Fail CLOSED for unexpected errors (programming bugs should not grant access)
-    return False
-```
+Rules that apply to both tiers:
 
-### Scanner Suppression
+- **Sensitive actions need fresh proof.** Changing members or roles, contact details, the legal or
+  tax identity, revealing gift-card codes or exporting personal data requires a password check (plus
+  the second factor when enabled) within the last 300 s. A login counts as that check. This is what
+  makes the AAL1 tier acceptable: a customer may browse for weeks, but cannot change what matters
+  without proving it is them.
+- **Only the customer's own activity extends the idle limit.** NIST resets the inactivity timeout on
+  "activity from the subscriber"; background calls do not count.
+- **Without "remember me" the cookie ends with the browser.** OWASP advises non-persistent cookies
+  when authentication need not persist across browser sessions. Platform still enforces every limit,
+  because browsers that restore sessions can keep such cookies.
+- **Sessions are bound to the browser, not the IP address.** A network change (mobile data to Wi-Fi,
+  home to office) keeps the session; a different user agent ends it.
+- **A credential change keeps the session that made it and ends every other one.**
+- **Platform owns the policy and enforces it server-side.** OWASP requires server-side enforcement of
+  timeouts; the portal follows the deadlines Platform returns and computes none of its own.
 
-The PRAHO security scanner (rule PRAHO-006) detects `return True` inside `except` blocks in middleware files as a potential fail-open vulnerability. This specific instance is suppressed with an inline `# praho-security: ignore[PRAHO-006]` comment referencing this ADR.
+Why these numbers: 24 h with 1 h of inactivity is NIST's current limit for AAL2, the level a password
+plus TOTP login reaches, and the strongest-backed choice for a normal session. 30 days with no
+required inactivity limit is NIST's AAL1; it is offered only because the 300 s re-check guards every
+sensitive action. OWASP's cheat sheet suggests stricter values for high-value applications (idle
+2-5 min, absolute 4-8 h); NIST's current revision is followed instead, with the re-check as the
+compensating control.
 
-### Observability
+**Gap until the implementation lands.** This list is removed when the code does what section 5 says:
 
-All fail-open events are logged at two levels:
-- `ERROR` — the Platform API failure itself (with exception details)
-- `INFO` — the fail-open decision (with customer ID)
+- every session ends after 8 h (section 4), so "remember me" does not last longer;
+- sessions are still bound to the IP address;
+- the cookie of a standard session persists for 24 h;
+- there is no 300 s re-check on sensitive actions;
+- every request extends the idle limit;
+- Platform cannot end a portal session without a credential change, and logout does not reach Platform.
 
-These log lines can be monitored to detect prolonged Platform outages affecting Portal authentication.
+### Accepted risk
+
+If a customer account is disabled on Platform while Platform is unreachable from the portal, the
+customer keeps access until the breaker trips (about four requests) or the hard deadline passes,
+whichever comes first. Disabling an account needs Platform to be up, so the exposure is the race
+between a disable and an outage that starts right after it.
 
 ## Consequences
 
 ### Positive
-- Customers experience zero disruption during brief Platform maintenance (deploys, restarts)
-- Portal availability is decoupled from Platform availability for already-authenticated users
-- No additional infrastructure (Redis, circuit breaker library) required
+- A Platform restart or a slow call does not log customers out.
+- A credential change ends every other session of that customer within one validation interval
+  (about 12 minutes).
+- The portal holds no business data, so a portal compromise exposes sessions, not records.
 
 ### Negative
-- Disabled accounts may retain access for up to 6 hours during Platform outages (accepted risk)
-- Fail-open events must be monitored — silent Platform degradation could go unnoticed without alerting
+- During a real outage customers are logged out after a few requests.
+- A session row is a credential; the portal's SQLite file must be protected accordingly.
+- Until section 5 is implemented, Platform cannot end a single session, and logout is portal-local.
 
 ### Neutral
-- New customer logins still fail during Platform outages (no way to verify credentials without Platform)
-- The pattern is well-documented and scanner-suppressed, reducing confusion for future developers
+- Fail-open events are logged: the Platform error at ERROR, each fail-open decision at INFO with the
+  breaker count, a tripped breaker at WARNING.
 
----
+## History
 
-## Addendum: the `session_key` trap
-
-The safeguards described above are enforced by `SessionSecurityMiddleware`. An earlier
-version of that middleware guarded on `request.session.session_key`, which silently disabled
-every check under a session backend that keeps no server-side record. The guard is now
-backend-agnostic (see Decision below); this addendum records the failure mode so it is not
-reintroduced.
-
-### The trap
-
-`django.contrib.sessions.backends.signed_cookies` always returns `session_key = None`,
-because there is no server-side session record. Middleware that guards on that value exits
-before running any check:
-
-```python
-if not request.session.session_key:  # Always None under signed_cookies
-    return None  # Skips ALL security checks
-```
-
-With such a guard, the safeguards this middleware implements go inert under that backend — IP
-address fingerprinting and change detection, User-Agent fingerprint binding, the 1-hour
-activity timeout, and session activity tracking. The rest of the table above is unaffected:
-the hard TTL, the validation error split, retry behaviour and the thundering-herd lock belong
-to portal authentication and keep working. Nothing errors and nothing logs: the middleware
-simply stops doing its job, so the failure is invisible to any test that exercises the checks
-rather than their activation.
-
-### Root cause
-
-`session_key` is a Django `SessionBase` property that returns the unique server-side
-identifier for a session. For DB/cache backends this is a random 32-character string.
-For the `signed_cookies` backend, there is no server-side record, so `session_key` is
-always `None`. Code that branches on `session_key` truthiness silently changes behavior
-when the session backend is switched.
-
-### Decision
-
-1. **Session backend**: all environments (base, dev, prod) pin
-   `django.contrib.sessions.backends.db`, backed by the existing `portal.sqlite3` file,
-   so a real `session_key` exists for every security check.
-
-2. **Defensive guard**: `SessionSecurityMiddleware` guards on
-   `"user_id" not in request.session` rather than on `session_key` truthiness, which makes
-   it backend-agnostic and removes the silent-bypass mode entirely.
-
-3. **Cart rate limiting** and **order idempotency** key on `user_id`, not `session_key`,
-   for the same reason.
-
-4. **Tests**: `tests/common/test_session_backend.py` asserts that `session_key` is non-None
-   after login and that `SessionSecurityMiddleware` activates for authenticated sessions —
-   testing the control's *activation*, not just its correctness, which is what this class of
-   defect requires.
-
-## Addendum 2026-09
-
-Portal sessions are bound to the Platform user's Django session auth hash.
-Login stores the hash separately from profile data; signed validation requests must supply it.
-Password changes and resets revoke older hashes at the next Platform validation.
-Django secret-key fallback hashes are accepted and upgraded to the current hash in Portal.
-Session-validation HTTP 401/403 responses are authoritative denials and fail closed, including during soft grace.
-Only transport errors and HTTP 5xx responses retain the bounded fail-open breaker; rate limits still propagate.
-A Portal password change updates the initiating session's hash and revokes the user's Platform sessions.
+- **2026-02-28.** First decision. The portal was then described as "fully stateless — no database,
+  no local user store", used signed-cookie sessions, and the ADR promised continued access for up to
+  6 h during an outage, a 30 s lock per customer, and no circuit breaker.
+- **Signed cookies replaced by database sessions.** Under signed cookies `session_key` is always
+  `None`, and `SessionSecurityMiddleware` guarded on it, so every check it runs (IP and user-agent
+  binding, the idle timeout, activity tracking) was silently off. The guard now reads `user_id`,
+  cart rate limits and order idempotency key on `user_id`, and
+  `services/portal/tests/common/test_session_backend.py` asserts that the checks activate.
+- **#130.** A per-user fail-open breaker was added; the original "why not a circuit breaker" reasoning
+  no longer applies.
+- **2026-09.** Sessions were bound to `session_auth_hash`; credential changes revoke sessions at the
+  next validation. #549 (2026-09-28) then narrowed the immediate denial to an explicit
+  `"active": false`, so an HMAC fault falls under the bounded breaker instead of logging every
+  customer out.
+- **2026-09 / 2026-10.** The counter table (ADR-0050) and merge-on-save sessions (ADR-0055) were added.
+- The scanner rule PRAHO-006 and its inline suppression, which an earlier version cited here, no
+  longer exist.
+- **2026-10-28.** Rewritten to describe the code as it is, "stateless" replaced by "holds no business
+  data", and the session policy of section 5 recorded.

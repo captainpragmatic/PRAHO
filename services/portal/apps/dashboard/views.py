@@ -1,6 +1,6 @@
 """
 Dashboard views for PRAHO Portal Service
-Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
+Customer-facing dashboard; all data comes from the Platform API (no business data in the portal).
 """
 
 import logging

@@ -14,8 +14,8 @@ graph TB
 
     subgraph "Portal Service (Customer-Facing)"
         PortalApp[Portal Django App<br/>:8701]
-        PortalSession[(SQLite<br/>Session Storage Only)]
-        PortalApp -.->|Sessions Only| PortalSession
+        PortalSession[(SQLite<br/>Sessions + Counters)]
+        PortalApp -.->|Sessions + counters, no business data| PortalSession
     end
 
     subgraph "Platform Service (Business Logic)"

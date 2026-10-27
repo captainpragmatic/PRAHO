@@ -1,5 +1,5 @@
 # ===============================================================================
-# PORTAL SERVICE CI/CD - API-ONLY, NO DATABASE ACCESS
+# PORTAL SERVICE CI/CD - API-ONLY, NO BUSINESS DATABASE
 # ===============================================================================
 # Tests and type checking for the portal service.
 # Linting is consolidated in integration.yml (make lint).
@@ -30,7 +30,8 @@ jobs:
   portal-test:
     runs-on: ubuntu-latest
 
-    # NO DATABASE SERVICES - Portal should not access DB!
+    # No database services: the portal has no business database. Its local SQLite file holds
+    # only sessions and counters (services/portal/PORTAL_STATE.md).
 
     steps:
     - uses: actions/checkout@v4

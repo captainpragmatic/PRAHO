@@ -4,7 +4,7 @@
 
 sequenceDiagram
     participant Customer as Customer Browser
-    participant Portal as Portal Service<br/>(Stateless API)
+    participant Portal as Portal Service<br/>(No Business Data)
     participant Platform as Platform Service<br/>(Business Logic)
     participant DB as PostgreSQL<br/>(Business Data)
     participant Cache as DB Cache Table
@@ -35,8 +35,8 @@ sequenceDiagram
     Portal-->>Customer: JSON response
 
     Note over Customer,Cache: Platform→Portal Webhook (System 2)
-    Platform->>Portal: POST /orders/payment/webhook/<br/>X-Platform-Signature: hmac-sha256<br/>X-Platform-Timestamp: int(unix)
-    Portal->>Portal: Verify HMAC signature<br/>+ replay dedup (LocMemCache)
+    Platform->>Portal: POST /order/payment/webhook/<br/>X-Platform-Signature: hmac-sha256<br/>X-Platform-Timestamp: int(unix)
+    Portal->>Portal: Verify HMAC signature<br/>+ replay claim (counter table)
     Portal-->>Platform: {success: true}
 
     Note over Customer,Cache: Security Isolation

@@ -49,7 +49,7 @@
 
 ## Context
 
-We need a full manual QA walkthrough of the Portal service (localhost:8701) using Chrome browser automation (claude-in-chrome MCP). The portal is a stateless Django frontend that proxies to the Platform service via HMAC-signed requests. This walkthrough will visit every page, test every form, click every button, take screenshots, check server logs, and document all findings in a `QA/` folder.
+We need a full manual QA walkthrough of the Portal service (localhost:8701) using Chrome browser automation (claude-in-chrome MCP). The portal is a Django frontend with no business data that proxies to the Platform service via HMAC-signed requests. This walkthrough will visit every page, test every form, click every button, take screenshots, check server logs, and document all findings in a `QA/` folder.
 
 **Scope**: Portal only (Platform walkthrough deferred to a later run).
 
