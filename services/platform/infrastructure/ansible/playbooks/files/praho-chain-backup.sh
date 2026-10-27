@@ -45,6 +45,8 @@ archive=${PRAHO_ARCHIVE:-}
 expected_fp=${PRAHO_EXPECTED_FP:-}
 lock_wait=${PRAHO_LOCK_WAIT:-60}
 staging=${PRAHO_STAGING_DIR:?}
+owner_shadow_helper=${PRAHO_OWNER_SHADOW_HELPER:-/var/lib/praho/recovery/credentials.pl}
+[[ $owner_shadow_helper =~ ^/[A-Za-z0-9._/-]+$ && $owner_shadow_helper != *..* ]] || exit 64
 
 [[ $action =~ ^(run|cancel)$ ]] || exit 64
 [[ $domain_id =~ ^[0-9]{1,30}$ ]] || exit 64
@@ -147,6 +149,20 @@ fi
 
 printf '%s\n' "$token" >"$running_marker"
 trap 'rm -f -- "$running_marker"' EXIT
+
+if ! owner=$(virtualmin list-domains --domain "$domain" --user-only 2>/dev/null) \
+  || [[ ! $owner =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]]; then
+  emit refused owner_lookup_failed false "$fp_before"
+  exit 0
+fi
+capture=$(printf '{"action":"capture-owner","domain":"%s","owner":"%s","domain_id":"%s","archive":"%s"}' \
+  "$domain" "$owner" "$domain_id" "$archive")
+if ! printf '%s' "$capture" | perl "$owner_shadow_helper" >"$RUN_DIR/owner-shadow-$token.log" 2>&1; then
+  rm -f -- "$RUN_DIR/owner-shadow-$token.log"
+  emit refused owner_shadow_capture_failed false "$fp_before"
+  exit 0
+fi
+rm -f -- "$RUN_DIR/owner-shadow-$token.log"
 
 backup_args=(--domain "$domain" --dest "$dest" --all-features)
 if [[ $mode == differential ]]; then

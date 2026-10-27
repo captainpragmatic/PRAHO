@@ -1,16 +1,20 @@
-"""Node-side steps for account names (ADR-0061): linking an account name's web root.
+"""Node-side account-name policy and historical web-root tooling (ADR-0061).
 
-The account name is a Virtualmin sub-server of its customer's domain. Its web root becomes the
-relative link ``../../public_html`` by a playbook that runs every filesystem step as the customer
-(``virtualmin_account_name_link.yml``); no Virtualmin program can do it (the lab contract shows
-``modify-web`` refusing ``..`` and an alias answering 403).
+Production names use root-owned neutral Apache vhosts and local certificate copies. Their privacy,
+certificate readiness and retirement require fresh receipts from the enrolled node. The older
+customer-owned symlink helper remains available for the historical lab contract; production callers
+keep previews off and do not invoke it.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import logging
 import re
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from apps.common.types import Err, Ok, Result, Retriability
 
@@ -23,11 +27,132 @@ logger = logging.getLogger(__name__)
 
 LINK_PLAYBOOK = "virtualmin_account_name_link.yml"
 LINK_TIMEOUT_SECONDS = 180
+NEUTRAL_PLAYBOOK = "virtualmin_account_name_neutral.yml"
+NEUTRAL_TIMEOUT_SECONDS = 180
+CERTIFICATE_MISMATCH = "account_name_certificate_mismatch"
+_NEUTRAL_RECEIPT = re.compile(r"NEUTRAL_RESULT=([A-Za-z0-9+/=]+)")
+_NEUTRAL_MAX_OUTPUT = 65536
+_MAX_HOSTNAME_LENGTH = 253
 _REFUSAL = re.compile(r"LINK=refused:([a-z_]+)")
 _CHANGED = re.compile(r"\bchanged=([0-9]+)\b")
 # The playbook's input check failed: nothing ran on the node. ansible-core 2.20 prints the
 # failure as a YAML-style block (`msg: Assertion failed`); older callbacks print JSON.
 _INPUTS_REFUSED = re.compile(r'(?:"msg":\s*"|\bmsg:\s*)Assertion failed')
+
+
+def prepare_account_name_neutral(
+    server: VirtualminServer, *, zone: str, name: str, customer_user: str
+) -> Result[str, str]:
+    """Prove HTTP privacy before creation or certificate repair, including an expired native leaf."""
+    return _neutral_step(server, zone=zone, name=name, customer_user=customer_user, action="prepare")
+
+
+def ensure_account_name_neutral(
+    server: VirtualminServer,
+    *,
+    zone: str,
+    name: str,
+    customer_user: str,
+    expected_certificate_sha256: str | None = None,
+) -> Result[str, str]:
+    """Install and freshly prove neutral HTTP on a node; return its owned configuration digest."""
+    return _neutral_step(
+        server,
+        zone=zone,
+        name=name,
+        customer_user=customer_user,
+        action="ensure",
+        expected_certificate_sha256=expected_certificate_sha256,
+    )
+
+
+def retire_account_name_neutral(
+    server: VirtualminServer, *, zone: str, name: str, customer_user: str
+) -> Result[str, str]:
+    """Retire a removed native child's private TLS data while keeping the neutral zone fallback."""
+    return _neutral_step(server, zone=zone, name=name, customer_user=customer_user, action="retire")
+
+
+def _neutral_step(  # noqa: PLR0913  # Node identity, action and certificate pin are independent boundaries.
+    server: VirtualminServer,
+    *,
+    zone: str,
+    name: str,
+    customer_user: str,
+    action: str,
+    expected_certificate_sha256: str | None = None,
+) -> Result[str, str]:
+    from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # ADR-0007
+
+    labels = zone.split(".")
+    if (
+        len(labels) <= 1
+        or len(zone) > _MAX_HOSTNAME_LENGTH
+        or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+        or not re.fullmatch(r"[a-z0-9]{8}\." + re.escape(zone), name)
+        or len(name) > _MAX_HOSTNAME_LENGTH
+        or (
+            not (action == "retire" and customer_user == "")
+            and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", customer_user)
+        )
+        or (
+            expected_certificate_sha256 is not None
+            and re.fullmatch(r"[0-9a-f]{64}", expected_certificate_sha256) is None
+        )
+    ):
+        return Err("Invalid neutral account-name inputs", retriability=Retriability.NOT_RETRIABLE)
+    deployment = getattr(server, "node_deployment", None)
+    if deployment is None:
+        return Err("Neutral account names require a managed node deployment", retriability=Retriability.NOT_RETRIABLE)
+    identity = str(uuid4())
+    result = AnsibleService().run_playbook(
+        deployment,
+        NEUTRAL_PLAYBOOK,
+        {
+            "account_name_guard_action": action,
+            "account_name_guard_id": identity,
+            "account_name_zone": zone,
+            "account_name_fqdn": name,
+            "customer_user": customer_user,
+        },
+        timeout_seconds=NEUTRAL_TIMEOUT_SECONDS,
+    )
+    if result.is_err() or not result.unwrap().success:
+        return Err("Neutral account-name policy could not be proved on the node", retriability=Retriability.UNKNOWN)
+    return _read_neutral_receipt(result.unwrap().stdout, (identity, action, zone, name), expected_certificate_sha256)
+
+
+def _read_neutral_receipt(
+    stdout: str, binding: tuple[str, str, str, str], expected_certificate_sha256: str | None
+) -> Result[str, str]:
+    """Validate complete operation identity before distinguishing positive certificate drift."""
+    if len(stdout) > _NEUTRAL_MAX_OUTPUT:
+        return Err("Neutral account-name receipt is oversized", retriability=Retriability.UNKNOWN)
+    matches = _NEUTRAL_RECEIPT.findall(stdout)
+    try:
+        proof = json.loads(base64.b64decode(matches[0], validate=True)) if len(matches) == 1 else None
+        if (
+            not isinstance(proof, dict)
+            or type(proof.get("version")) is not int
+            or proof["version"] != 1
+            or (proof.get("identity"), proof.get("action"), proof.get("zone"), proof.get("name")) != binding
+            or proof.get("neutral") is not True
+            or not isinstance(proof.get("config_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", proof["config_sha256"]) is None
+        ):
+            raise ValueError("Unbound neutral account-name receipt")
+        if expected_certificate_sha256 is not None:
+            actual = proof.get("certificate_sha256")
+            if not isinstance(actual, str) or re.fullmatch(r"[0-9a-f]{64}", actual) is None:
+                raise ValueError("Incomplete certificate receipt")
+            if actual != expected_certificate_sha256:
+                # Only this fully bound positive observation authorizes discarding
+                # the matching node's stale installation evidence. Transport or
+                # malformed receipts remain uncertain and cannot imply a mismatch.
+                return Err(CERTIFICATE_MISMATCH, retriability=Retriability.NOT_RETRIABLE)
+    except (ValueError, TypeError, KeyError, binascii.Error):
+        return Err("Neutral account-name receipt is uncertain", retriability=Retriability.UNKNOWN)
+    return Ok(proof["config_sha256"])
 
 
 def link_account_name_web_root(server: VirtualminServer, *, home: str, customer_user: str) -> Result[bool, str]:

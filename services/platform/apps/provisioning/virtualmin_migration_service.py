@@ -33,6 +33,7 @@ from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
+    get_virtualmin_timeouts,
     is_customer_domain_row,
     listing_attribute,
     listing_enabled,
@@ -174,7 +175,9 @@ def snapshot_attributes(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if key in _SNAPSHOT_KEYS}
 
 
-def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
+def list_migration_domains(
+    gateway: VirtualminGateway, *, strict: bool = True, deadline: float | None = None
+) -> Result[list[dict[str, Any]], str]:
     """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes.
 
     strict=True (migration admission) treats any malformed row as fatal — a
@@ -182,7 +185,11 @@ def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -
     strict=False (account sync) skips malformed rows so one odd header or
     separator row cannot abort a whole server's sync.
     """
-    result = gateway.call("list-domains", {"multiline": ""})
+    result = (
+        gateway.call("list-domains", {"multiline": ""}, deadline=deadline)
+        if deadline is not None
+        else gateway.call("list-domains", {"multiline": ""})
+    )
     if result.is_err():
         return Err(str(result.unwrap_err()))
     response = result.unwrap()
@@ -427,11 +434,25 @@ class VirtualminMigrationService:
             raise ValueError("Migration budget must fit below the Django-Q broker visibility timeout")
 
     @staticmethod
-    def _contract(account: VirtualminAccount) -> str:
+    def _locked_account_name(account: VirtualminAccount, *, source_id: UUID) -> AccountHostname | None:
+        """After Account/Server locks, serialize ownership with every routing publisher."""
+        hostname_id = AccountHostname.objects.filter(account_id=account.pk).values_list("pk", flat=True).first()
+        hostname = account_hostname_service.lock_for_publication(hostname_id) if hostname_id else None
+        if hostname is not None:
+            if hostname.retired_at is not None:
+                raise ValueError("The account hostname was retired")
+            if hostname.target_server_id not in {None, source_id}:
+                raise ValueError("The account hostname belongs to another target")
+        return hostname
+
+    @classmethod
+    def _contract(cls, account: VirtualminAccount) -> str:
         """A cutover when the account has a live published name; nothing to carry otherwise."""
-        hostname = AccountHostname.objects.filter(account=account, retired_at__isnull=True).first()
+        hostname = cls._locked_account_name(account, source_id=account.server_id)
         if hostname is not None and hostname.records and hostname.target_server_id is not None:
             return VirtualminMigration.Contract.CUTOVER
+        if hostname is not None and hostname.records:
+            raise ValueError("A published account hostname has no target")
         return VirtualminMigration.Contract.LEGACY
 
     def start_migration(  # noqa: PLR0913  # Admission carries its whole context, the drain included
@@ -462,6 +483,7 @@ class VirtualminMigrationService:
                 self._local_preflight(account, target)
                 if reason not in VirtualminMigration.Reason.values:
                     raise ValueError("Invalid migration reason")
+                contract = self._contract(account)
                 invalidate_chain(account)  # the retained source copy keeps a snapshot the account no longer owns
                 migration = VirtualminMigration.objects.create(
                     account=account,
@@ -470,7 +492,7 @@ class VirtualminMigrationService:
                     initiated_by=initiated_by,
                     reason=reason,
                     drain=drain,
-                    contract=self._contract(account),
+                    contract=contract,
                 )
                 token = uuid4()
                 if not migration.acquire_lease(token, self.lease_ttl):
@@ -532,7 +554,12 @@ class VirtualminMigrationService:
         program: str,
         **params: object,
     ) -> None:
-        timeout = self.backup_timeout if program in {"backup-domain", "restore-domain"} else 30
+        if program in {"backup-domain", "restore-domain"}:
+            timeout = self.backup_timeout
+        elif program == "create-domain":
+            timeout = get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"]
+        else:
+            timeout = 30
         domain = migration.account.domain
         base = domain_state_params(domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": domain}
         result = self._gateway(server).call(program, {**base, **params}, timeout_seconds=timeout)
@@ -633,14 +660,20 @@ class VirtualminMigrationService:
             if matches and str(listing_attribute(matches[0]["attributes"], "ID")) != str(target_id):
                 raise ValueError("The held target identity changed; it was left in place")
             self._release_target_hold(migration)
-        if not matches:
-            return
+        if matches:
+            if not migration.renew_lease(token, self.lease_ttl):
+                raise MigrationLeaseLostError("Target cleanup lost the migration lease")
+            self._command(migration, migration.target_server, "delete-domain")
+            rows = self._listing(self._gateway(migration.target_server))
+            if any(row["domain"] == migration.account.domain for row in rows):
+                raise ValueError("Target deletion could not be verified")
         if not migration.renew_lease(token, self.lease_ttl):
-            raise MigrationLeaseLostError("Target cleanup lost the migration lease")
-        self._command(migration, migration.target_server, "delete-domain")
-        rows = self._listing(self._gateway(migration.target_server))
-        if any(row["domain"] == migration.account.domain for row in rows):
-            raise ValueError("Target deletion could not be verified")
+            raise MigrationLeaseLostError("Target private cleanup lost the migration lease")
+        from .account_hostname_service import retire_removed_node_name  # noqa: PLC0415  # Node gateway imports
+
+        retired = retire_removed_node_name(migration.account, migration.target_server)
+        if retired.is_err():
+            raise ValueError(f"Target neutral guard private cleanup is unproven: {retired.unwrap_err()}")
 
     def _park_compensation(self, migration: VirtualminMigration, token: UUID, reason: str) -> None:
         """Keep the account exclusion while staff resolves an unproven undo step."""
@@ -665,6 +698,17 @@ class VirtualminMigrationService:
             return
         if migration.cancel_requested:
             self._abort(migration, token, ValueError("Migration cancelled while lowering the TTL"))
+            return
+        self._move(migration, token, "lowering_ttl")
+        neutral = account_hostname_service.prepare_account_name_neutral(
+            migration.source_server,
+            zone=hostname.zone,
+            name=hostname.fqdn,
+            customer_user=migration.account.virtualmin_username,
+        )
+        self._move(migration, token, "lowering_ttl")
+        if neutral.is_err():
+            self._abort(migration, token, DefiniteMigrationFailureError(neutral.unwrap_err()))
             return
         outcome = account_hostname_service.lower_account_hostname_ttl(hostname)
         if outcome.is_err():
@@ -836,7 +880,22 @@ class VirtualminMigrationService:
         )
 
     def _backup(self, migration: VirtualminMigration, token: UUID) -> None:
+        from .migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
         try:
+            self._move(migration, token, "backing_up")
+            source = self._domain(migration.source_server, migration.account.domain)
+            self._move(migration, token, "backing_up")
+            capture_backup_owner_shadow(
+                migration.source_server,
+                domain=migration.account.domain,
+                owner=migration.account.virtualmin_username,
+                domain_id=str(listing_attribute(source["attributes"], "ID")),
+                archive_name=migration.archive_name,
+                operation_id=migration.pk,
+                require_fenced=migration.contract == VirtualminMigration.Contract.CUTOVER,
+            )
+            self._move(migration, token, "backing_up")
             self._command(
                 migration,
                 migration.source_server,
@@ -940,18 +999,11 @@ class VirtualminMigrationService:
             if actual != expected:
                 raise ValueError(f"Restored domain differs from snapshot: {key}")
         # The archive carries the customer domain only: put the account name back on the target,
-        # disabled. The activation's cascading enable turns it on with the account (ADR-0061 P1.7).
+        # disabled. Its HTTP response stays neutral independently of later native enabled states.
         named = ensure_on_recreated_node(migration.account, migration.target_server, enabled=False)
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
-            from .account_hostname_config import account_zone_psl_shipped  # noqa: PLC0415
-
             outcome = named.unwrap() if named.is_ok() else None
-            if (
-                outcome is None
-                or outcome.enabled
-                or not outcome.certificate_installed
-                or (account_zone_psl_shipped() and not outcome.linked)
-            ):
+            if outcome is None or outcome.enabled or not outcome.certificate_installed or not outcome.neutral:
                 self._abort(migration, token, ValueError("The target account name and certificate are not ready"))
                 return
             from .migration_bridge_service import prepare_bridge  # noqa: PLC0415
@@ -1037,30 +1089,43 @@ class VirtualminMigrationService:
             if migration.cutover_committed_at is None:
                 raise ValueError("The ownership commit must precede target activation")
             from .migration_bridge_service import activate_target  # noqa: PLC0415
+            from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
+                activation_guard,
+                converge_before_release,
+                current_policy,
+                record_activation,
+            )
             from .migration_target_hold import run_held_target_node  # noqa: PLC0415
 
-            run_held_target_node(migration, "activate")
-
-            activated = activate_target(migration)
-            if activated.is_err():
-                if retriability_of(activated) is not Retriability.NOT_RETRIABLE:
-                    raise MigrationDeferredError(
-                        timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), activated.unwrap_err()
-                    )
-                raise ValueError(f"Target activation failed: {activated.unwrap_err()}")
-            expected = migration.pre_migration_snapshot["status"] != "suspended"
-            if self._domain(migration.target_server, migration.account.domain)["enabled"] is not expected:
-                raise ValueError("Target activation did not preserve the intended state")
-            self._release_target_hold(migration)
-            self._move(migration, token, "bridging")
+            with activation_guard(migration, token) as account:
+                enabled = current_policy(account).enabled
+                run_held_target_node(migration, "activate", enabled=enabled)
+                self._move(migration, token, "activating")
+                activated = activate_target(migration, enabled=enabled)
+                if activated.is_err():
+                    if retriability_of(activated) is not Retriability.NOT_RETRIABLE:
+                        raise MigrationDeferredError(
+                            timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), activated.unwrap_err()
+                        )
+                    raise ValueError(f"Target activation failed: {activated.unwrap_err()}")
+                policy = converge_before_release(self, migration, token, account)
+                self._release_target_hold(migration)
+                record_activation(self, migration, token, policy, "bridging")
             return
-        if migration.pre_migration_snapshot["status"] != "suspended":
-            self._command(migration, migration.target_server, "enable-domain")
-            if self._domain(migration.target_server, migration.account.domain)["enabled"] is not True:
-                raise ValueError("Target enable could not be verified")
-        elif self._domain(migration.target_server, migration.account.domain)["enabled"] is not False:
-            raise ValueError("Target did not preserve suspension")
-        self._move(migration, token, "repointing")
+        with transaction.atomic():
+            # Match completion's Migration→Account→Server→Name order. Old workers
+            # may have published before the legacy publication fence was deployed.
+            self._move(migration, token, "activating")
+            account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
+            VirtualminServer.objects.select_for_update(no_key=True).get(pk=migration.target_server_id)
+            self._legacy_name(migration, account)
+            if migration.pre_migration_snapshot["status"] != "suspended":
+                self._command(migration, migration.target_server, "enable-domain")
+                if self._domain(migration.target_server, migration.account.domain)["enabled"] is not True:
+                    raise ValueError("Target enable could not be verified")
+            elif self._domain(migration.target_server, migration.account.domain)["enabled"] is not False:
+                raise ValueError("Target did not preserve suspension")
+            self._move(migration, token, "repointing")
 
     @staticmethod
     def _release_target_hold(migration: VirtualminMigration) -> None:
@@ -1216,6 +1281,14 @@ class VirtualminMigrationService:
     def _prepare_completion(self, migration: VirtualminMigration, token: UUID) -> None:
         """An operation may finish its private staging cleanup before releasing account exclusion."""
 
+    def _legacy_name(self, migration: VirtualminMigration, account: VirtualminAccount) -> AccountHostname | None:
+        if account.server_id not in {migration.source_server_id, migration.target_server_id}:
+            raise ValueError("Account ownership changed during migration")
+        hostname = self._locked_account_name(account, source_id=migration.source_server_id)
+        if hostname is not None and hostname.records:
+            raise ValueError("The account hostname was published during a legacy migration")
+        return hostname
+
     def _repoint(self, migration: VirtualminMigration, token: UUID) -> None:
         # Final write-barrier check: an external writer (drift enforcement, an
         # operator) re-enabling the quiesced source after backup would create a
@@ -1233,10 +1306,16 @@ class VirtualminMigrationService:
         with transaction.atomic():
             self._move(migration, token, "repointing")
             account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
-            if account.server_id not in {migration.source_server_id, migration.target_server_id}:
-                raise ValueError("Account ownership changed during migration")
+            VirtualminServer.objects.select_for_update(no_key=True).get(pk=migration.target_server_id)
+            hostname = self._legacy_name(migration, account)
             account.server = migration.target_server
             account.save(update_fields=["server", "updated_at"])
+            if hostname is not None:
+                hostname.target_server = migration.target_server
+                hostname.save(update_fields=["target_server", "updated_at"])
+                from .managed_dns_service import advance_target_locked  # noqa: PLC0415  # Legacy ownership commit
+
+                advance_target_locked(hostname)
             # The restored domain occupies target capacity now; the reservation
             # row dies with this completion, so account for it immediately. Any
             # double count against the 6-hourly stats snapshot over-counts (the

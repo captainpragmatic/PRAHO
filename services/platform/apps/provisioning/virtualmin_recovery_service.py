@@ -15,7 +15,6 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 
 from . import account_hostname_service
-from .account_hostname_config import account_zone_psl_shipped
 from .account_hostname_lifecycle import ensure_on_recreated_node
 from .account_hostname_models import AccountHostname
 from .migration_barrier import barrier_variables, run_barrier
@@ -249,8 +248,8 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         return held_pair_variables(migration)
 
     @staticmethod
-    def _node(migration: VirtualminMigration, action: str) -> None:
-        run_held_target_node(migration, action)
+    def _node(migration: VirtualminMigration, action: str, *, enabled: bool | None = None) -> None:
+        run_held_target_node(migration, action, enabled=enabled)
 
     def _verify(self, migration: VirtualminMigration, token: UUID) -> None:
         target = self._domain(migration.target_server, migration.account.domain)
@@ -271,12 +270,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         if named.is_err():
             raise ValueError(named.unwrap_err())
         ready = named.unwrap()
-        if (
-            ready is None
-            or ready.enabled
-            or not ready.certificate_installed
-            or (account_zone_psl_shipped() and not ready.linked)
-        ):
+        if ready is None or ready.enabled or not ready.certificate_installed or not ready.neutral:
             raise ValueError("The recovered account name and certificate are not ready")
         with transaction.atomic():
             account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
@@ -307,27 +301,28 @@ class VirtualminRecoveryService(VirtualminMigrationService):
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
         if migration.cutover_committed_at is None:
             raise ValueError("Recovery activation requires the ownership commit")
-        self._move(migration, token, "activating")
-        self._node(migration, "activate")
-        variables = {**self._pair_variables(migration), "pair_action": "release"}
-        released = run_pair_step(
-            migration.target_server,
-            variables,
-            token=str(migration.pk),
-            domain_id=str(migration.barrier_state["target_domain_id"]),
-            timeout_seconds=180,
+        from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
+            activation_guard,
+            converge_before_release,
+            current_policy,
+            record_activation,
         )
-        if released.is_err() or released.unwrap().outcome != "released":
-            raise RuntimeError("The recovery maintenance barrier could not be released")
-        intended = migration.pre_migration_snapshot["status"] == "active"
-        current = self._domain(migration.target_server, migration.account.domain)["enabled"]
-        if current is None:
-            raise ValueError("The recovered domain's enabled state cannot be read")
-        if intended and not current:
-            self._command(migration, migration.target_server, "enable-domain")
-        if self._domain(migration.target_server, migration.account.domain)["enabled"] is not intended:
-            raise ValueError("Recovery did not preserve the account's intended state")
-        self._move(migration, token, "repointing")
+
+        with activation_guard(migration, token) as account:
+            self._move(migration, token, "activating")
+            self._node(migration, "activate", enabled=current_policy(account).enabled)
+            policy = converge_before_release(self, migration, token, account)
+            variables = {**self._pair_variables(migration), "pair_action": "release"}
+            released = run_pair_step(
+                migration.target_server,
+                variables,
+                token=str(migration.pk),
+                domain_id=str(migration.barrier_state["target_domain_id"]),
+                timeout_seconds=180,
+            )
+            if released.is_err() or released.unwrap().outcome != "released":
+                raise RuntimeError("The recovery maintenance barrier could not be released")
+            record_activation(self, migration, token, policy, "repointing")
 
     def _repoint(self, migration: VirtualminMigration, token: UUID) -> None:
         self._converge_cutover(migration, token)
@@ -405,6 +400,11 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     for row in self._listing(self._gateway(migration.target_server))
                 ):
                     return Err("The partial recovery target could not be verified absent")
+            self._move(migration, token, migration.status)
+            retired = account_hostname_service.retire_removed_node_name(migration.account, migration.target_server)
+            self._move(migration, token, migration.status)
+            if retired.is_err():
+                return Err(retired.unwrap_err())
             self._prepare_completion(migration, token)
             self._finish(
                 migration, token, "failed", f"Recovery abandoned after target verification: {note}", actor=actor

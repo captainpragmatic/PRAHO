@@ -50,6 +50,47 @@ class CutoverCommitTests(BarrierCase):
         ):
             VirtualminMigrationService()._converge_cutover(migration, token)
 
+    def test_source_neutral_policy_precedes_ttl_lowering_even_for_an_unpublished_name(self):
+        migration, token = self._held("lowering_ttl", contract="cutover")
+        AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        steps = []
+        with (
+            patch(
+                "apps.provisioning.account_hostname_service.prepare_account_name_neutral",
+                side_effect=lambda *args, **kwargs: steps.append("neutral") or Ok("a" * 64),
+            ) as guard,
+            patch(
+                "apps.provisioning.account_hostname_service.lower_account_hostname_ttl",
+                side_effect=lambda *args: steps.append("ttl") or Ok("skipped:not_published"),
+            ),
+        ):
+            VirtualminMigrationService()._lower_ttl(migration, token)
+        self.assertEqual(steps, ["neutral", "ttl"])
+        self.assertEqual(guard.call_args.args[0].pk, migration.source_server_id)
+
+    def test_source_neutral_refusal_prevents_ttl_writes_and_cutover_progress(self):
+        migration, token = self._held("lowering_ttl", contract="cutover")
+        AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        with (
+            patch(
+                "apps.provisioning.account_hostname_service.prepare_account_name_neutral",
+                return_value=Err("unproved neutral source"),
+            ),
+            patch(
+                "apps.provisioning.account_hostname_service.lower_account_hostname_ttl",
+                return_value=Ok("skipped:not_published"),
+            ) as lower,
+        ):
+            VirtualminMigrationService()._lower_ttl(migration, token)
+        lower.assert_not_called()
+        migration.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+        self.assertNotIn(migration.status, {"quiescing", "backing_up"})
+
     def setUp(self):
         super().setUp()
         self.server.ipv4_address = "95.217.0.10"
@@ -81,7 +122,7 @@ class CutoverCommitTests(BarrierCase):
 
     def test_verified_restore_commits_both_owners_before_enable_and_reserves_the_bridge(self):
         migration, token, name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
             patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
@@ -103,7 +144,7 @@ class CutoverCommitTests(BarrierCase):
 
     def test_cancellation_arriving_during_bridge_preparation_aborts_before_the_ownership_commit(self):
         migration, token, name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         service = VirtualminMigrationService()
 
         def prepare(_migration):
@@ -146,7 +187,7 @@ class CutoverCommitTests(BarrierCase):
 
     def test_frontend_old_ttls_must_fit_the_bridge_certificate_lifetime_before_commit(self):
         migration, token, name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
             patch(
@@ -165,7 +206,7 @@ class CutoverCommitTests(BarrierCase):
 
     def test_unknown_frontend_old_ttl_compensates_before_the_ownership_commit(self):
         migration, token, name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         service = VirtualminMigrationService()
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
@@ -190,7 +231,7 @@ class CutoverCommitTests(BarrierCase):
 
     def test_a_name_without_preview_linking_can_commit_while_the_psl_gate_is_closed(self):
         migration, token, _name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
             patch("apps.provisioning.account_hostname_config.account_zone_psl_shipped", return_value=False),
@@ -199,6 +240,30 @@ class CutoverCommitTests(BarrierCase):
             VirtualminMigrationService()._verify(migration, token)
         migration.refresh_from_db()
         self.assertIsNotNone(migration.cutover_committed_at)
+
+    def test_a_neutral_name_can_commit_after_psl_ships_without_enabling_previews(self):
+        migration, token, _name = self.restored()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.account_hostname_config.account_zone_psl_shipped", return_value=True),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+        ):
+            VirtualminMigrationService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.assertIsNotNone(migration.cutover_committed_at)
+
+    def test_a_certified_name_without_neutral_proof_cannot_commit(self):
+        migration, token, _name = self.restored()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=False)
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.account_hostname_config.account_zone_psl_shipped", return_value=False),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+        ):
+            VirtualminMigrationService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
 
     def test_uncommitted_cutover_cannot_enable_the_target(self):
         migration, token = self._held("activating", contract="cutover")
@@ -209,7 +274,7 @@ class CutoverCommitTests(BarrierCase):
 
     def committed_bridge(self):
         migration, token, _name = self.restored()
-        ready = EnsureOutcome(created=True, enabled=False, linked=True, certificate_installed=True)
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
             patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
             patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),

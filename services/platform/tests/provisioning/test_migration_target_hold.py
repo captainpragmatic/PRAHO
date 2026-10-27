@@ -1,5 +1,7 @@
 """Normal moves and recovery restore the same disabled, Unix-quiesced target."""
 
+import base64
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -15,10 +17,18 @@ class HeldTargetRestoreTests(SimpleTestCase):
     def setUp(self):
         self.identity = uuid4()
         self.migration = SimpleNamespace(
-            pk=self.identity, status="restoring", barrier_state={},
+            pk=self.identity,
+            status="restoring",
+            barrier_state={},
             target_server=SimpleNamespace(node_deployment=object()),
-            account=SimpleNamespace(domain="customer.example", virtualmin_username="customer", template_name="Default",
-                                    get_recovery_seed=lambda: "seed", disk_quota_mb=10, bandwidth_quota_mb=20),
+            account=SimpleNamespace(
+                domain="customer.example",
+                virtualmin_username="customer",
+                template_name="Default",
+                get_recovery_seed=lambda: "seed",
+                disk_quota_mb=10,
+                bandwidth_quota_mb=20,
+            ),
             pre_migration_snapshot={"status": "active"},
         )
         self.archives = [{"archive_name": f"migration_{self.identity}.tar.gz", "checksum_sha256": "a" * 64}]
@@ -44,9 +54,10 @@ class HeldTargetRestoreTests(SimpleTestCase):
             self.assertEqual(migration.barrier_state["target_domain_id"], "123")
             self.assertEqual(migration.barrier_state["held_archives"], self.archives)
 
-        with patch.object(hold, "run_held_target_node", side_effect=node), patch.object(
-            hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))
-        ) as pair:
+        with (
+            patch.object(hold, "run_held_target_node", side_effect=node),
+            patch.object(hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))) as pair,
+        ):
             hold.restore_held_target(self.service, self.migration, uuid4(), self.archives)
         calls = self.service._command.call_args_list
         self.assertEqual([call.args[2] for call in calls], ["create-domain", "disable-domain"])
@@ -63,17 +74,20 @@ class HeldTargetRestoreTests(SimpleTestCase):
             if action == "verify-held":
                 raise RuntimeError("shadow unlocked")
 
-        with patch.object(hold, "run_held_target_node", side_effect=node), patch.object(
-            hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))
-        ), self.assertRaisesRegex(RuntimeError, "shadow unlocked"):
+        with (
+            patch.object(hold, "run_held_target_node", side_effect=node),
+            patch.object(hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))),
+            self.assertRaisesRegex(RuntimeError, "shadow unlocked"),
+        ):
             hold.restore_held_target(self.service, self.migration, uuid4(), self.archives)
         self.assertFalse(self.migration.barrier_state.get("held_restore_complete"))
         self.assertEqual(self.migration.status, "restoring")
 
     def test_recorded_target_identity_is_reused_without_recreating_the_domain(self):
         self.migration.barrier_state = {"target_domain_id": "123", "held_archives": self.archives}
-        with patch.object(hold, "run_held_target_node"), patch.object(
-            hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))
+        with (
+            patch.object(hold, "run_held_target_node"),
+            patch.object(hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))),
         ):
             hold.restore_held_target(self.service, self.migration, uuid4(), self.archives)
         self.service._command.assert_not_called()
@@ -86,8 +100,11 @@ class HeldTargetRestoreTests(SimpleTestCase):
         node.assert_not_called()
 
     def test_node_variables_prefer_shared_archive_and_cleanup_needs_no_retained_archive(self):
-        self.migration.barrier_state = {"target_domain_id": "123", "held_archives": self.archives,
-                                        "recovery_archives": [{"archive_name": "wrong", "checksum_sha256": "b" * 64}]}
+        self.migration.barrier_state = {
+            "target_domain_id": "123",
+            "held_archives": self.archives,
+            "recovery_archives": [{"archive_name": "wrong", "checksum_sha256": "b" * 64}],
+        }
         with patch("apps.infrastructure.ansible_service.AnsibleService") as runner:
             runner.return_value.run_playbook.return_value = Ok(SimpleNamespace(success=True))
             hold.run_held_target_node(self.migration, "verify-held")
@@ -97,3 +114,16 @@ class HeldTargetRestoreTests(SimpleTestCase):
             self.migration.barrier_state.pop("recovery_archives")
             hold.cleanup_held_target(self.migration)
         self.assertEqual(runner.return_value.run_playbook.call_args.args[2]["recovery_action"], "cleanup")
+
+    def test_policy_rpc_validates_current_enabled_proof_after_archive_secrets_are_retired(self):
+        self.migration.barrier_state = {"target_domain_id": "123"}
+        proof = {"domain_id": "123", "owner": "customer", "enabled": False}
+        stdout = "PRAHO_POLICY_RESULT=" + base64.b64encode(json.dumps(proof).encode()).decode()
+        with patch("apps.infrastructure.ansible_service.AnsibleService") as runner:
+            runner.return_value.run_playbook.return_value = Ok(SimpleNamespace(success=True, stdout=stdout))
+            hold.run_held_target_node(self.migration, "reconcile_policy", enabled=False)
+            call = runner.return_value.run_playbook.call_args
+            self.assertEqual(call.args[2]["recovery_enabled"], False)
+            self.assertEqual(call.kwargs["timeout_seconds"], 300)
+            with self.assertRaisesRegex(RuntimeError, "proof"):
+                hold.run_held_target_node(self.migration, "reconcile_policy", enabled=True)

@@ -222,8 +222,20 @@ def _remove_transport(bridge: MigrationBridge, token: str) -> None:
     _progress(bridge.pk, token, {"bridge_removed": True})
 
 
+def _retire_source_guard(bridge: MigrationBridge, token: str) -> None:
+    from .account_hostname_service import retire_removed_node_name  # noqa: PLC0415  # Node gateway imports
+
+    if bridge.evidence.get("source_guard_retired"):
+        return
+    _guard(bridge.pk, token)
+    retired = retire_removed_node_name(bridge.migration.account, bridge.migration.source_server)
+    if retired.is_err():
+        raise ValueError(f"Source neutral guard private cleanup is unproven: {retired.unwrap_err()}")
+    _progress(bridge.pk, token, {"source_guard_retired": True})
+
+
 def cleanup_bridge(migration_id: str) -> dict[str, str]:
-    """Reverify routing, remove only the owned source, tear down transport, then restore TTLs."""
+    """Reverify routing, remove source and transport, retire its private name guard, then restore TTLs."""
     from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
 
     token = uuid4().hex
@@ -239,6 +251,7 @@ def cleanup_bridge(migration_id: str) -> dict[str, str]:
             _progress(bridge.pk, token, {}, transition_name="start_removing_source")
         _remove_content(bridge, token, service)
         _remove_transport(bridge, token)
+        _retire_source_guard(bridge, token)
         _guard(bridge.pk, token)
         service._restore_ttl(migration)
         _progress(bridge.pk, token, {"ttl_restored": True, "last_error": ""}, transition_name="tear_down")

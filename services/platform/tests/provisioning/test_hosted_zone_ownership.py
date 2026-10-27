@@ -11,6 +11,7 @@ from django.db import close_old_connections, connection, models, transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 
 from apps.audit.models import AuditEvent
+from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.domains.dns_zone_import import make_record_data
 from apps.domains.dns_zone_models import HostedZone, HostedZoneRecord
@@ -269,6 +270,10 @@ class HostedZoneOwnershipPostgresTests(TransactionTestCase):
         self.enterContext(patch.object(names.config, "account_hostnames_enabled", return_value=True))
         self.enterContext(patch.object(names.config, "account_zone_id", return_value="owned-zone"))
         self.enterContext(patch.object(names, "_syncable", return_value=None))
+        self.enterContext(patch.object(names, "expected_certificate_fingerprint", return_value=Ok("f" * 64)))
+        self.native_readiness = self.enterContext(
+            patch.object(names, "ensure_account_name_neutral", return_value=Ok("f" * 64))
+        )
         self.enterContext(patch.object(names, "_dns_gateway", return_value=FakeDnsGateway("fake-token")))
         self.enterContext(patch.object(managed, "get_zone_gateway", return_value=self.provider))
 
@@ -337,6 +342,7 @@ class HostedZoneOwnershipPostgresTests(TransactionTestCase):
             publisher = executor.submit(self._thread, self._publish, [], threading.Event(), threading.Event())
             try:
                 self.assertTrue(inside.wait(_RACE_SECONDS))
+                self.assertEqual(self.native_readiness.call_args.kwargs["expected_certificate_sha256"], "f" * 64)
                 writer = executor.submit(self._thread, action, pids, ready, done)
                 self.assertTrue(ready.wait(_RACE_SECONDS))
                 self.assertTrue(

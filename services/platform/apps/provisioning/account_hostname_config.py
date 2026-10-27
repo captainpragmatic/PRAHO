@@ -69,7 +69,7 @@ def bridge_window_hours() -> int:
 
 
 def account_zone_psl_shipped() -> bool:
-    """Whether the zone's Public Suffix List entry is in shipped browsers; until then no customer content."""
+    """Whether the zone's Public Suffix List entry is shipped; previews remain off independently."""
     return SettingsService.get_boolean_setting(PSL_SHIPPED, False)
 
 

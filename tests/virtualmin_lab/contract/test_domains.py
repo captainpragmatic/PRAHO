@@ -128,7 +128,7 @@ def test_list_domains(lab: Lab) -> None:
         assert_accepted(everything)
         owners, _ = lab.observe(lambda gateway: gateway.list_domains_with_owners())
         # Each row says what it is (ADR-0061 P1.6): a top-level customer domain, or an account name's sub-server.
-        assert owners.unwrap() == [
+        assert [item for item in owners.unwrap() if item["domain"] == SANDBOX_DOMAIN] == [
             {
                 "domain": SANDBOX_DOMAIN,
                 "username": "contract",
@@ -137,11 +137,15 @@ def test_list_domains(lab: Lab) -> None:
                 "description": "contract-recovery-seed",
             }
         ]
+        # Other owned lab probes may legitimately coexist. Independent native
+        # name-only output still proves the API parser loses/adds no domains.
+        expected_domains = sorted(lab.exec("virtualmin", "list-domains", "--name-only").splitlines())
+        assert sorted(item["domain"] for item in owners.unwrap()) == expected_domains
 
         table = lab.call("list-domains", {}, case="table", note="list_domains: the plain table, header rows included")
         assert_accepted(table)
         domains, _ = lab.observe(lambda gateway: gateway.list_domains(name_only=True))
-        assert domains.unwrap() == [SANDBOX_DOMAIN], "the header and separator rows must not read as domains"
+        assert sorted(domains.unwrap()) == expected_domains, "the header and separator rows must not read as domains"
 
         names = lab.call("list-domains", {"name-only": ""}, case="name_only", note="the lab's domain existence check")
         assert_accepted(names)

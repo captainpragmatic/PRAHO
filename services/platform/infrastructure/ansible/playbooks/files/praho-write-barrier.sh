@@ -41,11 +41,15 @@ STATE_DIR=${PRAHO_STATE_DIR:-/var/lib/praho/migration}
 WEBMIN_VAR=${PRAHO_WEBMIN_VAR:-/var/webmin}
 PROC_DIR=${PRAHO_PROC_DIR:-/proc}
 APACHE_SITES=${PRAHO_APACHE_SITES:-/etc/apache2/sites-enabled}
-readonly RUN_DIR STATE_DIR WEBMIN_VAR PROC_DIR APACHE_SITES
+NEUTRAL_HELPER=${PRAHO_NEUTRAL_HELPER:-/var/lib/praho/account-name-neutral/helper.py}
+APACHE_BINDINGS_HELPER=${PRAHO_APACHE_BINDINGS_HELPER:-/var/lib/praho/apache-bindings/library.py}
+readonly RUN_DIR STATE_DIR WEBMIN_VAR PROC_DIR APACHE_SITES NEUTRAL_HELPER APACHE_BINDINGS_HELPER
 safe_dir='^/[A-Za-z0-9._/-]+$'
 for dir in "$RUN_DIR" "$STATE_DIR" "$WEBMIN_VAR" "$PROC_DIR" "$APACHE_SITES"; do
   [[ $dir =~ $safe_dir && $dir != *..* ]] || exit 64
 done
+[[ $NEUTRAL_HELPER =~ $safe_dir && $NEUTRAL_HELPER != *..* ]] || exit 64
+[[ $APACHE_BINDINGS_HELPER =~ $safe_dir && $APACHE_BINDINGS_HELPER != *..* ]] || exit 64
 
 action=${PRAHO_BARRIER_ACTION:?}
 domain=${PRAHO_DOMAIN:?}
@@ -228,9 +232,10 @@ read_accounts() {
 
 # Why the barrier cannot be put up here; empty when it can. Read-only.
 refusal() {
-  local count db user host
+  local count db user host info
   for name in "${names[@]}"; do
-    if virtualmin list-domains --domain "$name" --multiline 2>/dev/null | grep -qE '^ *Features:.* mail( |$)'; then
+    info=$(virtualmin list-domains --domain "$name" --multiline 2>/dev/null) || { echo "domain_unreadable:$name"; return 0; }
+    if grep -qE '^ *Features:.* mail( |$)' <<<"$info"; then
       echo "mail_feature"; return 0
     fi
   done
@@ -308,13 +313,36 @@ domain_operations() {
   printf '%s\n' "$count"
 }
 
+# The provider-name child's root-owned neutral frontend supersedes its tenant-owned disabled page.
+# The fixed helper proves current native child/parent/owner/ID, private state/config digests, disabled
+# state and actual HTTP+HTTPS 404/Not Found. It performs no ensure, reload or other mutation.
+neutral_child_web_holds() {
+  local name=$1 proof
+  [[ $name != "$domain" && -f $NEUTRAL_HELPER && ! -L $NEUTRAL_HELPER &&
+     -d ${NEUTRAL_HELPER%/*} && ! -L ${NEUTRAL_HELPER%/*} &&
+     $(stat -c '%u:%a' -- "$NEUTRAL_HELPER") == 0:700 &&
+     $(stat -c '%u:%a' -- "${NEUTRAL_HELPER%/*}") == 0:700 ]] || return 1
+  proof=$(python3 "$NEUTRAL_HELPER" verify --name "$name" --owner "$owner" --parent "$domain" \
+    --parent-id "$domain_id" --host "$name" 2>/dev/null) || return 1
+  [[ $proof == neutral ]]
+}
+
+native_probe_endpoints() {
+  [[ -f $APACHE_BINDINGS_HELPER && ! -L $APACHE_BINDINGS_HELPER &&
+     -d ${APACHE_BINDINGS_HELPER%/*} && ! -L ${APACHE_BINDINGS_HELPER%/*} &&
+     $(stat -c '%u:%a' -- "$APACHE_BINDINGS_HELPER") == 0:700 &&
+     $(stat -c '%u:%a' -- "${APACHE_BINDINGS_HELPER%/*}") == 0:700 ]] || return 1
+  python3 "$APACHE_BINDINGS_HELPER" endpoints --name "$1" 2>/dev/null
+}
+
 # barrier_broken : why the barrier does not hold, or nothing. Read-only.
 barrier_broken() {
-  local name conf page page_sha body_sha user host locked live expected n now
+  local name conf page page_sha body_sha response code user host locked live expected n now endpoints port address scheme
   read_disabled
   [[ -z $(crontab_text | active_jobs) ]] || { echo "cron_job_active"; return 0; }
   for name in "${names[@]}"; do
     is_disabled "$name" || { echo "not_disabled:$name"; return 0; }
+    if neutral_child_web_holds "$name"; then continue; fi
     conf=$(grep -lE "^[[:space:]]*ServerName[[:space:]]+${name//./\\.}[[:space:]]*$" "$APACHE_SITES"/* 2>/dev/null | head -n1 || true)
     [[ -n $conf ]] || { echo "vhost_unknown:$name"; return 0; }
     n=$(grep -cE '^[[:space:]]*<VirtualHost' "$conf" || true)
@@ -322,8 +350,28 @@ barrier_broken() {
     page=$(sed -nE 's/^[[:space:]]*AliasMatch \^\/\.\*\$ (.*disabled_by_virtualmin\.html).*/\1/p' "$conf" | head -n1)
     [[ -r $page ]] || { echo "disabled_page_missing:$name"; return 0; }
     page_sha=$(sha <"$page")
-    body_sha=$(curl -sk --max-time 10 --resolve "$name:443:127.0.0.1" "https://$name/" 2>/dev/null | sha)
-    [[ $body_sha == "$page_sha" ]] || { echo "serving:$name"; return 0; }
+    # Legacy native disabled pages are HTTP 200. A transport failure, HTTP000 or a neutral404
+    # cannot fall back to a tenant-controlled page that happens to have the same body (or is empty).
+    endpoints=$(native_probe_endpoints "$name") || { echo "bindings_unknown:$name"; return 0; }
+    [[ -n $endpoints ]] || { echo "bindings_unknown:$name"; return 0; }
+    # Preserve the native TLS-page proof for HTTPS sites: Virtualmin keeps a
+    # site's ordinary HTTP-to-HTTPS rewrite while adding its disabled-page alias.
+    # HTTP-only legacy sites instead prove their actual HTTP endpoints. Never
+    # accept a redirect itself as evidence that application writes are blocked.
+    if [[ $endpoints == 443$'\t'* || $endpoints == *$'\n'443$'\t'* ]]; then
+      endpoints=$(awk -F '\t' '$1 == "443"' <<<"$endpoints")
+    fi
+    while IFS=$'\t' read -r port address; do
+      [[ $port =~ ^(80|443)$ && $address =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "bindings_unknown:$name"; return 0; }
+      scheme=http; [[ $port != 443 ]] || scheme=https
+      [[ $address != *:* ]] || address="[$address]"
+      response=$(curl -sk --noproxy '*' --connect-timeout 5 --max-time 10 --write-out $'\n%{http_code}' \
+        --resolve "$name:$port:$address" "$scheme://$name:$port/" 2>/dev/null) || { echo "serving:$name"; return 0; }
+      code=${response##*$'\n'}
+      [[ $code == 200 && $response == *$'\n'* ]] || { echo "serving:$name"; return 0; }
+      body_sha=$(printf '%s' "${response%$'\n'*}" | sha)
+      [[ $body_sha == "$page_sha" ]] || { echo "serving:$name"; return 0; }
+    done <<<"$endpoints"
   done
   expected=$(unb64 <<<"$accounts_b64" | cut -f1,2 | sort)
   live=$(db_accounts | sort) || { echo "database_unreadable"; return 0; }

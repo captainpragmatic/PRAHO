@@ -2142,8 +2142,8 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Account names"),
         label=_("Zone is on the shipped Public Suffix List"),
         help_text=_(
-            "Turn on only once the account zone's Public Suffix List entry is in current browsers. Until "
-            "then account names serve a neutral page, never customer content."
+            "Turn on only once the account zone's Public Suffix List entry is in current browsers. "
+            "Account-name previews remain disabled; this setting records PSL inclusion only."
         ),
         input_kind="toggle",
     ),

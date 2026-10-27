@@ -1,12 +1,12 @@
 """Account names: the node side and the DNS side (ADR-0061 P1.4).
 
-An account name `<label>.<zone>` is a Virtualmin sub-server of the customer's domain, its web root
-linked to the customer's (P1.15), its certificate its own (P1.10). PRAHO publishes A and AAAA
+An account name `<label>.<zone>` is a Virtualmin sub-server of the customer's domain, with a
+node-controlled neutral HTTP site and its own certificate (P1.10). PRAHO publishes A and AAAA
 records for it in the account zone, pointing at `AccountHostname.target_server`.
 
 - `ensure_node_account_name` makes one node serve the name: ownership read from the node's full
-  listing, the sub-server created if absent, its state set BEFORE its content, the web root linked
-  (only once the zone's Public Suffix List entry has shipped), the current certificate installed.
+  listing, the neutral site proved before creation, the sub-server created if absent and its state
+  set, the current certificate installed and the neutral site refreshed with that certificate.
 - `remove_node_account_name` deletes the name's sub-server only, after the same ownership check.
 - `sync_account_hostname` converges the DNS records to `target_server`, publishing only a name
   whose certificate is installed there, after proving the token reads the configured zone.
@@ -30,15 +30,15 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from . import account_hostname_config as config
-from .account_hostname_models import AccountHostname
-from .account_name_node import link_account_name_web_root
+from . import account_name_node
+from .account_hostname_models import AccountHostname, AccountNameCertificateInstall
+from .account_name_node import CERTIFICATE_MISMATCH, retire_account_name_neutral
 from .virtualmin_domain_state import domain_state_params
 from .virtualmin_gateway import (
     TOP_LEVEL_SERVER,
     VirtualminConfig,
     VirtualminGateway,
     explicit_rejection,
-    listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
@@ -67,6 +67,7 @@ class EnsureOutcome:
     enabled: bool
     linked: bool
     certificate_installed: bool
+    neutral: bool
 
 
 def owner_tag(hostname: AccountHostname) -> str:
@@ -79,11 +80,70 @@ def owner_tag(hostname: AccountHostname) -> str:
 # announced only once an unexpired certificate for it is installed on the node DNS points at.
 
 
+def prepare_account_name_neutral(
+    server: VirtualminServer, *, zone: str, name: str, customer_user: str
+) -> Result[str, str]:
+    """Prove HTTP privacy before creation or certificate repair; this is not TLS readiness."""
+    return account_name_node.prepare_account_name_neutral(server, zone=zone, name=name, customer_user=customer_user)
+
+
+def ensure_account_name_neutral(
+    server: VirtualminServer,
+    *,
+    zone: str,
+    name: str,
+    customer_user: str,
+    expected_certificate_sha256: str | None = None,
+) -> Result[str, str]:
+    """Typed node seam shared by publication and migration orchestration."""
+    return account_name_node.ensure_account_name_neutral(
+        server,
+        zone=zone,
+        name=name,
+        customer_user=customer_user,
+        expected_certificate_sha256=expected_certificate_sha256,
+    )
+
+
 def certificate_ready_on(hostname: AccountHostname, server: VirtualminServer) -> bool:
     """Whether an unexpired certificate for the name is installed on `server`."""
     from .account_name_certificates import certificate_installed_on  # noqa: PLC0415  # Deferred: imports acme
 
     return certificate_installed_on(hostname, server.pk)
+
+
+def expected_certificate_fingerprint(hostname: AccountHostname, server: VirtualminServer) -> Result[str, str]:
+    """The Platform-issued public leaf recorded on this specific node."""
+    from .account_name_certificates import expected_certificate_fingerprint as expected  # noqa: PLC0415
+
+    return expected(hostname, server)
+
+
+def _prove_current_certificate(
+    hostname: AccountHostname, server: VirtualminServer, customer_user: str
+) -> Result[str, str]:
+    from .account_name_certificates import forget_installation  # noqa: PLC0415  # Certificate evidence owner
+
+    pinned_ref = (
+        AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server, not_after__gt=timezone.now())
+        .values_list("certificate_ref", flat=True)
+        .first()
+    )
+    expected = expected_certificate_fingerprint(hostname, server)
+    if expected.is_err():
+        return Err(expected.unwrap_err(), retriability=retriability_of(expected))
+    proof = ensure_account_name_neutral(
+        server,
+        zone=hostname.zone,
+        name=hostname.fqdn,
+        customer_user=customer_user,
+        expected_certificate_sha256=expected.unwrap(),
+    )
+    if proof.is_err() and proof.unwrap_err() == CERTIFICATE_MISMATCH and pinned_ref is not None:
+        # The RPC runs without an installation-row lock. An authorized installer
+        # may have committed a newer leaf meanwhile; an old pin cannot erase it.
+        forget_installation(hostname, server, expected_ref=pinned_ref)
+    return proof
 
 
 def install_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[bool, str]:
@@ -204,18 +264,6 @@ def _name_state(gateway: VirtualminGateway, name: str) -> Result[dict[str, Any],
     return Ok(state.unwrap())
 
 
-def _home(gateway: VirtualminGateway, name: str) -> Result[str, str]:
-    result = gateway.call("list-domains", {"domain": name, "multiline": ""})
-    if result.is_err() or not result.unwrap().success:
-        return Err(f"Home of {name} unreadable", retriability=Retriability.UNKNOWN)
-    for item in result.unwrap().data.get("data") or []:
-        if isinstance(item, dict) and item.get("name") == name:
-            home = listing_attribute(item.get("values") or {}, "Home directory")
-            if home:
-                return Ok(home)
-    return Err(f"Home of {name} unreadable", retriability=Retriability.UNKNOWN)
-
-
 def _set_state(gateway: VirtualminGateway, name: str, *, enabled: bool) -> Result[None, str]:
     """Bring the name's sub-server to the wanted state and verify it from the node."""
     state = _name_state(gateway, name)
@@ -251,29 +299,14 @@ def _create_name(gateway: VirtualminGateway, account: VirtualminAccount, name: s
     return Ok(None)
 
 
-def _link_when_shipped(
-    gateway: VirtualminGateway, server: VirtualminServer, account: VirtualminAccount, name: str
-) -> Result[bool, str]:
-    """Link the web root, only once the zone is a public suffix in shipped browsers (ADR-0061 §1)."""
-    if not config.account_zone_psl_shipped():
-        return Ok(False)
-    home = _home(gateway, name)
-    if home.is_err():
-        return Err(home.unwrap_err(), retriability=retriability_of(home))
-    link = link_account_name_web_root(server, home=home.unwrap(), customer_user=account.virtualmin_username)
-    if link.is_err():
-        return Err(link.unwrap_err(), retriability=retriability_of(link))
-    return Ok(True)
-
-
 def ensure_node_account_name(
     account: VirtualminAccount, server: VirtualminServer, *, enabled: bool, operation_owner: bool = False
 ) -> Result[EnsureOutcome, str]:
-    """Make `server` serve the account's name: owned, in the wanted state, linked, certified. Idempotent.
+    """Make `server` serve the name: owned, in the wanted state, neutral, certified. Idempotent.
 
     `enabled` is False for a suspended account and for a migration target not yet activated: a
     child created under a disabled customer domain starts enabled (lab S10), so its state is set
-    and verified before its content is linked.
+    and verified explicitly. Customer content stays unreachable independently of that state.
 
     One node step runs per name at a time (`account_name_lease`). A caller that does not own an
     operation on the account (the create task, the sweep) changes the node only while it holds the
@@ -305,7 +338,7 @@ def _ensure_held(
     if preflight.is_err():
         return Err(preflight.unwrap_err(), retriability=retriability_of(preflight))
     if operation_owner:
-        placed = _place_name(gateway, hostname, account, enabled=enabled, rows=preflight.unwrap())
+        placed = _place_name(gateway, hostname, account, server, enabled=enabled, rows=preflight.unwrap())
     else:
         with transaction.atomic():
             locked = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
@@ -314,22 +347,24 @@ def _ensure_held(
                 return refusal
             # Read again under the lock: the account and the node may have moved since the preflight.
             wanted = enabled and locked.status == "active"
-            placed = _place_name(gateway, hostname, locked, enabled=wanted, rows=None)
+            placed = _place_name(gateway, hostname, locked, server, enabled=wanted, rows=None)
     if placed.is_err():
         return Err(placed.unwrap_err(), retriability=retriability_of(placed))
     created, now_enabled = placed.unwrap()
 
-    name = hostname.fqdn
-    linked = _link_when_shipped(gateway, server, account, name)
-    if linked.is_err():
-        return Err(linked.unwrap_err(), retriability=retriability_of(linked))
-
     certificate = install_certificate(hostname, server)
     if certificate.is_err():
         return Err(certificate.unwrap_err(), retriability=retriability_of(certificate))
+    neutral = _prove_current_certificate(hostname, server, account.virtualmin_username)
+    if neutral.is_err():
+        return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
     return Ok(
         EnsureOutcome(
-            created=created, enabled=now_enabled, linked=linked.unwrap(), certificate_installed=certificate.unwrap()
+            created=created,
+            enabled=now_enabled,
+            linked=False,
+            certificate_installed=certificate.unwrap(),
+            neutral=True,
         )
     )
 
@@ -368,10 +403,11 @@ def _admission_refusal(account: VirtualminAccount) -> Err[str] | None:
     return None
 
 
-def _place_name(
+def _place_name(  # noqa: PLR0913  # Fresh ownership rows and the managed node are separate placement inputs.
     gateway: VirtualminGateway,
     hostname: AccountHostname,
     account: VirtualminAccount,
+    server: VirtualminServer,
     *,
     enabled: bool,
     rows: dict[str, dict[str, str]] | None,
@@ -387,6 +423,11 @@ def _place_name(
         if refusal is not None:
             return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
 
+    neutral = prepare_account_name_neutral(
+        server, zone=hostname.zone, name=name, customer_user=account.virtualmin_username
+    )
+    if neutral.is_err():
+        return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
     created = name not in rows
     if created:
         create = _create_name(gateway, account, name)
@@ -414,14 +455,47 @@ def remove_node_account_name(account: VirtualminAccount, server: VirtualminServe
     if rows.is_err():
         return Err(rows.unwrap_err(), retriability=retriability_of(rows))
     if name not in rows.unwrap():
-        return Ok(False)
+        retired = _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+        return Ok(False) if retired.is_ok() else Err(retired.unwrap_err(), retriability=retriability_of(retired))
     refusal = _ownership_refusal(rows.unwrap(), account, name)
     if refusal is not None:
         return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
     deleted = _program(gateway, "delete-domain", {"domain": name})
     if deleted.is_err():
         return Err(deleted.unwrap_err(), retriability=retriability_of(deleted))
-    return Ok(True)
+    retired = _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+    return Ok(True) if retired.is_ok() else Err(retired.unwrap_err(), retriability=retriability_of(retired))
+
+
+def retire_removed_node_name(account: VirtualminAccount, server: VirtualminServer) -> Result[None, str]:
+    """Retire one removed node's private name guard, including a name already retired from DNS."""
+    hostname = AccountHostname.objects.filter(account_id=account.pk).first()
+    if hostname is None:
+        return Ok(None)
+    return _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+
+
+def _retire_removed_name(
+    hostname: AccountHostname, server: VirtualminServer, *, customer_user: str
+) -> Result[None, str]:
+    """Never remove a live native child's neutral guard; the node repeats this absence proof."""
+    from .account_name_certificates import forget_installation  # noqa: PLC0415  # Deferred: imports acme
+
+    rows = _rows(_gateway(server))
+    if rows.is_err():
+        return Err(rows.unwrap_err(), retriability=Retriability.UNKNOWN)
+    if hostname.fqdn in rows.unwrap():
+        return Err(
+            "The native account name is still present; its neutral guard must remain", retriability=Retriability.UNKNOWN
+        )
+    # Native absence invalidates readiness even if private guard retirement still needs a retry.
+    forget_installation(hostname, server)
+    retired = retire_account_name_neutral(server, zone=hostname.zone, name=hostname.fqdn, customer_user=customer_user)
+    if retired.is_err():
+        return Err(
+            f"Neutral guard private cleanup is unproven: {retired.unwrap_err()}", retriability=Retriability.UNKNOWN
+        )
+    return Ok(None)
 
 
 # ----------------------------------------------------------------------------- DNS side
@@ -440,6 +514,22 @@ def _syncable(hostname: AccountHostname) -> str | None:
     account = hostname.account
     if account is None or hostname.retired_at is not None:
         return "retired"
+    from .virtualmin_migration_models import (  # noqa: PLC0415  # Keep publication and admission under one name lock.
+        _TERMINAL_STATUSES,
+        VirtualminMigration,
+    )
+
+    # A legacy admission saw no published name. Both publication phases repeat this
+    # check under the same name lock admission holds until its contract is durable.
+    # Cutover/recovery own their DNS publication and must remain able to converge.
+    if (
+        VirtualminMigration.objects.filter(
+            account_id=account.pk, contract__in=(VirtualminMigration.Contract.LEGACY, "")
+        )
+        .exclude(status__in=_TERMINAL_STATUSES)
+        .exists()
+    ):
+        return "migration_locked"
     if account.status not in SYNCABLE_STATUSES or account.provisioned_at is None:
         return "account_not_ready"
     server = hostname.target_server
@@ -613,6 +703,11 @@ def _publish(
         decided = _decide(hostname)
         if decided is not None:
             return decided
+        # _decide admits only a live account with a target address.
+        assert hostname.target_server is not None and hostname.account is not None
+        neutral = _prove_current_certificate(hostname, hostname.target_server, hostname.account.virtualmin_username)
+        if neutral.is_err():
+            return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
         specs = _specs(hostname, ttl=ttl)
         intended = _store_intent(hostname, specs)
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
@@ -916,9 +1011,11 @@ def _confirm_restored(hostname: AccountHostname, recorded_ttls: Mapping[str, int
 
 
 def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
-    """Delete the name's records and retire it, under the name's lock. The label stays taken for ever."""
-    if hostname.retired_at is not None:
-        return Ok(None)
+    """Withdraw DNS, retire a removed native guard, then finish the permanent label retirement.
+
+    Withdrawal is durable even when private cleanup fails. The target and unretired row keep that
+    cleanup reachable by the sweep; DNS retirement never deletes a native child or customer parent.
+    """
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
         if locked is None or locked.retired_at is not None:
@@ -928,13 +1025,43 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
         managed = withdraw_managed_locked(locked)
         if managed.is_err():
             return Err(managed.unwrap_err(), retriability=retriability_of(managed))
+        account = locked.account
+        server = locked.target_server or (account.server if account else None)
+        metadata_only = _never_placed(locked)
+        if server is not None and locked.target_server_id is None and not metadata_only:
+            locked.target_server = server
+            locked.save(update_fields=["target_server", "updated_at"])
         if config.account_hostnames_enabled() or locked.records:
             deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(locked))
             if deleted.is_err():
                 return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+        locked.records = {}
+        locked.last_reconciled_at = None
+        locked.save(update_fields=["records", "last_reconciled_at", "updated_at"])
+        if not metadata_only:
+            if server is None:
+                return Err(
+                    "The retired name's node placement is unknown; private cleanup needs review",
+                    retriability=Retriability.UNKNOWN,
+                )
+            retired = _retire_removed_name(locked, server, customer_user=account.virtualmin_username if account else "")
+            if retired.is_err():
+                return retired
         # A save of the locked row, not a queryset update: the retirement is audited by its own signals.
         locked.retired_at = timezone.now()
-        locked.records = {}
         locked.target_server = None  # A retired name holds no node, so the node can be unregistered
         locked.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
     return Ok(None)
+
+
+def _never_placed(hostname: AccountHostname) -> bool:
+    """A legacy allocation that never qualified for any managed node step: retire metadata only."""
+    account = hostname.account
+    return bool(
+        account is not None
+        and account.provisioned_at is None
+        and hostname.target_server_id is None
+        and not hostname.records
+        and not hostname.certificate_installs.exists()
+        and getattr(account.server, "node_deployment", None) is None
+    )
