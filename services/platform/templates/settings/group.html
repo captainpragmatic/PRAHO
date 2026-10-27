@@ -22,11 +22,20 @@
           <span class="text-slate-200">{{ group.label }}</span>
         </nav>
         <h1 class="text-2xl font-bold text-white">{{ group.label }}</h1>
+        {% if request.GET.return_to == 'setup' %}
+        <a class="inline-block mt-2 text-sm text-blue-400 hover:underline" href="{% url 'settings:setup_checklist' %}">{% trans "Back to setup checklist" %}</a>
+        {% elif request.GET.return_to == 'node-deploy' %}
+        <a class="inline-block mt-2 text-sm text-blue-400 hover:underline" href="{% url 'infrastructure:deployment_create' %}">{% trans "Back to node creation" %}</a>
+        {% endif %}
         {% if group.description %}
         <p class="mt-1 text-slate-400">{{ group.description }}</p>
         {% endif %}
 
         {% if is_advanced %}
+        <p id="setting-infrastructure.node_admin_allowed_cidrs" class="mt-4 text-sm text-slate-400">
+          {% trans "The Node admin allowlist is now in Node Deployment settings." %}
+          <a class="text-blue-400 hover:underline" href="{% url 'settings:group' 'node-deployment' %}#setting-infrastructure.node_admin_allowed_cidrs">{% trans "Open Node admin allowlist" %}</a>
+        </p>
         {% trans "Defaults here are appropriate for most deployments. Changes affect performance and reliability — adjust only with a clear reason." as advanced_note %}
         {% alert advanced_note variant="warning" %}
         {% endif %}
@@ -34,7 +43,7 @@
         {% alert source_note variant="info" %}
         {% endif %}
 
-        {% if is_integration %}
+        {% if is_integration and group.slug != 'hosting-dns' and group.slug != 'backup' %}
         <div class="mt-4 mb-2" x-data="settingsIntegrationTest" data-test-url="{% url 'settings:integration_test' group.slug %}">
           {# tmpl-allow TMPL002: :disabled and @click Alpine bindings plus two x-show label spans; components accept no executable attributes (apps/ui/attributes.py) #}
           <button type="button" :disabled="testing" @click="testConnection()" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 disabled:opacity-50">

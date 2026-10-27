@@ -230,6 +230,9 @@ class ChainRunnerCase(ChainFixtures, ExclusionCase):
 
     def setUp(self) -> None:
         super().setUp()
+        transport = patch("apps.infrastructure.imported_backup_transport.server_transport_ready", return_value=Ok(None))
+        transport.start()
+        self.addCleanup(transport.stop)
         self.account = self._account()
         self.enable_incremental_backups()
 

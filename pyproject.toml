@@ -582,7 +582,7 @@ suppress-dummy-args = true
 python_version = "3.13"
 plugins = ["mypy_django_plugin.main"]
 strict = false
-mypy_path = ["services/platform/stubs"]
+mypy_path = ["$MYPY_CONFIG_FILE_DIR/services/platform/stubs"]
 exclude = '(^|/)(migrations|static|media|htmlcov|node_modules|\.venv[^/]*)(/|$)'
 
 # Guardrails

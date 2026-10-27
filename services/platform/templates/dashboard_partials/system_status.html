@@ -2,6 +2,8 @@
 {% load i18n %}
 
 <div id="system-status-widget">
+  {% if status_queued %}<p class="text-blue-400 text-xs mb-2" role="status">{% trans "Check queued. Refresh this page shortly for results." %}</p>{% endif %}
+  <a href="{% url 'system_status' %}" class="inline-block mb-3 text-sm text-blue-400 hover:underline">{% trans "System Status details" %}</a>
   {% if status_rate_limited %}
   <p class="text-amber-400 text-xs mb-2" role="status">{% trans 'Please wait one minute before checking again.' %}</p>
   {% endif %}
@@ -9,7 +11,7 @@
   <p class="text-amber-400 text-xs mb-2" role="status">{% trans 'Status cache unavailable.' %} {% if system_status %}{% trans 'Results not saved.' %}{% endif %}</p>
   {% endif %}
   {% if status_snapshot.stale %}
-  <p class="text-amber-400 text-xs mb-2" role="status">{% trans 'These results are over 26 hours old. Refresh to verify current status.' %}</p>
+  <p class="text-amber-400 text-xs mb-2" role="status">{% trans 'These results are over 25 minutes old. Refresh to verify current status.' %}</p>
   {% endif %}
   {% if system_status %}
   <div class="space-y-3">

@@ -554,7 +554,8 @@ def source_fingerprint() -> dict[str, str | bool]:
     for raw_name in sorted(untracked.split(b"\0")):
         if raw_name:
             digest.update(raw_name + b"\0")
-            digest.update((ROOT / os.fsdecode(raw_name)).read_bytes())
+            path = ROOT / os.fsdecode(raw_name)
+            digest.update(os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes())
     return {"source_sha256": digest.hexdigest(), "dirty": bool(diff or untracked)}
 
 

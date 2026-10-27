@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -39,6 +40,7 @@ from .virtualmin_validators import VirtualminValidator, is_virtualmin_read_only_
 
 if TYPE_CHECKING:
     from apps.common.credential_vault import CredentialVault
+    from apps.common.status_observations import ResourceValues
 
 logger = logging.getLogger(__name__)
 
@@ -1296,6 +1298,59 @@ class VirtualminGateway:
                 )
         else:
             return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
+
+    @staticmethod
+    def resource_snapshot(info: dict[str, object]) -> ResourceValues:
+        """Normalize only the documented resource fields, never the rest of the inventory."""
+        from apps.common.status_observations import ResourceValues  # noqa: PLC0415
+
+        cpu_fields, memory_fields, percent_max = 3, 2, 100
+
+        output = info.get("output")
+        if not isinstance(output, str):
+            return ResourceValues()
+        fields: dict[str, list[float]] = {}
+        current: str | None = None
+        for line in output.splitlines():
+            match = re.match(r"^([a-z_]+):\s*(.*)$", line)
+            if match:
+                current = match[1] if match[1] in {"cpu", "mem", "disk_total", "disk_free"} else None
+                if current is None:
+                    continue
+                fields[current] = []
+                raw = match[2]
+            elif current and line.strip().startswith("* "):
+                raw = line.strip()[2:]
+            else:
+                continue
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                fields.pop(current, None)
+                current = None
+                continue
+            if not math.isfinite(value) or value < 0:
+                fields.pop(current, None)
+                current = None
+                continue
+            fields[current].append(value)
+        cpu = fields.get("cpu", [])
+        memory = fields.get("mem", [])
+        disk_total = fields.get("disk_total", [])
+        disk_free = fields.get("disk_free", [])
+
+        def usage(total: float, free: float) -> float | None:
+            return 100 * (total - free) / total if total > 0 and 0 <= free <= total else None
+
+        return ResourceValues(
+            cpu_percent=percent_max - cpu[2]
+            if len(cpu) >= cpu_fields and all(value <= percent_max for value in cpu)
+            else None,
+            memory_percent=usage(memory[0], memory[1]) if len(memory) >= memory_fields else None,
+            disk_percent=usage(disk_total[0], disk_free[0]) if disk_total and disk_free else None,
+        )
 
     def list_domains(self, name_only: bool = False) -> Result[list[dict[str, Any]], str]:
         """
