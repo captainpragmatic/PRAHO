@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% load i18n localisation_tags ui_components tz %}
+{% block title %}{% trans "System Status" %} - PRAHO Platform{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  {% trans "System Status" as title %}
+  {% page_header title=title subtitle=_("Current observations and hourly resource summaries. Unknown results need a fresh check.") icon="server" %}{% end_page_header %}
+  <p class="text-sm text-slate-400">{% trans "Automatic checks run every ten minutes. Last check times describe retrieval; Virtualmin may return cached measurements." %}</p>
+  {% if selected_node %}
+  <div class="flex flex-wrap items-center gap-3">
+    <h2 class="text-lg font-semibold">{{ selected_node.name }}</h2>
+    <form method="post" action="{% url 'node_status_refresh' selected_node.pk %}">{% csrf_token %}
+      {% trans "Refresh node details" as refresh_label %}{% button refresh_label type="submit" variant="secondary" size="sm" %}
+    </form>
+    {% url 'system_status' as all_status_url %}{% trans "All system checks" as all_label %}{% button all_label href=all_status_url variant="secondary" size="sm" %}
+  </div>
+  {% endif %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {% for row in rows %}
+    <section class="p-4 bg-slate-800 border border-slate-700 rounded-lg">
+      <h2 class="text-white font-semibold">{% if row.state.node %}<a class="hover:underline" href="{% url 'system_status' %}?node={{ row.state.node_id }}">{{ row.state.node.name }}</a>{% else %}{{ row.state.details.name|default:row.state.check_key }}{% endif %}</h2>
+      <div class="mt-2">{% if row.level == 'green' %}{% badge row.label variant="success" %}{% elif row.level == 'red' %}{% badge row.label variant="danger" %}{% else %}{% badge row.label variant="warning" %}{% endif %}</div>
+      <p class="mt-2 text-sm text-slate-300">{{ row.message }}</p>
+      <p class="text-sm text-slate-400">{{ row.state.details.detail }}</p>
+      <p class="mt-2 text-xs text-slate-500">{% trans "Last check" %}: {{ row.state.observed_at|default:'—' }} · {% trans "Last success" %}: {{ row.state.last_success_at|default:'—' }}</p>
+      {% if row.state.node %}<p class="text-sm text-slate-300">{% trans "CPU" %}: {{ row.state.details.cpu_percent|floatformat:1|default:'—' }} · {% trans "RAM" %}: {{ row.state.details.memory_percent|floatformat:1|default:'—' }} · {% trans "Disk" %}: {{ row.state.details.disk_percent|floatformat:1|default:'—' }} {% trans "(percent)" %}</p>{% endif %}
+    </section>
+    {% empty %}<p class="text-slate-400">{% trans "No observations yet. Last check information will appear after a background check." %}</p>{% endfor %}
+  </div>
+  {% trans "Hourly resource summaries" as summaries_title %}
+  {% section_card title=summaries_title %}
+  <p class="text-sm text-slate-400 mb-3">{% trans "Last 48 hours: averages, peaks and sample counts. Summaries are retained for 30 days. Network rates are not exposed by this Virtualmin API." %}</p>
+  <div class="overflow-x-auto"><table class="w-full text-sm text-left text-slate-300">
+    <thead><tr><th scope="col">{% trans "Node" %}</th><th scope="col">{% trans "Hour (UTC)" %}</th><th scope="col">{% trans "CPU avg / peak (%)" %}</th><th scope="col">{% trans "RAM avg / peak (%)" %}</th><th scope="col">{% trans "Disk avg / peak (%)" %}</th><th scope="col">{% trans "Samples (CPU / RAM / Disk)" %}</th></tr></thead>
+    <tbody>{% for summary in summaries %}<tr class="border-t border-slate-700"><td>{{ summary.node.name }}</td><td>{{ summary.hour|utc|date:'Y-m-d H:i' }}</td><td>{{ summary.cpu_average|floatformat:1|default:'—' }} / {{ summary.cpu_peak|floatformat:1|default:'—' }}</td><td>{{ summary.memory_average|floatformat:1|default:'—' }} / {{ summary.memory_peak|floatformat:1|default:'—' }}</td><td>{{ summary.disk_average|floatformat:1|default:'—' }} / {{ summary.disk_peak|floatformat:1|default:'—' }}</td><td>{{ summary.cpu_count }} / {{ summary.memory_count }} / {{ summary.disk_count }}</td></tr>{% empty %}<tr><td colspan="6">{% trans "No hourly observations yet." %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if summaries.has_next %}<a class="inline-block mt-3 hover:underline" href="?page={{ summaries.next_page_number }}{% if selected_node %}&amp;node={{ selected_node.pk }}{% endif %}">{% trans "Older observations" %}</a>{% endif %}
+  {% if summaries.has_previous %}<a class="inline-block mt-3 ml-4 hover:underline" href="?page={{ summaries.previous_page_number }}{% if selected_node %}&amp;node={{ selected_node.pk }}{% endif %}">{% trans "Newer observations" %}</a>{% endif %}
+  {% end_section_card %}
+  {% url 'settings:setup_checklist' as setup_url %}{% trans "Setup checklist" as setup_label %}{% button setup_label href=setup_url variant="secondary" %}
+</div>
+{% endblock %}

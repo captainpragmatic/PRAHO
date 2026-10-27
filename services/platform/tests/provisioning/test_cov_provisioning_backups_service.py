@@ -77,7 +77,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
     def test_manual_server_refuses_backup_and_preserves_correlation(self) -> None:
         result = self.backups.backup_domain(self.account, progress_key="manual-job")
         self.assertTrue(result.is_err())
-        self.assertIn("archive transport is unavailable", result.unwrap_err())
+        self.assertIn("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", result.unwrap_err())
         progress = self.backups.get_backup_status("manual-job")
         self.assertTrue(str(progress["backup_id"]).startswith(self.account.domain))
         self.assertIsNone(self.backups._progress_key)
@@ -86,8 +86,8 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
     def test_manual_server_refuses_archive_fetch_and_push(self) -> None:
         fetch = self.backups._fetch_archive_to_spool({})
         push = self.backups._push_archive_to_target(self.server, "virtualmin_backup_" + "a" * 32 + ".tar.gz", "0" * 64)
-        self.assertIn("archive transport is unavailable", fetch.unwrap_err())
-        self.assertIn("archive transport is unavailable", push.unwrap_err())
+        self.assertIn("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", fetch.unwrap_err())
+        self.assertIn("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", push.unwrap_err())
         self.assertEqual(retriability_of(push), Retriability.NOT_RETRIABLE)
 
     def test_selective_restore_is_refused_before_download(self) -> None:

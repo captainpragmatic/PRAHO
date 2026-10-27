@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.conf import settings
 
 from apps.common.ssh import PUBLIC_KEY_FIELDS, parse_ssh_host_keys
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
+from apps.infrastructure.imported_backup_transport import BACKUP_PLAYBOOKS, imported_identity
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.ssh_transport import (
     TARGET_SSH_PORT,
@@ -39,6 +40,7 @@ from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment
+    from apps.provisioning.virtualmin_models import VirtualminServer
 
 logger = logging.getLogger(__name__)
 
@@ -336,15 +338,7 @@ class AnsibleService:
             ansible_env["ANSIBLE_SSH_COMMON_ARGS"] += f" -o HostKeyAlias={deployment.ipv4_address}"
 
             # Execute
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
-                cmd,
-                cwd=ANSIBLE_BASE_PATH,
-                capture_output=True,
-                text=True,
-                timeout=effective_timeout,
-                check=False,
-                env=ansible_env,
-            )
+            result = self._execute_process(cmd, ansible_env, effective_timeout)
 
             success = result.returncode == 0
             if success and playbook == "ssh-hardening.yml":
@@ -368,16 +362,7 @@ class AnsibleService:
             # Parse stats if possible
             stats = self._parse_stats(result.stdout)
 
-            return Ok(
-                AnsibleResult(
-                    success=success,
-                    playbook=playbook,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    return_code=result.returncode,
-                    stats=stats,
-                )
-            )
+            return Ok(self._process_result(playbook, result, stats))
 
         except subprocess.TimeoutExpired:
             logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {effective_timeout}s")
@@ -405,6 +390,120 @@ class AnsibleService:
                         _tmp_path.unlink(missing_ok=True)
                     except OSError as _cleanup_err:
                         logger.warning(f"⚠️ [Ansible] Could not remove temp file {_tmp_path}: {_cleanup_err}")
+
+    @staticmethod
+    def _execute_process(
+        command: list[str], environment: dict[str, str], timeout: int
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- Internal argv builder; no shell interpolation.
+            command,
+            cwd=ANSIBLE_BASE_PATH,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=environment,
+        )
+
+    @staticmethod
+    def _process_result(
+        playbook: str, result: subprocess.CompletedProcess[str], stats: dict[str, Any]
+    ) -> AnsibleResult:
+        return AnsibleResult(
+            success=result.returncode == 0,
+            playbook=playbook,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            return_code=result.returncode,
+            stats=stats,
+        )
+
+    def run_server_playbook(  # noqa: PLR0911  # Separate definite refusals from uncertain remote outcomes.
+        self,
+        server: VirtualminServer,
+        playbook: str,
+        extra_vars: dict[str, Any] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> Result[AnsibleResult, str]:
+        """Use managed enrollment or a narrowly scoped imported root identity, never a fallback."""
+        if playbook not in BACKUP_PLAYBOOKS:
+            return Err("Playbook not allowed for archive transport", retriability=Retriability.NOT_RETRIABLE)
+        deployment = getattr(server, "node_deployment", None)
+        if deployment is not None:
+            return self.run_playbook(deployment, playbook, extra_vars, timeout_seconds=timeout_seconds)
+        if any(key.startswith(("ansible_", "ssh_")) for key in (extra_vars or {})):
+            return Err("Connection variables belong to the verified transport", retriability=Retriability.NOT_RETRIABLE)
+        timeout = self.timeout if timeout_seconds is None else timeout_seconds
+        if timeout <= 0:
+            return Err("Playbook timeout must be positive", retriability=Retriability.NOT_RETRIABLE)
+        try:
+            identity = imported_identity(server)
+        except (OSError, ValueError) as error:
+            return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
+        # TemporaryDirectory owns only generated files, never the operator's private key or trust file.
+        with tempfile.TemporaryDirectory(prefix="praho_imported_backup_") as directory:
+            temporary = Path(directory)
+            inventory = temporary / "inventory.json"
+            trust = temporary / "known_hosts"
+            variables = temporary / "variables.json"
+            inventory.write_text(
+                json.dumps(
+                    {
+                        "all": {
+                            "hosts": {
+                                "backup_target": {
+                                    "ansible_host": identity.host,
+                                    "ansible_port": identity.port,
+                                    "ansible_user": "root",
+                                    "ansible_python_interpreter": "/usr/bin/python3",
+                                    "ansible_connection": "ssh",
+                                }
+                            }
+                        }
+                    }
+                )
+            )
+            trust.write_text("\n".join(identity.trusted_keys) + "\n")
+            variables.write_text(json.dumps(extra_vars or {}))
+            for artifact in (inventory, trust, variables):
+                artifact.chmod(0o600)
+            environment = self._build_ansible_env(known_hosts_file=trust)
+            environment.pop("SSH_AUTH_SOCK", None)
+            environment["ANSIBLE_SSH_ARGS"] = (
+                "-F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none"
+                " -o ControlMaster=no -o ControlPath=none -o ControlPersist=no"
+                " -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no"
+                " -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null"
+                f" -o UserKnownHostsFile={shlex.quote(str(trust))}"
+            )
+            environment["ANSIBLE_SSH_EXTRA_ARGS"] = ""
+            environment["ANSIBLE_SCP_EXTRA_ARGS"] = ""
+            environment["ANSIBLE_SFTP_EXTRA_ARGS"] = ""
+            command = [
+                self._ansible_path,
+                "-i",
+                str(inventory),
+                "--private-key",
+                str(identity.key),
+                "-e",
+                f"@{variables}",
+                str(PLAYBOOKS_PATH / playbook),
+            ]
+            try:
+                result = self._execute_process(command, environment, timeout)
+                return Ok(self._process_result(playbook, result, self._parse_stats(result.stdout)))
+            except subprocess.TimeoutExpired:
+                return Ok(
+                    AnsibleResult(
+                        success=False,
+                        playbook=playbook,
+                        stdout="",
+                        stderr="Archive transport timed out",
+                        return_code=-1,
+                    )
+                )
+            except OSError:
+                return Err("Archive transport could not start")
 
     def _ensure_ssh_policy(
         self, deployment: NodeDeployment, *, operator_public_keys: tuple[str, ...] | None = None
@@ -587,7 +686,7 @@ ansible_python_interpreter=/usr/bin/python3
         """Build variables dict for playbook"""
         # Get settings
         backup_enabled = SettingsService.get_setting("node_deployment.backup_enabled", True)
-        backup_storage = SettingsService.get_setting("node_deployment.backup_storage", "local")
+        backup_storage = SettingsService.get_setting("node_deployment.backup_storage", "platform")
         backup_retention = SettingsService.get_setting("node_deployment.backup_retention_days", 7)
         backup_schedule = SettingsService.get_setting("node_deployment.backup_schedule", "0 2 * * *")
 
@@ -601,7 +700,8 @@ ansible_python_interpreter=/usr/bin/python3
             # extra vars, so the FQDN the panel installer and Let's Encrypt need travels under its own name.
             "node_fqdn": deployment.fqdn,
             # Backup settings
-            "backup_enabled": backup_enabled,
+            # Platform-managed backups use the central durable job service, not a second node cron.
+            "backup_enabled": backup_enabled and backup_storage != "platform",
             "backup_storage": backup_storage,
             "backup_retention_days": backup_retention,
             "backup_schedule": backup_schedule,

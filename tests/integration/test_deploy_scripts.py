@@ -116,6 +116,15 @@ elif argv[:1] == ["exec"] and os.environ.get("DOCKER_SETUP_FAILS") and "setup_in
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
+elif "upload_platform_backup" in argv:
+    if "--check-enabled" in argv:
+        print("enabled" if os.environ.get("OFFSITE_ENABLED") else "disabled")
+    elif "-i" in argv:
+        content = sys.stdin.buffer.read()
+        with open(os.environ["DOCKER_LOG"], "a") as log:
+            log.write(json.dumps({{"stream_bytes": len(content)}}) + "\\n")
+        if os.environ.get("OFFSITE_FAILS"):
+            sys.exit(1)
 elif argv[:1] == ["exec"] and any("media_sweep" in a for a in argv):
     print(os.environ.get("DOCKER_PAUSE_ANSWER", "2026-10-25T00:00:00+00:00"))
 elif argv[:3] == ["exec", "-i", "praho_db"]:
@@ -212,6 +221,58 @@ class Project:
 @pytest.fixture
 def project(tmp_path: Path) -> Project:
     return Project(tmp_path.resolve())
+
+
+def test_offsite_bridge_streams_pair_before_finalizing(project: Project) -> None:
+    backup_dir = project.root / "backups"
+    backup_dir.mkdir()
+    dump = backup_dir / "praho_backup_test.sql.gz"
+    media = backup_dir / "praho_backup_test.media.tar.gz"
+    dump.write_bytes(DUMP_GZIP)
+    media.write_bytes(MEDIA_GZIP)
+    helper = project.root / "deploy/scripts/backup_manifest.py"
+    env = {**project.env, "OFFSITE_ENABLED": "1"}
+    subprocess.run([sys.executable, str(helper), "create", str(dump)], env=env, check=True)  # noqa: S603 -- Fixed helper in a temporary checkout.
+    result = subprocess.run([sys.executable, str(helper), "upload", str(dump)], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode == 0, result.stderr
+    calls = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert [call[call.index("--artifact") + 1] for call in calls if "--artifact" in call] == ["database", "media"]
+    assert "--finalize" in calls[-1]
+    assert all(call[:3] == ["exec", "-i", "praho_platform"] for call in calls if "--artifact" in call or "--finalize" in call)
+    assert dump.read_bytes() == DUMP_GZIP
+    assert media.read_bytes() == MEDIA_GZIP
+
+
+def test_offsite_bridge_failure_does_not_finalize_or_remove_local_pair(project: Project) -> None:
+    backup_dir = project.root / "backups"
+    backup_dir.mkdir()
+    dump = backup_dir / "praho_backup_test.sql.gz"
+    dump.write_bytes(DUMP_GZIP)
+    media = backup_dir / "praho_backup_test.media.tar.gz"
+    media.write_bytes(MEDIA_GZIP)
+    helper = project.root / "deploy/scripts/backup_manifest.py"
+    env = {**project.env, "OFFSITE_ENABLED": "1", "OFFSITE_FAILS": "1"}
+    subprocess.run([sys.executable, str(helper), "create", str(dump)], env=env, check=True)  # noqa: S603 -- Fixed helper in a temporary checkout.
+    result = subprocess.run([sys.executable, str(helper), "upload", str(dump)], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode != 0
+    assert not any("--finalize" in call.get("argv", []) for call in project.calls())
+    assert dump.exists() and media.exists()
+
+
+def test_local_backup_failure_is_reported_to_platform(project: Project) -> None:
+    result = project.run("backup.sh", DOCKER_EXEC_FAILS="1")
+    assert result.returncode != 0
+    reports = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert any("--report-failure" in call for call in reports)
+
+
+def test_upload_refusal_does_not_start_an_unowned_failure_report(project: Project) -> None:
+    result = project.run("backup.sh", OFFSITE_ENABLED="1", OFFSITE_FAILS="1")
+    assert result.returncode != 0
+    reports = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert any("--artifact" in call for call in reports)
+    assert not any("--report-failure" in call for call in reports)
+    assert list((project.root / "backups").glob("praho_backup_*.sql.gz"))
 
 
 def _subcommand(call: dict[str, Any]) -> list[str]:

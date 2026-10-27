@@ -669,7 +669,7 @@ def register_scheduled_tasks() -> None:
     """
     from django_q.models import Schedule  # Deferred: django-q task  # noqa: PLC0415  # Deferred: avoids circular import
 
-    schedules = [
+    schedules: list[dict[str, str | int]] = [
         {
             "name": "Process Pending Usage Events",
             "func": "apps.billing.metering_tasks.process_pending_usage_events",

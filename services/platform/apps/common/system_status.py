@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
-import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from uuid import uuid4
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection
+from django.db import DatabaseError, InterfaceError, connection, transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from django.utils.functional import Promise
 from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
@@ -24,11 +27,62 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.operator import operator_is_romanian
 from apps.common.system_status_probes import ProbeBudget, ProbeCode, email_probe_config
 
+if TYPE_CHECKING:
+    from apps.common.credential_vault import EncryptedCredential
+    from apps.provisioning.virtualmin_models import VirtualminServer
+
+
+def node_input_identity(server: VirtualminServer, *, credentials: Sequence[EncryptedCredential] | None = None) -> str:
+    """Bind evidence to effective connection inputs without decrypting or publishing credentials."""
+    from apps.common.credential_vault import EncryptedCredential  # noqa: PLC0415
+
+    fields = ("hostname", "api_username", "api_port", "api_path", "use_ssl", "ssl_verify", "ssl_cert_fingerprint")
+    values: list[object] = [getattr(server, field) for field in fields]
+    values.append(bytes(server.encrypted_api_password or b"").hex())
+    if credentials is None:
+        credentials = list(
+            EncryptedCredential.objects.filter(service_type="virtualmin", service_identifier=server.hostname).order_by(
+                "pk"
+            )
+        )
+    # Access counters/timestamps are deliberately excluded: reading a credential does not change its identity.
+    values.extend(
+        (
+            str(credential.id),
+            bytes(credential.encrypted_username).hex(),
+            bytes(credential.encrypted_password).hex(),
+            credential.is_active,
+            credential.expires_at.isoformat(),
+            credential.expires_at <= timezone.now(),
+        )
+        for credential in credentials
+    )
+    values.extend(
+        (str(getattr(settings, key, "")))
+        for key in ("CREDENTIAL_VAULT_MASTER_KEY", "ENCRYPTION_KEY", "ENCRYPTION_KEYS")
+    )
+    return salted_hmac("praho.node-check.v1", json.dumps(values, sort_keys=True), algorithm="sha256").hexdigest()
+
+
+def node_input_identities(nodes: Iterable[VirtualminServer]) -> dict[UUID, str]:
+    """Batch local identity reads for rendered fleet views; no decryption or external calls."""
+    from apps.common.credential_vault import EncryptedCredential  # noqa: PLC0415
+
+    servers = {node.id: node for node in nodes}
+    grouped: dict[str, list[EncryptedCredential]] = {}
+    credentials = EncryptedCredential.objects.filter(
+        service_type="virtualmin", service_identifier__in=[node.hostname for node in servers.values()]
+    ).order_by("pk")
+    for credential in credentials:
+        grouped.setdefault(credential.service_identifier, []).append(credential)
+    return {node.id: node_input_identity(node, credentials=grouped.get(node.hostname, [])) for node in servers.values()}
+
+
 logger = logging.getLogger(__name__)
-CACHE_KEY = "system_status_snapshot_v2"
+CACHE_KEY = "system_status_snapshot_v4"
 CACHE_TIMEOUT = 86400 * 2
-SNAPSHOT_VERSION = 2
-STALE_AFTER = timedelta(hours=26)
+SNAPSHOT_VERSION = 4
+STALE_AFTER = timedelta(minutes=25)
 _FX_FETCH_OUTCOME_KEY = "fx:last_fetch_outcome"
 _FX_FETCH_OUTCOME_TTL = 86400 * 7
 
@@ -67,6 +121,7 @@ class StatusSnapshot:
     saved: bool = True
     cache_available: bool = True
     version: int = SNAPSHOT_VERSION
+    input_identity: str = ""
     check_id: str = field(default_factory=lambda: uuid4().hex)
 
     @property
@@ -352,28 +407,59 @@ def _has_backup_job(crontab: str) -> bool:
     return False
 
 
-def _check_backup() -> SubsystemStatus:
-    level = StatusLevel.GREY if settings.DEBUG else StatusLevel.AMBER
+def _check_backup() -> SubsystemStatus:  # noqa: PLR0911  # Configuration, failure, deadline and verified-success outcomes.
+    from croniter import croniter  # noqa: PLC0415
+
+    from apps.common.management.commands.upload_platform_backup import storage_identity  # noqa: PLC0415
+    from apps.common.status_models import SystemCheckState  # noqa: PLC0415
+
+    row = SystemCheckState.objects.filter(check_key="platform_backup", node=None).first()
+    if row is None or not row.details.get("configuration_applied") or not row.details.get("runner_enabled"):
+        return SubsystemStatus(
+            _("Platform backups"),
+            StatusLevel.AMBER,
+            _("Configure backups"),
+            _("Apply an enabled Platform backup runner and configure off-server storage."),
+        )
+    if row.level == "red":
+        return SubsystemStatus(
+            _("Platform backups"),
+            StatusLevel.RED,
+            _("Backup failed"),
+            _("The latest backup attempt failed. Local artifacts are retained for recovery."),
+        )
     try:
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5, check=False)  # noqa: S607
-        if result.returncode == 0 and _has_backup_job(result.stdout):
-            return SubsystemStatus(
-                _("Backup"),
-                StatusLevel.GREEN,
-                _("Scheduled"),
-                _("An active PRAHO backup command is scheduled. Backup completion was not verified."),
-            )
-        if result.returncode == 0 or "no crontab" in result.stderr.lower():
-            return SubsystemStatus(
-                _("Backup"),
-                level,
-                _("No cron job"),
-                _("No active PRAHO backup command was found in this user's crontab."),
-            )
-    except (subprocess.TimeoutExpired, OSError):
-        pass
+        clock = timezone.now().astimezone(ZoneInfo(str(row.details.get("schedule_timezone", settings.TIME_ZONE))))
+        due = croniter(str(row.details.get("schedule", "")), clock).get_prev(datetime)
+    except (ValueError, KeyError):
+        return SubsystemStatus(_("Platform backups"), StatusLevel.AMBER, _("Schedule unverified"))
+    if (
+        due >= row.created_at
+        and timezone.now() >= due + timedelta(hours=2)
+        and (row.last_success_at is None or row.last_success_at < due)
+    ):
+        return SubsystemStatus(
+            _("Platform backups"),
+            StatusLevel.RED,
+            _("Off-server backup overdue"),
+            _(
+                "No verified database/media pair was completed for the scheduled backup within its two-hour grace period."
+            ),
+        )
+    if row.last_success_at is None:
+        return SubsystemStatus(_("Platform backups"), StatusLevel.AMBER, _("Awaiting first backup"))
+    if row.input_identity != storage_identity() or row.verified_generation != row.configuration_generation:
+        return SubsystemStatus(
+            _("Platform backups"),
+            StatusLevel.AMBER,
+            _("Storage configuration changed"),
+            _("A successful backup must verify the current off-server destination."),
+        )
     return SubsystemStatus(
-        _("Backup"), level, _("Schedule unverified"), _("The service user's crontab could not be inspected.")
+        _("Platform backups"),
+        StatusLevel.GREEN,
+        _("Verified off-server pair"),
+        _("Database and media were uploaded and their remote checksums verified."),
     )
 
 
@@ -472,6 +558,8 @@ def _compute_fx_freshness() -> SubsystemStatus:
 
 def check_all_subsystems() -> list[SubsystemStatus]:
     """Isolate individual failures and share one external-work deadline."""
+    from apps.provisioning.scheduled_backups import customer_backup_health  # noqa: PLC0415
+
     budget = ProbeBudget()
     checks: list[tuple[str, str | Promise, Callable[[], SubsystemStatus]]] = [
         ("database", _("Database"), _check_database),
@@ -483,6 +571,7 @@ def check_all_subsystems() -> list[SubsystemStatus]:
         ("vault", _("Credential Vault"), _check_credential_vault),
         ("sentry", _("Sentry"), _check_sentry),
         ("backup", _("Backup"), _check_backup),
+        ("hosting_backups", _("Customer hosting backups"), customer_backup_health),
         ("fx", _("FX rates"), _check_fx_freshness),
     ]
     results = []
@@ -514,12 +603,38 @@ def get_cached_status() -> StatusSnapshot:
         replace(_check_fx_freshness(), key="fx", checked_at=timezone.now()) if row.key == "fx" else row
         for row in snapshot.results
     ]
+    from apps.common.status_models import SystemCheckState  # noqa: PLC0415
+
+    try:
+        with transaction.atomic():
+            owner = SystemCheckState.objects.filter(check_key="status_refresh", node=None).first()
+            current_identity = runtime_input_identity() if owner or snapshot.input_identity else ""
+            if (
+                owner and (owner.input_identity != current_identity or snapshot.input_identity != current_identity)
+            ) or (snapshot.input_identity and owner is None):
+                results = [
+                    replace(row, level=StatusLevel.AMBER, message=_("Unknown · configuration changed"))
+                    for row in results
+                ]
+    except (DatabaseError, InterfaceError):
+        results = [
+            replace(row, level=StatusLevel.AMBER, message=_("Unknown · current state unavailable")) for row in results
+        ]
+    if snapshot.stale:
+        results = [
+            row if row.key == "fx" else replace(row, level=StatusLevel.AMBER, message=_("Unknown · check overdue"))
+            for row in results
+        ]
     return replace(snapshot, results=results)
 
 
 def refresh_and_cache_status() -> StatusSnapshot:
     """Manual and scheduled checks share one writer; cache failure cannot discard results."""
     snapshot = StatusSnapshot(check_all_subsystems(), checked_at=timezone.now())
+    return _cache_status(snapshot)
+
+
+def _cache_status(snapshot: StatusSnapshot) -> StatusSnapshot:
     try:
         cache.set(CACHE_KEY, snapshot, timeout=CACHE_TIMEOUT)
         # DatabaseCache can swallow write errors. A read-back must confirm this
@@ -544,3 +659,88 @@ def refresh_and_cache_status() -> StatusSnapshot:
         logger.warning("⚠️ [SystemStatus] Results computed but snapshot could not be saved")
         return replace(snapshot, saved=False, cache_available=False)
     return snapshot
+
+
+def runtime_input_identity() -> str:
+    """Private configuration identity; never publish the inputs or their fingerprint."""
+    from apps.settings.models import SystemSetting  # noqa: PLC0415
+
+    runtime = (
+        "EMAIL_BACKEND",
+        "EMAIL_HOST",
+        "EMAIL_PORT",
+        "EMAIL_HOST_USER",
+        "EMAIL_HOST_PASSWORD",
+        "DEFAULT_FROM_EMAIL",
+        "PLATFORM_API_SECRET",
+        "PORTAL_HMAC_CREDENTIALS",
+        "ENCRYPTION_KEYS",
+        "CREDENTIAL_VAULT_MASTER_KEY",
+        "ANYMAIL",
+    )
+    data = (
+        [str(getattr(settings, name, "")) for name in runtime],
+        list(SystemSetting.objects.order_by("key").values_list("key", "revision")),
+    )
+    return salted_hmac("praho.system-check.v1", json.dumps(data), algorithm="sha256").hexdigest()
+
+
+def run_status_refresh(*, force: bool = False) -> StatusSnapshot:
+    """Shared worker entry point: no network under locks and no obsolete publication."""
+    from apps.common.status_models import SystemCheckState  # noqa: PLC0415
+    from apps.common.status_observations import (  # noqa: PLC0415
+        Observation,
+        claim_check,
+        finish_check,
+        prune_hourly_summaries,
+    )
+
+    identity = runtime_input_identity()
+    previous = SystemCheckState.objects.filter(check_key="status_refresh", node__isnull=True).first()
+    if (
+        not force
+        and previous
+        and previous.input_identity == identity
+        and previous.observed_at
+        and timezone.now() - previous.observed_at < timedelta(minutes=10)
+    ):
+        return get_cached_status()
+    claim = claim_check("status_refresh", identity=identity)
+    if claim is None:
+        return get_cached_status()
+    snapshot = StatusSnapshot(check_all_subsystems(), checked_at=timezone.now(), input_identity=claim.input_identity)
+
+    def publish() -> None:
+        for result in snapshot.results:
+            row, _ = SystemCheckState.objects.get_or_create(check_key=result.key, node__isnull=True)
+            if row.level != result.level.value:
+                row.changed_at = timezone.now()
+            row.level = result.level.value
+            row.input_identity = claim.input_identity
+            row.reason = "observed"
+            row.details = {
+                "name": str(result.name)[:500],
+                "message": str(result.message)[:500],
+                "detail": str(result.detail)[:500],
+            }
+            row.observed_at = result.checked_at
+            row.last_attempt_at = claim.started_at
+            if result.level == StatusLevel.GREEN:
+                row.last_success_at = result.checked_at
+            row.save()
+
+    accepted = finish_check(
+        claim,
+        identity=runtime_input_identity,
+        observation=Observation("green", "observed", {"message": "Background checks"}),
+        on_accept=publish,
+    )
+    prune_hourly_summaries()
+    if accepted:
+        # Evidence must commit before an external cache can expose it. Re-lock the owner
+        # while caching so an older publisher cannot overwrite a newer accepted snapshot.
+        with transaction.atomic():
+            current = SystemCheckState.objects.select_for_update().get(pk=claim.state_id)
+            if current.sequence == claim.sequence and current.claim_token is None:
+                return _cache_status(snapshot)
+    return get_cached_status()

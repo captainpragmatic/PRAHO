@@ -58,22 +58,26 @@ def _alert_on_fx_freshness(results: list[SubsystemStatus], ttl: int) -> None:
         logger.error("🔥 [SystemStatus] FX freshness alert not delivered (recipients configured?)")
 
 
-def system_status_check() -> None:
+def system_status_check(*, force: bool = False) -> None:
     """
-    Daily system health check. Results cached for dashboard display.
-
-    Scheduled to run at 3:00 AM (after the 2:00 AM backup cron).
+    Ten-minute system health check on the existing Q2 cluster.
     Also runs on first startup via setup_scheduled_tasks command.
     """
     from apps.common.system_status import (  # noqa: PLC0415
         CACHE_TIMEOUT,
         StatusLevel,
-        refresh_and_cache_status,
+        run_status_refresh,
     )
 
-    logger.info("🚀 [SystemStatus] Running daily system status check...")
+    logger.info("🚀 [SystemStatus] Running system status check...")
+    from apps.provisioning.scheduled_backups import schedule_customer_backup  # noqa: PLC0415
 
-    results = refresh_and_cache_status().results
+    try:
+        schedule_customer_backup()
+    except Exception:
+        logger.error("🔥 [Backups] Scheduled admission failed; continuing system health checks")
+
+    results = run_status_refresh(force=force).results
     _alert_on_fx_freshness(results, CACHE_TIMEOUT)
 
     # Summary
@@ -107,10 +111,19 @@ def setup_system_status_scheduled_tasks() -> dict[str, str]:
     """
     results: dict[str, str] = {}
 
-    for task_name, func_path in (
-        ("system_status_check", "apps.common.tasks.system_status_check"),
-        ("counter_cull", "apps.common.tasks.cull_counters"),
-    ):
+    _, created = Schedule.objects.update_or_create(
+        name="system_status_check",
+        defaults={
+            "func": "apps.common.tasks.system_status_check",
+            "schedule_type": Schedule.MINUTES,
+            "minutes": 10,
+            "repeats": -1,
+            "cluster": "praho-cluster",
+        },
+    )
+    results["system_status_check"] = "created" if created else "already_exists"
+
+    for task_name, func_path in (("counter_cull", "apps.common.tasks.cull_counters"),):
         if Schedule.objects.filter(name=task_name).exists():
             results[task_name] = "already_exists"
             continue

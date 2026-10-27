@@ -93,6 +93,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) | Account Hostnames, Customer DNS and Mail Follow the Account Across Nodes | Proposed | 2026-10-14 |
 | [ADR-0062](ADR-0062-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
 | [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
+| [ADR-0064](ADR-0064-setup-and-bounded-system-status.md) | Setup Configuration and Bounded Operational Status | Accepted | 2026-10-27 |
 
 ### 🟡 Partially Superseded
 
@@ -229,8 +230,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 63 (ADR-0001 through ADR-0063)
-- **Active**: 57 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 64 (ADR-0001 through ADR-0064)
+- **Active**: 58 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0064
+- **Next available**: ADR-0065

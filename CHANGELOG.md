@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Administrator setup checklist with anchored configuration links, actionable node-deployment prerequisites and temporary preservation of nonsecret node-form choices.
+- Detailed System Status, a shared attention banner, queued manual checks and ten-minute background observations. Virtualmin CPU, memory and disk are kept as hourly summaries for 30 days.
+- Verified off-server Platform database/media backup pairs, native systemd backup scheduling, Docker streaming publication and bounded Platform-managed customer backups. Imported Virtualmin servers support explicit root-key archive transport with enrolled host trust.
+
 ### Security
 
 - **Upgrading: what an operator must do first** (the #751 hardening and its follow-up).
@@ -25,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Unreadable stored credentials leave setup and settings repair pages accessible, with an explicit warning and write-only replacement controls.
+- Product filters wait for the initial table load and keep the latest submitted selection, avoiding aborted requests and stale results.
 - Provider catalog sync preserves saved API-token references and operator-owned provider settings, so refreshing regions and plans does not disconnect an encrypted credential.
 
 - **Email delivery.**

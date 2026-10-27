@@ -196,6 +196,10 @@ def _render(template: str, root: Path) -> str:
 
 def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     root = tmp_path / "opt"
+    runtime = root / ".venv-linux/bin/python"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("#!/bin/sh\n# Fixed uploader boundary is exercised separately.\nexit 0\n")
+    runtime.chmod(0o755)
     (root / "media" / "efactura").mkdir(parents=True)
     (root / "media" / "efactura" / "response.zip").write_bytes(b"anaf")
     stubs = tmp_path / "bin"

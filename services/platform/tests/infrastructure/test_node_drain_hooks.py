@@ -223,7 +223,8 @@ class NodeDrainHookTests(MigrationTestBase):
         self.assertEqual(self.server.status, "active")
         self.assertTrue(self.server.is_draining)
 
-    def test_source_node_is_offered_inside_the_options_step(self) -> None:
+    @patch("apps.infrastructure.views.deployment_configuration_issues", return_value=[])
+    def test_source_node_is_offered_inside_the_options_step(self, _prerequisites: MagicMock) -> None:
         """The field rendered as Django's bare widget, unstyled, between the step cards."""
         self.staff.is_superuser = True
         self.staff.save(update_fields=["is_superuser"])
@@ -242,7 +243,8 @@ class NodeDrainHookTests(MigrationTestBase):
         select_tag = html[html.rindex("<select", 0, field) : html.index(">", field)]
         self.assertIn("rounded-md", select_tag)  # the shared select component, not the bare widget
 
-    def test_create_with_optional_source_stamps_failover_and_audit(self) -> None:
+    @patch("apps.infrastructure.views.deployment_configuration_issues", return_value=[])
+    def test_create_with_optional_source_stamps_failover_and_audit(self, _prerequisites: MagicMock) -> None:
         """RED: create ignores source_node and never stamps replacement provenance."""
         self.staff.is_superuser = True
         self.staff.save(update_fields=["is_superuser"])

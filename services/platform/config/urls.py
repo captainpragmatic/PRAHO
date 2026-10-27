@@ -19,6 +19,7 @@ from apps.common.legal_views import cookie_policy, privacy_policy, terms_of_serv
 
 # Import dashboard view
 from apps.common.views import dashboard_view, system_status_refresh
+from apps.settings.setup_views import node_status_refresh, system_status_page
 
 
 def root_redirect(request: HttpRequest) -> HttpResponseBase:
@@ -30,6 +31,8 @@ def root_redirect(request: HttpRequest) -> HttpResponseBase:
 
 
 urlpatterns = [
+    path("system-status/", system_status_page, name="system_status"),
+    path("system-status/nodes/<uuid:node_id>/refresh/", node_status_refresh, name="node_status_refresh"),
     # Root redirect - to dashboard if authenticated, to login if not
     path("", root_redirect, name="root"),
     # Django admin disabled — Platform has its own staff UI.

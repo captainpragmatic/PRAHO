@@ -154,10 +154,12 @@ class SettingsCacheInvalidationTests(TestCase):
             mock_cache_delete.assert_not_called()
 
         self.assertGreaterEqual(len(callbacks), 1)
-        mock_cache_delete.assert_called_once_with(
+        mock_cache_delete.assert_any_call(
             SettingsService._get_cache_key("billing.recurring_auto_collection_enabled"),
             version=SettingsService.CACHE_VERSION,
         )
+        key = SettingsService._get_cache_key("billing.recurring_auto_collection_enabled")
+        self.assertEqual(sum(call.args[0] == key for call in mock_cache_delete.call_args_list), 1)
 
     def test_rolled_back_setting_update_does_not_invalidate_cache(self) -> None:
         SystemSetting.objects.create(
