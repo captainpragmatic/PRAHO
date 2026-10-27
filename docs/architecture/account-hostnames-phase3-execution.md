@@ -106,7 +106,7 @@ Each component returns an immutable observation: state (`healthy`, `broken`, `un
 - New `services/platform/templates/provisioning/virtualmin/partials/dns_status_card.html` and `.../dns_failures.html`; include from account_detail.html. Raw evidence is bounded/escaped, with checked_at and the exact expected-generation target shown to staff. No inline DNS on list/detail pages.
 - RED→GREEN: staff-role/MFA and nonstaff denial, tenant/account links, pagination, unknown vs broken filters, no network and bounded query count with many rows.
 
-### 10. Register transitions, verify all paths and split the PR
+### 10. Register transitions and verify the combined PR
 
 - Audit real DNS state-transition/recheck events in existing `services/platform/apps/audit/models.py`, add the next audit migration, regenerate `services/platform/apps/audit/BUSINESS_AUDIT_EVENTS.md`; no audit on every unchanged hourly result. Register model classification in existing `scripts/audit_model_allowlist.txt` only where the scanner requires it.
 - Update ADR plan/checklist, CHANGELOG for customer-visible card, migration checksums and settings catalog. Enumerate writers: scheduler, manual API/staff requests, initial row upsert, successful result, unknown/error result, incident/email transaction, reclaim, termination/deletion and account ownership change.

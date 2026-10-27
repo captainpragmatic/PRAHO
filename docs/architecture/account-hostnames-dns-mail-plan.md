@@ -1,6 +1,6 @@
 # Implementation plan: account hostnames, customer DNS and mail (ADR-0061)
 
-Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Each phase is its own PR series.
+Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. All work in Phases 2 through 5 is delivered in PR #749; local phase branches are verification checkpoints.
 
 **Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf. That was `0007_legacy_price_labels` when this was written; P1.1 then added `0008_account_hostnames`. Each later task takes the next number after whatever the leaf is when it lands, never a number fixed in this plan.
 
@@ -44,7 +44,7 @@ from the later phases so a passing bridge test cannot be mistaken for a complete
 
 Owner decisions for the remaining phases:
 
-- Finish Phases 2 through 5, keeping each phase in its own PR series.
+- Finish Phases 2 through 5 in PR #749. Keep phase-specific verification evidence, consolidate the implementation into that PR and retain draft status until combined review and verification pass. Do not open additional phase PRs.
 - Keep website previews off. Use complete zone-file uploads for the first zone import.
 - Install mail on all eligible existing and new nodes through Virtualmin's supported setup.
   Existing external mail stays external until the domain's owner enables hosted mail.
@@ -55,6 +55,9 @@ Owner decisions for the remaining phases:
 - Finish a migration after target activation, bridge verification and DNS convergence. The bridge's
   own retryable task owns retention and teardown, so backups and billing reconciliation resume.
 - Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
+- Missing trusted node TLS leaves web provisioning available and hosted mail unavailable until verification succeeds.
+- A moved legacy mailbox with ambiguous lock history stays locked until its intended state is explicitly confirmed.
+- Cancel a confirmed opt-in after 24 hours without prerequisites only while it has made no mail or DNS changes. Release its account reservation so the owner can try again. This policy's coordinator is not implemented yet; running or uncertain effects retain their evidence and exclusion.
 
 Phase 4's implementation and focused verification are recorded in
 [account-hostnames-phase4-execution.md](account-hostnames-phase4-execution.md).
@@ -66,8 +69,8 @@ Review findings to close, each with a failing regression and recorded green resu
 
 | Finding | State / evidence |
 |---|---|
-| Native backups omit original owner password aging/expiry | Open: native mixed-user probe reproduced the omission; source capture and held activation are being corrected before publishing Phase 2 |
-| A service/domain hold introduced during a move waits for DNS completion | Open: ADR-0051 regression reproduces target activation from the old snapshot; current-policy activation and safe postactivation reconciliation are being corrected |
+| Native backups omit original owner password aging/expiry | Phase 2 owner capture/held activation and native archive-binding proof pass; all-user mail restoration remains a separate unfinished Phase 5 gate |
+| A service/domain hold introduced during a move waits for DNS completion | Current-policy activation and identity-bound reconciliation pass focused SQLite/PostgreSQL and native active/suspended proofs; replay preserves current credentials and cron |
 | Original barrier record and saved-crontab token survive replay | Regression green; migration review suite: 100 tests + 90 subtests |
 | Compensation preserves each child's enabled state | Regression green in the migration review suite |
 | Cancellation removes only the owned, idle target copy | Regression green in the migration review suite |
@@ -123,9 +126,12 @@ The audit CI failures mentioning `virtualmin_migration_apply` and
 variables were mistaken for audit wrapper parameters. Fix the scanner's lexical
 scope handling rather than registering events that no operation emits.
 
-The Phase 2 base has passed the local gates above. The combined Phase 3 branch
-still requires its own integration verification; approval of the base alone is
-not evidence for the merged result.
+The Phase 2 base has passed the local gates above. The integrated Phase 3 checkpoint
+also passes the complete local test pipeline: Platform runs 14,314 tests with 136
+skipped, Portal passes 1,997 with three skipped, integration passes 1,038 with 11
+skipped and 944 subtests, and the cache/isolation phases pass. Full lint and typing,
+120 checksums and both schema checks pass. The later two-value native default-site
+recording correction passes all eight recorded-gateway cases on that checkpoint.
 
 Phase 3 is implemented on its own branch. The transport shares a 90-second/96-query
 budget, records five independent component results and explicitly limits DNSSEC to
@@ -137,8 +143,8 @@ Per-component definitive history prevents unknown observations from inventing a
 healthy baseline or hiding a later healthy-to-broken transition. Customer output
 excludes private evidence, while staff see bounded, escaped recorded observations.
 Focused tests include real signed API requests, revocation, rollback, slow-render
-lease expiry, malformed Portal receipts and concurrent PostgreSQL workers. Final
-combined, UI, schema, lint and type gates remain before the Phase 3 draft PR.
+lease expiry, malformed Portal receipts and concurrent PostgreSQL workers. These
+phase results do not replace final verification of the complete PR #749 tree.
 
 Phases 4 and 5 keep separate implementation and verification gates. The native
 mail lifecycle remains unfinished and mail-enabled migrations remain refused.
