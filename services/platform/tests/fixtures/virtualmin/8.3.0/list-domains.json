@@ -81,7 +81,7 @@
                 "<size>"
               ],
               "default_website_for_ip": [
-                "Yes"
+                "No"
               ],
               "description": [
                 "<redacted>"
@@ -408,7 +408,7 @@
                 "<size>"
               ],
               "default_website_for_ip": [
-                "Yes"
+                "No"
               ],
               "description": [
                 "<redacted>"
