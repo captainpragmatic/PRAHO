@@ -211,12 +211,24 @@ route/action guard now finds the actual isolated mail harness, with a planted fi
 an exact 17-playbook inventory; its 22 contracts and four subtests pass. Full stack publication gates
 and the remaining native mail lifecycle work are still separate.
 
+A worker-only managed-mail DNS source now reads the complete typed provider inventory outside
+database transactions and rechecks current ownership, zone binding and revision afterward. Its
+private resource digest also binds provider record IDs, so recreating identical public records does
+not validate an earlier resource observation. It preserves unrelated records, TTLs, proxy flags and
+ownership tags and makes no publication or readiness changes. The source/planner/SPF composite
+passes 60 cases, the source passes all 14 cases on PostgreSQL, and scoped typing and Ruff pass.
+Connecting this observation to confirmed consent and the fenced publication outbox remains unfinished.
+
 The execution primitives claim, renew, checkpoint and park an existing immutable owner operation under
 the current account/node/name/service locks. A 75-minute lease covers the supported SSH repair path.
 Expired or uncertain native work parks for review rather than repeating effects. Checkpoints retain
 only bounded immutable identity/digest/count evidence. Six real PostgreSQL races and the 63-case
-model/enrollment/execution composite pass. A future coordinator must give pristine queued refusals a
-bounded retry or terminal disposition; the primitives alone do not dispatch or activate mail.
+model/enrollment/execution composite pass. The confirmed preparation policy cancels an attempt and
+releases its account reservation after 24 hours without prerequisites only if it has made no mail or
+DNS changes; the owner can try again. This deadline is separate from the 20-minute proposal window.
+The coordinator and deadline handling are not implemented yet. Running or uncertain effects retain
+their exclusion and evidence rather than being cancelled as pristine. The primitives alone do not
+dispatch or activate mail.
 
 The signed read-only service API and lazy Portal status section are implemented. Active tenant members
 can read the current enrollment intent and bounded progress; no configuration row is created by a read.
