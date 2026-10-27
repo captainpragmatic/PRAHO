@@ -6,6 +6,7 @@ import base64
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -121,6 +122,36 @@ class SnapshotFixture(SimpleTestCase):
 
 
 class UserStateSchemaTests(SnapshotFixture):
+    def test_imported_command_failure_returns_status_without_terminating_its_caller(self):
+        with (
+            patch.object(node.os, "geteuid", return_value=0),
+            patch.object(node.sys, "argv", [str(SCRIPT), "private-invalid-action"]),
+            patch.object(node.sys, "stderr", new_callable=io.StringIO) as output,
+        ):
+            self.assertEqual(node.main(), 1)
+        self.assertEqual(output.getvalue(), "USER_STATE_ERROR=invalid_action\n")
+
+    def test_imported_command_success_returns_status_and_only_the_bound_public_projection(self):
+        nonce = str(uuid4())
+        request = {
+            "action": "project",
+            "nonce": nonce,
+            "expected": self.document["identity"],
+            "snapshot": self.document,
+        }
+        source = io.TextIOWrapper(io.BytesIO(json.dumps(request).encode()))
+        with (
+            patch.object(node.os, "geteuid", return_value=0),
+            patch.object(node.sys, "argv", [str(SCRIPT), "project"]),
+            patch.object(node.sys, "stdin", source),
+            patch.object(node.sys, "stdout", new_callable=io.StringIO) as output,
+        ):
+            self.assertEqual(node.main(), 0)
+        receipt = json.loads(base64.b64decode(output.getvalue().removeprefix("USER_STATE_RESULT=")))
+        self.assertEqual(receipt["nonce"], nonce)
+        self.assertEqual(receipt["user_count"], 4)
+        self.assertNotIn(PASSWORD, output.getvalue())
+
     def test_disabled_empty_password_child_and_frozen_aging_are_preserved_exactly(self):
         document = copy.deepcopy(self.document)
         document["domains"].append(

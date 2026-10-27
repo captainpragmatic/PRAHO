@@ -509,17 +509,18 @@ class SnapshotStore:
         return True
 
 
-def main() -> None:
+def main() -> int:
     try:
         if os.geteuid() != 0:
             raise UserStateError("root_required")
         if sys.argv[1:] != ["project"]:
             raise UserStateError("invalid_action")
         print(project_request(sys.stdin.buffer.read(MAX_SNAPSHOT_BYTES + 16385)))
+        return 0
     except UserStateError as error:
         print("USER_STATE_ERROR=" + str(error), file=sys.stderr)
-        raise SystemExit(1) from None
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
