@@ -166,9 +166,20 @@ setup, repeated setup, submitter reconciliation and fresh inspection after an ac
 configured/default-off capability and only public mail ports 25/465/993/995. Existing credentials, aging,
 global authentication files, domain mail flags and unrelated configuration are preserved. A new account
 using native default features stays mail-off; a valid unenrolled Unix owner cannot authenticate over
-993/995/465. Bootstrap integration and permanent native contract fixtures remain separate gates. The
-latest focused native-helper/boot/receipt/submitter composite passes 81 cases, and the error-handling
+993/995/465. Bootstrap integration remains a separate gate. The
+latest focused native-helper/boot/receipt/submitter composite passes 82 cases, and the error-handling
 scan has no high-severity findings. These checks do not establish completed node rollout.
+
+The permanent isolated contract in `tests/virtualmin_mail_lab/` now passes on fresh pinned Debian 12
+and Ubuntu 26.04 images through setup, ready replay, preservation, new-domain default-off behavior,
+valid Unix credential denials on 993/995/465, submitter reconciliation, an actual reboot and fresh
+inspection/denials. It creates no public port bindings and owns its containers and networks by UUID;
+successful fixtures are removed, while a failed fixture retains its journal for review. Twenty-five
+fake-Docker tests verify ownership and sanitized diagnostics. The first Debian run reproduced Webmin's
+normalization of blank lines in its configuration; a behavioral regression first failed on the digest,
+then passed after excluding blank-only lines while retaining every nonblank policy/provider line.
+Both complete native profiles passed with that final fix and the original blank-line fixture. This
+contract proves default-off capability, not domain enrollment, accepted-mail queues or forwarding.
 
 The execution primitives claim, renew, checkpoint and park an existing immutable owner operation under
 the current account/node/name/service locks. A 75-minute lease covers the supported SSH repair path.

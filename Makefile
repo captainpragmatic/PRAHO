@@ -1354,6 +1354,15 @@ test-virtualmin-contract:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_contract.sh
 
+# Separate, opt-in disposable mail-node capability proofs; never mutate the shared P2 lab.
+export MAIL_LAB_PROFILE MAIL_LAB_DNS MAIL_LAB_DEBIAN_IMAGE MAIL_LAB_UBUNTU_IMAGE MAIL_LAB_CLEANUP_FAILURE
+.PHONY: test-virtualmin-mail-node test-virtualmin-mail-node-unit
+test-virtualmin-mail-node:
+	@$(PYTHON_SHARED) -m pytest -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. tests/virtualmin_mail_lab/test_node_capability.py
+
+test-virtualmin-mail-node-unit:
+	@$(PYTHON_SHARED) -m pytest -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. tests/virtualmin_mail_lab/test_harness_ownership.py
+
 test-virtualmin-workflows:
 	@echo "🧪 [Virtualmin lab] Workflow suite: PRAHO's services, jobs and tasks against the real nodes (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
