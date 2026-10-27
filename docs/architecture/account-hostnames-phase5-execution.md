@@ -181,6 +181,25 @@ then passed after excluding blank-only lines while retaining every nonblank poli
 Both complete native profiles passed with that final fix and the original blank-line fixture. This
 contract proves default-off capability, not domain enrollment, accepted-mail queues or forwarding.
 
+Routine node-certificate reconciliation is implemented as a separate fixed native action. A bad
+candidate leaves a freshly verified valid service certificate unchanged. A valid replacement is
+privately staged, journaled before file changes, reloaded and checked against the exact leaf served
+on all four TLS frontends. Completed-operation replay verifies the current certificate and cannot
+reinstall an earlier one. The focused helper/service/harness composite passes 97 cases; disposable
+Debian and Ubuntu rotation contracts are pending. Recovery after an expired certificate prevents
+service startup remains a separate unfinished gate. Bootstrap scheduling is also unfinished; missing
+trusted node TLS must leave web provisioning available and hosted mail unavailable, as confirmed by
+the rollout decision.
+
+The first all-user state component is a private snapshot codec, durable immutable store and public
+identity projection. It validates original/frozen per-login credential, aging and cron state, including
+native companion relationships, without exposing credential-derived hashes. Nineteen cases and
+24 subtests cover malformed identities, projection bypasses, private file permissions, unsafe file
+types and directory durability; scoped Ruff, strict typing and Perl syntax pass. These are schema and
+storage proofs, not live native capture, fencing, compensation or held restore. Those integrations
+remain required before mail migration is admitted. The confirmed legacy policy keeps an uncertain
+mailbox locked after a move until its intended state is explicitly confirmed.
+
 The ordinary Phase 4 integration (`54e6c883`) preserves the final cutover/native helpers and customer
 DNS publication, ownership and outbox code. A four-state regression reproduced queued/DNS-waiting
 mail prerequisites blocked by the new asynchronous name publisher, and direct publication still
