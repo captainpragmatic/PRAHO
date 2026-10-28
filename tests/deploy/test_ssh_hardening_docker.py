@@ -146,6 +146,9 @@ def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
     assert unset.returncode != 0
     assert "Set PRAHO_SSH_ALLOWED_CIDRS" in unset.stdout, unset.stdout[-4000:]
     assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
+    world = harden(container, sources="127.0.0.1/32 0.0.0.0/0")
+    assert world.returncode != 0
+    assert "Set PRAHO_SSH_ALLOWED_CIDRS" in world.stdout, world.stdout[-4000:]
     outside = harden(container, sources="192.0.2.0/24")
     assert outside.returncode != 0
     assert "Verify controller is within the SSH source allowlist" in outside.stdout, outside.stdout[-4000:]
@@ -162,6 +165,13 @@ def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
         "ufw allow from 127.0.0.1 to any port 9876 proto tcp",
         "ufw allow from 198.51.100.7 to any port 9876 proto tcp",
     ]
+    assert ssh(container, 9876).stdout.strip() == "0"
+
+    # Dropping a source from the list revokes its rule on the next run.
+    shrunk = harden(container, 9876)
+    assert shrunk.returncode == 0, shrunk.stdout[-7000:] + shrunk.stderr[-1000:]
+    rules = [line for line in docker("exec", container, "ufw", "show", "added").stdout.splitlines() if "9876" in line]
+    assert rules == ["ufw allow from 127.0.0.1 to any port 9876 proto tcp"]
     assert ssh(container, 9876).stdout.strip() == "0"
 
 

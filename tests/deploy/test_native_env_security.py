@@ -97,6 +97,16 @@ def test_launcher_forwards_the_ssh_allowlist_to_ansible(tmp_path: Path) -> None:
     assert run.call_args.kwargs["env"]["PRAHO_SSH_ALLOWED_CIDRS"] == cidrs
 
 
+def test_launcher_rejects_a_world_allowlist_from_the_shell(tmp_path: Path) -> None:
+    with (
+        patch.dict(os.environ, {"PRAHO_SSH_ALLOWED_CIDRS": "0.0.0.0/0"}, clear=True),
+        patch("deploy.scripts.native_env.subprocess.run") as run,
+        pytest.raises(ValueError, match="PRAHO_SSH_ALLOWED_CIDRS"),
+    ):
+        run_native({}, tmp_path / "env", "staging", fetch_backup=None, version="", ssh_only=True)
+    run.assert_not_called()
+
+
 def test_caddy_only_launcher_selects_only_caddy_tasks(tmp_path: Path) -> None:
     with patch("deploy.scripts.native_env.subprocess.run") as run:
         run.return_value.returncode = 0
