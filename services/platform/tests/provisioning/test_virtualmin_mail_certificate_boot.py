@@ -2,11 +2,13 @@
 
 import base64
 import copy
+import errno
 import hashlib
 import importlib.util
 import json
 import os
 import ssl
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -405,3 +407,32 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
         with specification, loader, patch.object(self.module, "execute") as openssl:
             self.assertFalse(self.module.configured(self.record))
             openssl.assert_not_called()
+
+    def test_process_evidence_is_read_in_counts_procfs_accepts(self):
+        # Kernel sysctl files such as boot_id refuse any read count of KMALLOC_MAX_SIZE (4 MiB) or more.
+        original = Path.open
+        proc = self.root / "proc"
+
+        class ProcStream:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def read(self, size=-1):
+                if size < 0 or size >= 4 * 1024 * 1024:
+                    raise OSError(errno.ENOMEM, "Cannot allocate memory")
+                return self.stream.read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *details):
+                self.stream.close()
+
+        def procfs_open(path, *args, **kwargs):
+            stream = original(path, *args, **kwargs)
+            return ProcStream(stream) if path.is_relative_to(proc) else stream
+
+        environment = self.root / "proc/1234/environ"
+        environment.write_text(environment.read_text() + "PADDING=" + "x" * 200_000 + "\0")
+        with patch.object(Path, "open", procfs_open):
+            self.assertTrue(self.guard.allowed())

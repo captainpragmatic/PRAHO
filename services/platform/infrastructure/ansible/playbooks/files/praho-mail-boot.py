@@ -25,6 +25,8 @@ CHAIN = "PRAHO_MAIL_SETUP"
 PORTS = "25,110,143,465,587,993,995"
 START_SECONDS = 120
 MAX_FILE_BYTES = 4 * 1024 * 1024
+# procfs sysctl files refuse a single read count of 4 MiB or more with ENOMEM; read in chunks.
+PROC_READ_BYTES = 64 * 1024
 MAX_LOCK_FD = 1_048_576
 MAX_HOSTNAME_LENGTH = 253
 CERTIFICATE_PATHS = frozenset({"/etc/praho-mail/node.pem", "/etc/praho-mail/node.key"})
@@ -254,12 +256,16 @@ class MailBootGuard:
 
     def proc_bytes(self, name: str) -> bytes:
         # Every path is fixed or derived from a strictly typed PID/descriptor.
-        # proc files report size zero, so bound the actual read instead.
-        with (self.root / "proc" / name).open("rb") as stream:
-            value = stream.read(MAX_FILE_BYTES + 1)
-        if len(value) > MAX_FILE_BYTES:
-            raise ValueError("oversized process evidence")
-        return value
+        # proc files report size zero, so bound the total actually read instead.
+        chunks: list[bytes] = []
+        total = 0
+        with (self.root / "proc" / name).open("rb", buffering=0) as stream:
+            while chunk := stream.read(PROC_READ_BYTES):
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    raise ValueError("oversized process evidence")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
     @staticmethod
     def digest(data: bytes) -> str:
