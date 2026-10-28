@@ -32,3 +32,5 @@ gh api --method PUT "repos/$repo/rulesets/$id" --input .github/rulesets/master.j
 
 After applying, prove the rules with a throwaway pull request: a failing check blocks the merge, a
 direct push to `master` is rejected, and a docs-only change still reports every required check.
+
+Applied on 2026-10-28 (ids 26026153, 26026156, 26026158).

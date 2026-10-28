@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WEBMIN_PORT = 10000
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 
 VIRTUALMIN_CHECK_POLICY = OutboundPolicy(
     name="virtualmin_check",
@@ -422,6 +423,16 @@ class NodeValidationService:
                 message=f"Security check failed: {e}",
             )
         except urllib.error.HTTPError as e:
+            e.close()
+            # safe_urlopen never follows redirects: a 3xx proves the HTTPS listener answered.
+            # The Location header is deliberately left out of the result.
+            if e.code in _REDIRECT_STATUS_CODES:
+                return ValidationResult(
+                    check_name="virtualmin",
+                    passed=True,
+                    message="HTTPS listener answered with a redirect",
+                    details={"status_code": e.code},
+                )
             # 401/403 means Webmin is running (just needs auth)
             if e.code in (401, 403):
                 return ValidationResult(

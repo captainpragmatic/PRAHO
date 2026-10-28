@@ -28,6 +28,21 @@ def check_account_lockout(app_configs: Any, **kwargs: Any) -> list[Error]:
     return []
 
 
+@register(Tags.security)
+def check_ses_webhook_topic_allowlist(app_configs: Any, **kwargs: Any) -> list[DjangoWarning]:
+    """Amazon SES needs an SNS topic allowlist, or the bounce/complaint webhook rejects everything."""
+    if getattr(settings, "EMAIL_PROVIDER", "") == "amazon_ses" and not getattr(settings, "SES_SNS_TOPIC_ARNS", ()):
+        return [
+            DjangoWarning(
+                "EMAIL_PROVIDER is amazon_ses but AWS_SES_SNS_TOPIC_ARNS is empty",
+                hint="Set AWS_SES_SNS_TOPIC_ARNS to the comma-separated ARNs of the SNS topics that deliver SES "
+                "events. Until then /webhooks/email/ses/ rejects every message and bounces and complaints are lost.",
+                id="security.W064",
+            )
+        ]
+    return []
+
+
 def get_max_session_age_seconds() -> int:
     """Max allowed session age (seconds) from SettingsService, safe pre-migrate."""
     from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
