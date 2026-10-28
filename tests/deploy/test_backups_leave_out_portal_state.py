@@ -47,6 +47,31 @@ def _mounts(service: dict) -> list[tuple[str, str]]:
     return mounts
 
 
+def _volume_identity(compose: dict, source: str) -> str:
+    """The physical volume a mount source names: its top-level `name:` when set, else the source itself."""
+    declared = (compose.get("volumes") or {}).get(source)
+    return str(declared["name"]) if isinstance(declared, dict) and declared.get("name") else source
+
+
+def _session_volume_users(compose: dict) -> list[str]:
+    """Every service that mounts the physical volume holding the portal's session database."""
+    services = compose["services"]
+    state_dir = str(PurePosixPath(_environment(services["portal"])["SESSION_DB_PATH"]).parent)
+    sources = [source for source, target in _mounts(services["portal"]) if target == state_dir]
+    if len(sources) != 1:
+        raise AssertionError(f"{state_dir} is not one mounted volume: {sources}")
+    volume = _volume_identity(compose, sources[0])
+    return [
+        name
+        for name, service in services.items()
+        if any(_volume_identity(compose, source) == volume for source, _target in _mounts(service))
+    ]
+
+
+def _compose(stack: str) -> dict:
+    return yaml.safe_load((ROOT / f"deploy/docker-compose.{stack}.yml").read_text())
+
+
 class BackupSourcesTests(unittest.TestCase):
     def test_the_container_backup_copies_only_the_dump_and_platform_media(self) -> None:
         script = CONTAINER_BACKUP.read_text()
@@ -90,14 +115,17 @@ class PortalStateLocationTests(unittest.TestCase):
     def test_each_stacks_session_volume_is_mounted_by_the_portal_alone(self) -> None:
         for stack in PORTAL_STACKS:
             with self.subTest(stack=stack):
-                services = yaml.safe_load((ROOT / f"deploy/docker-compose.{stack}.yml").read_text())["services"]
-                owners = [name for name, service in services.items() if "SESSION_DB_PATH" in _environment(service)]
+                compose = _compose(stack)
+                owners = [name for name, svc in compose["services"].items() if "SESSION_DB_PATH" in _environment(svc)]
                 self.assertEqual(owners, ["portal"])
-                state_dir = str(PurePosixPath(_environment(services["portal"])["SESSION_DB_PATH"]).parent)
-                volumes = [source for source, target in _mounts(services["portal"]) if target == state_dir]
-                self.assertEqual(len(volumes), 1, f"{state_dir} is not a mounted volume")
-                sharing = [name for name, service in services.items() if volumes[0] in dict(_mounts(service))]
-                self.assertEqual(sharing, ["portal"])
+                self.assertEqual(_session_volume_users(compose), ["portal"])
+
+    def test_a_volume_name_shared_with_media_counts_as_sharing(self) -> None:
+        # Two keys naming one physical volume are one volume: Platform's media backup would hold the sessions.
+        compose = _compose("single-server")
+        compose["volumes"]["portal_sessions"] = {"name": "praho_shared"}
+        compose["volumes"]["media_files"] = {"name": "praho_shared"}
+        self.assertIn("platform", _session_volume_users(compose))
 
     def test_the_native_portal_state_is_outside_the_backed_up_tree(self) -> None:
         state_dir = yaml.safe_load(NATIVE_DEFAULTS.read_text())["portal_state_directory"]
