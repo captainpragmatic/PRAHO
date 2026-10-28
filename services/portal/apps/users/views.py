@@ -51,6 +51,7 @@ from apps.users.constants import (
     REGISTRATION_CONFIRM_SESSION_KEY,
     REGISTRATION_INTENT_SESSION_KEY,
     REGISTRATION_PREFILL_SESSION_KEY,
+    SIGNED_OUT_FLOW_SESSION_KEYS,
 )
 from apps.users.forms import (
     ChangePasswordForm,
@@ -350,6 +351,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
 
                     # ✅ CRITICAL: Prevent session fixation attacks
                     request.session.cycle_key()
+                    for key in SIGNED_OUT_FLOW_SESSION_KEYS:
+                        request.session.pop(key, None)
 
                     # Store in Django session (secure, handled by framework)
                     # Store correct user_id (platform user.id) and primary customer_id separately
