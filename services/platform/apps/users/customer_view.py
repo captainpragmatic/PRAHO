@@ -142,12 +142,11 @@ def _lock_authority(staff_id: int, target_id: int, customer_id: int) -> tuple[Us
     """Lock users in primary-key order, then the customer and the membership (one order everywhere)."""
     from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app, deferred
 
+    # Lock first, then read: a credential version joined into the locking query could be read
+    # before a concurrent rotation released the user row, and its hash would be stale.
+    list(User.objects.select_for_update(no_key=True).filter(pk__in={staff_id, target_id}).order_by("pk"))
     users = {
-        user.pk: user
-        for user in User.objects.select_for_update(no_key=True, of=("self",))
-        .select_related("credential_version")
-        .filter(pk__in={staff_id, target_id})
-        .order_by("pk")
+        user.pk: user for user in User.objects.select_related("credential_version").filter(pk__in={staff_id, target_id})
     }
     customer = Customer.objects.select_for_update(no_key=True).get(pk=customer_id)
     list(

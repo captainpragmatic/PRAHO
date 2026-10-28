@@ -206,6 +206,13 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
         self.assertEqual(self.call("/api/users/customers/"), 200)
         self.assertTrue(AuditEvent.objects.filter(action="customer_view_accessed").exists())
 
+    def test_reading_the_profile_never_creates_one(self) -> None:
+        from apps.users.models import UserProfile  # noqa: PLC0415
+
+        UserProfile.objects.filter(user=self.target).delete()
+        self.assertEqual(self.call("/api/users/profile/"), 200)
+        self.assertFalse(UserProfile.objects.filter(user=self.target).exists())
+
     def test_only_the_viewed_customer_is_listed(self) -> None:
         payload = {"user_id": self.target.pk, "session_id": str(self.row.pk), "timestamp": int(time.time())}
         raw = json.dumps(payload).encode()
@@ -231,7 +238,9 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
         for path, body, method in refused:
             with self.subTest(path=path, body=body):
                 self.assertEqual(self.call(path, body, method), 403)
-        self.assertEqual(self.target.check_password(PASSWORD), True)
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.check_password(PASSWORD))
+        self.assertEqual(self.target.first_name, "")
         self.assertGreaterEqual(AuditEvent.objects.filter(action="customer_view_denied").count(), len(refused))
 
     def test_every_api_route_outside_the_allowlist_is_refused(self) -> None:

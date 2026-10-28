@@ -1316,8 +1316,13 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 "date_joined": user.date_joined.isoformat() if user.date_joined else None,
             }
 
-            # Add profile data (create default if doesn't exist)
-            profile, created = UserProfile.objects.get_or_create(user=user)
+            # Add profile data (create default if doesn't exist; a customer view only reads, ADR-0065)
+            bound = getattr(request, "portal_session", None)
+            if bound is not None and bound.tier == PortalSession.TIER_CUSTOMER_VIEW:
+                profile = UserProfile.objects.filter(user=user).first() or UserProfile(user=user)
+                created = False
+            else:
+                profile, created = UserProfile.objects.get_or_create(user=user)
 
             if created:
                 logger.info(f"✅ [Profile API] Created default profile for customer: {user.email}")
