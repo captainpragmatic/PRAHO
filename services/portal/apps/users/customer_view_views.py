@@ -14,7 +14,7 @@ from django.conf import settings
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import rotate_token
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
@@ -76,7 +76,7 @@ def _end_current_platform_session(request: HttpRequest) -> None:
     request_context.forget_rejection()
 
 
-@csrf_exempt  # a cross-site POST from Platform's page by design; the exact Origin check replaces CSRF
+@csrf_exempt  # nosemgrep: no-csrf-exempt — a cross-site POST from Platform's page by design; the exact Origin check replaces CSRF
 @never_cache
 @require_POST
 def redeem(request: HttpRequest) -> HttpResponse:
@@ -138,7 +138,10 @@ def redeem(request: HttpRequest) -> HttpResponse:
     # The cookie ends with the browser: closing it never reopens the customer's portal.
     request.session.set_expiry(0)
     logger.info("✅ [CustomerView] Customer view opened")
-    return HttpResponse(status=303, headers={"Location": "/dashboard/", "Cache-Control": "no-store"})
+    opened = redirect("/dashboard/")
+    opened.status_code = 303
+    opened["Cache-Control"] = "no-store"
+    return opened
 
 
 @csrf_protect
@@ -151,6 +154,8 @@ def leave(request: HttpRequest) -> HttpResponse:
     _end_current_platform_session(request)
     request.session.flush()
     rotate_token(request)
-    return HttpResponse(
-        status=303, headers={"Location": "/login/", "Cache-Control": "no-store", "Clear-Site-Data": '"cache"'}
-    )
+    left = redirect("/login/")
+    left.status_code = 303
+    left["Cache-Control"] = "no-store"
+    left["Clear-Site-Data"] = '"cache"'
+    return left

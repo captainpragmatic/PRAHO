@@ -264,10 +264,10 @@
                                     {% trans "Sign in as customer" as customer_view_label %}
                                     {% if customer.status == 'active' and membership.is_active and membership.user.is_active and not membership.user.is_staff_user %}
                                         {% url 'customers:customer_view_start' customer.pk membership.user.pk as customer_view_url %}
-                                        {% button customer_view_label href=customer_view_url variant="secondary" size="xs" icon="eye" %}
+                                        {% button customer_view_label|force_escape href=customer_view_url variant="secondary" size="xs" icon="eye" %}
                                     {% else %}
                                         {% if customer.status != 'active' %}{% trans "Only an active customer's portal can be opened." as customer_view_why %}{% else %}{% trans "Only an active member who is not staff can be viewed." as customer_view_why %}{% endif %}
-                                        <span title="{{ customer_view_why }}">{% button customer_view_label variant="secondary" size="xs" icon="eye" disabled=True %}</span>
+                                        <span title="{{ customer_view_why|force_escape }}">{% button customer_view_label|force_escape variant="secondary" size="xs" icon="eye" disabled=True %}</span>
                                     {% endif %}
                                 {% endif %}
                                 {% if membership.user.is_active %}

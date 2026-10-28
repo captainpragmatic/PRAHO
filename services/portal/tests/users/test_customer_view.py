@@ -247,6 +247,31 @@ class LeaveAndBannerTests(TestCase):
         self.assertIn(reverse("users:customer_view_leave"), html)
 
 
+class HostileCatalogTests(TestCase):
+    """Django marks a translated template literal safe, so a hostile catalog entry is markup unless escaped."""
+
+    def test_the_banner_escapes_translated_text_and_values(self) -> None:
+        from django.template import Context, Template  # noqa: PLC0415
+        from django.utils import translation  # noqa: PLC0415
+        from django.utils.translation import trans_real  # noqa: PLC0415
+
+        hostile = "<img src=x onerror=alert(1)>"
+        request = RequestFactory().get("/dashboard/")
+        request.session = {"customer_view_customer_name": hostile, "customer_view_staff_label": "Ana"}
+        with translation.override("en"):
+            active = trans_real._active.value
+            original = active.gettext
+            active.gettext = lambda message: hostile if message == "Customer view" else original(message)
+            try:
+                html = Template("{% include 'components/customer_view_banner.html' %}").render(
+                    Context({"request": request})
+                )
+            finally:
+                active.gettext = original
+        self.assertNotIn(hostile, html)
+        self.assertEqual(html.count("&lt;img src=x onerror=alert(1)&gt;"), 2)  # the label and the name, once each
+
+
 def _sample(converter: object) -> str:
     name = type(converter).__name__
     return {"IntConverter": "1", "UUIDConverter": str(uuid.uuid4()), "SlugConverter": "x"}.get(name, "x")
