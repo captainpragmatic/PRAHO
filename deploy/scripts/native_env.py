@@ -23,7 +23,9 @@ CONNECTION_KEYS = (
     "PRAHO_SSH_PORT",
     "PRAHO_SSH_PUBLIC_KEYS_FILE",
     "PRAHO_DEPLOY_KNOWN_HOSTS_FILE",
+    "PRAHO_SSH_ALLOWED_CIDRS",
 )
+ALLOWLIST_KEYS = ("PLATFORM_ALLOWED_CIDRS", "PRAHO_SSH_ALLOWED_CIDRS")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -52,14 +54,20 @@ def read_env(path: Path) -> dict[str, str]:
             raise ValueError(
                 f"line {number}:{key}: unsupported env syntax; quote values and use one assignment per line"
             ) from None
-    for cidr in values.get("PLATFORM_ALLOWED_CIDRS", "").split():
-        try:
-            network = ipaddress.ip_network(cidr, strict=True)
-        except ValueError:
-            raise ValueError("PLATFORM_ALLOWED_CIDRS must contain space-separated, canonical CIDRs") from None
-        if network.prefixlen == 0:
-            raise ValueError("PLATFORM_ALLOWED_CIDRS cannot allow the entire Internet")
+    validate_allowlists(values)
     return values
+
+
+def validate_allowlists(values: dict[str, str]) -> None:
+    """Allowlists hold canonical CIDRs and never the whole Internet."""
+    for name in ALLOWLIST_KEYS:
+        for cidr in values.get(name, "").split():
+            try:
+                network = ipaddress.ip_network(cidr, strict=True)
+            except ValueError:
+                raise ValueError(f"{name} must contain space-separated, canonical CIDRs") from None
+            if network.prefixlen == 0:
+                raise ValueError(f"{name} cannot allow the entire Internet")
 
 
 def systemd_env(values: dict[str, str]) -> str:
@@ -176,6 +184,8 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
     if caddy_only:
         command += ["--tags", "caddy"]
     child_env = {**os.environ, **{key: values[key] for key in CONNECTION_KEYS if key in values}}
+    # A value exported in the shell reaches Ansible too when the env file omits the key.
+    validate_allowlists({"PRAHO_SSH_ALLOWED_CIDRS": child_env.get("PRAHO_SSH_ALLOWED_CIDRS", "")})
     recover_ssh_port(child_env, environment)
     return subprocess.run(command, cwd=ROOT / "deploy/ansible", env=child_env, check=False).returncode
 
