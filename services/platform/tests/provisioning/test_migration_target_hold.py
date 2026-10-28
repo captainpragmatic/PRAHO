@@ -12,6 +12,7 @@ from apps.common.types import Ok
 from apps.common.validators import SecureInputValidator
 from apps.provisioning import migration_target_hold as hold
 from apps.provisioning.virtualmin_pair_restore import PairStepResult
+from apps.provisioning.virtualmin_validators import VirtualminValidator
 
 
 class _ScriptedTokens:
@@ -89,6 +90,10 @@ class HeldTargetRestoreTests(SimpleTestCase):
         rejected = "aA1--" + "b" * 59
         accepted = "cC2_" + "d" * 60
         tokens = _ScriptedTokens([rejected, accepted])
+        # The gateway validates every parameter exactly like this before any request is sent
+        self.service._command.side_effect = lambda _migration, _server, _program, **params: (
+            VirtualminValidator.validate_virtualmin_params(params)
+        )
         with (
             patch.object(hold, "secrets", tokens),
             patch.object(hold, "run_held_target_node"),
