@@ -33,7 +33,10 @@ cannot reach Platform to re-check?
 - Server-side sessions in `portal.sqlite3`, through `apps.common.session_store`, Django's database
   session store with merge-on-save (ADR-0055). Signed-cookie sessions were tried first and rejected
   (History).
-- Logout deletes the session row on the portal. Platform is not told (see the gaps in section 5).
+- Platform holds the session itself: a `PortalSession` row (`apps.users.portal_sessions`), opened at
+  login. The portal keeps the row's id in its own session and sends it, inside the HMAC-signed body,
+  with every call it makes for that customer (section 6).
+- Logout ends the Platform row (`POST /api/users/session/end/`) and then deletes the portal's row.
 - `portal.sqlite3` is never backed up.
 
 ### 2. What binds a session to the customer
@@ -119,14 +122,41 @@ sensitive action. OWASP's cheat sheet suggests stricter values for high-value ap
 2-5 min, absolute 4-8 h); NIST's current revision is followed instead, with the re-check as the
 compensating control.
 
-**Gap until the implementation lands.** This list is removed when the code does what section 5 says:
+**Gap until the implementation lands.** Platform-owned sessions (section 6) closed the last item
+of the original list: Platform ends a single session, logout reaches it, and only the customer's own
+activity extends Platform's idle limit. What remains, deliberately, because the longer lifetimes are
+acceptable only together with the 300 s re-check:
 
-- every session ends after 8 h (section 4), so "remember me" does not last longer;
+- every session ends after 8 h (section 4), so "remember me" does not last longer, and Platform
+  enforces the same idle 1 h and absolute 8 h;
+- the portal still checks its own idle and absolute limits beside Platform's, instead of following
+  the deadlines Platform returns;
 - sessions are still bound to the IP address;
 - the cookie of a standard session persists for 24 h;
-- there is no 300 s re-check on sensitive actions;
-- every request extends the idle limit;
-- Platform cannot end a portal session without a credential change, and logout does not reach Platform.
+- there is no 300 s re-check on sensitive actions.
+
+### 6. Platform-owned sessions (implemented 2026-10-28)
+
+- **Binding.** `PortalServiceHMACMiddleware` resolves the session a verified body names before any
+  view runs, so the views that read the signed `user_id` themselves are bound like the decorated
+  ones. A body the views could read differently from the middleware (not JSON, not an object,
+  duplicate keys, a `user_id` outside its one spelling) is refused first.
+- **Liveness.** A row is live while it is not revoked, both deadlines are in the future, the user is
+  active, and its credential snapshot matches the user's session hash (or a `SECRET_KEY_FALLBACKS`
+  hash, which is then promoted). A refusal answers `{"active": false}`, so the portal ends the
+  browser session at once instead of counting it against the fail-open breaker.
+- **Credential changes.** Every password or second-factor change moves the session hash, so it ends
+  every other session at its next request, with no hook at each place a credential changes. The
+  portal endpoints where customers change their own password or second factor re-stamp the calling
+  session inside the same locked transaction.
+- **Idle.** Only calls the customer makes extend the idle deadline, at most once a minute and never
+  backwards; the portal marks its own revalidation calls as background.
+- **Portal.** The session id is bound for the whole request, public routes included. A Platform
+  refusal during a view ends the browser session even when the view caught the error. A browser
+  session without a Platform session id (one from before this release) ends at its next request.
+- **Deploying.** Deploy Platform with `PORTAL_SESSION_REQUIRED=false`, then Portal, then set it true
+  (the default in production and staging). Roll back in the reverse order: set it false, roll Portal
+  back, then Platform. A new Portal against an old Platform ends every login at once.
 
 ### Accepted risk
 
@@ -146,7 +176,7 @@ between a disable and an outage that starts right after it.
 ### Negative
 - During a real outage customers are logged out after a few requests.
 - A session row is a credential; the portal's SQLite file must be protected accordingly.
-- Until section 5 is implemented, Platform cannot end a single session, and logout is portal-local.
+- Until the 300 s re-check lands, the longer "remember me" lifetimes of section 5 stay off.
 
 ### Neutral
 - Fail-open events are logged: the Platform error at ERROR, each fail-open decision at INFO with the
@@ -173,3 +203,5 @@ between a disable and an outage that starts right after it.
   longer exist.
 - **2026-10-28.** Rewritten to describe the code as it is, "stateless" replaced by "holds no business
   data", and the session policy of section 5 recorded.
+- **2026-10-28.** Platform-owned sessions implemented (section 6). Lifetimes unchanged until the
+  300 s re-check lands.
