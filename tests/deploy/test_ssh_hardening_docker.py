@@ -62,7 +62,9 @@ def ssh_target(request: pytest.FixtureRequest) -> Iterator[str]:
         docker("rm", "-f", container)
 
 
-def harden(container: str, port: int = 22, extra: dict[str, str | int] | None = None) -> subprocess.CompletedProcess[str]:
+def harden(
+    container: str, port: int = 22, extra: dict[str, str | int] | None = None, sources: str = "127.0.0.1/32"
+) -> subprocess.CompletedProcess[str]:
     # Host vars are changed rather than extra-vars, so set_fact can perform the handoff.
     docker("exec", container, "/opt/controller/bin/python", "-c",
            "import json; p='/work/test-inventory.json'; v=json.load(open(p)); "
@@ -70,7 +72,8 @@ def harden(container: str, port: int = 22, extra: dict[str, str | int] | None = 
            "open(p,'w').write(json.dumps(v))")
     docker("exec", "-i", container, "tee", "/work/test-vars.json", input_text=json.dumps(extra or {}))
     return docker("exec", "-w", "/work", "-e", "PRAHO_SSH_PUBLIC_KEYS_FILE=/root/operator.pub",
-                  "-e", "PRAHO_DEPLOY_KNOWN_HOSTS_FILE=/root/known_hosts", container,
+                  "-e", "PRAHO_DEPLOY_KNOWN_HOSTS_FILE=/root/known_hosts",
+                  "-e", f"PRAHO_SSH_ALLOWED_CIDRS={sources}", container,
                   "/opt/controller/bin/ansible-playbook", "-i", "test-inventory.json", "-e", "@/work/test-vars.json",
                   "playbooks/ssh-hardening.yml", check=False)
 
@@ -134,6 +137,45 @@ def test_socket_cutover_rejection_and_repeat(ssh_target: str) -> None:
     assert docker("exec", container, "cat", "/root/.ssh/authorized_keys").stdout == keys_before
     assert ssh(container, 9876).stdout.strip() == "0"
     assert ssh(container, 22).returncode != 0
+
+
+def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
+    container = ssh_target
+    original = docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout
+    unset = harden(container, sources="")
+    assert unset.returncode != 0
+    assert "Set PRAHO_SSH_ALLOWED_CIDRS" in unset.stdout, unset.stdout[-4000:]
+    assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
+    world = harden(container, sources="127.0.0.1/32 0.0.0.0/0.0.0.0")
+    assert world.returncode != 0
+    assert "Refuse an SSH allowlist that admits the whole Internet" in world.stdout, world.stdout[-4000:]
+    outside = harden(container, sources="192.0.2.0/24")
+    assert outside.returncode != 0
+    assert "Verify controller is within the SSH source allowlist" in outside.stdout, outside.stdout[-4000:]
+    assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
+
+    assert harden(container).returncode == 0
+    # A server an earlier deploy left open to everyone, as every deploy did before the allowlist was fed.
+    docker("exec", container, "ufw", "allow", "9876/tcp")
+    docker("exec", container, "ufw", "allow", "9876")
+    added = docker("exec", container, "ufw", "show", "added").stdout
+    assert "ufw allow 9876/tcp" in added
+    assert "ufw allow 9876\n" in added
+    again = harden(container, 9876, sources="127.0.0.1/32 198.51.100.7/32")
+    assert again.returncode == 0, again.stdout[-7000:] + again.stderr[-1000:]
+    rules = [line for line in docker("exec", container, "ufw", "show", "added").stdout.splitlines() if "9876" in line]
+    assert sorted(rules) == [
+        "ufw allow from 127.0.0.1 to any port 9876 proto tcp",
+        "ufw allow from 198.51.100.7 to any port 9876 proto tcp",
+    ]
+    assert ssh(container, 9876).stdout.strip() == "0"
+
+    # Dropping a source from the list revokes its rule on the next run.
+    shrunk = harden(container, 9876)
+    assert shrunk.returncode == 0, shrunk.stdout[-7000:] + shrunk.stderr[-1000:]
+    rules = [line for line in docker("exec", container, "ufw", "show", "added").stdout.splitlines() if "9876" in line]
+    assert rules == ["ufw allow from 127.0.0.1 to any port 9876 proto tcp"]
+    assert ssh(container, 9876).stdout.strip() == "0"
 
 
 @pytest.mark.parametrize("before_activation", [False, True])

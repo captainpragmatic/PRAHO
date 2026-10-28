@@ -1,7 +1,7 @@
 ---
 ssh_target_port: 9876
 ssh_operator_public_keys: []
-ssh_allowed_cidrs: ["0.0.0.0/0", "::/0"]
+ssh_allowed_cidrs: []
 ssh_probe_identity_file: "{{ ansible_ssh_private_key_file | default('', true) }}"
 ssh_probe_known_hosts_file: ""
 ssh_rollback_seconds: 180
