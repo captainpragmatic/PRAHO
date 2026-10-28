@@ -533,8 +533,13 @@ def _public_normalization(row: dict[str, Any], offset: int, size: int) -> dict[s
     return result
 
 
-def cached_zone_status(zone: HostedZone, *, page: int = 1, page_size: int = MAX_PUBLIC_PAGE_SIZE) -> dict[str, Any]:
-    """Database-only projection: never expose stale or unproven switch instructions."""
+def cached_zone_status(
+    zone: HostedZone, *, page: int = 1, page_size: int = MAX_PUBLIC_PAGE_SIZE, actor: User | None = None
+) -> dict[str, Any]:
+    """Database-only projection: never expose stale or unproven switch instructions.
+
+    With an actor, an export receipt is shown only to the member who downloaded that export.
+    """
     zone = HostedZone.objects.select_related("account", "account_hostname").get(pk=zone.pk)
     revision = zone.revisions.defer("raw_upload").filter(number=zone.current_revision).first()
     current = False
@@ -608,13 +613,22 @@ def cached_zone_status(zone: HostedZone, *, page: int = 1, page_size: int = MAX_
             for row in records[offset : offset + page_size]
         ],
         "can_switch_registrar": can_switch_registrar(zone) if ready else False,
-        "export_digest": _current_export_digest(zone, revision),
+        "export_digest": _current_export_digest(zone, revision, actor),
         "dnssec": {key: zone.dnssec.get(key, "") for key in ("status", "ds")} if zone.status == "active" else {},
     }
 
 
-def _current_export_digest(zone: HostedZone, revision: HostedZoneImportRevision | None) -> str:
-    if revision is None or zone.deletion.get("export_revision") != zone.current_revision:
+def exported_by(zone: HostedZone, actor: User | None) -> bool:
+    """A customer's deletion rests on an export that member downloaded, not on another member's receipt."""
+    return actor is None or zone.deletion.get("exported_by") == str(actor.pk)
+
+
+def _current_export_digest(zone: HostedZone, revision: HostedZoneImportRevision | None, actor: User | None) -> str:
+    if (
+        revision is None
+        or zone.deletion.get("export_revision") != zone.current_revision
+        or not exported_by(zone, actor)
+    ):
         return ""
     from .dns_zone_record_services import current_manifest  # noqa: PLC0415
 

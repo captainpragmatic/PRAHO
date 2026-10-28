@@ -1,4 +1,4 @@
-"""Explicit whole-zone removal requires a real export and a proven, cached-out move away."""
+"""Explicit whole-zone removal requires the requester's own real export and a proven, cached-out move away."""
 
 from __future__ import annotations
 
@@ -62,7 +62,11 @@ def request_zone_delete(
         current = lock_data_zone(zone, actor)
         if current is None:
             return Err("zone_access_denied")
-        if current.current_revision != expected_revision or not _export_current(current, export_digest):
+        if (
+            current.current_revision != expected_revision
+            or not _export_current(current, export_digest)
+            or not service.exported_by(current, actor)
+        ):
             return Err("current_export_required")
         from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415
 

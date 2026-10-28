@@ -247,7 +247,8 @@ def request_record_change(
 
 def export_zone_file(zone: HostedZone, *, actor: User | None) -> Result[bytes, str]:
     with transaction.atomic():
-        current = lock_data_zone(zone, actor, readonly=True)
+        # A technical write: the receipt it records is the precondition of a whole-zone deletion.
+        current = lock_data_zone(zone, actor)
         if current is None:
             return Err("zone_access_denied")
         if current.status in {"deleting", "deleted"}:

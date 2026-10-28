@@ -64,9 +64,11 @@
       </section>
     {% endif %}
     {% if zone.dnssec.ds %}<section class="space-y-2"><h2 class="text-xl font-semibold text-white">{% trans "DNSSEC delegation" %}</h2><p class="text-slate-300">{% trans "Registrar DS record" %}</p><p class="break-all font-mono text-slate-200">{{ zone.dnssec.ds }}</p></section>{% endif %}
-    <div class="flex flex-wrap items-center gap-4">
-      <form method="post" action="{% url 'dns:export' zone.id %}">{% csrf_token %}{% trans "Export zone file" as export_label %}{% button export_label type="submit" variant="secondary" %}</form>
-      {% if can_edit %}<a href="{% url 'dns:delete' zone.id %}" class="text-primary-400 underline">{% trans "Move away and delete zone" %}</a>{% endif %}
-    </div>
+    {% if can_edit %}
+      <div class="flex flex-wrap items-center gap-4">
+        <form method="post" action="{% url 'dns:export' zone.id %}">{% csrf_token %}{% trans "Export zone file" as export_label %}{% button export_label type="submit" variant="secondary" %}</form>
+        <a href="{% url 'dns:delete' zone.id %}" class="text-primary-400 underline">{% trans "Move away and delete zone" %}</a>
+      </div>
+    {% endif %}
   </main>
 {% endblock %}

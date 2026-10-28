@@ -508,15 +508,28 @@ class DnsZoneViewsTests(SimpleTestCase):
                 42, 7, UUID(ZONE_ID), UUID(RECORD_ID), {"expected_revision": 2, "delete": True}
             )
 
-    def test_viewer_can_download_real_export_and_mutations_remain_blocked(self):
-        self.login_as("viewer")
+    def test_export_is_technical_hidden_and_refused_for_viewer_and_billing(self):
         with patch.object(dns_api, "export_zone", return_value=b'@ 300 IN TXT "keep"\n') as exported:
-            self.assertEqual(self.client.get(self.path + "export/").status_code, 405)
-            response = self.client.post(self.path + "export/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, b'@ 300 IN TXT "keep"\n')
-        self.assertIn("attachment", response["Content-Disposition"])
-        exported.assert_called_once_with(42, 7, UUID(ZONE_ID))
+            for role in ("viewer", "billing"):
+                with self.subTest(role=role):
+                    self.login_as(role)
+                    page = self.client.get(self.path)
+                    self.assertContains(page, "keep mail unchanged")
+                    self.assertNotContains(page, "Export zone file")
+                    self.assertNotContains(page, f"/dns/zones/{ZONE_ID}/export/")
+                    self.assertEqual(self.client.post(self.path + "export/").status_code, 403)
+            exported.assert_not_called()
+            for role in ("owner", "tech"):
+                with self.subTest(role=role):
+                    self.login_as(role)
+                    self.assertContains(self.client.get(self.path), "Export zone file")
+                    self.assertEqual(self.client.get(self.path + "export/").status_code, 405)
+                    response = self.client.post(self.path + "export/")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.content, b'@ 300 IN TXT "keep"\n')
+                    self.assertIn("attachment", response["Content-Disposition"])
+        self.assertEqual(exported.call_count, 2)
+        exported.assert_called_with(42, 7, UUID(ZONE_ID))
 
     def test_real_export_digest_and_both_confirmations_queue_delete_intent(self):
         self.read.return_value = zone_payload(export_digest=DIGEST)

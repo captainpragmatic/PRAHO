@@ -11,7 +11,7 @@ from apps.domains import dns_zone_services as zones
 from apps.domains.dns_zone_import import parse_zone_file
 from apps.domains.dns_zone_models import HostedZoneOperation
 from apps.provisioning.service_models import Service
-from apps.users.models import CustomerMembership
+from apps.users.models import CustomerMembership, User
 from tests.domains.test_dns_zone_import_service import UPLOAD, hosting_fixture
 
 
@@ -91,9 +91,30 @@ class ZoneRecordIntentTests(TestCase):
         self.zone.records.filter(managed_by="praho").update(ttl=600)
         self.assertEqual(zones.cached_zone_status(self.zone)["export_digest"], "")
 
-    def test_viewer_can_export_customer_dns_but_cannot_use_that_read_to_request_a_record_change(self):
+    def test_a_deletion_rests_on_the_requesting_members_own_export(self):
+        colleague = User.objects.create_user(email="zone-tech@example.net", password="test-password")
+        CustomerMembership.objects.create(customer=self.zone.customer, user=colleague, role="tech")
+        digest = hashlib.sha256(zones.export_zone_file(self.zone, actor=self.actor).unwrap()).hexdigest()
+        self.assertEqual(zones.cached_zone_status(self.zone, actor=self.actor)["export_digest"], digest)
+        self.assertEqual(zones.cached_zone_status(self.zone, actor=colleague)["export_digest"], "")
+        refused = zones.request_zone_delete(self.zone, self.zone.current_revision, digest, actor=colleague)
+        self.assertTrue(refused.is_err(), refused)
+        self.assertEqual(refused.unwrap_err(), "current_export_required")
+        self.assertFalse(HostedZoneOperation.objects.filter(kind="delete").exists())
+        zones.export_zone_file(self.zone, actor=colleague).unwrap()
+        self.assertEqual(zones.cached_zone_status(self.zone, actor=colleague)["export_digest"], digest)
+        self.assertEqual(zones.cached_zone_status(self.zone, actor=self.actor)["export_digest"], "")
+        accepted = zones.request_zone_delete(self.zone, self.zone.current_revision, digest, actor=colleague)
+        self.assertTrue(accepted.is_ok(), accepted)
+        self.assertEqual(accepted.unwrap().kind, "delete")
+
+    def test_viewer_can_neither_export_a_deletion_receipt_nor_request_a_record_change(self):
         CustomerMembership.objects.filter(user=self.actor).update(role="viewer")
-        self.assertTrue(zones.export_zone_file(self.zone, actor=self.actor).is_ok())
+        exported = zones.export_zone_file(self.zone, actor=self.actor)
+        self.assertTrue(exported.is_err(), exported)
+        self.assertEqual(exported.unwrap_err(), "zone_access_denied")
+        self.zone.refresh_from_db()
+        self.assertNotIn("export_digest", self.zone.deletion)
         self.assertTrue(
             zones.request_record_change(
                 self.zone,
