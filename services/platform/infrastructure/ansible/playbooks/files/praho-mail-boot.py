@@ -37,6 +37,8 @@ RECORD_FIELDS = frozenset(
         "status",
         "old_certificate_sha256",
         "new_certificate_sha256",
+        "new_pem_sha256",
+        "new_key_sha256",
         "before_sha256",
     }
 )
@@ -370,7 +372,11 @@ class MailBootGuard:
                 self.owned_bytes(stage + "/old." + name, private=True),
                 self.owned_bytes(stage + "/new." + name, private=True),
             )
-            if self.digest(old) != before["files"][path] or self.digest(new) != record["files"][path]:
+            if (
+                self.digest(old) != before["files"][path]
+                or self.digest(new) != record["files"][path]
+                or record["files"][path] != record["new_" + name + "_sha256"]
+            ):
                 raise ValueError("staged certificate pair changed")
             if name == "pem" and (self.leaf_digest(old), self.leaf_digest(new)) != (
                 record["old_certificate_sha256"],

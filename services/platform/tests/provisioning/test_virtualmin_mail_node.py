@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import ssl
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -932,6 +933,8 @@ passdb praho-proxy {
         self.assert_no_node_mutation()
 
     def rotation_fixture(self):
+        # A fresh ready node: no stage left by an earlier subtest's parked operation.
+        shutil.rmtree(self.root / "var/lib/praho/mail/certificate-operations", ignore_errors=True)
         driver = self.node.setup_driver()
         old = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(b"old leaf") + b"\n-----END CERTIFICATE-----\n"
         new = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(b"new leaf") + b"\n-----END CERTIFICATE-----\n"
@@ -954,6 +957,8 @@ passdb praho-proxy {
         driver.state.chmod(0o700)
         self.enterContext(patch.object(driver, "security_configuration"))
         self.enterContext(patch.object(driver, "read_fences", return_value={}))
+        # Routine rotation runs on live units; the systemd reader has its own tests.
+        self.enterContext(patch.object(driver, "unit_phase", return_value="running"))
         self.node.public_ports = lambda: [25, 465, 993, 995]
         self.node.probe = self.rotation_proof
         return driver, old, new

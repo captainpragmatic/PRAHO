@@ -90,6 +90,8 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
             "status": "certificate_applying",
             "old_certificate_sha256": hashlib.sha256(ssl.PEM_cert_to_DER_cert(old_pem)).hexdigest(),
             "new_certificate_sha256": hashlib.sha256(ssl.PEM_cert_to_DER_cert(new_pem)).hexdigest(),
+            "new_pem_sha256": hashlib.sha256(new_pem.encode()).hexdigest(),
+            "new_key_sha256": hashlib.sha256(b"new fixture key").hexdigest(),
             "before_sha256": hashlib.sha256(json.dumps(self.before, sort_keys=True).encode()).hexdigest(),
         }
         self.operation_file = self.private(
@@ -250,6 +252,17 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 path.write_bytes(b"changed candidate or policy")
                 self.assertFalse(self.guard.allowed())
                 path.write_bytes(original)
+
+    def test_the_candidate_manifest_must_name_the_recorded_staged_file_digests(self):
+        self.assertTrue(self.guard.allowed())
+        for field in ("new_pem_sha256", "new_key_sha256"):
+            with self.subTest(field=field):
+                operation = json.loads(self.operation_file.read_text())
+                self.operation_file.write_text(json.dumps({**operation, field: "0" * 64}))
+                self.record[field] = "0" * 64
+                self.save_marker()
+                self.assertFalse(self.guard.allowed())
+                self.recovery()
 
     def test_original_journal_and_operation_tombstone_must_match_the_same_live_attempt(self):
         self.assertTrue(self.guard.allowed())
