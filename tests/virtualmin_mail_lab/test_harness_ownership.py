@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import json
+import re
 import subprocess
 import traceback
 from datetime import UTC, datetime, timedelta
@@ -16,7 +18,15 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from tests.virtualmin_mail_lab import node_checks
-from tests.virtualmin_mail_lab.harness import PROFILES, MailClone, MailLabError, _certificate
+from tests.virtualmin_mail_lab.harness import (
+    _PUBLIC_CODES,
+    _PUBLIC_STAGES,
+    PLAYBOOK,
+    PROFILES,
+    MailClone,
+    MailLabError,
+    _certificate,
+)
 
 CID = "1" * 64
 NID = "2" * 64
@@ -32,6 +42,7 @@ class FakeDocker:
         self.fail = None
         self.receipt_override = {}
         self.payload_override = {}
+        self.ansible_result = None
         self.runtime = {
             "ok": True,
             "os_id": "debian",
@@ -40,37 +51,43 @@ class FakeDocker:
             "domain_count": 0,
         }
 
+    def receipt(self, argv):
+        values = json.loads(argv[argv.index("--extra-vars") + 1])
+        payload = {
+            "node_hostname": values["mail_expected_node_hostname"],
+            "profile": "debian12-dovecot23",
+            "configured": True,
+            "default_mail_off": True,
+            "public_ports": [25, 465, 993, 995],
+            "maps_sha256": "a" * 64,
+            "outcome": "unchanged",
+            "certificate_sha256": "b" * 64,
+            "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+            "pending_code": "",
+            **self.payload_override,
+        }
+        envelope = {
+            "version": 1,
+            "action": values["mail_action"],
+            "identity": values["mail_operation_id"],
+            "node_hostname": values["mail_expected_node_hostname"],
+            "payload": payload,
+            **self.receipt_override,
+        }
+        return "MAIL_RESULT=" + base64.b64encode(json.dumps(envelope).encode()).decode()
+
     def __call__(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
         if self.fail is not None:
             raise self.fail
-        output, code = "", 0
-        command = argv[1:]
         if Path(argv[0]).name == "ansible-playbook":
-            values = json.loads(argv[argv.index("--extra-vars") + 1])
-            payload = {
-                "node_hostname": values["mail_expected_node_hostname"],
-                "profile": "debian12-dovecot23",
-                "configured": True,
-                "default_mail_off": True,
-                "public_ports": [25, 465, 993, 995],
-                "maps_sha256": "a" * 64,
-                "outcome": "unchanged",
-                "certificate_sha256": "b" * 64,
-                "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
-                "pending_code": "",
-                **self.payload_override,
-            }
-            envelope = {
-                "version": 1,
-                "action": values["mail_action"],
-                "identity": values["mail_operation_id"],
-                "node_hostname": values["mail_expected_node_hostname"],
-                "payload": payload,
-                **self.receipt_override,
-            }
-            output = "MAIL_RESULT=" + base64.b64encode(json.dumps(envelope).encode()).decode()
-        elif command[:2] == ["image", "inspect"]:
+            output, code = self.ansible_result or (self.receipt(argv), 0)
+            return subprocess.CompletedProcess(argv, code, output, "")
+        return subprocess.CompletedProcess(argv, 0, self.docker(argv[1:]), "")
+
+    def docker(self, command):
+        output = ""
+        if command[:2] == ["image", "inspect"]:
             output = json.dumps([{"Id": IMAGE}])
         elif command[:2] == ["network", "create"]:
             self.network = {"Id": NID, "Labels": self.labels(command), "Containers": {}}
@@ -96,11 +113,13 @@ class FakeDocker:
             output = json.dumps(self.runtime)
         elif command[:1] == ["exec"]:
             output = "running"
+        elif command[:1] == ["restart"]:
+            self.container["State"]["StartedAt"] = "restarted-" + str(len(self.calls))
         elif command[:2] == ["network", "rm"]:
             self.network = None
         elif command[:1] == ["rm"]:
             self.container = None
-        return subprocess.CompletedProcess(argv, code, output, "")
+        return output
 
     @staticmethod
     def labels(command):
@@ -358,3 +377,62 @@ def test_generated_certificate_satisfies_the_production_seven_day_preflight():
     assert certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(
         x509.DNSName
     ) == ["node-test.mail-lab.praho.test"]
+
+
+def test_a_recovered_certificate_is_typed_proof(clone):
+    value, runner = clone
+    runner.payload_override.update(outcome="recovered", pending_code="")
+    assert value.playbook("reconcile_node_certificate", operation_id=uuid4())["outcome"] == "recovered"
+
+
+def test_a_bundle_upgrade_receipt_is_bound_and_typed_without_live_listeners(clone):
+    value, runner = clone
+    runner.payload_override.update(
+        outcome="upgraded", bundle_sha256="c" * 64, configured=False, default_mail_off=False, public_ports=[]
+    )
+    result = value.playbook("upgrade_bundle", operation_id=uuid4())
+    assert result == {"profile": "debian12-dovecot23", "outcome": "upgraded", "bundle_sha256": "c" * 64}
+    for changes in ({"outcome": "replaced"}, {"bundle_sha256": "not a digest"}, {"node_hostname": "foreign.test"}):
+        runner.payload_override.update(changes)
+        with pytest.raises(MailLabError):
+            value.playbook("upgrade_bundle", operation_id=uuid4())
+        runner.payload_override.update(outcome="upgraded", bundle_sha256="c" * 64, node_hostname=value.hostname)
+
+
+def test_a_previous_commit_playbook_source_is_the_one_run(clone, tmp_path):
+    value, runner = clone
+    source = tmp_path / "previous/virtualmin_mail.yml"
+    source.parent.mkdir()
+    source.write_text("---\n")
+    value.playbook("setup", source=source)
+    call = next(argv for argv, _kwargs in runner.calls if Path(argv[0]).name == "ansible-playbook")
+    assert str(source) in call and str(PLAYBOOK) not in call
+    for unsafe in (tmp_path / "previous/other.yml", tmp_path / "missing/virtualmin_mail.yml"):
+        with pytest.raises(MailLabError):
+            value.playbook("setup", source=unsafe)
+
+
+def test_an_interrupted_playbook_must_end_without_any_receipt(clone):
+    value, runner = clone
+    runner.ansible_result = ("worker killed", 2)
+    value.playbook_interrupted("reconcile_node_certificate", operation_id=uuid4())
+    runner.ansible_result = None
+    with pytest.raises(MailLabError):
+        value.playbook_interrupted("reconcile_node_certificate", operation_id=uuid4())
+
+
+def test_a_bare_restart_proves_a_new_start_without_requiring_ready_mail(clone):
+    value, runner = clone
+    value.restart()
+    assert any(argv[1:2] == ["restart"] for argv, _ in runner.calls)
+    assert not any('"action": "boot_state"' in (kwargs.get("input") or "") for _argv, kwargs in runner.calls)
+
+
+def test_public_codes_and_stages_cover_every_native_code_and_stage():
+    files = PLAYBOOK.parent / "files"
+    specification = importlib.util.spec_from_file_location("mail_lab_public_codes", files / "praho-mail.py")
+    native = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(native)
+    assert native.PUBLIC_ERRORS == _PUBLIC_CODES
+    sources = "".join((files / name).read_text() for name in ("praho-mail.py", "praho_mail_setup.py"))
+    assert set(re.findall(r'stage = "([a-z_]+)"', sources)) <= _PUBLIC_STAGES

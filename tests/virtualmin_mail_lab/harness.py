@@ -42,6 +42,10 @@ _PUBLIC_CODES = {
     "mail_setup_review_required",
     "mail_unrelated_configuration_changed",
     "mail_operation_busy",
+    "mail_node_operation_in_progress",
+    "mail_node_services_unavailable",
+    "mail_node_bundle_upgrade_required",
+    "mail_node_bundle_incompatible",
 }
 _PUBLIC_STAGES = {
     "inspection",
@@ -70,7 +74,22 @@ _PUBLIC_STAGES = {
     "certificate_installing",
     "certificate_reload",
     "certificate_verification",
+    "certificate_resume",
+    "certificate_fence",
+    "certificate_stop",
+    "certificate_validation",
+    "certificate_start",
+    "certificate_commit",
+    "certificate_cleanup",
+    "bundle_preflight",
+    "bundle_staging",
+    "bundle_replacing",
+    "bundle_compatibility",
+    "bundle_commit",
+    "bundle_restore",
+    "bundle_resume",
 }
+_ACTIONS = {"setup", "inspect_node", "reconcile_submitters", "reconcile_node_certificate", "upgrade_bundle"}
 
 
 class MailLabError(RuntimeError):
@@ -114,10 +133,20 @@ def _certificate_receipt(payload: dict[str, Any]) -> dict[str, Any]:
     if (payload["outcome"], payload["pending_code"]) not in {
         ("unchanged", ""),
         ("replaced", ""),
+        ("recovered", ""),
         ("retained_previous", "mail_node_certificate_unproven"),
     }:
         raise ValueError
     return {key: payload[key] for key in ("outcome", "pending_code", "certificate_sha256", "not_after")}
+
+
+def _bundle_receipt(payload: dict[str, Any]) -> dict[str, Any]:
+    # An upgrade proves only offline state: an expired, stopped node has no listeners to report.
+    if payload["outcome"] not in {"upgraded", "unchanged"}:
+        raise ValueError
+    if re.fullmatch(r"[a-f0-9]{64}", payload["bundle_sha256"]) is None:
+        raise ValueError
+    return {key: payload[key] for key in ("outcome", "bundle_sha256")}
 
 
 def _certificate(hostname: str) -> dict[str, str]:
@@ -385,9 +414,14 @@ class MailClone:
         _private_json(self.artifacts / "facts.json", self.facts)
         return facts
 
-    def playbook(self, action: str, *, operation_id: UUID | None = None) -> dict[str, Any]:
-        if action not in {"setup", "inspect_node", "reconcile_submitters", "reconcile_node_certificate"}:
+    def _run_playbook(
+        self, action: str, operation_id: UUID | None, source: Path, *, required: bool = True
+    ) -> tuple[str, subprocess.CompletedProcess[str]]:
+        if action not in _ACTIONS:
             raise MailLabError("Unknown production mail action")
+        # A previous commit's extracted playbook directory may stand in, for bundle upgrade cases.
+        if source.name != PLAYBOOK.name or source.is_symlink() or not source.is_file():
+            raise MailLabError("Invalid production mail playbook source")
         identity = str(uuid4() if operation_id is None else operation_id)
         try:
             if str(UUID(identity)) != identity:
@@ -411,14 +445,27 @@ class MailClone:
                 self.container_id + ",",
                 "--connection",
                 "community.docker.docker",
-                str(PLAYBOOK),
+                str(source),
                 "--extra-vars",
                 json.dumps(values),
             ],
             timeout=PLAYBOOK_TIMEOUT,
             environment=environment,
+            required=required,
         )
         self._owned()
+        return identity, result
+
+    def playbook_interrupted(self, action: str, *, operation_id: UUID | None = None, source: Path = PLAYBOOK) -> None:
+        """The worker was killed mid-operation: the run must end without any receipt."""
+        _identity, result = self._run_playbook(action, operation_id, source, required=False)
+        if not result.returncode or re.findall(r"MAIL_RESULT=", result.stdout):
+            raise MailLabError("An interrupted playbook still produced a receipt")
+        self.facts.append({"stage": action + "_interrupted", "ok": True})
+        _private_json(self.artifacts / "facts.json", self.facts)
+
+    def playbook(self, action: str, *, operation_id: UUID | None = None, source: Path = PLAYBOOK) -> dict[str, Any]:
+        identity, result = self._run_playbook(action, operation_id, source)
         try:
             records = re.findall(r"MAIL_RESULT=([A-Za-z0-9+/=]+)", result.stdout)
             if len(records) != 1:
@@ -452,9 +499,14 @@ class MailClone:
                 payload.get("node_hostname") != self.hostname
                 or payload.get("error")
                 or payload.get("profile") != self.profile.native_profile
-                or payload.get("configured") is not True
-                or payload.get("default_mail_off") is not True
             ):
+                raise ValueError
+            if action == "upgrade_bundle":
+                proof = _bundle_receipt(payload)
+                self.facts.append({"stage": action, "ok": True, "profile": self.profile.native_profile})
+                _private_json(self.artifacts / "facts.json", self.facts)
+                return {"profile": self.profile.native_profile, **proof}
+            if payload.get("configured") is not True or payload.get("default_mail_off") is not True:
                 raise ValueError
             if action in {"setup", "inspect_node", "reconcile_node_certificate"} and set(
                 payload.get("public_ports", [])
@@ -481,12 +533,16 @@ class MailClone:
         name = self.hostname if case == "valid" else "foreign." + self.hostname
         self.node("certificate_candidate", material=_certificate(name), case=case)
 
-    def reboot(self) -> None:
+    def restart(self) -> None:
+        """Restart the owned container without requiring mail to come back ready."""
         before = self._owned()["State"]["StartedAt"]
         self._docker(["restart", "--timeout", "20", self.container_id], timeout=90)
         self._wait_boot()
         if self._owned()["State"]["StartedAt"] == before:
             raise MailLabError("Owned node did not actually restart")
+
+    def reboot(self) -> None:
+        self.restart()
         self.node("boot_state")
 
     def cleanup(self) -> None:
