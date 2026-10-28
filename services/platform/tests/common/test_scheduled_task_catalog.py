@@ -2,6 +2,7 @@
 
 import json
 from io import StringIO
+from operator import itemgetter
 from pathlib import Path
 
 from django.core.management import call_command
@@ -21,7 +22,10 @@ class ScheduledTaskCatalogTests(TestCase):
         # Production migrates before bootstrap; infrastructure owns a post_migrate receiver.
         InfrastructureConfig._schedule_infrastructure_tasks(InfrastructureConfig)
         call_command("setup_scheduled_tasks", stdout=StringIO())
-        self.assertEqual(list(Schedule.objects.order_by("name").values(*FIELDS)), CATALOG)
+        # Sorted in Python: ORDER BY name follows the database collation, which differs between
+        # SQLite (byte order) and PostgreSQL (locale order, case-insensitive first).
+        installed = sorted(Schedule.objects.values(*FIELDS), key=itemgetter("name"))
+        self.assertEqual(installed, CATALOG)
         identities = dict(Schedule.objects.values_list("name", "pk"))
         operator = Schedule.objects.create(name="operator-one-off", func="operator.maintenance", repeats=1)
         InfrastructureConfig._schedule_infrastructure_tasks(InfrastructureConfig)
