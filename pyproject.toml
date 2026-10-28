@@ -632,7 +632,11 @@ ignore_missing_imports = true
 module = [
   "core.*", "*.services.*", "*.repos.*", "*.gateways.*",
   "*.validators", "apps.billing.calculations",
-  "*.managers", "*.querysets"
+  "*.managers", "*.querysets",
+  # Hosted-mail cross-component seams (docs/architecture/account-hostnames-mail-contracts.md)
+  "apps.provisioning.virtualmin_mail_publisher",
+  "apps.provisioning.virtualmin_mail_node_tasks",
+  "apps.provisioning.virtualmin_mailbox_service",
 ]
 strict = true
 disallow_untyped_defs = true
