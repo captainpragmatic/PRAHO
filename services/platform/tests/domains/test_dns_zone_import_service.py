@@ -1,6 +1,7 @@
 """Request paths stage and confirm exact tenant/target-bound revisions without network calls."""
 
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -9,7 +10,7 @@ from django.utils import timezone
 from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.domains import dns_zone_services as zones
-from apps.domains.dns_zone_models import HostedZoneOperation
+from apps.domains.dns_zone_models import HostedZoneImportRevision, HostedZoneOperation
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
@@ -134,6 +135,24 @@ class ZoneImportServiceTests(TestCase):
             zones.confirm_import(revision.zone, revision.number, revision.manifest_digest, actor=self.actor).is_err()
         )
         self.assertEqual(zones.cached_zone_status(revision.zone)["nameservers"], [])
+
+    def test_crosscheck_progress_and_confirmation_advance_the_revision_updated_at(self):
+        revision = self.stage()
+        earlier = timezone.now() - timedelta(days=1)
+        rows = HostedZoneImportRevision.objects.filter(pk=revision.pk)
+        rows.update(updated_at=earlier)
+        revision.save(update_fields=[])
+        self.assertEqual(rows.get().updated_at, earlier)
+        revision.crosscheck = {"complete": True, "ok": True, "checked_at": timezone.now().isoformat(), "ds_ttl": 300}
+        revision.save(update_fields=["crosscheck"])
+        self.assertGreater(rows.get().updated_at, earlier)
+        rows.update(updated_at=earlier)
+        self.assertTrue(
+            zones.confirm_import(revision.zone, revision.number, revision.manifest_digest, actor=self.actor).is_ok()
+        )
+        confirmed = rows.get()
+        self.assertIsNotNone(confirmed.confirmed_at)
+        self.assertGreater(confirmed.updated_at, earlier)
 
     def test_customer_transfer_or_same_tenant_service_relink_invalidates_the_binding(self):
         revision = self.checked()
