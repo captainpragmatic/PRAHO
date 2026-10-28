@@ -991,7 +991,7 @@ lint-security:
 	fi; \
 	rm -f "$$SEMGREP_TMP"; \
 	echo "🧪 2/2: Hardcoded credentials check..."; \
-	$(MAKE) lint-credentials; \
+	$(MAKE) lint-credentials || exit $$?; \
 	if [ $$SEMGREP_EXIT -ne 0 ]; then \
 		echo "❌ Semgrep reported findings (exit $$SEMGREP_EXIT)."; \
 		exit $$SEMGREP_EXIT; \

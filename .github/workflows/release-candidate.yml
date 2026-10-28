@@ -80,8 +80,10 @@ jobs:
           echo "### Release candidate \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
 
       # Every check master requires, read from the ruleset, must have passed on the PR that produced
-      # the candidate. A check that never reported counts as failed.
-      - name: The candidate's pull request passed every required check
+      # the candidate, and on exactly the candidate's tree: an owner bypass can merge a PR whose branch
+      # was behind master, and its squash commit then holds code those checks never saw. A check that
+      # never reported counts as failed.
+      - name: The candidate's pull request passed every required check on the same tree
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -95,6 +97,11 @@ jobs:
             exit 1
           fi
           head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha')"
+          git fetch --quiet origin "pull/$pr/head"
+          if [ "$(git rev-parse "$SHA^{tree}")" != "$(git rev-parse "$head^{tree}")" ]; then
+            echo "::error::PR #$pr's final head ($head) does not have the candidate's tree: it was merged while behind master. Land a pull request whose checks ran on the current tree, then release that."
+            exit 1
+          fi
           # The latest run of each check on the PR's final head.
           gh api --paginate "repos/$REPO/commits/$head/check-runs?per_page=100" --jq '.check_runs[]' \
             | jq -s 'group_by(.name) | map(max_by(.id)) | map({(.name): .conclusion}) | add // {}' > "$RUNNER_TEMP/runs.json"

@@ -123,7 +123,8 @@ jobs:
   # ---------------------------------------------------------------------------
   pull-request:
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.lab != 'false'
+    # !cancelled(): if `changes` itself fails, its output is empty, which is not 'false', so the lab runs.
+    if: "!cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.lab != 'false'"
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

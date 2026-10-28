@@ -8,7 +8,11 @@
 # 2. It is deployed with `make deploy-staging VERSION=<sha>` (the playbook's pre- and post-checks).
 # 3. Only after the deploy succeeds does origin/staging move to it, so the branch always names what
 #    staging runs. A forward move must be a fast-forward. --rollback allows an OLDER approved commit
-#    and moves the branch back with a lease on its current value.
+#    and moves the branch back. Every move carries a lease on the value this run validated, so a branch
+#    moved by someone else meanwhile is never overwritten.
+#
+# Only a git deploy installs exactly the approved commit (an rsync deploy copies this checkout's working
+# tree), so the script refuses any other DEPLOY_METHOD. One promotion runs at a time per checkout.
 #
 # Runs anywhere with git, gh (authenticated for this repository) and the staging deploy inputs; it
 # assumes nothing about the machine beyond that. Works with macOS bash 3.2.
@@ -35,6 +39,15 @@ done
 
 cd "$(git rev-parse --show-toplevel)"
 command -v gh >/dev/null 2>&1 || die "gh is not installed"
+
+[ -f .env.staging ] || die "Missing .env.staging (see .env.example.staging)"
+method="$(sed -n 's/^DEPLOY_METHOD=//p' .env.staging | tail -n 1 | tr -d "\"'")"
+[ -z "$method" ] || [ "$method" = "git" ] \
+    || die "DEPLOY_METHOD is '$method' in .env.staging: only a git deploy installs exactly the approved commit"
+
+lock="$(git rev-parse --git-common-dir)/promote-staging.lock"
+mkdir "$lock" 2>/dev/null || die "Another promotion is running from this checkout ($lock); remove it if that run died"
+trap 'rmdir "$lock"' EXIT
 
 info "Fetching master and staging from origin..."
 git fetch --quiet origin master staging
@@ -72,9 +85,9 @@ fi
 echo "🚀 Deploying $sha to staging..."
 make deploy-staging VERSION="$sha" || die "The deploy failed; origin/staging still points at $staging"
 
-case "$move" in
-    fast-forward) git push origin "$sha:refs/heads/staging" ;;
-    rollback) git push --force-with-lease="staging:$staging" origin "$sha:refs/heads/staging" ;;
-    none) ;;
-esac
+if [ "$move" != "none" ]; then
+    # A non-fast-forward (the rollback) needs the admin bypass on the staging ruleset; the lease holds either way.
+    git push --force-with-lease="staging:$staging" origin "$sha:refs/heads/staging" \
+        || die "Staging now RUNS $sha, but origin/staging moved during the deploy and still names another commit. Find out who promoted, then re-run promote-staging for the release staging should run."
+fi
 echo "✅ Staging runs $sha, and origin/staging names it."

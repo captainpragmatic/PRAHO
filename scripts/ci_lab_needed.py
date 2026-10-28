@@ -22,7 +22,8 @@ import sys
 LAB_PATH_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(pattern)
     for pattern in (
-        r"^services/platform/apps/(provisioning|infrastructure|common|audit|settings)/",
+        # The lab bootstrap creates currencies, customers and staff users, so their apps count too.
+        r"^services/platform/apps/(provisioning|infrastructure|common|audit|settings|billing|customers|users)/",
         r"^services/platform/infrastructure/ansible/",
         r"^services/platform/config/",
         r"^deploy/virtualmin-lab/",

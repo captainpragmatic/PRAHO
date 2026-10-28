@@ -30,7 +30,7 @@ RULESETS = REPO / ".github" / "rulesets"
 GITHUB_ACTIONS_APP_ID = 15368
 
 # Jobs allowed an `if:` because skipping them is the selection itself, and it fails open.
-SELECTIVE_JOBS = {"pull-request": "needs.changes.outputs.lab != 'false'"}
+SELECTIVE_JOBS = {"pull-request": "!cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.lab != 'false'"}
 
 
 def load_workflow(path: Path) -> dict[str, Any]:
@@ -112,6 +112,10 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         (["services/platform/apps/infrastructure/ansible_service.py"], True),
         (["services/platform/apps/provisioning/services.py"], True),
         (["services/platform/config/settings/base.py"], True),
+        # The lab bootstrap creates currencies, customers and staff users.
+        (["services/platform/apps/billing/models.py"], True),
+        (["services/platform/apps/customers/models.py"], True),
+        (["services/platform/apps/users/models.py"], True),
         (["docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md"], False),
         (["services/portal/apps/billing/views.py", "README.md"], False),
         (["README.md", "deploy/virtualmin-lab/README.md"], True),
@@ -129,6 +133,10 @@ class TestReleaseCandidate:
         assert list(self.workflow["on"]) == ["workflow_dispatch"]
         script = str(self.jobs["resolve"]["steps"])
         assert 'refs/heads/master' in script and "merge-base --is-ancestor" in script
+
+    def test_the_candidate_must_have_the_tree_its_pull_request_tested(self) -> None:
+        script = str(self.jobs["resolve"]["steps"])
+        assert 'git rev-parse "$SHA^{tree}"' in script and 'git rev-parse "$head^{tree}"' in script
 
     def test_every_job_tests_the_resolved_candidate(self) -> None:
         for job_id, job in self.jobs.items():
@@ -148,6 +156,11 @@ class TestReleaseCandidate:
         assert "if" not in record, "an `always()` here would vouch for a failed run"
         assert record["permissions"] == {"statuses": "write"}
         assert self.workflow["permissions"] == {"contents": "read"}
+
+
+def test_a_failing_credential_check_fails_the_security_lint() -> None:
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    assert "$(MAKE) lint-credentials || exit $$?;" in makefile
 
 
 @pytest.mark.parametrize("job_id", ["browser-e2e", "browser-csp"])
