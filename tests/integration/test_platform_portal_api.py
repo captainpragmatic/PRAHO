@@ -29,6 +29,19 @@ def _database_drivers(requirements):
     return sorted(n for n in (re.sub(r"[._]", "-", m.group(1)).lower() for m in names if m) if n in _DATABASE_DRIVERS)
 
 
+def _group_requirements(groups, name, seen=()):
+    """A dependency group's requirements, with its included groups resolved (PEP 735)."""
+    if name in seen:
+        raise AssertionError(f"dependency group {name!r} includes itself")
+    requirements = []
+    for entry in groups[name]:
+        if isinstance(entry, dict) and "include-group" in entry:
+            requirements += _group_requirements(groups, entry["include-group"], (*seen, name))
+        else:
+            requirements.append(entry)
+    return requirements
+
+
 def is_database_cache_configured():
     """Check if database cache backend is configured."""
     cache_config = settings.CACHES.get('default', {})
@@ -125,14 +138,15 @@ class TestPlatformPortalIntegration:
         groups = workspace["dependency-groups"]
         installed = [
             *workspace["project"]["dependencies"],
-            *groups["portal"],
-            *groups["prod"],
+            *_group_requirements(groups, "portal"),
+            *_group_requirements(groups, "prod"),
             *portal["project"]["dependencies"],
         ]
         assert installed, "no portal dependency declarations found; the check would prove nothing"
 
-        # Positive control: the matcher must find the driver the platform does install.
+        # Positive controls: the matcher must find the platform's driver, also through an included group.
         assert _database_drivers(groups["platform"]), "the driver matcher no longer recognises the platform's driver"
+        assert _database_drivers(_group_requirements({**groups, "probe": [{"include-group": "platform"}]}, "probe"))
         assert _database_drivers(installed) == []
 
     @pytest.mark.integration
