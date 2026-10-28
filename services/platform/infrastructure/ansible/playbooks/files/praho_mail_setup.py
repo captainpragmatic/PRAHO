@@ -1392,7 +1392,7 @@ class MailSetup:
     def install_boot_guard(self) -> None:
         directory = self.path("/usr/lib/praho/mail")
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
+        os.chmod(directory, 0o700)  # nosemgrep: insecure-file-permissions — owner-only root directory
         for name in NATIVE_FILES:
             atomic(directory / name, Path(__file__).with_name(name).read_bytes())
         for unit in UNITS:
@@ -1649,7 +1649,7 @@ class MailSetup:
     def configure(self, expected: str, certificate_pem: bytes, key_pem: bytes) -> None:
         for directory in ("/etc/praho-mail", "/var/lib/praho/mail", "/var/lib/praho/mail/faillock"):
             self.path(directory).mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.chmod(self.path(directory), 0o700)
+            os.chmod(self.path(directory), 0o700)  # nosemgrep: insecure-file-permissions — owner-only root state
         atomic(self.path("/etc/praho-mail/node.pem"), certificate_pem)
         # Copy the verified private snapshot only into our root-private file; Webmin is unchanged.
         atomic(self.path("/etc/praho-mail/node.key"), key_pem)

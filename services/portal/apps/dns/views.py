@@ -88,7 +88,9 @@ def _number(raw: str | None, *, default: int = 1, maximum: int = 100000) -> int:
 def _success(request: HttpRequest, zone_id: UUID | str) -> HttpResponse:
     url = reverse("dns:detail", args=[zone_id])
     if request.headers.get("HX-Request") == "true":
-        return HttpResponse(status=200, headers={"HX-Redirect": url})
+        return HttpResponse(  # nosemgrep: direct-use-of-httpresponse — empty body, redirect header only
+            status=200, headers={"HX-Redirect": url}
+        )
     return HttpResponseRedirect(url, status=303)
 
 

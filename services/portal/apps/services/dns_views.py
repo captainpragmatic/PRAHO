@@ -125,7 +125,9 @@ def service_dns(request: HttpRequest, service_id: int) -> HttpResponse:
     try:
         role = _get_user_role_for_customer(request, str(customer_id))
         if request.method == "POST" and role not in TECH_ROLES:
-            return HttpResponseForbidden(_("You do not have permission to recheck DNS."))
+            return HttpResponseForbidden(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
+                _("You do not have permission to recheck DNS.")
+            )
         status = (
             services_api.recheck_service_dns(customer_id, user_id, service_id)
             if request.method == "POST"
@@ -137,7 +139,9 @@ def service_dns(request: HttpRequest, service_id: int) -> HttpResponse:
             return HttpResponseRedirect(reverse("services:dns", args=[service_id]), status=303)
     except PlatformAPIError as error:
         if error.status_code == HTTPStatus.FORBIDDEN:
-            return HttpResponseForbidden(_("You do not have permission to access these DNS checks."))
+            return HttpResponseForbidden(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
+                _("You do not have permission to access these DNS checks.")
+            )
         context = _context(request, service_id, {"state": "unavailable"}, can_recheck=False)
         code = 200 if request.headers.get("HX-Request") == "true" else 503
     template = (
