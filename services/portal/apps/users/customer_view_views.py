@@ -69,7 +69,9 @@ def redeem(request: HttpRequest) -> HttpResponse:
     try:
         if counters.increment(f"customer-view-redeem:{client_ip}", 60) > REDEEM_LIMIT:
             return JsonResponse({"error": "Too many attempts"}, status=429, headers={"Retry-After": "60"})
-        data = api_client.redeem_customer_view(request.POST["code"], client_ip)
+        # Unbound: the code is exchanged for itself, never as the session this browser held before.
+        with request_context.bound(None, None):
+            data = api_client.redeem_customer_view(request.POST["code"], client_ip)
         if "session_auth_hash" in data:
             raise ValueError("a customer view never carries a credential of the customer")
         session_id = str(data["session_id"])

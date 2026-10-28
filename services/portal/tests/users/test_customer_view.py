@@ -67,6 +67,23 @@ class RedeemTests(TestCase):
         cookie = response.cookies[self.client.cookies.keys().__iter__().__next__()]
         self.assertFalse(cookie["max-age"])  # ends with the browser
 
+    def test_the_code_is_exchanged_outside_the_session_this_browser_held(self) -> None:
+        from apps.common import request_context  # noqa: PLC0415
+
+        seen: dict[str, object] = {}
+
+        def redeem(code: str, client_ip: str) -> dict[str, object]:
+            seen.update(request_context.signed_fields())
+            return REDEEMED
+
+        with (
+            request_context.bound(SESSION_ID, 99),  # as inside the middleware for a signed-in browser
+            patch("apps.users.customer_view_views.api_client.redeem_customer_view", side_effect=redeem),
+            patch("apps.users.customer_view_views.api_client.end_session"),
+        ):
+            self.assertEqual(self.redeem().status_code, 303)
+        self.assertEqual(seen, {})
+
     def test_only_platform_s_page_can_hand_over_a_code(self) -> None:
         with patch("apps.users.customer_view_views.api_client.redeem_customer_view") as redeem:
             for origin in ("https://evil.example", "null", ""):
@@ -153,6 +170,15 @@ class GateTests(TestCase):
                 response, view = self.through(self.request(method, path, HTTP_HX_REQUEST="true"))
                 self.assertEqual(response.status_code, 403)
                 view.assert_not_called()
+
+    def test_role_checks_fetch_memberships_without_naming_a_customer(self) -> None:
+        from apps.common.decorators import _fetch_user_memberships  # noqa: PLC0415
+
+        request = self.request("GET", "/billing/invoices/")
+        with patch("apps.common.decorators.api_client.post", return_value={"success": True, "results": []}) as post:
+            _fetch_user_memberships(request)
+        # Platform pins a customer view to one customer; a user id sent as customer_id was refused.
+        self.assertNotIn("customer_id", post.call_args.kwargs["data"])
 
     def test_a_query_naming_another_customer_is_refused(self) -> None:
         response, view = self.through(self.request("GET", "/billing/invoices/?customer_id=8"))

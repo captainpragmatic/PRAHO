@@ -25,6 +25,7 @@ from django.contrib.auth import SESSION_KEY
 from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
@@ -89,8 +90,13 @@ def _staff_session_live(staff: User, session_key: str, now: datetime) -> bool:
     return str(data.get(SESSION_KEY)) == str(staff.pk) and bool(data.get(MFA_LOGIN_MARKER))
 
 
-def staff_blockers(staff: User, session_key: str, now: datetime | None = None) -> list[CustomerViewBlocked]:
-    """Why this staff member cannot open a customer view now; empty when they can."""
+def staff_blockers(
+    staff: User, session_key: str, now: datetime | None = None, *, issuing: bool = True
+) -> list[CustomerViewBlocked]:
+    """Why this staff member cannot open a customer view now; empty when they can.
+
+    The hourly quota counts grants being issued; redeeming one or using an open view never does.
+    """
     now = now or timezone.now()
     blockers: list[CustomerViewBlocked] = []
     if not enabled():
@@ -111,7 +117,9 @@ def staff_blockers(staff: User, session_key: str, now: datetime | None = None) -
                 reverse("users:logout"),
             )
         )
-    recent = CustomerViewGrant.objects.filter(staff=staff, created_at__gt=now - timedelta(hours=1)).count()
+    recent = (
+        CustomerViewGrant.objects.filter(staff=staff, created_at__gt=now - timedelta(hours=1)).count() if issuing else 0
+    )
     if recent >= HOURLY_LIMIT:
         blockers.append(
             CustomerViewBlocked("rate_limited", _("You opened 20 customer views in the last hour. Try again later."))
@@ -121,7 +129,7 @@ def staff_blockers(staff: User, session_key: str, now: datetime | None = None) -
 
 def target_refusal(target: User, customer: Customer) -> str:
     """Why this member's portal cannot be opened, or an empty string."""
-    if customer.status not in CUSTOMER_STATUSES:
+    if customer.status not in CUSTOMER_STATUSES or getattr(customer, "deleted_at", None) is not None:
         return _("Only an active customer's portal can be opened.")
     if not target.is_active or target.is_staff_user:
         return _("Only an active customer member who is not staff can be viewed.")
@@ -136,7 +144,7 @@ def _lock_authority(staff_id: int, target_id: int, customer_id: int) -> tuple[Us
 
     users = {
         user.pk: user
-        for user in User.objects.select_for_update(no_key=True)
+        for user in User.objects.select_for_update(no_key=True, of=("self",))
         .select_related("credential_version")
         .filter(pk__in={staff_id, target_id})
         .order_by("pk")
@@ -246,7 +254,7 @@ def consume(code: object) -> PortalSession:
         grant = CustomerViewGrant.objects.select_for_update().get(pk=candidate.pk)
         now = timezone.now()
         if (
-            staff_blockers(staff, grant.staff_session_key, now)
+            staff_blockers(staff, grant.staff_session_key, now, issuing=False)
             or target_refusal(target, customer)
             or not constant_time_compare(grant.staff_credential_snapshot, staff.get_session_auth_hash())
             or not constant_time_compare(grant.target_credential_snapshot, target.get_session_auth_hash())
@@ -317,8 +325,7 @@ def nonlive_reason(row: PortalSession, now: datetime | None = None) -> str:
         return "disabled"
     if staff is None or grant is None or customer is None:
         return "authority_changed"
-    # The hourly issue limit governs new grants, not a view already open.
-    if any(blocker.code != "rate_limited" for blocker in staff_blockers(staff, grant.staff_session_key, now)):
+    if staff_blockers(staff, grant.staff_session_key, now, issuing=False):
         return "authority_changed"
     if not constant_time_compare(row.staff_credential_snapshot, staff.get_session_auth_hash()):
         return "credentials_changed"
@@ -327,13 +334,18 @@ def nonlive_reason(row: PortalSession, now: datetime | None = None) -> str:
     return ""
 
 
-def end_customer_view(row: PortalSession, reason: str) -> bool:
-    """End one customer view once, with its audit event in the same transaction."""
+def end_customer_view(row: PortalSession, reason: str, *, only_if_expired: bool = False) -> bool:
+    """End one customer view once, with its audit event in the same transaction.
+
+    only_if_expired re-checks the deadlines in the update itself, so a request that renewed the
+    view after the caller read it keeps it.
+    """
     with transaction.atomic():
         now = timezone.now()
-        changed = PortalSession.objects.filter(
-            pk=row.pk, tier=PortalSession.TIER_CUSTOMER_VIEW, revoked_at__isnull=True
-        ).update(revoked_at=now, revoke_reason=reason)
+        rows = PortalSession.objects.filter(pk=row.pk, tier=PortalSession.TIER_CUSTOMER_VIEW, revoked_at__isnull=True)
+        if only_if_expired:
+            rows = rows.filter(Q(expires_at__lte=now) | Q(idle_deadline__lte=now))
+        changed = rows.update(revoked_at=now, revoke_reason=reason)
         if changed:
             row.revoked_at, row.revoke_reason = now, reason
             _audit(
@@ -360,7 +372,7 @@ def sweep(now: datetime | None = None) -> int:
             with transaction.atomic():
                 expired = row.expires_at <= now or row.idle_deadline <= now
                 why = "expired" if expired else nonlive_reason(row, now)
-                if why and end_customer_view(row, why):
+                if why and end_customer_view(row, why, only_if_expired=expired):
                     ended += 1
         except Exception:
             logger.exception("🔥 [CustomerView] Sweep could not end a customer view")

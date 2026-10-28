@@ -104,7 +104,6 @@ def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
         response = api_client.post(
             "users/customers/",
             data={
-                "customer_id": user_id,  # Note: Platform expects customer_id field, not user_id
                 "action": "get_user_customers",
                 "timestamp": int(timezone.now().timestamp()),
             },

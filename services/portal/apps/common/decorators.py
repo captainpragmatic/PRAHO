@@ -94,10 +94,7 @@ def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, object]]:
     try:
         response = api_client.post(
             "users/customers/",
-            data={
-                "customer_id": user_id,
-                "action": "get_user_customers",
-            },
+            data={"action": "get_user_customers"},
             user_id=user_id,
         )
         success = response.get("success") if isinstance(response, dict) else None

@@ -118,10 +118,11 @@ class IssueTests(CustomerViewFixture):
         self.assertEqual(response.status_code, 403)
 
     def test_twenty_grants_an_hour(self) -> None:
-        for _ in range(customer_view.HOURLY_LIMIT):
-            self.issue()
+        codes = [self.issue() for _ in range(customer_view.HOURLY_LIMIT)]
         response = self.client.post(self.start_url(), {"reason_category": "support_request", "reason": "x" * 20})
         self.assertEqual(response.status_code, 403)
+        # The quota limits issuing; the twentieth grant issued is still redeemable.
+        self.assertEqual(customer_view.consume(codes[-1]).tier, PortalSession.TIER_CUSTOMER_VIEW)
 
 
 def transaction_savepoint() -> str:
@@ -270,6 +271,7 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
                 is_active=False
             ),
             "customer suspended": lambda: Customer.objects.filter(pk=self.customer.pk).update(status="suspended"),
+            "customer deleted": lambda: Customer.objects.filter(pk=self.customer.pk).update(deleted_at=timezone.now()),
             "target credential changed": lambda: User.objects.filter(pk=self.target.pk).update(password="changed"),
         }
         for label, break_it in breakers.items():
@@ -304,8 +306,11 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
         self.call("/api/users/customers/", {"interactive": False})
         self.row.refresh_from_db()
         self.assertEqual(self.row.last_seen_at, stale)
+        before = timezone.now()
         self.call("/api/users/customers/", {"interactive": True})
         self.row.refresh_from_db()
+        self.assertGreaterEqual(self.row.last_seen_at, before)  # the touch happened
+        self.assertGreater(self.row.idle_deadline, stale + timedelta(minutes=10))  # and extended idle
         self.assertLessEqual(self.row.idle_deadline - self.row.last_seen_at, customer_view.IDLE_TIMEOUT)
 
     def test_the_sweep_ends_unusable_views_and_voids_stale_grants(self) -> None:
