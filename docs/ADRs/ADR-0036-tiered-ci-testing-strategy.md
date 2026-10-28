@@ -34,10 +34,10 @@ Every pull request to `master` runs, with no paths filter on any required workfl
 | `portal.yml` | `portal-test`, `portal-server` | portal unit tests and coverage floor, mypy, prod-settings server acceptance |
 | `integration.yml` | `lint-and-quality`, `integration-test` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking), cross-service, cache, isolation and deploy tests on PostgreSQL |
 | `browser.yml` | `browser-e2e`, `browser-csp` | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
-| `virtualmin-lab.yml` | `pull-request` | the lab suites on the pinned Virtualmin, when `scripts/ci_lab_needed.py` says the change can reach them (it fails open) |
+| `virtualmin-lab-pr.yml` | `pull-request` | the lab suites on the pinned Virtualmin unless every changed path is known not to reach them (`scripts/ci_lab_needed.py`, the base branch's copy; it fails open) |
 | `dco-check.yml` | `dco` | sign-off on every commit |
 
-`.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), requires the branch to be up to date, and allows squash merges only. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. `tests/integration/test_ci_required_checks.py` enforces this.
+`.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), requires the branch to be up to date, and allows squash merges only. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
 
 A new push to a pull request cancels the run on its previous head (`concurrency` with `cancel-in-progress` on `pull_request` only).
 
@@ -49,14 +49,14 @@ Locally, contributors and agents run only what takes seconds on what they touche
 
 `nightly.yml` runs at 02:30 UTC when there was activity: the whole platform suite on PostgreSQL (`make test-platform-postgres-full`), the full suite with coverage, integration, cache and security suites on PostgreSQL, types, Semgrep against the staging release, and the browser suite with server-side coverage. `virtualmin-lab.yml` runs the full lab nightly and a drift run against the latest Virtualmin.
 
-`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). It confirms that the commit's pull request passed every required check, then runs only what pull requests cannot afford, on that exact SHA: the whole platform suite on PostgreSQL and the full Virtualmin lab. On success it posts the commit status `release-candidate`.
+`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the commit's pull request passed every required check on exactly the commit's tree, then the workflow runs only what pull requests cannot afford, on that SHA: the whole platform suite on PostgreSQL and the full Virtualmin lab. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
 
 ### Promotion to staging
 
 `staging` is a pointer to what fi-staging runs, never a branch anyone merges into. Commits flow one way: pull request → `master` → release candidate → staging → (later) production.
 
 1. Run the release candidate and wait (an hour or more, mostly the lab). A red run changes nothing: fix it through a pull request and start a new candidate.
-2. From an approved operator IP: `make promote-staging SHA=<sha>` (`DRY_RUN=1` to see the checks only). It refuses a commit that is not on `master` or lacks the green status, deploys with `make deploy-staging VERSION=<sha>`, and only then fast-forwards `staging` (`--rollback` deploys an older approved commit).
+2. From an approved operator IP: `make promote-staging SHA=<sha>` (`DRY_RUN=1` to see the checks only). It refuses a commit that is not on `master` or has no successful release-candidate run from `master`'s copy of the workflow, deploys from a clean detached checkout of that commit (git deploy only), and only then fast-forwards `staging` (`--rollback` deploys an older approved commit).
 3. Accept on staging and record the deployed SHA.
 
 A release candidate is not a GitHub Release: a `v*` tag publishes one. For production the order will be release candidate → staging accepted → tag that same commit → deploy the tag. `.github/rulesets/staging.json` and `release-tags.json` restrict both refs to the owner.
@@ -72,7 +72,8 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 | File | Purpose |
 |------|---------|
 | `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request, required |
-| `.github/workflows/virtualmin-lab.yml` | Tier 1 when relevant; nightly full and drift runs; the release candidate's lab |
+| `.github/workflows/virtualmin-lab-pr.yml` | Tier 1 when relevant, required |
+| `.github/workflows/virtualmin-lab.yml` | Nightly full and drift runs; the release candidate's lab |
 | `.github/workflows/nightly.yml` | Tier 2 — scheduled nightly |
 | `.github/workflows/release-candidate.yml` | Tier 2 — the release gate before staging |
 | `.github/rulesets/*.json` | Branch and tag rules, applied with `gh api` (see that directory's README) |

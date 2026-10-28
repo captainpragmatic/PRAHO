@@ -184,7 +184,12 @@ jobs:
         DB_USER: test
         DB_PASSWORD: test
         DB_HOST: localhost
-      run: make test-platform-postgres-full
+      # Spelled out rather than `make test-platform-postgres-full`: the staging leg runs staging's own
+      # Makefile, which can predate that target.
+      run: |
+        cd services/platform
+        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test tests \
+          --settings=config.settings.ci --parallel --verbosity=1 --noinput
 
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |

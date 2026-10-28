@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Release candidates and promotion to staging.** `release-candidate.yml` (dispatched on a `master` commit, blank = the current tip) confirms the commit's pull request passed every required check, then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that exact SHA and marks it `release-candidate`. `make promote-staging SHA=<sha>` deploys only such a commit and then fast-forwards `staging`, so the branch always names what staging runs. See `docs/deployment/DEPLOYMENT.md`.
+- **Release candidates and promotion to staging.** `release-candidate.yml` (dispatched on a `master` commit, blank = the current tip) confirms the commit's pull request passed every required check on exactly the commit's tree, then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that SHA. `make promote-staging SHA=<sha>` deploys only a commit with such a successful run, from a clean checkout of it, and then fast-forwards `staging`, so the branch always names what staging runs. See `docs/deployment/DEPLOYMENT.md`.
 
 ### Changed
 

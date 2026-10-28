@@ -534,16 +534,20 @@ pull request → `master` → release candidate → staging → (later) producti
 1. **Run the release candidate.** Actions → *Release candidate* → *Run workflow*, or
    `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank SHA means
    the current `master` commit; the run title names it. The run checks that the
-   commit's pull request passed every required check, then runs the whole platform
-   suite on PostgreSQL and the full Virtualmin lab on that SHA. Expect an hour or more.
-   On success the commit gets the status `release-candidate`.
+   commit's pull request passed every required check on exactly the commit's tree,
+   then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that
+   SHA. Expect an hour or more. On success the commit shows the status
+   `release-candidate`.
 2. **If it is red,** staging is untouched: fix it through a pull request into `master`
    and start a new candidate.
 3. **If it is green,** from an approved operator IP:
    `make promote-staging SHA=<sha>` (add `DRY_RUN=1` to see the checks only). It
-   refuses a commit that is not on `master` or lacks the green status, deploys with
-   `make deploy-staging VERSION=<sha>` (environment/DNS and HTTP/HTTPS checks
-   included), and only after a successful deploy fast-forwards `staging`.
+   refuses a commit that is not on `master` or has no successful release-candidate run
+   from `master`'s copy of the workflow (the run is the proof, not the status, which
+   anyone who can push could post). It deploys from a clean detached checkout of that
+   commit, so the playbooks and templates are the reviewed ones (environment/DNS and
+   HTTP/HTTPS checks included), refuses any `DEPLOY_METHOD` but git, and only after a
+   successful deploy fast-forwards `staging`. Promote from one machine at a time.
    `scripts/promote_staging.sh --rollback <sha>` deploys an older approved release
    and moves the branch back.
 4. **Accept it on staging,** then record the deployed SHA.

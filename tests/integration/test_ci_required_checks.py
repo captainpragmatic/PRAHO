@@ -30,7 +30,10 @@ RULESETS = REPO / ".github" / "rulesets"
 GITHUB_ACTIONS_APP_ID = 15368
 
 # Jobs allowed an `if:` because skipping them is the selection itself, and it fails open.
-SELECTIVE_JOBS = {"pull-request": "!cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.lab != 'false'"}
+SELECTIVE_JOBS = {"pull-request": "!cancelled() && needs.changes.outputs.lab != 'false'"}
+# A required job whose steps branch on the event: the PR runs a focused subset first, then everything.
+STEP_CONDITIONS_ALLOWED = {"platform-test"}
+STEP_CONDITIONS_ALWAYS_OK = {"always()", "failure()"}
 
 
 def load_workflow(path: Path) -> dict[str, Any]:
@@ -57,9 +60,12 @@ def pull_request_jobs() -> dict[str, tuple[str, dict[str, Any]]]:
             continue
         if "master" not in trigger.get("branches", ["master"]):
             continue
+        types = trigger.get("types")
+        assert types is None or "synchronize" in types, f"{path.name}: a new push must re-run its checks"
         for job_id, job in workflow["jobs"].items():
-            assert job_id not in jobs, f"job id {job_id} appears in two PR workflows: its check is ambiguous"
-            jobs[job_id] = (path.name, job)
+            name = job.get("name", job_id)
+            assert name not in jobs, f"check {name} appears in two PR workflows: it is ambiguous"
+            jobs[name] = (path.name, job)
     return jobs
 
 
@@ -89,10 +95,28 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
     assert "continue-on-error" not in job, f"{workflow}:{context} may fail and still pass"
     for step in job.get("steps", []):
         assert "continue-on-error" not in step, f"{workflow}:{context} step {step.get('name')} may fail silently"
+    assert "strategy" not in job, f"{workflow}:{context}: a matrix renames the check, which then never reports"
     if context in SELECTIVE_JOBS:
-        assert SELECTIVE_JOBS[context] in job["if"], f"{workflow}:{context} must skip only on an explicit 'false'"
+        assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
     else:
         assert "if" not in job, f"{workflow}:{context} can be skipped, and a skipped job reports success"
+    if context not in STEP_CONDITIONS_ALLOWED:
+        for step in job.get("steps", []):
+            condition = step.get("if")
+            assert condition is None or condition in STEP_CONDITIONS_ALWAYS_OK, (
+                f"{workflow}:{context} step {step.get('name')} runs only `if: {condition}`: the check can pass without it"
+            )
+
+
+def test_no_other_job_can_stand_in_for_a_required_check() -> None:
+    # A same-named job in another workflow (a dispatch, a schedule, the release candidate) adds a check
+    # run with that name to the commit, and a skipped one reads as success.
+    owners = {name: workflow for name, (workflow, _) in pull_request_jobs().items()}
+    for path in WORKFLOWS.glob("*.yml"):
+        for job_id, job in load_workflow(path)["jobs"].items():
+            name = job.get("name", job_id)
+            if name in owners:
+                assert owners[name] == path.name, f"{path.name}:{job_id} shares the required check name {name}"
 
 
 def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
@@ -118,7 +142,10 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         (["services/platform/apps/users/models.py"], True),
         (["docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md"], False),
         (["services/portal/apps/billing/views.py", "README.md"], False),
-        (["README.md", "deploy/virtualmin-lab/README.md"], True),
+        (["README.md", "deploy/virtualmin-lab/compose.yml"], True),
+        # Imported by provisioning, and nobody had listed them: an allowlist of what reaches the lab goes stale.
+        (["services/platform/apps/orders/tasks.py", "services/platform/apps/tickets/models.py"], True),
+        (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py", ".github/rulesets/master.json"], False),
     ],
 )
 def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> None:
@@ -134,9 +161,10 @@ class TestReleaseCandidate:
         script = str(self.jobs["resolve"]["steps"])
         assert 'refs/heads/master' in script and "merge-base --is-ancestor" in script
 
-    def test_the_candidate_must_have_the_tree_its_pull_request_tested(self) -> None:
-        script = str(self.jobs["resolve"]["steps"])
-        assert 'git rev-parse "$SHA^{tree}"' in script and 'git rev-parse "$head^{tree}"' in script
+    def test_the_candidate_is_verified_by_the_tested_script(self) -> None:
+        # tests/integration/test_verify_release_candidate.py drives the script's decisions.
+        runs = [step.get("run", "") for step in self.jobs["resolve"]["steps"]]
+        assert 'python3 scripts/verify_release_candidate.py "$SHA"' in runs
 
     def test_every_job_tests_the_resolved_candidate(self) -> None:
         for job_id, job in self.jobs.items():

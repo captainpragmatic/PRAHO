@@ -14,8 +14,10 @@
 # When both pass, `record` posts the commit status `release-candidate` = success, which
 # `make promote-staging SHA=<sha>` requires before it deploys anything.
 #
-# Security: only a master dispatch may vouch for a commit, so a branch cannot record a status with an
-# edited copy of this file. The candidate reaches shell through `env` only.
+# Security: anyone who can push could post a commit status named `release-candidate`, so
+# promote-staging does not trust the status: it requires a successful run of this workflow, titled
+# with the candidate, whose own commit is on master (an edited copy on a branch cannot qualify). The
+# status is for people reading the commit. The candidate reaches shell through `env` only.
 
 name: Release candidate
 
@@ -45,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: read
+      actions: read
       pull-requests: read
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -79,48 +81,17 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "### Release candidate \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
 
-      # Every check master requires, read from the ruleset, must have passed on the PR that produced
-      # the candidate, and on exactly the candidate's tree: an owner bypass can merge a PR whose branch
-      # was behind master, and its squash commit then holds code those checks never saw. A check that
-      # never reported counts as failed.
+      # The PR that produced the candidate must have passed every check master requires, on exactly
+      # the candidate's tree, read per workflow from its pull_request runs (scripts/verify_release_candidate.py
+      # says why each rule exists; tests/integration/test_verify_release_candidate.py pins them).
       - name: The candidate's pull request passed every required check on the same tree
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
           SHA: ${{ steps.resolve.outputs.sha }}
-        run: |
-          set -euo pipefail
-          pr="$(gh api "repos/$REPO/commits/$SHA/pulls" \
-            --jq '[.[] | select(.merged_at != null and .base.ref == "master")][0].number // empty')"
-          if [ -z "$pr" ]; then
-            echo "::error::$SHA did not come from a merged pull request into master."
-            exit 1
-          fi
-          head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha')"
-          git fetch --quiet origin "pull/$pr/head"
-          if [ "$(git rev-parse "$SHA^{tree}")" != "$(git rev-parse "$head^{tree}")" ]; then
-            echo "::error::PR #$pr's final head ($head) does not have the candidate's tree: it was merged while behind master. Land a pull request whose checks ran on the current tree, then release that."
-            exit 1
-          fi
-          # The latest run of each check on the PR's final head.
-          gh api --paginate "repos/$REPO/commits/$head/check-runs?per_page=100" --jq '.check_runs[]' \
-            | jq -s 'group_by(.name) | map(max_by(.id)) | map({(.name): .conclusion}) | add // {}' > "$RUNNER_TEMP/runs.json"
-          failed=0
-          while IFS= read -r context; do
-            conclusion="$(jq -r --arg c "$context" '.[$c] // "missing"' "$RUNNER_TEMP/runs.json")"
-            echo "PR #$pr $context: $conclusion"
-            case "$conclusion" in
-              success|skipped) ;;
-              *) failed=1 ;;
-            esac
-          done < <(jq -r '.rules[] | select(.type == "required_status_checks")
-                          | .parameters.required_status_checks[].context' .github/rulesets/master.json)
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::PR #$pr did not pass every required check on its final head ($head)."
-            exit 1
-          fi
+        run: python3 scripts/verify_release_candidate.py "$SHA"
 
-  platform-postgres:
+  # Not named after a PR check: a same-named job here could stand in for a required check.
+  rc-platform-postgres:
     needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -159,7 +130,7 @@ jobs:
         if: always()
         run: make ci-postgres-stop
 
-  virtualmin-lab:
+  rc-virtualmin-lab:
     needs: resolve
     # The lab workflow declares its scheduled-failure notifier and activity check; a called workflow may
     # only ask for what the caller grants, even for jobs this call skips.
@@ -173,7 +144,7 @@ jobs:
       ref: ${{ needs.resolve.outputs.sha }}
 
   record:
-    needs: [resolve, platform-postgres, virtualmin-lab]
+    needs: [resolve, rc-platform-postgres, rc-virtualmin-lab]
     runs-on: ubuntu-latest
     permissions:
       statuses: write

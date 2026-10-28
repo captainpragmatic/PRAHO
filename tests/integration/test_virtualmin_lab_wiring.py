@@ -21,6 +21,7 @@ pytestmark = pytest.mark.integration
 REPO = Path(__file__).resolve().parents[2]
 MAKEFILE = (REPO / "Makefile").read_text()
 WORKFLOW = yaml.safe_load((REPO / ".github/workflows/virtualmin-lab.yml").read_text())
+PR_WORKFLOW = yaml.safe_load((REPO / ".github/workflows/virtualmin-lab-pr.yml").read_text())
 DOCKERFILE = (REPO / "deploy/virtualmin-lab/virtualmin/Dockerfile").read_text()
 
 # The targets a developer or CI runs without opting in to the lab.
@@ -66,11 +67,15 @@ def on_block() -> dict[str, Any]:
 def test_pull_requests_run_the_lab_when_a_change_can_break_it() -> None:
     # `pull-request` is a required check: a workflow skipped by a paths filter never reports, so the
     # selection lives in a job, and the job it gates reports success when skipped.
-    assert "paths" not in on_block()["pull_request"]
-    jobs = WORKFLOW["jobs"]
-    assert "scripts/ci_lab_needed.py" in str(jobs["changes"]["steps"])
+    pr_on = PR_WORKFLOW[True] if True in PR_WORKFLOW else PR_WORKFLOW["on"]
+    assert list(pr_on) == ["pull_request"] and "paths" not in pr_on["pull_request"]
+    assert "pull_request" not in on_block(), "the nightly workflow must not also hold a job named pull-request"
+    jobs = PR_WORKFLOW["jobs"]
+    # The base branch's rules decide, renames count as both paths, and an unreadable diff runs the lab.
+    decide = str(jobs["changes"]["steps"])
+    assert 'git show "${BASE_SHA}:scripts/ci_lab_needed.py"' in decide and "--no-renames" in decide
     assert jobs["pull-request"]["needs"] == "changes"
-    assert "needs.changes.outputs.lab != 'false'" in jobs["pull-request"]["if"]
+    assert jobs["pull-request"]["if"] == "!cancelled() && needs.changes.outputs.lab != 'false'"
 
     for changed in (
         "services/platform/apps/provisioning/virtualmin_service.py",
@@ -92,7 +97,10 @@ def test_the_workflow_follows_the_nightly_conventions() -> None:
     assert "check-activity" in jobs and "notify-scheduled-failure" in jobs
     assert jobs["notify-scheduled-failure"]["permissions"] == {"issues": "write"}
     assert "make test-virtualmin-lab-full" in str(jobs["nightly-full"]["steps"])
-    assert "make test-virtualmin-lab" in str(jobs["pull-request"]["steps"])
+    assert "make test-virtualmin-lab" in str(PR_WORKFLOW["jobs"]["pull-request"]["steps"])
+    # A release candidate's lab must test the candidate, not the master tip it was dispatched on.
+    checkout = next(step for step in jobs["nightly-full"]["steps"] if "actions/checkout" in str(step.get("uses")))
+    assert checkout["with"]["ref"] == "${{ inputs.ref }}"
     assert "make test-virtualmin-drift" in str(jobs["nightly-drift"]["steps"])
     assert set(jobs["nightly-drift"]["strategy"]["matrix"]["runner"]) == {"ubuntu-latest", "ubuntu-24.04-arm"}
 

@@ -208,8 +208,8 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
-    # Blocking: any medium-or-higher finding fails the job (services/platform/.bandit holds the
-    # thresholds). A finding that is safe by construction carries an inline `# nosec <id> - <reason>`.
+    # Blocking: any finding of medium-or-higher severity and confidence (-ll -ii) fails the job. A finding
+    # that is safe by construction carries an inline `# nosec <id> - <reason>`.
     - name: Run Bandit SAST Security Scan
       run: |
         cd services/platform
