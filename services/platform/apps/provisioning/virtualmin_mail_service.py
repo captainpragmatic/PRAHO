@@ -27,6 +27,7 @@ MAIL_PROFILES = frozenset({MAIL_PROFILE, "ubuntu2604-dovecot24"})
 MAIL_INSPECT_TIMEOUT_SECONDS = 120
 MAIL_SETUP_TIMEOUT_SECONDS = 900
 MAIL_CERTIFICATE_TIMEOUT_SECONDS = 900
+MAIL_BUNDLE_TIMEOUT_SECONDS = 300
 MAX_MAIL_USERS = 1000
 MAX_RESERVED_ACCOUNT_ZONES = 64
 MAX_MAIL_ALIASES = 2000
@@ -55,6 +56,10 @@ _SAFE_ERRORS = frozenset(
         "mail_node_certificate_unproven",
         "mail_setup_review_required",
         "mail_unrelated_configuration_changed",
+        "mail_node_operation_in_progress",
+        "mail_node_services_unavailable",
+        "mail_node_bundle_upgrade_required",
+        "mail_node_bundle_incompatible",
     }
 )
 _PERMANENT_ERRORS = frozenset(
@@ -65,8 +70,14 @@ _PERMANENT_ERRORS = frozenset(
         "mail_domain_identity_mismatch",
         "mail_setup_review_required",
         "mail_unrelated_configuration_changed",
+        "mail_node_bundle_upgrade_required",
+        "mail_node_bundle_incompatible",
     }
 )
+# The node refuses these before any write; the caller replays its own persisted operation id.
+_RETRIABLE_ERRORS = frozenset({"mail_node_operation_in_progress", "mail_node_services_unavailable"})
+# An unproven candidate is refused before staging only at these (action, stage) points.
+_CANDIDATE_STAGES = frozenset({("setup", "node_certificate"), ("reconcile_node_certificate", "certificate_candidate")})
 
 
 @dataclass(frozen=True)
@@ -85,10 +96,18 @@ class MailNodeCertificateObservation:
     configured: bool
     default_mail_off: bool
     public_ports: tuple[int, ...]
-    outcome: Literal["unchanged", "replaced", "retained_previous"]
+    outcome: Literal["unchanged", "replaced", "retained_previous", "recovered"]
     certificate_sha256: str
     not_after: datetime
     pending_code: str
+
+
+@dataclass(frozen=True)
+class MailNodeBundleObservation:
+    node_hostname: str
+    profile: str
+    outcome: Literal["upgraded", "unchanged"]
+    bundle_sha256: str
 
 
 @dataclass(frozen=True)
@@ -243,10 +262,8 @@ def _read_receipt(stdout: str, identity: str, action: str, hostname: str) -> Res
         error = payload.get("error")
         if error is not None:
             code = error if error in _SAFE_ERRORS else "mail_native_inspection_failed"
-            if (
-                code == "mail_node_certificate_unproven"
-                and action == "setup"
-                and payload.get("stage") == "node_certificate"
+            if code in _RETRIABLE_ERRORS or (
+                code == "mail_node_certificate_unproven" and (action, payload.get("stage")) in _CANDIDATE_STAGES
             ):
                 return Err(code, retriability=Retriability.RETRIABLE)
             return Err(
@@ -293,6 +310,7 @@ def _run(
         timeout_seconds={
             "setup": MAIL_SETUP_TIMEOUT_SECONDS,
             "reconcile_node_certificate": MAIL_CERTIFICATE_TIMEOUT_SECONDS,
+            "upgrade_bundle": MAIL_BUNDLE_TIMEOUT_SECONDS,
         }.get(action, MAIL_INSPECT_TIMEOUT_SECONDS),
     )
     if result.is_err() or not result.unwrap().success:
@@ -340,9 +358,12 @@ def inspect_mail_node(server: VirtualminServer) -> Result[MailNodeObservation, s
 
 
 def reconcile_mail_node_certificate(
-    server: VirtualminServer, *, operation_id: UUID | None = None
+    server: VirtualminServer, *, operation_id: UUID
 ) -> Result[MailNodeCertificateObservation, str]:
-    """Reconcile only verified node TLS; a completed identity cannot reinstall an old certificate."""
+    """Reconcile or recover only verified node TLS; a completed identity cannot reinstall an old certificate.
+
+    Persist ``operation_id`` before dispatch and replay that same id whenever the result is UNKNOWN.
+    """
     response = _run(server, "reconcile_node_certificate", operation_id=operation_id)
     if response.is_err():
         return Err(response.unwrap_err(), retriability=retriability_of(response))
@@ -360,6 +381,7 @@ def reconcile_mail_node_certificate(
         if (outcome, pending) not in {
             ("unchanged", ""),
             ("replaced", ""),
+            ("recovered", ""),
             ("retained_previous", "mail_node_certificate_unproven"),
         }:
             raise ValueError("unproven certificate outcome")
@@ -370,10 +392,36 @@ def reconcile_mail_node_certificate(
                 True,
                 True,
                 observed.public_ports,
-                cast(Literal["unchanged", "replaced", "retained_previous"], outcome),
+                cast(Literal["unchanged", "replaced", "retained_previous", "recovered"], outcome),
                 digest,
                 expiry.astimezone(UTC),
                 pending,
+            )
+        )
+    except (ValueError, TypeError, KeyError):
+        return Err("mail_native_result_uncertain", retriability=Retriability.UNKNOWN)
+
+
+def upgrade_mail_node_bundle(server: VirtualminServer, *, operation_id: UUID) -> Result[MailNodeBundleObservation, str]:
+    """Upgrade only the installed native helpers and unit drop-ins of a ready node.
+
+    Persist ``operation_id`` before dispatch and replay that same id whenever the result is UNKNOWN.
+    """
+    response = _run(server, "upgrade_bundle", operation_id=operation_id)
+    if response.is_err():
+        return Err(response.unwrap_err(), retriability=retriability_of(response))
+    try:
+        data = response.unwrap()
+        outcome = _text(data.get("outcome"), 16)
+        digest = _text(data.get("bundle_sha256"), 64)
+        if outcome not in {"upgraded", "unchanged"} or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("unproven bundle outcome")
+        return Ok(
+            MailNodeBundleObservation(
+                _hostname(data["node_hostname"]),
+                _text(data["profile"]),
+                cast(Literal["upgraded", "unchanged"], outcome),
+                digest,
             )
         )
     except (ValueError, TypeError, KeyError):

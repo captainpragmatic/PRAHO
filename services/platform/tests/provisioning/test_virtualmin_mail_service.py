@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from apps.common.types import Err, Ok, Retriability, retriability_of
@@ -370,7 +373,10 @@ class MailNativeReceiptTests(SimpleTestCase):
             "pending_code": "mail_node_certificate_unproven",
         }
         self.payload = dict(base)
-        self.assertEqual(mail.reconcile_mail_node_certificate(self.server).unwrap().outcome, "retained_previous")
+        self.assertEqual(
+            mail.reconcile_mail_node_certificate(self.server, operation_id=uuid4()).unwrap().outcome,
+            "retained_previous",
+        )
         for changes in (
             {"configured": False},
             {"pending_code": "raw provider detail"},
@@ -381,4 +387,99 @@ class MailNativeReceiptTests(SimpleTestCase):
         ):
             with self.subTest(changes=changes):
                 self.payload = {**base, **changes}
-                self.assertTrue(mail.reconcile_mail_node_certificate(self.server).is_err())
+                self.assertTrue(mail.reconcile_mail_node_certificate(self.server, operation_id=uuid4()).is_err())
+
+    def certificate_payload(self, **changes):
+        return {
+            "node_hostname": self.server.hostname,
+            "profile": mail.MAIL_PROFILE,
+            "configured": True,
+            "default_mail_off": True,
+            "public_ports": [25, 465, 993, 995],
+            "outcome": "recovered",
+            "certificate_sha256": "a" * 64,
+            "not_after": (datetime.now(UTC) + timedelta(days=20)).isoformat(),
+            "pending_code": "",
+            **changes,
+        }
+
+    def test_recovered_is_a_typed_success_only_with_live_proof(self):
+        self.payload = self.certificate_payload()
+        observed = mail.reconcile_mail_node_certificate(self.server, operation_id=uuid4()).unwrap()
+        self.assertEqual((observed.outcome, observed.pending_code), ("recovered", ""))
+        for changes in (
+            {"pending_code": "mail_node_certificate_unproven"},
+            {"public_ports": [25]},
+            {"not_after": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()},
+            {"configured": False},
+        ):
+            with self.subTest(changes=changes):
+                self.payload = self.certificate_payload(**changes)
+                result = mail.reconcile_mail_node_certificate(self.server, operation_id=uuid4())
+                self.assertEqual(result.unwrap_err(), "mail_native_result_uncertain")
+
+    def test_certificate_and_bundle_operations_require_a_persisted_identity(self):
+        for operation in (mail.reconcile_mail_node_certificate, mail.upgrade_mail_node_bundle):
+            with self.subTest(operation=operation.__name__), self.assertRaises(TypeError):
+                operation(self.server)
+        self.runner.run_playbook.assert_not_called()
+
+    def test_recovery_and_upgrade_refusals_carry_fixed_retry_classes(self):
+        reconcile = mail.reconcile_mail_node_certificate
+        upgrade = mail.upgrade_mail_node_bundle
+        for operation, code, stage, expected in (
+            (reconcile, "mail_node_operation_in_progress", "certificate_preflight", Retriability.RETRIABLE),
+            (upgrade, "mail_node_operation_in_progress", "bundle_preflight", Retriability.RETRIABLE),
+            (reconcile, "mail_node_services_unavailable", "certificate_preflight", Retriability.RETRIABLE),
+            (reconcile, "mail_node_certificate_unproven", "certificate_candidate", Retriability.RETRIABLE),
+            (reconcile, "mail_node_certificate_unproven", "certificate_verification", Retriability.UNKNOWN),
+            (reconcile, "mail_node_certificate_unproven", "node_certificate", Retriability.UNKNOWN),
+            (reconcile, "mail_node_bundle_upgrade_required", "certificate_preflight", Retriability.NOT_RETRIABLE),
+            (upgrade, "mail_node_bundle_incompatible", "bundle_compatibility", Retriability.NOT_RETRIABLE),
+            (upgrade, "mail_setup_review_required", "bundle_resume", Retriability.NOT_RETRIABLE),
+        ):
+            with self.subTest(operation=operation.__name__, code=code, stage=stage):
+                self.payload = {"error": code, "stage": stage}
+                result = operation(self.server, operation_id=uuid4())
+                self.assertEqual(result.unwrap_err(), code)
+                self.assertEqual(retriability_of(result), expected)
+
+    def test_bundle_upgrade_is_typed_and_bound_to_the_persisted_operation(self):
+        operation_id = uuid4()
+        self.payload = {
+            "node_hostname": self.server.hostname,
+            "profile": "ubuntu2604-dovecot24",
+            "outcome": "upgraded",
+            "bundle_sha256": "b" * 64,
+            "private_key": "secret fixture",
+        }
+        observed = mail.upgrade_mail_node_bundle(self.server, operation_id=operation_id).unwrap()
+        self.assertEqual(
+            asdict(observed),
+            {
+                "node_hostname": self.server.hostname,
+                "profile": "ubuntu2604-dovecot24",
+                "outcome": "upgraded",
+                "bundle_sha256": "b" * 64,
+            },
+        )
+        self.assertEqual(self.variables["mail_action"], "upgrade_bundle")
+        self.assertEqual(self.variables["mail_operation_id"], str(operation_id))
+        self.assertGreater(self.runner.run_playbook.call_args.kwargs["timeout_seconds"], 120)
+        base = dict(self.payload)
+        for changes in (
+            {"outcome": "replaced"},
+            {"bundle_sha256": "not a digest"},
+            {"node_hostname": "other.example"},
+            {"profile": "debian13-dovecot24"},
+        ):
+            with self.subTest(changes=changes):
+                self.payload = {**base, **changes}
+                self.assertTrue(mail.upgrade_mail_node_bundle(self.server, operation_id=uuid4()).is_err())
+
+    def test_every_native_public_code_is_a_known_platform_code(self):
+        helper = Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files/praho-mail.py"
+        specification = importlib.util.spec_from_file_location("mail_public_codes", helper)
+        native = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(native)
+        self.assertLessEqual(native.PUBLIC_ERRORS, mail._SAFE_ERRORS)
