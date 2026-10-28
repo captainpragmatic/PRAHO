@@ -2,11 +2,12 @@
 Platform API Client (Portal → Platform)
 
 Security guidelines for all requests:
-- Customer/user-scoped endpoints carry an HMAC-signed JSON body with 'user_id'
-  and, for customer-scoped calls, 'customer_id'. Most use POST; the explicit
-  read-only mail-status GET uses the same signed identity body. Do not put
-  identities in URL or query parameters (prevents ID enumeration).
-- Public GET resources (e.g., service plans, currencies) need no customer context.
+- Customer/user-scoped endpoints MUST use POST with an HMAC-signed JSON body
+  that includes identity fields: 'user_id' and, for customer-scoped calls,
+  'customer_id'. Do not put identities in URL or query parameters
+  (prevents ID enumeration).
+- GET is allowed only for public/non-identity resources (e.g., service plans,
+  currencies) where no customer/user context is required.
 - The client automatically injects 'timestamp' (and 'user_id' when provided)
   into the signed body and ensures header/body timestamps match the signature.
 """

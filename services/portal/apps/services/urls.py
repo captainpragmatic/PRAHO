@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import dns_views, mail_views, views
+from . import dns_views, views
 
 app_name = "services"
 
@@ -14,7 +14,6 @@ urlpatterns = [
     path("search/", views.service_search_api, name="search_api"),
     path("<int:service_id>/", views.service_detail, name="detail"),
     path("<int:service_id>/dns/", dns_views.service_dns, name="dns"),
-    path("<int:service_id>/mail-status/", mail_views.service_mail_status, name="mail_status"),
     path("plans/", views.service_plans, name="plans"),
     # Service management
     path("<int:service_id>/request-action/", views.service_request_action, name="request_action"),

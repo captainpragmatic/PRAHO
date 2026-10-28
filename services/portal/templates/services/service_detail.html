@@ -244,10 +244,6 @@
                   </div>
                 {% endif %}
 
-                <div id="service-mail-status" hx-get="{% url 'services:mail_status' service_id %}" hx-trigger="load" hx-swap="outerHTML" aria-live="polite">
-                  <p class="text-sm text-slate-400">{% trans "Loading mail status…" %}</p>
-                </div>
-
                 <!-- Contact Information -->
                 <div class="bg-slate-700/30 rounded-lg p-6 border border-slate-600/50">
                   <div class="flex items-center space-x-3 mb-4">

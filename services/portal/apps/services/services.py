@@ -2,9 +2,11 @@
 Services API Client (customer-facing "My Services")
 
 Security guidelines:
-- Customer/user-scoped calls carry an HMAC-signed JSON body containing both IDs.
-  Most routes use POST; the explicit read-only mail-status route uses GET with
-  the same signed body. Identity never moves into URL or query parameters.
+- All customer/user-scoped calls MUST use POST with an HMAC-signed JSON body
+  that includes 'user_id' and 'customer_id'. Avoid putting identities in URL
+  or query parameters to prevent ID enumeration.
+- GET is reserved for public/non-identity endpoints (e.g., /api/services/plans/),
+  which accept optional filters but no customer/user identity.
 """
 
 # ===============================================================================
@@ -20,8 +22,6 @@ from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.timezone import is_aware
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-
-from .mail_status import PublicMailStatus, mail_status_receipt
 
 logger = logging.getLogger(__name__)
 
@@ -313,17 +313,6 @@ class ServicesAPIClient(PlatformAPIClient):
             idempotent=True,
         )
         return _dns_status_receipt(response)
-
-    def get_service_mail_status(self, customer_id: int, user_id: int, service_id: int) -> PublicMailStatus:
-        """Read only recorded PRAHO enrollment and public progress under current membership."""
-        response = self._make_request(
-            "GET",
-            f"/services/{service_id}/mail-status/",
-            user_id=user_id,
-            data={"customer_id": customer_id, "user_id": user_id},
-            idempotent=True,
-        )
-        return mail_status_receipt(response)
 
     def recheck_service_dns(self, customer_id: int, user_id: int, service_id: int) -> dict[str, Any]:
         """Request a deduplicated background check under Platform's current membership role."""
