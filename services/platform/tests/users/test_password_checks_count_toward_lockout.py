@@ -11,15 +11,21 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pyotp
 from django.conf import settings
 from django.contrib.auth.hashers import PBKDF2PasswordHasher
 from django.core.cache import cache
+from django.db.models import F
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.customers.models import Customer
+from apps.users import forms as forms_module
+from apps.users.forms import LockedPasswordChangeForm
 from apps.users.mfa import TOTPService
 from apps.users.models import CustomerMembership, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
@@ -207,3 +213,32 @@ class StaffPagePasswordChecksTests(TestCase):
         self.change_password(PASSWORD)  # the right password, while locked
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password(PASSWORD))
+
+    def test_a_lock_landing_after_the_old_password_was_checked_refuses_the_change(self) -> None:
+        real_clean = LockedPasswordChangeForm.clean_old_password
+
+        def checked_then_locked(form: LockedPasswordChangeForm) -> str:
+            value = real_clean(form)
+            User.objects.filter(pk=self.user.pk).update(account_locked_until=timezone.now() + timedelta(minutes=5))
+            return str(value)
+
+        with patch.object(LockedPasswordChangeForm, "clean_old_password", checked_then_locked):
+            self.change_password(PASSWORD)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+        self.assertTrue(self.user.is_account_locked())
+
+    def test_a_failure_recorded_after_the_change_commits_is_kept(self) -> None:
+        self.change_password(WRONG)  # one failure before the change, which the change clears
+        real_apply = forms_module.apply_password_change
+
+        def applied_then_failed_elsewhere(*args: Any, **kwargs: Any) -> User:
+            written = real_apply(*args, **kwargs)
+            User.objects.filter(pk=self.user.pk).update(failed_login_attempts=F("failed_login_attempts") + 1)
+            return written
+
+        with patch.object(forms_module, "apply_password_change", applied_then_failed_elsewhere):
+            response = self.change_password(PASSWORD)
+        self.assertEqual(response.status_code, 302)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.failed_login_attempts, 1)
