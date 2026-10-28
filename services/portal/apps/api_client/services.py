@@ -36,6 +36,7 @@ from django.conf import settings
 from django.utils.encoding import escape_uri_path, repercent_broken_unicode
 from urllib3.util import parse_url
 
+from apps.common import request_context
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 from apps.common.retry_after import coerce_retry_after_seconds
 
@@ -215,6 +216,12 @@ def _resolve_portal_signing_secret() -> str:
     return resolve_signing_secret()
 
 
+def _note_session_refusal(status_code: int, error_data: dict[str, Any]) -> None:
+    """Platform ended the bound session: the auth middleware ends the browser session (ADR-0017)."""
+    if status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN) and error_data.get("active") is False:
+        request_context.mark_rejected()
+
+
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
@@ -379,6 +386,10 @@ class PlatformAPIClient:
         payload: dict[str, Any] = {} if data is None else dict(data)
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
+        if "user_id" in payload:
+            # ADR-0017 section 5: every call made for a customer names the portal session it is for.
+            for key, value in request_context.signed_fields().items():
+                payload.setdefault(key, value)
         if "timestamp" not in payload:
             payload["timestamp"] = int(time.time())
 
@@ -556,6 +567,7 @@ class PlatformAPIClient:
             error_data = {"error": "Invalid response format"}
         if not isinstance(error_data, dict):
             error_data = {"error": str(error_data)}
+        _note_session_refusal(response.status_code, error_data)
 
         error_message = self._extract_error_message(error_data)
         retry_after = self._get_retry_after_seconds(response)
@@ -683,6 +695,7 @@ class PlatformAPIClient:
             error_data = {"error": "Invalid response format"}
         if not isinstance(error_data, dict):
             error_data = {"error": str(error_data)}
+        _note_session_refusal(response.status_code, error_data)
 
         error_message = self._extract_error_message(error_data)
 
@@ -821,6 +834,8 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                     "session_auth_hash": data.get("session_auth_hash"),
+                    # ADR-0017 section 5: the Platform session every later call names.
+                    "session_id": data.get("session_id"),
                 }
             return None
 
@@ -958,6 +973,12 @@ class PlatformAPIClient:
             "/users/session/validate/",
             user_id=int(user_id),
             data=request_data,  # Context in body, signed by HMAC
+        )
+
+    def end_session(self, user_id: int, session_id: str) -> None:
+        """End this portal session on Platform (logout). Raises PlatformAPIError like every call."""
+        self._make_request(
+            "POST", "/users/session/end/", user_id=user_id, data={"user_id": user_id, "session_id": session_id}
         )
 
     # ===============================================================================

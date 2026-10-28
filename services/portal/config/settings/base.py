@@ -119,6 +119,9 @@ DATABASES: dict[str, dict[str, Any]] = {
 # SecurityMiddleware can fingerprint/expire sessions, and server-side
 # revocation is possible. See ADR-0017 addendum for rationale.
 SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
+# ADR-0017 section 5: Platform owns every portal session. A browser session without the id of its
+# Platform session (one from before this release) is ended at its next request.
+PORTAL_SESSION_ID_REQUIRED = True
 
 # Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
 # Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.
