@@ -172,6 +172,7 @@ class Command(BaseCommand):
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import generate_virtualmin_parameter_secret  # noqa: PLC0415
 
         server = VirtualminServer.objects.get(hostname=NODES[0].server_hostname)
         customer, _ = Customer.objects.get_or_create(
@@ -213,6 +214,7 @@ class Command(BaseCommand):
             },
         )
         if created or not account.encrypted_password:
-            account.set_password(secrets.token_urlsafe(18))
+            # The roundtrip sends this as create-domain's pass, so it must pass parameter validation
+            account.set_password(generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(18)))
         account.server = server
         account.save(update_fields=["encrypted_password", "server", "updated_at"])

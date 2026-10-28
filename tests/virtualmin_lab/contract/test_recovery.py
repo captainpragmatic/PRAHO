@@ -20,7 +20,7 @@ from apps.provisioning.virtualmin_migration_service import migration_backup_para
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_pair_restore import run_pair_step
 from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService
-from apps.provisioning.virtualmin_service import create_domain_params
+from apps.provisioning.virtualmin_service import create_domain_params, generate_virtualmin_parameter_secret
 from tests.virtualmin_lab.contract.harness import BACKUP_TIMEOUT, CREATE_TIMEOUT, Lab, RecordingGateway, assert_accepted
 
 DOMAIN = "contractrecovery.praho.test"
@@ -187,7 +187,7 @@ def test_recovery_holds_restored_unix_and_preserves_archived_credentials(lab: La
                 create_domain_params(
                     domain=DOMAIN,
                     username=OWNER,
-                    password=secrets.token_urlsafe(48),
+                    password=generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(48)),
                     template="Default Settings",
                     recovery_seed="contract-recovery-seed",
                     disk_quota_mb=1024,

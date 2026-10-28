@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .virtualmin_gateway import listing_attribute
 from .virtualmin_pair_restore import run_pair_step
-from .virtualmin_service import create_domain_params
+from .virtualmin_service import create_domain_params, generate_virtualmin_parameter_secret
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -165,7 +165,7 @@ def restore_held_target(
         params = create_domain_params(
             domain=migration.account.domain,
             username=migration.account.virtualmin_username,
-            password=secrets.token_urlsafe(48),
+            password=generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(48)),
             template=migration.account.template_name,
             recovery_seed=migration.account.get_recovery_seed(),
             disk_quota_mb=migration.account.disk_quota_mb,
