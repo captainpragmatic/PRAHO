@@ -33,6 +33,8 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django.http import HttpRequest
 
     from .mfa import BrowserOrigin
@@ -135,15 +137,19 @@ class EnrolmentResult:
     user: User | None = None
 
 
-def complete_enrolment(
+def complete_enrolment(  # noqa: PLR0913  # keyword-only enrolment contract
     user_pk: int,
     *,
     password: str,
     code: str,
     request: HttpRequest | None,
     origin: BrowserOrigin | None = None,
+    keep: Callable[[str, str], object] | None = None,
 ) -> EnrolmentResult:
     """Enable TOTP when the password and a code from the pending secret are both right.
+
+    keep, when given, runs inside the same transaction with the session hash from before and
+    after the change, so the caller can keep its own portal session (ADR-0017 section 5).
 
     One transaction, user row first: the password is checked on the locked row, so a password
     changed meanwhile is not accepted; the code may be from the previous 30-second step, as at
@@ -163,7 +169,10 @@ def complete_enrolment(
         secret = row.secret()
         if not locked_user.check_password(password) or not TOTPService.verify_enrolment_code(locked_user, secret, code):
             return EnrolmentResult("incorrect")
+        before = locked_user.get_session_auth_hash()
         _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret, origin=origin)
         row.delete()
         enrolled = User.objects.select_related("credential_version").get(pk=user_pk)
+        if keep is not None:
+            keep(before, enrolled.get_session_auth_hash())
     return EnrolmentResult("enabled", backup_codes, enrolled)

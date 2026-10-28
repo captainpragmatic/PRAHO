@@ -179,6 +179,37 @@ def parse_signed_user_id(value: object) -> int | None:
     return None
 
 
+class AmbiguousSignedBody(ValueError):  # noqa: N818  # a refusal reason, not a programming error
+    """A verified body that the views could read differently from the middleware."""
+
+
+class MalformedSignedUser(AmbiguousSignedBody):
+    """A user_id outside its one accepted spelling: refused as unauthenticated, like the views do."""
+
+
+def parse_signed_body(body: bytes, content_type: str) -> dict[str, object]:
+    """The verified body as the one object every reader will see, or AmbiguousSignedBody.
+
+    The middleware binds identity and the portal session from this parse, and the views read the
+    same bytes again through DRF or json. Anything they could disagree about is refused: a body
+    that is not JSON, is not an object, or repeats a key. An empty body is an empty object.
+    """
+    if not body:
+        return {}
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        raise AmbiguousSignedBody("a non-empty signed body must be application/json")
+    try:
+        data = json.loads(body, object_pairs_hook=_refuse_duplicate_keys)
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        raise AmbiguousSignedBody("malformed or duplicate-key JSON") from exc
+    if not isinstance(data, dict):
+        raise AmbiguousSignedBody("a signed body must be a JSON object")
+    if "user_id" in data and parse_signed_user_id(data["user_id"]) is None:
+        # A view that coerces it itself (int(7.0) is 7) would act for a user the binding never saw.
+        raise MalformedSignedUser("user_id is not in its one accepted spelling")
+    return data
+
+
 def portal_principal(body: bytes) -> str:
     """Who a verified portal request is for: ``user:<id>``, else ``ip:<addr>``, else ``anonymous``.
 

@@ -192,6 +192,8 @@ class PortalHMACTests(TestCase):
     def test_non_json_body_passes_hmac_validation(self):
         # Non-JSON body (e.g., form data) must pass HMAC if the signature is valid.
         # The body-timestamp cross-check was removed; body_hash alone covers integrity.
+        # Since ADR-0017 section 5 the verified request is then refused as ambiguous: DRF would read a
+        # user_id from form data that the middleware's JSON parse never bound to a portal session.
         ts = str(int(time.time()))
         body = b"field=value&other=data"
         method = "POST"
@@ -215,7 +217,9 @@ class PortalHMACTests(TestCase):
 
         middleware_instance = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok", status=200))
         response = middleware_instance(request)
-        self.assertEqual(response.status_code, 200, f"Non-JSON body rejected: {response.content.decode()}")
+        self.assertTrue(getattr(request, "_portal_authenticated", False), "the signature itself must verify")
+        self.assertEqual(response.status_code, 400, response.content.decode())
+        self.assertEqual(json.loads(response.content), {"error": "Invalid request format"})
 
     def test_legacy_auth_middleware_removed(self):
         """PortalServiceAuthMiddleware was removed in favour of PortalServiceHMACMiddleware.

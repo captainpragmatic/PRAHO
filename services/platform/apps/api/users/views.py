@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -61,6 +62,7 @@ from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
+from apps.users import portal_sessions
 from apps.users.mfa import (
     BrowserOrigin,
     MFAService,
@@ -210,6 +212,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 user.account_locked_until = None
                 user.save(update_fields=["failed_login_attempts", "account_locked_until"])
                 session_auth_hash = user.get_session_auth_hash()
+                # ADR-0017 section 5: Platform owns the session; the portal sends its id with every call.
+                portal_session = portal_sessions.open_session(
+                    user, ip=forwarded_ip or client_ip or "", user_agent=str(data.get("client_user_agent", ""))[:500]
+                )
 
         if refusal is not None:
             return _portal_login_refusal(request, user, refusal, forwarded_ip or client_ip, forwarded_ip)
@@ -234,6 +240,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 "success": True,
                 "user": user_data,
                 "session_auth_hash": session_auth_hash,
+                **portal_sessions.deadlines(portal_session).as_payload(),
                 "message": "Authentication successful",
             }
         )
@@ -696,7 +703,9 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
 
             logger.info(f"✅ [Security] Portal {portal_id} session validated (jti: {jti})")
 
+            bound = getattr(request, "portal_session", None)
             response_data = {
+                **(portal_sessions.deadlines(bound).as_payload() if bound is not None else {}),
                 "active": True,
                 "session_auth_hash": current_auth_hash,
                 "membership_hash": membership_hash,
@@ -716,6 +725,41 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
     except Exception as e:
         logger.error(f"🔥 [Security] Session validation error: {type(e).__name__}")
         return _uniform_session_error(security_headers)
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def portal_session_end_api(request: HttpRequest, user: User) -> Response:
+    """End the portal session this signed request names (portal logout, ADR-0017 section 5).
+
+    The HMAC middleware has already resolved the session; a request without one has nothing to
+    end, and answers the same uniform refusal as any other unbound session.
+    """
+    row = getattr(request, "portal_session", None)
+    if row is None:
+        return _uniform_session_error({"Cache-Control": "no-store"})
+    portal_sessions.end(row, portal_sessions.REASON_LOGOUT)
+    response = Response({"success": True, "active": False})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def _keep_calling_session(request: HttpRequest) -> Callable[[str, str], bool]:
+    """Re-stamp the portal session that made its own credential change; every other one ends.
+
+    Call the result inside the transaction that holds the user row lock and writes the change.
+    """
+    row = getattr(request, "portal_session", None)
+
+    def keep(_before: str, new_hash: str) -> bool:
+        # The snapshot this request was bound with, not a hash recomputed after check_password:
+        # a password rehash on a Django upgrade would otherwise end the caller's own session.
+        old_hash = row.credential_snapshot if row is not None else ""
+        return portal_sessions.restamp(row, old_hash=old_hash, new_hash=new_hash)
+
+    return keep
 
 
 def _uniform_session_error(headers: dict[str, Any]) -> Response:
@@ -795,6 +839,7 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
         code=serializer.validated_data["token"],
         request=request,
         origin=_browser_origin(request),
+        keep=_keep_calling_session(request),
     )
     if result.status != "enabled" or result.user is None:
         code, message = _ENROLMENT_REFUSALS.get(result.status, _ENROLMENT_REFUSALS["incorrect"])
@@ -834,8 +879,10 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
             data=request.data, context={"request": request, "user": user, "origin": _browser_origin(request)}
         )
         if serializer.is_valid():
+            before = user.get_session_auth_hash()
             result = serializer.save()
             result["session_auth_hash"] = user.get_session_auth_hash()
+            _keep_calling_session(request)(before, result["session_auth_hash"])
             return Response(result)
         errors = serializer.errors
     # Answered after the transaction ends, not raised inside it, so the failed attempt's audit
@@ -1351,8 +1398,10 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             and not MFAService.verify_mfa_code(user, str(request.data.get("token", "")), request)["success"]
         ):
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
+        before = user.get_session_auth_hash()
         user.set_password(new_password)
         user.save(update_fields=["password"])
+        _keep_calling_session(request)(before, user.get_session_auth_hash())
         discard_pending_totp(user.pk)  # A secret shown before the change must not be confirmable after it.
         notify_credential_change(user.pk, "password_changed")
         SessionSecurityService.invalidate_all_sessions_for_user(user.id)
