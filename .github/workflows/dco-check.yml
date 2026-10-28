@@ -15,7 +15,7 @@ jobs:
 
       - name: Fetch base branch
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1 || true
+          git fetch origin ${{ github.base_ref }} || true
 
       - name: Verify DCO sign-off on all commits
         shell: bash
@@ -23,9 +23,10 @@ jobs:
           set -euo pipefail
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          # Ensure both SHAs are available locally
-          git fetch origin ${BASE_SHA} --depth=1 || true
-          git fetch origin ${HEAD_SHA} --depth=1 || true
+          # Ensure both SHAs are available locally. Never with --depth: a shallow fetch cuts a
+          # commit's parents, so a merge looks like an ordinary commit and the range is the head alone.
+          git fetch origin ${BASE_SHA} || true
+          git fetch origin ${HEAD_SHA} || true
           echo "Checking commits from ${BASE_SHA}..${HEAD_SHA}"
           MISSING=0
           for c in $(git rev-list --no-merges ${BASE_SHA}..${HEAD_SHA}); do
