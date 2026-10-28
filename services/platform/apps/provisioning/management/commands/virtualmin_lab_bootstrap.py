@@ -218,6 +218,9 @@ class Command(BaseCommand):
         # including a password an older bootstrap stored before that was checked
         stored = account.get_password() if not created and account.encrypted_password else ""
         if not stored or SecureInputValidator.first_malicious_pattern(stored) is not None:
-            account.set_password(generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(18)))
+            password = generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(18))
+            account.set_password(  # nosemgrep: unvalidated-password — a Virtualmin credential, not a Django login
+                password
+            )
         account.server = server
         account.save(update_fields=["encrypted_password", "server", "updated_at"])

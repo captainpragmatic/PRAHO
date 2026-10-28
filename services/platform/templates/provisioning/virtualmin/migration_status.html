@@ -101,6 +101,7 @@
             {% trans "Retry cleanup" as retry_label %}{% button retry_label type="submit" attrs='name="action" value="retry"' %}
           {% endif %}
         </form>
+        {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
         <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
           {% csrf_token %}
           <input type="hidden" name="migration_id" value="{{ migration.pk }}">
@@ -115,6 +116,7 @@
           {% trans "Attest external proxy origin" as attest_label %}{% button attest_label type="submit" variant="warning" attrs='name="action" value="attest"' %}
         </form>
         {% if independent_alias_options %}
+          {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
           <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
             {% csrf_token %}
             <input type="hidden" name="migration_id" value="{{ migration.pk }}">
