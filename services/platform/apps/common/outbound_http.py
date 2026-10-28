@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import IO
 
 import requests
 from django.utils.functional import SimpleLazyObject
@@ -730,6 +731,33 @@ def _execute_pinned_request(
 # ---------------------------------------------------------------------------
 # safe_urlopen — urllib wrapper for validation_service.py
 # ---------------------------------------------------------------------------
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: the validated, pinned address is the only address contacted.
+
+    Returning None makes urllib raise the 3xx as an HTTPError instead of re-requesting.
+    """
+
+    def redirect_request(  # noqa: PLR0913  # fixed by urllib's HTTPRedirectHandler signature
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+def _build_urlopen_opener(ctx: ssl.SSLContext | None) -> urllib.request.OpenerDirector:
+    """Build the opener safe_urlopen uses: no environment proxies, policy TLS context, no redirects."""
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),  # same as safe_request: the pinned connection is never proxied
+        urllib.request.HTTPSHandler(context=ctx),
+        _RefuseRedirects(),
+    )
+
+
 def safe_urlopen(
     url: str,
     *,
@@ -749,7 +777,13 @@ def safe_urlopen(
 
     Returns:
         http.client.HTTPResponse
+
+    Raises:
+        OutboundSecurityError: If the policy asks for redirects or fingerprints this helper cannot enforce
+        urllib.error.HTTPError: For any non-2xx answer, including an unfollowed 3xx redirect
     """
+    if policy.allow_redirects:
+        raise OutboundSecurityError("safe_urlopen never follows redirects; use safe_request")
     if policy.tls_cert_fingerprint:
         raise OutboundSecurityError("safe_urlopen cannot enforce TLS certificate fingerprints; use safe_request")
 
@@ -771,10 +805,10 @@ def safe_urlopen(
 
     # SSL context
     ctx = _build_ssl_context(target, policy, ssl_context)
-    result: http.client.HTTPResponse = urllib.request.urlopen(  # noqa: S310  # nosec B310 - scheme restricted to policy.allowed_schemes by validate_and_resolve  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    opener = _build_urlopen_opener(ctx)
+    result: http.client.HTTPResponse = opener.open(  # nosec B310 - scheme restricted to policy.allowed_schemes by validate_and_resolve  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         req,
         timeout=effective_timeout,
-        context=ctx,
     )
     return result
 
