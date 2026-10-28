@@ -83,7 +83,9 @@ def _identity(identifier: UUID, token: UUID) -> int:
     from . import dns_zone_tasks as worker  # noqa: PLC0415
 
     with worker._guard(identifier, token) as (operation, zone):
-        if timezone.now() - operation.created_at > POLL_DEADLINE:
+        raw_started = operation.evidence.get("poll_started_at")
+        started = parse_datetime(raw_started) if isinstance(raw_started, str) else None
+        if timezone.now() - (started or operation.created_at) > POLL_DEADLINE:
             raise ValueError("activation_deadline")
         result = worker.get_zone_gateway(zone.provider).read_zone(service.provider_binding(zone))
         if result.is_ok():
@@ -191,6 +193,14 @@ def _ds_matches(parent: list[str], provider: str) -> bool:
         return False
 
 
+def _restore_failed(zone: HostedZone) -> None:
+    """A retried operation proved readiness again: leave `failed` the way a retried apply does."""
+    if zone.status == "failed" and zone.can_offer_nameservers():
+        zone.retry()
+        zone.await_nameservers()
+        zone.last_error = ""
+
+
 def _parent(identifier: UUID, token: UUID) -> int:
     from . import dns_zone_tasks as worker  # noqa: PLC0415
 
@@ -248,15 +258,18 @@ def _parent(identifier: UUID, token: UUID) -> int:
                 "parent_ns_ttl": int(proof.get("ns_ttl", 0)),
                 "ds_ttl": int(proof.get("ds_ttl", 0)),
             }
+            _restore_failed(zone)
             if zone.status == "awaiting_ns":
                 zone.activate()
+            zone.last_error = ""
             zone.save()
             worker._save(operation, token, status="completed", evidence=evidence, last_error="")
             service._audit(
                 zone, "dns_zone_state_changed", metadata={"status": zone.status, "revision": zone.current_revision}
             )
             return 0
-        zone.save(update_fields=["readiness", "updated_at"])
+        _restore_failed(zone)
+        zone.save(update_fields=["readiness", "status", "last_error", "updated_at"])
         worker._save(operation, token, phase="activation_identity", evidence=evidence)
         return POLL_SECONDS
 

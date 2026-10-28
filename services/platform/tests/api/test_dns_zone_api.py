@@ -170,6 +170,47 @@ class DnsZoneApiTests(HMACTestMixin, TestCase):
         self.assertEqual(response.json()["data"]["page"], 1)
         self.assertEqual(len(response.json()["data"]["zones"]), 1)
 
+    def test_malformed_record_values_are_the_fixed_refusal_not_a_server_error(self):
+        zone = self.stage()
+        # Only a zone bound to its provider zone is editable, so the value reaches the record parser.
+        HostedZone.objects.filter(pk=zone.pk).update(provider_account_id="a" * 32, provider_zone_id="b" * 32)
+        self.client.raise_request_exception = False
+        cases = (
+            ("A", "not-an-ip"),
+            ("AAAA", "not-an-ip"),
+            ("CNAME", "bad..name."),
+            ("MX", "ten mail.example."),
+            ("TXT", '"unterminated'),
+            ("SRV", "1 2 not-a-port target.example."),
+            ("CAA", "0 issue"),
+            ("BOGUS", "95.217.0.10"),
+            ("", "95.217.0.10"),
+        )
+        for record_type, rdata in cases:
+            with self.subTest(record_type=record_type, rdata=rdata):
+                response = self.portal_post(
+                    f"{self.path}{zone.pk}/records/",
+                    self.identity(
+                        expected_revision=1, name="new." + zone.name, record_type=record_type, rdata=rdata, ttl=300
+                    ),
+                )
+                self.assertEqual(response.status_code, 409, response.content)
+                self.assertEqual(response.json()["error"], "invalid_record")
+        zone.refresh_from_db()
+        self.assertEqual((zone.current_revision, zone.revisions.count()), (1, 1))
+
+    def test_a_malformed_value_in_an_upload_is_staged_invalid_not_a_server_error(self):
+        self.client.raise_request_exception = False
+        upload = b"$ORIGIN customer.example.\n$TTL 900\n@ IN A not-an-ip\n"
+        response = self.portal_post(
+            self.path + "import/",
+            self.identity(service_id=self.service.pk, zone_file=base64.b64encode(upload).decode()),
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        staged = response.json()["data"]["zone"]
+        self.assertFalse(staged["valid"])
+        self.assertEqual([error["code"] for error in staged["errors"]], ["invalid_zone_file"])
+
     def test_record_reads_are_tenant_scoped_and_managed_updates_are_refused(self):
         zone = self.stage()
         row = HostedZoneRecord.objects.create(

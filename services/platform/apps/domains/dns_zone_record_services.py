@@ -6,6 +6,7 @@ import hashlib
 from typing import TYPE_CHECKING, Any, Unpack
 from uuid import UUID, uuid4
 
+import dns.exception
 from django.db import transaction
 from django.utils import timezone
 
@@ -94,6 +95,14 @@ def _editable(zone: HostedZone) -> str:
     return ""
 
 
+def _record_data(record_type: str, text: str, origin: str) -> dict[str, str]:
+    """Customer record text is parsed only here; every parser refusal is the fixed invalid-record answer."""
+    try:
+        return make_record_data(record_type, text, origin=origin)
+    except (ValueError, dns.exception.DNSException) as error:
+        raise ValueError("invalid_record") from error
+
+
 def _change_rows(
     zone: HostedZone,
     manifest: list[dict[str, Any]],
@@ -116,7 +125,7 @@ def _change_rows(
         "name": change.name,
         "record_type": change.record_type.upper(),
         "ttl": change.ttl,
-        "rdata": make_record_data(change.record_type.upper(), change.rdata, origin=zone.name),
+        "rdata": _record_data(change.record_type.upper(), change.rdata, zone.name),
         "managed_by": "customer",
         "managed_slot": "",
     }
@@ -124,7 +133,7 @@ def _change_rows(
     if checked.is_err():
         raise ValueError("invalid_record")
     normalized = checked.unwrap()
-    row.update(name=normalized.name, rdata=make_record_data(normalized.record_type, normalized.rdata, origin=zone.name))
+    row.update(name=normalized.name, rdata=_record_data(normalized.record_type, normalized.rdata, zone.name))
     row["rdata_digest"] = hashlib.sha256(bytes.fromhex(row["rdata"]["wire"])).hexdigest()
     if any(
         (other["name"], other["record_type"], other["rdata_digest"])

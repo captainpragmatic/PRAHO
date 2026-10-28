@@ -195,10 +195,13 @@ def reconcile_account_names() -> dict[str, int]:
     This dispatcher performs database work only. Placement, guarded DNS publication and private
     retirement each run in separate per-name jobs with explicit budgets. Dispatch claims are checked
     under the name's lock, including the retry cooldown, so concurrent sweeps do not duplicate work.
+
+    Retirements are queued before the feature check: a termination whose own dispatch was lost
+    must still withdraw its records and private copies after names are switched off.
     """
-    if not config.account_hostnames_enabled():
-        return {"disabled": 1}
     retirements_queued = _finish_retirements()
+    if not config.account_hostnames_enabled():
+        return {"disabled": 1, "enqueued": retirements_queued}
     unnamed = _queue_unnamed_accounts()
     due = Q(last_reconciled_at__isnull=True) | Q(last_reconciled_at__lt=timezone.now() - RECHECK_AFTER)
     candidates = list(

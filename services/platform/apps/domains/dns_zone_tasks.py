@@ -61,10 +61,10 @@ def _guard(identifier: UUID, token: UUID) -> Iterator[tuple[HostedZoneOperation,
 
     original = HostedZoneOperation.objects.select_related("zone").get(pk=identifier)
     with transaction.atomic():
+        # Established monitoring belongs to the customer's zone (ADR-0061 §5): its own row and provider
+        # binding are checked, never whether the hosting that enrolled it is still live.
         independent = original.kind in {"edit", "delete"} or (
-            original.kind == "activate"
-            and bool(original.zone.activation.get("activated_at"))
-            and original.zone.account_id is None
+            original.kind == "activate" and bool(original.zone.activation.get("activated_at"))
         )
         account = None
         hostname = None
@@ -526,6 +526,7 @@ def _complete_apply(operation: HostedZoneOperation, zone: HostedZone, token: UUI
         zone.retry()
     if zone.status == "pending_import":
         zone.await_nameservers()
+    zone.last_error = ""
     zone.save()
     _save(operation, token, status="completed", last_error="")
     if not zone.activation.get("activated_at"):

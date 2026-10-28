@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 SHA256_LENGTH = 64
+# The parent is observed outside the zone's locks, whose wait has no bound. An observation started
+# longer ago than this when the locks are held is repeated before any provider deletion.
+PROOF_MAX_AGE = timedelta(seconds=30)
 
 
 def _export_current(zone: HostedZone, digest: str) -> bool:
@@ -104,12 +107,19 @@ def request_operation_retry(zone: HostedZone, *, actor: User | None) -> Result[H
         operation.status = "waiting"  # fsm-bypass: CharField operation status; explicit retry under its row lock.
         if operation.kind == "delete":
             operation.phase = "delete_parent"
+        elif operation.kind == "activate":
+            # A parked poll proves nothing about the provider now: the whole chain runs again,
+            # under a poll deadline of its own.
+            operation.phase = "activation_identity"
+            operation.cursor = 0
+            operation.evidence = {**operation.evidence, "poll_started_at": timezone.now().isoformat()}
         operation.last_error = ""
         operation.next_attempt_at = timezone.now()
         operation.save(
             update_fields=[
                 "status",
                 "phase",
+                "cursor",
                 "evidence",
                 "registrar_operation",
                 "last_error",
@@ -166,42 +176,59 @@ def _waited(evidence: dict[str, Any], key: str, ttl: int) -> bool:
     return bool(when is not None and timezone.is_aware(when) and timezone.now() >= when + timedelta(seconds=ttl))
 
 
+def _move_away(
+    operation: HostedZoneOperation, zone: HostedZone, proof: dict[str, Any]
+) -> tuple[dict[str, Any], bool, bool]:
+    """Fold one parent observation into the evidence: (evidence, moved away, cache wait complete).
+
+    Any change in the observed delegation restarts both waits: caches may hold whatever the parent
+    served in between, including our own nameservers.
+    """
+    evidence = dict(operation.evidence)
+    old_ds_ttl = max(
+        int(evidence.get("old_ds_ttl", 0)),
+        int(operation.revision.crosscheck.get("ds_ttl", 0)),
+        int(zone.activation.get("ds_ttl", 0)),
+        int(proof.get("ds_ttl", 0)),
+    )
+    old_ns_ttl = max(
+        int(evidence.get("old_ns_ttl", 0)),
+        int(zone.activation.get("parent_ns_ttl", 0)),
+        int(zone.readiness.get("parent_ns_ttl", 0)),
+        int(proof.get("ns_ttl", 0)),
+    )
+    evidence.update(old_ds_ttl=old_ds_ttl, old_ns_ttl=old_ns_ttl)
+    observed = sorted(proof.get("nameservers") or [])
+    moved = (
+        proof.get("state") == "verified"
+        and bool(observed)
+        and not set(observed).intersection(zone.assigned_nameservers)
+        and not proof.get("ds")
+    )
+    if not moved or evidence.get("parent_nameservers") != observed:
+        evidence.pop("parent_moved_since", None)
+        evidence.pop("ds_absent_since", None)
+    evidence["parent_nameservers"] = observed
+    if not moved:
+        return evidence, False, False
+    evidence.setdefault("parent_moved_since", timezone.now().isoformat())
+    evidence.setdefault("ds_absent_since", timezone.now().isoformat())
+    waited = _waited(evidence, "parent_moved_since", old_ns_ttl) and _waited(evidence, "ds_absent_since", old_ds_ttl)
+    return evidence, True, waited
+
+
 def _parent(identifier: UUID, token: UUID) -> int:
     from . import dns_zone_tasks as worker  # noqa: PLC0415
 
     original = HostedZoneOperation.objects.select_related("zone").get(pk=identifier)
     proof = checks.handover_snapshot(original.zone.name)
     with worker._guard(identifier, token) as (operation, zone):
-        evidence = dict(operation.evidence)
-        old_ds_ttl = max(
-            int(evidence.get("old_ds_ttl", 0)),
-            int(operation.revision.crosscheck.get("ds_ttl", 0)),
-            int(zone.activation.get("ds_ttl", 0)),
-            int(proof.get("ds_ttl", 0)),
-        )
-        old_ns_ttl = max(
-            int(evidence.get("old_ns_ttl", 0)),
-            int(zone.activation.get("parent_ns_ttl", 0)),
-            int(zone.readiness.get("parent_ns_ttl", 0)),
-            int(proof.get("ns_ttl", 0)),
-        )
-        evidence.update(old_ds_ttl=old_ds_ttl, old_ns_ttl=old_ns_ttl)
-        moved = (
-            proof.get("state") == "verified"
-            and bool(proof.get("nameservers"))
-            and not set(proof["nameservers"]).intersection(zone.assigned_nameservers)
-        )
-        if not moved or proof.get("ds"):
-            evidence.pop("parent_moved_since", None)
-            evidence.pop("ds_absent_since", None)
+        evidence, moved, waited = _move_away(operation, zone, proof)
+        if not moved:
             worker._save(operation, token, evidence=evidence, last_error="move_away_proof_required")
             return worker.RETRY_SECONDS
-        evidence.setdefault("parent_moved_since", timezone.now().isoformat())
-        evidence.setdefault("ds_absent_since", timezone.now().isoformat())
         worker._save(operation, token, evidence=evidence)
-        if not _waited(evidence, "parent_moved_since", old_ns_ttl) or not _waited(
-            evidence, "ds_absent_since", old_ds_ttl
-        ):
+        if not waited:
             return worker.RETRY_SECONDS
         if not _export_current(zone, evidence["export_digest"]):
             raise ValueError("current_export_required")
@@ -215,6 +242,7 @@ def _parent(identifier: UUID, token: UUID) -> int:
         }
         if zone.status != "deleting":
             zone.start_deleting()
+        zone.last_error = ""
         zone.save()
         worker._save(operation, token, phase="delete_provider_inflight", evidence=evidence)
         return 0
@@ -223,7 +251,22 @@ def _parent(identifier: UUID, token: UUID) -> int:
 def _delete(identifier: UUID, token: UUID) -> int:
     from . import dns_zone_tasks as worker  # noqa: PLC0415
 
+    # A worker can stop for any length of time after this phase commits. Every attempt observes
+    # the parent again rather than trusting the move-away proof that admitted the phase.
+    original = HostedZoneOperation.objects.select_related("zone").get(pk=identifier)
+    observed_at = timezone.now()
+    proof = checks.handover_snapshot(original.zone.name)
     with worker._guard(identifier, token) as (operation, zone):
+        evidence, moved, waited = _move_away(operation, zone, proof)
+        if not waited:
+            zone.deletion = {**zone.deletion, "parent_moved_away": False, "ds_safe": False}
+            zone.save(update_fields=["deletion", "updated_at"])
+            refusal = {} if moved else {"last_error": "move_away_proof_required"}
+            worker._save(operation, token, phase="delete_parent", evidence=evidence, **refusal)
+            return worker.RETRY_SECONDS
+        if timezone.now() - observed_at > PROOF_MAX_AGE:
+            worker._save(operation, token, evidence=evidence, last_error="move_away_proof_stale")
+            return worker.RETRY_SECONDS
         if zone.provider_zone_id:
             expected = tuple(service.spec_from_record(record) for record in zone.records.filter(desired_deleted=False))
             result = worker.get_zone_gateway(zone.provider).delete_zone(
