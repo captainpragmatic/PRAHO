@@ -1,0 +1,183 @@
+# ===============================================================================
+# RELEASE CANDIDATE — what pull requests cannot afford, pinned to one master commit
+# ===============================================================================
+# Dispatched by hand: Actions → Release candidate → Run workflow, or
+# `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank candidate means the master
+# commit at the moment of the dispatch; the run title names the commit either way.
+#
+# Pull requests already ran every required check on this exact tree: master requires them and
+# requires the branch to be up to date, so the squashed commit is the tree its PR tested. `resolve`
+# proves that from the PR's own check runs (an owner bypass could merge a red PR). Then only what PR
+# CI cannot afford runs here, on the candidate SHA:
+#   - the whole platform suite on PostgreSQL (PRs run it on SQLite plus the PostgreSQL-gated tests);
+#   - the full Virtualmin lab: node deploy, fault injection, its browser tests.
+# When both pass, `record` posts the commit status `release-candidate` = success, which
+# `make promote-staging SHA=<sha>` requires before it deploys anything.
+#
+# Security: only a master dispatch may vouch for a commit, so a branch cannot record a status with an
+# edited copy of this file. The candidate reaches shell through `env` only.
+
+name: Release candidate
+
+run-name: Release candidate ${{ inputs.candidate_sha || github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Master commit to test (blank = the current master commit)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+concurrency:
+  group: release-candidate-${{ inputs.candidate_sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and validate the candidate
+        id: resolve
+        env:
+          CANDIDATE: ${{ inputs.candidate_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$DISPATCH_REF" != "refs/heads/master" ]; then
+            echo "::error::Dispatch this workflow from master; a branch's copy of it may not vouch for a commit."
+            exit 1
+          fi
+          sha="${CANDIDATE:-$DISPATCH_SHA}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The candidate must be a full 40-character commit SHA."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$sha" origin/master; then
+            echo "::error::$sha is not on master."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "### Release candidate \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Every check master requires, read from the ruleset, must have passed on the PR that produced
+      # the candidate. A check that never reported counts as failed.
+      - name: The candidate's pull request passed every required check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "master")][0].number // empty')"
+          if [ -z "$pr" ]; then
+            echo "::error::$SHA did not come from a merged pull request into master."
+            exit 1
+          fi
+          head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha')"
+          # The latest run of each check on the PR's final head.
+          gh api --paginate "repos/$REPO/commits/$head/check-runs?per_page=100" --jq '.check_runs[]' \
+            | jq -s 'group_by(.name) | map(max_by(.id)) | map({(.name): .conclusion}) | add // {}' > "$RUNNER_TEMP/runs.json"
+          failed=0
+          while IFS= read -r context; do
+            conclusion="$(jq -r --arg c "$context" '.[$c] // "missing"' "$RUNNER_TEMP/runs.json")"
+            echo "PR #$pr $context: $conclusion"
+            case "$conclusion" in
+              success|skipped) ;;
+              *) failed=1 ;;
+            esac
+          done < <(jq -r '.rules[] | select(.type == "required_status_checks")
+                          | .parameters.required_status_checks[].context' .github/rulesets/master.json)
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::PR #$pr did not pass every required check on its final head ($head)."
+            exit 1
+          fi
+
+  platform-postgres:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DB_NAME: postgres
+      DB_USER: test
+      DB_PASSWORD: test
+      DB_HOST: localhost
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - name: Start PostgreSQL (registry fallback)
+        run: make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16
+        env:
+          CI_POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+
+      - name: Install uv and sync dependencies
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python and install dependencies
+        run: |
+          uv python install
+          uv sync --group platform --group dev
+
+      - name: Whole platform suite on PostgreSQL
+        run: make test-platform-postgres-full
+
+      - name: Stop CI PostgreSQL
+        if: always()
+        run: make ci-postgres-stop
+
+  virtualmin-lab:
+    needs: resolve
+    # The lab workflow declares its scheduled-failure notifier and activity check; a called workflow may
+    # only ask for what the caller grants, even for jobs this call skips.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/virtualmin-lab.yml
+    with:
+      suite: full
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  record:
+    needs: [resolve, platform-postgres, virtualmin-lab]
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark the commit as a release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api --method POST "repos/$REPO/statuses/$SHA" \
+            -f state=success -f context=release-candidate \
+            -f description="Release checks passed" -f target_url="$RUN_URL"
