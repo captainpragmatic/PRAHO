@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-566 actions, in 9 categories.
+567 actions, in 9 categories.
 
 ## Account management
 
@@ -42,15 +42,16 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `login_failed_password` | medium | no | yes | audit |
 | `login_failed_user_not_found` | medium | no | yes | audit |
 | `login_new_location` | medium | no | yes | users |
-| `login_success` | medium | no | yes | audit |
+| `login_success` | medium | no | yes | audit, users |
 | `logout_concurrent_session` | low | no | yes | audit |
-| `logout_manual` | medium | no | yes | audit |
+| `logout_manual` | medium | no | yes | audit, users |
 | `logout_security_event` | low | no | yes | audit |
 | `logout_session_expired` | low | no | yes | audit |
 | `password_reset_completed` | medium | no | yes | api |
 | `session_rotated_2fa_change` | low | no | no | users |
 | `session_rotated_password_change` | low | no | no | users |
 | `session_rotation` | medium | no | yes | audit |
+| `session_terminated` | low | no | yes | users |
 | `session_timeout_updated` | low | no | no | users |
 
 ## Authorization and access

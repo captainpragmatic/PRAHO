@@ -764,4 +764,48 @@ class UserSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class PortalSession(models.Model):
+    """A customer's portal session, owned and enforced by Platform (ADR-0017 section 5).
+
+    The portal sends the row's id in every signed request; Platform refuses a row that is
+    revoked, past either deadline, or whose credential snapshot no longer matches the user's
+    session hash. A password or second-factor change therefore ends every other session at its
+    next request, without a hook at each place a credential changes.
+    """
+
+    TIER_STANDARD = "standard"
+    TIER_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = ((TIER_STANDARD, _("Standard")),)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="portal_sessions")
+    tier = models.CharField(max_length=16, choices=TIER_CHOICES, default=TIER_STANDARD)
+    credential_snapshot = models.CharField(max_length=64)
+    last_seen_at = models.DateTimeField()
+    idle_deadline = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    # The time of the last password (and second factor) check; the 300 s re-check reads it later.
+    reauth_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoke_reason = models.CharField(max_length=32, blank=True, default="")
+    ip_digest = models.CharField(max_length=16, blank=True, default="")
+    ua_digest = models.CharField(max_length=16, blank=True, default="")
+    ua_label = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_portal_sessions"
+        db_table_comment = (
+            "Customer portal sessions; Platform checks the row, its deadlines and its credential "
+            "snapshot on every signed portal request."
+        )
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["user", "revoked_at"], name="idx_portal_session_user_live"),
+            models.Index(fields=["expires_at"], name="idx_portal_session_expires"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PortalSession {self.pk} ({self.tier})"
+
+
 # Import MFA models to ensure they're recognized by Django

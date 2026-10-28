@@ -576,6 +576,15 @@
     "cluster": "praho-cluster"
   },
   {
+    "name": "user-portal-session-sweep",
+    "func": "apps.users.tasks.sweep_portal_sessions",
+    "schedule_type": "H",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
     "name": "user-suspicious-pattern-audit",
     "func": "apps.users.tasks.audit_suspicious_login_patterns",
     "schedule_type": "C",

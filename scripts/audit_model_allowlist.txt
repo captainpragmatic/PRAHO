@@ -115,5 +115,6 @@ common.NodeResourceHourlySummary # 30-day aggregate telemetry, no customer data;
 common.LegalDocument            # publish_legal_document() writes legal_document_published in the same transaction; rows are immutable, so there is no other write to audit
 users.UserSession               # session revocation index (key to user); the sessions it mirrors are not audited either
 users.UserCredentialVersion     # monotonic MFA binding version; every change is written by an audited MFA state change
+users.PortalSession             # portal session row; opening and ending are audited explicitly by apps.users.portal_sessions (log_simple_event); a deadline passing is a time fact, not an action
 users.PendingTOTPEnrolment     # an authenticator secret shown but not yet confirmed, gone within minutes; its confirmation logs 2fa_enabled and an audit row per showing would only record page views (ADR-0058)
 users.PendingRegistration       # unverified signup data, deleted within 25 h; confirming it logs pending_registration_confirmed and the account it creates is audited. Auditing each submission would keep unverified addresses in the immutable trail
