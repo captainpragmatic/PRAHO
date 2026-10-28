@@ -3,12 +3,15 @@
 # ===============================================================================
 # Single source of truth for all linting (make lint) and cross-service validation.
 # Service-specific tests and type checking live in platform.yml / portal.yml.
+#
+# Both jobs are required checks on master (.github/rulesets/master.json), so the pull_request trigger has
+# no paths filter: a workflow skipped by a filter never reports, and its required check would block forever.
 
 name: Integration CI
 
 on:
   push:
-    branches: [master, staging]
+    branches: [master]
     paths:
       - 'deploy/**'
       - '.env.example.*'
@@ -22,17 +25,6 @@ on:
       - '.github/workflows/integration.yml'
   pull_request:
     branches: [master]
-    paths:
-      - 'deploy/**'
-      - '.env.example.*'
-      - 'services/**'
-      - 'shared/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'Makefile'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/integration.yml'
   workflow_dispatch:
 
 env:
@@ -41,6 +33,13 @@ env:
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+# A new push to a PR supersedes the run on its previous head: cancel it so it stops holding job slots.
+# Every other event gets a group of its own, so it is never cancelled or queued behind another run of this
+# workflow (it can still wait for free runners).
+concurrency:
+  group: integration-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -71,7 +70,9 @@ jobs:
     # The PR's own validators could be weakened by the PR itself: the base revision's copies check its tree.
     # They are written under scripts/ so that their ROOT is this checkout. This raises the bar only (a PR can
     # also edit this workflow); code-owner review of these files is the gate.
+    # The base resolved here is also the baseline for the migration-state and security checks below.
     - name: Check migrations with the base branch's validators
+      id: migration-base
       env:
         BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
       run: |
@@ -80,6 +81,17 @@ jobs:
         if [ -z "$base" ] || [ -z "${base//0/}" ]; then
           base="$(git merge-base HEAD origin/master)"  # A first push has no previous commit
         fi
+        # A dispatch on master resolves to HEAD itself, and HEAD compared with HEAD checks nothing.
+        if [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse HEAD)" ]; then
+          base="$(git rev-parse HEAD^)"
+        fi
+        for validator in scripts/migration_checksums.py scripts/check_new_model_schema.py; do
+          if ! git cat-file -e "$base:$validator" 2>/dev/null; then
+            echo "The baseline $base has no $validator to check this tree with; refusing a weaker check" >&2
+            exit 1
+          fi
+        done
+        echo "ref=$base" >> "${GITHUB_OUTPUT:-/dev/null}"
         py="${PYTHON:-.venv-$(uname -s | tr '[:upper:]' '[:lower:]')/bin/python}"
         trap 'rm -f scripts/_trusted_migration_checksums.py scripts/_trusted_check_new_model_schema.py' EXIT
         git show "$base:scripts/migration_checksums.py" > scripts/_trusted_migration_checksums.py
@@ -95,12 +107,11 @@ jobs:
 
     - name: Check migration state
       env:
-        MIGRATION_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        MIGRATION_BASE_REF: ${{ steps.migration-base.outputs.ref }}
       run: make check-migrations
 
     - name: Component parity check (portal ↔ platform)
       run: make check-parity
-      continue-on-error: true  # TODO: fix badge.html drift, then make blocking
 
     - name: Template design-system lint
       run: make lint-templates
@@ -111,14 +122,22 @@ jobs:
     - name: Dark-mode audit
       run: make audit-dark-mode
 
+    # A uv environment has no pip, so semgrep is a pinned uv tool. A failed install fails the job: an absent
+    # scanner must never read as a clean scan.
     - name: Install semgrep for security scanning
       run: |
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pip install semgrep 2>/dev/null \
-          || echo "⚠️ semgrep install failed — lint-security will skip semgrep checks"
+        uv tool install "semgrep==${SEMGREP_VERSION}"
+        uv tool dir --bin >> "$GITHUB_PATH"
+      env:
+        SEMGREP_VERSION: '1.157.0'
 
+    # SEMGREP_STRICT makes an unreachable rule registry or a timeout a failure, not a warning. The baseline
+    # limits findings to what this change introduces; code already on master was scanned when it merged.
     - name: Security lint (make lint-security)
       run: make lint-security
-      continue-on-error: true  # Non-blocking until semgrep is a stable dependency
+      env:
+        SEMGREP_STRICT: '1'
+        SEMGREP_BASELINE_REF: ${{ steps.migration-base.outputs.ref }}
 
   # ---------------------------------------------------------------------------
   # Integration Tests — requires PostgreSQL
@@ -155,28 +174,25 @@ jobs:
         uv python install
         uv sync --all-groups
 
+    # A PR compares against its base branch, not against its own previous push: every file the PR changes
+    # is checked, however many pushes it took.
     - name: Ruff no-new-debt gate (changed Python files)
+      env:
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
       run: |
-        BASE_REF="${{ github.event.before }}"
-        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_REF="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_REF="HEAD~1"
-          fi
+        set -euo pipefail
+        BASE_REF="${PR_BASE_SHA:-${PUSH_BEFORE:-}}"
+        if [ -z "$BASE_REF" ] || [ -z "${BASE_REF//0/}" ]; then
+          BASE_REF="HEAD~1"
         fi
         if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
           echo "Baseline ref not present locally ($BASE_REF); fetching..."
-          git fetch origin "${BASE_REF}" --depth=1 || true
+          git fetch origin "${BASE_REF}" --depth=1
         fi
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
+        "$UV_PROJECT_ENVIRONMENT/bin/python" scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
 
-    - name: Test layout audit (bootstrap non-blocking)
-      run: |
-        echo "Running test layout audit (non-blocking bootstrap pass)..."
-        # TODO: Remove `|| true` after baseline cleanup lands on master.
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/audit_test_layout.py --strict --json > test-layout-audit.json || true
     - name: Set up platform database
       run: |
         cd services/platform
@@ -237,7 +253,6 @@ jobs:
         path: |
           tests/integration/reports/
           htmlcov/
-          test-layout-audit.json
         if-no-files-found: warn
 
     - name: Stop CI PostgreSQL

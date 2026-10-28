@@ -120,6 +120,7 @@ def system_status(request: HttpRequest) -> dict[str, Any]:
     that page (view context beats processors), silently hiding the staff banner.
     """
     return {
+        **setup_attention(request),
         "maintenance_mode": _maintenance_mode_active(),
         "system_status": {
             "maintenance_mode": _maintenance_mode_active(),
@@ -128,6 +129,41 @@ def system_status(request: HttpRequest) -> dict[str, Any]:
             "environment": getattr(settings, "ENVIRONMENT", "development"),
         },
     }
+
+
+def setup_attention(request: HttpRequest) -> dict[str, object]:
+    """Read local evidence only; rendering a page never starts checks or writes progress."""
+    user = getattr(request, "user", None)
+    if "admin" in getattr(getattr(request, "resolver_match", None), "namespaces", ()):
+        return {}  # Django admin has its own layout and can be mounted without staff-app routes.
+    if (
+        not user
+        or not user.is_authenticated
+        or not (getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+    ):
+        return {}
+    from django.db import DatabaseError, InterfaceError, transaction  # noqa: PLC0415
+
+    from apps.common.status_models import INTERNAL_CHECK_KEYS, SystemCheckState  # noqa: PLC0415
+    from apps.common.status_observations import display_level  # noqa: PLC0415
+    from apps.common.system_status import node_input_identities, runtime_input_identity  # noqa: PLC0415
+    from apps.settings.setup_checklist import get_setup_report  # noqa: PLC0415
+
+    try:
+        with transaction.atomic():
+            report = get_setup_report()
+            rows = list(SystemCheckState.objects.exclude(check_key__in=INTERNAL_CHECK_KEYS).select_related("node"))
+            identities = node_input_identities(row.node for row in rows if row.node is not None)
+            global_identity = runtime_input_identity()
+            issues = sum(
+                display_level(row, current_identity=identities[row.node_id] if row.node_id else global_identity)
+                in {"red", "amber", "unknown"}
+                for row in rows
+            )
+            return {"setup_remaining": report.remaining, "health_attention_count": issues}
+    except (DatabaseError, InterfaceError):
+        # Bootstrap can render before additive migrations; absence is never reported as complete.
+        return {"setup_status_unavailable": True}
 
 
 def current_customer(request: HttpRequest) -> dict[str, Any]:

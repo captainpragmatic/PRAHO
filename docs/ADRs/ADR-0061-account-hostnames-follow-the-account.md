@@ -7,11 +7,11 @@
 
 ## Implementation clarifications (2026-10-27)
 
-This ADR remains Proposed. Phases 2 through 5 are being delivered in PR #749, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
+This ADR remains Proposed. Phase 2 is delivered by PR #749. Phases 3 to 5 are delivered together in one follow-up PR, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
 
 The agreed first release imports a complete customer-uploaded zone file, keeps account-name previews disabled, and makes native mail available on eligible nodes without enabling it for existing or new domains until their owner opts in. Temporary forwarding stays on the account's source node using Apache for web and native Postfix/Dovecot for mail; HAProxy is not a prerequisite. The detailed cutover below distinguishes the ownership commit from later bridge retention and cleanup.
 
-Phase 2 is under review in PR #749. Account-name sites remain root-owned and neutral even after PSL inclusion, with independently observed source/target bindings. Mail-enabled moves remain refused until the native Postfix/Dovecot lifecycle and all-mailbox safety gates pass.
+Account-name sites remain root-owned and neutral even after PSL inclusion, with independently observed source/target bindings. Mail-enabled moves and recoveries remain refused until the native Postfix/Dovecot lifecycle and all-mailbox safety gates pass.
 
 ## Context at proposal (2026-10-14)
 

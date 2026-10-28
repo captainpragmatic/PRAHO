@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .virtualmin_gateway import listing_attribute
 from .virtualmin_pair_restore import run_pair_step
-from .virtualmin_service import create_domain_params
+from .virtualmin_service import create_domain_params, generate_virtualmin_parameter_secret
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -35,11 +35,13 @@ def capture_backup_owner_shadow(  # noqa: PLR0913  # Exact source/archive identi
 ) -> None:
     """Snapshot numeric owner aging before dispatch, never inferring it from target defaults."""
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415
+    from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
 
-    deployment = getattr(server, "node_deployment", None)
-    if deployment is None:
+    readiness = server_transport_ready(server)
+    if readiness.is_err():
         raise ValueError(
-            "Owner login aging capture requires a managed node with SSH; enroll the API-only server before creating a recovery-capable backup"
+            "Owner login aging capture needs a verified SSH transport; enroll the API-only server as a managed node "
+            f"or configure its imported root key and trust ({readiness.unwrap_err()})"
         )
     if not re.fullmatch(r"[0-9]{1,30}", domain_id):
         raise ValueError("The backup source identity is invalid")
@@ -56,7 +58,7 @@ def capture_backup_owner_shadow(  # noqa: PLR0913  # Exact source/archive identi
         "recovery_enabled": False,
         "recovery_require_fenced": require_fenced,
     }
-    result = AnsibleService().run_playbook(deployment, "virtualmin_recovery.yml", variables, timeout_seconds=600)
+    result = AnsibleService().run_server_playbook(server, "virtualmin_recovery.yml", variables, timeout_seconds=600)
     if result.is_err() or not result.unwrap().success:
         if result.is_ok() and "PRAHO_OWNER_SHADOW_RESERVED_FLAG" in str(getattr(result.unwrap(), "stdout", "")):
             raise RuntimeError(
@@ -165,7 +167,7 @@ def restore_held_target(
         params = create_domain_params(
             domain=migration.account.domain,
             username=migration.account.virtualmin_username,
-            password=secrets.token_urlsafe(48),
+            password=generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(48)),
             template=migration.account.template_name,
             recovery_seed=migration.account.get_recovery_seed(),
             disk_quota_mb=migration.account.disk_quota_mb,

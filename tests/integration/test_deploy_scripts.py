@@ -116,6 +116,15 @@ elif argv[:1] == ["exec"] and os.environ.get("DOCKER_SETUP_FAILS") and "setup_in
     sys.exit(1)
 elif argv[:1] == ["exec"] and os.environ.get("DOCKER_EXEC_FAILS"):
     sys.exit(1)
+elif "upload_platform_backup" in argv:
+    if "--check-enabled" in argv:
+        print("enabled" if os.environ.get("OFFSITE_ENABLED") else "disabled")
+    elif "-i" in argv:
+        content = sys.stdin.buffer.read()
+        with open(os.environ["DOCKER_LOG"], "a") as log:
+            log.write(json.dumps({{"stream_bytes": len(content)}}) + "\\n")
+        if os.environ.get("OFFSITE_FAILS"):
+            sys.exit(1)
 elif argv[:1] == ["exec"] and any("media_sweep" in a for a in argv):
     print(os.environ.get("DOCKER_PAUSE_ANSWER", "2026-10-25T00:00:00+00:00"))
 elif argv[:3] == ["exec", "-i", "praho_db"]:
@@ -212,6 +221,58 @@ class Project:
 @pytest.fixture
 def project(tmp_path: Path) -> Project:
     return Project(tmp_path.resolve())
+
+
+def test_offsite_bridge_streams_pair_before_finalizing(project: Project) -> None:
+    backup_dir = project.root / "backups"
+    backup_dir.mkdir()
+    dump = backup_dir / "praho_backup_test.sql.gz"
+    media = backup_dir / "praho_backup_test.media.tar.gz"
+    dump.write_bytes(DUMP_GZIP)
+    media.write_bytes(MEDIA_GZIP)
+    helper = project.root / "deploy/scripts/backup_manifest.py"
+    env = {**project.env, "OFFSITE_ENABLED": "1"}
+    subprocess.run([sys.executable, str(helper), "create", str(dump)], env=env, check=True)  # noqa: S603 -- Fixed helper in a temporary checkout.
+    result = subprocess.run([sys.executable, str(helper), "upload", str(dump)], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode == 0, result.stderr
+    calls = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert [call[call.index("--artifact") + 1] for call in calls if "--artifact" in call] == ["database", "media"]
+    assert "--finalize" in calls[-1]
+    assert all(call[:3] == ["exec", "-i", "praho_platform"] for call in calls if "--artifact" in call or "--finalize" in call)
+    assert dump.read_bytes() == DUMP_GZIP
+    assert media.read_bytes() == MEDIA_GZIP
+
+
+def test_offsite_bridge_failure_does_not_finalize_or_remove_local_pair(project: Project) -> None:
+    backup_dir = project.root / "backups"
+    backup_dir.mkdir()
+    dump = backup_dir / "praho_backup_test.sql.gz"
+    dump.write_bytes(DUMP_GZIP)
+    media = backup_dir / "praho_backup_test.media.tar.gz"
+    media.write_bytes(MEDIA_GZIP)
+    helper = project.root / "deploy/scripts/backup_manifest.py"
+    env = {**project.env, "OFFSITE_ENABLED": "1", "OFFSITE_FAILS": "1"}
+    subprocess.run([sys.executable, str(helper), "create", str(dump)], env=env, check=True)  # noqa: S603 -- Fixed helper in a temporary checkout.
+    result = subprocess.run([sys.executable, str(helper), "upload", str(dump)], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode != 0
+    assert not any("--finalize" in call.get("argv", []) for call in project.calls())
+    assert dump.exists() and media.exists()
+
+
+def test_local_backup_failure_is_reported_to_platform(project: Project) -> None:
+    result = project.run("backup.sh", DOCKER_EXEC_FAILS="1")
+    assert result.returncode != 0
+    reports = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert any("--report-failure" in call for call in reports)
+
+
+def test_upload_refusal_does_not_start_an_unowned_failure_report(project: Project) -> None:
+    result = project.run("backup.sh", OFFSITE_ENABLED="1", OFFSITE_FAILS="1")
+    assert result.returncode != 0
+    reports = [call["argv"] for call in project.calls() if "upload_platform_backup" in call.get("argv", [])]
+    assert any("--artifact" in call for call in reports)
+    assert not any("--report-failure" in call for call in reports)
+    assert list((project.root / "backups").glob("praho_backup_*.sql.gz"))
 
 
 def _subcommand(call: dict[str, Any]) -> list[str]:
@@ -500,7 +561,7 @@ class TestRollbackAndRestore:
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
         backup.write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
+        result = project.run("restore-platform.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
         assert result.returncode != 0, result.stdout + result.stderr
         assert "starting the local services failed" in result.stdout
         assert env_file.read_text() == STAGING_ENV
@@ -514,13 +575,13 @@ class TestRollbackAndRestore:
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
         backup.write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
+        result = project.run("restore-platform.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
         assert "Starting services" in result.stdout, result.stdout + result.stderr
         assert result.returncode != 0, result.stdout
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
-        ("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore.sh", ("--latest",))]
+        ("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore-platform.sh", ("--latest",))]
     )
     def test_recovery_refuses_a_production_file_without_its_keys_before_touching_anything(
         self, project: Project, script: str, args: tuple[str, ...]
@@ -615,14 +676,16 @@ class TestBackupFiles:
         assert being_written.exists()
 
     @pytest.mark.integration
-    def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, project: Project) -> None:
+    @pytest.mark.parametrize("directory", ["checkout", "checkout with spaces"])
+    def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, tmp_path: Path, directory: str) -> None:
+        project = Project(tmp_path / directory)
         # The listing went to stdout inside $(...), so it reached the restore as part of the file
         # name: no operator saw it, and every interactive restore ended in "Backup file not found".
         project.write_env(".env.staging", STAGING_ENV)
         backups = project.root / "backups"
         backups.mkdir()
         (backups / "praho_backup_20261008_020000_4242.sql.gz").write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", "--env", "staging", stdin="1\nyes\n")
+        result = project.run("restore-platform.sh", "--env", "staging", stdin="1\nyes\n")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1) 20261008_020000 (" in result.stderr
         assert any(c["argv"][:4] == ["exec", "-i", "praho_db", "psql"] for c in project.calls())

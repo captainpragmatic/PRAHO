@@ -14,7 +14,7 @@ from apps.provisioning.migration_target_hold import capture_backup_owner_shadow
 class OwnerShadowBackupDispatchTests(SimpleTestCase):
     def setUp(self):
         self.service = object.__new__(backup.VirtualminBackupService)
-        self.service.server = SimpleNamespace(hostname="node.example", node_deployment=object())
+        self.service.server = SimpleNamespace(hostname="node.example", ssh_port=22, node_deployment=object())
         self.service._owns_execution = Mock(return_value=True)
         self.service._read_domain_id = Mock(return_value=Ok("123"))
         self.service._update_backup_progress = Mock()
@@ -84,7 +84,7 @@ class OwnerShadowBackupDispatchTests(SimpleTestCase):
 
     def test_unsupported_reserved_shadow_flag_is_an_actionable_capture_refusal(self):
         with patch("apps.infrastructure.ansible_service.AnsibleService") as service:
-            service.return_value.run_playbook.return_value = Ok(
+            service.return_value.run_server_playbook.return_value = Ok(
                 SimpleNamespace(success=False, stdout="PRAHO_OWNER_SHADOW_RESERVED_FLAG")
             )
             with self.assertRaisesRegex(RuntimeError, "reserved flag.*unsupported"):

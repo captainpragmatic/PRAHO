@@ -9,8 +9,22 @@ from uuid import uuid4
 from django.test import SimpleTestCase
 
 from apps.common.types import Ok
+from apps.common.validators import SecureInputValidator
 from apps.provisioning import migration_target_hold as hold
 from apps.provisioning.virtualmin_pair_restore import PairStepResult
+from apps.provisioning.virtualmin_validators import VirtualminValidator
+
+
+class _ScriptedTokens:
+    """A secrets stand-in whose token_urlsafe() returns scripted tokens and records the sizes asked for."""
+
+    def __init__(self, tokens: list[str]) -> None:
+        self._tokens = iter(tokens)
+        self.requested: list[int] = []
+
+    def token_urlsafe(self, nbytes: int) -> str:
+        self.requested.append(nbytes)
+        return next(self._tokens)
 
 
 class HeldTargetRestoreTests(SimpleTestCase):
@@ -68,6 +82,42 @@ class HeldTargetRestoreTests(SimpleTestCase):
         self.assertTrue(variables["pair_recovery"])
         self.assertEqual(variables["pair_base_archive"], self.archives[0]["archive_name"])
         self.assertEqual(variables["chain_domain_id"], "123")
+
+    def test_placeholder_password_always_passes_the_parameter_validator(self):
+        # Every Virtualmin parameter is checked against SecureInputValidator's injection heuristics,
+        # and a random token containing "--" reads as an SQL comment: Virtualmin Lab CI saw two held
+        # restores fail definitively with "Invalid input detected". A rejected candidate is drawn again.
+        rejected = "aA1--" + "b" * 59
+        accepted = "cC2_" + "d" * 60
+        tokens = _ScriptedTokens([rejected, accepted])
+        # The gateway validates every parameter exactly like this before any request is sent
+        self.service._command.side_effect = lambda _migration, _server, _program, **params: (
+            VirtualminValidator.validate_virtualmin_params(params)
+        )
+        with (
+            patch.object(hold, "secrets", tokens),
+            patch.object(hold, "run_held_target_node"),
+            patch.object(hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))),
+            self.assertNoLogs("apps.common.validators", level="WARNING"),
+        ):
+            hold.restore_held_target(self.service, self.migration, uuid4(), self.archives)
+        create = self.service._command.call_args_list[0]
+        self.assertEqual(create.args[2], "create-domain")
+        self.assertEqual(create.kwargs["pass"], accepted)
+        self.assertIsNone(SecureInputValidator.first_malicious_pattern(create.kwargs["pass"]))
+        self.assertEqual(tokens.requested, [48, 48])
+
+    def test_placeholder_that_never_passes_the_validator_creates_nothing(self):
+        tokens = _ScriptedTokens(["aA1--" + "b" * 59] * 1000)
+        with (
+            patch.object(hold, "secrets", tokens),
+            patch.object(hold, "run_held_target_node") as node,
+            patch.object(hold, "run_pair_step", return_value=Ok(PairStepResult("ok", "completed", True, ()))),
+            self.assertRaisesRegex(RuntimeError, "passes parameter validation"),
+        ):
+            hold.restore_held_target(self.service, self.migration, uuid4(), self.archives)
+        self.service._command.assert_not_called()
+        node.assert_not_called()
 
     def test_failed_unix_proof_never_marks_restore_complete_or_moves_to_verifying(self):
         def node(migration, action):

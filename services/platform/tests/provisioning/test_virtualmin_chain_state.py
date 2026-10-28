@@ -261,7 +261,7 @@ class EvidenceInvalidationTests(ChainFixtures, ExclusionCase):
         with patch.object(self.backups, "run_chain_step", wraps=self.backups.run_chain_step), patch(
             "apps.infrastructure.ansible_service.AnsibleService"
         ) as ansible, patch.object(type(self.server), "node_deployment", create=True, new=object()):
-            ansible.return_value.run_playbook.return_value = played
+            ansible.return_value.run_server_playbook.return_value = played
             return self.backups._execute_chain_backup(self.account, "b", metadata, config)
 
     def chain_state(self) -> tuple[Any, int]:

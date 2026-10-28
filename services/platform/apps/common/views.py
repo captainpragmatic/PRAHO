@@ -2,6 +2,7 @@
 # DASHBOARD VIEW - MAIN PRAHO Platform OVERVIEW
 # ===============================================================================
 
+import logging
 from datetime import datetime, time, timedelta
 
 from django.contrib.admin.views.decorators import staff_member_required
@@ -19,6 +20,8 @@ from apps.common.rate_limiting import rate_limit
 from apps.customers.models import Customer
 from apps.provisioning.models import Service
 from apps.tickets.models import Ticket
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -161,12 +164,28 @@ def system_status_refresh(request: HttpRequest) -> HttpResponse:
     HTMX endpoint: run system status checks on demand and return partial HTML.
     Staff-only. POST to prevent accidental crawling.
     """
-    from apps.common.system_status import get_cached_status, refresh_and_cache_status  # noqa: PLC0415
+    from django.core.cache import cache  # noqa: PLC0415
+    from django_q.tasks import async_task  # noqa: PLC0415
+
+    from apps.common.system_status import get_cached_status  # noqa: PLC0415
 
     limited = getattr(request, "limited", False)
-    snapshot = get_cached_status() if limited else refresh_and_cache_status()
+    queued = False
+    if not limited and cache.add("status:refresh-requested", True, timeout=60):
+        try:
+            async_task("apps.common.tasks.system_status_check", force=True)
+            queued = True
+        except Exception:
+            cache.delete("status:refresh-requested")
+            logger.exception("🔥 [SystemStatus] Could not queue a manual check")
+    snapshot = get_cached_status()
     return render(
         request,
         "dashboard_partials/system_status.html",
-        {"system_status": snapshot.results, "status_snapshot": snapshot, "status_rate_limited": limited},
+        {
+            "system_status": snapshot.results,
+            "status_snapshot": snapshot,
+            "status_rate_limited": limited,
+            "status_queued": queued,
+        },
     )

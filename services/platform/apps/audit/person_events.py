@@ -35,7 +35,7 @@ REMOVED = "[removed]"
 # Network identity copied into metadata, which the column scrub alone would miss. It is the actor's.
 _NETWORK_KEYS = frozenset({"ip_address", "user_agent", "user_agent_info", "client_ip"})
 # Values erasure itself writes, and empty ones: matching them would touch other people's rows.
-_PLACEHOLDERS = frozenset({"anonymized", "user", "anonymized user", "+40700000000", "0.0.0.0"})
+_PLACEHOLDERS = frozenset({"anonymized", "user", "anonymized user", "+40700000000", "0.0.0.0"})  # nosec B104 - the placeholder erasure writes into ip columns, not a bind address
 _ANONYMIZED_EMAIL = re.compile(r"^anonymized_[0-9a-f]+@example\.com$")
 # Shorter values (initials, empty names) would match unrelated text.
 _MIN_IDENTIFIER_LENGTH = 3

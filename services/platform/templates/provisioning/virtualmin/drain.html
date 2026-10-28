@@ -8,6 +8,7 @@
     <p>{{ drain.get_status_display }}: {{ drain.accounts_migrated }} / {{ drain.accounts_total }} {% trans "migrated" %}; {{ drain.accounts_skipped }} {% trans "skipped" %}</p>
     <p>{{ drain.error_detail }}</p>
     {% if drain.cancel_requested %}<p>{% trans "Cancellation requested; waiting for the current account." %}</p>{% endif %}
+    {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="drain_id" value="{{ drain.pk }}">

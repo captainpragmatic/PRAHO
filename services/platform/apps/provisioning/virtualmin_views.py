@@ -606,7 +606,9 @@ def virtualmin_bridge_control(request: HttpRequest, account_id: str) -> HttpResp
     try:
         migration_id = UUID(str(request.POST.get("migration_id", "")))
     except ValueError:
-        return HttpResponse(_("Invalid bridge reference."), status=400)
+        return HttpResponse(  # nosemgrep: direct-use-of-httpresponse — content is a fixed translated string
+            _("Invalid bridge reference."), status=400
+        )
     bridge = get_object_or_404(MigrationBridge, migration_id=migration_id, migration__account_id=account_id)
     result = control_bridge(
         bridge.migration_id,

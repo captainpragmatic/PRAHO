@@ -12,6 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -127,11 +128,72 @@ def compose_images(*, portal: bool) -> dict[str, str]:
     return references
 
 
+def upload(dump: Path) -> None:
+    """Stream host-owned artifacts to the fixed Platform command, without host credentials."""
+    command = ["docker", "exec", "praho_platform", "python", "manage.py", "upload_platform_backup"]
+    enabled = subprocess.check_output([*command, "--check-enabled"], text=True).splitlines()
+    if not enabled or enabled[-1] not in {"enabled", "disabled"}:
+        raise ValueError("cannot determine off-server backup configuration")
+    if enabled[-1] == "disabled":
+        return
+    metadata = json.loads(manifest_path(dump).read_text())
+    validate(dump, metadata["database_major"], portal="portal" in metadata["images"])
+    run_id = str(uuid4())
+    stream_command = [
+        "docker",
+        "exec",
+        "-i",
+        "praho_platform",
+        "python",
+        "manage.py",
+        "upload_platform_backup",
+        "--backup-id",
+        run_id,
+    ]
+    artifacts = []
+    for role, path, file_format in (
+        ("database", dump, "sql-gzip"),
+        ("media", dump.with_name(dump.name.removesuffix(".sql.gz") + ".media.tar.gz"), "tar-gzip"),
+    ):
+        if path.is_symlink() or path.stat().st_uid != os.getuid():
+            raise ValueError("backup artifacts must be owned regular files")
+        artifact = {
+            "role": role,
+            "size": path.stat().st_size,
+            "sha256": metadata[role]["sha256"],
+            "format": file_format,
+        }
+        with path.open("rb") as stream:
+            subprocess.run(
+                [
+                    *stream_command,
+                    "--artifact",
+                    role,
+                    "--size",
+                    str(artifact["size"]),
+                    "--sha256",
+                    str(artifact["sha256"]),
+                    "--format",
+                    file_format,
+                ],
+                stdin=stream,
+                check=True,
+            )
+        artifacts.append(artifact)
+    subprocess.run(
+        [*stream_command, "--finalize"],
+        input=json.dumps({"artifacts": artifacts, "recovery": metadata}).encode(),
+        check=True,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
     producer = commands.add_parser("create")
     producer.add_argument("dump", type=Path)
+    uploader = commands.add_parser("upload")
+    uploader.add_argument("dump", type=Path)
     consumer = commands.add_parser("validate")
     consumer.add_argument("dump", type=Path)
     consumer.add_argument("--database-major", type=int, required=True)
@@ -142,6 +204,8 @@ def main() -> int:
     try:
         if args.action == "create":
             create(args.dump)
+        elif args.action == "upload":
+            upload(args.dump)
         else:
             result = (
                 validate(args.dump, args.database_major, portal=args.portal)

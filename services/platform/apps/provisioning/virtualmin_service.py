@@ -58,7 +58,7 @@ from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from .virtualmin_migration_service import MigrationResumeOutcome
 
@@ -73,6 +73,21 @@ _MAX_PASSWORD_ATTEMPTS = 100
 # Username generation defaults
 MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+
+
+def generate_virtualmin_parameter_secret(candidate: Callable[[], str]) -> str:
+    """A random secret from ``candidate`` that Virtualmin's parameter validation accepts.
+
+    Every remote.cgi parameter value is checked against SecureInputValidator's injection
+    heuristics, and a random secret can match one (two adjacent "-" read as an SQL comment).
+    A candidate the validator would reject is drawn again instead of failing the call permanently.
+    """
+    for _attempt in range(_MAX_PASSWORD_ATTEMPTS):
+        secret = candidate()
+        # The side-effect-free check: a discarded candidate is not an attack to alert on
+        if SecureInputValidator.first_malicious_pattern(secret) is None:
+            return secret
+    raise RuntimeError("Could not generate a Virtualmin password that passes parameter validation")
 
 
 def create_domain_params(  # noqa: PLR0913  # One keyword per remote.cgi parameter
@@ -1551,12 +1566,7 @@ class VirtualminProvisioningService:
         Returns:
             Secure password string
         """
-        for _attempt in range(_MAX_PASSWORD_ATTEMPTS):
-            candidate = self._password_candidate(length)
-            # The side-effect-free check: a discarded candidate is not an attack to alert on
-            if SecureInputValidator.first_malicious_pattern(candidate) is None:
-                return candidate
-        raise RuntimeError("Could not generate a Virtualmin password that passes parameter validation")
+        return generate_virtualmin_parameter_secret(lambda: self._password_candidate(length))
 
     def _password_candidate(self, length: int) -> str:
         """One random password with at least one lowercase, uppercase, digit and special character."""
@@ -1610,7 +1620,65 @@ class VirtualminProvisioningService:
 class VirtualminServerManagementService:
     """Service for managing Virtualmin servers and health monitoring"""
 
-    def health_check_server(self, server: VirtualminServer) -> Result[dict[str, Any], str]:
+    def health_check_server(self, server: VirtualminServer, *, scheduled: bool = False) -> Result[dict[str, Any], str]:
+        """Verify a captured configuration and fence every resulting health mutation."""
+        from apps.common.status_observations import Observation, claim_check, finish_check  # noqa: PLC0415
+        from apps.common.system_status import node_input_identity  # noqa: PLC0415
+
+        try:
+            server.refresh_from_db()
+        except VirtualminServer.DoesNotExist:
+            return Err("Node was removed before its health check")
+        claim = claim_check("virtualmin", node_id=server.pk, identity=node_input_identity(server))
+        if claim is None:
+            return Err("A check is already running or the node was removed")
+        try:
+            result = VirtualminProvisioningService(server).test_server_connection(server)
+            if result.is_ok() and result.unwrap().get("healthy") is not True:
+                result = Err("Server did not affirm a healthy connection")
+            resources = None
+            if result.is_ok():
+                raw = result.unwrap().get("data", {})
+                if isinstance(raw, dict):
+                    resources = VirtualminGateway.resource_snapshot(raw)
+            observation = Observation(
+                "green" if result.is_ok() else "red",
+                "connected" if result.is_ok() else "connection_failed",
+                resources.details() if resources is not None else {},
+                resources,
+                scheduled,
+            )
+
+            def publish() -> None:
+                server.refresh_from_db()
+                applied = self._apply_health_result(server, result)
+                if result.is_ok() and applied.is_err():
+                    raise RuntimeError("Node health mutation failed")
+
+            accepted = finish_check(
+                claim,
+                identity=lambda: node_input_identity(VirtualminServer.objects.get(pk=server.pk)),
+                observation=observation,
+                on_accept=publish,
+            )
+            if not accepted:
+                return Err("Node configuration changed or the check was superseded")
+            from apps.settings.setup_checklist import clear_setup_cache  # noqa: PLC0415
+
+            transaction.on_commit(clear_setup_cache)
+            return result
+        except Exception:  # Diagnostic boundary: do not expose gateway/vault exception payloads.
+            logger.error("🔥 [ServerManagement] Health check could not complete for node %s", server.pk)
+            finish_check(
+                claim,
+                identity=lambda: node_input_identity(VirtualminServer.objects.get(pk=server.pk)),
+                observation=Observation("unknown", "check_failed"),
+            )
+            return Err("Node check could not complete; inspect the private operational logs")
+
+    def _apply_health_result(
+        self, server: VirtualminServer, result: Result[dict[str, Any], str]
+    ) -> Result[dict[str, Any], str]:
         """
         Perform health check on Virtualmin server.
 
@@ -1621,14 +1689,6 @@ class VirtualminServerManagementService:
             Result with health data or error message
         """
         try:
-            provisioning_service = VirtualminProvisioningService(server)
-            result = provisioning_service.test_server_connection(server)
-
-            if result.is_ok() and result.unwrap().get("healthy") is not True:
-                # Affirmative health only: a missing/malformed/non-bool "healthy"
-                # is a failed check, never a streak reset or freshness stamp.
-                result = Err(f"Server reported unhealthy: {result.unwrap()}")
-
             if result.is_ok():
                 health_data = result.unwrap()
 
@@ -1675,9 +1735,11 @@ class VirtualminServerManagementService:
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
                 return Err(error_msg, retriability=retriability_of(result))
 
-        except Exception as e:
-            logger.exception(f"Error in health check for {server.hostname}: {e}")
-            return Err(str(e))
+        except Exception:
+            # The caller publishes evidence and mutations in one transaction. Propagate so
+            # a partial health write rolls back instead of recording a successful check.
+            logger.exception("🔥 [ServerManagement] Health mutation failed for node %s", server.pk)
+            raise
 
     def update_server_statistics(self, server: VirtualminServer) -> Result[dict[str, Any], str]:
         """

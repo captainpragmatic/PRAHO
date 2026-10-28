@@ -24,6 +24,9 @@ class CommonConfig(AppConfig):
     verbose_name = "Common Utilities"
 
     def ready(self) -> None:
+        from apps.common.setup_signals import connect_setup_dependencies
+
+        connect_setup_dependencies()
         _validate_account_lockout_at_startup()
         _validate_internal_service_domains()
         _validate_throttle_rates_at_startup()

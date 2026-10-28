@@ -14,12 +14,12 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
         verified_at = self.server.last_health_check
         self.rejections["info"] = "permission denied"
         result = VirtualminServerManagementService().health_check_server(self.server)
-        self.assertIn("Server reported unhealthy:", result.unwrap_err())
+        self.assertIn("Server did not affirm a healthy connection", result.unwrap_err())
         self.server.refresh_from_db()
         self.assertEqual(self.server.status, "active")
         self.assertEqual(self.server.last_health_check, verified_at)
         self.assertEqual(self.server.consecutive_health_failures, 1)
-        self.assertIn("Server reported unhealthy:", self.server.health_check_error)
+        self.assertIn("Server did not affirm a healthy connection", self.server.health_check_error)
 
     def test_successful_probe_recovers_only_health_failed_server(self) -> None:
         self.server.status = "failed"

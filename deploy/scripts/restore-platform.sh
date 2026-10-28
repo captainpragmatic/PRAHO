@@ -5,9 +5,9 @@
 # Restores the database from a backup file, and the media archive backup.sh wrote next to it
 #
 # Usage:
-#   ./restore.sh                           # Interactive - choose from list
-#   ./restore.sh <backup_file>             # Restore specific file
-#   ./restore.sh --latest                  # Restore latest backup
+#   ./restore-platform.sh                           # Interactive - choose from list
+#   ./restore-platform.sh <backup_file>             # Restore specific file
+#   ./restore-platform.sh --latest                  # Restore latest backup
 #
 # Add --env staging or --env-file PATH to use an env file other than .env.prod (see lib/compose.sh).
 
@@ -62,7 +62,11 @@ get_latest_backup() {
 
 # Everything but the chosen path goes to stderr: the caller captures stdout as the file to restore.
 list_and_select_backup() {
-    local BACKUPS=($(ls -t "${BACKUP_DIR}"/praho_backup_*.sql.gz 2>/dev/null))
+    local -a BACKUPS=()
+    local BACKUP SIZE DATE
+    while IFS= read -r BACKUP; do
+        BACKUPS+=("$BACKUP")
+    done < <(ls -t "${BACKUP_DIR}"/praho_backup_*.sql.gz 2>/dev/null)
 
     if [ ${#BACKUPS[@]} -eq 0 ]; then
         log_error "No backups found in ${BACKUP_DIR}" >&2
@@ -73,8 +77,8 @@ list_and_select_backup() {
         echo "Available backups:"
         echo ""
         for i in "${!BACKUPS[@]}"; do
-            local SIZE=$(du -h "${BACKUPS[$i]}" | cut -f1)
-            local DATE=$(basename "${BACKUPS[$i]}" .sql.gz)
+            SIZE=$(du -h "${BACKUPS[$i]}" | cut -f1)
+            DATE=$(basename "${BACKUPS[$i]}" .sql.gz)
             DATE="${DATE#praho_backup_}"
             # YYYYMMDD_HHMMSS, without the process id that newer names end in.
             echo "  $((i+1))) ${DATE:0:15} (${SIZE})"

@@ -81,8 +81,11 @@ def _version(text: str) -> tuple[int, ...]:
 
 class TestBackupPlaybook:
     def test_backup_runs_as_the_directory_owner(self) -> None:
-        run = next(task for task in _backup_tasks() if task.get("name") == "Run backup script")
+        run = next(task for task in _backup_tasks() if task.get("name") == "Run the legacy backup before the first service deployment")
         assert run["become_user"] == "{{ project_user }}"
+        unit = (PROJECT_ROOT / "deploy/ansible/roles/praho-native/templates/praho-backup.service.j2").read_text()
+        assert "User={{ project_user }}" in unit
+        assert "EnvironmentFile=" in unit
 
     @pytest.mark.integration
     def test_it_targets_a_group_every_inventory_defines(self) -> None:
@@ -237,6 +240,10 @@ class TestNativeBackupScript:
         """The rendered script, and an environment whose `date` is pinned and `pg_dump` is a stub."""
         stubs = tmp_path / "bin"
         stubs.mkdir()
+        runtime = tmp_path / ".venv-linux/bin/python"
+        runtime.parent.mkdir(parents=True)
+        runtime.write_text("#!/bin/sh\n# Fixed uploader boundary is exercised separately.\nexit 0\n")
+        runtime.chmod(0o755)
         (stubs / "date").write_text("#!/bin/sh\necho 20261008_020000\n")
         (stubs / "pg_dump").write_text(pg_dump)
         for stub in stubs.iterdir():

@@ -117,7 +117,7 @@ def test_deployment_list_page_loads(monitored_staff_page: Page) -> None:
 
 def test_deployment_create_page_loads(monitored_staff_page: Page) -> None:
     """
-    Test the deployment create page loads with form.
+    An unconfigured installation explains prerequisites before exposing the node form.
     """
     page = monitored_staff_page
     print("+ Testing deployment create page")
@@ -129,18 +129,12 @@ def test_deployment_create_page_loads(monitored_staff_page: Page) -> None:
     # Verify page loaded
     assert "/create/" in page.url
 
-    # Check for form elements
-    form = page.locator("form")
-    assert form.count() > 0, "No form found on create page"
+    expect(page.get_by_role("heading", name="Before you deploy a node", exact=True)).to_be_visible()
+    expect(page.get_by_role("link", name="Configure Cloudflare API token", exact=True)).to_be_visible()
+    expect(page.get_by_role("link", name="Return to node creation", exact=True)).to_be_visible()
+    expect(page.locator('select[name="provider"]')).to_have_count(0)
 
-    # Check for key form fields
-    provider_select = page.locator('select[name="provider"], [id*="provider"]')
-    environment_select = page.locator('select[name="environment"], [id*="environment"]')
-
-    # At least one of these should be present
-    assert provider_select.count() > 0 or environment_select.count() > 0, "Form fields not found"
-
-    print("  ✅ Deployment create page loaded with form")
+    print("  ✅ Deployment prerequisites show actionable configuration links")
 
 
 # =============================================================================

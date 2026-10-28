@@ -13,6 +13,7 @@ from apps.provisioning import migration_routing as routing
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.migration_bridge_cleanup import cleanup_bridge, control_bridge
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration
+from apps.users.models import User
 from tests.provisioning.test_virtualmin_migration_bridge import BridgeCase
 
 
@@ -79,6 +80,26 @@ class FrontendRetentionTests(BridgeCase):
             patch.object(routing.timezone, "now", return_value=checked + timedelta(seconds=3600)),
         ):
             self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "torn_down")
+
+    def test_role_based_staff_may_attest_and_non_staff_may_not(self):
+        # The bridge-control view admits staff by role (User.is_staff_user); the attestation must
+        # accept the same identities, not only the Django is_staff flag.
+        bridge, migration = self.due()
+        self.staff.is_staff = False
+        self.staff.save(update_fields=["is_staff"])
+        self.assertEqual(self.staff.staff_role, "admin")
+        attestation = {
+            "note": "Checked the CDN dashboard: origin is the committed target", "target_id": str(self.target.pk),
+            "ipv4": self.target.ipv4_address, "ipv6": self.target.ipv6_address or "",
+        }
+        outsider = User.objects.create_user(email="not-staff@example.com", password="not-staff-password")
+        with patch("apps.provisioning.migration_bridge_cleanup.schedule_bridge_cleanup"):
+            refused = control_bridge(migration.pk, action="attest", actor=outsider, attestation=attestation)
+            accepted = control_bridge(migration.pk, action="attest", actor=self.staff, attestation=attestation)
+        self.assertTrue(refused.is_err())
+        self.assertTrue(accepted.is_ok(), accepted)
+        bridge.refresh_from_db()
+        self.assertEqual(bridge.evidence["routing_attestation"]["actor"], str(self.staff.pk))
 
     def test_a_staff_proxy_statement_is_bound_to_current_target_and_audited(self):
         bridge, migration = self.due()

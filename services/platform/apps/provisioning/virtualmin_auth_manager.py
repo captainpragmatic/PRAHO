@@ -440,7 +440,7 @@ class VirtualminAuthenticationManager:
             if not self._ssh_client:
                 return Err("Failed to establish SSH connection")
 
-            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=get_sudo_command_timeout())
+            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=get_sudo_command_timeout())  # nosec B601 - callers build it with shlex.join
 
             # Read output
             output = stdout.read().decode("utf-8")

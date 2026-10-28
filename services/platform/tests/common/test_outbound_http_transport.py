@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import socket
+import ssl
+import urllib.request
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -12,6 +14,8 @@ from apps.common.outbound_http import (
     OutboundPolicy,
     OutboundSecurityError,
     PinnedIPAdapter,
+    _build_urlopen_opener,
+    _RefuseRedirects,
     safe_request,
     safe_urlopen,
 )
@@ -326,33 +330,52 @@ class TestSafeUrlopen(TestCase):
             safe_urlopen("ftp://example.com/file")
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
-    @patch("apps.common.outbound_http.urllib.request.urlopen")
-    def test_calls_urlopen_with_timeout(self, mock_urlopen):
-        mock_urlopen.return_value = MagicMock()
+    @patch("apps.common.outbound_http._build_urlopen_opener")
+    def test_calls_opener_with_timeout(self, mock_build):
         safe_urlopen("https://example.com/", timeout=15.0)
-        call_kwargs = mock_urlopen.call_args[1]
+        call_kwargs = mock_build.return_value.open.call_args[1]
         self.assertEqual(call_kwargs["timeout"], 15.0)
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
-    @patch("apps.common.outbound_http.urllib.request.urlopen")
-    def test_uses_policy_timeout_by_default(self, mock_urlopen):
-        mock_urlopen.return_value = MagicMock()
+    @patch("apps.common.outbound_http._build_urlopen_opener")
+    def test_uses_policy_timeout_by_default(self, mock_build):
         safe_urlopen("https://example.com/")
-        call_kwargs = mock_urlopen.call_args[1]
+        call_kwargs = mock_build.return_value.open.call_args[1]
         self.assertEqual(call_kwargs["timeout"], 30.0)
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
-    @patch("apps.common.outbound_http.urllib.request.urlopen")
-    def test_sets_host_header(self, mock_urlopen):
-        mock_urlopen.return_value = MagicMock()
+    @patch("apps.common.outbound_http._build_urlopen_opener")
+    def test_sets_host_header(self, mock_build):
         safe_urlopen("https://example.com/path")
-        req_arg = mock_urlopen.call_args[0][0]
+        req_arg = mock_build.return_value.open.call_args[0][0]
         self.assertEqual(req_arg.get_header("Host"), "example.com")
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
-    @patch("apps.common.outbound_http.urllib.request.urlopen")
-    def test_pins_to_resolved_ip(self, mock_urlopen):
-        mock_urlopen.return_value = MagicMock()
+    @patch("apps.common.outbound_http._build_urlopen_opener")
+    def test_pins_to_resolved_ip(self, mock_build):
         safe_urlopen("https://example.com/path")
-        req_arg = mock_urlopen.call_args[0][0]
+        req_arg = mock_build.return_value.open.call_args[0][0]
         self.assertIn(MOCK_PUBLIC_IP, req_arg.full_url)
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    @patch("apps.common.outbound_http._build_urlopen_opener")
+    def test_passes_the_policy_tls_context_to_the_opener(self, mock_build):
+        policy = OutboundPolicy(name="no_verify", verify_tls=False)
+        safe_urlopen("https://example.com/", policy=policy)
+        ctx = mock_build.call_args[0][0]
+        self.assertFalse(ctx.check_hostname)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_NONE)
+
+    def test_opener_has_no_proxy_no_redirect_and_the_given_tls_context(self):
+        ctx = ssl.create_default_context()
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.invalid:3128", "HTTP_PROXY": "http://proxy.invalid:3128"}):
+            default_opener = urllib.request.build_opener()
+            opener = _build_urlopen_opener(ctx)
+        # Control: a stock opener would pick the environment proxy up.
+        self.assertTrue(any(isinstance(h, urllib.request.ProxyHandler) for h in default_opener.handlers))
+        self.assertFalse(any(isinstance(h, urllib.request.ProxyHandler) for h in opener.handlers))
+        https = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPSHandler)]
+        self.assertEqual(len(https), 1)
+        self.assertIs(https[0]._context, ctx)
+        redirects = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)]
+        self.assertEqual([type(h) for h in redirects], [_RefuseRedirects])

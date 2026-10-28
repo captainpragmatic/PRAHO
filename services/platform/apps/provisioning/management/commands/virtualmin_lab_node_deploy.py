@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 API_USER = "praho-api"
 PLAYBOOK_TIMEOUT = 3600
-FACT_CACHE = Path("/tmp/ansible_facts_cache")  # noqa: S108  # Ansible's own fact cache (ansible.cfg), keyed by inventory hostname
+FACT_CACHE = Path("/tmp/ansible_facts_cache")  # noqa: S108  # nosec B108 - Ansible's own fact cache (ansible.cfg), keyed by inventory hostname
 SSH_PORT = 22
 HTTP_PORT = 80
 WEBMIN_PORT = 10000

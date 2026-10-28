@@ -21,6 +21,16 @@ from apps.provisioning.virtualmin_pair_restore import PairStepResult
 from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService, select_recovery_backups
 from tests.provisioning.test_virtualmin_migration_barrier_wiring import BarrierCase
 
+# The node playbook pins Virtualmin's default features; PRAHO nodes host no mail.
+NODE_FEATURES = ["unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"]
+
+
+def seed_restored(gateway, account, *, enabled):
+    """The restored target as a PRAHO node lists it (the mock's own default includes mail)."""
+    domain = gateway.seed_domain(account.domain, username=account.virtualmin_username, enabled=enabled)
+    domain.features = list(NODE_FEATURES)
+    return domain
+
 
 def manifest(account, backup_id="b" * 32, role="standalone"):
     return {
@@ -92,8 +102,31 @@ class RecoverySelectionTests(BarrierCase):
         AccountHostname.objects.create(
             account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
         )
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        self.target_domain = seed_restored(self.target_gateway, self.account, enabled=False)
         return migration, token
+
+    def test_mail_enabled_archives_are_refused_before_any_transfer(self):
+        # The hosted-mail lifecycle cannot recover mailboxes yet, and the policy step after the
+        # ownership commit refuses mail; selection and transfer refuse it before anything changes.
+        mail_archive = {**manifest(self.account), "domain_features": ["unix", "dir", "web", "mail"]}
+        refused = select_recovery_backups(self.account, [mail_archive])
+        self.assertTrue(refused.is_err())
+        self.assertIn("Mail-enabled", refused.unwrap_err())
+
+    def test_a_restored_mail_domain_is_refused_before_ownership_commit(self):
+        # An archive without a recorded feature list is checked against what was actually restored.
+        migration, token = self._restored_name()
+        self.target_domain.features = ["unix", "dir", "web", "mail"]
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        with (
+            patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            self.assertRaisesRegex(ValueError, "Mail-enabled"),
+        ):
+            VirtualminRecoveryService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.account.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+        self.assertEqual(self.account.server_id, self.server.pk)
 
     def test_recovery_requires_neutral_http_proof_before_ownership_commit(self):
         migration, token = self._restored_name()
@@ -124,7 +157,7 @@ class RecoverySelectionTests(BarrierCase):
         AccountHostname.objects.create(
             account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
         )
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        seed_restored(self.target_gateway, self.account, enabled=False)
         self.events.clear()
         ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with patch("apps.provisioning.virtualmin_recovery_service.ensure_on_recreated_node", return_value=Ok(ready)):
@@ -144,7 +177,7 @@ class RecoverySelectionTests(BarrierCase):
         AccountHostname.objects.create(
             account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
         )
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        seed_restored(self.target_gateway, self.account, enabled=False)
         self.effects[("target", "modify-domain")] = self._error("target", "modify-domain")
         ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
         with (
@@ -166,7 +199,7 @@ class RecoverySelectionTests(BarrierCase):
             barrier_state={"target_domain_id": "42", "recovery_archives": [{"archive_name": archive}]},
         )
         migration.transition(token, "needs_review", "needs_review", lease_token=None, worker_lease_expires_at=None)
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        seed_restored(self.target_gateway, self.account, enabled=False)
         live = VirtualminRecoveryService()._domain(self.target, self.account.domain)
         VirtualminMigration.objects.filter(pk=migration.pk).update(
             barrier_state={**migration.barrier_state, "target_domain_id": str(live["attributes"]["ID"])}
@@ -320,7 +353,7 @@ class RecoverySelectionTests(BarrierCase):
             cutover_committed_at=timezone.now(),
             barrier_state={"target_domain_id": "17919754553304"},
         )
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
+        seed_restored(self.target_gateway, self.account, enabled=True)
         # A committed activation checkpoint already owns the target in PRAHO.
         self.account.server = self.target
         self.account.save(update_fields=["server", "updated_at"])
@@ -430,7 +463,7 @@ class RecoverySelectionTests(BarrierCase):
             barrier_state={"target_domain_id": "17919754553304"},
         )
         migration.transition(token, "needs_review", "needs_review", lease_token=None, worker_lease_expires_at=None)
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        seed_restored(self.target_gateway, self.account, enabled=False)
         with patch(
             "apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Err("unknown"), create=True
         ):
@@ -450,7 +483,7 @@ class RecoverySelectionTests(BarrierCase):
         name = AccountHostname.objects.create(
             account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
         )
-        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
+        seed_restored(self.target_gateway, self.account, enabled=False)
         self.events.clear()  # _held uses normal migration admission to construct the fixture.
         self.effects[("source", "list-domains")] = AssertionError("Recovery must never contact the source")
         ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
