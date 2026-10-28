@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-567 actions, in 9 categories.
+572 actions, in 9 categories.
 
 ## Account management
 
@@ -581,6 +581,11 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `cloud_provider_created` | low | no | no | infrastructure |
 | `cloud_provider_updated` | low | no | no | infrastructure |
 | `configuration_changed` | high | yes | no | billing, domains, settings |
+| `customer_view_denied` | low | no | yes | users |
+| `customer_view_ended` | low | no | yes | users |
+| `customer_view_issue_denied` | low | no | yes | users |
+| `customer_view_issued` | high | yes | yes | users |
+| `customer_view_started` | high | yes | yes | users |
 | `drift_accepted` | low | no | no | infrastructure |
 | `drift_auto_resolved` | low | no | no | infrastructure |
 | `drift_detected` | low | no | no | infrastructure |

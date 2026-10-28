@@ -289,7 +289,7 @@ database and in media). Anyone holding a backup file can read that data.
 | Feature | Status | Location |
 |---------|--------|----------|
 | Authentication Logging | Implemented | 15+ auth event types in `audit/models.py` |
-| Privileged Actions | Implemented | Staff role changes, impersonation |
+| Privileged Actions | Implemented | Staff role changes, customer view (ADR-0065) |
 | Configuration Changes | Implemented | System admin event category |
 | JSON Format Logging | Implemented | `config/settings/prod.py` — `SIEMJSONFormatter` |
 | Request ID Tracking | Implemented | `RequestIDMiddleware` + `RequestIDFilter` in prod logging |

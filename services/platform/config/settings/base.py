@@ -959,6 +959,12 @@ PORTAL_HMAC_CREDENTIALS: str | None = os.environ.get("PORTAL_HMAC_CREDENTIALS")
 # Production and staging require an isolated credential for each Portal.
 PORTAL_HMAC_REQUIRE_ISOLATION = False
 
+# ADR-0065: staff may open a read-only customer view. False stops new grants, and every live
+# customer view ends at its next request.
+CUSTOMER_VIEW_ENABLED: bool = os.environ.get("CUSTOMER_VIEW_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# The portal's public origin: the handoff page posts the one-time code there.
+PORTAL_PUBLIC_ORIGIN: str = os.environ.get("PORTAL_PUBLIC_ORIGIN", "http://localhost:8701").strip()
+
 # ADR-0017 section 5: every signed request that names a user must name a live portal session.
 # False here, true in prod and staging. Deploy Platform with it false, then Portal, then set it
 # true; set it false again before rolling Portal back.

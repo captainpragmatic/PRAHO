@@ -774,7 +774,11 @@ class PortalSession(models.Model):
     """
 
     TIER_STANDARD = "standard"
-    TIER_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = ((TIER_STANDARD, _("Standard")),)
+    TIER_CUSTOMER_VIEW = "customer_view"
+    TIER_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        (TIER_STANDARD, _("Standard")),
+        (TIER_CUSTOMER_VIEW, _("Customer view")),
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="portal_sessions")
@@ -790,6 +794,17 @@ class PortalSession(models.Model):
     ip_digest = models.CharField(max_length=16, blank=True, default="")
     ua_digest = models.CharField(max_length=16, blank=True, default="")
     ua_label = models.CharField(max_length=80, blank=True, default="")
+    # Customer view (ADR-0065): a staff member's scoped, read-only session as one customer member.
+    viewed_as_customer_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="customer_view_sessions"
+    )
+    customer_view_customer = models.ForeignKey(
+        "customers.Customer", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    customer_view_grant = models.OneToOneField(
+        "users.CustomerViewGrant", on_delete=models.SET_NULL, null=True, blank=True, related_name="portal_session"
+    )
+    staff_credential_snapshot = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -809,6 +824,51 @@ class PortalSession(models.Model):
 
     def __str__(self) -> str:
         return f"PortalSession {self.pk} ({self.tier})"
+
+
+class CustomerViewGrant(models.Model):
+    """A one-time, 60-second permission to open one customer view (ADR-0065).
+
+    Only the SHA-256 digest of the code is stored. Consuming it is a conditional update, so two
+    redemptions of one code cannot both succeed.
+    """
+
+    REASON_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("support_request", _("Support request")),
+        ("incident_investigation", _("Incident investigation")),
+        ("account_assistance", _("Account assistance")),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code_digest = models.CharField(max_length=64, unique=True)
+    staff = models.ForeignKey(User, on_delete=models.CASCADE, related_name="customer_view_grants_issued")
+    target = models.ForeignKey(User, on_delete=models.CASCADE, related_name="customer_view_grants_received")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE, related_name="+")
+    # The staff console session that issued it; the customer view lives only while it does.
+    staff_session_key = models.CharField(max_length=40)
+    staff_credential_snapshot = models.CharField(max_length=64)
+    target_credential_snapshot = models.CharField(max_length=64)
+    reason_category = models.CharField(max_length=32, choices=REASON_CHOICES)
+    reason = models.TextField()
+    ticket_reference = models.CharField(max_length=100, blank=True, default="")
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_customer_view_grants"
+        db_table_comment = (
+            "One-time grants a staff member redeems to open a read-only customer view in the portal; "
+            "only the code's SHA-256 digest is kept."
+        )
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["staff", "created_at"], name="idx_cv_grant_staff_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"CustomerViewGrant {self.pk}"
 
 
 # Import MFA models to ensure they're recognized by Django
