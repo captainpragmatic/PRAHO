@@ -122,7 +122,7 @@
                     {% include 'components/mobile_nav_item.html' with url_name='users:user_profile' title='Settings' subtitle='Profile & preferences' icon_name='settings' %}
 
                     <!-- Sign Out -->
-                    {% include 'components/mobile_nav_item.html' with url='users:logout' title='Sign Out' subtitle='End your session' is_button=True button_bg='bg-red-900/50' button_hover_bg='bg-red-800/60' text_color='text-red-400' text_hover_color='text-red-300' subtitle_color='text-red-500/70' icon_name='logout' icon_css='text-red-400 group-hover:text-red-300' %}
+                    {% url 'users:logout' as logout_url %}{% include 'components/mobile_nav_item.html' with url=logout_url title='Sign Out' subtitle='End your session' is_button=True button_bg='bg-red-900/50' button_hover_bg='bg-red-800/60' text_color='text-red-400' text_hover_color='text-red-300' subtitle_color='text-red-500/70' icon_name='logout' icon_css='text-red-400 group-hover:text-red-300' %}
                 </div>
             {% else %}
                 <!-- Guest Navigation -->

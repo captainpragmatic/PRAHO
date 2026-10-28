@@ -22,14 +22,15 @@ import hmac
 import json
 import logging
 import re
+import time
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.x509 import load_pem_x509_certificate
 from django.conf import settings
 from django.core.cache import cache
@@ -486,6 +487,29 @@ class SESWebhookView(View):
         logger.info(f"Processed SES delivery for {len(recipients)} recipients")
 
 
+def _sendgrid_signature_valid(public_key_b64: str, signature_b64: str, signed: bytes) -> bool:
+    """SendGrid signs timestamp + raw body with ECDSA P-256 / SHA-256.
+
+    The verification key SendGrid publishes is that public key (base64 DER), so a keyed hash over it,
+    as this check once was, proves nothing: anyone holding the key could produce it.
+    """
+    try:
+        public_key = serialization.load_der_public_key(base64.b64decode(public_key_b64))
+        if not isinstance(public_key, ec.EllipticCurvePublicKey):
+            logger.error("SendGrid webhook key is not an elliptic-curve public key - rejecting")
+            return False
+        public_key.verify(base64.b64decode(signature_b64), signed, ec.ECDSA(hashes.SHA256()))
+    except (InvalidSignature, UnsupportedAlgorithm, ValueError, binascii.Error):
+        return False
+    return True
+
+
+# How old a signed SendGrid delivery may be (seconds); SendGrid retries with a fresh timestamp.
+SENDGRID_SIGNATURE_MAX_AGE_SECONDS = 300
+# The same for Mailgun, whose signed tokens are also refused a second time within twice this.
+MAILGUN_SIGNATURE_MAX_AGE_SECONDS = 300
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class SendGridWebhookView(View):
     """
@@ -544,14 +568,11 @@ class SendGridWebhookView(View):
         signature = request.META.get("HTTP_X_TWILIO_EMAIL_EVENT_WEBHOOK_SIGNATURE")
         timestamp = request.META.get("HTTP_X_TWILIO_EMAIL_EVENT_WEBHOOK_TIMESTAMP")
 
-        if not signature or not timestamp:
+        if not signature or not timestamp or not timestamp.isdigit():
             return False
-
-        # Verify signature
-        payload = timestamp + request.body.decode()
-        expected = hmac.new(webhook_key.encode(), payload.encode(), hashlib.sha256).hexdigest()
-
-        return hmac.compare_digest(signature, expected)
+        if abs(time.time() - int(timestamp)) > SENDGRID_SIGNATURE_MAX_AGE_SECONDS:
+            return False  # a captured delivery cannot be replayed later
+        return _sendgrid_signature_valid(webhook_key, signature, timestamp.encode() + request.body)
 
     def _process_event(self, event: dict[str, Any]) -> None:
         """Process a single SendGrid event."""
@@ -646,8 +667,15 @@ class MailgunWebhookView(View):
 
         # Verify signature
         expected = hmac.new(api_key.encode(), f"{timestamp}{token}".encode(), hashlib.sha256).hexdigest()
-
-        return hmac.compare_digest(signature, expected)
+        if not hmac.compare_digest(signature, expected):
+            return False
+        # The signature covers only timestamp and token, not the event: a captured triple must be
+        # fresh and used once, or it could carry any event body again.
+        try:
+            fresh = abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
+        except ValueError:
+            return False
+        return fresh and cache.add(f"mailgun-webhook-token:{token}", 1, MAILGUN_SIGNATURE_MAX_AGE_SECONDS * 2)
 
     def _process_event(self, data: dict[str, Any]) -> None:
         """Process a Mailgun event."""

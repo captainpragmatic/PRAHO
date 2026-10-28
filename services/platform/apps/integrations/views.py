@@ -60,19 +60,10 @@ class WebhookView(View):
 
         # Handle rate limiting — audit logging handled by @rate_limit decorator
         if getattr(request, "limited", False):  # type: ignore[unreachable]
-            ip_address = self.get_client_ip(request)
-            user_agent = request.META.get("HTTP_USER_AGENT", "")
-
-            # Log rate limit event to WebhookEvent for webhook-specific monitoring
-            WebhookEvent.objects.create(
-                source=self.source_name,
-                event_type="rate_limited",
-                event_id=f"rate_limit_{uuid.uuid4().hex[:8]}",
-                payload={"error": "Rate limit exceeded", "ip": ip_address},
-                status="skipped",
-                ip_address=ip_address,
-                user_agent=user_agent,
-                error_message="Rate limit exceeded",
+            # Logged, never stored: this sender has not been authenticated, so a row per refused
+            # request would let anyone grow the webhook table at will.
+            logger.warning(
+                "⚠️ [Webhooks] Rate limited %s webhook from %s", self.source_name, self.get_client_ip(request)
             )
             return JsonResponse(
                 {"status": "rate_limited", "message": "Too many webhook requests. Please slow down."}, status=429
