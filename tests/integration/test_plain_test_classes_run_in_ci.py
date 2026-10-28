@@ -1,13 +1,14 @@
-"""Every plain ``Test*`` class in the platform tests must run in CI.
+"""Every plain ``Test*`` class and top-level ``test_*`` function in the platform tests must run in CI.
 
 ``manage.py test`` only collects ``unittest.TestCase`` subclasses. A ``class TestX:`` with
 ``test_*`` methods and pytest fixtures is silently ignored by it, so 40 such classes in nine
-files passed nothing for as long as they existed, and several had gone stale.
+files passed nothing for as long as they existed, and several had gone stale. Module-level
+``def test_x()`` functions are ignored the same way: three DNS modules ran in no CI job.
 
 CI now derives the modules holding them with ``scripts/plain_test_class_modules.py`` and runs
 exactly those under pytest (``make test-platform-pytest-only``). This test checks the three
-parts of that arrangement: the scan finds every plain class, the target runs what the scan
-finds, and a pull-request job runs the target.
+parts of that arrangement: the scan finds every plain class and function, the target runs what
+the scan finds, and a pull-request job runs the target.
 """
 
 from __future__ import annotations
@@ -81,6 +82,27 @@ class TestPlainTestClassesRunInCi:
         # A same-named TestCase elsewhere does not hide a plain class here.
         assert plain("class TestA:\n    def test_x(self): ...", {"TestA": ["TestCase"]}) == ["TestA"]
 
+    def test_a_module_of_top_level_test_functions_is_listed(self, tmp_path: Path) -> None:
+        tests = tmp_path / "tests"
+        (tests / "dns").mkdir(parents=True)
+        testcase = "from django.test import TestCase\nclass ZoneTests(TestCase):\n    def test_a(self): ...\n"
+        modules = {
+            "test_functions.py": "def test_x():\n    assert True\n",
+            "test_async.py": "async def test_y():\n    assert True\n",
+            "test_mixed.py": testcase + "def test_z():\n    assert True\n",
+            # Controls: only the Django runner's TestCase, and only helpers pytest does not collect.
+            "test_cases.py": testcase,
+            "test_helpers.py": "def build_zone():\n    def test_inner(): ...\n    return 1\ndef testing_wire(): ...\n",
+        }
+        for name, source in modules.items():
+            (tests / "dns" / name).write_text(source, encoding="utf-8")
+
+        assert _scanner().plain_class_modules(tests) == {
+            "tests/dns/test_async.py": ["test_y"],
+            "tests/dns/test_functions.py": ["test_x"],
+            "tests/dns/test_mixed.py": ["test_z"],
+        }
+
     def test_the_scan_misses_no_class_a_regex_can_see(self) -> None:
         """An independent net: any `class TestX:` or `class TestX():` line in a test module."""
         scanned = _scanner().plain_class_modules()
@@ -97,6 +119,20 @@ class TestPlainTestClassesRunInCi:
         }
 
         assert missed == {}
+
+    def test_the_scan_misses_no_top_level_test_function_a_regex_can_see(self) -> None:
+        """An independent net: any `def test_x(` or `async def test_x(` line at column 0 in a test module."""
+        scanned = _scanner().plain_class_modules()
+        missed: dict[str, list[str]] = {}
+        for path in TESTS.rglob("test*.py"):
+            text = path.read_text(encoding="utf-8")
+            names = set(re.findall(r"^(?:async )?def (test_\w*)\(", text, flags=re.MULTILINE))
+            module = path.relative_to(TESTS.parent).as_posix()
+            if names - set(scanned.get(module, [])):
+                missed[module] = sorted(names - set(scanned.get(module, [])))
+
+        assert missed == {}
+        assert "test_caa_policy_and_unknown_parameters" in scanned["tests/infrastructure/test_dns_probes.py"]
 
     def test_the_make_target_runs_the_scan_output_and_stops_on_a_failed_or_empty_scan(self) -> None:
         recipe = _make_recipe(TARGET)
