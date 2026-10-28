@@ -3,8 +3,18 @@
   ansible.builtin.assert:
     that:
       - ssh_allowed_cidrs | length > 0
-      - ssh_allowed_cidrs | select('search', '/0$') | list | length == 0
     fail_msg: "Set PRAHO_SSH_ALLOWED_CIDRS (space-separated staff CIDRs) in the deploy env file; SSH is never opened to everyone."
+
+- name: Refuse an SSH allowlist that admits the whole Internet
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import ipaddress, json, sys;
+        sys.exit(1 if any(ipaddress.ip_network(cidr, strict=False).prefixlen == 0 for cidr in json.loads(sys.argv[1])) else 0)
+      - "{{ ssh_allowed_cidrs | to_json }}"
+  changed_when: false
 
 - name: Validate SSH hardening inputs
   ansible.builtin.assert:
@@ -203,8 +213,8 @@
       community.general.ufw:
         rule: allow
         port: "{{ ssh_target_port }}"
-        proto: tcp
-        from_ip: "{{ item }}"
+        proto: "{{ item.proto }}"
+        from_ip: "{{ item.source }}"
         delete: true
       loop: "{{ ssh_stale_sources.stdout | from_json }}"
 

@@ -146,9 +146,9 @@ def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
     assert unset.returncode != 0
     assert "Set PRAHO_SSH_ALLOWED_CIDRS" in unset.stdout, unset.stdout[-4000:]
     assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
-    world = harden(container, sources="127.0.0.1/32 0.0.0.0/0")
+    world = harden(container, sources="127.0.0.1/32 0.0.0.0/0.0.0.0")
     assert world.returncode != 0
-    assert "Set PRAHO_SSH_ALLOWED_CIDRS" in world.stdout, world.stdout[-4000:]
+    assert "Refuse an SSH allowlist that admits the whole Internet" in world.stdout, world.stdout[-4000:]
     outside = harden(container, sources="192.0.2.0/24")
     assert outside.returncode != 0
     assert "Verify controller is within the SSH source allowlist" in outside.stdout, outside.stdout[-4000:]

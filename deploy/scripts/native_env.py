@@ -185,7 +185,7 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
         command += ["--tags", "caddy"]
     child_env = {**os.environ, **{key: values[key] for key in CONNECTION_KEYS if key in values}}
     # A value exported in the shell reaches Ansible too when the env file omits the key.
-    validate_allowlists(child_env)
+    validate_allowlists({"PRAHO_SSH_ALLOWED_CIDRS": child_env.get("PRAHO_SSH_ALLOWED_CIDRS", "")})
     recover_ssh_port(child_env, environment)
     return subprocess.run(command, cwd=ROOT / "deploy/ansible", env=child_env, check=False).returncode
 

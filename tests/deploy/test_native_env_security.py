@@ -107,6 +107,15 @@ def test_launcher_rejects_a_world_allowlist_from_the_shell(tmp_path: Path) -> No
     run.assert_not_called()
 
 
+def test_launcher_ignores_an_unused_platform_allowlist_in_the_shell(tmp_path: Path) -> None:
+    with (
+        patch.dict(os.environ, {"PLATFORM_ALLOWED_CIDRS": "0.0.0.0/0"}, clear=True),
+        patch("deploy.scripts.native_env.subprocess.run") as run,
+    ):
+        run.return_value.returncode = 0
+        assert run_native({}, tmp_path / "env", "staging", fetch_backup=None, version="", ssh_only=True) == 0
+
+
 def test_caddy_only_launcher_selects_only_caddy_tasks(tmp_path: Path) -> None:
     with patch("deploy.scripts.native_env.subprocess.run") as run:
         run.return_value.returncode = 0
