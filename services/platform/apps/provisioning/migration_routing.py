@@ -283,7 +283,8 @@ def attest_proxy_origin(  # noqa: PLR0911  # Staff, ownership and distinct routi
     )
     from .virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
 
-    if actor is None or not (actor.is_staff or actor.is_superuser):
+    # The same staff predicate as the bridge-control view: staff by role count, not only is_staff
+    if actor is None or not actor.is_staff_user:
         return Err("Only staff may attest an external proxy origin")
     kind = fields.get("kind", "target_origin")
     if kind not in {"target_origin", "optional_alias"}:
