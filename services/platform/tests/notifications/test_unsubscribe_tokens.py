@@ -303,6 +303,21 @@ class ProcessUnsubscribeTests(TestCase):
         self.assertFalse(customer.marketing_consent)
 
 
+
+    def test_failure_log_omits_the_still_valid_token(self) -> None:
+        token = UnsubscribeToken.objects.create(email="leak@example.com", template_key="marketing")
+        with (
+            patch(
+                "apps.notifications.services.EmailSuppressionService.suppress_email",
+                side_effect=RuntimeError("suppression store down"),
+            ),
+            self.assertLogs("apps.notifications.services", level="ERROR") as captured,
+        ):
+            self.assertFalse(EmailPreferenceService.process_unsubscribe(str(token.id)))
+        token.refresh_from_db()
+        self.assertIsNone(token.used_at)  # rolled back, so the token in a log line would still work
+        self.assertNotIn(str(token.id), "\n".join(captured.output))
+
 class UpdatePreferencesTests(TestCase):
     """Tests for EmailPreferenceService.update_preferences."""
 

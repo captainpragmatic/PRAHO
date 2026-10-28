@@ -1510,5 +1510,6 @@ class EmailPreferenceService:
                 return True
 
         except Exception:
-            logger.exception("🔥 [Unsubscribe] Failed to process token %s", token_id)
+            # Never the token: it is the bearer secret of the unsubscribe link, still unused after this rollback.
+            logger.exception("🔥 [Unsubscribe] Failed to process an unsubscribe token")
             return False
