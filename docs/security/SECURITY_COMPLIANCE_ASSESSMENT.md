@@ -384,11 +384,11 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-d
 
 | Tool | Status | Integration |
 |------|--------|-------------|
-| **Semgrep** | Active | `make lint-security` — `semgrep scan --config=auto --error` |
+| **Semgrep** | Active, blocking | `make lint-security` — pinned 1.157.0; every PR blocks on findings it introduces (`--baseline-commit`), nightly on findings since the staging release. About 200 findings predate CI enforcement and remain to be worked down |
 | **Custom PRAHO Scanner** | Active | `scripts/security_scanner.py` (1,052 lines) — OWASP Top 10, APT patterns, CVE checks |
-| **Ruff Security Rules** | Active | S105/S106/S107/S108 in pre-commit |
+| **Ruff Security Rules** | Active, blocking | S105/S106/S107/S108 in pre-commit and `make lint-credentials` |
 | **Audit Coverage Scanner** | Active | `scripts/audit_coverage_scan.py` — validates audit decorator coverage |
-| Bandit | Config exists, dormant | `.bandit` file in `services/platform/` — not in CI/CD |
+| **Bandit** | Active, blocking | `platform-security` job on every PR; config in `services/platform/.bandit` (medium+ severity and confidence); safe-by-construction lines carry `# nosec <id> - <reason>` |
 | pip-audit / Safety | Framework exists | `scripts/security_scanner.py` `--include-dependencies` flag — not triggered by default |
 | Snyk | Not configured | |
 | Trivy | Not configured | Container scanning not integrated |
@@ -511,7 +511,6 @@ Key services:
 |-----|------------|--------|-------|
 | Formal RBAC Permission Matrix | Low | Medium | Currently ad-hoc decorators |
 | SMS 2FA | Low | Medium | |
-| Bandit Integration in CI | Low | Low | Config exists, just needs wiring |
 | Custom Scanner as CI Blocker | Low | Low | Currently `|| true` (non-blocking) |
 
 ---
