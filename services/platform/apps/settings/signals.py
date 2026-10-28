@@ -42,7 +42,10 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
     with swallow_application_errors(logger=logger, scope="settings", message="handle_setting_saved failed"):
         # Do not invalidate before the database value is visible to other
         # transactions; an early reader could otherwise repopulate the old value.
-        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
+        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key), robust=True)
+        from .setup_checklist import clear_setup_cache  # noqa: PLC0415
+
+        transaction.on_commit(clear_setup_cache)
 
         action = "create" if created else "update"
         with best_effort_atomic(logger=logger, scope="Settings", message="Setting audit failed"):
@@ -111,7 +114,10 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     - Log audit event
     """
     with swallow_application_errors(logger=logger, scope="settings", message="handle_setting_deleted failed"):
-        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
+        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key), robust=True)
+        from .setup_checklist import clear_setup_cache  # noqa: PLC0415
+
+        transaction.on_commit(clear_setup_cache)
 
         # Savepoint: same rationale as handle_setting_saved — audit failure must not
         # poison the caller's transaction.

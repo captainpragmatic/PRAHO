@@ -20,6 +20,8 @@ ZONE = "dns.account_hostname_zone"
 ZONE_ID = "dns.account_hostname_zone_id"
 API_TOKEN = "dns.account_zone_api_token"  # noqa: S105  # A setting key, not a secret
 RECORD_TTL = "dns.account_record_ttl_seconds"
+CUTOVER_TTL = "dns.cutover_ttl_seconds"
+BRIDGE_WINDOW = "dns.bridge_window_hours"
 PSL_SHIPPED = "dns.account_zone_psl_shipped"
 CERT_WEEKLY_BUDGET = "dns.account_cert_weekly_budget"
 ACME_DIRECTORY = "dns.account_acme_directory_url"
@@ -30,7 +32,14 @@ _BRAND_EMAIL_KEYS = ("company.email_contact", "company.email_support", "company.
 
 
 def account_hostnames_enabled() -> bool:
-    return SettingsService.get_boolean_setting(ENABLED, False)
+    """On by default, but in effect only once the zone, its id and its token are all set.
+
+    So a fresh install does nothing until the account zone is configured, and clearing any of the
+    three switches account names off again, whatever the flag says.
+    """
+    if not SettingsService.get_boolean_setting(ENABLED, True):
+        return False
+    return bool(account_zone() and account_zone_id() and account_zone_api_token())
 
 
 def account_zone() -> str:
@@ -49,8 +58,18 @@ def account_record_ttl_seconds() -> int:
     return SettingsService.get_integer_setting(RECORD_TTL, 300)
 
 
+def account_cutover_ttl_seconds() -> int:
+    """The TTL a cutover lowers every record to, below the steady-state TTL."""
+    return SettingsService.get_integer_setting(CUTOVER_TTL, 60)
+
+
+def bridge_window_hours() -> int:
+    """How long the source keeps bridging to the target after the commit."""
+    return SettingsService.get_integer_setting(BRIDGE_WINDOW, 48)
+
+
 def account_zone_psl_shipped() -> bool:
-    """Whether the zone's Public Suffix List entry is in shipped browsers; until then no customer content."""
+    """Whether the zone's Public Suffix List entry is shipped; previews remain off independently."""
     return SettingsService.get_boolean_setting(PSL_SHIPPED, False)
 
 

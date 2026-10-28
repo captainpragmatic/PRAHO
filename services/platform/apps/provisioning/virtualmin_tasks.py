@@ -797,6 +797,30 @@ def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, An
     }
 
 
+def schedule_migration_wake(migration_id: UUID, until: datetime) -> bool:
+    """Wake a deferred migration at `until` (ADR-0061 P2.1). Never raises: the reclaim sweep is the fallback.
+
+    The name carries the wake time, so a later deferral of the same row never collides with this one.
+    """
+    from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    try:
+        schedule(
+            "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
+            str(migration_id),
+            name=f"migration-wake-{migration_id}-{int(until.timestamp())}",
+            schedule_type=ScheduleModel.ONCE,
+            next_run=until,
+            q_options={"timeout": migration_task_timeout()},
+        )
+    except Exception:
+        logger.exception(
+            "🔥 [VirtualminTask] Wake not scheduled; the reclaim sweep runs it: migration=%s", migration_id
+        )
+        return False
+    return True
+
+
 def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:
     return async_task(
         "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
@@ -992,10 +1016,13 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         return {"status": final_status, "job_id": job_id}
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
     if rows:
+        from .scheduled_backups import continue_after_completed_backup  # noqa: PLC0415
+
         _audit_job(job.pk)
         _queue_reconcile_after_pair(job, params)
         if operation == "restore_domain":
             _release_hold_after_safety_restore(job, params)
+        continue_after_completed_backup(job)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 
@@ -1231,8 +1258,13 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     sweep such rows strand non-terminal forever — holding the account lock and
     the capacity reservation while the source domain stays disabled.
     """
+    from .migration_artifact_cleanup import reclaim_migration_artifacts  # noqa: PLC0415  # Circular
+    from .migration_bridge_cleanup import reclaim_bridges  # noqa: PLC0415  # Circular
     from .virtualmin_migration_models import _TERMINAL_STATUSES, VirtualminMigration  # noqa: PLC0415  # Circular
     from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    reclaim_bridges()
+    reclaim_migration_artifacts()
 
     stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
     counts = {
@@ -1248,8 +1280,10 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         # Oldest-first so newer stalls never starve older rows; the updated_at
         # bump after each dispatch is the per-row retry backoff.
         VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
+        .filter(parked_phase="")
         .filter(updated_at__lt=stale)
         .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .exclude(resume_after__gt=timezone.now())  # Waiting on a deferral; its wake, or this sweep once due
         .order_by("updated_at")
         .values_list("pk", flat=True)[:_RECLAIM_BATCH]
     )
@@ -1337,6 +1371,17 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
         return {"success": False, "error": f"Service {service_id} not found"}
 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+    if account is not None:
+        from .migration_enabled_state import (  # noqa: PLC0415  # Narrow ADR-0051 target permission.
+            reconcile_committed_target,
+        )
+
+        committed_policy = reconcile_committed_target(
+            str(service_id),
+            task_budget_seconds=task_budget_seconds if task_budget_seconds is not None else get_task_soft_time_limit(),
+        )
+        if committed_policy is not None:
+            return committed_policy
     if account is not None and _migration_locked(account):
         return {"success": True, "action": "migration_locked"}
     # A restore, a delete or any running job owns the account: converging its enabled state
@@ -1692,6 +1737,15 @@ def delete_virtualmin_account(account_id: str, *, task_budget_seconds: int | Non
         return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
+def refresh_virtualmin_node_status(node_id: str) -> dict[str, bool]:
+    """Manual API-only detail refresh; it never contributes an hourly sample."""
+    node = VirtualminServer.objects.filter(pk=node_id).first()
+    if node is None:
+        return {"success": False}
+    result = VirtualminServerManagementService().health_check_server(node, scheduled=False)
+    return {"success": result.is_ok()}
+
+
 def health_check_virtualmin_servers() -> dict[str, Any]:
     """
     Periodic task to health check all Virtualmin servers.
@@ -1730,7 +1784,7 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
             for server in servers:
                 logger.info(f"🏥 [VirtualminTask] Health checking {server.hostname}")
 
-                health_result = management_service.health_check_server(server)
+                health_result = management_service.health_check_server(server, scheduled=True)
 
                 server_result = {
                     "hostname": server.hostname,
@@ -1740,10 +1794,9 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
 
                 if health_result.is_ok():
                     results["healthy_servers"] += 1
-                    server_result["data"] = health_result.unwrap()
                 else:
                     results["unhealthy_servers"] += 1
-                    server_result["error"] = health_result.unwrap_err()
+                    server_result["error"] = "Check failed; inspect the current node status"
 
                 results["servers"].append(server_result)
 
@@ -2099,7 +2152,7 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     # Health check every 10 minutes. UPSERT by name: skip-if-exists left
     # deployed installations on the old hourly cadence forever, starving
     # placement (is_healthy freshness << cadence).
-    _, created = ScheduleModel.objects.update_or_create(
+    health_schedule, created = ScheduleModel.objects.update_or_create(
         name="virtualmin-health-check",
         defaults={
             "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
@@ -2108,6 +2161,9 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
             "cluster": "praho-cluster",
         },
     )
+    # Preserve imminent runs, but do not retain the old hourly deadline on upgrade.
+    now = timezone.now()
+    ScheduleModel.objects.filter(pk=health_schedule.pk, next_run__gt=now + timedelta(minutes=10)).update(next_run=now)
     tasks_created["health_check"] = "created" if created else "updated"
 
     # Divergence backstop every 15 minutes (durable recovery for lost

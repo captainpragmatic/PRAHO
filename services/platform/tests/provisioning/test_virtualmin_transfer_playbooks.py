@@ -9,6 +9,8 @@ without needing the lab. The helpers are shared with the node playbook tests.
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +59,18 @@ def task_named(name: str, title: str) -> dict[str, Any]:
 
 class TransferPlaybookTests(SimpleTestCase):
     """Archives move through a root-owned 0700 directory, never /tmp."""
+
+    def test_cleanup_accepts_only_backup_names_and_canonical_migration_uuid_archives(self) -> None:
+        checks = task_named("virtualmin_remote_cleanup.yml", "Validate single-host cleanup inputs")["ansible.builtin.assert"]["that"]
+        expression = next(check for check in checks if check.startswith("archive_name is match("))
+        pattern = ast.literal_eval(expression.removeprefix("archive_name is match(").removesuffix(")"))
+        valid = ("virtualmin_backup_" + "a" * 32 + ".tar.gz", "migration_11111111-2222-4333-8444-555555555555.tar.gz")
+        invalid = ("../migration_11111111-2222-4333-8444-555555555555.tar.gz", "migration_" + "-" * 36 + ".tar.gz",
+                   valid[1] + ".info", "migration_*.tar.gz", "customer.tar.gz")
+        for name in valid:
+            self.assertRegex(name, pattern)
+        for name in invalid:
+            self.assertIsNone(re.fullmatch(pattern, name))
 
     def test_every_transfer_playbook_uses_the_private_directory(self) -> None:
         for name in TRANSFER_PLAYBOOKS:

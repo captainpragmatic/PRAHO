@@ -1,0 +1,90 @@
+---
+# The migration's write barrier on a node (ADR-0061 Phase 2, plan amendment E2), one action per run.
+# files/praho-write-barrier.sh does all of it under the per-domain migration lock, refusing when the
+# cancel marker of the operation token exists:
+#
+#   barrier_action=record   the crontab (kept on the node), enabled states, databases and accounts
+#   barrier_action=apply    the fence on administration, then the accounts locked; verified
+#   barrier_action=verify   the barrier still holds (read-only; re-run before the point of no return)
+#   barrier_action=release  exactly what was recorded comes back, verified (compensation)
+#   barrier_action=idle     on the target: no restore or backup of the domain is running
+#
+# The crontab never leaves the node: this playbook's output is logged when it fails.
+- name: Apply, verify or release a migration's write barrier
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    barrier_lock_wait_seconds: 60
+    barrier_drain_wait_seconds: 60
+    barrier_previous_token: ""
+    barrier_saved_token: ""
+    barrier_accounts: ""
+    barrier_enabled: ""
+    barrier_killed_at: "0"
+    barrier_has_crontab: ""
+    barrier_crontab_active_sha: ""
+  tasks:
+    - name: Validate write barrier inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - barrier_action in ['record', 'apply', 'verify', 'release', 'idle']
+          - barrier_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
+          - barrier_domain_id is match('^[0-9]{1,30}$')
+          - barrier_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - barrier_previous_token == '' or barrier_previous_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - barrier_saved_token == '' or barrier_saved_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - barrier_lock_wait_seconds | string is match('^[0-9]{1,4}$')
+          - barrier_drain_wait_seconds | string is match('^[0-9]{1,4}$')
+          - barrier_accounts is match('^[A-Za-z0-9+/=]*$')
+          - barrier_enabled is match('^[A-Za-z0-9+/=]*$')
+          - barrier_killed_at | string is match('^[0-9]{1,12}$')
+          - barrier_has_crontab | string is match('^[01]?$')
+          - barrier_crontab_active_sha == '' or barrier_crontab_active_sha is match('^[0-9a-f]{64}$')
+
+    - name: Keep cancellation and completed release evidence across node reboots
+      ansible.builtin.file:
+        path: /var/lib/praho/migration
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the root-private read-only Apache binding reader
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
+    - name: Run the barrier action under the per-domain migration lock
+      ansible.builtin.script:
+        cmd: files/praho-write-barrier.sh
+      environment:
+        PRAHO_BARRIER_ACTION: "{{ barrier_action }}"
+        PRAHO_DOMAIN: "{{ barrier_domain }}"
+        PRAHO_DOMAIN_ID: "{{ barrier_domain_id }}"
+        PRAHO_OPERATION_TOKEN: "{{ barrier_token }}"
+        PRAHO_PREVIOUS_TOKEN: "{{ barrier_previous_token }}"
+        PRAHO_SAVED_TOKEN: "{{ barrier_saved_token }}"
+        PRAHO_LOCK_WAIT: "{{ barrier_lock_wait_seconds }}"
+        PRAHO_DRAIN_WAIT: "{{ barrier_drain_wait_seconds }}"
+        PRAHO_ACCOUNTS: "{{ barrier_accounts }}"
+        PRAHO_ENABLED: "{{ barrier_enabled }}"
+        PRAHO_KILLED_AT: "{{ barrier_killed_at }}"
+        PRAHO_HAS_CRONTAB: "{{ barrier_has_crontab }}"
+        PRAHO_CRONTAB_ACTIVE_SHA: "{{ barrier_crontab_active_sha }}"
+      register: barrier_step
+      changed_when: barrier_action in ['apply', 'release']
+
+    - name: Require exactly one result line
+      vars:
+        barrier_result_lines: "{{ barrier_step.stdout_lines | select('match', '^BARRIER_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - barrier_result_lines | length == 1
+        fail_msg: "The barrier step did not print exactly one result line"
+
+    - name: Emit the structured barrier result
+      ansible.builtin.debug:
+        msg: "{{ barrier_step.stdout_lines | select('match', '^BARRIER_RESULT=[A-Za-z0-9+/=]+$') | first }}"

@@ -70,8 +70,11 @@ class AccountHostname(models.Model):
     zone = models.CharField(max_length=253, verbose_name=_("Zone"))
     # Per record type: intended content, applied content, provider record id, applied TTL.
     records = models.JSONField(default=dict, blank=True)
+    # Longest prior TTL, retained if a record type disappears while caches still hold it.
     previous_ttl = models.PositiveIntegerField(null=True, blank=True)
+    # Attempt start bounds provider confirmation; cache expiry starts only after confirmation.
     ttl_lowered_at = models.DateTimeField(null=True, blank=True)
+    ttl_confirmed_at = models.DateTimeField(null=True, blank=True)
     last_reconciled_at = models.DateTimeField(null=True, blank=True)
     # The sweep's rotation: set on every pass whatever the outcome, so names that cannot be published
     # yet never hold the head of the queue (`last_reconciled_at` keeps gating the one-time node step).

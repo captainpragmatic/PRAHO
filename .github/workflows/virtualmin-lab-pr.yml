@@ -1,0 +1,107 @@
+# ===============================================================================
+# VIRTUALMIN LAB ON PULL REQUESTS — the lab suites when a change can reach them
+# ===============================================================================
+# `changes` runs the base branch's scripts/ci_lab_needed.py on the diff. When the lab can be affected, or
+# the diff or the rules cannot be read, `pull-request` runs the round trip, the contract suite, the workflow
+# suite and the lab checks (make test-virtualmin-lab) on the PINNED Virtualmin. The nightly, drift and
+# release-candidate runs live in virtualmin-lab.yml.
+#
+# `pull-request` is a required check on master. A job skipped by its `if:` reports success, so the selection
+# fails open, the workflow never carries a paths filter, and it runs on nothing but pull requests: a job of
+# the same name skipped by a schedule or a dispatch must never be able to stand in for it.
+
+name: Virtualmin Lab (pull request)
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: virtualmin-lab-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Pull requests: does this change reach the lab? Fails open (see scripts/ci_lab_needed.py).
+  # ---------------------------------------------------------------------------
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      lab: ${{ steps.decide.outputs.lab }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide whether the lab runs
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          # A diff that cannot be computed feeds the script nothing, and nothing means "run the lab".
+          # --no-renames lists a moved file's old path too, so moving code out of a lab path still counts.
+          changed="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" 2>/dev/null)" || changed=""
+          printf '%s\n' "$changed"
+          # The base branch's copy of the rules decides, so a pull request cannot talk itself out of the lab.
+          if rules="$(git show "${BASE_SHA}:scripts/ci_lab_needed.py" 2>/dev/null)"; then
+            lab="$(printf '%s\n' "$changed" | python3 -c "$rules")" || lab=true
+          else
+            lab=true
+          fi
+          echo "Lab needed: $lab"
+          echo "lab=$lab" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Pull requests: the lab suites on the pinned Virtualmin.
+  # ---------------------------------------------------------------------------
+  pull-request:
+    needs: changes
+    # !cancelled(): if `changes` itself fails, its output is empty, which is not 'false', so the lab runs.
+    if: "!cancelled() && needs.changes.outputs.lab != 'false'"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+
+      - name: Fetch the published lab image, if there is one
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          version="$(sed -n 's/^ARG VIRTUAL_SERVER_VERSION=\([0-9][0-9.]*\).*/\1/p' deploy/virtualmin-lab/virtualmin/Dockerfile)"
+          # Built by virtualmin-lab-image.yml. A missing or private image only costs the build below.
+          if docker pull "ghcr.io/${owner}/praho-virtualmin-lab:${version}"; then
+            docker tag "ghcr.io/${owner}/praho-virtualmin-lab:${version}" "praho-virtualmin-lab:${version}"
+          else
+            echo "No published image: make virtualmin-lab-up will build it"
+          fi
+
+      - name: Start the lab
+        run: make virtualmin-lab-up
+
+      - name: Lab suites (round trip, contract, workflows, checks)
+        run: make test-virtualmin-lab
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for node in vmlab-a vmlab-b vmlab-minio; do
+            echo "::group::docker logs ${node}"
+            docker logs --tail 200 "${node}" || true
+            echo "::endgroup::"
+          done
+
+      - name: Stop the lab
+        if: always()
+        run: make virtualmin-lab-down

@@ -2,7 +2,7 @@
 # =============================================================================
 # PRAHO - Compose helper for the standalone deployment scripts
 # =============================================================================
-# Sourced by deploy.sh, rollback.sh and restore.sh, after they set PROJECT_ROOT and DEPLOY_DIR.
+# Sourced by deploy.sh, rollback.sh and restore-platform.sh, after they set PROJECT_ROOT and DEPLOY_DIR.
 #
 # The compose files live in deploy/, so a bare `docker compose -f deploy/...` reads deploy/.env,
 # which no documented step creates, and every ${VAR:?} fails. praho_compose passes the operator's

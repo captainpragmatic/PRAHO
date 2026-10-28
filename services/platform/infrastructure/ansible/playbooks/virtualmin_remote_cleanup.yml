@@ -1,5 +1,5 @@
 ---
-- name: Remove one Virtualmin backup temp archive from a node
+- name: Remove one Virtualmin backup or migration temp archive from a node
   hosts: all
   gather_facts: false
   become: false
@@ -11,7 +11,7 @@
       ansible.builtin.assert:
         that:
           - ansible_play_hosts_all | length == 1
-          - archive_name is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - archive_name is match('^(virtualmin_backup_[0-9a-f]{32}|migration_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.tar\.gz$')
 
     # The .dom/.info sidecars Virtualmin writes beside a backup carry the
     # domain's database passwords: they go with the archive.

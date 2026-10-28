@@ -190,20 +190,22 @@ class CoverageGateWorkflowTests(SimpleTestCase):
         self.assertIn("integration-test", jobs)
         self.assertIn("lint-and-quality", jobs)
         triggers = _mapping(workflow["on"])
-        for event in ("push", "pull_request"):
-            with self.subTest(event=event):
-                trigger = _mapping(triggers[event])
-                paths = trigger["paths"]
-                self.assertIsInstance(paths, list)
-                patterns = cast(list[str], paths)
-                self.assertIn("shared/**", patterns)
-                for path in (
-                    "shared/ui/templates/components/button.html",
-                    "services/platform/apps/common/services.py",
-                    "services/portal/apps/common/views.py",
-                ):
-                    self.assertTrue(any(fnmatchcase(path, pattern) for pattern in patterns), path)
-                self.assertNotIn("paths-ignore", trigger)
+        push = _mapping(triggers["push"])
+        paths = push["paths"]
+        self.assertIsInstance(paths, list)
+        patterns = cast(list[str], paths)
+        self.assertIn("shared/**", patterns)
+        for path in (
+            "shared/ui/templates/components/button.html",
+            "services/platform/apps/common/services.py",
+            "services/portal/apps/common/views.py",
+        ):
+            self.assertTrue(any(fnmatchcase(path, pattern) for pattern in patterns), path)
+        self.assertNotIn("paths-ignore", push)
+        # Both jobs are required checks: a pull request must start them whatever it changes.
+        pull_request = _mapping(triggers["pull_request"])
+        self.assertNotIn("paths", pull_request)
+        self.assertNotIn("paths-ignore", pull_request)
 
     def test_nightly_global_floor_reads_the_makefile(self) -> None:
         workflow = self._workflow("nightly.yml")

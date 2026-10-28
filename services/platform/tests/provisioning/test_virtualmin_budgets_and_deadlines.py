@@ -445,18 +445,27 @@ class HealthSweepDeadlineTests(SimpleTestCase):
     def test_backoff_stops_at_absolute_deadline(self) -> None:
         account = self.health_accounts()[0]
         dispatches: list[float] = []
+        clock = [100.0]
+        backoffs: list[float] = []
+
+        def advance(seconds: float) -> None:
+            backoffs.append(seconds)
+            clock[0] += seconds
 
         def connect_timeout(method: str, url: str, **kwargs: object) -> Response:
-            dispatches.append(time.perf_counter())
-            time.sleep(0.75)
+            dispatches.append(clock[0])
+            clock[0] += 0.75
             raise ConnectTimeout("health probe connection timeout")
 
-        started = time.perf_counter()
-        deadline = started + 1.0
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=connect_timeout):
+        deadline = 101.0
+        with (
+            patch("apps.provisioning.virtualmin_gateway.time.perf_counter", side_effect=lambda: clock[0]),
+            patch("apps.provisioning.virtualmin_gateway.time.sleep", side_effect=advance),
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=connect_timeout),
+        ):
             checked_account, healthy, error = _health_check_until_deadline(account, deadline)
-        elapsed = time.perf_counter() - started
-        self.assertLess(elapsed, 1.4)
+        self.assertEqual(backoffs, [0.25])
+        self.assertEqual(clock[0], deadline)
         self.assertIs(checked_account, account)
         self.assertFalse(healthy)
         self.assertEqual(error, "Health check timed out")

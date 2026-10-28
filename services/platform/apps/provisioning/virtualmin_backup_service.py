@@ -23,14 +23,16 @@ import shutil
 import tarfile
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+from botocore.client import BaseClient
 from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from django.utils.translation import gettext as _
 
 from apps.common.security_decorators import (
@@ -62,6 +64,56 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+
+
+@dataclass(frozen=True, repr=False)
+class BackupStorageConfiguration:
+    access_key: str | None
+    secret_key: str | None
+    bucket: str
+    region: str
+    endpoint: str
+
+    @property
+    def identity(self) -> str:
+        return salted_hmac(
+            "praho.backup-destination.v1", json.dumps(asdict(self), sort_keys=True), algorithm="sha256"
+        ).hexdigest()
+
+
+def backup_storage_configuration() -> BackupStorageConfiguration:
+    access = SettingsService.get_setting("backup.aws_access_key_id")
+    secret = SettingsService.get_setting("backup.aws_secret_access_key")
+    return BackupStorageConfiguration(
+        str(access) if access else None,
+        str(secret) if secret else None,
+        str(SettingsService.get_setting("backup.s3_bucket_name", "") or ""),
+        str(SettingsService.get_setting("backup.aws_region", "eu-west-1")),
+        str(SettingsService.get_setting("backup.s3_endpoint_url", "") or "").strip(),
+    )
+
+
+def backup_storage_client(configuration: BackupStorageConfiguration | None = None) -> BaseClient:
+    """Shared Platform-side storage configuration; credentials never travel to a node."""
+    if boto3 is None:
+        raise RuntimeError("S3 support is unavailable")
+    configuration = configuration or backup_storage_configuration()
+    endpoint_url = configuration.endpoint
+    endpoint_kwargs: dict[str, object] = {}
+    if endpoint_url:
+        from botocore.config import Config as BotoConfig  # noqa: PLC0415
+
+        endpoint_kwargs = {"endpoint_url": endpoint_url, "config": BotoConfig(s3={"addressing_style": "path"})}
+    return cast(
+        BaseClient,
+        boto3.client(
+            "s3",
+            aws_access_key_id=configuration.access_key,
+            aws_secret_access_key=configuration.secret_key,
+            region_name=configuration.region,
+            **endpoint_kwargs,
+        ),
+    )
 
 
 # Differential-chain role of a backup (docs/domain/virtualmin-incremental-contract.md).
@@ -864,21 +916,14 @@ class VirtualminBackupService:
     ) -> Result[None, str]:
         from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
 
-        deployment = getattr(target_server, "node_deployment", None)
-        if deployment is None:
-            return Err(
-                f"Server {target_server.hostname} is manually registered (no managed node_deployment); "
-                "archive transport is unavailable",
-                retriability=Retriability.NOT_RETRIABLE,
-            )
         transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
         variables: dict[str, Any] = {
             "archive_name": archive_name,
             "spool_dir": str(self._spool_dir()),
             "expected_sha256": expected_sha256,
         }
-        result = AnsibleService().run_playbook(
-            deployment, "virtualmin_backup_push.yml", variables, timeout_seconds=transfer_timeout
+        result = AnsibleService().run_server_playbook(
+            target_server, "virtualmin_backup_push.yml", variables, timeout_seconds=transfer_timeout
         )
         if result.is_err() or not result.unwrap().success:
             detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
@@ -900,13 +945,12 @@ class VirtualminBackupService:
     def _cleanup_remote_archive(self, target_server: VirtualminServer, archive_name: str) -> None:
         from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
 
-        deployment = getattr(target_server, "node_deployment", None)
-        if deployment is None:
-            return
         try:
-            AnsibleService().run_playbook(
-                deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
+            result = AnsibleService().run_server_playbook(
+                target_server, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
             )
+            if result.is_err() or not result.unwrap().success:
+                logger.warning("⚠️ [Restore] Remote archive cleanup failed for %s", archive_name)
         except Exception:
             logger.warning("⚠️ [Restore] Remote archive cleanup failed for %s", archive_name)
 
@@ -916,14 +960,11 @@ class VirtualminBackupService:
 
         if not _ARCHIVE_NAME_RE.match(archive_name):
             return Err("Not a PRAHO archive name; nothing removed", retriability=Retriability.NOT_RETRIABLE)
-        deployment = getattr(self.server, "node_deployment", None)
-        if deployment is None:
-            return Err("The server has no managed node deployment", retriability=Retriability.NOT_RETRIABLE)
-        result = AnsibleService().run_playbook(
-            deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
+        result = AnsibleService().run_server_playbook(
+            self.server, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
         )
         if result.is_err():
-            return Err(str(result.unwrap_err()), retriability=Retriability.UNKNOWN)
+            return Err(str(result.unwrap_err()), retriability=retriability_of(result))
         if not result.unwrap().success:
             return Err("The cleanup playbook failed on the node", retriability=Retriability.UNKNOWN)
         return Ok(None)
@@ -1062,6 +1103,13 @@ class VirtualminBackupService:
         )
         if pinned.exists():
             return f"Backup {backup_id} is named by a restore that has not finished"
+        from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+
+        recoveries = VirtualminMigration.objects.filter(contract="recovery").exclude(
+            status__in=("completed", "failed", "rolled_back")
+        )
+        if any(backup_id in row.barrier_state.get("recovery_backups", []) for row in recoveries.iterator()):
+            return f"Backup {backup_id} is pinned by an unfinished node recovery"
         if account is not None and account.restore_hold_safety_backup_id == backup_id:
             return f"Backup {backup_id} is the safety backup of a half-restored domain; resolve the hold first"
         if (
@@ -1202,31 +1250,12 @@ class VirtualminBackupService:
 
     # Private implementation methods
 
-    def _get_s3_client(self) -> boto3.client:
+    def _get_s3_client(self, configuration: BackupStorageConfiguration | None = None) -> boto3.client:
         """Get configured S3 client."""
+        if configuration is not None:
+            return backup_storage_client(configuration)
         if self._s3_client is None:
-            aws_access_key = SettingsService.get_setting("backup.aws_access_key_id")
-            aws_secret_key = SettingsService.get_setting("backup.aws_secret_access_key")
-            aws_region = SettingsService.get_setting("backup.aws_region", "eu-west-1")
-            # Empty = AWS. A custom endpoint (MinIO, Ceph RGW) is addressed
-            # path-style: virtual-hosted bucket names do not resolve there.
-            endpoint_url = str(SettingsService.get_setting("backup.s3_endpoint_url", "") or "").strip()
-            endpoint_kwargs: dict[str, Any] = {}
-            if endpoint_url:
-                from botocore.config import Config as BotoConfig  # noqa: PLC0415  # Optional dependency
-
-                endpoint_kwargs = {
-                    "endpoint_url": endpoint_url,
-                    "config": BotoConfig(s3={"addressing_style": "path"}),
-                }
-
-            self._s3_client = boto3.client(
-                "s3",
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key,
-                region_name=aws_region,
-                **endpoint_kwargs,
-            )
+            self._s3_client = backup_storage_client()
         return self._s3_client
 
     def _get_backup_bucket(self) -> str:
@@ -1319,11 +1348,12 @@ class VirtualminBackupService:
             str(SettingsService.get_setting("provisioning.migration_spool_dir", "/var/lib/praho/migration-spool"))
         )
 
-    def _fetch_archive_to_spool(  # noqa: PLR0911  # Distinct transport refusals
+    def _fetch_archive_to_spool(  # noqa: PLR0911  # Distinct transport refusals preserve definite/unknown outcomes.
         self, metadata: dict[str, Any]
     ) -> Result[None, str]:
         """Pull the remote archive into the controller spool and delete the remote copy."""
         from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
 
         from .spool import (  # noqa: PLC0415
             acquire_spool_reservation,
@@ -1331,12 +1361,9 @@ class VirtualminBackupService:
             release_spool_reservation,
         )
 
-        deployment = getattr(self.server, "node_deployment", None)
-        if deployment is None:
-            return Err(
-                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
-                "archive transport is unavailable"
-            )
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return readiness
         archive_name = str(metadata["archive_name"])
         spool = self._spool_dir()
         spool.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1354,8 +1381,8 @@ class VirtualminBackupService:
                 "spool_dir": str(spool),
                 "spool_free_bytes": shutil.disk_usage(spool).free,
             }
-            result = AnsibleService().run_playbook(
-                deployment, "virtualmin_backup_fetch.yml", variables, timeout_seconds=transfer_timeout
+            result = AnsibleService().run_server_playbook(
+                self.server, "virtualmin_backup_fetch.yml", variables, timeout_seconds=transfer_timeout
             )
             if result.is_err() or not result.unwrap().success:
                 detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
@@ -1390,13 +1417,11 @@ class VirtualminBackupService:
         self, account: VirtualminAccount
     ) -> Result[None, str]:
         """Validate that backup can proceed safely."""
-        # Transport capability gate BEFORE any remote archive is created:
-        # a manually-registered server has no Ansible path off the node.
-        if getattr(self.server, "node_deployment", None) is None:
-            return Err(
-                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
-                "archive transport is unavailable"
-            )
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return readiness
         # Check server connectivity
         config = VirtualminConfig(server=self.server)
         gateway = VirtualminGateway(config)
@@ -1490,6 +1515,9 @@ class VirtualminBackupService:
     ) -> Result[str, str]:
         """Execute full domain backup using Virtualmin API."""
         try:
+            captured = self._capture_owner_shadow(account, metadata)
+            if captured.is_err():
+                return Err(captured.unwrap_err(), retriability=retriability_of(captured))
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
@@ -1510,6 +1538,48 @@ class VirtualminBackupService:
         except Exception as e:
             logger.error(f"Full backup execution failed: {e}")
             return Err(f"Full backup failed: {e!s}")
+
+    def _capture_owner_shadow(  # noqa: PLR0911  # Each refusal fences a distinct source identity, ownership, or dispatch boundary.
+        self,
+        account: VirtualminAccount,
+        metadata: dict[str, Any],
+    ) -> Result[None, str]:
+        from .migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
+        if not self._owns_execution():
+            return Err("Backup execution superseded before owner aging capture")
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return Err(
+                "Owner login aging capture needs a verified SSH transport; enroll the API-only server as a managed node "
+                f"or configure its imported root key and trust ({readiness.unwrap_err()})",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        identity = self._read_domain_id(account)
+        if identity.is_err():
+            return Err(identity.unwrap_err(), retriability=retriability_of(identity))
+        if not self._owns_execution():
+            return Err("Backup execution superseded after source identity read; owner aging was not dispatched")
+        name = str(metadata["archive_name"])
+        operation = uuid.UUID(hex=name.removeprefix("virtualmin_backup_").removesuffix(".tar.gz"))
+        try:
+            capture_backup_owner_shadow(
+                self.server,
+                domain=account.domain,
+                owner=account.virtualmin_username,
+                domain_id=identity.unwrap(),
+                archive_name=name,
+                operation_id=operation,
+            )
+        except (RuntimeError, ValueError) as error:
+            return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
+        if not self._owns_execution():
+            return Err("Backup execution superseded after owner aging capture; backup was not dispatched")
+        metadata["owner_shadow_version"] = 1
+        metadata["owner_shadow_owner"] = account.virtualmin_username
+        return Ok(None)
 
     def _read_domain_id(self, account: VirtualminAccount) -> Result[str, str]:
         """Virtualmin's numeric id of the domain, from list-domains; digits only."""
@@ -1593,18 +1663,16 @@ class VirtualminBackupService:
         input_error = chain_step_input_error(variables)
         if input_error is not None:
             return Err(input_error, retriability=Retriability.NOT_RETRIABLE)
-        deployment = getattr(self.server, "node_deployment", None)
-        if deployment is None:
-            return Err(
-                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
-                "chain backups are unavailable",
-                retriability=Retriability.NOT_RETRIABLE,
-            )
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return Err(readiness.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
         lock_wait = int(variables.get("chain_lock_wait_seconds", CHAIN_LOCK_WAIT_SECONDS))
         timeout = chain_step_timeout(self._backup_command_timeout()) - CHAIN_LOCK_WAIT_SECONDS + lock_wait
-        result = AnsibleService().run_playbook(deployment, CHAIN_PLAYBOOK, variables, timeout_seconds=timeout)
+        result = AnsibleService().run_server_playbook(self.server, CHAIN_PLAYBOOK, variables, timeout_seconds=timeout)
         if result.is_err():
-            return Err(f"Chain step could not run: {result.unwrap_err()}", retriability=Retriability.UNKNOWN)
+            return Err(f"Chain step could not run: {result.unwrap_err()}", retriability=retriability_of(result))
         run = result.unwrap()
         if not run.success:
             # The step may have started before ansible lost it (a timeout kills only the
@@ -1641,10 +1709,17 @@ class VirtualminBackupService:
         # The last gate before the node is touched: a superseded runner must not start a step.
         if not self._owns_execution():
             return Err("Backup execution superseded; no remote work performed", retriability=Retriability.NOT_RETRIABLE)
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return Err(readiness.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
         self._update_backup_progress(backup_id, "backing_up", 30)
         self._chain_step_state = "dispatched"
         outcome = self.run_chain_step(variables, token=chain.token, mode=config.chain_role, domain_id=domain_id)
         if outcome.is_err():
+            if retriability_of(outcome) is Retriability.NOT_RETRIABLE:
+                self._chain_step_state = "settled"
             return Err(outcome.unwrap_err(), retriability=retriability_of(outcome))
         self._chain_step_state = "settled"
         step = outcome.unwrap()
@@ -1662,6 +1737,8 @@ class VirtualminBackupService:
                 f"Chain {config.chain_role} {where}: {step.reason} {step.detail}".strip(), retriability=retriability
             )
         metadata["chain_remote_sha256"] = step.sha256
+        metadata["owner_shadow_version"] = 1
+        metadata["owner_shadow_owner"] = account.virtualmin_username
         return Ok(f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
 
     def _execute_config_backup(
@@ -1669,6 +1746,9 @@ class VirtualminBackupService:
     ) -> Result[str, str]:
         """Execute configuration-only backup."""
         try:
+            captured = self._capture_owner_shadow(account, metadata)
+            if captured.is_err():
+                return Err(captured.unwrap_err(), retriability=retriability_of(captured))
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
@@ -1775,6 +1855,16 @@ class VirtualminBackupService:
                     % {"features": ", ".join(missing_features)}
                 )
 
+            if metadata.get("owner_shadow_version") == 1:
+                from .backup_owner_shadow import read_archive_owner_shadow  # noqa: PLC0415
+
+                read_archive_owner_shadow(
+                    Path(backup_path),
+                    domain=domain,
+                    owner=str(metadata["owner_shadow_owner"]),
+                    archive_name=str(metadata["archive_name"]),
+                )
+
             metadata["verified_at"] = timezone.now().isoformat()
             metadata["verification_status"] = "passed"
 
@@ -1789,8 +1879,9 @@ class VirtualminBackupService:
         """Upload backup files to S3 with encryption."""
 
         try:
-            s3_client = self._get_s3_client()
-            bucket_name = self._get_backup_bucket()
+            configuration = backup_storage_configuration()
+            s3_client = self._get_s3_client(configuration)
+            bucket_name = configuration.bucket
 
             # Defense-in-depth: only a fetched spool archive may be published.
             if metadata.get("backup_location") != "spool":
@@ -1852,6 +1943,8 @@ class VirtualminBackupService:
             # as restorable and skipping checksum verification. Writing it last means a metadata
             # object only ever exists alongside its archive.
             metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
+            if backup_storage_configuration().identity != configuration.identity:
+                return Err("Backup destination changed during upload; local archive retained")
             s3_client.put_object(
                 Bucket=bucket_name,
                 Key=metadata_key,
@@ -1860,6 +1953,8 @@ class VirtualminBackupService:
                 ServerSideEncryption="AES256",
             )
 
+            if backup_storage_configuration().identity != configuration.identity:
+                return Err("Backup destination changed during publication; local archive retained")
             # Clean up local backup file after successful upload
             try:
                 os.remove(backup_path)
@@ -1873,6 +1968,7 @@ class VirtualminBackupService:
                 "s3_bucket": bucket_name,
                 "file_size_bytes": file_size,
                 "uploaded_at": timezone.now().isoformat(),
+                "storage_identity": configuration.identity,
             }
 
             logger.info(f"Successfully uploaded backup {backup_id} to S3 ({file_size} bytes)")

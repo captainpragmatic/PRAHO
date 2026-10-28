@@ -173,15 +173,17 @@ document.addEventListener("alpine:init", function () {
     };
   });
 
-  Alpine.data("settingsSecretRow", function (configured) {
+  Alpine.data("settingsSecretRow", function (configured, unreadable = false) {
     return {
       replacing: false,
       secret: "",
       busy: false,
       message: "",
       configured: configured,
+      unreadable: unreadable,
       applyCredentialState(data) {
         this.configured = data.configured;
+        this.unreadable = false;
         if (this.$root.dataset.deploymentFallback === "1") {
           this.$root.dataset.inherited = data.inherited ? "1" : "0";
           const label = this.$root.querySelector("code + p");
@@ -313,10 +315,20 @@ document.addEventListener("alpine:init", function () {
       },
 
       init() {
+        const initialNodeForm = document.getElementById("deployment-form-data");
+        if (initialNodeForm) {
+          const initial = JSON.parse(initialNodeForm.textContent);
+          this.environment = initial.environment || "prd";
+          this.nodeType = initial.node_type || "sha";
+          this.provider = initial.provider || "";
+          this.region = initial.region || "";
+          this.nodeSize = initial.node_size || "";
+        }
         this.dnsZone = this.$el.dataset.dnsZone;
         this.hostnamePreviewUrl = this.$el.dataset.hostnamePreviewUrl;
         this.$watch("environment", () => this.updateHostname());
         this.$watch("nodeType", () => this.updateHostname());
+        this.updateHostname();
       },
     };
   });

@@ -160,6 +160,8 @@
     </nav>
     {% endif %}
 
+    {% include 'components/setup_attention.html' %}
+
     {% if maintenance_mode and user.is_staff_user %}
     <div class="bg-amber-500/15 border-b border-amber-500/40 text-amber-300 text-sm px-4 py-2 text-center">
       {% icon "warning" size="sm" %} {% trans "Maintenance mode is active — customers are receiving a 503. Disable it under Settings → Maintenance & Availability." %}

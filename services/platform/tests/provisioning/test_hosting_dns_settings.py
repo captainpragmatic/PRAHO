@@ -112,6 +112,38 @@ class EnableHostnamesTests(TestCase):
         self.assertTrue(config.account_hostnames_enabled())
 
 
+class FlagOnByDefaultTests(TestCase):
+    """The flag is on by default, but account names act only once the zone, its id and its token are set."""
+
+    def _configure(self) -> None:
+        for key, value in (
+            ("dns.account_hostname_zone", ZONE),
+            ("dns.account_hostname_zone_id", ZONE_ID),
+            ("dns.account_zone_api_token", "token-value"),
+        ):
+            self.assertIsNone(_write(key, value))
+
+    def test_on_by_default_once_configured_without_touching_the_flag(self) -> None:
+        self._configure()
+
+        self.assertTrue(config.account_hostnames_enabled())
+
+    def test_nothing_happens_while_unconfigured_even_with_the_flag_on(self) -> None:
+        self.assertFalse(config.account_hostnames_enabled())
+
+    def test_the_flag_still_turns_it_off(self) -> None:
+        self._configure()
+        self.assertIsNone(_write("dns.account_hostnames_enabled", False))
+
+        self.assertFalse(config.account_hostnames_enabled())
+
+    def test_clearing_the_token_turns_it_off_again(self) -> None:
+        self._configure()
+        self.assertIsNone(_write("dns.account_zone_api_token", ""))
+
+        self.assertFalse(config.account_hostnames_enabled())
+
+
 class HostingDnsDefaultsTests(TestCase):
     def test_the_defaults_are_off_and_safe(self) -> None:
         self.assertFalse(config.account_hostnames_enabled())
@@ -123,6 +155,28 @@ class HostingDnsDefaultsTests(TestCase):
     def test_the_record_ttl_takes_effect(self) -> None:
         self.assertIsNone(_write("dns.account_record_ttl_seconds", 600))
         self.assertEqual(config.account_record_ttl_seconds(), 600)
+
+    def test_the_cutover_defaults_are_bounded(self) -> None:
+        self.assertEqual(config.account_cutover_ttl_seconds(), 60)
+        self.assertEqual(config.bridge_window_hours(), 48)
+        self.assertIsNone(_write("dns.cutover_ttl_seconds", 60))
+
+    def test_the_cutover_settings_take_effect(self) -> None:
+        self.assertIsNone(_write("dns.cutover_ttl_seconds", 120))
+        self.assertIsNone(_write("dns.bridge_window_hours", 24))
+        self.assertEqual(config.account_cutover_ttl_seconds(), 120)
+        self.assertEqual(config.bridge_window_hours(), 24)
+
+    def test_out_of_range_cutover_settings_are_refused(self) -> None:
+        for key, value in (
+            ("dns.cutover_ttl_seconds", 10),
+            ("dns.cutover_ttl_seconds", 59),
+            ("dns.cutover_ttl_seconds", 1000),
+            ("dns.bridge_window_hours", 0),
+            ("dns.bridge_window_hours", 200),
+        ):
+            with self.subTest(key=key, value=value):
+                self.assertIsNotNone(_write(key, value))
 
     def test_the_certificate_budget_takes_effect(self) -> None:
         self.assertIsNone(_write("dns.account_cert_weekly_budget", 25))

@@ -107,7 +107,6 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "public_lookup_ip",
             "mfa_credential",
             "sustained",
-
             "api_burst",
             "anon",
             "order_create",
@@ -240,8 +239,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
                 req = factory.post(f"/{name}/", REMOTE_ADDR="198.51.100.10")
                 req.user = AnonymousUser()  # unsigned: no portal auth, no DRF user
                 keys_an_unsigned_request = any(
-                    throttle().get_cache_key(req, view=view_cls) is not None
-                    for throttle in view_cls.throttle_classes
+                    throttle().get_cache_key(req, view=view_cls) is not None for throttle in view_cls.throttle_classes
                 )
                 if not keys_an_unsigned_request:
                     unprotected.append(f"{module.__name__}.{name}")
@@ -260,6 +258,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         explicitly suppresses the defaults — and asserts the sweep's own predicates would
         flag it (not skip it), so a future regression of that shape can't pass silently.
         """
+
         @api_view(["POST"])
         @authentication_classes([])
         @throttle_classes([])  # explicit suppression — the dangerous config
@@ -335,7 +334,8 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         stops proving anything about a class the view no longer uses.
         """
         portal_throttles = [
-            t for t in update_customer_billing_address.cls.throttle_classes
+            t
+            for t in update_customer_billing_address.cls.throttle_classes
             if issubclass(t, rate_limiting.PortalHMACRateThrottle)
         ]
         self.assertTrue(portal_throttles, "billing-address view must carry a portal-keyed throttle")
@@ -527,6 +527,10 @@ class EndpointThrottleBehaviorTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
         self.factory = APIRequestFactory()
+        # These requests share one budget; a real minute rollover must not split them.
+        clock = patch.object(rate_limiting, "time")
+        self.addCleanup(clock.stop)
+        clock.start().time.return_value = 1_800_000_030.0
 
     @patch.object(OrderCreateThrottle, "rate", "2/min", create=True)
     def test_order_create_throttle_returns_429_after_configured_limit(self) -> None:

@@ -66,8 +66,9 @@ _SHIMS = {
         "#!/bin/bash\n"
         "cmd=$1; shift\n"
         "case $cmd in\n"
-        '  list-domains) printf "%s\\n" "$FAKE_DOMAIN_ID" ;;\n'
+        '  list-domains) if [[ "$*" == *--user-only* ]]; then echo customer; else printf "%s\\n" "$FAKE_DOMAIN_ID"; fi ;;\n'
         "  backup-domain)\n"
+        '    printf "backup\\n" >>"$FAKE_TRACE"\n'
         '    dest=""; differential=0\n'
         '    while (($#)); do\n'
         '      case $1 in --dest) dest=$2; shift ;; --differential) differential=1 ;; esac\n'
@@ -103,6 +104,15 @@ class ChainNodeScriptTests(SimpleTestCase):
             shim.write_text(body)
             shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
         self.snapshot = self.snapshots / DOMAIN_ID
+        self.trace = self.root / "capture-trace"
+        self.owner_helper = self.bin / "owner-shadow.pl"
+        self.owner_helper.write_text(
+            "use JSON::PP; my $x=decode_json(do {local $/;<STDIN>});\n"
+            "die unless $x->{action} eq 'capture-owner' && $x->{owner} eq 'customer'\n"
+            " && $x->{domain_id} eq $ENV{FAKE_DOMAIN_ID} && $x->{archive} eq $ENV{PRAHO_ARCHIVE};\n"
+            "open(my $out,'>>',$ENV{FAKE_TRACE}) or die; print $out qq(capture\\n); close($out);\n"
+            "die 'unsupported aging' if $ENV{FAKE_CAPTURE_FAIL}; print qq(PRAHO_RECOVERY_CREDENTIALS_OK\\n);\n"
+        )
 
     def run_script(self, **overrides: str) -> subprocess.CompletedProcess[str]:
         env = {
@@ -119,6 +129,8 @@ class ChainNodeScriptTests(SimpleTestCase):
             "PRAHO_RUN_DIR": str(self.run_dir),
             "FAKE_DOMAIN_ID": DOMAIN_ID,
             "FAKE_SNAPSHOT": str(self.snapshot),
+            "PRAHO_OWNER_SHADOW_HELPER": str(self.owner_helper),
+            "FAKE_TRACE": str(self.trace),
             **overrides,
         }
         return subprocess.run(["/bin/bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False)  # noqa: S603  # Fixed argv
@@ -139,6 +151,22 @@ class ChainNodeScriptTests(SimpleTestCase):
     def fingerprint(self) -> str:
         data = self.snapshot.read_bytes()
         return f"{hashlib.sha256(data).hexdigest()}:{len(data)}"
+
+    def test_capture_is_bound_to_this_archive_and_precedes_native_base_and_differential(self):
+        self.assertEqual(self.step().outcome, "ok")
+        before = self.fingerprint()
+        self.assertEqual(self.step("differential", PRAHO_ARCHIVE=self.new_archive(), PRAHO_EXPECTED_FP=before).outcome, "ok")
+        self.assertEqual(self.trace.read_text().splitlines(), ["capture", "backup", "capture", "backup"])
+
+    def test_owner_capture_refusal_cannot_run_backup_or_change_the_lineage(self):
+        self.snapshot.write_bytes(b"existing fingerprint")
+        before = self.fingerprint()
+        step = self.step(FAKE_CAPTURE_FAIL="1")
+        self.assertEqual(step.reason, "owner_shadow_capture_failed")
+        self.assertFalse(step.ran)
+        self.assertEqual(self.fingerprint(), before)
+        self.assertFalse((self.staging / ARCHIVE).exists())
+        self.assertEqual(self.trace.read_text().splitlines(), ["capture"])
 
     def new_archive(self) -> str:
         return "virtualmin_backup_" + os.urandom(16).hex() + ".tar.gz"

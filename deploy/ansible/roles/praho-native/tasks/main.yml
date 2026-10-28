@@ -693,12 +693,17 @@
 
 - name: Template restore script
   template:
-    src: restore-native.sh.j2
-    dest: "{{ project_root }}/scripts/restore.sh"
+    src: restore-platform-native.sh.j2
+    dest: "{{ project_root }}/scripts/restore-platform.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
     mode: "0700"
   diff: false
+
+- name: Remove obsolete generic restore entrypoint
+  file:
+    path: "{{ project_root }}/scripts/restore.sh"
+    state: absent
 
 - name: Template health check script
   template:
@@ -708,14 +713,47 @@
     group: "{{ project_group }}"
     mode: "0755"
 
-- name: Setup backup cron job
+- name: Create the private Platform backup directory
+  file:
+    path: "{{ backup_directory }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: '0700'
+
+- name: Install the Platform backup service and timer
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - praho-backup.service
+    - praho-backup.timer
+
+- name: Remove the replaced Platform backup cron job
   cron:
     name: "PRAHO database backup"
-    minute: "0"
-    hour: "2"
-    job: "{{ project_root }}/scripts/backup.sh >> {{ project_root }}/logs/backup.log 2>&1"
     user: "{{ project_user }}"
-  when: backup_enabled
+    state: absent
+
+- name: Apply the Platform backup timer
+  systemd:
+    name: praho-backup.timer
+    daemon_reload: true
+    enabled: "{{ backup_enabled }}"
+    state: "{{ 'started' if backup_enabled else 'stopped' }}"
+
+- name: Record applied Platform backup configuration
+  no_log: true
+  command:
+    argv: "{{ [project_root + '/.venv-linux/bin/python', 'manage.py', 'upload_platform_backup', '--register-runner', 'native', '--schedule-timezone', deployed_env.TIME_ZONE | default('Europe/Bucharest')] + ([] if backup_enabled else ['--runner-disabled']) }}"
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  environment: "{{ django_env }}"
+  changed_when: false
 
 - name: Setup Portal counter cull cron job
   cron:
@@ -777,7 +815,7 @@
         systemctl status praho-platform praho-portal praho-qcluster
         journalctl -u praho-platform -f
         {{ project_root }}/scripts/health-check.sh
-        {{ project_root }}/scripts/backup.sh
+        systemctl start praho-backup.service
       ================================================
 
 # ---------------------------------------------------------------------------

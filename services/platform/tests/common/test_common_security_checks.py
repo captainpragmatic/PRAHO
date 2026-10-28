@@ -17,6 +17,7 @@ from apps.common.checks import (
     check_ip_trust_configuration,
     check_proxy_ssl_configuration,
     check_security_middleware_configuration,
+    check_ses_webhook_topic_allowlist,
 )
 
 
@@ -262,3 +263,22 @@ class TestAPITokenConfigurationChecks(TestCase):
                 self.assertEqual(len(errors), 1)
                 self.assertIsInstance(errors[0], Error)
                 self.assertEqual(errors[0].id, 'security.E064')
+
+
+class TestSESWebhookTopicAllowlistCheck(TestCase):
+    """Amazon SES without a topic allowlist silently drops every bounce and complaint."""
+
+    @override_settings(EMAIL_PROVIDER="amazon_ses", SES_SNS_TOPIC_ARNS=())
+    def test_amazon_ses_with_an_empty_allowlist_warns(self):
+        findings = check_ses_webhook_topic_allowlist(None)
+        self.assertEqual([finding.id for finding in findings], ["security.W064"])
+        self.assertIsInstance(findings[0], DjangoWarning)
+        self.assertIn("AWS_SES_SNS_TOPIC_ARNS", findings[0].msg)
+
+    @override_settings(EMAIL_PROVIDER="amazon_ses", SES_SNS_TOPIC_ARNS=("arn:aws:sns:eu-west-1:123456789012:ses-events",))
+    def test_amazon_ses_with_an_allowlist_is_quiet(self):
+        self.assertEqual(check_ses_webhook_topic_allowlist(None), [])
+
+    @override_settings(EMAIL_PROVIDER="smtp", SES_SNS_TOPIC_ARNS=())
+    def test_other_providers_are_not_asked_for_an_allowlist(self):
+        self.assertEqual(check_ses_webhook_topic_allowlist(None), [])

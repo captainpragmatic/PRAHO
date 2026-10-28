@@ -47,6 +47,11 @@ urlpatterns = [
         name="virtualmin_migration_resolve",
     ),
     path(
+        "accounts/<uuid:account_id>/migration/bridge/",
+        virtualmin_views.virtualmin_bridge_control,
+        name="virtualmin_bridge_control",
+    ),
+    path(
         "accounts/<uuid:account_id>/backup/",
         virtualmin_views.virtualmin_account_backup,
         name="virtualmin_account_backup",

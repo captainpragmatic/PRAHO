@@ -55,8 +55,31 @@ else
 fi
 read -r -p 'This overwrites the current database. Continue? (yes/no): ' CONFIRM
 if [ "$CONFIRM" != yes ]; then echo 'Restore cancelled'; exit 0; fi
-if ! {{ project_root }}/scripts/backup.sh; then
-    echo 'ERROR: Pre-restore safety backup failed; nothing was restored' >&2; exit 1
+# The service supplies the backup owner and its complete deployed environment. A root
+# invocation of backup.sh fails its ownership guard; never bypass that guard.
+journalctl --sync
+SAFETY_CURSOR=$(journalctl -n 0 --show-cursor --no-pager --output=cat | sed -n 's/^-- cursor: //p')
+if [ -z "$SAFETY_CURSOR" ] || [[ "$SAFETY_CURSOR" == *$'\n'* ]]; then
+    echo 'ERROR: Cannot capture safety backup journal cursor; nothing was restored' >&2; exit 1
+fi
+if ! systemctl start --wait praho-backup.service; then
+    echo 'ERROR: Pre-restore safety backup failed; nothing was restored. Verify praho-backup.service is deployed.' >&2; exit 1
+fi
+# Inactive oneshot units can be collected immediately, losing InvocationID. A
+# journal cursor works with the backup timer disabled and excludes old successes.
+journalctl --sync
+SAFETY_OUTPUT=$(journalctl -u praho-backup.service "--after-cursor=$SAFETY_CURSOR" --no-pager --output=cat)
+SAFETY_DUMP=$(sed -n 's/^.* Backup created: //p' <<< "$SAFETY_OUTPUT")
+# Lock contention exits zero without creating a pair. Require evidence from this
+# fresh log window before stopping writers or replacing their database.
+case "$SAFETY_DUMP" in
+    "$BACKUP_DIR"/praho_backup_*.dump) ;;
+    *) echo 'ERROR: No completed safety backup pair; nothing was restored' >&2; exit 1 ;;
+esac
+if ! grep -Fq 'Backup completed successfully' <<< "$SAFETY_OUTPUT" ||
+   [ ! -s "$SAFETY_DUMP" ] || [ -L "$SAFETY_DUMP" ] ||
+   [ ! -s "${SAFETY_DUMP%.dump}.media.tar.gz" ] || [ -L "${SAFETY_DUMP%.dump}.media.tar.gz" ]; then
+    echo 'ERROR: Cannot verify completed safety backup pair; nothing was restored' >&2; exit 1
 fi
 # A failed stop can leave only some services stopped. Never mutate the database in that case.
 if ! systemctl stop praho-qcluster praho-portal praho-platform; then
@@ -68,7 +91,7 @@ sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
 pg_restore -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
     --exit-on-error --no-owner --no-privileges "$STAGE/database.dump"
 if $HAS_MEDIA; then
-    sudo -u {{ project_user | quote }} tar --no-same-owner --no-same-permissions -C "{{ project_root }}" -xzf "$STAGE/media.tar.gz"
+    sudo -u {{ project_user | quote }} tar --no-same-owner --no-same-permissions -C "{{ project_root }}" -xzf - < "$STAGE/media.tar.gz"
 fi
 # After a restore, files written since the backup have no row, and the orphaned-media sweep would
 # delete them a day later: pause it for seven days. A backup taken before the sweeper existed has no

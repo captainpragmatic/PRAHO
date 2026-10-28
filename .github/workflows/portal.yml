@@ -3,12 +3,15 @@
 # ===============================================================================
 # Tests and type checking for the portal service.
 # Linting is consolidated in integration.yml (make lint).
+#
+# Both jobs are required checks on master (.github/rulesets/master.json), so pull_request has no
+# paths filter. Staging is never pushed to: it is promoted from master (make promote-staging).
 
 name: Portal Service CI/CD
 
 on:
   push:
-    branches: [master, staging]
+    branches: [master]
     paths:
       - 'services/portal/**'
       - 'shared/**'
@@ -25,6 +28,13 @@ env:
   PLATFORM_API_URL: http://mock-platform:8000
   PLATFORM_API_KEY: test-api-key
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+# A new push to a PR supersedes the run on its previous head: cancel it so it stops holding job slots.
+# Every other event gets a group of its own, so it is never cancelled or queued behind another run of this
+# workflow (it can still wait for free runners).
+concurrency:
+  group: portal-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   portal-test:

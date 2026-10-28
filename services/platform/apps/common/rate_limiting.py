@@ -81,7 +81,7 @@ def _parse_rate(rate_str: str) -> tuple[int, int]:
 
 def _hash_value(value: str) -> str:
     """MD5-hash a value for use in cache keys (not cryptographic)."""
-    return hashlib.md5(str(value).encode()).hexdigest()[:12]  # noqa: S324
+    return hashlib.md5(str(value).encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _resolve_key(key: str | Callable[..., str], group: str, request: HttpRequest) -> str:
@@ -185,7 +185,7 @@ def rate_limit(
                 cache_key = f"rl:{resolved_group}:{cache_key_id}"
                 # Truncate to avoid memcached 250-char key limit
                 if len(cache_key) > _MAX_CACHE_KEY_LENGTH:
-                    cache_key = f"rl:{hashlib.md5(cache_key.encode()).hexdigest()}"  # noqa: S324
+                    cache_key = f"rl:{hashlib.md5(cache_key.encode(), usedforsecurity=False).hexdigest()}"
 
                 new_count = counters.increment(cache_key, window_seconds)
 

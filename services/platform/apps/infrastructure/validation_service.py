@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WEBMIN_PORT = 10000
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 
 VIRTUALMIN_CHECK_POLICY = OutboundPolicy(
     name="virtualmin_check",
@@ -235,7 +236,7 @@ class NodeValidationService:
             )
 
             # Test command execution
-            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)
+            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             client.close()
 
@@ -319,7 +320,7 @@ class NodeValidationService:
                 "openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null "
                 "| openssl x509 -noout -fingerprint -sha256"
             )
-            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)
+            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             if stdout.channel.recv_exit_status() != 0:
                 error_output = stderr.read().decode().strip()
@@ -422,6 +423,16 @@ class NodeValidationService:
                 message=f"Security check failed: {e}",
             )
         except urllib.error.HTTPError as e:
+            e.close()
+            # safe_urlopen never follows redirects: a 3xx proves the HTTPS listener answered.
+            # The Location header is deliberately left out of the result.
+            if e.code in _REDIRECT_STATUS_CODES:
+                return ValidationResult(
+                    check_name="virtualmin",
+                    passed=True,
+                    message="HTTPS listener answered with a redirect",
+                    details={"status_code": e.code},
+                )
             # 401/403 means Webmin is running (just needs auth)
             if e.code in (401, 403):
                 return ValidationResult(

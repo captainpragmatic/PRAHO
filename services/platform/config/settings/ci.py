@@ -4,7 +4,8 @@ CI settings for PRAHO Platform — production-parity testing.
 Inherits test optimizations (fast hasher, minimal middleware, etc.)
 but uses PostgreSQL + DatabaseCache to match production.
 
-Used by: platform.yml (master), full-test.yml, nightly.yml
+Used by: platform.yml (platform-postgres), integration.yml, nightly.yml,
+release-candidate.yml (make test-platform-postgres-full)
 """
 
 from __future__ import annotations

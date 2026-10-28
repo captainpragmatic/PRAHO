@@ -366,6 +366,13 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "30"))
 
+# Amazon SNS topics allowed to deliver to /webhooks/email/ses/ (AWS_SES_SNS_TOPIC_ARNS, comma-separated).
+# Top level on purpose: system_status hashes str(ANYMAIL) into the configuration identity, and the
+# sorted tuple keeps that stable. Empty means the SES webhook rejects every message outside DEBUG.
+SES_SNS_TOPIC_ARNS: tuple[str, ...] = tuple(
+    sorted({arn.strip() for arn in os.environ.get("AWS_SES_SNS_TOPIC_ARNS", "").split(",") if arn.strip()})
+)
+
 # ===============================================================================
 # ANYMAIL CONFIGURATION (Multi-Provider Email Backend)
 # ===============================================================================
@@ -493,6 +500,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 # Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
 # Credentials are stored in the encrypted credential vault.
 PRAHO_SSH_KNOWN_HOSTS_PATH = os.environ.get("PRAHO_SSH_KNOWN_HOSTS_PATH", "")
+VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH = os.environ.get("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", "")
 
 # e-Factura API settings
 EFACTURA_API_URL = os.environ.get("EFACTURA_API_URL")

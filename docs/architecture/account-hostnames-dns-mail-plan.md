@@ -1,22 +1,22 @@
 # Implementation plan: account hostnames, customer DNS and mail (ADR-0061)
 
-Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Each phase is its own PR series.
+Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Phase 2 is delivered by PR #749. Phases 3 through 5 follow together in one later PR; local phase branches are verification checkpoints.
 
 **Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf. That was `0007_legacy_price_labels` when this was written; P1.1 then added `0008_account_hostnames`. Each later task takes the next number after whatever the leaf is when it lands, never a number fixed in this plan.
 
-## Design corrections found in pre-flight
+## Historical design corrections found in pre-flight
 
 - **The DNS path cannot live on `Domain`.** A `Domain` row needs a registrar and a TLD (PROTECT keys) and exists only for domains we registered (`domains/services.py:622`, `operation_services.py:122`). Per-account DNS state hangs off `VirtualminAccount` instead.
 - **Virtualmin parameters reject `--`, CR and LF** (`apps/common/validators.py:42`, `SUSPICIOUS_PATTERNS`) and are capped at 1000 characters. So:
   - a PEM never goes through the API; certificates travel by playbook and `install-cert` receives file paths;
   - labels are `[a-z0-9]` only;
   - punycode domains (`xn--`) are rejected today, which is fixed in P0.1.
-- **One vhost serves one certificate,** so the account name cannot be a ServerAlias on the customer's vhost. It is a **Virtualmin sub-server of the customer domain** with its own vhost and certificate, its web root a relative symlink to the customer's (`docs/domain/virtualmin-account-subserver-contract.md`). An alias domain was disproved first (`virtualmin-account-alias-contract.md`).
+- **One vhost serves one certificate,** so the account name cannot be a ServerAlias on the customer's vhost. It is a **Virtualmin sub-server of the customer domain** with its own certificate. The historical symlink experiment is recorded in `docs/domain/virtualmin-account-subserver-contract.md`; the agreed first release instead places a root-owned neutral vhost before the tenant's vhost. An alias domain was disproved first (`virtualmin-account-alias-contract.md`).
 - **Recovery today recreates empty domains** (`virtualmin_disaster_recovery.py:44`), and restore never changes `account.server`. P2.9 adds a real recover-to-node service.
 - **Sub-servers appear in `list-domains`** (`type: Sub-server`, `parent_domain`) and would corrupt the account sync, `update_server_statistics` and `list_migration_domains`. They are filtered in P1.6.
 - **There is no ACME client.** Virtualmin GPL's DNS-01 needs BIND, and nodes run without it. Certificates are issued on Platform with the Python `acme` and `josepy` libraries, so the Cloudflare token stays off the nodes.
 
-## Status (2026-10-19)
+## Historical status (2026-10-19)
 
 - **Phase 0 is built** (PR #695, merged).
 - **Phase 1 is built, behind `dns.account_hostnames_enabled` (off)** (P1.2 to P1.16, one PR). It stays off until Phase 2: a migration does not move `target_server` before the cutover exists, so a name turned on now would keep pointing at a node a migration left. Departures from the tasks below:
@@ -33,6 +33,128 @@ Every task: a test that fails first (quote the failure line), the fix, green, `m
   - its key is in any archive that carries it, which rules out a wildcard on it unless every such archive is excluded (P1.10).
 
 ## Review record
+
+### Execution ledger (2026-10-27)
+
+The implementation continues from PR #749 at `66e31447`, on the isolated
+`codex/adr61-phase2-master-integration` branch. Signed checkpoint `b07ec939`
+contains the access-policy/archive-aging review fixes after integration with master.
+The Phase 2 gates below are recorded separately
+from the later phases so a passing bridge test cannot be mistaken for a completed plan.
+
+Owner decisions for the remaining phases:
+
+- Merge Phase 2 through PR #749 once its pull request checks pass. Deliver Phases 3 through 5 together in one later PR, not one PR per phase. Keep phase-specific verification evidence and keep that PR in draft until combined review and verification pass.
+- Keep website previews off. Use complete zone-file uploads for the first zone import.
+- Install mail on all eligible existing and new nodes through Virtualmin's supported setup.
+  Existing external mail stays external until the domain's owner enables hosted mail.
+- Advertise implicit TLS client ports 993, 995 and 465.
+- Investigate native Postfix/Dovecot forwarding in the mail lab before adding a proxy dependency.
+  Native proxying may terminate TLS at the source and use a verified encrypted onward connection;
+  the invariant is one authoritative writable mailbox copy, with credentials checked at the target.
+- Finish a migration after target activation, bridge verification and DNS convergence. The bridge's
+  own retryable task owns retention and teardown, so backups and billing reconciliation resume.
+- Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
+
+Review findings to close, each with a failing regression and recorded green result:
+
+| Finding | State / evidence |
+|---|---|
+| Original barrier record and saved-crontab token survive replay | Regression green; migration review suite: 100 tests + 90 subtests |
+| Compensation preserves each child's enabled state | Regression green in the migration review suite |
+| Cancellation removes only the owned, idle target copy | Regression green in the migration review suite |
+| Compensation resumes safely and parked rows have staff actions | Regression green in the migration review suite |
+| Scheduled wakes keep the migration task timeout | Regression green in the migration review suite |
+| Wait the old record TTL after all lower TTLs confirm | Seven regressions reproduced; 46 tests + 16 subtests green |
+| Every TTL restoration decision uses fresh publication-locked state | Regression green; 81 neighboring tests green, two PostgreSQL-only tests require PostgreSQL |
+| Cloudflare cutover TTL minimum is 60 seconds | Settings regression green |
+| Web-only accounts do not issue an empty database-union query | Barrier suite: 47 tests + 20 subtests green |
+| Bridge runner allowlist and failed-curl verification | Bridge suite: 35 tests + 2 subtests green |
+| Encrypted bridge, aliases, full chain and neutral-default ordering | Real two-node contract green, including continued traffic after source deletion |
+| Bridge lifecycle audit coverage | Audit/scanner/model suite: 27 tests green |
+| Audit scanner respects lexical scopes | Two scope regressions reproduced; scanner tests green |
+| New bridge migration checksum matches its file | 0014 digest corrected; 115 checksums and both service schema checks passed |
+| Bridge playbook has production-path lab coverage | Full real-node contract: 37 cases passed in 1512.66 seconds, including active and suspended cutovers and recovery |
+| A restored target stays held before ownership commits | Real Unix-lock proof, archived application database login and grants, suspension and activation replay passed |
+| Native API children count as running operations during cleanup | Remote CGI and argument-free native-child regressions green; CLI commands for other domains remain independent |
+| Cancellation arriving during bridge preparation cannot commit | Fresh-row cancellation regression green; compensation runs outside the ownership transaction |
+| A fenced, unavailable source cannot trap an already committed cutover | Audited staff-only fencing control; target-only convergence regression green; failed bridge retains separate cleanup exclusion |
+| Customer frontend records and old cache lifetimes gate source deletion | Precommit inventory and TTL evidence, fresh authoritative checks, and per-name retention clocks; 39 tests and five subtests green |
+| Opaque proxy origins require explicit staff evidence | Expiring attestation binds target, addresses and full inventory; source addresses and failed DNS cannot be overridden |
+| Completed or conclusively abandoned moves remove temporary transport data | UUID-scoped archive and private target-data cleanup, retryable per location, permanent replay markers retained |
+| Backup recovery keeps current billing quotas | Two regressions reproduced; current quotas reapplied on target before ownership commits; 32 neighboring checks green |
+| Recovery refuses a missing account name before changing nodes | Admission regression green; source remains eligible when admission is refused |
+| Cancellation and completed releases survive replay and reboot | Source/pair script suites: 59 tests with 38 subtests; additional bridge/pair batch: 59 tests with 17 subtests |
+| External webmail/admin aliases do not require a false target-origin statement | Explicit independent-service declarations, fresh route/cache checks and historical source-IP guards; 52 tests green |
+| Current billing/domain policy applies to a fully activated committed target | Dedicated identity-bound policy writer preserves current credentials and cron; focused SQLite/PostgreSQL and native active/suspended proofs green |
+| Owner aging is bound to the credential actually carried by its archive | Native capture/serialization race reproduced; changed credentials refuse the archive rather than reuse stale aging; full native contract 37 cases green |
+| Parent activation never briefly enables a disabled child | Native RED exposed a late-created linked child while its parent remained held; parent-only activation and explicit per-child restoration pass the same observer and 30 node tests |
+| Account names never serve tenant content while previews are off | Native defects reproduced without a symlink, through tenant-writable suspension pages and with explicit-IP vhosts. Root-owned neutral sites pass actual HTTP/verified TLS, source and pair holds, rotation and retirement. Full native contract: 41 cases green; the final narrow followups pass both affected native lifecycles |
+| The guard and web bridge cover Apache's actual address groups | Shared node-local binding inventory, stable per-name definitions and a durable rollback journal; explicit-IP two-node bridge proof green. Source and target bindings are observed separately |
+| Cleanup cannot remove a name's protection before its source bridge | Transport removal precedes independent guard retirement; retries retain completed milestones, and private TLS is pruned only after durable configuration/tombstone commits |
+| Publication proves the certificate actually installed on that node | Public vault leaf pins both final neutrality checks and publication. A confirmed mismatch invalidates only the matching install record; pending renewal and concurrent replacement regressions pass |
+| Unpublished legacy names follow a move without routing back to the source | Name-locked admission blocks publication during the move; account and name targets advance atomically. Both PostgreSQL contention orderings pass |
+| A normal public full chain need not contain its trust anchor | Real TLS regression reproduced when a custom CA bundle replaced system roots. The probe now retains system roots and explicit native anchors while enforcing the exact leaf/name; the native root-omitted-chain counterexample passes |
+
+The final Phase 2 implementation passes `make lint` and the complete `make test`
+pipeline: 14,249 Platform tests, 1,978 Portal passes, 1,038 integration passes,
+and the database-cache/security isolation phases. Full typing passes for 623 Platform
+and 100 Portal modules; 118 migration checksums match and neither service has schema
+drift. Nineteen PostgreSQL regressions, including both actual publication/admission
+contention orderings, pass. The full 41-case native run precedes the narrow TLS/socket
+and rollback-cleanup followups; those final bytes pass 162 affected tests and 101
+subtests, both affected native lifecycles, and the native root-omitted-chain proof.
+These are local review gates, not deployment evidence. The owner has decided that
+previews remain off even after
+the factual PSL-shipped setting becomes true; skipping the web-root link alone never
+provided that guarantee. The neutral-site task and certificate installation now require
+fresh node receipts, and publication/cutover/recovery refuse unproved HTTP neutrality.
+
+The audit CI failures mentioning `virtualmin_migration_apply` and
+`virtualmin_migration_verify` are scanner false positives: unrelated barrier loop
+variables were mistaken for audit wrapper parameters. Fix the scanner's lexical
+scope handling rather than registering events that no operation emits.
+
+P2.6-P2.11 are implemented and have passed the local gates above. Phases 3-5 keep
+separate implementation and integration gates; the native mail lifecycle remains
+unfinished and mail-enabled migrations remain refused.
+
+The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
+restricted to its source and admitted hostnames; HTTPS uses the customer's verified
+target vhost. No new proxy service, provider firewall rule or listening port is needed.
+The retained frontend certificates bound the bridge deadline and any staff extension.
+
+Recovery uses a disabled placeholder and the existing-domain restore path, with Unix
+restore excluded and the inherited maintenance barrier retained until ownership commits.
+Review against Virtualmin 8.3 established additional gates: restore the archive's Unix
+hash through native `modify_unix` so `disabled_oldpass` is correct, use reversible native
+cron markers, and persist node activation before exposing the target so replay cannot
+overwrite a customer's new cron. These recovery gates passed their real-node checks.
+
+Native existing-domain restore also creates database users from the placeholder's domain
+metadata. Before activation, the target therefore needs the archived native credential metadata
+as well as its Unix hash. The real-node acceptance checks use the original database login and
+grants for both active and suspended accounts; matching table contents alone is insufficient.
+
+Virtualmin's native archive does not include the owner's shadow aging and expiry fields.
+New full/configuration and differential-chain backups capture those numeric fields under the
+source identity and lock, bind them to the exact archive, and include them in its native domain
+metadata before checksums or storage. Held activation restores them once and refuses archives
+whose aging is unknown; an operator must take a newly captured backup or review that legacy
+account's expiry policy. A nonempty reserved shadow flag is unsupported and refused explicitly.
+The private profile also binds aging to the exact credential selected by native restore. A
+password change between live capture and backup therefore refuses publication or held
+activation; a fresh backup uses a new archive identity. No credential fingerprint is returned
+to Platform metadata, audit events or logs.
+Completed backups already require managed SSH archive transport, including on master and the
+original Phase 2 branch. The internal full/configuration capture seam now enforces that same
+capability with an actionable refusal: enroll an API-only or manually registered server with
+verified SSH transport first. This does not remove public completed-backup support. Existing
+archive listing and download remain available; unknown metadata never implies safe held activation.
+
+After activation, current billing/domain policy uses a separate native action. Suspension fences
+Unix login, web, cron and SQL even when the domain's disabled flag was already set. Active replay
+does not reapply archived credentials, cron or aging, so customer changes survive retries.
 
 - **Phase 1 v3 (sub-server design):** two adversarial plan reviews. Pass 1 REWORK (0 CRITICAL, 5 HIGH, 3 MEDIUM, 1 LOW), all folded in with two extra lab checks (S10, S11); pass 2 APPROVE (0 CRITICAL, 0 HIGH, 1 MEDIUM, 1 LOW), both folded in.
 
@@ -135,8 +257,8 @@ These are live defects today. Each ships with a test that fails without it.
 8. **P1.7 Lifecycle at one completion boundary.**
    - A single `on_account_ready(account)` runs on every path that finishes a create: `_handle_successful_provisioning_secure` (`virtualmin_tasks.py` ~542), `_retry_create_domain` (`virtualmin_service.py` ~1298) and direct creation. It sets `target_server`, calls `ensure_node_account_name(account, account.server, enabled=account.status == "active")` and enqueues the sync.
    - **The same ensure runs wherever a customer domain is recreated from nothing:** a migration's target after `restoring` and before `activating` (`_restore`/`_activate`), a recovery or `rebuild_server_from_praho` restore, and a backup restore that recreated the domain. An in-place restore keeps the name (lab S9), so the ensure is a cheap no-op there.
-   - **A migration target is created disabled.** The ensure runs on the target with `enabled=False` while it is still disabled; `_activate`'s cascading enable (P1.5) turns the name on with the account, and a suspended account's target keeps both disabled. Recovery and restore paths pass the account's own state (`enabled=account.status == "active"`).
-   - **The pair restore's 503 barrier must cover the account name's vhost too.** It matches the customer vhost's `DOCUMENT_ROOT` and its names today. The account name is a separate vhost with its own document root (the link) and its own generated names (`www.`, `mail.`, `webmail.`, `admin.` of the name), so the script collects both vhosts' roots and full name sets into the barrier, and P1.5 disables both domains. Lab test: requests to every name of both vhosts answer 503 throughout both restore steps, after a failure, during compensation, and stop at release.
+   - **A migration target is created disabled.** The ensure runs on the target with `enabled=False`. Record-driven activation restores each admitted child's state explicitly; its parent enable does not cascade through disabled children. Native enabled state never grants access to provider-name tenant content.
+   - **The pair restore fences every captured web surface.** The customer site and its aliases remain at maintenance 503. A provider-name child may instead remain at the fixed neutral 404, but only after the installed root-owned helper proves its native parent/ID, owned configuration digest and exact HTTP/HTTPS body. A tenant-made 404 or header cannot satisfy that exception. All native disabled-state, Unix, cron, SQL and process checks remain required. Native tests must cover both source and pair consumers, including a malicious tenant 503 error document.
    - **Retire the name only where an account becomes `terminated`** and on row delete. Deleting the customer domain on the node removes the sub-server with it.
    - **Removing a failed migration target, or any rollback delete,** deletes the customer domain on the target, which removes the target's copy of the name; it never retires the name (`_rollback`, `_execute_rollback`).
    - Tests: every create path ends ready with the name ensured; a migration ends with the name on the target, enabled with the account; a failed migration's cleanup keeps the label and the records; termination retires them; the barrier's host set includes the account name.
@@ -150,7 +272,7 @@ These are live defects today. Each ships with a test that fails without it.
     - Issued on Platform with `acme` and `josepy` through DNS-01 on the account zone (P1.9), so it works before the customer's DNS points anywhere. The ACME account key and each certificate key live in the vault, per hostname.
     - **Let's Encrypt budget, durable.** New names are limited per registered domain over a rolling window that refills continuously; renewals of an existing identifier set do not consume it. Each issuance is an `AccountNameCertificate` row (P1.1) moved `pending → ordering → issued|failed` under a row lock; a reservation is taken atomically on the zone's `AccountNameCertificateBudget` row (rolling seven-day count, setting `dns.account_cert_weekly_budget`, default 40). The issuer honours `Retry-After`, resumes an `ordering` row after a crash from its stored order URL instead of ordering twice, and an ensure or a move never orders for a name that already has valid material (it reinstalls the stored certificate); only the scheduled renewal orders while a valid certificate exists. The issued certificate is kept on its own fields, apart from the attempt state, so a renewal in `ordering` or `failed` leaves the current certificate in force. A staff alert fires at 80% of the budget.
     - **Readiness is valid material installed on the intended node,** not the attempt state: every sync entry point (P1.4, P1.8, "Repair DNS", P1.12's email) publishes and announces a name only when an unexpired certificate for it is installed on `target_server`. A first issuance still `pending`, `ordering` or `failed` keeps the name unpublished and unannounced; a failing renewal does not unpublish a name whose certificate is still valid.
-    - **Public Suffix gate, enforced.** A setting `dns.account_zone_psl_shipped` (default off) is set by staff only once the zone's Public Suffix List entry is confirmed shipped in current browsers. Until it is on, a published account name serves the node's neutral default site (P1.16) and never customer content: P1.15 does not link the web root, and hiding the preview link alone would not stop direct visits or customer CNAMEs setting a zone-wide cookie. Turning it on links the web roots on the next sync.
+    - **Previews remain off independently of PSL inclusion.** Staff records shipped inclusion in `dns.account_zone_psl_shipped` (default off). Turning it on does not link content or change HTTP policy. P1.15 enforces the neutral response before creation/publication, during migration and recovery, and through Native suspension or parent enablement.
     - Renewal runs daily for certificates under 30 days left.
     - Distribution by playbook with the existing temporary-vars-file pattern (`no_log`, never argv): write the PEMs to a root-only temporary directory on the node, `install-cert --domain <name> --cert <path> --key <path>`, delete the files in the same play.
     - `ensure_node_account_name` installs the current certificate before the name's records are published.
@@ -164,11 +286,19 @@ These are live defects today. Each ships with a test that fails without it.
     - Hostname card on account detail.
     - "Repair DNS" enqueues a sync and returns at once; no DNS lookup inside a request.
     - Server IPs on the server pages.
-15. **P1.14 WordPress preview decision** (owner). Whatever is decided, no preview serves customer content on an account name until the zone's Public Suffix List entry is confirmed shipped in current browsers (ADR-0061 section 1). Until then the preview link is not offered, because a customer site could otherwise set a cookie for the whole zone.
+15. **P1.14 WordPress preview decision** (owner). The agreed first release keeps previews off, including after PSL inclusion. Account names remain plain connection names in the Portal and never expose the customer's website.
 
-**Build order** (dependencies, not numbering): P1.1 → P1.2, P1.3 → P1.6 (which supplies the shared row and ownership predicates P1.4 uses) → P1.5 → P1.9 → P1.10 → P1.15 → P1.4 → P1.7 → P1.8 → P1.11, P1.12, P1.13 → P1.16 (any time).
+**Build order** (dependencies, not numbering): P1.1 → P1.2, P1.3 → P1.6 (which supplies the shared row and ownership predicates P1.4 uses) → P1.5 → P1.9 → P1.16 → P1.15 → P1.10 → P1.4 → P1.7 → P1.8 → P1.11, P1.12, P1.13. The root-owned default and neutral vhosts precede certificate installation and publication.
 
-16. **P1.15 The link playbook** (`infrastructure/ansible/playbooks/virtualmin_account_name_link.yml`, allowlisted in `apps/infrastructure/ansible_service.py`).
+16. **P1.15 Enforce a neutral account-name HTTP site** (`infrastructure/ansible/playbooks/virtualmin_account_name_neutral.yml` and its fixed private helper).
+    - Install a root-owned per-zone neutral fallback before creating a child. Per-name neutral vhosts load before the zone fallback and Virtualmin's sites, retain the name's full certificate chain and never consult tenant document roots or `.htaccess`. The node's ordinary default site remains first for unclaimed names.
+    - Copy only that name's native TLS material locally into private root-owned storage. Verify the served leaf and exact neutral response; certificate installation, final placement and publication must match that node's recorded vault leaf. A pending renewal retains the still-valid installed leaf until installation changes its record. Only a confirmed, identity-bound certificate mismatch invalidates that installation; unavailable or ambiguous evidence preserves it for review. No private key leaves the node through this helper.
+    - Shared binding definitions cover every native literal IPv4, bracketed IPv6 and wildcard address group without inventing explicit groups that would shadow other wildcard tenants. Observe source and target independently; probe the actual listener families and addresses. Changes to shared definitions have their own digest and durable rollback journal, while each name's configuration remains stable.
+    - Define-indirected names keep Virtualmin certificate and deletion callbacks on its original vhosts. Native child deletion does not invalidate the independent neutral copy. Retirement removes the named configuration and private TLS only after native absence is proven, leaving the zone fallback.
+    - Placement, guarded DNS publication and private retirement run as separate per-name jobs, explicitly asynchronous even when the queue defaults to inline execution. The sweep and termination callback only dispatch work. Each job has a 7,200-second timeout; the 125-minute node lease outlives it, and queue visibility remains longer. Placement bounds include four neutral-site calls, certificate installation, provider-backed DNS-01 publication/cleanup, Virtualmin retries and the supported one-time SSH-port repair. The separate certificate-attempt lease is 30 minutes. DNS jobs retain durable publication intent when their hard deadline interrupts unusually large provider pagination or cleanup; the bound does not promise every provider inventory fits one attempt.
+    - Required native coverage includes active/suspended parents, tenant PHP/redirect/error/header attempts, aliases, source and pair holds, full-chain rotation and private-copy retirement. Failed or ambiguous proof keeps publication and ownership commit blocked.
+
+**Historical P1.15 link experiment** (`infrastructure/ansible/playbooks/virtualmin_account_name_link.yml`). The utility remains available for the lab contract and is not called by production account-name orchestration:
     - Inputs: the sub-server's home as the node's own listing reports it (never built from user input) and the customer's unix user, both re-checked by P1.4 just before the call.
     - **No privileged path-following.** The home and its ancestors are customer-writable, so every filesystem step runs **as the customer's own UID** (`become_user`), never as root: `lstat` each component from `/home/<user>` down and refuse on any symlink or foreign owner; then, inside the sub-server's home only, `ln -s ../../public_html public_html.new` and an atomic rename over `public_html` (a real directory is first renamed `public_html.own`, once). Running as the customer gives the step no more access than the customer already has.
     - Idempotent: a correct link changes nothing.
@@ -301,7 +431,7 @@ These are live defects today. Each ships with a test that fails without it.
    - PTR through a new optional `set_reverse_dns` on the cloud gateway (Hetzner API), and a checked manual step elsewhere.
 5. **P5.5 Relay mail during the bridge.**
    - Inbound delivery: the bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
-   - Mail clients: during the bridge window, clients that still resolve the account name to the source connect there for IMAP, POP3 and submission. The bridge forwards each advertised client port to B as TCP passthrough, so TLS terminates on B with B's certificate and the client authenticates against B; the source never holds a mailbox copy that accepts writes.
+   - Mail clients: prove native Dovecot proxying and Postfix relay behavior in the lab before choosing a forwarding topology. Advertise implicit TLS ports 993, 995 and 465. A stale-DNS client must authenticate against the destination and use its single authoritative mailbox copy, with verified encryption between nodes. Source TLS termination is acceptable with an independently retained certificate; HAProxy is not a prerequisite.
    - The source is retired only after the client forwards are torn down at the end of the window.
 6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
 7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.

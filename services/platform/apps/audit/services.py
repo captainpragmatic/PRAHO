@@ -1411,7 +1411,7 @@ class GDPRDeletionService:
         "first_name": lambda: "Anonymized",
         "last_name": lambda: "User",
         "phone": lambda: "+40700000000",
-        "ip_address": lambda: "0.0.0.0",
+        "ip_address": lambda: "0.0.0.0",  # nosec B104 - anonymized placeholder written to ip columns, not a bind address
     }
     ANONYMIZED_ADDRESS = "Anonymized"
 

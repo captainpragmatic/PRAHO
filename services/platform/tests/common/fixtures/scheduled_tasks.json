@@ -515,11 +515,11 @@
   {
     "name": "system_status_check",
     "func": "apps.common.tasks.system_status_check",
-    "schedule_type": "D",
-    "minutes": 0,
+    "schedule_type": "I",
+    "minutes": 10,
     "cron": null,
     "repeats": -1,
-    "cluster": null
+    "cluster": "praho-cluster"
   },
   {
     "name": "tickets-auto-close-inactive",

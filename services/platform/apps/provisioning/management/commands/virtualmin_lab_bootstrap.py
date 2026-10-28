@@ -169,9 +169,11 @@ class Command(BaseCommand):
 
     def _ensure_account(self) -> None:
         from apps.billing.models import Currency  # noqa: PLC0415
+        from apps.common.validators import SecureInputValidator  # noqa: PLC0415
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
+        from apps.provisioning.virtualmin_service import generate_virtualmin_parameter_secret  # noqa: PLC0415
 
         server = VirtualminServer.objects.get(hostname=NODES[0].server_hostname)
         customer, _ = Customer.objects.get_or_create(
@@ -212,7 +214,13 @@ class Command(BaseCommand):
                 "praho_customer_id": customer.id,
             },
         )
-        if created or not account.encrypted_password:
-            account.set_password(secrets.token_urlsafe(18))
+        # The roundtrip sends this as create-domain's pass, so it must pass parameter validation,
+        # including a password an older bootstrap stored before that was checked
+        stored = account.get_password() if not created and account.encrypted_password else ""
+        if not stored or SecureInputValidator.first_malicious_pattern(stored) is not None:
+            password = generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(18))
+            account.set_password(  # nosemgrep: unvalidated-password — a Virtualmin credential, not a Django login
+                password
+            )
         account.server = server
         account.save(update_fields=["encrypted_password", "server", "updated_at"])

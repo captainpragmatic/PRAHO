@@ -3,12 +3,15 @@ adapts only the lab node names."""
 
 from __future__ import annotations
 
+import secrets
 import stat
 import tempfile
 import threading
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
+import paramiko
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -16,16 +19,23 @@ from django_q.models import OrmQ
 from django_q.signing import SignedPackage
 
 from apps.common import outbound_http
+from apps.common.types import Ok
+from apps.common.validators import SecureInputValidator
+from apps.infrastructure.models import NodeDeployment
+from apps.infrastructure.ssh_transport import trusted_node_known_hosts
+from apps.provisioning.management.commands import virtualmin_lab_bootstrap as bootstrap
 from apps.provisioning.management.commands._virtualmin_lab import (
     LAB_STAFF_EMAIL,
     LabNode,
     LabState,
     enable_lab_features,
+    ensure_lab_deployment,
     ensure_lab_staff,
     lab_transport,
     read_env_file,
     run_queued_once,
 )
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.settings.services import SettingsService
 from apps.users.models import User
 
@@ -40,6 +50,39 @@ def _state() -> LabState:
         domain="roundtrip.praho.test",
         domain_user="roundtrip",
     )
+
+
+@override_settings(SETTINGS_MODULE="config.settings.lab", DEBUG=True)
+class LabBootstrapSSHTrustTests(TestCase):
+    def test_fresh_and_refreshed_lab_rows_use_the_published_port_verified_pin_without_scanning(self):
+        node = _state().nodes[0]
+        wanted = paramiko.RSAKey.generate(2048)
+        foreign = paramiko.RSAKey.generate(2048)
+        wanted_public = wanted.get_name() + " " + wanted.get_base64()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "known_hosts").write_text(
+                "127.0.0.1 " + foreign.get_name() + " " + foreign.get_base64() + "\n"
+                + f"[127.0.0.1]:{node.ssh_port} " + wanted_public + "\n"
+            )
+            manager = Mock()
+            manager.generate_deployment_key.return_value = Ok(SimpleNamespace(public_key=wanted_public))
+            with patch("apps.infrastructure.ssh_key_manager.get_ssh_key_manager", return_value=manager):
+                deployment = ensure_lab_deployment(node, root)
+                self.assertEqual(deployment.ssh_port, node.ssh_port)
+                self.assertEqual(deployment.ssh_host_keys, wanted_public)
+                NodeDeployment.objects.filter(pk=deployment.pk).update(ssh_port=22, ssh_host_keys="")
+                refreshed = ensure_lab_deployment(node, root)
+            self.assertEqual(refreshed.ssh_port, node.ssh_port)
+            self.assertEqual(refreshed.ssh_host_keys, wanted_public)
+            scan = Mock(side_effect=AssertionError("No network trust enrollment for an existing lab pin"))
+            rendered = trusted_node_known_hosts(refreshed, scan)
+            try:
+                hosts = paramiko.HostKeys(str(rendered))
+                self.assertEqual(hosts.lookup(f"[127.0.0.1]:{node.ssh_port}")[wanted.get_name()], wanted)
+                scan.assert_not_called()
+            finally:
+                rendered.unlink()
 
 
 class LabCommandRefusalTests(SimpleTestCase):
@@ -161,6 +204,35 @@ class LabWorkerLoopTests(SimpleTestCase):
             command._work(stop)
 
         self.assertEqual(len(passes), 2)
+
+
+class LabAccountPasswordTests(TestCase):
+    """The roundtrip sends the lab account's password as create-domain's pass parameter."""
+
+    def setUp(self) -> None:
+        VirtualminServer.objects.create(name="lab-vm-a", hostname=bootstrap.NODES[0].server_hostname)
+        self.command = bootstrap.Command()
+        self.command._ensure_account()
+        self.account = VirtualminAccount.objects.get(domain=bootstrap.LAB_DOMAIN)
+
+    def _store(self, password: str) -> None:
+        self.account.set_password(password)
+        self.account.save(update_fields=["encrypted_password"])
+
+    def test_a_stored_password_the_parameter_validator_rejects_is_replaced(self) -> None:
+        # An older bootstrap stored raw tokens, and a token with "--" fails every later create-domain
+        self._store("aA1--" + "b" * 19)
+        self.command._ensure_account()
+        self.account.refresh_from_db()
+        self.assertIsNone(SecureInputValidator.first_malicious_pattern(self.account.get_password()))
+
+    def test_a_stored_password_the_parameter_validator_accepts_is_kept(self) -> None:
+        kept = "Qz9" + secrets.token_hex(10)  # hexadecimal never matches an injection heuristic
+        self.assertIsNone(SecureInputValidator.first_malicious_pattern(kept))
+        self._store(kept)
+        self.command._ensure_account()
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.get_password(), kept)
 
 
 class LabStaffTests(TestCase):

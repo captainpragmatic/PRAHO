@@ -4,20 +4,136 @@
   <section class="space-y-2 rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="font-semibold text-slate-100">{% trans "Migration" %}</h2>
     <p>{% trans "Status:" %} {{ migration.get_status_display }}</p>
-    <p>{% trans "Phase:" %} {{ migration.status }}</p>
-    {% if migration.status == "needs_review" %}
+    <p>{% trans "Phase:" %} {{ migration.get_status_display }}</p>
+    {% if migration.contract == "cutover" %}
+      <p>{% trans "This migration includes automatic DNS cutover and source bridge cleanup." %}</p>
+      <ol class="list-decimal space-y-1 pl-5 text-sm">
+        <li>{% trans "Lower DNS TTL and wait for cached answers." %}</li>
+        <li>{% if migration.source_disabled_at %}✓ {% endif %}{% trans "Fence source writes, back up, restore, and verify the target." %}</li>
+        <li>{% if migration.cutover_committed_at %}✓ {% endif %}{% trans "Commit account and hostname ownership to the target." %}</li>
+        <li>{% trans "Enable the target and verify the source bridge." %}</li>
+        <li>{% if migration.dns_converged_at %}✓ {% endif %}{% trans "Confirm DNS convergence on every authoritative server." %}</li>
+        <li>{% trans "Wait for the bridge window, remove retained source content, then restore TTLs." %}</li>
+      </ol>
+      {% if migration.cutover_committed_at %}
+        <p>{% trans "Committed to the target. Recovery can only continue on the target." %}</p>
+      {% endif %}
+      {% for record_type, progress in migration.barrier_state.dns.records.items %}
+        <p>{{ record_type }}: {% if progress.agreed %}{% trans "Converged" %}{% else %}{% trans "Waiting for convergence" %}{% endif %}</p>
+      {% endfor %}
+    {% endif %}
+    {% if migration.contract == "recovery" %}
+      <p>{% trans "Recovery restores a verified backup onto a replacement node. The original node must remain fenced." %}</p>
+      <ol class="list-decimal space-y-1 pl-5 text-sm">
+        <li>{% trans "Verify the selected full archive or exact backup pair." %}</li>
+        <li>{% trans "Restore behind maintenance with credentials and cron held." %}</li>
+        <li>{% if migration.cutover_committed_at %}✓ {% endif %}{% trans "Commit account and hostname ownership to the verified target." %}</li>
+        <li>{% trans "Restore the intended account state and converge authoritative DNS." %}</li>
+      </ol>
+      {% for record_type, progress in migration.barrier_state.dns.records.items %}
+        <p>{{ record_type }}: {% if progress.agreed %}{% trans "Converged" %}{% else %}{% trans "Waiting for convergence" %}{% endif %}</p>
+      {% endfor %}
+    {% endif %}
+    {% if migration.status == "needs_review" or migration.parked_phase %}
       <p class="text-amber-300">{% trans "Needs review: operator action is required. Automatic migration is stopped." %}</p>
       <p>{{ migration.error_detail }}</p>
-      <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-2" data-confirm="{% trans 'Confirm the remote state was repaired manually. This releases the migration lock.' %}">
+      <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-2">
         {% csrf_token %}
         <input type="hidden" name="migration_id" value="{{ migration.pk }}">
 
         {% trans 'Migration resolution note' as note_aria_label %}{% trans 'What was repaired manually?' as note_placeholder %}
         {% input_field "note" html_id="migration-resolution-note" aria_label=note_aria_label maxlength=200 placeholder=note_placeholder %}
-        {% trans "Mark resolved" as mark_resolved_label %}{% button mark_resolved_label type="submit" variant="warning" %}
+        {% if migration.cutover_committed_at %}
+          {% trans "Keep target and retry" as resolve_label %}
+          {% if migration.contract == "cutover" %}
+            {% if migration.barrier_state.source_fenced_control %}
+              <p>{% trans "The source remains fenced. Retry continues on the target; keep the source fenced until its stale content is removed." %}</p>
+            {% else %}
+              <p>{% trans "If the source is unavailable, first confirm it is powered off or otherwise fenced. Record that confirmation to continue DNS recovery on the target. The retained source and bridge will still need separate cleanup." %}</p>
+              {% trans 'Source fencing confirmation' as fenced_label %}{% trans 'Leave empty to retry the source bridge, or record how the source was fenced' as fenced_placeholder %}
+              {% input_field "source_fenced" html_id="migration-source-fenced" label=fenced_label maxlength=1000 placeholder=fenced_placeholder %}
+            {% endif %}
+          {% endif %}
+        {% elif migration.contract == "cutover" %}
+          {% trans "Keep source and compensate" as resolve_label %}
+        {% elif migration.contract == "recovery" %}
+          {% trans "Remove partial target and abandon recovery" as resolve_label %}
+        {% else %}
+          {% trans "Mark resolved" as resolve_label %}
+        {% endif %}
+        {% if migration.contract == "recovery" and not migration.cutover_committed_at %}
+          {% trans "Remove the owned partial target after its operations stop, and keep the original node fenced?" as recovery_confirm %}
+          {% button resolve_label type="submit" variant="warning" hx_confirm=recovery_confirm %}
+        {% else %}
+          {% button resolve_label type="submit" variant="warning" %}
+        {% endif %}
       </form>
     {% elif migration.status == "completed" %}
-      <p>{% trans "Update routing/DNS manually and validate the target. The disabled source copy is retained; remove it manually after validation." %}</p>
+      {% if migration.contract == "cutover" %}
+        <p>{% trans "DNS converged. Backups and account state reconciliation are available while bridge cleanup continues." %}</p>
+      {% elif migration.contract == "recovery" %}
+        <p>{% trans "Recovery and DNS convergence are complete. Keep the original node fenced until its stale content has been removed." %}</p>
+      {% else %}
+        <p>{% trans "Update routing/DNS manually and validate the target. The disabled source copy is retained; remove it manually after validation." %}</p>
+      {% endif %}
+    {% endif %}
+    {% if migration_bridge %}
+      {% if migration.barrier_state.source_fenced_control %}
+        <p class="text-amber-300">{% trans "Source fenced by staff. DNS recovery uses the target; source and bridge cleanup remain pending." %}</p>
+      {% endif %}
+      <p>{% trans "Bridge:" %} {{ migration_bridge.get_status_display }}</p>
+      {% if migration_bridge.evidence.expires_at %}<p>{% trans "Bridge window ends:" %} {{ migration_bridge.evidence.expires_at }}</p>{% endif %}
+      {% if migration_bridge.evidence.last_error %}<p class="text-amber-300">{{ migration_bridge.evidence.last_error }}</p>{% endif %}
+      {% for name, progress in migration_bridge.evidence.routing.items %}
+        <div class="rounded border border-slate-600 p-2 text-sm">
+          <p>{{ name }}: {% if progress.independent_service %}{% trans "Independent service verified" %}{% elif progress.agreed %}{% trans "Target routing confirmed" %}{% else %}{% trans "Customer DNS still needs verification" %}{% endif %}</p>
+          {% if progress.cache_until %}<p>{% trans "Old DNS cache wait ends:" %} {{ progress.cache_until }}</p>{% endif %}
+          {% if progress.attested %}<p>{% trans "External proxy origin verified by staff." %}</p>{% endif %}
+          {% if progress.observation.detail %}<p>{{ progress.observation.detail }}</p>{% endif %}
+        </div>
+      {% endfor %}
+      {% if migration.status == "completed" and migration_bridge.status != "torn_down" %}
+        <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="flex gap-2">
+          {% csrf_token %}
+          <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+          {% trans "Extend bridge window" as extend_label %}{% button extend_label type="submit" attrs='name="action" value="extend"' %}
+          {% if migration_bridge.status == "failed" %}
+            {% trans "Retry cleanup" as retry_label %}{% button retry_label type="submit" attrs='name="action" value="retry"' %}
+          {% endif %}
+        </form>
+        {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
+        <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
+          {% csrf_token %}
+          <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+          <input type="hidden" name="kind" value="target_origin">
+          <input type="hidden" name="target_id" value="{{ migration_bridge.target_server_id }}">
+          <input type="hidden" name="ipv4" value="{{ migration_bridge.target_server.ipv4_address|default_if_none:'' }}">
+          <input type="hidden" name="ipv6" value="{{ migration_bridge.target_server.ipv6_address|default_if_none:'' }}">
+          <p class="text-sm">{% trans "If customer DNS uses an external proxy, inspect its origin settings and confirm that each account frontend below forwards to this target. Independently declared optional services are recorded separately. DNS errors and records still pointing at the source cannot be overridden." %}</p>
+          <p class="text-sm">{% for name in bridge_target_origin_names %}{{ name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+          {% trans "External origin inspection evidence" as origin_note_label %}
+          {% input_field "note" input_type="textarea" html_id="bridge-origin-note" label=origin_note_label required=True maxlength=1000 %}
+          {% trans "Attest external proxy origin" as attest_label %}{% button attest_label type="submit" variant="warning" attrs='name="action" value="attest"' %}
+        </form>
+        {% if independent_alias_options %}
+          {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
+          <form method="post" action="{% url 'provisioning:virtualmin_bridge_control' account.pk %}" class="space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+            <input type="hidden" name="kind" value="optional_alias">
+            <input type="hidden" name="target_id" value="{{ migration_bridge.target_server_id }}">
+            <input type="hidden" name="ipv4" value="{{ migration_bridge.target_server.ipv4_address|default_if_none:'' }}">
+            <input type="hidden" name="ipv6" value="{{ migration_bridge.target_server.ipv6_address|default_if_none:'' }}">
+            <h3 class="font-semibold">{% trans "Independent optional service" %}</h3>
+            <p class="text-sm">{% trans "Inspect the service provider's settings and confirm that this optional hostname serves an independent service. Its complete pre-migration routing and a DNS observation from the last 15 minutes must support the declaration. Every cleanup checks the declared route again; source addresses and DNS errors keep the bridge in place." %}</p>
+            {% trans "Optional service hostname" as independent_name_label %}
+            {% input_field "names" input_type="select" html_id="bridge-independent-name" options=independent_alias_options label=independent_name_label required=True %}
+            {% trans "Independent service inspection evidence" as independent_note_label %}
+            {% input_field "note" input_type="textarea" html_id="bridge-independent-note" label=independent_note_label required=True maxlength=1000 %}
+            {% trans "Declare independent service" as independent_label %}{% button independent_label type="submit" variant="warning" attrs='name="action" value="attest"' %}
+          </form>
+        {% endif %}
+      {% endif %}
     {% endif %}
   </section>
 {% endif %}

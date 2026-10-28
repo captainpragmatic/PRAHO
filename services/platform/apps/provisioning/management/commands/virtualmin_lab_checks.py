@@ -17,7 +17,7 @@ never touches the round-trip domain on vm-a. Each check fails the command:
    root-owned 0700 directory that an unprivileged user cannot read; a
    verified fetch leaves nothing behind; a staging directory others can read
    makes the fetch refuse and the archive is cleaned up.
-4. Node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
+4. Local node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
    non-differential schedule and no legacy one; Webmin cron runs it; running
    it as cron does writes a non-empty archive and keeps the differential base.
 4c. Chain state through the service entry points (take_base_backup, take_differential_backup,
@@ -54,10 +54,13 @@ from __future__ import annotations
 import io
 import logging
 import re
+import select
 import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from decimal import Decimal
 from typing import Any
 
@@ -79,6 +82,7 @@ CHECK_DOMAIN = "labcheck.praho.test"
 CHECK_USER = "labcheck"
 HTTPS_PORT = 443
 MIN_PROBES = 20  # at 50 ms spacing plus curl latency, two restores last far longer
+NEUTRAL_PROBE_HOSTS = frozenset({"unknown.invalid", "IP-LITERAL"})
 _ARCHIVE_RE = re.compile(r"^virtualmin_backup_[0-9a-f]{32}\.tar\.gz(\.dom|\.info)?$")
 
 
@@ -110,6 +114,43 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Lab checks OK"))
 
     # ------------------------------------------------------------- helpers
+
+    @contextmanager
+    def _hold_node_lock(self, node: LabNode, path: str) -> Iterator[subprocess.Popen[str]]:
+        """Confirm acquisition; release on parent EOF, with a bounded crash watchdog."""
+        program = (
+            "import fcntl, select, sys\n"
+            "with open(sys.argv[1], 'a') as stream:\n"
+            "    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+            "    print('LOCKED', flush=True)\n"
+            "    if not select.select([sys.stdin], [], [], 300)[0]:\n"
+            "        raise SystemExit(2)\n"
+            "    sys.stdin.read(1)\n"
+        )
+        with subprocess.Popen(
+            ["docker", "exec", "-i", node.container, "python3", "-u", "-c", program, path],  # noqa: S607  # Fixed lab argv.
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ) as held:
+            try:
+                if (
+                    held.stdout is None
+                    or not select.select([held.stdout], [], [], 30)[0]
+                    or held.stdout.readline().strip() != "LOCKED"
+                ):
+                    raise CommandError("The native lock fixture did not acquire its lock")
+                yield held
+            finally:
+                if held.stdin:
+                    held.stdin.close()
+                try:
+                    held.wait(timeout=30)
+                except subprocess.TimeoutExpired as error:
+                    held.kill()
+                    held.wait(timeout=5)
+                    raise CommandError("The native lock fixture did not release its lock") from error
 
     def _gateway(self, server: Any) -> Any:
         from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway  # noqa: PLC0415
@@ -315,14 +356,14 @@ class Command(BaseCommand):
         self._ok(f"{playbook} applied through AnsibleService", ok, detail)
 
     def _check_node_backup_playbook(self, server: Any, node: LabNode, base: str) -> None:
-        """The nightly node backup exists, runs from Webmin cron, backs up, keeps the base."""
+        """Explicit local mode keeps its nightly Webmin backup and differential base."""
         import json  # noqa: PLC0415
 
         self.stdout.write("Check 4: the node's nightly backup (virtualmin_backup.yml)")
         dest = "/var/backups/virtualmin/%Y-%m-%d"
         before = self._file_state(node, base)
         for run in (1, 2):
-            self._run_playbook(server, "virtualmin_backup.yml")
+            self._run_playbook(server, "virtualmin_backup.yml", {"backup_enabled": True, "backup_storage": "local"})
             listing = json.loads(node_exec(node.container, "virtualmin", "list-scheduled-backups", "--json"))
             mine = [row for row in listing["data"] if row["values"].get("destination") == [dest]]
             self._ok(f"run {run}: exactly one schedule for {dest}", len(mine) == 1, listing["data"])
@@ -525,20 +566,14 @@ class Command(BaseCommand):
             self._ok("another token still runs", fresh.outcome == "ok", fresh)
             discard(fresh)
 
-            held = subprocess.Popen(  # Holds the node's per-domain lock for the check
-                ["docker", "exec", node.container, "flock", f"/run/praho/chain-{domain_id}.lock", "sleep", "40"],  # noqa: S607
-            )
-            try:
-                time.sleep(3)
+            with self._hold_node_lock(node, f"/run/praho/chain-{domain_id}.lock") as held:
                 busy = self._chain_step(server, node, "base", token(), lock_wait=5)
+                self._ok("the lock fixture remained alive throughout the attempt", held.poll() is None, held.returncode)
                 self._ok(
                     "a step cannot start while the lock is held",
                     (busy.outcome, busy.reason, busy.ran) == ("refused", "lock_busy", False),
                     busy,
                 )
-            finally:
-                held.terminate()
-                held.wait(timeout=30)
         finally:
             node_exec(
                 node.container,
@@ -843,12 +878,29 @@ class Command(BaseCommand):
             )
         logger.info("✅ [VirtualminLab] Chain state checks passed")
 
+    def _check_pair_restore_probes(self, inside: list[tuple[float, str, str, str]], expected_hosts: set[str]) -> None:
+        violations = [
+            row for row in inside if row[2:] != (("404", "404") if row[1] in NEUTRAL_PROBE_HOSTS else ("503", "503"))
+        ]
+        self._ok(
+            "named hosts stayed at 503 and unclaimed hosts at neutral 404 on both ports throughout both restores",
+            len(inside) >= MIN_PROBES and not violations,
+            (len(inside), violations[:5]),
+        )
+        probed_hosts = {row[1] for row in inside}
+        self._ok(
+            "every odd Host spelling, every alias, an unnamed Host and the bare IP were probed",
+            expected_hosts <= probed_hosts,
+            sorted(probed_hosts),
+        )
+
     def _check_pair_restore(self, account: Any, node: LabNode) -> None:  # noqa: C901, PLR0915  # One linear lab scenario
         """Pair restore against the real node: barrier, ordering, data, and a failure between the restores.
 
         Check 4d. A base and its differential are restored as one workflow while a probe on the node
-        requests the domain on ports 80 and 443 every 50 ms. The probe must see 503 from the moment
-        the barrier is verified until the second restore has finished; every checkpoint must show the
+        requests the domain on ports 80 and 443 every 50 ms. Named hosts must answer 503 from the moment
+        the barrier is verified until the second restore has finished; unknown hosts and bare IPs retain
+        the root-owned neutral 404. Every checkpoint must show the
         domain disabled; the data must be base plus differential (files deleted after the base
         reappear, as documented); reconcile alone re-enables the domain. A second run is stopped
         between the two restores by a cancel marker: the domain must stay disabled behind the
@@ -874,7 +926,7 @@ class Command(BaseCommand):
         home = f"/home/{CHECK_USER}/public_html"
         management = VirtualminBackupManagementService(account.server)
         flag = "provisioning.incremental_backups_enabled"
-        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # Inside the lab container
+        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # nosec B108 - path inside the throwaway lab container, not the host /tmp
 
         def write(name: str, content: str) -> None:
             node_exec(
@@ -931,8 +983,8 @@ class Command(BaseCommand):
                 f"{scheme}://{CHECK_DOMAIN}/",
             ).strip()
 
-        # Every name the virtual host answers to, in the spellings a client may use, a Host header that
-        # names nothing (the domain's virtual host is the node's default for its address) and the bare IP.
+        # Every name the virtual host answers to, in the spellings a client may use,
+        # plus an unclaimed Host and bare IP handled by the neutral default site.
         odd_hosts = (
             CHECK_DOMAIN.upper(),
             f"{CHECK_DOMAIN}.",
@@ -1020,17 +1072,7 @@ class Command(BaseCommand):
             )
             start, end = float(checkpoints[0]["at"]), float(checkpoints[2]["at"])
             inside = [row for row in rows if start <= row[0] <= end]
-            self._ok(
-                "requests got 503 on ports 80 and 443 throughout both restores",
-                len(inside) >= MIN_PROBES and all(row[2] == "503" and row[3] == "503" for row in inside),
-                (len(inside), [row for row in inside if row[2:] != ("503", "503")][:5]),
-            )
-            probed_hosts = {row[1] for row in inside}
-            self._ok(
-                "every odd Host spelling, every alias, an unnamed Host and the bare IP were probed",
-                {CHECK_DOMAIN, *odd_hosts, "IP-LITERAL"} <= probed_hosts,
-                sorted(probed_hosts),
-            )
+            self._check_pair_restore_probes(inside, {CHECK_DOMAIN, *odd_hosts, "IP-LITERAL"})
             self._ok(
                 "the domain was serving before the barrier",
                 any(row[2] not in ("503", "000") for row in rows if row[0] < start and row[1] == CHECK_DOMAIN),

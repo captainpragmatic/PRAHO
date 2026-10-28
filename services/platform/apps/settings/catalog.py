@@ -358,6 +358,18 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("AWS access key ID"),
     ),
     SettingDef(
+        key="backup.platform_offsite_enabled",
+        data_type="boolean",
+        default=False,
+        group="backup",
+        section=_("Platform database and media"),
+        label=_("Platform off-server backups"),
+        help_text=_(
+            "Upload the deployed database and media backup pair to the private S3 storage below. Local backups continue when this is disabled."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
         key="backup.aws_region",
         data_type="string",
         default="eu-west-1",
@@ -1626,17 +1638,16 @@ CATALOG: tuple[SettingDef, ...] = (
         key="infrastructure.node_admin_allowed_cidrs",
         data_type="list",
         default=[],
-        group="advanced",
+        group="node-deployment",
         section=_("Infrastructure"),
         label=_("Node admin allowlist"),
         help_text=_(
             "Addresses or networks (CIDR) that may reach a node's SSH and Webmin: Platform's egress "
             "addresses plus the operators' admin networks. The node playbooks lock the Virtualmin API "
-            "user and the firewall for ports 22 and 10000 to this list, and refuse to run while it is "
+            "user and the firewall for SSH port 9876 and Webmin port 10000 to this list, and refuse to run while it is "
             "empty (ADR-0060)."
         ),
         input_kind="chips",
-        advanced=True,
         validation={"min_items": 0, "item_type": "string", "item_format": "ip_network", "unique_items": True},
     ),
     SettingDef(
@@ -1975,18 +1986,20 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="node_deployment.backup_storage",
         data_type="string",
-        default="local",
+        default="platform",
         group="node-deployment",
         section=_("Backups"),
         label=_("Backup storage"),
-        help_text=_("Local: disk on node. S3: external (requires S3 bucket configuration)."),
+        help_text=_(
+            "Platform-managed: fetch Virtualmin backups through PRAHO using Backup Storage settings. Other panels retain local backups. Local and direct S3 modes preserve existing installations."
+        ),
         input_kind="select",
-        validation={"choices": ["local", "s3"]},
+        validation={"choices": ["platform", "local", "s3"]},
     ),
     SettingDef(
         key="dns.account_hostnames_enabled",
         data_type="boolean",
-        default=False,
+        default=True,
         group="hosting-dns",
         section=_("Account names"),
         label=_("Account names enabled"),
@@ -2044,6 +2057,32 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 60, "max": 86400},
     ),
     SettingDef(
+        key="dns.cutover_ttl_seconds",
+        data_type="integer",
+        default=60,
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Cutover TTL (seconds)"),
+        help_text=_(
+            "The lower TTL every A and AAAA record is moved to before a hosting account migrates. "
+            "It bounds how long the old routing survives after the move."
+        ),
+        validation={"min": 60, "max": 300},
+    ),
+    SettingDef(
+        key="dns.bridge_window_hours",
+        data_type="integer",
+        default=48,
+        group="hosting-dns",
+        section=_("Account names"),
+        label=_("Bridge window (hours)"),
+        help_text=_(
+            "How long the source node keeps proxying to the target after a cutover commits, so clients "
+            "that still resolve the old address keep working until DNS converges."
+        ),
+        validation={"min": 1, "max": 168},
+    ),
+    SettingDef(
         key="dns.account_zone_psl_shipped",
         data_type="boolean",
         default=False,
@@ -2051,8 +2090,8 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Account names"),
         label=_("Zone is on the shipped Public Suffix List"),
         help_text=_(
-            "Turn on only once the account zone's Public Suffix List entry is in current browsers. Until "
-            "then account names serve a neutral page, never customer content."
+            "Turn on only once the account zone's Public Suffix List entry is in current browsers. "
+            "Account-name previews remain disabled; this setting records PSL inclusion only."
         ),
         input_kind="toggle",
     ),

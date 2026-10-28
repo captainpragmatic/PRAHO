@@ -57,7 +57,10 @@ class BackupDispatchChainRoleTests(VirtualminTaskTestBase):
             return http_response({"status": "success"})
 
         metadata = self.backups._initialize_backup_metadata(self.account, config.backup_type, "role-id", config)
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport):
+        with (
+            patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport),
+        ):
             result = self.backups._execute_backup_by_type(config, self.account, "role-id", metadata)
         return result, sent
 
@@ -145,12 +148,17 @@ class MigrationBackupChainRoleTests(VirtualminTaskTestBase):
     def test_migration_backup_step_sends_those_params(self) -> None:
         from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
 
-        migration = cast(Any, type("M", (), {"archive_name": f"migration_{uuid4()}.tar.gz", "source_server": None}))
+        identity = uuid4()
+        migration = cast(Any, type("M", (), {"archive_name": f"migration_{identity}.tar.gz", "pk": identity,
+                                           "source_server": self.server, "account": self.account, "contract": "legacy"}))
         with (
             patch.object(VirtualminMigrationService, "_command") as command,
             patch.object(VirtualminMigrationService, "_move"),
+            patch.object(VirtualminMigrationService, "_domain", return_value={"attributes": {"ID": "123"}}),
+            patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow") as capture,
         ):
             VirtualminMigrationService()._backup(migration, uuid4())
+        self.assertEqual(capture.call_args.kwargs["archive_name"], migration.archive_name)
         program = command.call_args.args[2]
         self.assertEqual(program, "backup-domain")
         self.assertEqual(command.call_args.kwargs, migration_backup_params(migration.archive_name))

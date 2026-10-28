@@ -1,0 +1,60 @@
+---
+- name: Stage, verify, activate or clean a held restore on its target
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Require a single recovery target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - recovery_action in ['capture-owner', 'stage', 'verify-held', 'activate', 'cleanup', 'reconcile_policy']
+    - name: Keep recovery artifacts private on the target
+      ansible.builtin.file:
+        path: /var/lib/praho/recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Install the native Unix credential callback
+      ansible.builtin.copy:
+        src: files/praho-recovery-credentials.pl
+        dest: /var/lib/praho/recovery/credentials.pl
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Install the shared numeric owner shadow schema
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../apps/provisioning/backup_owner_shadow.py"
+        dest: /var/lib/praho/recovery/praho_owner_shadow.py
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Run the recovery step under the node domain lock
+      ansible.builtin.script:
+        cmd: files/praho-recovery.py
+        executable: /usr/bin/python3
+      environment:
+        PRAHO_RECOVERY_ID: "{{ recovery_id }}"
+        PRAHO_DOMAIN: "{{ recovery_domain }}"
+        PRAHO_USERNAME: "{{ recovery_username }}"
+        PRAHO_DOMAIN_ID: "{{ recovery_domain_id }}"
+        PRAHO_RECOVERY_ACTION: "{{ recovery_action }}"
+        PRAHO_ARCHIVE: "{{ recovery_archive }}"
+        PRAHO_SHA256: "{{ recovery_sha256 }}"
+        PRAHO_ENABLED: "{{ (recovery_enabled | bool) | ternary('1', '0') }}"
+        PRAHO_REQUIRE_FENCED: "{{ (recovery_require_fenced | default(false) | bool) | ternary('1', '0') }}"
+      register: recovery_step
+      changed_when: true
+      failed_when: false
+      no_log: true
+    - name: Require successful recovery proof
+      ansible.builtin.assert:
+        that:
+          - recovery_step.rc == 0
+          - "'PRAHO_RECOVERY_OK' in recovery_step.stdout_lines"
+        fail_msg: "{{ 'PRAHO_OWNER_SHADOW_UNKNOWN: archive owner login aging is missing; take a newly captured backup or review expiry before activation' if 'PRAHO_OWNER_SHADOW_UNKNOWN' in recovery_step.stdout else 'PRAHO_OWNER_SHADOW_RESERVED_FLAG: owner login shadow reserved flag is unsupported; review the source account before backup' if 'PRAHO_OWNER_SHADOW_RESERVED_FLAG' in recovery_step.stdout else 'PRAHO_OWNER_SHADOW_CREDENTIAL_CHANGED: source credential changed after aging capture; take a fresh backup with a new archive identity' if 'PRAHO_OWNER_SHADOW_CREDENTIAL_CHANGED' in recovery_step.stdout else 'The held-target step failed safely; verify its identity and private staging before retrying' }}"
+    - name: Emit the verified policy proof without private activation data
+      when: recovery_action == 'reconcile_policy'
+      ansible.builtin.debug:
+        msg: "{{ recovery_step.stdout_lines | select('match', '^PRAHO_POLICY_RESULT=[A-Za-z0-9+/=]+$') | first }}"

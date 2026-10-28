@@ -10,6 +10,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import timedelta
+from decimal import Decimal
 from itertools import count
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -26,6 +27,7 @@ from django_q.models import Schedule
 from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent
+from apps.billing.models import Currency
 from apps.common.credential_vault import EncryptedCredential
 from apps.common.types import Err, Ok
 from apps.provisioning import account_name_certificates as certs
@@ -37,8 +39,10 @@ from apps.provisioning.account_hostname_models import (
     AccountNameCertificateInstall,
 )
 from apps.provisioning.account_name_certificates import IssuanceStatus
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.settings.services import SettingsService
+from tests.factories.core_factories import create_full_customer
 from tests.infrastructure.test_dns_gateway_cloudflare import SAFE_REQUEST, FakeCloudflare
 from tests.infrastructure.test_dns_gateway_cloudflare import ZONE as CF_ZONE_ID
 from tests.provisioning.acme_fakes import FakeAcme, SimulatedCrash
@@ -649,6 +653,34 @@ class ReadinessTests(CertificateTestCase):
 
 
 class NodeInstallTests(CertificateTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
+        plan = ServicePlan.objects.create(
+            name="Certificate owner", plan_type="shared_hosting", price_monthly=Decimal("10")
+        )
+        service = Service.objects.create(
+            customer=create_full_customer(),
+            service_plan=plan,
+            currency=currency,
+            service_name="customer.example",
+            domain="customer.example",
+            username="customer",
+            price=Decimal("10"),
+            status="active",
+        )
+        account = VirtualminAccount.objects.create(
+            service=service, server=self.server, domain=service.domain, virtualmin_username="customer", status="active"
+        )
+        self.hostname.account = account
+        self.hostname.save(update_fields=["account"])
+        self.neutral = self.enterContext(
+            patch.object(certs, "ensure_account_name_neutral", return_value=Ok("a" * 64), create=True)
+        )
+        self.prepared = self.enterContext(
+            patch.object(certs, "prepare_account_name_neutral", return_value=Ok("a" * 64), create=True)
+        )
+
     @contextmanager
     def managed_node(self) -> Iterator[None]:
         """Give servers a managed node deployment, the way a deployed node has one."""
@@ -725,6 +757,47 @@ class NodeInstallTests(CertificateTestCase):
 
         self.assertTrue(result.is_err())
         self.assertFalse(AccountNameCertificateInstall.objects.exists())
+
+    def test_a_valid_native_install_is_not_recorded_if_the_neutral_tls_frontend_cannot_refresh(self) -> None:
+        self.issue()
+        runner = MagicMock()
+        runner.return_value.run_playbook.return_value = Ok(self.served())
+        with (
+            patch("apps.infrastructure.ansible_service.AnsibleService", runner),
+            patch.object(certs, "ensure_account_name_neutral", return_value=Err("neutral refresh failed")),
+            self.managed_node(),
+        ):
+            result = certs.install_current_certificate(self.hostname, self.server)
+        self.assertTrue(result.is_err())
+        runner.return_value.run_playbook.assert_called_once()
+        self.assertFalse(
+            AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=self.server).exists()
+        )
+
+    def test_unproved_neutral_preflight_does_not_install_even_a_valid_certificate(self) -> None:
+        self.issue()
+        self.prepared.return_value = Err("neutral preflight failed")
+        runner = MagicMock()
+        runner.return_value.run_playbook.return_value = Ok(self.served())
+        with patch("apps.infrastructure.ansible_service.AnsibleService", runner), self.managed_node():
+            result = certs.install_current_certificate(self.hostname, self.server)
+        self.assertTrue(result.is_err())
+        runner.return_value.run_playbook.assert_not_called()
+
+    def test_expired_native_leaf_does_not_prevent_installing_its_valid_replacement(self) -> None:
+        self.issue()
+        runner = MagicMock()
+        runner.return_value.run_playbook.return_value = Ok(self.served())
+        self.neutral.side_effect = lambda *args, **kwargs: (
+            Ok("a" * 64) if runner.return_value.run_playbook.called else Err("native leaf expired")
+        )
+        with patch("apps.infrastructure.ansible_service.AnsibleService", runner), self.managed_node():
+            result = certs.install_current_certificate(self.hostname, self.server)
+        self.assertTrue(result.is_ok(), result)
+        self.prepared.assert_called_once()
+        self.neutral.assert_called_once()
+        self.assertIn("expected_certificate_sha256", self.neutral.call_args.kwargs)
+        self.assertTrue(AccountNameCertificateInstall.objects.filter(hostname=self.hostname, server=self.server).exists())
 
     def test_a_manually_registered_node_cannot_be_installed_on(self) -> None:
         self.issue()

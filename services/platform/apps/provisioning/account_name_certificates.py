@@ -61,6 +61,7 @@ from .account_hostname_models import (
     AccountNameCertificateBudget,
     AccountNameCertificateInstall,
 )
+from .account_name_node import CERTIFICATE_MISMATCH, ensure_account_name_neutral, prepare_account_name_neutral
 from .acme_client import (
     AcmeClient,
     AcmeError,
@@ -90,9 +91,9 @@ SWEEP_MIN_AGE_SECONDS = 1800.0
 # Seconds to let the DNS provider publish the challenge values before the server is asked to check them.
 DNS_SETTLE_SECONDS = 10.0
 INSTALL_TIMEOUT_SECONDS = 180
-# A claim's lease: longer than the ACME exchange can take (its 180 s deadline, the settle wait, request
-# timeouts) and than any task the queue lets run an attempt, so a live worker never loses it.
-ATTEMPT_LEASE = timedelta(minutes=15)
+# An issuance claim covers the bounded ACME exchange and DNS-01 publication/cleanup.
+# Placement and installation have a longer task budget, protected separately by the node lease.
+ATTEMPT_LEASE = timedelta(minutes=30)
 # Below the seven days an ACME order lives and the budget window: an older attempt is failed, not resumed.
 ATTEMPT_MAX_AGE = timedelta(days=6)
 
@@ -200,9 +201,21 @@ def record_installation(
     return install
 
 
-def forget_installation(hostname: AccountHostname, server: VirtualminServer) -> None:
-    """The node no longer serves what was recorded: its sub-server is about to be created afresh."""
-    AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server).delete()
+def forget_installation(
+    hostname: AccountHostname, server: VirtualminServer, *, expected_ref: str | None = None
+) -> None:
+    """Discard removed-node evidence, or only the particular reference a failed proof pinned."""
+    rows = AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server)
+    if expected_ref is None:
+        rows.delete()
+        return
+    # Signal-bearing QuerySet.delete() can collect rows then delete by primary
+    # key. Keep the fresh reference check and audited deletion under one short
+    # row lock, acquired only after the external proof has returned.
+    with transaction.atomic():
+        recorded = rows.select_for_update().filter(certificate_ref=expected_ref).first()
+        if recorded is not None:
+            recorded.delete()
 
 
 def ensure_certificate_on_node(hostname: AccountHostname, server: VirtualminServer) -> NodeCertificateResult:
@@ -668,6 +681,34 @@ def _checked_material(certificate: AccountNameCertificate, fqdn: str) -> Result[
     return Ok((fullchain, key_pem))
 
 
+def expected_certificate_fingerprint(hostname: AccountHostname, server: VirtualminServer) -> Result[str, str]:
+    """The valid vault leaf recorded on this node; pending renewals keep the old install usable.
+
+    Only the public certificate is read. The node proves that its private key
+    matches the served leaf, including an older retained bridge installation.
+    """
+    installed = AccountNameCertificateInstall.objects.filter(
+        hostname=hostname, server=server, not_after__gt=timezone.now()
+    ).first()
+    if installed is None or not installed.certificate_ref.startswith(f"{CERT_TYPE}:"):
+        return Err("The account name has no recorded valid vault certificate on this node.")
+    fullchain = vault_secret(installed.certificate_ref)
+    if not fullchain:
+        return Err("The recorded public certificate could not be read from the vault.")
+    try:
+        leaf, _chain = split_chain(fullchain)
+        parsed = x509.load_pem_x509_certificate(leaf.encode())
+        names = parsed.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(
+            x509.DNSName
+        )
+    except (ValueError, x509.ExtensionNotFound):
+        return Err("The recorded vault certificate is not valid for this account name.")
+    now = timezone.now()
+    if names != [hostname.fqdn] or not parsed.not_valid_before_utc <= now < parsed.not_valid_after_utc:
+        return Err("The recorded vault certificate is not valid for this account name.")
+    return Ok(parsed.fingerprint(hashes.SHA256()).hex())
+
+
 def _served_after_install(result: Result[Any, str], server: VirtualminServer, leaf: str) -> Result[None, str]:
     """Ok when the play worked and the node reports serving exactly `leaf`."""
     if result.is_err():
@@ -682,7 +723,9 @@ def _served_after_install(result: Result[Any, str], server: VirtualminServer, le
     return Ok(None)
 
 
-def install_current_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[None, str]:
+def install_current_certificate(  # noqa: PLR0911  # Each refusal precedes or validates a separate native boundary.
+    hostname: AccountHostname, server: VirtualminServer
+) -> Result[None, str]:
     """Install the certificate in force on ``server`` and record it. The PEMs travel only in the playbook's vars file."""
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
 
@@ -696,7 +739,19 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
     if material.is_err():
         return Err(material.unwrap_err())
     fullchain, key_pem = material.unwrap()
+    pinned_ref = (
+        AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server)
+        .values_list("certificate_ref", flat=True)
+        .first()
+    )
     leaf, chain = split_chain(fullchain)
+    if hostname.account is None:
+        return Err("The name has no owning account; no certificate was installed.")
+    neutral = prepare_account_name_neutral(
+        server, zone=hostname.zone, name=hostname.fqdn, customer_user=hostname.account.virtualmin_username
+    )
+    if neutral.is_err():
+        return Err(neutral.unwrap_err())
     variables: dict[str, Any] = {
         "account_name": hostname.fqdn,
         "certificate_pem": leaf,
@@ -709,6 +764,17 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
     checked = _served_after_install(result, server, leaf)
     if checked.is_err():
         return checked
+    neutral = ensure_account_name_neutral(
+        server,
+        zone=hostname.zone,
+        name=hostname.fqdn,
+        customer_user=hostname.account.virtualmin_username,
+        expected_certificate_sha256=_fingerprint(leaf),
+    )
+    if neutral.is_err():
+        if neutral.unwrap_err() == CERTIFICATE_MISMATCH and pinned_ref is not None:
+            forget_installation(hostname, server, expected_ref=pinned_ref)
+        return Err(neutral.unwrap_err())
     record_installation(
         hostname, server, certificate_ref=certificate.current_certificate_ref, not_after=certificate.current_not_after
     )
@@ -722,12 +788,12 @@ def install_current_certificate(hostname: AccountHostname, server: VirtualminSer
 
 
 def _dispatch(task: str, *args: str) -> None:
-    """Queue one account-name task with the timeout its work needs (tests run it inline)."""
+    """Queue external work with its own budget, including when the queue defaults to inline."""
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: the queue is optional at import time
 
     from .account_name_lease import ACCOUNT_NAME_TASK_TIMEOUT_SECONDS  # noqa: PLC0415
 
-    async_task(task, *args, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
+    async_task(task, *args, timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False)
 
 
 def renew_due_certificates() -> dict[str, int]:

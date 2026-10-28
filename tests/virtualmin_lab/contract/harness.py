@@ -47,6 +47,7 @@ SANDBOX_USER = "contract"
 CONTRACT_DOMAIN = re.compile(r"^contract[a-z0-9-]*\.praho\.test$")
 # The slowest commands get the budget production gives them (backup/restore: provisioning.migration_backup_timeout_seconds).
 BACKUP_TIMEOUT = 1800
+CREATE_TIMEOUT = 180  # Native setup uses the default provisioning budget rather than a 30s read deadline.
 DELETE_TIMEOUT = 120
 
 
@@ -285,6 +286,7 @@ class Lab:
                 disk_quota_mb=1024,
                 bandwidth_quota_mb=10240,
             ),
+            timeout_seconds=CREATE_TIMEOUT,
         )
         assert_accepted(created)
 

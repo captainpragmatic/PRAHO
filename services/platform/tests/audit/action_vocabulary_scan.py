@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 import itertools
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,10 +83,21 @@ def _enclosing_function(
     return None
 
 
+def _scope_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Walk a lexical scope without treating nested functions or classes as globals."""
+    pending = [scope]
+    while pending:
+        node = pending.pop()
+        if node is not scope and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            continue
+        yield node
+        pending.extend(ast.iter_child_nodes(node))
+
+
 def _assignments(scope: ast.AST, name: str) -> list[ast.expr] | None:
     """Every value bound to ``name`` in ``scope``; None when one of them is not a plain assignment."""
     values: list[ast.expr] = []
-    for node in ast.walk(scope):
+    for node in _scope_nodes(scope):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == name:
@@ -143,6 +154,10 @@ class _Resolver:
                         return None
                     found |= resolved
                 return found
+            if search is scope and isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+                parameters = (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs)
+                if name in {argument.arg for argument in parameters}:
+                    return None  # A caller supplies this value; a module global cannot supply it.
         return None
 
     def _fstring(self, node: ast.JoinedStr, scope: ast.AST, depth: int) -> set[str] | None:

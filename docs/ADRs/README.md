@@ -65,7 +65,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) | Encryption Architecture Consolidation (4→2 Systems) | Accepted | 2026-03-06 |
 | [ADR-0034](ADR-0034-django-fsm2-state-machines.md) | Adopt django-fsm-2 for State Machines | Active | 2026-03-10 |
 | [ADR-0035](ADR-0035-unified-design-system.md) | Unified Design System Architecture | Active | 2026-03-17 |
-| [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) | Tiered CI Testing Strategy | Active | 2026-03-20 |
+| [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) | Tiered CI Testing Strategy | Active (amended 2026-10-28) | 2026-03-20 |
 | [ADR-0037](ADR-0037-psycopg-v3-migration.md) | psycopg v3 Migration | Active | 2026-03-20 |
 | [ADR-0038](ADR-0038-proforma-payment-convergence.md) | Proforma Payment Convergence Architecture | Accepted | 2026-03 |
 | [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) | PRAHO-Owned Recurring Billing | Accepted | 2026-07 |
@@ -93,6 +93,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0061](ADR-0061-account-hostnames-follow-the-account.md) | Account Hostnames, Customer DNS and Mail Follow the Account Across Nodes | Proposed | 2026-10-14 |
 | [ADR-0062](ADR-0062-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
 | [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
+| [ADR-0064](ADR-0064-setup-and-bounded-system-status.md) | Setup Configuration and Bounded Operational Status | Accepted | 2026-10-27 |
 
 ### 🟡 Partially Superseded
 
@@ -170,7 +171,7 @@ Billing Ownership
 - [ADR-0002](ADR-0002-strategic-linting-framework.md) — Ruff linting strategy
 - [ADR-0014](ADR-0014-no-test-suppression-policy.md) — No skipping/suppressing tests
 - [ADR-0028](ADR-0028-server-log-checking-e2e.md) — Backend log verification during E2E
-- [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) — Tiered CI: SQLite for PRs, PostgreSQL for nightly
+- [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) — Tiered CI: every PR runs the required full gate; PostgreSQL full suite and the full lab run nightly and per release candidate
 
 ### 🔒 Security & Authentication
 - [ADR-0004](ADR-0004-custom-2fa-implementation.md) — Custom TOTP 2FA
@@ -229,8 +230,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 63 (ADR-0001 through ADR-0063)
-- **Active**: 57 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 64 (ADR-0001 through ADR-0064)
+- **Active**: 58 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0064
+- **Next available**: ADR-0065

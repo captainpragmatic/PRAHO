@@ -24,6 +24,9 @@
     {% if row.definition.help_text %}
     <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">{{ row.definition.help_text }}</p>
     {% endif %}
+    {% if row.unreadable %}
+    <p class="mt-1.5 text-sm text-amber-300">{% trans "Stored value cannot be read. Enter a replacement or restore the encryption key." %}</p>
+    {% endif %}
   </div>
   <div class="md:col-span-5">
     <div class="flex items-center gap-2">

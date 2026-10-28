@@ -134,6 +134,9 @@ class BackupNodeFixture(task_tests.VirtualminTaskTestBase):
         self.addCleanup(bucket_patch.stop)
 
         self.ansible = MagicMock()
+        # The service now dispatches registered servers through the transport adapter.
+        # Keep the same fake remote endpoint for managed/imported workflow tests.
+        self.ansible.run_server_playbook = self.ansible.run_playbook
         ansible_patch = patch("apps.infrastructure.ansible_service.AnsibleService", return_value=self.ansible)
         ansible_patch.start()
         self.addCleanup(ansible_patch.stop)
@@ -144,9 +147,17 @@ class BackupNodeFixture(task_tests.VirtualminTaskTestBase):
 
 
 class BackupTransportTests(BackupNodeFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        # These cases isolate transport after native source capture; that
+        # boundary and bound-archive validation have separate regression gates.
+        capture = patch.object(self.svc, "_capture_owner_shadow", return_value=Ok(None))
+        capture.start()
+        self.addCleanup(capture.stop)
+
     def _fake_fetch(self, deployment: Any, playbook: str, variables: dict[str, Any], **kwargs: Any) -> Any:
         self.assertEqual(playbook, "virtualmin_backup_fetch.yml")
-        self.assertEqual(deployment.virtualmin_server_id, self.server.pk)
+        self.assertEqual(deployment.pk, self.server.pk)
         archive = Path(variables["spool_dir"]) / variables["archive_name"]
         archive.write_bytes(ARCHIVE_BYTES)
         sha = hashlib.sha256(ARCHIVE_BYTES).hexdigest()
@@ -187,7 +198,7 @@ class BackupTransportTests(BackupNodeFixture):
         self.assertTrue(result.is_err())
         self.assertIn("disk full", result.unwrap_err())
 
-    def test_preflight_refuses_manually_registered_server(self) -> None:
+    def test_preflight_refuses_imported_server_without_explicit_key(self) -> None:
         deployment = self.server.node_deployment
         deployment.virtualmin_server = None
         deployment.save(update_fields=["virtualmin_server"])
@@ -195,7 +206,7 @@ class BackupTransportTests(BackupNodeFixture):
         svc = VirtualminBackupService(self.server)
         result = svc.backup_domain(account=self.account, config=BackupConfig())
         self.assertTrue(result.is_err())
-        self.assertIn("node_deployment", result.unwrap_err())
+        self.assertIn("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", result.unwrap_err())
         self.gateway.call.assert_not_called()
 
     def test_fetch_timeout_shape_fails_without_publication(self) -> None:

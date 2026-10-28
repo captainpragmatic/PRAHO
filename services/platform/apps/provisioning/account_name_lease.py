@@ -1,10 +1,10 @@
 """One node step at a time per account name (ADR-0061 P1.4, P1.10).
 
-Creating the name's sub-server, linking its web root and installing its certificate all change what
+Creating the name's sub-server, enforcing its neutral HTTP site and installing its certificate all change what
 one node serves for that name. Two tasks doing them at once (the create task, the sweep, a migration,
 a renewal's install) could leave a node serving one certificate while PRAHO records another. The lease
 is a single conditional UPDATE on the name's row, so it holds across processes and needs no cache; it
-expires after NODE_LEASE, well past the longest node step (a link and an install, each bounded by
+expires after NODE_LEASE, well past the longest node step (neutral-site checks and an install, each bounded by
 its playbook timeout, plus the ACME exchange's own deadline).
 """
 
@@ -20,12 +20,15 @@ from django.utils import timezone
 
 from .account_hostname_models import AccountHostname
 
-# Every account-name task (the ensure task, a renewal, an install) gets this queue timeout: room for a
-# node step's Virtualmin calls, a link and an install (each an SSH wait plus its playbook) and an ACME
-# exchange. The node lease outlives
-# it, so a worker the queue still lets run never loses the lease (test_account_name_bounds).
-ACCOUNT_NAME_TASK_TIMEOUT_SECONDS = 2400
-NODE_LEASE = timedelta(minutes=45)
+# Every per-name task (placement, publication, retirement, renewal or installation) gets this timeout: room for a
+# node step's Virtualmin calls, four neutral-site checks and an install (SSH waits plus playbooks), and an ACME
+# exchange. DNS publication (including its own fresh neutral-site check) and retirement
+# run as separate per-name tasks; a 50-name sweep only dispatches them. The node lease
+# outlives its task (test_account_name_bounds). The budget also covers the supported
+# one-time SSH port recovery, whose nested hardening playbook has its own 1800s limit.
+# Provider pagination/bulk cleanup is bounded by the task deadline and retries its durable intent.
+ACCOUNT_NAME_TASK_TIMEOUT_SECONDS = 7200
+NODE_LEASE = timedelta(minutes=125)
 
 
 def take_node_lease(hostname: AccountHostname) -> str | None:

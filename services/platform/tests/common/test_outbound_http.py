@@ -498,12 +498,12 @@ class TestTLSFingerprintPinning(TestCase):
 
         mock_send.assert_not_called()
 
-    @patch("apps.common.outbound_http.urllib.request.urlopen")
+    @patch("apps.common.outbound_http._build_urlopen_opener")
     @patch("apps.common.outbound_http.validate_and_resolve")
     def test_urlopen_rejects_fingerprint_policy_it_cannot_enforce(
         self,
         mock_validate: MagicMock,
-        mock_urlopen: MagicMock,
+        mock_build_opener: MagicMock,
     ) -> None:
         mock_validate.return_value = ResolvedTarget(
             original_url="https://virtualmin.example.com:10000/",
@@ -518,7 +518,7 @@ class TestTLSFingerprintPinning(TestCase):
         with self.assertRaises(OutboundSecurityError):
             safe_urlopen(mock_validate.return_value.original_url, policy=policy)
 
-        mock_urlopen.assert_not_called()
+        mock_build_opener.assert_not_called()
 
 
 class TestInternalServicePolicy(TestCase):

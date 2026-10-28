@@ -79,7 +79,7 @@
     <form method="GET" class="space-y-4 sm:space-y-0 sm:flex sm:flex-wrap sm:items-end sm:gap-4"
           hx-get="{% url 'products:product_list_htmx' %}"
           hx-target="#product-results"
-          hx-sync="#product-results:replace"
+          hx-sync="#product-results:queue last"
           hx-trigger="submit, change from:select">
       <!-- Search -->
       <div class="flex-1 sm:min-w-64">
