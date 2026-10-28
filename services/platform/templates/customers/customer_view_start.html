@@ -48,7 +48,8 @@
       {% input_field "ticket_reference" html_id="customer-view-ticket" label=ticket_label|force_escape value=values.ticket_reference maxlength=100 %}
       {% trans 'Open the portal' as submit_label %}
       {% url 'customers:detail' customer.id as cancel_url %}
-      {% form_actions submit_label=submit_label|force_escape cancel_url=cancel_url %}
+      {% trans 'Cancel' as cancel_label %}
+      {% form_actions submit_label=submit_label|force_escape cancel_label=cancel_label|force_escape cancel_url=cancel_url %}
     </form>
   {% endif %}
 </div>
