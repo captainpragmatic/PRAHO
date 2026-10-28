@@ -55,8 +55,26 @@ The routine certificate extension stages a trusted-but-wrong-name renewal and re
 copy/journal to remain exact. It then installs two validated replacement leaves, checks every actual TLS frontend,
 and replays the first completed UUID against the later generation without replacing it. Both fake renewal CAs stay
 trusted only inside that disposable clone. The ordinary preservation/default-off/reboot checks still follow.
-These cases cover live-service reload; they do not claim expired-certificate recovery after bootguard has stopped
-the services, and they do not reset a review/applying journal.
+These cases cover live-service reload; they do not reset a review/applying journal.
+
+`test_certificate_expiry.py` covers expired-certificate recovery after the boot guard has stopped the services, on the
+same owned-clone harness (one clone per case, run them with `-x` so a failure retains at most one clone):
+
+```sh
+MAIL_LAB_PROFILE=debian12 python -m pytest -x -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. \
+  tests/virtualmin_mail_lab/test_certificate_expiry.py
+```
+
+Its in-clone helper `expiry_checks.py` forges a trusted, correctly named leaf that expired a day ago, with matching
+manifest digests (production cannot install one: setup and rotation refuse a candidate within seven days of expiry),
+and proves a real `systemctl restart` is refused by the guard before stopping mail. The first case asserts the pinned
+unit topology, then recovers through `reconcile_node_certificate`, checks all four frontends and bounds each start's
+cost under a permit. It then kills the worker right after the guard admitted its first unit (later starts are refused,
+the admitted daemon stays fenced, the same UUID resumes). It also kills the worker and restarts the container
+mid-sequence (the tmpfs lock and the live fence are gone; Docker keeps the boot ID, so boot binding stays a unit
+test), and the same UUID resumes. A completed UUID replays as verification only. The second case sets a clone up
+from the previous commit's extracted playbook, expires it, upgrades the helper bundle in place with `upgrade_bundle`,
+and then recovers.
 
 An ephemeral strict CA/leaf and random fake passwords live only in clone/private memory or private test state.
 Secrets travel over stdin, never into host argv or saved console logs. The fixed in-clone dispatcher suppresses
