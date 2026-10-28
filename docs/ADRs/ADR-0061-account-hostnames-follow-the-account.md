@@ -7,8 +7,8 @@
 
 ## Implementation clarifications (2026-10-27)
 
-This ADR remains Proposed. Phase 2 is under review in PR #749; implementation and lab
-proofs do not mean it is deployed. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md)
+This ADR remains Proposed. Phase 2 is delivered by PR #749, and Phases 3 to 5 follow in one
+later PR; implementation and lab proofs do not mean it is deployed. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md)
 records the current behavior, outstanding gates and later customer-DNS/mail phases.
 Account-name website previews remain disabled even after PSL inclusion. Apache supplies
 the temporary web bridge, with root-owned neutral account-name sites and independently

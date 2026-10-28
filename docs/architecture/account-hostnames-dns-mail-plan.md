@@ -1,6 +1,6 @@
 # Implementation plan: account hostnames, customer DNS and mail (ADR-0061)
 
-Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. All work in Phases 2 through 5 is delivered in PR #749; local phase branches are verification checkpoints.
+Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Phase 2 is delivered by PR #749. Phases 3 through 5 follow together in one later PR; local phase branches are verification checkpoints.
 
 **Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf. That was `0007_legacy_price_labels` when this was written; P1.1 then added `0008_account_hostnames`. Each later task takes the next number after whatever the leaf is when it lands, never a number fixed in this plan.
 
@@ -44,7 +44,7 @@ from the later phases so a passing bridge test cannot be mistaken for a complete
 
 Owner decisions for the remaining phases:
 
-- Finish Phases 2 through 5 in PR #749. Keep phase-specific verification evidence, consolidate the implementation into that PR and retain draft status until combined review and verification pass. Do not open additional phase PRs.
+- Merge Phase 2 through PR #749 once its pull request checks pass. Deliver Phases 3 through 5 together in one later PR, not one PR per phase. Keep phase-specific verification evidence and keep that PR in draft until combined review and verification pass.
 - Keep website previews off. Use complete zone-file uploads for the first zone import.
 - Install mail on all eligible existing and new nodes through Virtualmin's supported setup.
   Existing external mail stays external until the domain's owner enables hosted mail.
