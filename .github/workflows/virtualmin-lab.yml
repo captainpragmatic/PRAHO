@@ -3,8 +3,12 @@
 # ===============================================================================
 # Three runs, one lab (deploy/virtualmin-lab, see its README):
 #
-#   pull request   Touches provisioning, the node playbooks, the lab or its tests: the round trip, the contract
-#                  suite, the workflow suite and the lab checks (make test-virtualmin-lab) on the PINNED version.
+#   pull request   Every PR to master starts the workflow. The `changes` job runs scripts/ci_lab_needed.py on the
+#                  diff; when the lab can be affected (or the diff is unknown), the round trip, the contract suite,
+#                  the workflow suite and the lab checks (make test-virtualmin-lab) run on the PINNED version.
+#                  `pull-request` is a required check on master: a job skipped by its `if:` reports success, so
+#                  the selection fails open, and the workflow itself never carries a paths filter.
+#   release        release-candidate.yml calls this workflow (suite: full) with the candidate SHA in `ref`.
 #   nightly full   03:30 UTC, skipped when nothing changed in 24h: the same, plus the from-scratch node deploy,
 #                  fault injection and the browser smoke tests (make test-virtualmin-lab-full), PINNED version.
 #   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
@@ -21,14 +25,16 @@ name: Virtualmin Lab
 on:
   pull_request:
     branches: [master]
-    paths:
-      - 'services/platform/apps/provisioning/**'
-      - 'services/platform/infrastructure/ansible/**'
-      - 'deploy/virtualmin-lab/**'
-      - 'Makefile'
-      - 'tests/virtualmin_lab/**'
-      - '.github/workflows/virtualmin-lab.yml'
-      - '.github/actions/virtualmin-lab-setup/**'
+  # A caller's event is what this workflow sees, so a release candidate dispatched with suite `full` runs
+  # nightly-full exactly as a manual dispatch does, checked out at `ref`.
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: full
+      ref:
+        type: string
+        default: ''
   schedule:
     - cron: '30 3 * * *'
     - cron: '30 5 * * *'
@@ -86,10 +92,38 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # Pull requests: does this change reach the lab? Fails open (see scripts/ci_lab_needed.py).
+  # ---------------------------------------------------------------------------
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      lab: ${{ steps.decide.outputs.lab }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide whether the lab runs
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          # A diff that cannot be computed feeds the script nothing, and nothing means "run the lab".
+          changed="$(git diff --name-only "${BASE_SHA}...HEAD" 2>/dev/null)" || changed=""
+          printf '%s\n' "$changed"
+          lab="$(printf '%s\n' "$changed" | python3 scripts/ci_lab_needed.py)" || lab=true
+          echo "Lab needed: $lab"
+          echo "lab=$lab" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
   # Pull requests: the lab suites on the pinned Virtualmin.
   # ---------------------------------------------------------------------------
   pull-request:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.lab != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -140,10 +174,12 @@ jobs:
         (needs.check-activity.result == 'success' && needs.check-activity.outputs.run == 'true') ||
         (github.event_name == 'workflow_dispatch' && inputs.suite == 'full')
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Its browser tests need Playwright, which does not support Ubuntu 26.04.
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: ./.github/actions/virtualmin-lab-setup
         with:

@@ -14,6 +14,8 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts.ci_lab_needed import lab_needed
+
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[2]
@@ -61,17 +63,25 @@ def on_block() -> dict[str, Any]:
     return WORKFLOW[True] if True in WORKFLOW else WORKFLOW["on"]  # YAML 1.1 reads the key `on` as True
 
 
-def test_pull_requests_run_on_the_paths_that_can_break_the_lab() -> None:
-    paths = on_block()["pull_request"]["paths"]
+def test_pull_requests_run_the_lab_when_a_change_can_break_it() -> None:
+    # `pull-request` is a required check: a workflow skipped by a paths filter never reports, so the
+    # selection lives in a job, and the job it gates reports success when skipped.
+    assert "paths" not in on_block()["pull_request"]
+    jobs = WORKFLOW["jobs"]
+    assert "scripts/ci_lab_needed.py" in str(jobs["changes"]["steps"])
+    assert jobs["pull-request"]["needs"] == "changes"
+    assert "needs.changes.outputs.lab != 'false'" in jobs["pull-request"]["if"]
 
-    for needed in (
-        "services/platform/apps/provisioning/**",
-        "services/platform/infrastructure/ansible/**",
-        "deploy/virtualmin-lab/**",
-        "tests/virtualmin_lab/**",
+    for changed in (
+        "services/platform/apps/provisioning/virtualmin_service.py",
+        "services/platform/apps/infrastructure/ansible_service.py",
+        "services/platform/infrastructure/ansible/playbooks/node.yml",
+        "deploy/virtualmin-lab/virtualmin/Dockerfile",
+        "tests/virtualmin_lab/contract/test_bridge.py",
         "Makefile",  # the targets the job runs live there
+        "uv.lock",
     ):
-        assert needed in paths, needed
+        assert lab_needed([changed]), changed
 
 
 def test_the_workflow_follows_the_nightly_conventions() -> None:

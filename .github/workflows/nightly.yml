@@ -85,7 +85,9 @@ jobs:
           if [ "$((MASTER_COMMITS + PR_COUNT))" -gt 0 ]; then
             BRANCHES=$(echo "$BRANCHES" | jq -c '. + ["master"]')
           fi
-          if [ "$STAGING_COMMITS" -gt 0 ]; then
+          # Staging is promoted from master, so it usually names a commit master already has: testing
+          # the same commit twice only doubles the run.
+          if [ "$STAGING_COMMITS" -gt 0 ] && [ "$(git rev-parse origin/staging)" != "$(git rev-parse origin/master)" ]; then
             BRANCHES=$(echo "$BRANCHES" | jq -c '. + ["staging"]')
           fi
 
@@ -102,7 +104,7 @@ jobs:
   nightly:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04 (ubuntu-latest since 2026-10-19).
     strategy:
       fail-fast: false
       matrix:
@@ -173,6 +175,17 @@ jobs:
         PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $modules \
           --settings=config.settings.ci --verbosity=2
 
+    # PRs run the whole suite on SQLite only; this is where a PostgreSQL-only difference anywhere in
+    # the suite shows up before a release candidate does.
+    - name: Whole platform suite on PostgreSQL
+      timeout-minutes: 60
+      env:
+        DB_NAME: postgres
+        DB_USER: test
+        DB_PASSWORD: test
+        DB_HOST: localhost
+      run: make test-platform-postgres-full
+
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         floor=$(make -s print-PLATFORM_COVERAGE_FLOOR)
@@ -223,9 +236,23 @@ jobs:
     - name: Type checking (all services)
       run: make check-types
 
-    - name: Security lint
-      run: make lint-security
-      continue-on-error: true
+    - name: Install semgrep for security scanning
+      run: |
+        uv tool install "semgrep==${SEMGREP_VERSION}"
+        uv tool dir --bin >> "$GITHUB_PATH"
+      env:
+        SEMGREP_VERSION: '1.157.0'
+
+    # Blocking on findings introduced since the release staging runs. The code it already runs carries
+    # Semgrep debt from before the scanner worked in CI; a full-scan nightly would stay red on that
+    # forever and hide every new finding behind it.
+    - name: Security lint (new since the staging release)
+      env:
+        SEMGREP_STRICT: '1'
+      run: |
+        set -euo pipefail
+        git fetch origin staging
+        SEMGREP_BASELINE_REF="$(git merge-base HEAD origin/staging)" make lint-security
 
     # Artifact names may not contain `/`, which a dispatched `fix/...` branch would bring.
     - name: Name the artifact after the branch
@@ -273,7 +300,7 @@ jobs:
   nightly-e2e:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04 (ubuntu-latest since 2026-10-19).
     timeout-minutes: 60
     strategy:
       fail-fast: false
