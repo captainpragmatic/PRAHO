@@ -20,7 +20,10 @@ from tests.provisioning.test_virtualmin_transfer_playbooks import command_text, 
 
 def deployment(dns_zone: str | None) -> Any:
     fqdn = f"prd-sha-het-de-fsn1-001.{dns_zone}" if dns_zone else "prd-sha-het-de-fsn1-001"
-    return SimpleNamespace(id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=dns_zone, fqdn=fqdn, ssh_port=9876)
+    return SimpleNamespace(
+        id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=dns_zone, fqdn=fqdn, ssh_port=9876,
+        panel_type=SimpleNamespace(panel_type="virtualmin"),
+    )
 
 
 class NodeFqdnVarTests(TestCase):

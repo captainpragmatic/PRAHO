@@ -1,5 +1,7 @@
 # PRAHO Deployment Guide
 
+For Platform database/media recovery, see [Restore a Platform backup](PLATFORM_RESTORE.md).
+
 This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents
@@ -525,10 +527,44 @@ Failed creation retains one protected, bounded candidate for retry. Staging uses
 one web worker per service; production defaults to two. Swap helps memory spikes
 but does not establish production load capacity.
 
-To deploy a reviewed revision without moving a branch:
-`make deploy-staging VERSION=<commit-or-tag>`. The application deploy still performs
-its environment/DNS checks and HTTP/HTTPS checks. The production service split
-is a separate rollout requirement.
+### Promoting a release to staging
+
+Staging receives only release candidates, and the `staging` branch always names the
+commit staging runs. Nothing is merged into `staging`; commits flow one way:
+pull request → `master` → release candidate → staging → (later) production.
+
+1. **Run the release candidate.** Actions → *Release candidate* → *Run workflow*, or
+   `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank SHA means
+   the current `master` commit; the run title names it. The run checks that the
+   commit's pull request passed every required check on exactly the commit's tree,
+   then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that
+   SHA. Expect an hour or more. On success the commit shows the status
+   `release-candidate`.
+2. **If it is red,** staging is untouched: fix it through a pull request into `master`
+   and start a new candidate.
+3. **If it is green,** from an approved operator IP:
+   `make promote-staging SHA=<sha>` (add `DRY_RUN=1` to see the checks only). It
+   refuses a commit that is not on `master` or has no successful release-candidate run
+   from `master`'s copy of the workflow (the run is the proof, not the status, which
+   anyone who can push could post). It deploys from a clean detached checkout of that
+   commit, so the playbooks and templates are the reviewed ones (environment/DNS and
+   HTTP/HTTPS checks included), refuses any `DEPLOY_METHOD` but git, and only after a
+   successful deploy fast-forwards `staging`. Promote from one machine at a time.
+   `scripts/promote_staging.sh --rollback <sha>` deploys an older approved release
+   and moves the branch back.
+4. **Accept it on staging,** then record the deployed SHA.
+
+A release candidate is not a GitHub Release; a `v*` tag publishes one. For production
+the order will be: release candidate → staging accepted → tag that same commit →
+deploy the tag.
+
+`make deploy-staging VERSION=<commit-or-tag>` still deploys any revision without
+moving a branch, for emergencies. Deploys stay manual: staging admits only the
+operator IPs and the deploy inputs live on the operator's machine. A "Promote to
+staging" button (a `workflow_dispatch` behind a protected `staging` environment that
+joins the tailnet and calls the same script) is future work and needs its own
+security review first. The production service split is a separate rollout
+requirement.
 
 Native staging restricts **both entire sites** to `PLATFORM_ALLOWED_CIDRS`, including
 API, health, webhook and static routes. Supply space-separated canonical CIDRs in
@@ -622,7 +658,7 @@ sudo systemctl restart praho-platform
 /opt/praho/scripts/backup.sh
 
 # Restore from backup
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 #### Redeployment
@@ -654,7 +690,7 @@ Override defaults with `-e` flags:
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
-| `deploy_method` | rsync | `rsync` (dev/staging) or `git` (prod) |
+| `deploy_method` | git | `git` (always for prod), or `DEPLOY_METHOD=rsync` in a dev/staging env file |
 | `platform_allowed_ips` | `[]` | IP whitelist for Platform access |
 
 Example: deploy production with 4 Gunicorn workers:
@@ -979,22 +1015,22 @@ Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, a
 
 ```bash
 # Interactive (choose from list)
-./deploy/scripts/restore.sh
+./deploy/scripts/restore-platform.sh
 
 # Restore specific file
-./deploy/scripts/restore.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
+./deploy/scripts/restore-platform.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
 
 # Restore latest backup
-./deploy/scripts/restore.sh --latest
+./deploy/scripts/restore-platform.sh --latest
 
 # Docker staging: the scripts read .env.prod unless told otherwise
-./deploy/scripts/restore.sh --latest --env staging
+./deploy/scripts/restore-platform.sh --latest --env staging
 
 # Using make (DEPLOY_ENV=staging for staging)
 make restore
 
 # Native deployment
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 Docker restore privately stages the selected dump and companion media archive before creating its
@@ -1100,7 +1136,7 @@ and the safety backup. The env file is not edited, so a later deploy still uses 
 make deploy-prod VERSION=v1.2.3
 
 # Restore the latest database backup (on the server)
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 ---
@@ -1415,7 +1451,7 @@ deploy/
 ├── scripts/
 │   ├── deploy.sh                      # Main deployment script
 │   ├── backup.sh                      # Database backup
-│   ├── restore.sh                     # Database restore
+│   ├── restore-platform.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
 │   ├── health-check.sh               # Health check script
 │   ├── portal-env.sh                  # Writes a portal host's env file from the full one

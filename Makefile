@@ -141,6 +141,7 @@ help:
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
 	@echo "  make deploy-staging                - Deploy to staging (git HEAD of DEPLOY_BRANCH, or rsync)"
+	@echo "  make promote-staging SHA=<sha>     - Deploy a green release candidate to staging, then move the staging branch (DRY_RUN=1)"
 	@echo "  make deploy-prod                   - Deploy to production (git tag from PRAHO_VERSION)"
 	@echo "  make deploy-prod VERSION=v0.14.0   - Deploy specific version to production"
 	@echo ""
@@ -677,6 +678,14 @@ test-platform-postgres-gated:
 	cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test $$modules \
 		--settings=config.settings.ci --verbosity=2 --noinput
 
+# The whole platform suite on PostgreSQL, for the nightly run and every release candidate (PRs run
+# the full suite on SQLite plus test-platform-postgres-gated). Needs a running PostgreSQL, as above.
+.PHONY: test-platform-postgres-full
+test-platform-postgres-full:
+	@echo "🐘 [Platform] Whole platform suite on PostgreSQL..."
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test tests \
+		--settings=config.settings.ci --parallel --verbosity=1 --noinput
+
 
 test:
 	@echo "🔄 [All Tests] Running comprehensive test suite (post Redis removal)..."
@@ -944,6 +953,11 @@ lint-security:
 	SEMGREP_CACHE_DIR="$(PWD)/.cache/semgrep"; \
 	mkdir -p "$$SEMGREP_CACHE_DIR" "$$SEMGREP_CACHE_DIR/xdg_config" "$$SEMGREP_CACHE_DIR/xdg_cache"; \
 	CERT_PATH="$$( $(PWD)/$(VENV_DIR)/bin/python -c 'import certifi; print(certifi.where())' 2>/dev/null || true )"; \
+	SEMGREP_BASELINE_ARGS=""; \
+	if [ -n "$${SEMGREP_BASELINE_REF:-}" ]; then \
+		SEMGREP_BASELINE_ARGS="--baseline-commit=$${SEMGREP_BASELINE_REF}"; \
+		echo "🔎 Reporting only findings introduced since $${SEMGREP_BASELINE_REF}"; \
+	fi; \
 	echo "🔎 Using Semgrep: $$SEMGREP_BIN"; \
 	echo "🧪 1/2: Semgrep scan (blocking)..."; \
 	if [ -n "$$CERT_PATH" ]; then \
@@ -954,26 +968,30 @@ lint-security:
 		SEMGREP_ENABLE_VERSION_CHECK=0 \
 		SSL_CERT_FILE="$$CERT_PATH" \
 		REQUESTS_CA_BUNDLE="$$CERT_PATH" \
-		timeout 180 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
 	else \
 		XDG_CONFIG_HOME="$$SEMGREP_CACHE_DIR/xdg_config" \
 		XDG_CACHE_HOME="$$SEMGREP_CACHE_DIR/xdg_cache" \
 		SEMGREP_LOG_FILE="$$SEMGREP_CACHE_DIR/semgrep.log" \
 		SEMGREP_SETTINGS_FILE="$$SEMGREP_CACHE_DIR/settings.yml" \
 		SEMGREP_ENABLE_VERSION_CHECK=0 \
-		timeout 180 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
 	fi; \
 	cat "$$SEMGREP_TMP"; \
 	if [ $$SEMGREP_EXIT -ne 0 ]; then \
 		if [ $$SEMGREP_EXIT -eq 124 ] || grep -Eq "empty trust anchors|Failed to create system store X509 authenticator|Operation not permitted: '.*/\\.semgrep/semgrep\\.log'|NameResolutionError|Failed to resolve 'semgrep.dev'|Max retries exceeded with url: /c/auto|requests\\.exceptions\\.ConnectionError" "$$SEMGREP_TMP"; then \
-			echo "⚠️ Semgrep environment bootstrap issue detected; continuing with credential checks and internal scanners."; \
-			SEMGREP_ENV_ISSUE=1; \
-			SEMGREP_EXIT=0; \
+			if [ "$${SEMGREP_STRICT:-0}" = "1" ]; then \
+				echo "❌ Semgrep could not run (timeout or rule registry unreachable); SEMGREP_STRICT treats that as a failure."; \
+			else \
+				echo "⚠️ Semgrep environment bootstrap issue detected; continuing with credential checks and internal scanners."; \
+				SEMGREP_ENV_ISSUE=1; \
+				SEMGREP_EXIT=0; \
+			fi; \
 		fi; \
 	fi; \
 	rm -f "$$SEMGREP_TMP"; \
 	echo "🧪 2/2: Hardcoded credentials check..."; \
-	$(MAKE) lint-credentials; \
+	$(MAKE) lint-credentials || exit $$?; \
 	if [ $$SEMGREP_EXIT -ne 0 ]; then \
 		echo "❌ Semgrep reported findings (exit $$SEMGREP_EXIT)."; \
 		exit $$SEMGREP_EXIT; \
@@ -990,9 +1008,8 @@ lint-security:
 # Blocking on purpose, and it is the point of the target. This scan previously ran with `|| true`
 # inside lint-security, which itself runs with `continue-on-error: true` in both workflows that call
 # it - three layers of suppression over a scanner that was reporting five HIGH findings. A gate that
-# cannot fail is a getter nobody calls. `lint-security` keeps its allowance because semgrep is still
-# an unstable dependency there; this scan does not need it, so it goes into `make lint` where CI
-# actually blocks on the result.
+# cannot fail is a getter nobody calls. It sits in `make lint` too, so the lint gate blocks on it
+# without needing semgrep.
 lint-error-handling:
 	@echo "🧯 [Error Handling] Scanning for swallowed failures..."
 	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high
@@ -1010,10 +1027,10 @@ lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  Platform service:"
-	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise
 	@echo ""
 	@echo "🌐 Portal service:"
-	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise
 	@echo "✅ Credentials check complete!"
 
 # ===============================================================================
@@ -1512,14 +1529,14 @@ backup-list:
 	@./deploy/scripts/backup.sh --list
 
 restore:
-	@echo "🔄 [Restore] Interactive database restore..."
+	@echo "🔄 [Restore] Interactive Platform database and media restore..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --env $(DEPLOY_ENV)
+	@./deploy/scripts/restore-platform.sh --env $(DEPLOY_ENV)
 
 restore-latest:
 	@echo "🔄 [Restore] Restoring latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --latest --env $(DEPLOY_ENV)
+	@./deploy/scripts/restore-platform.sh --latest --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # ROLLBACK PROCEDURES ⏪
@@ -1617,7 +1634,14 @@ infra-destroy-dev:
 # ENVIRONMENT DEPLOYMENT (Ansible) 🚀
 # ===============================================================================
 
-.PHONY: deploy-dev-native deploy-staging deploy-prod
+.PHONY: deploy-dev-native deploy-staging deploy-prod promote-staging
+
+# Promote a release candidate to staging: refuses a commit that is not on master or lacks the green
+# `release-candidate` status, deploys it, then fast-forwards the staging branch to it.
+# Usage: make promote-staging SHA=<sha> [DRY_RUN=1]
+promote-staging:
+	@test -n "$(SHA)" || (echo "❌ Usage: make promote-staging SHA=<master commit> [DRY_RUN=1]"; exit 2)
+	@bash scripts/promote_staging.sh $(if $(DRY_RUN),--dry-run,) "$(SHA)"
 
 deploy-dev-native:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (native)..."

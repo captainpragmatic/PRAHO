@@ -771,7 +771,7 @@ def safe_urlopen(
 
     # SSL context
     ctx = _build_ssl_context(target, policy, ssl_context)
-    result: http.client.HTTPResponse = urllib.request.urlopen(  # noqa: S310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    result: http.client.HTTPResponse = urllib.request.urlopen(  # noqa: S310  # nosec B310 - scheme restricted to policy.allowed_schemes by validate_and_resolve  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         req,
         timeout=effective_timeout,
         context=ctx,

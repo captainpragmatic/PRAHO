@@ -3,9 +3,10 @@
 htmx inherits hx-sync, and `this` names the element that declares it. The product results container
 declared `this:drop`, so every toggle and pagination link inside it synced on the container and a click
 during a filter request was dropped. Billing, audit and GDPR filter forms declared nothing, so a filter
-response and the region's initial load (or a page change) could land out of order. Now each filter form,
-search box and pagination link replaces the region's in-flight request (the newest wins), and an action
-toggle syncs on itself, so a filter never cancels it and a double click does not toggle twice.
+response and the region's initial load (or a page change) could land out of order. Product filters queue
+the latest selection behind the initial load, so that load is not aborted and the newest selection wins.
+Other filter forms, search boxes and pagination links replace their region's in-flight request. Action
+toggles sync on themselves, so a filter never cancels them and a double click does not toggle twice.
 """
 
 from __future__ import annotations
@@ -75,12 +76,12 @@ class ResultsRegionSyncTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return _requests(response.content.decode())
 
-    def test_the_product_filters_replace_and_nothing_inherits_a_drop(self) -> None:
+    def test_the_product_filters_queue_the_latest_selection_and_nothing_inherits_a_drop(self) -> None:
         found = self._page("products:product_list")
         (container,) = [r for r in found if r["id"] == "product-results"]
         self.assertIsNone(container["own"], "the results container declares no sync for its children to inherit")
         (form,) = [r for r in found if r["tag"] == "form" and r["target"] == "#product-results"]
-        self.assertEqual(form["own"], "#product-results:replace")
+        self.assertEqual(form["own"], "#product-results:queue last")
 
     def test_product_toggles_sync_on_themselves_and_pages_replace_with_an_encoded_search(self) -> None:
         Product.objects.bulk_create(

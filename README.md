@@ -208,6 +208,10 @@ All methods include automatic HTTPS (Caddy/Let's Encrypt), database backups, hea
 
 > **Full guide:** [Deployment Guide](docs/deployment/DEPLOYMENT.md) — includes multi-server setups, Ansible automation, backup/restore, and troubleshooting.
 
+After bootstrap, administrators can open **Settings → Setup checklist** for configuration
+requirements. Ongoing failures appear separately in **System Status**. See the
+[setup, status and off-server backup guide](docs/deployment/SYSTEM_STATUS.md).
+
 ## Tech Stack
 
 - **Backend**: Django 5.2, Python 3.13+

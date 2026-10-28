@@ -1,0 +1,10 @@
+{% load i18n %}
+{% if health_attention_count or setup_remaining or setup_status_unavailable %}
+<aside class="bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-sm px-4 py-2" aria-label="{% trans 'Platform attention' %}">
+  <div class="max-w-7xl mx-auto flex flex-wrap gap-x-6 gap-y-1">
+    {% if health_attention_count %}<a class="hover:underline font-medium" href="{% url 'system_status' %}">{% blocktrans count counter=health_attention_count %}System Status: {{ counter }} issue needs attention{% plural %}System Status: {{ counter }} issues need attention{% endblocktrans %}</a>{% endif %}
+    {% if setup_remaining %}<a class="hover:underline" href="{% url 'settings:setup_checklist' %}">{% blocktrans count counter=setup_remaining %}Setup checklist: {{ counter }} required item remaining{% plural %}Setup checklist: {{ counter }} required items remaining{% endblocktrans %}</a>{% endif %}
+    {% if setup_status_unavailable %}<a href="{% url 'settings:setup_checklist' %}">{% trans "Setup status unavailable" %}</a>{% endif %}
+  </div>
+</aside>
+{% endif %}

@@ -16,8 +16,7 @@ from django.conf import settings
 from django.forms import BoundField, CheckboxInput, PasswordInput, Select, Textarea
 from django.template.base import FilterExpression
 from django.template.base import token_kwargs as django_token_kwargs
-from django.utils.html import format_html
-from django.utils.safestring import mark_safe  # For XSS prevention
+from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
@@ -718,7 +717,7 @@ class PageHeaderNode(template.Node):
                 "ph_subtitle": resolved.get("subtitle", ""),
                 "ph_icon": resolved.get("icon", ""),
                 "ph_css_class": resolved.get("css_class", ""),
-                "ph_actions": mark_safe(actions_html),  # noqa: S308  — rendered from Django templates, not user input
+                "ph_actions": actions_html,  # NodeList.render() already returns SafeString
             }
         ):
             return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
@@ -777,7 +776,7 @@ class SectionCardNode(template.Node):
                 "sc_padding": resolved.get("padding", "p-6"),
                 "sc_css_class": resolved.get("css_class", ""),
                 "sc_html_id": resolved.get("html_id", ""),
-                "sc_content": mark_safe(content_html),  # noqa: S308
+                "sc_content": content_html,  # NodeList.render() already returns SafeString
             }
         ):
             return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
@@ -1296,17 +1295,16 @@ def icon(name: str, *, size: str = "md", css_class: str = "", style: str = "outl
         if css_class:
             classes += f" {css_class}"
 
-        if isinstance(paths, tuple):
-            path_html = "".join(
-                format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', p) for p in paths
-            )
-        else:
-            path_html = format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', paths)
+        path_html = format_html_join(
+            "",
+            '<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />',
+            ((p,) for p in (paths if isinstance(paths, tuple) else (paths,))),
+        )
 
         return format_html(
             '<svg class="{}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">{}</svg>',
             classes,
-            mark_safe(path_html),  # noqa: S308  — escaped template output
+            path_html,
         )
 
     # Default: outline style
@@ -1318,20 +1316,16 @@ def icon(name: str, *, size: str = "md", css_class: str = "", style: str = "outl
     if css_class:
         classes += f" {css_class}"
 
-    if isinstance(paths, tuple):
-        path_html = "".join(
-            format_html('<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{}" />', p)
-            for p in paths
-        )
-    else:
-        path_html = format_html(
-            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{}" />', paths
-        )
+    path_html = format_html_join(
+        "",
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{}" />',
+        ((p,) for p in (paths if isinstance(paths, tuple) else (paths,))),
+    )
 
     return format_html(
         '<svg class="{}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">{}</svg>',
         classes,
-        mark_safe(path_html),  # noqa: S308  — escaped template output
+        path_html,
     )
 
 

@@ -128,7 +128,7 @@
                         {# tmpl-allow TMPL003: options rendered inline from form.panel_type.field.queryset; select components take a view-built options list #}
                         <select id="id_panel_type" name="panel_type" class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             {% for panel in form.panel_type.field.queryset %}
-                            <option value="{{ panel.id }}" {% if panel.panel_type == 'virtualmin' %}selected{% endif %}>
+                            <option value="{{ panel.id }}" {% if form.panel_type.value %}{% if form.panel_type.value|stringformat:'s' == panel.id|stringformat:'s' %}selected{% endif %}{% elif panel.panel_type == 'virtualmin' %}selected{% endif %}>
                                 {{ panel.name }}{% if panel.version %} v{{ panel.version }}{% endif %}
                             </option>
                             {% endfor %}
@@ -137,7 +137,7 @@
                     <div>
                         {% trans "Display Name" as display_name_label %}
                         {% trans "Friendly name for this node" as display_name_placeholder %}
-                        {% input_field "display_name" label=display_name_label placeholder=display_name_placeholder %}
+                        {% input_field "display_name" label=display_name_label placeholder=display_name_placeholder value=form.display_name.value|default_if_none:'' %}
                     </div>
                 </div>
 
@@ -146,8 +146,8 @@
                     {% form_field form.source_node %}
                 </div>
 
-                {% trans "Enable automatic backups (local storage, 7-day retention)" as backup_enabled_label %}
-                {% checkbox_field "backup_enabled" html_id="backup_enabled" checked=True label=backup_enabled_label %}
+                {% trans "Enable automatic backups using the configured backup policy" as backup_enabled_label %}
+                {% checkbox_field "backup_enabled" html_id="backup_enabled" checked=backup_checked label=backup_enabled_label %}
             </div>
 
             <!-- Hostname Preview -->
@@ -181,6 +181,7 @@
 </div>
 
 {{ providers_data|json_script:"providers-data" }}
+{{ deployment_form_data|json_script:"deployment-form-data" }}
 {{ regions_data|json_script:"regions-data" }}
 {{ sizes_data|json_script:"sizes-data" }}
 {% endblock %}

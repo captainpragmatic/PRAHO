@@ -99,6 +99,19 @@ backup_media() {
     fi
 }
 
+backup_exit() {
+    local result=$?
+    rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"
+    # The uploader reports only its owned claim. A busy/unowned refusal must not
+    # create another attempt from this trap after the actual owner finishes.
+    if [ "$result" -ne 0 ] && [ "$OFFSITE_UPLOAD_ATTEMPTED" -eq 0 ]; then
+        if ! docker exec praho_platform python manage.py upload_platform_backup --report-failure; then
+            log_error "Backup failure could not be recorded in Platform"
+        fi
+    fi
+    return "$result"
+}
+
 create_backup() {
     # The process id keeps two backups started in the same second apart: no two running processes share one.
     local BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}_$$.sql.gz"
@@ -108,7 +121,8 @@ create_backup() {
     # The media archive sits next to its dump, so a restore finds the pair by name.
     MEDIA_FILE="${BACKUP_FILE%.sql.gz}.media.tar.gz"
     MEDIA_PARTIAL="${MEDIA_FILE}.partial"
-    trap 'rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"' EXIT
+    OFFSITE_UPLOAD_ATTEMPTED=0
+    trap backup_exit EXIT
     # Before the dump, so a string of interrupted runs cannot pile partials up either.
     remove_abandoned_partials
 
@@ -135,6 +149,12 @@ create_backup() {
         # Metadata is published only for a complete pair; it contains no credentials.
         if ! python3 "${SCRIPT_DIR}/backup_manifest.py" create "$BACKUP_FILE"; then
             log_error "Backup pair retained, but recovery metadata could not be written"
+            cleanup_backups
+            exit 1
+        fi
+        OFFSITE_UPLOAD_ATTEMPTED=1
+        if ! python3 "${SCRIPT_DIR}/backup_manifest.py" upload "$BACKUP_FILE"; then
+            log_error "Off-server upload failed; the local backup pair is retained"
             cleanup_backups
             exit 1
         fi

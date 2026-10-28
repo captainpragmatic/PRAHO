@@ -181,6 +181,7 @@ class PairRestoreCase(ChainFixtures, ExclusionCase):
         self.cleaned: list[str] = []
         self.reconciles: list[str] = []
         patches = [
+            patch("apps.infrastructure.imported_backup_transport.server_transport_ready", return_value=Ok(None)),
             patch.object(VirtualminBackupService, "_download_backup_to_spool", autospec=True, side_effect=download),
             patch.object(VirtualminBackupService, "_target_domain_gate", return_value=Ok(True)),
             patch.object(VirtualminBackupService, "backup_domain", return_value=Ok({"backup_id": "safety-1"})),

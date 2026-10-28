@@ -24,6 +24,8 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.safestring import SafeString
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -32,7 +34,7 @@ from apps.infrastructure.audit_service import InfrastructureAuditContext, Infras
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
 from apps.settings.services import SettingsService
 
-from .deployment_preflight import validate_deployment_dns_zone
+from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
@@ -73,6 +75,31 @@ from .tasks import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _provider_credentials_help(provider: CloudProvider) -> SafeString:
+    action = format_html(
+        '<a class="underline" href="{}">{}</a>',
+        reverse("infrastructure:provider_edit", args=[provider.pk]) + "#id_api_token",
+        _("Configure provider credentials"),
+    )
+    return format_html(
+        str(_("No API token found for provider {provider}. {action}")), provider=provider.name, action=action
+    )
+
+
+DEPLOYMENT_DRAFT_FIELDS = (
+    "environment",
+    "node_type",
+    "provider",
+    "region",
+    "node_size",
+    "panel_type",
+    "display_name",
+    "backup_enabled",
+    "source_node",
+)
+DEPLOYMENT_DRAFT_TTL = 1800
 
 # Items per page for list views
 ITEMS_PER_PAGE = 25
@@ -263,10 +290,17 @@ def deployment_list(request: HttpRequest) -> HttpResponse:
 def deployment_create(request: HttpRequest) -> HttpResponse:
     """Create new node deployment."""
 
-    # Check if deployment is enabled
-    if not SettingsService.get_setting("node_deployment.enabled", True):
-        messages.error(request, _("Node deployment is disabled in settings."))
-        return redirect("infrastructure:deployment_list")
+    issues = deployment_configuration_issues()
+    if issues:
+        if request.method == "POST":
+            request.session["node_deployment_draft"] = {
+                "created_at": timezone.now().timestamp(),
+                "values": {key: request.POST[key][:256] for key in DEPLOYMENT_DRAFT_FIELDS if key in request.POST},
+            }
+            request.session["node_deployment_draft"]["values"]["backup_enabled"] = bool(
+                request.POST.get("backup_enabled")
+            )
+        return render(request, "infrastructure/deployment_prerequisites.html", {"issues": issues})
 
     raw_dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
     zone_result = validate_deployment_dns_zone(raw_dns_zone)
@@ -278,6 +312,26 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = NodeDeploymentForm(request.POST, dns_zone=dns_zone)
         if form.is_valid():
+            token_result = get_provider_token(form.cleaned_data["provider"])
+            if token_result.is_err():
+                from apps.settings.setup_checklist import SetupItem  # noqa: PLC0415
+
+                provider = form.cleaned_data["provider"]
+                issue = SetupItem(
+                    "credentials",
+                    str(_("Provider credentials")),
+                    str(_("Configure a valid API token before creating this deployment.")),
+                    reverse("infrastructure:provider_edit", args=[provider.pk]),
+                    False,
+                )
+                request.session["node_deployment_draft"] = {
+                    "created_at": timezone.now().timestamp(),
+                    "values": {key: request.POST[key][:256] for key in DEPLOYMENT_DRAFT_FIELDS if key in request.POST},
+                }
+                request.session["node_deployment_draft"]["values"]["backup_enabled"] = bool(
+                    request.POST.get("backup_enabled")
+                )
+                return render(request, "infrastructure/deployment_prerequisites.html", {"issues": [issue]})
             deployment = form.save(commit=False)
             deployment.initiated_by = request.user
             deployment.triggered_by_failover = deployment.source_node_id is not None
@@ -300,14 +354,6 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
                 deployment.save()
 
-            # Verify provider token exists before queueing
-            token_result = get_provider_token(deployment.provider)
-            if token_result.is_err():
-                messages.error(request, f"No API token found for provider {deployment.provider.name}")
-                deployment.status = "failed"
-                deployment.save()
-                return redirect("infrastructure:deployment_detail", pk=deployment.id)
-
             # Queue deployment task — token fetched from vault at execution time (not serialized)
             task_id = queue_deploy_node(
                 deployment_id=deployment.id,
@@ -324,10 +370,17 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 f"Deployment '{deployment.hostname}' created and queued for provisioning.",
             )
             logger.info(f"[Deployment] Created {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
-
+            request.session.pop("node_deployment_draft", None)
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
     else:
-        form = NodeDeploymentForm(dns_zone=dns_zone)
+        draft = request.session.get("node_deployment_draft", {})
+        initial = (
+            draft.get("values", {})
+            if isinstance(draft.get("created_at"), (int, float))
+            and timezone.now().timestamp() - draft["created_at"] < DEPLOYMENT_DRAFT_TTL
+            else {}
+        )
+        form = NodeDeploymentForm(initial=initial, dns_zone=dns_zone)
 
     # Get data for JS
     providers = list(CloudProvider.objects.filter(is_active=True).values("id", "name", "code"))
@@ -364,6 +417,12 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         "breadcrumb_items": breadcrumb_items,
         "form": form,
         "providers_data": providers,
+        "deployment_form_data": {
+            key: str(form[key].value() or "") for key in ("environment", "node_type", "provider", "region", "node_size")
+        },
+        "backup_checked": bool(form.data.get("backup_enabled"))
+        if form.is_bound
+        else bool(form.initial.get("backup_enabled", form.fields["backup_enabled"].initial)),
         "regions_data": regions,
         "sizes_data": sizes,
         "dns_zone": dns_zone,
@@ -486,7 +545,7 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
     token_result = get_provider_token(deployment.provider)
 
     if token_result.is_err():
-        messages.error(request, f"No API token found for provider {deployment.provider.name}")
+        messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     task_id = queue_retry_deployment(
@@ -520,7 +579,7 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
             token_result = get_provider_token(deployment.provider)
 
             if token_result.is_err():
-                messages.error(request, f"No API token found for provider {deployment.provider.name}")
+                messages.error(request, _provider_credentials_help(deployment.provider))
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             task_id = queue_destroy_node(
@@ -596,7 +655,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
                 # Validate token exists before queuing (fail fast)
                 token_result = get_provider_token(deployment.provider)
                 if token_result.is_err():
-                    messages.error(request, f"No API token found for provider {deployment.provider.name}")
+                    messages.error(request, _provider_credentials_help(deployment.provider))
                     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
                 task_id = queue_upgrade_node(
@@ -656,7 +715,7 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
     if token_result.is_err():
-        messages.error(request, f"No API token found for provider {deployment.provider.name}")
+        messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     task_id = queue_stop_node(
@@ -687,7 +746,7 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
     if token_result.is_err():
-        messages.error(request, f"No API token found for provider {deployment.provider.name}")
+        messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     task_id = queue_start_node(
@@ -717,7 +776,7 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
     if token_result.is_err():
-        messages.error(request, f"No API token found for provider {deployment.provider.name}")
+        messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     task_id = queue_reboot_node(
@@ -955,7 +1014,7 @@ def sync_providers(request: HttpRequest) -> HttpResponse:
 
         token_result = get_provider_token(provider)
         if token_result.is_err():
-            messages.warning(request, _("No credentials for %(name)s.") % {"name": provider.name})
+            messages.warning(request, _provider_credentials_help(provider))
             continue
 
         result = sync_fn(token=token_result.unwrap())
@@ -1048,8 +1107,11 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "breadcrumb_items": breadcrumb_items,
         "form": form,
         "provider": provider,
-        "form_action": reverse("infrastructure:provider_edit", args=[provider.id]),
-        "cancel_url": reverse("infrastructure:provider_list"),
+        "form_action": reverse("infrastructure:provider_edit", args=[provider.id])
+        + ("?return_to=node-deploy" if request.GET.get("return_to") == "node-deploy" else ""),
+        "cancel_url": reverse("infrastructure:deployment_create")
+        if request.GET.get("return_to") == "node-deploy"
+        else reverse("infrastructure:provider_list"),
     }
 
     if request.method == "POST" and form.is_valid():
@@ -1087,6 +1149,8 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
             logger.warning("⚠️ [Audit] Failed to log provider update for %s", provider.name, exc_info=True)
 
         messages.success(request, f"Provider '{provider.name}' updated successfully.")
+        if request.GET.get("return_to") == "node-deploy":
+            return redirect("infrastructure:deployment_create")
         return redirect("infrastructure:provider_list")
 
     return render(request, "infrastructure/provider_form.html", context)

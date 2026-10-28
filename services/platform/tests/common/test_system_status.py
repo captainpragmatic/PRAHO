@@ -20,7 +20,28 @@ from config.settings.test import LOCMEM_TEST_CACHE
 KEY = base64.urlsafe_b64encode(b"k" * 32).decode()
 
 
-class RuntimeStatusTests(SimpleTestCase):
+class RuntimeStatusTests(TestCase):
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_new_configuration_claim_cannot_revalidate_an_old_green_cache(self) -> None:
+        from apps.common.status_observations import claim_check  # noqa: PLC0415
+
+        cache.clear()
+        green = status.SubsystemStatus("Email", status.StatusLevel.GREEN, "Connected", key="email")
+        with patch.object(status, "check_all_subsystems", return_value=[green]), patch.object(status, "runtime_input_identity", return_value="a" * 64):
+            status.run_status_refresh(force=True)
+        with patch.object(status, "runtime_input_identity", return_value="b" * 64):
+            self.assertIsNotNone(claim_check("status_refresh", identity="b" * 64))
+            snapshot = status.get_cached_status()
+        self.assertEqual(snapshot.results[0].level, status.StatusLevel.AMBER)
+        self.assertIn("configuration changed", str(snapshot.results[0].message))
+
+    def test_backup_admission_failure_does_not_prevent_system_health_refresh(self) -> None:
+        from apps.common.tasks import system_status_check  # noqa: PLC0415
+
+        with patch("apps.provisioning.scheduled_backups.schedule_customer_backup", side_effect=RuntimeError("queue unavailable")), patch.object(status, "run_status_refresh", return_value=status.StatusSnapshot([])) as refresh:
+            system_status_check()
+        refresh.assert_called_once_with(force=False)
+
     def test_definite_credentials_rejection_is_red_but_unknown_denial_is_amber(self) -> None:
         rejected = status._probe_status("Stripe", ProbeCode.UNAUTHORIZED, "verified")
         unknown = status._probe_status("Stripe", ProbeCode.FORBIDDEN, "verified")
@@ -168,7 +189,7 @@ class RuntimeStatusTests(SimpleTestCase):
     def test_backup_visibility_failure_in_deployment_is_warning(self, _run: Mock) -> None:
         result = status._check_backup()
         self.assertEqual(result.level, status.StatusLevel.AMBER)
-        self.assertEqual(result.message, "Schedule unverified")
+        self.assertEqual(result.message, "Configure backups")
         self.assertNotIn("private", result.detail)
 
 
@@ -182,7 +203,37 @@ class DatabaseStatusTests(TestCase):
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
-class SnapshotTests(SimpleTestCase):
+class SnapshotTests(TestCase):
+    def test_unusable_connection_is_reported_by_both_status_fallbacks(self) -> None:
+        from django.db import InterfaceError  # noqa: PLC0415
+
+        from apps.common.context_processors import setup_attention  # noqa: PLC0415
+        from apps.common.status_models import SystemCheckState  # noqa: PLC0415
+
+        SystemCheckState.objects.create(check_key="status_refresh", input_identity="a" * 64)
+        cache.set(status.CACHE_KEY, status.StatusSnapshot([status.SubsystemStatus("Email", status.StatusLevel.GREEN, "Verified", key="email")], checked_at=timezone.now(), input_identity="a" * 64))
+        with patch.object(status, "runtime_input_identity", side_effect=InterfaceError("Connection unavailable")):
+            self.assertEqual(status.get_cached_status().results[0].level, status.StatusLevel.AMBER)
+        request = RequestFactory().get("/settings/setup/")
+        request.user = SimpleNamespace(is_authenticated=True, is_superuser=True)
+        with patch("apps.settings.setup_checklist.get_setup_report", side_effect=InterfaceError("Connection unavailable")):
+            self.assertTrue(setup_attention(request)["setup_status_unavailable"])
+
+    def test_configuration_change_invalidates_green_dashboard_snapshot(self) -> None:
+        from apps.common.status_models import SystemCheckState  # noqa: PLC0415
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        identity = status.runtime_input_identity()
+        SystemCheckState.objects.create(check_key="status_refresh", input_identity=identity, level="green", observed_at=timezone.now())
+        snapshot = status.StatusSnapshot([status.SubsystemStatus("Portal Auth", status.StatusLevel.GREEN, "Verified", key="hmac")], checked_at=timezone.now(), input_identity=identity)
+        cache.set(status.CACHE_KEY, snapshot)
+        self.assertEqual(status.get_cached_status().results[0].level, status.StatusLevel.GREEN)
+        changed = SettingsService.update_setting("node_deployment.enabled", False)
+        self.assertTrue(changed.is_ok())
+        result = status.get_cached_status().results[0]
+        self.assertNotEqual(result.level, status.StatusLevel.GREEN)
+        self.assertIn("configuration", str(result.message).lower())
+
     def setUp(self) -> None:
         cache.clear()
 
@@ -235,9 +286,9 @@ class SnapshotTests(SimpleTestCase):
         now = timezone.now()
         with patch.object(status.timezone, "now", return_value=now):
             for age, expected in (
-                (timedelta(hours=26, microseconds=-1), False),
-                (timedelta(hours=26), True),
-                (timedelta(hours=27), True),
+                (timedelta(minutes=25, microseconds=-1), False),
+                (timedelta(minutes=25), True),
+                (timedelta(minutes=26), True),
             ):
                 self.assertEqual(status.StatusSnapshot([], checked_at=now - age).stale, expected)
 
@@ -295,7 +346,7 @@ class SnapshotTests(SimpleTestCase):
                 )
             stack.enter_context(patch.object(status, "_check_hmac", side_effect=RuntimeError("private-secret")))
             results = status.check_all_subsystems()
-        self.assertEqual(len(results), 10)
+        self.assertEqual(len(results), 11)
         self.assertEqual(results[1].key, "hmac")
         self.assertEqual(results[1].level, status.StatusLevel.RED)
         self.assertNotIn("private-secret", str(results))
@@ -319,6 +370,7 @@ class SnapshotTests(SimpleTestCase):
 @override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
 class StatusRefreshViewTests(SimpleTestCase):
     def setUp(self) -> None:
+        cache.clear()
         self.factory = RequestFactory()
         maintenance = patch("apps.common.context_processors._maintenance_mode_active", return_value=False)
         maintenance.start()
@@ -331,7 +383,7 @@ class StatusRefreshViewTests(SimpleTestCase):
         return request
 
     @patch("apps.common.counters.increment", side_effect=[1, 2])
-    @patch.object(status, "refresh_and_cache_status")
+    @patch("django_q.tasks.async_task", return_value="queued")
     @patch.object(status, "get_cached_status")
     @patch("apps.common.rate_limiting._log_rate_limit_audit")
     def test_refresh_renders_one_replaceable_widget_and_cooldown(
@@ -342,7 +394,7 @@ class StatusRefreshViewTests(SimpleTestCase):
         row = status.SubsystemStatus(
             "Portal Auth", status.StatusLevel.GREEN, "Configured (legacy)", checked_at=timezone.now()
         )
-        cached.return_value = refresh.return_value = status.StatusSnapshot([row], checked_at=timezone.now())
+        cached.return_value = status.StatusSnapshot([row], checked_at=timezone.now())
         for expected in ("Configured (legacy)", "Please wait one minute"):
             result = system_status_refresh(self._request())
             content = result.content.decode()

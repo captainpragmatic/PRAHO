@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Release candidates and promotion to staging.** `release-candidate.yml` (dispatched on a `master` commit, blank = the current tip) confirms the commit's pull request passed every required check on exactly the commit's tree, then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that SHA. `make promote-staging SHA=<sha>` deploys only a commit with such a successful run, from a clean checkout of it, and then fast-forwards `staging`, so the branch always names what staging runs. See `docs/deployment/DEPLOYMENT.md`.
+
+### Changed
+
+- **Pull request CI is the full merge gate.** Every PR to `master` runs platform, portal, integration, browser and strict-CSP suites, the Virtualmin lab when the change can reach it (fail-open selection), and DCO, with no paths filter on a required workflow. `.github/rulesets/` holds the rules that make them required on an up-to-date branch. A new push cancels the PR's superseded run. Pushes to `staging` no longer run CI, the nightly run adds the whole platform suite on PostgreSQL, and the `/full-test` comment trigger is removed (ADR-0036, amended).
+
+- Administrator setup checklist with anchored configuration links, actionable node-deployment prerequisites and temporary preservation of nonsecret node-form choices.
+- Detailed System Status, a shared attention banner, queued manual checks and ten-minute background observations. Virtualmin CPU, memory and disk are kept as hourly summaries for 30 days.
+- Verified off-server Platform database/media backup pairs, native systemd backup scheduling, Docker streaming publication and bounded Platform-managed customer backups. Imported Virtualmin servers support explicit root-key archive transport with enrolled host trust.
+
 ### Security
 
+- **Security scans now block merges.** Bandit had never run in CI (it was not installed, and `continue-on-error` hid the failure) and Semgrep's install always failed. Bandit is now a pinned dev dependency whose findings fail the `platform-security` job, and its 29 findings were fixed or justified inline. Semgrep is pinned, fails when it cannot run, and blocks findings a PR introduces. The credential lint and the parity check are blocking too.
 - **Upgrading: what an operator must do first** (the #751 hardening and its follow-up).
   - **Portal keys.** Deployed Platform and Portal services refuse a portal signing key shorter than 32 characters, or equal to `PLATFORM_API_SECRET`. This covers every key in a `PORTAL_HMAC_CREDENTIALS` keyring, rotation keys included. Replace short or shared keys before upgrading.
   - **Portal identity.** Production and staging run `PORTAL_HMAC_MODE=enforce` by default, and the compose stacks require `PORTAL_HMAC_CREDENTIALS` (Platform), `PORTAL_ID` and `PORTAL_HMAC_SECRET` (Portal). A deployed portal no longer falls back to `portal-001`. Its `PORTAL_ID` must be set, and must match the Platform's id pattern; an inline comment in a native `.env` makes it invalid. See `docs/security/portal-hmac-registry.md`.
@@ -25,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native Platform recovery runs its safety backup with the deployed service environment, verifies fresh completion evidence before replacing data, and streams private media to the unprivileged extractor. Native and Docker restore entrypoints are now named `restore-platform.sh`; Make commands and rollback callers use the explicit name. Interactive Docker restore preserves backup paths containing spaces.
+- Health evidence follows edits to existing settings, backup completion preserves concurrently registered runner configuration, and non-Virtualmin panels retain their local backups under the Platform-managed default.
+- Existing health schedules adopt the ten-minute cadence immediately instead of retaining a daily or hourly next-run deadline.
+- Unreadable stored credentials leave setup and settings repair pages accessible, with an explicit warning and write-only replacement controls.
+- Product filters wait for the initial table load and keep the latest submitted selection, avoiding aborted requests and stale results.
 - Provider catalog sync preserves saved API-token references and operator-owned provider settings, so refreshing regions and plans does not disconnect an encrypted credential.
 
 - **Email delivery.**

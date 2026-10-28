@@ -1016,10 +1016,13 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
         return {"status": final_status, "job_id": job_id}
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
     if rows:
+        from .scheduled_backups import continue_after_completed_backup  # noqa: PLC0415
+
         _audit_job(job.pk)
         _queue_reconcile_after_pair(job, params)
         if operation == "restore_domain":
             _release_hold_after_safety_restore(job, params)
+        continue_after_completed_backup(job)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 
@@ -1734,6 +1737,15 @@ def delete_virtualmin_account(account_id: str, *, task_budget_seconds: int | Non
         return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
+def refresh_virtualmin_node_status(node_id: str) -> dict[str, bool]:
+    """Manual API-only detail refresh; it never contributes an hourly sample."""
+    node = VirtualminServer.objects.filter(pk=node_id).first()
+    if node is None:
+        return {"success": False}
+    result = VirtualminServerManagementService().health_check_server(node, scheduled=False)
+    return {"success": result.is_ok()}
+
+
 def health_check_virtualmin_servers() -> dict[str, Any]:
     """
     Periodic task to health check all Virtualmin servers.
@@ -1772,7 +1784,7 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
             for server in servers:
                 logger.info(f"🏥 [VirtualminTask] Health checking {server.hostname}")
 
-                health_result = management_service.health_check_server(server)
+                health_result = management_service.health_check_server(server, scheduled=True)
 
                 server_result = {
                     "hostname": server.hostname,
@@ -1782,10 +1794,9 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
 
                 if health_result.is_ok():
                     results["healthy_servers"] += 1
-                    server_result["data"] = health_result.unwrap()
                 else:
                     results["unhealthy_servers"] += 1
-                    server_result["error"] = health_result.unwrap_err()
+                    server_result["error"] = "Check failed; inspect the current node status"
 
                 results["servers"].append(server_result)
 
@@ -2141,7 +2152,7 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     # Health check every 10 minutes. UPSERT by name: skip-if-exists left
     # deployed installations on the old hourly cadence forever, starving
     # placement (is_healthy freshness << cadence).
-    _, created = ScheduleModel.objects.update_or_create(
+    health_schedule, created = ScheduleModel.objects.update_or_create(
         name="virtualmin-health-check",
         defaults={
             "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
@@ -2150,6 +2161,9 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
             "cluster": "praho-cluster",
         },
     )
+    # Preserve imminent runs, but do not retain the old hourly deadline on upgrade.
+    now = timezone.now()
+    ScheduleModel.objects.filter(pk=health_schedule.pk, next_run__gt=now + timedelta(minutes=10)).update(next_run=now)
     tasks_created["health_check"] = "created" if created else "updated"
 
     # Divergence backstop every 15 minutes (durable recovery for lost

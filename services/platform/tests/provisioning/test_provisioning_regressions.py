@@ -174,7 +174,7 @@ class ProvisioningRegressionTests(VirtualminTaskTestBase):
     def test_precondition_refusal_records_terminal_backup_progress(self) -> None:
         result = self.backups.backup_domain(self.account, progress_key="refused-job")
         self.assertTrue(result.is_err())
-        self.assertIn("archive transport is unavailable", result.unwrap_err())
+        self.assertIn("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", result.unwrap_err())
         progress = self.backups.get_backup_status("refused-job")
         self.assertEqual((progress["status"], progress["progress"]), ("failed", 100))
         self.assertIsNone(self.backups._progress_key)
@@ -339,7 +339,7 @@ class ProvisioningRegressionTests(VirtualminTaskTestBase):
                 patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http_transport),
                 patch("apps.infrastructure.ansible_service.AnsibleService", autospec=True) as ssh,
             ):
-                ssh.return_value.run_playbook.side_effect = fetch
+                ssh.return_value.run_server_playbook.side_effect = fetch
                 result = self.backups.backup_domain(self.account, progress_key="incomplete-job")
             self.assertTrue(result.is_err())
             self.assertIn("mail", result.unwrap_err())

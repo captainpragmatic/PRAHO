@@ -23,7 +23,18 @@ PARTIAL_FILE="${BACKUP_FILE}.partial"
 MEDIA_ROOT="{{ project_root }}/media"
 MEDIA_FILE="${BACKUP_FILE%.dump}.media.tar.gz"
 MEDIA_PARTIAL="${MEDIA_FILE}.partial"
-trap 'rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"' EXIT
+OFFSITE_HANDLED=0
+backup_exit() {
+    local result=$?
+    rm -f "${PARTIAL_FILE}" "${MEDIA_PARTIAL}"
+    if [ "$result" -ne 0 ] && [ "$OFFSITE_HANDLED" -eq 0 ]; then
+        if ! "{{ project_root }}/.venv-linux/bin/python" "{{ project_root }}/src/services/platform/manage.py" upload_platform_backup --report-failure; then
+            echo "ERROR: Backup failure could not be recorded" >&2
+        fi
+    fi
+    return "$result"
+}
+trap backup_exit EXIT
 
 echo "[$(date)] Starting native PostgreSQL backup..."
 
@@ -38,6 +49,12 @@ if [ ! -O "$BACKUP_DIR" ]; then
     exit 1
 fi
 chmod 0700 "$BACKUP_DIR"
+# The scheduled and manual service paths must not produce overlapping backup pairs.
+exec 9>"$BACKUP_DIR/.backup.lock"
+if ! flock -n 9; then
+    echo "A Platform backup is already running"
+    exit 0
+fi
 find "$BACKUP_DIR" -maxdepth 1 -type f -user "$(id -un)" \
     \( -name 'praho_backup_*.sql.gz' -o -name 'praho_backup_*.dump' \
        -o -name 'praho_backup_*.metadata.json' -o -name 'praho_backup_*.media.tar.gz' \
@@ -94,4 +111,7 @@ fi
 echo "[$(date)] Current backups:"
 ls -lh "${BACKUP_DIR}"/praho_backup_*.dump 2>/dev/null || echo "No backups found"
 
+OFFSITE_HANDLED=1
+"{{ project_root }}/.venv-linux/bin/python" "{{ project_root }}/src/services/platform/manage.py" \
+    upload_platform_backup --database "$BACKUP_FILE" --media "$MEDIA_FILE"
 echo "[$(date)] Backup completed successfully"

@@ -48,13 +48,15 @@ def clone(tmp_path: Path) -> Path:
     return target
 
 
-def _run_step(repo: Path, base: str) -> subprocess.CompletedProcess[str]:
+def _run_step(repo: Path, base: str, output: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = {
         "PATH": os.environ["PATH"],
         "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108  # Only git's config lookup
         "BASE_REF": base,
         "PYTHON": sys.executable,
     }
+    if output is not None:
+        env["GITHUB_OUTPUT"] = str(output)
     return subprocess.run(  # noqa: S603  # The workflow's own script, in a temporary clone.
         ["/bin/bash", "-c", _step_script()], cwd=repo, env=env, capture_output=True, text=True, timeout=120, check=False
     )
@@ -87,3 +89,20 @@ def test_an_unchanged_tree_passes(clone: Path) -> None:
 def test_a_first_push_compares_with_master(clone: Path) -> None:
     result = _run_step(clone, "0" * 40)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_dispatch_on_the_compared_commit_still_compares_with_its_parent(clone: Path, tmp_path: Path) -> None:
+    # A dispatch on master resolves the base to HEAD itself; HEAD against HEAD would check nothing. The
+    # resolved base is also what the migration-state and Semgrep steps compare against.
+    output = tmp_path / "github_output"
+    result = _run_step(clone, _git(clone, "rev-parse", "HEAD"), output)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text().strip() == f"ref={_git(clone, 'rev-parse', 'HEAD^')}"
+
+
+def test_a_base_without_the_validators_fails_instead_of_checking_less(clone: Path) -> None:
+    # A stale base (a branch far behind master) predates the trusted scripts: refuse, never fall back.
+    added = _git(clone, "log", "--diff-filter=A", "--format=%H", "--", "scripts/migration_checksums.py").splitlines()[-1]
+    result = _run_step(clone, _git(clone, "rev-parse", f"{added}^"))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "refusing a weaker check" in result.stderr

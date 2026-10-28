@@ -38,6 +38,7 @@
     "services/platform/apps/common/migrations/0003_legal_documents.py": "dc4190f899aab16be2cc084c1aa80c1718858910873094b21ff71ba249c795f3",
     "services/platform/apps/common/migrations/0004_persistent_secret_contexts.py": "bd33eb7804c776f7df80016db0beccf2c2b9babce0604f8c7fffe1090612abfc",
     "services/platform/apps/common/migrations/0005_bind_credential_natural_key.py": "46eddce03213dfb218893c59f9f86237e55b24fe18f7faf71d9af17d33d07a9c",
+    "services/platform/apps/common/migrations/0006_noderesourcehourlysummary_systemcheckstate.py": "d7a6293d9d3f71f62abe36bd8d36dac29ccb910116b352e139427ae1444f6d5b",
     "services/platform/apps/customers/migrations/0001_initial.py": "6d2e3d2d436e842407ba5ce90878a6140d622ff89cef574233f218905b42c0e8",
     "services/platform/apps/customers/migrations/0002_initial.py": "c2b3d0b33ebec044528cbaf3d622d10a92dee92cf9d3b5db75f54e01eb31e4f2",
     "services/platform/apps/customers/migrations/0003_payment_method_encryption_context_trigger.py": "a06eca2a4a04bbc83412a24ceb9422e6370f5fbf211ab0b739acaf0e3d7c5bd4",
