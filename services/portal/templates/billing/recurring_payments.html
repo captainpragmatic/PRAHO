@@ -119,7 +119,7 @@
     document.querySelectorAll('.begin-authorization').forEach((button) => {
       button.addEventListener('click', async () => {
         if (!document.getElementById('recurring-terms').checked) {
-          showToast(acceptTerms, 'warning');
+          showToast('warning', acceptTerms);
           return;
         }
         button.disabled = true;
@@ -145,7 +145,7 @@
           });
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
           button.disabled = false;
         }
       });
@@ -161,7 +161,7 @@
           );
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
         }
       });
     });
@@ -177,7 +177,7 @@
           });
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
           select.disabled = false;
         }
       });

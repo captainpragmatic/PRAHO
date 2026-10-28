@@ -13,7 +13,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from django.http import HttpRequest
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
-from apps.notifications.webhooks import SENDGRID_SIGNATURE_MAX_AGE_SECONDS, SendGridWebhookView
+from apps.notifications.webhooks import (
+    MAILGUN_SIGNATURE_MAX_AGE_SECONDS,
+    SENDGRID_SIGNATURE_MAX_AGE_SECONDS,
+    SendGridWebhookView,
+)
 
 BODY = b'[{"email": "a@example.ro", "event": "bounce"}]'
 
@@ -70,26 +74,46 @@ class MailgunReplayTests(TestCase):
 
     KEY = "mailgun-test-key"
 
-    def deliver(self, timestamp: str, token: str, process: object = None) -> int:
+    def deliver(self, timestamp: str, token: str, recipient: str) -> int:
         from apps.notifications.webhooks import MailgunWebhookView  # noqa: PLC0415
 
         signature = hmac.new(self.KEY.encode(), f"{timestamp}{token}".encode(), hashlib.sha256).hexdigest()
         request = RequestFactory().post(
             "/webhooks/email/mailgun/",
-            {"timestamp": timestamp, "token": token, "signature": signature, "event": "delivered"},
+            {
+                "timestamp": timestamp,
+                "token": token,
+                "signature": signature,
+                "event": "complained",
+                "recipient": recipient,
+            },
         )
-        with patch.object(MailgunWebhookView, "_process_event", side_effect=process):
-            return MailgunWebhookView().post(request).status_code
+        return MailgunWebhookView().post(request).status_code
 
-    def test_a_token_is_applied_once(self) -> None:
-        now = str(int(time.time()))
-        self.assertEqual(self.deliver(now, "fresh-token"), 200)
-        self.assertEqual(self.deliver(now, "fresh-token"), 403)
+    def suppressed(self, email: str) -> bool:
+        from apps.notifications.services import EmailSuppressionService  # noqa: PLC0415
 
-    def test_a_failure_before_the_event_is_applied_leaves_the_token_redeliverable(self) -> None:
+        return EmailSuppressionService.is_suppressed(email)
+
+    def test_a_complaint_is_applied_and_its_token_cannot_carry_another(self) -> None:
         now = str(int(time.time()))
-        self.assertEqual(self.deliver(now, "crash-token", RuntimeError("worker stopped")), 500)
-        self.assertEqual(self.deliver(now, "crash-token"), 200)
+        self.assertEqual(self.deliver(now, "fresh-token", "ana@example.ro"), 200)
+        self.assertTrue(self.suppressed("ana@example.ro"))
+        # The signature does not cover the event: a replay could name anyone. It is answered 200 so
+        # Mailgun stops retrying, and applies nothing.
+        self.assertEqual(self.deliver(now, "fresh-token", "victim@example.ro"), 200)
+        self.assertFalse(self.suppressed("victim@example.ro"))
+
+    def test_a_failure_while_applying_the_event_leaves_the_token_redeliverable(self) -> None:
+        now = str(int(time.time()))
+        with patch(
+            "apps.notifications.webhooks.EmailService.handle_delivery_event", side_effect=RuntimeError("worker stopped")
+        ):
+            self.assertEqual(self.deliver(now, "crash-token", "bob@example.ro"), 500)
+        self.assertEqual(self.deliver(now, "crash-token", "bob@example.ro"), 200)
+        self.assertTrue(self.suppressed("bob@example.ro"))
 
     def test_a_stale_timestamp_is_refused(self) -> None:
-        self.assertEqual(self.deliver(str(int(time.time()) - 3600), "old-token"), 403)
+        stale = int(time.time()) - MAILGUN_SIGNATURE_MAX_AGE_SECONDS - 60
+        self.assertEqual(self.deliver(str(stale), "old-token", "old@example.ro"), 403)
+        self.assertFalse(self.suppressed("old@example.ro"))

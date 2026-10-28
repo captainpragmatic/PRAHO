@@ -34,6 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.x509 import load_pem_x509_certificate
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -507,8 +508,9 @@ def _sendgrid_signature_valid(public_key_b64: str, signature_b64: str, signed: b
 
 # How old a signed SendGrid delivery may be (seconds); SendGrid retries with a fresh timestamp.
 SENDGRID_SIGNATURE_MAX_AGE_SECONDS = 300
-# The same for Mailgun; post() also refuses a token it already processed, for twice this long.
-MAILGUN_SIGNATURE_MAX_AGE_SECONDS = 300
+# Mailgun retries a failed delivery for about eight hours and may keep its signed timestamp, so the
+# window covers that; post() applies each token once within it, which is the replay control.
+MAILGUN_SIGNATURE_MAX_AGE_SECONDS = 9 * 3600
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -569,7 +571,7 @@ class SendGridWebhookView(View):
         signature = request.META.get("HTTP_X_TWILIO_EMAIL_EVENT_WEBHOOK_SIGNATURE")
         timestamp = request.META.get("HTTP_X_TWILIO_EMAIL_EVENT_WEBHOOK_TIMESTAMP")
 
-        if not signature or not timestamp or not timestamp.isdigit():
+        if not signature or not timestamp or not (timestamp.isascii() and timestamp.isdigit()):
             return False
         if abs(time.time() - int(timestamp)) > SENDGRID_SIGNATURE_MAX_AGE_SECONDS:
             return False  # a captured delivery cannot be replayed later
@@ -631,24 +633,29 @@ class MailgunWebhookView(View):
                 )
                 return HttpResponse("Invalid signature", status=403)
 
-            # Once per token, recorded only after the event is applied: a crash before that lets
-            # Mailgun redeliver. The counter table never drops a row before it expires.
-            replay_key = f"mailgun-webhook-token:{request.POST.get('token', '')}"
-            if counters.peek(replay_key):
-                return HttpResponse("Already processed", status=403)
-
-            # Parse event data
+            # Parse event data. A form posts single values: .dict(), not dict(), which made every
+            # value a list and silently dropped every form-encoded event.
             event_data = request.POST.get("event-data")
             if event_data:
                 try:
                     data = json.loads(event_data)
                 except json.JSONDecodeError:
-                    data = dict(request.POST)
+                    data = request.POST.dict()
             else:
-                data = dict(request.POST)
+                data = request.POST.dict()
 
-            self._process_event(data)
-            counters.increment(replay_key, MAILGUN_SIGNATURE_MAX_AGE_SECONDS * 2)
+            # Each token is applied once. The claim and the event commit together: an overlapping
+            # copy waits on the claim row and is refused, and a failure rolls the claim back so
+            # Mailgun can redeliver. The counter table never drops a row before it expires.
+            token = request.POST.get("token", "")
+            with transaction.atomic():
+                # Only unsigned DEBUG requests lack a token; they get no replay guard.
+                if token and not counters.claim(
+                    f"mailgun-webhook-token:{token}", MAILGUN_SIGNATURE_MAX_AGE_SECONDS, token
+                ):
+                    # Applied already: answer 200 so Mailgun stops retrying, and apply nothing again.
+                    return HttpResponse("Already processed", status=200)
+                self._process_event(data)
 
             return HttpResponse("OK", status=200)
 
@@ -658,7 +665,9 @@ class MailgunWebhookView(View):
 
     def _validate_signature(self, request: HttpRequest) -> bool:
         """Validate Mailgun webhook signature."""
-        api_key = getattr(settings, "ANYMAIL", {}).get("MAILGUN_API_KEY")
+        # Mailgun signs webhooks with the HTTP webhook signing key; older accounts used the API key.
+        anymail = getattr(settings, "ANYMAIL", {})
+        api_key = anymail.get("MAILGUN_WEBHOOK_SIGNING_KEY") or anymail.get("MAILGUN_API_KEY")
         if not api_key:
             if not getattr(settings, "DEBUG", False):
                 logger.error("Mailgun API key not configured in production - rejecting")
@@ -679,7 +688,11 @@ class MailgunWebhookView(View):
             return False
         # The signature covers only timestamp and token, not the event: a captured triple must be
         # fresh, and post() accepts each token once.
-        return timestamp.isdigit() and abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
+        return (
+            timestamp.isascii()
+            and timestamp.isdigit()
+            and abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
+        )
 
     def _process_event(self, data: dict[str, Any]) -> None:
         """Process a Mailgun event."""
