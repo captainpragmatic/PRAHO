@@ -37,7 +37,9 @@ def check_password_locked(user: User, raw_password: str, *, source: str) -> bool
     if not raw_password:
         return False
     if not check_password(raw_password, user.password):
-        logger.warning("⚠️ [Auth] Wrong password in a signed-in %s check for user %s", source, user.pk)
+        logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
+            "⚠️ [Auth] Wrong password in a signed-in %s check for user %s", source, user.pk
+        )
         user.increment_failed_login_attempts(source=source)
         return False
     return True
