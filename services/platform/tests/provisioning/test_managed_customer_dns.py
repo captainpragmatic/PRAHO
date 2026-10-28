@@ -6,17 +6,20 @@ from unittest.mock import patch
 from django.db import transaction
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.domains.dns_zone_import import make_record_data
 from apps.domains.dns_zone_models import HostedZone, HostedZoneRecord
+from apps.domains.dns_zone_record_services import current_manifest
 from apps.infrastructure.dns_agreement import Agreement
 from apps.infrastructure.dns_zone_gateway import ProviderZoneRecord, ZoneIdentity, ZoneInventory
 from apps.provisioning import account_hostname_service as service
 from apps.provisioning import managed_dns_service as managed
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.service_models import Service
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
+from tests.helpers.fake_dns_gateway import FakeDnsGateway
 from tests.provisioning.test_account_name_ttl import TtlCase
 
 
@@ -220,6 +223,114 @@ class ManagedCustomerDnsTests(TtlCase):
         self.gateway.calls.clear()
         self.assertTrue(service.sync_account_hostname(self.hostname).is_err())
         self.assertEqual(self.gateway.calls, [])
+
+    # A customer zone's state never keeps the account name in DNS (withdrawal) or alive (retirement).
+
+    def _account_records(self):
+        return [record for record in FakeDnsGateway.records.values() if record["name"] == self.hostname.fqdn]
+
+    def _managed_rows(self):
+        return list(self.zone.records.filter(managed_by="praho").order_by("pk"))
+
+    def _withdraw(self):
+        with patch.object(service, "certificate_ready_on", return_value=False):
+            return service.sync_account_hostname(self.hostname)
+
+    def _hold(self, state):
+        if state == "deleting":
+            HostedZone.objects.filter(pk=self.zone.pk).update(status="deleting")
+        elif state == "moved":
+            other = Customer.objects.create(name="Next tenant", company_name="Next", customer_type="company")
+            Service.objects.filter(pk=self.account.service_id).update(customer=other)
+        else:
+            VirtualminAccount.objects.filter(pk=self.account.pk).update(domain="renamed.example.com")
+        with transaction.atomic():
+            locked = service.lock_for_publication(self.hostname.pk)
+            self.assertTrue(managed._ownership(HostedZone.objects.get(pk=self.zone.pk), locked).is_err())
+        self.assertTrue(self._account_records())
+        self.assertTrue(self._managed_rows())
+        self.assertTrue(all(row.provider_record_id in self.gateway.records for row in self._managed_rows()))
+        self.manifest = current_manifest(self.zone)
+        self.gateway.calls.clear()
+
+    def _assert_held(self, reason):
+        self.assertEqual(self._account_records(), [])
+        for row in self._managed_rows():
+            self.assertFalse(row.desired_deleted)
+            self.assertIn(row.provider_record_id, self.gateway.records)
+            self.assertEqual(row.evidence[managed.WITHDRAWAL_HELD]["reason"], reason)
+        self.assertEqual(current_manifest(self.zone), self.manifest)
+        self.assertFalse([call for call in self.gateway.calls if call[0] == "delete"])
+        parked = AuditEvent.objects.filter(action="dns_zone_operation_parked", object_id=str(self.zone.pk))
+        self.assertEqual(
+            [event.new_values["code"] for event in parked],
+            [managed.WITHDRAWAL_PARKED_CODE] if reason == "ownership_changed" else [],
+        )
+
+    def _assert_withdrawal_held(self, state, reason):
+        self._hold(state)
+        self.assertEqual(self._withdraw(), Ok("withdrawn"))
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records, {})
+        self._assert_held(reason)
+
+    def _assert_retirement_held(self, state, reason):
+        self._hold(state)
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self.hostname.refresh_from_db()
+        self.assertIsNotNone(self.hostname.retired_at)
+        self._assert_held(reason)
+
+    def test_withdrawal_leaves_a_deleting_zone_to_its_deletion_and_withdraws_the_name(self):
+        self._assert_withdrawal_held("deleting", "zone_deleting")
+
+    def test_withdrawal_parks_a_moved_service_zone_and_withdraws_the_name(self):
+        self._assert_withdrawal_held("moved", "ownership_changed")
+
+    def test_withdrawal_parks_a_renamed_domain_zone_and_withdraws_the_name(self):
+        self._assert_withdrawal_held("renamed", "ownership_changed")
+
+    def test_retirement_leaves_a_deleting_zone_to_its_deletion_and_retires_the_name(self):
+        self._assert_retirement_held("deleting", "zone_deleting")
+
+    def test_retirement_parks_a_moved_service_zone_and_retires_the_name(self):
+        self._assert_retirement_held("moved", "ownership_changed")
+
+    def test_retirement_parks_a_renamed_domain_zone_and_retires_the_name(self):
+        self._assert_retirement_held("renamed", "ownership_changed")
+
+    def test_a_parked_zone_is_audited_once_however_often_the_name_is_withdrawn(self):
+        self._assert_withdrawal_held("moved", "ownership_changed")
+        AccountHostname.objects.filter(pk=self.hostname.pk).update(records={"A": {"intended": "95.217.0.10"}})
+        self.assertEqual(self._withdraw(), Ok("withdrawn"))
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self._assert_held("ownership_changed")
+
+    def test_a_refused_customer_slot_is_retried_after_the_name_itself_is_withdrawn(self):
+        self.gateway.fail = True
+        self.assertTrue(self._withdraw().is_err())
+        self.assertEqual(self._account_records(), [])
+        self.hostname.refresh_from_db()
+        self.assertTrue(self.hostname.records, "the withdrawal stays due for the customer slot")
+        self.assertTrue(any(row.provider_record_id in self.gateway.records for row in self._managed_rows()))
+        self.gateway.fail = False
+        self.assertEqual(self._withdraw(), Ok("withdrawn"))
+        self.hostname.refresh_from_db()
+        self.assertEqual(self.hostname.records, {})
+        self.assertFalse(any(row.provider_record_id for row in self._managed_rows()))
+        self.assertEqual(self.gateway.records, {})
+
+    def test_a_refused_customer_slot_keeps_the_name_unretired_until_it_is_withdrawn(self):
+        self.gateway.fail = True
+        self.assertTrue(service.retire_account_hostname(self.hostname).is_err())
+        self.assertEqual(self._account_records(), [])
+        self.hostname.refresh_from_db()
+        self.assertIsNone(self.hostname.retired_at)
+        self.gateway.fail = False
+        self.assertEqual(service.retire_account_hostname(self.hostname), Ok(None))
+        self.hostname.refresh_from_db()
+        self.assertIsNotNone(self.hostname.retired_at)
+        self.assertFalse(any(row.provider_record_id for row in self._managed_rows()))
 
     def test_an_owned_uuid_record_recovers_an_ambiguous_create_without_repeating_post(self):
         self.apex.provider_record_id = ""

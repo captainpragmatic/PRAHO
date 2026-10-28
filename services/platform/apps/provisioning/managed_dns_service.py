@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -19,6 +20,7 @@ from uuid import UUID, uuid4
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err, Ok, Result, retriability_of
 from apps.infrastructure.dns_zone_gateway import (
     MAX_RECORD_TTL,
@@ -39,8 +41,14 @@ if TYPE_CHECKING:
     from .account_hostname_models import AccountHostname
     from .virtualmin_models import VirtualminAccount
 
+logger = logging.getLogger(__name__)
+
 TtlMode = Literal["current", "lower", "restore"]
 CreatePermits = dict[str, str]
+WithdrawalHold = Literal["zone_deleting", "ownership_changed"]
+# On a managed slot's evidence: why an account-name withdrawal left it in place.
+WITHDRAWAL_HELD = "withdrawal_held"
+WITHDRAWAL_PARKED_CODE = "managed_withdrawal_ownership_changed"
 
 
 def assert_move_ready(account: VirtualminAccount) -> None:
@@ -491,7 +499,11 @@ def _delete_row(gateway: ZoneGateway, binding: ZoneBinding, row: HostedZoneRecor
         if deleted.is_err():
             return Err(deleted.unwrap_err(), retriability=retriability_of(deleted))
     row.provider_record_id, row.applied_ttl, row.applied_rdata = "", None, {}
-    row.evidence = {**row.evidence, "create_issued": False, "delete_confirmed_at": timezone.now().isoformat()}
+    row.evidence = {
+        **_without_hold(row.evidence),
+        "create_issued": False,
+        "delete_confirmed_at": timezone.now().isoformat(),
+    }
     row.applied_revision = row.desired_revision
     row.save(
         update_fields=[
@@ -540,7 +552,7 @@ def _apply_row(
     row.applied_rdata = {"text": actual.spec.rdata}
     row.applied_ttl = actual.spec.ttl
     row.applied_revision = row.desired_revision if _spec_matches(actual, spec) else None
-    row.evidence = {**row.evidence, "confirmed_at": timezone.now().isoformat()}
+    row.evidence = {**_without_hold(row.evidence), "confirmed_at": timezone.now().isoformat()}
     row.save(
         update_fields=[
             "provider_record_id",
@@ -633,8 +645,55 @@ def clear_restored_locked(hostname: AccountHostname) -> bool:
     return True
 
 
+def _without_hold(evidence: dict[str, Any]) -> dict[str, Any]:
+    """A slot PRAHO has written again is no longer held by an earlier withdrawal."""
+    return {key: value for key, value in evidence.items() if key != WITHDRAWAL_HELD}
+
+
+def _hold_slots(zone: HostedZone, hostname: AccountHostname, reason: WithdrawalHold, detail: str) -> None:
+    """Record on each live managed slot why the account name's withdrawal left it in place.
+
+    Only rows `_web_rows` locked are written; zone status and its operations stay with the zone's
+    own workers. A changed ownership is parked for staff review and audited once per hold.
+    """
+    held = {"reason": reason, "hostname_id": str(hostname.pk)}
+    recorded = False
+    for row in _web_rows(zone):
+        live = bool(row.provider_record_id or row.evidence.get("create_issued"))
+        previous = row.evidence.get(WITHDRAWAL_HELD) or {}
+        if not live or {key: previous.get(key) for key in held} == held:
+            continue
+        row.evidence = {**row.evidence, WITHDRAWAL_HELD: {**held, "detail": detail, "at": timezone.now().isoformat()}}
+        row.save(update_fields=["evidence", "updated_at"])
+        recorded = True
+    if not recorded:
+        return
+    if reason == "zone_deleting":
+        logger.info("⚠️ [ManagedDNS] Zone %s keeps its managed slots for its own deletion", zone.pk)
+        return
+    logger.warning("⚠️ [ManagedDNS] Zone %s managed slots parked for review: %s", zone.pk, detail)
+    from apps.domains.dns_zone_services import _audit  # noqa: PLC0415  # ADR-0007
+
+    # A savepoint: the account zone is withdrawn in this transaction after this, whatever the audit does.
+    with best_effort_atomic(logger=logger, scope="ManagedDNS", message="Parked withdrawal audit failed"):
+        metadata = {"code": WITHDRAWAL_PARKED_CODE, "hostname": held["hostname_id"]}
+        _audit(zone, "dns_zone_operation_parked", metadata=metadata)
+
+
 def withdraw_managed_locked(hostname: AccountHostname) -> Result[None, str]:
+    """Withdraw each customer zone's managed web slots on its own; no zone blocks another.
+
+    A zone this name may write has its slots deleted at the provider. A provider failure there is
+    returned once every zone has been tried, so the caller keeps the withdrawal due and retries it. A
+    zone being deleted keeps its slots for that deletion, which removes the whole provider zone and
+    whose export receipt covers them. A zone whose customer, service, account or name no longer
+    matches is never written by this name: its slots are parked for staff review. Both holds are
+    recorded on the slots. The account name's own records do not wait for any of this.
+    """
+    failure: Result[None, str] | None = None
     for zone in _zones(hostname):
+        if not _enrolled(zone):
+            continue
         orphan = (
             hostname.account_id is None
             and zone.account_id is None
@@ -642,13 +701,14 @@ def withdraw_managed_locked(hostname: AccountHostname) -> Result[None, str]:
         )
         valid = Ok(None) if orphan else _ownership(zone, hostname)
         if valid.is_err():
-            return valid
-        if not _enrolled(zone):
+            reason: WithdrawalHold = "zone_deleting" if zone.status == "deleting" else "ownership_changed"
+            _hold_slots(zone, hostname, reason, valid.unwrap_err())
             continue
         for row in _web_rows(zone):
             row.desired_deleted = True
             row.save(update_fields=["desired_deleted", "updated_at"])
             applied = _apply_row(zone, row, hostname, "current")
             if applied.is_err():
-                return applied
-    return Ok(None)
+                failure = failure or applied
+                break
+    return failure or Ok(None)
