@@ -169,6 +169,7 @@ class Command(BaseCommand):
 
     def _ensure_account(self) -> None:
         from apps.billing.models import Currency  # noqa: PLC0415
+        from apps.common.validators import SecureInputValidator  # noqa: PLC0415
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
@@ -213,8 +214,10 @@ class Command(BaseCommand):
                 "praho_customer_id": customer.id,
             },
         )
-        if created or not account.encrypted_password:
-            # The roundtrip sends this as create-domain's pass, so it must pass parameter validation
+        # The roundtrip sends this as create-domain's pass, so it must pass parameter validation,
+        # including a password an older bootstrap stored before that was checked
+        stored = account.get_password() if not created and account.encrypted_password else ""
+        if not stored or SecureInputValidator.first_malicious_pattern(stored) is not None:
             account.set_password(generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(18)))
         account.server = server
         account.save(update_fields=["encrypted_password", "server", "updated_at"])

@@ -19,8 +19,10 @@ from django_q.signing import SignedPackage
 
 from apps.common import outbound_http
 from apps.common.types import Ok
+from apps.common.validators import SecureInputValidator
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.ssh_transport import trusted_node_known_hosts
+from apps.provisioning.management.commands import virtualmin_lab_bootstrap as bootstrap
 from apps.provisioning.management.commands._virtualmin_lab import (
     LAB_STAFF_EMAIL,
     LabNode,
@@ -32,6 +34,7 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     read_env_file,
     run_queued_once,
 )
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.settings.services import SettingsService
 from apps.users.models import User
 
@@ -200,6 +203,33 @@ class LabWorkerLoopTests(SimpleTestCase):
             command._work(stop)
 
         self.assertEqual(len(passes), 2)
+
+
+class LabAccountPasswordTests(TestCase):
+    """The roundtrip sends the lab account's password as create-domain's pass parameter."""
+
+    def setUp(self) -> None:
+        VirtualminServer.objects.create(name="lab-vm-a", hostname=bootstrap.NODES[0].server_hostname)
+        self.command = bootstrap.Command()
+        self.command._ensure_account()
+        self.account = VirtualminAccount.objects.get(domain=bootstrap.LAB_DOMAIN)
+
+    def _store(self, password: str) -> None:
+        self.account.set_password(password)
+        self.account.save(update_fields=["encrypted_password"])
+
+    def test_a_stored_password_the_parameter_validator_rejects_is_replaced(self) -> None:
+        # An older bootstrap stored raw tokens, and a token with "--" fails every later create-domain
+        self._store("aA1--" + "b" * 19)
+        self.command._ensure_account()
+        self.account.refresh_from_db()
+        self.assertIsNone(SecureInputValidator.first_malicious_pattern(self.account.get_password()))
+
+    def test_a_stored_password_the_parameter_validator_accepts_is_kept(self) -> None:
+        self._store("cC2_" + "d" * 20)
+        self.command._ensure_account()
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.get_password(), "cC2_" + "d" * 20)
 
 
 class LabStaffTests(TestCase):
