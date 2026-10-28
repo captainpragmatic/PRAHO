@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import importlib.util
+import os
 import time
 from unittest.mock import patch
 
@@ -134,12 +136,35 @@ class MailgunReplayTests(TestCase):
 
     def test_a_token_claim_outlives_every_timestamp_that_still_verifies(self) -> None:
         # The newest verifiable timestamp is MAX_SKEW ahead and stays valid MAX_AGE after that.
-        self.assertGreater(MAILGUN_TOKEN_CLAIM_SECONDS, MAILGUN_SIGNATURE_MAX_AGE_SECONDS + MAILGUN_SIGNATURE_MAX_SKEW_SECONDS)
+        self.assertGreater(
+            MAILGUN_TOKEN_CLAIM_SECONDS, MAILGUN_SIGNATURE_MAX_AGE_SECONDS + MAILGUN_SIGNATURE_MAX_SKEW_SECONDS
+        )
 
     def test_a_user_variable_named_recipient_cannot_pick_the_address(self) -> None:
         # Mailgun posts its own value first and the sender's user-variable of the same name after.
         now = str(int(time.time()))
         self.assertEqual(self.deliver(now, "merged-token", ["real@example.ro", "victim@example.ro"]), 200)
+        self.assertTrue(self.suppressed("real@example.ro"))
+        self.assertFalse(self.suppressed("victim@example.ro"))
+
+    def test_a_user_variable_named_event_data_cannot_replace_the_event(self) -> None:
+        from apps.notifications.webhooks import MailgunWebhookView  # noqa: PLC0415
+
+        now, token = str(int(time.time())), "event-data-token"
+        signature = hmac.new(self.KEY.encode(), f"{now}{token}".encode(), hashlib.sha256).hexdigest()
+        forged = '{"event": "complained", "recipient": "victim@example.ro"}'
+        request = RequestFactory().post(
+            "/webhooks/email/mailgun/",
+            {
+                "timestamp": now,
+                "token": token,
+                "signature": signature,
+                "event": "complained",
+                "recipient": "real@example.ro",
+                "event-data": forged,
+            },
+        )
+        self.assertEqual(MailgunWebhookView().post(request).status_code, 200)
         self.assertTrue(self.suppressed("real@example.ro"))
         self.assertFalse(self.suppressed("victim@example.ro"))
 
@@ -152,5 +177,13 @@ class MailgunReplayTests(TestCase):
 
 
 class MailgunSigningKeySettingTests(SimpleTestCase):
-    def test_the_signing_key_is_read_into_the_anymail_settings(self) -> None:
-        self.assertIn("MAILGUN_WEBHOOK_SIGNING_KEY", settings.ANYMAIL)
+    def test_the_signing_key_is_read_from_the_environment(self) -> None:
+        # A fresh copy of the base settings module, loaded with a known environment value.
+        spec = importlib.util.spec_from_file_location(
+            "config.settings._base_settings_copy", settings.BASE_DIR / "config/settings/base.py"
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(os.environ, {"MAILGUN_WEBHOOK_SIGNING_KEY": "from-the-environment"}):
+            spec.loader.exec_module(module)
+        self.assertEqual(module.ANYMAIL["MAILGUN_WEBHOOK_SIGNING_KEY"], "from-the-environment")

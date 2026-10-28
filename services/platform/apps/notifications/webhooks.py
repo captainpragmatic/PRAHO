@@ -17,7 +17,6 @@ Security:
 
 import base64
 import binascii
-import contextlib
 import hashlib
 import hmac
 import json
@@ -638,15 +637,13 @@ class MailgunWebhookView(View):
                 )
                 return HttpResponse("Invalid signature", status=403)
 
-            # Parse event data. Mailgun's legacy form merges the sender's user-variables into the
-            # same fields after its own values, so an event field takes its FIRST value (a
-            # user-variable named "recipient" must not pick the address). dict(request.POST) made
-            # every value a list and silently dropped every form-encoded event.
-            event_data = request.POST.get("event-data")
+            # Parse the legacy form. Mailgun merges the sender's user-variables into the same fields
+            # after its own values, so an event field takes its FIRST value (a user-variable named
+            # "recipient" must not pick the address). Nothing here is read from an "event-data"
+            # field: Mailgun's JSON webhooks post a JSON body, so in a form that field can only be
+            # a user-variable, and it once replaced the whole event. dict(request.POST) made every
+            # value a list and silently dropped every form-encoded event.
             data: dict[str, Any] = {key: request.POST.getlist(key)[0] for key in request.POST}
-            if event_data:
-                with contextlib.suppress(json.JSONDecodeError):
-                    data = json.loads(event_data)
 
             # Each token is applied once. The claim and the event commit together: an overlapping
             # copy waits on the claim row and is refused, and a failure rolls the claim back so
