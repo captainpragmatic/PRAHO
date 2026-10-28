@@ -23,7 +23,9 @@ CONNECTION_KEYS = (
     "PRAHO_SSH_PORT",
     "PRAHO_SSH_PUBLIC_KEYS_FILE",
     "PRAHO_DEPLOY_KNOWN_HOSTS_FILE",
+    "PRAHO_SSH_ALLOWED_CIDRS",
 )
+ALLOWLIST_KEYS = ("PLATFORM_ALLOWED_CIDRS", "PRAHO_SSH_ALLOWED_CIDRS")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -52,13 +54,14 @@ def read_env(path: Path) -> dict[str, str]:
             raise ValueError(
                 f"line {number}:{key}: unsupported env syntax; quote values and use one assignment per line"
             ) from None
-    for cidr in values.get("PLATFORM_ALLOWED_CIDRS", "").split():
-        try:
-            network = ipaddress.ip_network(cidr, strict=True)
-        except ValueError:
-            raise ValueError("PLATFORM_ALLOWED_CIDRS must contain space-separated, canonical CIDRs") from None
-        if network.prefixlen == 0:
-            raise ValueError("PLATFORM_ALLOWED_CIDRS cannot allow the entire Internet")
+    for name in ALLOWLIST_KEYS:
+        for cidr in values.get(name, "").split():
+            try:
+                network = ipaddress.ip_network(cidr, strict=True)
+            except ValueError:
+                raise ValueError(f"{name} must contain space-separated, canonical CIDRs") from None
+            if network.prefixlen == 0:
+                raise ValueError(f"{name} cannot allow the entire Internet")
     return values
 
 

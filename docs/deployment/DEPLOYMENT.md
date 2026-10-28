@@ -510,7 +510,11 @@ Before deploying, the playbook checks:
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
 The shared SSH role requires a verified server key in `PRAHO_DEPLOY_KNOWN_HOSTS_FILE`
-and approved operator public keys in `PRAHO_SSH_PUBLIC_KEYS_FILE`. Leave
+and approved operator public keys in `PRAHO_SSH_PUBLIC_KEYS_FILE`. It also requires
+`PRAHO_SSH_ALLOWED_CIDRS`, the space-separated CIDRs that may reach SSH (staff and VPN
+addresses). The deploy refuses to run when it is empty or allows the whole Internet, admits
+the SSH port from those sources only, and removes any rule that opened it to everyone. The
+controller running the deploy must be inside the list. Leave
 `PRAHO_SSH_KEY` empty to use the SSH agent, or provide an explicit identity file.
 For a first bootstrap set `PRAHO_SSH_PORT=22`; normal access uses 9876. Run
 `make ssh-harden ENV=staging` to establish SSH access independently of application

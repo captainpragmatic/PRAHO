@@ -78,12 +78,23 @@ def test_passfile_escapes_libpq_separators() -> None:
     assert pgpass({PASSWORD_KEY: r"a:b\c"}) == "localhost:5432:praho:praho:a\\:b\\\\c\n"
 
 
+@pytest.mark.parametrize("name", ["PLATFORM_ALLOWED_CIDRS", "PRAHO_SSH_ALLOWED_CIDRS"])
 @pytest.mark.parametrize("cidrs", ["0.0.0.0/0", "::/0", "192.0.2.1/24", "192.0.2.1/32,::1/128", "invalid"])
-def test_staff_cidrs_reject_invalid_or_world_access(tmp_path: Path, cidrs: str) -> None:
+def test_staff_cidrs_reject_invalid_or_world_access(tmp_path: Path, name: str, cidrs: str) -> None:
     path = tmp_path / "config"
-    path.write_text(f"PLATFORM_ALLOWED_CIDRS='{cidrs}'\n")
-    with pytest.raises(ValueError, match="PLATFORM_ALLOWED_CIDRS"):
+    path.write_text(f"{name}='{cidrs}'\n")
+    with pytest.raises(ValueError, match=name):
         read_env(path)
+
+
+def test_launcher_forwards_the_ssh_allowlist_to_ansible(tmp_path: Path) -> None:
+    cidrs = "192.0.2.10/32 2001:db8::/64"
+    path = tmp_path / "config"
+    path.write_text(f"PRAHO_SSH_ALLOWED_CIDRS='{cidrs}'\n")
+    with patch.dict(os.environ, {}, clear=True), patch("deploy.scripts.native_env.subprocess.run") as run:
+        run.return_value.returncode = 0
+        assert run_native(read_env(path), path, "staging", fetch_backup=None, version="", ssh_only=True) == 0
+    assert run.call_args.kwargs["env"]["PRAHO_SSH_ALLOWED_CIDRS"] == cidrs
 
 
 def test_caddy_only_launcher_selects_only_caddy_tasks(tmp_path: Path) -> None:
