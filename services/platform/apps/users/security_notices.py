@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+SUBJECT_COMPANY_MAX = 80
 SecurityNotice = Literal["2fa_enabled", "2fa_disabled", "2fa_reset", "backup_codes", "password_changed"]
 TeamNotice = Literal["team_member_added", "team_role_changed", "team_member_removed"]
 CompanyNotice = Literal["company_contact_changed", "company_tax_changed"]
@@ -45,7 +46,9 @@ CompanyNotice = Literal["company_contact_changed", "company_tax_changed"]
 
 def _subject(event: str, context: dict[str, Any]) -> str:
     """The notice's subject, in the active language."""
-    company = {"company": context.get("company", "")}
+    name = str(context.get("company", ""))
+    # A company name may be 255 characters and a subject only 200: one too long would be refused.
+    company = {"company": name if len(name) <= SUBJECT_COMPANY_MAX else name[: SUBJECT_COMPANY_MAX - 1] + "…"}
     subjects = {
         "2fa_enabled": lambda: gettext("Two-factor authentication was turned on"),
         "2fa_disabled": lambda: gettext("Two-factor authentication was turned off"),
@@ -103,6 +106,7 @@ def queue_notice(
             track_opens=False,
             track_clicks=False,
             async_send=True,
+            essential=True,
         )
         if not result.success:
             logger.warning("⚠️ [Security] Notice %s not queued: %s", event, result.error)

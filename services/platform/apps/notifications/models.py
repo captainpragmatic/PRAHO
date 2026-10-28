@@ -947,8 +947,8 @@ class EmailSuppression(models.Model):
                 )
 
     @classmethod
-    def is_suppressed(cls, email: str) -> bool:
-        """Check if an email is currently suppressed."""
+    def is_suppressed(cls, email: str, *, ignore_reasons: tuple[str, ...] = ()) -> bool:
+        """Check if an email is currently suppressed; a suppression for one of ignore_reasons does not count."""
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
         suppression = cls.objects.filter(email_hash=email_hash).first()
@@ -960,7 +960,7 @@ class EmailSuppression(models.Model):
             suppression.delete()
             return False
 
-        return True
+        return suppression.reason not in ignore_reasons
 
 
 # ===============================================================================

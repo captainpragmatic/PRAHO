@@ -881,6 +881,9 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
 
     try:
         with transaction.atomic():
+            # Locked and re-read: the owners are told what this write changes (and the old email).
+            customer = Customer.objects.select_for_update().get(pk=customer.pk)
+            contact_before = _contact_details(customer)
             # F02 fix: Build update_fields dynamically — only save fields actually provided.
             # Unconditionally saving all 4 fields triggered unnecessary audit signals and
             # could overwrite values with stale data from a prior serializer state.
@@ -901,6 +904,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
             if customer_update_fields:
                 # Include updated_at so the auto_now field is written to DB even with update_fields.
                 customer.save(update_fields=[*customer_update_fields, "updated_at"])
+                _tell_contact_changes(customer, contact_before)
 
             # F03 fix: Use ContactService.create_address() for atomic versioning.
             # The previous get_or_create + setattr loop bypassed version history and
@@ -961,6 +965,8 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 tax_fields["registration_number"] = validated_data["registration_number"]
 
             if tax_fields:
+                existing = CustomerTaxProfile.objects.select_for_update().filter(customer=customer).first()
+                tax_before = _tax_identity(existing) if existing is not None else None
                 # A new profile with only a CUI is not a VAT payer; the model default (True) would say so.
                 tax_profile, created = CustomerTaxProfile.objects.get_or_create(
                     customer=customer, defaults={"is_vat_payer": bool(tax_fields.get("vat_number")), **tax_fields}
@@ -970,6 +976,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                     for field, value in tax_fields.items():
                         setattr(tax_profile, field, value)
                     tax_profile.save(update_fields=[*tax_fields.keys(), "updated_at"])
+                _tell_tax_changes(customer, tax_profile, tax_before)
 
         logger.info(f"✅ [Billing Address API] Successfully updated billing address for customer {customer.id}")
 
@@ -1018,6 +1025,44 @@ def _check_self_action(user_id: int | str | None, target_user_id: int | str | No
             status=status.HTTP_400_BAD_REQUEST,
         )
     return None
+
+
+_CONTACT_FIELDS = ("name", "company_name", "primary_email", "primary_phone", "website", "industry")
+_TAX_IDENTITY_FIELDS = ("is_vat_payer", "cui", "vat_number", "registration_number", "cnp")
+
+
+def _contact_details(customer: Customer) -> dict[str, Any]:
+    return {field: getattr(customer, field) for field in _CONTACT_FIELDS}
+
+
+def _tax_identity(profile: CustomerTaxProfile) -> dict[str, Any]:
+    return {field: getattr(profile, field) for field in _TAX_IDENTITY_FIELDS}
+
+
+def _tell_contact_changes(customer: Customer, before: dict[str, Any]) -> None:
+    """Tell the owners which contact details this write changed, and the old address a new email replaced."""
+    changed = [field for field in _CONTACT_FIELDS if getattr(customer, field) != before[field]]
+    if changed:
+        notify_company_changed(
+            customer,
+            "company_contact_changed",
+            fields=[_field_label(Customer, field) for field in changed],
+            old_email=before["primary_email"] if "primary_email" in changed else "",
+        )
+
+
+def _tell_tax_changes(customer: Customer, profile: CustomerTaxProfile, before: dict[str, Any] | None) -> None:
+    """Tell the owners which legal or tax details this write changed (all it filled in, for a new profile)."""
+    if before is None:
+        changed = [field for field in _TAX_IDENTITY_FIELDS if getattr(profile, field)]
+    else:
+        changed = [field for field in _TAX_IDENTITY_FIELDS if getattr(profile, field) != before[field]]
+    if changed:
+        notify_company_changed(
+            customer,
+            "company_tax_changed",
+            fields=[_field_label(CustomerTaxProfile, field) for field in changed],
+        )
 
 
 def _field_label(model: type[Model], name: str) -> Any:
@@ -1110,6 +1155,9 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             CustomerMembership.objects.create(customer=customer, user=target_user, role=role)
+            notify_team_change(
+                customer, "team_member_added", actor_email=_actor_email(user_id), member=target_user, new_role=role
+            )
     except IntegrityError:
         return Response(
             {"success": False, "error": "User is already a member of this customer."},
@@ -1386,6 +1434,14 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
 
     membership.is_active = not membership.is_active
     membership.save(update_fields=["is_active", "updated_at"])
+    # Suspending a member takes them off the team, reactivating puts them back: told as either.
+    notify_team_change(
+        customer,
+        "team_member_added" if membership.is_active else "team_member_removed",
+        actor_email=_actor_email(user_id),
+        member=target_user,
+        new_role=membership.role,
+    )
     new_status = "activated" if membership.is_active else "suspended"
     logger.info(f"✅ [User Management API] Membership for {target_user.email} {new_status} for customer {customer.id}")
     return Response({"success": True, "is_active": membership.is_active, "message": f"User {new_status}."})
@@ -1413,37 +1469,33 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     if not membership or membership.role not in ("owner", "billing"):
         return _uniform_error_response()
 
-    updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
-    before = {field: getattr(customer, field) for field in updatable_fields}
     update_fields = []
-    for field in updatable_fields:
-        if field in data:
-            value = data[field]
-            if not isinstance(value, str):
-                return Response(
-                    {"success": False, "error": f"Field '{field}' must be a string."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if field == "primary_phone" and value.strip():
-                address = customer.get_billing_address()
-                try:
-                    value = normalize_phone(value, address.country if address else "")
-                except ValidationError as error:
-                    return Response({"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
-            setattr(customer, field, value.strip())
-            update_fields.append(field)
-
-    if update_fields:
-        changed = sorted(field for field in update_fields if getattr(customer, field) != before[field])
-        with transaction.atomic():
+    with transaction.atomic():
+        # Locked and re-read: the change the owners are told about is the one this write makes.
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+        before = _contact_details(customer)
+        for field in _CONTACT_FIELDS:
+            if field in data:
+                value = data[field]
+                if not isinstance(value, str):
+                    return Response(
+                        {"success": False, "error": f"Field '{field}' must be a string."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if field == "primary_phone" and value.strip():
+                    address = customer.get_billing_address()
+                    try:
+                        value = normalize_phone(value, address.country if address else "")
+                    except ValidationError as error:
+                        return Response(
+                            {"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST
+                        )
+                setattr(customer, field, value.strip())
+                update_fields.append(field)
+        if update_fields:
             customer.save(update_fields=[*update_fields, "updated_at"])
-            if changed:
-                notify_company_changed(
-                    customer,
-                    "company_contact_changed",
-                    fields=[_field_label(Customer, field) for field in changed],
-                    old_email=before["primary_email"] if "primary_email" in changed else "",
-                )
+            _tell_contact_changes(customer, before)
+    if update_fields:
         logger.info(f"✅ [Customer API] Updated fields {update_fields} for customer {customer.id}")
 
     return Response({"success": True, "message": "Customer updated."})
@@ -1485,8 +1537,9 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Val
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(
         customer=customer, defaults={"is_vat_payer": bool(str(data.get("vat_number") or "").strip())}
     )
-    tax_fields = (*tax_bool_fields, *tax_string_fields, "cnp")
-    before = {field: getattr(tax_profile, field) for field in tax_fields}
+    # Locked and re-read (the view runs in one transaction): owners are told what this write changes.
+    tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile.pk)
+    before = _tax_identity(tax_profile)
     update_fields = []
     for field in tax_bool_fields | tax_string_fields:
         if field in data:
@@ -1534,13 +1587,7 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Val
     if update_fields:
         with transaction.atomic():
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
-            changed = sorted(field for field in tax_fields if getattr(tax_profile, field) != before[field])
-            if changed:
-                notify_company_changed(
-                    customer,
-                    "company_tax_changed",
-                    fields=[_field_label(CustomerTaxProfile, field) for field in changed],
-                )
+            _tell_tax_changes(customer, tax_profile, before)
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
     if cnp is not None:

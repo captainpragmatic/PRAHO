@@ -21,6 +21,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from apps.notifications.models import EmailLog
+from apps.notifications.services import EmailService, EmailSuppressionService
 from apps.notifications.tasks import send_email_task
 from apps.users.forms import apply_password_change
 from apps.users.mfa import MFAService, TOTPService
@@ -125,6 +126,27 @@ class NoticesWrittenTests(TestCase):
 
     def test_an_inactive_account_gets_nothing(self) -> None:
         user = User.objects.create_user(email="gone@example.ro", password=PASSWORD, is_active=False)
+        MFAService.enable_totp(user, None)
+        self.assertEqual(_notices(), [])
+
+
+class NoticeSuppressionTests(TestCase):
+    """A marketing unsubscribe never silences what protects the account; a bounce still does."""
+
+    def test_an_unsubscribed_address_still_gets_its_security_notice(self) -> None:
+        user = User.objects.create_user(email="unsubscribed@example.ro", password=PASSWORD)
+        EmailSuppressionService.suppress_email(user.email, "unsubscribe")
+        MFAService.enable_totp(user, None)
+        self.assertEqual(_notices(), [(user.email, "2fa_enabled", "queued")])
+
+    def test_control_other_mail_to_an_unsubscribed_address_is_still_suppressed(self) -> None:
+        EmailSuppressionService.suppress_email("unsubscribed@example.ro", "unsubscribe")
+        result = EmailService.send_email(to="unsubscribed@example.ro", subject="News", body_text="Offers")
+        self.assertFalse(result.success)
+
+    def test_a_bounced_address_gets_no_notice(self) -> None:
+        user = User.objects.create_user(email="bounced@example.ro", password=PASSWORD)
+        EmailSuppressionService.suppress_email(user.email, "hard_bounce")
         MFAService.enable_totp(user, None)
         self.assertEqual(_notices(), [])
 

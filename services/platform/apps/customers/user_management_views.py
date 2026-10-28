@@ -23,7 +23,13 @@ from apps.common.validators import SecureInputValidator
 from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from apps.users.security_notices import notify_team_change
 from apps.users.services import SecureCustomerUserService
+
+
+def _staff_email(request: HttpRequest) -> str:
+    """The staff member a team notice names (every view here is staff_required)."""
+    return cast(User, request.user).email
 
 
 def _get_accessible_customer(request: HttpRequest, customer_id: int) -> Customer:
@@ -67,6 +73,9 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
         # Create membership. Atomic, so the erasure guard reads the customer under its lock.
         with transaction.atomic():
             CustomerMembership.objects.create(customer=customer, user=user, role=role)
+            notify_team_change(
+                customer, "team_member_added", actor_email=_staff_email(request), member=user, new_role=role
+            )
 
         messages.success(request, _("User '{}' added to customer with {} role.").format(user.email, role))
         return redirect("customers:detail", customer_id=customer.id)
@@ -132,6 +141,9 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
                     return redirect("customers:detail", customer_id=customer.id)
                 user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
                 CustomerMembership.objects.create(customer=customer, user=user, role=role)
+                notify_team_change(
+                    customer, "team_member_added", actor_email=_staff_email(request), member=user, new_role=role
+                )
         except IntegrityError:
             # Race: concurrent insert. Same generic message — don't disclose where it landed.
             messages.error(request, _("Cannot create a user with this email. Contact support if you need help."))
@@ -253,8 +265,17 @@ def change_user_role(request: HttpRequest, customer_id: int, membership_id: int)
             return redirect("customers:detail", customer_id=customer.id)
 
     old_role = membership.get_role_display()
+    old_role_key = membership.role
     membership.role = new_role
     membership.save()
+    notify_team_change(
+        customer,
+        "team_role_changed",
+        actor_email=_staff_email(request),
+        member=membership.user,
+        old_role=old_role_key,
+        new_role=new_role,
+    )
 
     messages.success(
         request,
@@ -339,7 +360,9 @@ def remove_user(request: HttpRequest, customer_id: int, membership_id: int) -> H
             return redirect("customers:detail", customer_id=customer.id)
 
     user_email = membership.user.email
+    removed = membership.user
     membership.delete()
+    notify_team_change(customer, "team_member_removed", actor_email=_staff_email(request), member=removed)
 
     messages.success(request, _("User '{}' removed from customer.").format(user_email))
     return redirect("customers:detail", customer_id=customer.id)

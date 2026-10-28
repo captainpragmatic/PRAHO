@@ -25,7 +25,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -194,12 +194,18 @@ class EmailSuppressionService:
     # Cache timeout for suppression lookups (5 minutes)
     CACHE_TIMEOUT = 300
 
+    # A person who unsubscribed from marketing still gets what protects their account (security
+    # notices); bounces, complaints and manual or invalid-address suppressions still apply to it.
+    ESSENTIAL_IGNORES: ClassVar[tuple[str, ...]] = ("unsubscribe",)
+
     @classmethod
-    def is_suppressed(cls, email: str) -> bool:
+    def is_suppressed(cls, email: str, *, essential: bool = False) -> bool:
         """
         Check if an email address is suppressed.
-        Uses cache with database fallback.
+        Uses cache with database fallback; an essential email reads the database, by reason.
         """
+        if essential:
+            return EmailSuppression.is_suppressed(email, ignore_reasons=cls.ESSENTIAL_IGNORES)
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         cache_key = f"{SUPPRESSION_CACHE_PREFIX}{email_hash}"
 
@@ -568,6 +574,7 @@ class EmailService:
         track_opens: bool = True,
         track_clicks: bool = True,
         async_send: bool = True,
+        essential: bool = False,
     ) -> EmailResult:
         """
         Send an email with full tracking and logging.
@@ -590,6 +597,8 @@ class EmailService:
             track_opens: Enable open tracking
             track_clicks: Enable click tracking
             async_send: Send asynchronously via Django-Q2
+            essential: Account-protection mail (security notices): a marketing unsubscribe does not
+                suppress it
 
         Returns:
             EmailResult with success status and message ID
@@ -607,7 +616,7 @@ class EmailService:
         # Check for suppressed addresses
         active_recipients = []
         for recipient in recipients:
-            if EmailSuppressionService.is_suppressed(recipient):
+            if EmailSuppressionService.is_suppressed(recipient, essential=essential):
                 logger.info(f"Skipping suppressed email: {recipient[:3]}***")
             else:
                 active_recipients.append(recipient)
