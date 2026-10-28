@@ -126,7 +126,7 @@ def discard(user_pk: int) -> None:
     PendingTOTPEnrolment.objects.filter(user_id=user_pk).delete()
 
 
-EnrolmentStatus = Literal["enabled", "incorrect", "expired", "already_enabled"]
+EnrolmentStatus = Literal["enabled", "incorrect", "expired", "already_enabled", "locked"]
 
 
 @dataclass(frozen=True)
@@ -164,9 +164,11 @@ def complete_enrolment(
         if row is None or row.expires_at <= timezone.now():
             return EnrolmentResult("expired")
         secret = row.secret()
-        if not check_password_locked(locked_user, password) or not TOTPService.verify_enrolment_code(
-            locked_user, secret, code
-        ):
+        if locked_user.is_account_locked():  # answered before the password, so it says nothing about it
+            return EnrolmentResult("locked")
+        if not check_password_locked(
+            locked_user, password, source="mfa_enrolment"
+        ) or not TOTPService.verify_enrolment_code(locked_user, secret, code):
             return EnrolmentResult("incorrect")
         proof_passed(locked_user)
         _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret, origin=origin)

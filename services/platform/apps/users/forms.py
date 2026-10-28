@@ -434,8 +434,17 @@ class PasswordAuthorityChanged(Exception):  # noqa: N818  # names the condition,
     """What allowed this password write (the old password, a reset link) no longer holds on the row."""
 
 
+class AccountLockedDuringChange(PasswordAuthorityChanged):
+    """The account was locked after the form checked the old password: the write is refused."""
+
+
 def apply_password_change(
-    user_pk: int, new_password: str, *, still_authorised: Callable[[User], bool], clear_failed_attempts: bool = False
+    user_pk: int,
+    new_password: str,
+    *,
+    still_authorised: Callable[[User], bool],
+    refuse_locked: bool = False,
+    clear_failed_attempts: bool = False,
 ) -> User:
     """Write a new password under the row lock, after re-checking what authorised it.
 
@@ -445,8 +454,10 @@ def apply_password_change(
     authority it had already lost. Here the row is locked, the authority re-checked on it, the
     policy re-run against it, and only the password column written. A pending authenticator
     setup is dropped (ADR-0058). The account is returned as committed, so the caller binds the
-    session to the new credentials. clear_failed_attempts clears the lockout count on the locked
-    row, in this transaction, so a failure recorded after the commit is never overwritten.
+    session to the new credentials. refuse_locked refuses an account locked by now, after the
+    caller's own check, with AccountLockedDuringChange. clear_failed_attempts clears the lockout
+    count on the locked row, in this transaction, so a failure recorded after the commit is never
+    overwritten.
     """
     from django.contrib.auth.password_validation import validate_password  # noqa: PLC0415
     from django.db import transaction  # noqa: PLC0415
@@ -456,6 +467,8 @@ def apply_password_change(
 
     with transaction.atomic():
         locked = User.objects.select_for_update().get(pk=user_pk)
+        if refuse_locked and locked.is_account_locked():
+            raise AccountLockedDuringChange
         if not still_authorised(locked):
             raise PasswordAuthorityChanged
         validate_password(new_password, locked)
@@ -468,6 +481,10 @@ def apply_password_change(
         return User.objects.select_related("credential_version").get(pk=user_pk)
 
 
+# The staff page's own wording for a locked account; the lockout outlasts the request rate limit.
+LOCKED_PASSWORD_CHANGE = _("Too many password change attempts. Please wait before trying again.")
+
+
 class LockedPasswordChangeForm(PasswordChangeForm):
     """Django's change form, with the write done by apply_password_change.
 
@@ -478,7 +495,9 @@ class LockedPasswordChangeForm(PasswordChangeForm):
 
     def clean_old_password(self) -> str:
         old_password = cast(str, self.cleaned_data["old_password"])
-        if not check_password_locked(self.user, old_password):
+        if self.user.is_account_locked():  # answered before the password, so it says nothing about it
+            raise ValidationError(LOCKED_PASSWORD_CHANGE, code="account_locked")
+        if not check_password_locked(self.user, old_password, source="staff_password_change"):
             raise ValidationError(self.error_messages["password_incorrect"], code="password_incorrect")
         return old_password
 
@@ -491,9 +510,8 @@ class LockedPasswordChangeForm(PasswordChangeForm):
             self.cleaned_data["new_password1"],
             # Re-checked on the locked row: a lock or a password change landing after the form's
             # own check refuses the write. Compared without upgrading the hash, as the form did.
-            still_authorised=lambda locked: (
-                not locked.is_account_locked() and password_matches(old_password, locked.password)
-            ),
+            still_authorised=lambda locked: password_matches(old_password, locked.password),
+            refuse_locked=True,
             clear_failed_attempts=True,
         )
         self.user = written

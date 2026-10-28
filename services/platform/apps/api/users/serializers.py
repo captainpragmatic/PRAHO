@@ -152,7 +152,9 @@ class MFADisableSerializer(serializers.Serializer):
         # never tells a right password from a wrong one. The code is checked only after the
         # password, so a backup code offered with a wrong password is not spent.
         incorrect = _("The password or the code is incorrect.")
-        if not user.two_factor_enabled or not check_password_locked(user, data["password"]):
+        if not user.two_factor_enabled or not check_password_locked(
+            user, data["password"], source=self.context.get("check", "mfa_disable")
+        ):
             raise serializers.ValidationError(incorrect)
 
         if not MFAService.verify_mfa_code(user, data["token"], self.context.get("request"))["success"]:

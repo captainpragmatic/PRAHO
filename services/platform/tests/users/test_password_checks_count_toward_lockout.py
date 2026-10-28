@@ -23,6 +23,7 @@ from django.db.models import F
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.customers.models import Customer
 from apps.users import forms as forms_module
 from apps.users.forms import LockedPasswordChangeForm
@@ -33,6 +34,9 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 PASSWORD = "Original-secure123!"  # test fixture, not a credential
 WRONG = "Not-the-password-1!"  # test fixture, not a credential
 NEW_PASSWORD = "Another-secure123!"  # test fixture, not a credential
+LOCKED_STAFF_CHECK = "Too many attempts. Please wait an hour and try again."
+LOCKED_PASSWORD_CHANGE = "Too many password change attempts. Please wait before trying again."
+PATHS = ("mfa/verify/", "mfa/disable/", "mfa/regenerate-backup-codes/", "change-password/")
 OUTDATED_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher", "django.contrib.auth.hashers.PBKDF2PasswordHasher"]
 
 
@@ -75,6 +79,20 @@ class PortalPasswordChecksTests(HMACTestMixin, TestCase):
             return self.client.put(path, payload, content_type="application/json", **hmac_headers("PUT", path, payload))
         return self.portal_post(path, body)
 
+    def member_on(self, path: str, label: str) -> tuple[User, Any]:
+        """A member set up for the path, and a function that tries a password on it with a valid code."""
+        user, secret = self.member(f"{label}-{path.replace('/', '-')}@example.com", two_factor=path != "mfa/verify/")
+        if path == "mfa/verify/":
+            secret = self.pending_secret(user)
+
+        def attempt(password: str) -> Any:
+            code = pyotp.TOTP(secret).now()
+            if path == "change-password/":
+                return self.call(user, path, current_password=password, new_password=NEW_PASSWORD, token=code)
+            return self.call(user, path, password=password, token=code)
+
+        return user, attempt
+
     def pending_secret(self, user: User) -> str:
         response = self.call(user, "mfa/setup/")
         self.assertEqual(response.status_code, 200, response.content)
@@ -82,20 +100,9 @@ class PortalPasswordChecksTests(HMACTestMixin, TestCase):
 
     def test_wrong_passwords_lock_the_account_on_every_path(self) -> None:
         threshold = settings.ACCOUNT_LOCKOUT_THRESHOLD
-        for path in ("mfa/verify/", "mfa/disable/", "mfa/regenerate-backup-codes/", "change-password/"):
+        for path in PATHS:
             with self.subTest(path=path):
-                user, secret = self.member(
-                    f"lock-{path.replace('/', '-')}@example.com", two_factor=path != "mfa/verify/"
-                )
-                if path == "mfa/verify/":
-                    secret = self.pending_secret(user)
-
-                def attempt(password: str, user: User = user, secret: str = secret, path: str = path) -> Any:
-                    code = pyotp.TOTP(secret).now()
-                    if path == "change-password/":
-                        return self.call(user, path, current_password=password, new_password=NEW_PASSWORD, token=code)
-                    return self.call(user, path, password=password, token=code)
-
+                user, attempt = self.member_on(path, "lock")
                 for _ in range(threshold):
                     self.assertEqual(attempt(WRONG).status_code, 400)
                 user.refresh_from_db()
@@ -103,15 +110,29 @@ class PortalPasswordChecksTests(HMACTestMixin, TestCase):
                 self.assertTrue(user.is_account_locked())
 
                 before = (user.password, user.two_factor_enabled, list(user.backup_tokens))
-                self.assertNotEqual(attempt(PASSWORD).status_code, 200)  # the right password, while locked
+                refused = attempt(PASSWORD)  # the right password, while locked: said so, and not counted
+                self.assertEqual(refused.json().get("code"), "account_locked")
                 user.refresh_from_db()
                 self.assertEqual((user.password, user.two_factor_enabled, list(user.backup_tokens)), before)
+                self.assertEqual(user.failed_login_attempts, threshold)
 
-    def test_disabling_2fa_that_is_off_answers_alike_for_the_right_and_a_wrong_password(self) -> None:
+    def test_a_lockout_records_which_check_caused_it(self) -> None:
+        sources = dict(zip(PATHS, ("mfa_enrolment", "mfa_disable", "backup_codes", "password_change"), strict=True))
+        for path, source in sources.items():
+            with self.subTest(path=path):
+                user, attempt = self.member_on(path, "source")
+                for _ in range(settings.ACCOUNT_LOCKOUT_THRESHOLD):
+                    attempt(WRONG)
+                self.assertEqual(AuditEvent.objects.get(action="account_locked", user=user).metadata["source"], source)
+
+    def test_2fa_changes_without_2fa_say_so_alike_for_the_right_and_a_wrong_password(self) -> None:
         user, _secret = self.member("no-2fa@example.com", two_factor=False)
-        right = self.call(user, "mfa/disable/", password=PASSWORD, token="000000")
-        wrong = self.call(user, "mfa/disable/", password=WRONG, token="000000")
-        self.assertEqual((right.status_code, right.json()), (wrong.status_code, wrong.json()))
+        for path in ("mfa/disable/", "mfa/regenerate-backup-codes/"):
+            with self.subTest(path=path):
+                right = self.call(user, path, password=PASSWORD, token="000000")
+                wrong = self.call(user, path, password=WRONG, token="000000")
+                self.assertEqual((right.status_code, right.json()), (wrong.status_code, wrong.json()))
+                self.assertEqual(right.json().get("code"), "mfa_not_enabled")
         user.refresh_from_db()
         self.assertEqual(user.failed_login_attempts, 0)  # the password is never checked, so never counted
 
@@ -140,20 +161,9 @@ class PortalPasswordChecksTests(HMACTestMixin, TestCase):
                 self.assertEqual(user.get_session_auth_hash(), session_hash)
 
     def test_a_complete_proof_resets_the_count(self) -> None:
-        for path in ("mfa/verify/", "mfa/disable/", "mfa/regenerate-backup-codes/", "change-password/"):
+        for path in PATHS:
             with self.subTest(path=path):
-                user, secret = self.member(
-                    f"reset-{path.replace('/', '-')}@example.com", two_factor=path != "mfa/verify/"
-                )
-                if path == "mfa/verify/":
-                    secret = self.pending_secret(user)
-
-                def attempt(password: str, user: User = user, secret: str = secret, path: str = path) -> Any:
-                    code = pyotp.TOTP(secret).now()
-                    if path == "change-password/":
-                        return self.call(user, path, current_password=password, new_password=NEW_PASSWORD, token=code)
-                    return self.call(user, path, password=password, token=code)
-
+                user, attempt = self.member_on(path, "reset")
                 for _ in range(2):
                     attempt(WRONG)
                 user.refresh_from_db()
@@ -214,6 +224,15 @@ class StaffPagePasswordChecksTests(TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password(PASSWORD))
 
+    def test_a_locked_account_is_told_so_on_the_staff_pages(self) -> None:
+        User.objects.filter(pk=self.user.pk).update(
+            failed_login_attempts=5, account_locked_until=timezone.now() + timedelta(minutes=5)
+        )
+        self.assertContains(self.regenerate(PASSWORD), LOCKED_STAFF_CHECK)
+        self.assertContains(self.change_password(PASSWORD), LOCKED_PASSWORD_CHANGE)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.failed_login_attempts, 5)  # said so, and not counted
+
     def test_a_lock_landing_after_the_old_password_was_checked_refuses_the_change(self) -> None:
         real_clean = LockedPasswordChangeForm.clean_old_password
 
@@ -223,7 +242,9 @@ class StaffPagePasswordChecksTests(TestCase):
             return str(value)
 
         with patch.object(LockedPasswordChangeForm, "clean_old_password", checked_then_locked):
-            self.change_password(PASSWORD)
+            response = self.change_password(PASSWORD)
+        self.assertContains(response, LOCKED_PASSWORD_CHANGE)
+        self.assertNotContains(response, "changed while this form was open")
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password(PASSWORD))
         self.assertTrue(self.user.is_account_locked())
