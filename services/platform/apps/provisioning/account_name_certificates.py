@@ -893,7 +893,7 @@ def _name_under_operation(hostname: AccountHostname) -> bool:
     from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
     account = hostname.account
-    return account is not None and account_has_active_operation(account, allow_waiting_mail=True)
+    return account is not None and account_has_active_operation(account)
 
 
 def _serving_servers(hostname: AccountHostname) -> set[UUID]:

@@ -341,37 +341,15 @@ _EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain")
 ACCOUNT_BUSY_REFUSAL = "Account already has another active operation"
 
 
-def account_has_active_operation(
-    account: VirtualminAccount,
-    *,
-    ignore_job_id: uuid.UUID | None = None,
-    ignore_mail_operation_id: uuid.UUID | None = None,
-    allow_waiting_mail: bool = False,
-) -> bool:
-    """Two-sided admission: moves, backups, restores, deletes and mail work mutually exclude.
+def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: uuid.UUID | None = None) -> bool:
+    """Two-sided admission: migrations, backups, restores and deletes mutually exclude.
 
     ``ignore_job_id`` names the job asking: a retried job is itself the account's
-    operation and must not refuse itself. The mail worker may ignore only its own UUID.
-    Name/certificate prerequisites can allow queued or DNS-waiting mail work; running
-    or uncertain mail mutation still excludes them. Destructive admission never uses
-    that allowance.
+    operation and must not refuse itself.
     """
-    from .virtualmin_mail_models import (  # noqa: PLC0415  # Same-app model registry cycle.
-        MAIL_NATIVE_OPERATION_STATUSES,
-        MAIL_OPEN_OPERATION_STATUSES,
-        VirtualminMailOperation,
-    )
     from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
     if account_has_active_migration(account):
-        return True
-    mail = VirtualminMailOperation.objects.filter(
-        configuration__account_id=account.pk,
-        status__in=MAIL_NATIVE_OPERATION_STATUSES if allow_waiting_mail else MAIL_OPEN_OPERATION_STATUSES,
-    )
-    if ignore_mail_operation_id is not None:
-        mail = mail.exclude(pk=ignore_mail_operation_id)
-    if mail.exists():
         return True
     active = VirtualminProvisioningJob.objects.filter(
         account_id=account.pk,

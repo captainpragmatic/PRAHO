@@ -118,7 +118,7 @@ def sync_account_name(hostname_id: str) -> dict[str, str]:
     hostname = AccountHostname.objects.select_related("account").filter(pk=hostname_id, retired_at__isnull=True).first()
     if hostname is None or hostname.account is None:
         return {"outcome": "not_ready"}
-    if account_has_active_operation(hostname.account, allow_waiting_mail=True):
+    if account_has_active_operation(hostname.account):
         return {"outcome": "migration_locked"}
     synced = service.sync_account_hostname(hostname, skip_locked=True)
     if synced.is_err():
@@ -296,7 +296,7 @@ def _sweep_one(pk: UUID) -> str:
             return "skipped"
         AccountHostname.objects.filter(pk=hostname.pk).update(last_swept_at=timezone.now())
         account = hostname.account
-        busy = account is None or account_has_active_operation(account, allow_waiting_mail=True)
+        busy = account is None or account_has_active_operation(account)
     if account is None or busy:
         return "skipped"
     # A name never reconciled, or one whose certificate is no longer on its node (a restore that recreated

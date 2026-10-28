@@ -396,7 +396,7 @@ def _admission_refusal(account: VirtualminAccount) -> Err[str] | None:
     """None when a caller owning no operation may change the node now; the refusal otherwise."""
     from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
 
-    if account_has_active_operation(account, allow_waiting_mail=True):
+    if account_has_active_operation(account):
         return Err("An operation owns the account; its name is left to the sweep", retriability=Retriability.UNKNOWN)
     if account.status not in SYNCABLE_STATUSES:
         return Err(f"The account is {account.status}", retriability=Retriability.NOT_RETRIABLE)
@@ -509,21 +509,16 @@ def _dns_gateway() -> Any:
     return get_dns_gateway(DNS_PROVIDER, config.account_zone_api_token())
 
 
-def _publication_operation_refusal(account: VirtualminAccount) -> str | None:
-    """Recheck operation ownership in each publication phase under the name lock."""
-    from .virtualmin_mail_models import (  # noqa: PLC0415  # Publication repeats native-work admission under the name lock.
-        MAIL_NATIVE_OPERATION_STATUSES,
-        VirtualminMailOperation,
-    )
+def _syncable(hostname: AccountHostname) -> str | None:
+    """Why the name is not published now, or None when it may be."""
+    account = hostname.account
+    if account is None or hostname.retired_at is not None:
+        return "retired"
     from .virtualmin_migration_models import (  # noqa: PLC0415  # Keep publication and admission under one name lock.
         _TERMINAL_STATUSES,
         VirtualminMigration,
     )
 
-    if VirtualminMailOperation.objects.filter(
-        configuration__account_id=account.pk, status__in=MAIL_NATIVE_OPERATION_STATUSES
-    ).exists():
-        return "mail_operation_locked"
     # A legacy admission saw no published name. Both publication phases repeat this
     # check under the same name lock admission holds until its contract is durable.
     # Cutover/recovery own their DNS publication and must remain able to converge.
@@ -535,17 +530,6 @@ def _publication_operation_refusal(account: VirtualminAccount) -> str | None:
         .exists()
     ):
         return "migration_locked"
-    return None
-
-
-def _syncable(hostname: AccountHostname) -> str | None:
-    """Why the name is not published now, or None when it may be."""
-    account = hostname.account
-    if account is None or hostname.retired_at is not None:
-        return "retired"
-    refusal = _publication_operation_refusal(account)
-    if refusal is not None:
-        return refusal
     if account.status not in SYNCABLE_STATUSES or account.provisioned_at is None:
         return "account_not_ready"
     server = hostname.target_server

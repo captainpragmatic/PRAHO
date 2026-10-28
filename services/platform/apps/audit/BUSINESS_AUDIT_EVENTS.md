@@ -584,7 +584,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `backup_domain_success` | low | no | no | provisioning |
 | `cloud_provider_created` | low | no | no | infrastructure |
 | `cloud_provider_updated` | low | no | no | infrastructure |
-| `configuration_changed` | high | yes | no | billing, domains, provisioning, settings |
+| `configuration_changed` | high | yes | no | billing, domains, settings |
 | `drift_accepted` | low | no | no | infrastructure |
 | `drift_auto_resolved` | low | no | no | infrastructure |
 | `drift_detected` | low | no | no | infrastructure |

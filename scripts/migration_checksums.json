@@ -105,7 +105,6 @@
     "services/platform/apps/provisioning/migrations/0016_alter_virtualminmigration_contract_and_more.py": "f7ac6a15ccf54ec65d275f6f3ae15be8f617f6eea64202d6c48a7493d25588e9",
     "services/platform/apps/provisioning/migrations/0017_merge_ssh_cutover.py": "13a60f985e95e953c51f4483c081b11da3e8f7e34eb401638ef14e338d636190",
     "services/platform/apps/provisioning/migrations/0018_hosted_domain_dns_status.py": "0acce720e209c84b120a3faade347bbea5bdf9c0330a3be1c42cd9abd48646e4",
-    "services/platform/apps/provisioning/migrations/0019_virtualminmailconfiguration_virtualminmailoperation_and_more.py": "81c38153098f003776c37b05165256ba5bbfa5b348b1dc17942f858088c0fa2c",
     "services/platform/apps/settings/migrations/0001_initial.py": "871979fab3cd12b6043a52acee99bef62a7007e2bf90ed6430411d6082cb2f24",
     "services/platform/apps/settings/migrations/0002_seed_selling_currency.py": "77f062e980f5edc970631b944dd0f0561c9fa059611c3f11f7c803c53a6bc16a",
     "services/platform/apps/settings/migrations/0003_setting_activation.py": "495c17809a3fb388e088f7c03cf4fc80508d38fde6040b963c92496dfe6d034c",

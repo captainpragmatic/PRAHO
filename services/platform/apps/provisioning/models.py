@@ -14,7 +14,6 @@ from .hosted_domain_dns_models import HostedDomainDnsStatus
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
 from .service_request_models import ServiceRequest
-from .virtualmin_mail_models import VirtualminMailConfiguration, VirtualminMailOperation
 from .virtualmin_migration_models import MigrationBridge, NodeDrain, VirtualminMigration
 from .virtualmin_models import (
     VirtualminAccount,
@@ -45,8 +44,6 @@ __all__ = [
     # Virtualmin models
     "VirtualminAccount",
     "VirtualminDriftRecord",
-    "VirtualminMailConfiguration",
-    "VirtualminMailOperation",
     "VirtualminMigration",
     "VirtualminProvisioningJob",
     "VirtualminServer",
