@@ -894,6 +894,9 @@ class EmailSuppression(models.Model):
     def get_decrypted_email(self) -> str:
         return decrypt_model_secret(self, "email_encrypted", self.email_encrypted)
 
+    # Reasons that keep an address blocked when a marketing unsubscribe arrives for it.
+    OUTRANKS_UNSUBSCRIBE: ClassVar[frozenset[str]] = frozenset({"hard_bounce", "complaint", "manual", "invalid"})
+
     @classmethod
     def suppress(
         cls,
@@ -923,6 +926,15 @@ class EmailSuppression(models.Model):
             # Try to get existing suppression with row lock
             existing = cls.objects.select_for_update().filter(email_hash=email_hash).first()
 
+            # A marketing unsubscribe never replaces a bounce, a complaint or a manual block that still
+            # holds: essential mail (security notices) ignores an unsubscribe, and must keep honouring those.
+            if (
+                existing
+                and reason == "unsubscribe"
+                and existing.reason in cls.OUTRANKS_UNSUBSCRIBE
+                and (existing.expires_at is None or existing.expires_at > now)
+            ):
+                return existing
             if existing:
                 # Update existing - increment bounce count atomically
                 existing.reason = reason

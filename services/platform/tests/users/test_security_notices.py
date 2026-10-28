@@ -144,6 +144,13 @@ class NoticeSuppressionTests(TestCase):
         result = EmailService.send_email(to="unsubscribed@example.ro", subject="News", body_text="Offers")
         self.assertFalse(result.success)
 
+    def test_an_unsubscribe_never_replaces_a_bounce(self) -> None:
+        user = User.objects.create_user(email="bounced-then-unsubscribed@example.ro", password=PASSWORD)
+        EmailSuppressionService.suppress_email(user.email, "hard_bounce")
+        EmailSuppressionService.suppress_email(user.email, "unsubscribe")  # an old marketing link, used later
+        MFAService.enable_totp(user, None)
+        self.assertEqual(_notices(), [])
+
     def test_a_bounced_address_gets_no_notice(self) -> None:
         user = User.objects.create_user(email="bounced@example.ro", password=PASSWORD)
         EmailSuppressionService.suppress_email(user.email, "hard_bounce")

@@ -16,6 +16,7 @@ from unittest.mock import patch
 from django.core import mail
 from django.db import connection
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import translation
 
@@ -154,6 +155,22 @@ class CompanySecurityNoticeTests(HMACTestMixin, TestCase):
             notices("company_contact_changed"), {self.owner.email, self.co_owner.email, "office@meanwhile.example"}
         )
 
+    def test_a_role_change_and_its_notice_commit_together(self) -> None:
+        with (
+            patch("apps.api.customers.views.notify_team_change", side_effect=RuntimeError("interrupted")),
+            self.assertRaises(RuntimeError),
+        ):
+            self.portal_post(
+                "/api/customers/users/role/",
+                {
+                    "customer_id": self.customer.pk,
+                    "user_id": self.owner.pk,
+                    "target_user_id": self.member.pk,
+                    "new_role": "billing",
+                },
+            )
+        self.assertEqual(CustomerMembership.objects.get(customer=self.customer, user=self.member).role, "tech")
+
     def test_a_company_name_too_long_for_a_subject_still_sends_the_notice(self) -> None:
         Customer.objects.filter(pk=self.customer.pk).update(name="N" * 200)
         self.call("users/role/", target_user_id=self.member.pk, new_role="billing")
@@ -171,6 +188,16 @@ class StaffTeamNoticeTests(TestCase):
         )
         staff = User.objects.create_user(email="staff@praho.example", password=PASSWORD, staff_role="admin")
         self.client.force_login(staff)
+
+    def test_a_staff_role_change_and_its_notice_commit_together(self) -> None:
+        url = reverse("customers:change_user_role", args=[self.customer.pk, self.membership.pk])
+        with (
+            patch("apps.customers.user_management_views.notify_team_change", side_effect=RuntimeError("interrupted")),
+            self.assertRaises(RuntimeError),
+        ):
+            self.client.post(url, {"role": "billing"})
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.role, "tech")
 
     def test_staff_team_changes_are_told_to_the_owners(self) -> None:
         joiner = User.objects.create_user(email="joiner@staffed.example", password=PASSWORD)
@@ -201,6 +228,25 @@ class ExportNoticeCommitTests(HMACTestMixin, TransactionTestCase):
 @skipUnless(connection.vendor == "postgresql", "an aborted transaction is PostgreSQL's")
 class NoticeWriteIsolationTests(HMACTestMixin, TestCase):
     """A notice whose write fails in the database leaves the change's own transaction usable."""
+
+    def test_the_tax_update_locks_the_customer_before_its_profile(self) -> None:
+        customer = Customer.objects.create(name="Ordered Co", customer_type="company", status="active")
+        owner = User.objects.create_user(email="owner@ordered.example", password=PASSWORD)
+        CustomerMembership.objects.create(customer=customer, user=owner, role="owner", is_active=True)
+        CustomerTaxProfile.objects.create(customer=customer)
+        with (
+            override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE),
+            CaptureQueriesContext(connection) as queries,
+        ):
+            response = self.portal_post(
+                "/api/customers/tax-profile/",
+                {"customer_id": customer.pk, "user_id": owner.pk, "registration_number": "J40/9/2022"},
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        locks = [q["sql"] for q in queries.captured_queries if " FOR " in q["sql"] and "UPDATE" in q["sql"]]
+        customer_lock = next(i for i, sql in enumerate(locks) if "customers" in sql and "FOR NO KEY UPDATE" in sql)
+        profile_lock = next(i for i, sql in enumerate(locks) if "tax_profile" in sql)
+        self.assertLess(customer_lock, profile_lock)
 
     def test_a_failed_notice_write_does_not_abort_the_change(self) -> None:
         customer = Customer.objects.create(name="Isolated Co", customer_type="company", status="active")
