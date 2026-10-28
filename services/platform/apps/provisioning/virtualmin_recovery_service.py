@@ -57,6 +57,11 @@ _MANIFEST_KEYS = frozenset(
 )
 
 
+# Hosted-mail recovery is not supported yet: the post-commit policy step refuses mail, so a mail
+# domain must be refused while the source still owns the account.
+MAIL_RECOVERY_REFUSAL = "Mail-enabled domains cannot be recovered until hosted-mail recovery is supported"
+
+
 def _complete_archive(account: VirtualminAccount, archive: dict[str, Any]) -> str | None:
     if str(archive.get("praho_service_id")) != str(account.service_id) or archive.get("domain") != account.domain:
         return "The backup belongs to another account or domain"
@@ -64,6 +69,9 @@ def _complete_archive(account: VirtualminAccount, archive: dict[str, Any]) -> st
         return "Recovery requires a completed backup of every component"
     if not _BACKUP_ID.fullmatch(str(archive.get("backup_id", ""))):
         return "The backup has an invalid identity"
+    features = archive.get("domain_features")
+    if isinstance(features, list) and "mail" in features:
+        return MAIL_RECOVERY_REFUSAL
     return None
 
 
@@ -252,11 +260,13 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         target = self._domain(migration.target_server, migration.account.domain)
         if target["username"] != migration.account.virtualmin_username or target["enabled"] is not False:
             raise ValueError("The recovered domain is not verifiably owned and disabled")
+        restored = set(str(listing_attribute(target["attributes"], "Features") or "").split())
         features = migration.barrier_state.get("features")
-        if isinstance(features, list) and set(
-            str(listing_attribute(target["attributes"], "Features") or "").split()
-        ) != set(features):
+        if isinstance(features, list) and restored != set(features):
             raise ValueError("The recovered features differ from the selected backup")
+        # An archive without a recorded feature list is judged by what was actually restored
+        if "mail" in restored:
+            raise ValueError(MAIL_RECOVERY_REFUSAL)
         # Native restore replaces the placeholder's limits with those in the older archive.
         # Billing's current limits take effect before this replacement can be activated.
         quotas = modify_quota_parameters(migration.account.disk_quota_mb, migration.account.bandwidth_quota_mb)
