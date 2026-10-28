@@ -464,7 +464,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 if (!canSubmit) {
-                    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please complete your company profile information before creating the order." as profile_incomplete_msg %}
                     showToast('error', '{{ profile_incomplete_msg|escapejs }}');
                     return false;
@@ -486,7 +485,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (selectedMethod === 'bank_transfer') {
                     actionUrl = "{% url 'orders:create_order' %}";
                 } else {
-                    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please select a payment method" as select_payment_msg %}
                     showToast('error', '{{ select_payment_msg|escapejs }}');
                     if (submitButton) submitButton.disabled = false;
@@ -502,7 +500,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error('[Checkout] Submission error:', error);
-                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred. Please try again." as checkout_error_msg %}
                 showToast('error', '{{ checkout_error_msg|escapejs }}');
                 if (submitButton) submitButton.disabled = false;

@@ -57,12 +57,10 @@
   </div>
   {% elif proforma.is_expired %}
     {% trans "Proforma Expired" as alert_title %}
-    {# nosemgrep: template-blocktranslate-no-escape — translated text is printed through force_escape (Django marks translated template literals safe); the date it wraps contains no markup characters #}
     {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}This proforma expired on {{ date }}. It can no longer be processed.{% endblocktrans %}
     {% alert alert_msg|force_escape variant="danger" title=alert_title|force_escape css_class="mb-6" %}
   {% else %}
     {% trans "Proforma Valid" as alert_title %}
-    {# nosemgrep: template-blocktranslate-no-escape — translated text is printed through force_escape (Django marks translated template literals safe); the date it wraps contains no markup characters #}
     {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}Valid until {{ date }}. Please contact us to proceed with this quote.{% endblocktrans %}
     {% alert alert_msg|force_escape variant="success" title=alert_title|force_escape css_class="mb-6" %}
   {% endif %}

@@ -177,7 +177,6 @@
 
     if (!title || !description) {
       e.preventDefault();
-      {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please fill in both title and description fields." as fill_both_msg %}
       const errorDiv = document.getElementById('form-error');
       const errorMsg = document.getElementById('form-error-message');

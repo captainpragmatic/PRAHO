@@ -127,7 +127,6 @@
         {% trans 'Age' as st3_label %}
         {% if service.service_age_days != None %}
           {% with days=service.service_age_days %}
-            {# nosemgrep: template-blocktranslate-no-escape — translated text is printed through force_escape (Django marks translated template literals safe); it wraps an integer #}
             {% blocktrans count days=days asvar st3_age_val %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
             {% stat_tile st3_label|force_escape st3_age_val|force_escape icon="clock" variant="info" %}
           {% endwith %}
@@ -190,7 +189,6 @@
                       <span class="text-white">
                         {% if service.service_age_days != None %}
                           {% with days=service.service_age_days %}
-                            {# nosemgrep: template-blocktranslate-no-escape — translated text is printed through force_escape (Django marks translated template literals safe); it wraps an integer #}
                             {% blocktrans count days=days asvar uptime_text %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}{{ uptime_text|force_escape }}
                           {% endwith %}
                         {% else %}
@@ -650,7 +648,6 @@
                       <span class="text-white">
                         {% if service.service_age_days != None %}
                           {% with days=service.service_age_days %}
-                            {# nosemgrep: template-blocktranslate-no-escape — translated text is printed through force_escape (Django marks translated template literals safe); it wraps an integer #}
                             {% blocktrans count days=days asvar uptime_text %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}{{ uptime_text|force_escape }}
                           {% endwith %}
                         {% else %}
