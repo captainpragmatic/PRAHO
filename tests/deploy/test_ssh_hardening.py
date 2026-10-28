@@ -223,3 +223,27 @@ def test_service_startup_cannot_override_verified_config(override: dict[str, str
     validator.validate_startup(properties, 'SSHD_OPTS = ""\n')
     with pytest.raises(ValueError, match="custom SSH"):
         validator.validate_startup({**properties, **override}, options)
+
+
+def test_stale_sources_are_the_ssh_rules_the_allowlist_no_longer_names() -> None:
+    added = "\n".join([
+        "Added user rules (see 'ufw status' for running firewall):",
+        "ufw allow 80/tcp",
+        "ufw allow 9876/tcp",
+        "ufw allow from 192.0.2.10 to any port 9876 proto tcp",
+        "ufw allow from 198.51.100.0/24 to any port 9876 proto tcp",
+        "ufw allow from 2001:db8::/64 to any port 9876 proto tcp",
+        "ufw allow from 203.0.113.9 to any port 9876 proto tcp",
+        "ufw allow from 203.0.113.9 to any port 22 proto tcp",
+        "ufw allow from 203.0.113.20 to any port 9876 proto tcp comment 'old office'",
+        "ufw allow from 203.0.113.21 to any port 9876",
+        "ufw allow from any to any port 9876 proto tcp",
+    ])
+    allowed = ["192.0.2.10/32", "2001:db8::/64"]
+    assert load_helper("stale_sources").stale_sources(added, 9876, allowed) == [
+        {"source": "198.51.100.0/24", "proto": "tcp"},
+        {"source": "203.0.113.9", "proto": "tcp"},
+        {"source": "203.0.113.20", "proto": "tcp"},
+        {"source": "203.0.113.21", "proto": "any"},
+        {"source": "any", "proto": "tcp"},
+    ]
