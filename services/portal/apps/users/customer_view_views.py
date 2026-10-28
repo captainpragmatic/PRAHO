@@ -98,7 +98,9 @@ def redeem(request: HttpRequest) -> HttpResponse:
             _client_ip_is_distinguishable()
             and counters.increment(f"customer-view-redeem:{client_ip}", 60) > REDEEM_LIMIT
         ):
-            return _answer(request, 429, "Too many attempts", _("Too many attempts. Wait a minute and try again."))
+            limited = _answer(request, 429, "Too many attempts", _("Too many attempts. Wait a minute and try again."))
+            limited["Retry-After"] = "60"
+            return limited
         # Unbound: the code is exchanged for itself, never as the session this browser held before.
         with request_context.bound(None, None):
             data = api_client.redeem_customer_view(request.POST["code"], client_ip)

@@ -256,7 +256,9 @@ def consume(code: object) -> PortalSession:
             staff, target, customer = _lock_authority(candidate.staff_id, candidate.target_id, candidate.customer_id)
         except (Customer.DoesNotExist, KeyError) as exc:  # the customer was deleted, or a person removed
             raise PermissionDenied("customer_view_forbidden") from exc
-        grant = CustomerViewGrant.objects.select_for_update().get(pk=candidate.pk)
+        grant = CustomerViewGrant.objects.select_for_update().filter(pk=candidate.pk).first()
+        if grant is None:  # swept between the two reads
+            raise PermissionDenied("customer_view_forbidden")
         now = timezone.now()
         if (
             staff_blockers(staff, grant.staff_session_key, now, issuing=False)
