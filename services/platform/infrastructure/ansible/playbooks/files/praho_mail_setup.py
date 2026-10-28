@@ -65,6 +65,50 @@ UNITS = ("postfix.service", "postfix@.service", "dovecot.service")
 # Like the packaged Postfix preflight, this short root-only check needs the host's
 # proc/firewall view. The daemon retains its native capability and mount restrictions.
 UNIT_GUARD = b"[Service]\nExecStartPre=+/usr/bin/python3 /usr/lib/praho/mail/praho-mail-boot.py\n"
+DROPIN_PATHS = tuple("/etc/systemd/system/" + name + ".d/praho-mail.conf" for name in UNITS)
+BUNDLE_PATHS = (*("/usr/lib/praho/mail/" + name for name in NATIVE_FILES), *DROPIN_PATHS)
+# Helper bundles setup could have installed, keyed by the commit that shipped each (none reached
+# master; each was installed by setup on lab clones). The drop-ins were UNIT_GUARD in all of them.
+PREDECESSOR_BUNDLES: dict[str, dict[str, str]] = {
+    "660cfec9": {
+        "praho-mail.py": "cc615eaece5984136ab22e58dad57190962f17a96a758d24e051615853ea9e42",
+        "praho_mail_setup.py": "b18d7deebcd65cb893331c315dd9ed55e1f06297a8a4a4e30ebbdd7f6684983f",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "5e718359": {
+        "praho-mail.py": "cc615eaece5984136ab22e58dad57190962f17a96a758d24e051615853ea9e42",
+        "praho_mail_setup.py": "409be32aec85aa77e64b98077737678a919104aaaa515aacf73cada64e9eaeb3",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "47124809": {
+        "praho-mail.py": "2e93416554542e85b5f942feafb6e1cc363c21830285941e7736dbbc7bf73fa1",
+        "praho_mail_setup.py": "b941fbca1de5e36e939b10e6d8baf61710d613422789d0f86f507e89c227924a",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "7947ce12": {
+        "praho-mail.py": "2e93416554542e85b5f942feafb6e1cc363c21830285941e7736dbbc7bf73fa1",
+        "praho_mail_setup.py": "d9abc863509dba7518ed607dee051fec5a8e6d3ec9cffd52a523a34b5b1bd693",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "36c781821362ffd82481fe19cbf3592a51c5488b9a9625f215aafc3c342fb0f1",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "bd0d9651": {
+        "praho-mail.py": "04bc52973c66e5c59810361be95b30c049fa81e32965e926a2b23fa699bd7326",
+        "praho_mail_setup.py": "d9abc863509dba7518ed607dee051fec5a8e6d3ec9cffd52a523a34b5b1bd693",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "4a5329109d42eb86b975e2337b747e7d7f3c99ff77e815ab58c786e3c723b4f3",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+}
+COMPAT_RESULT = "mail_bundle_compatible"
+GUARD_PATH = "/usr/lib/praho/mail/praho-mail-boot.py"
+GUARD_COMPAT_TIMEOUT_SECONDS = 120
 PACKAGES = (
     "postfix",
     "dovecot-imapd",
@@ -278,14 +322,16 @@ class MailSetup:
     def refuse(self, code: str) -> NoReturn:
         raise self.error(code)
 
-    def certificate_verify_command(self, expected: str, certificate: Path) -> list[str]:
+    def certificate_verify_command(self, expected: str, certificate: Path, *, check_time: bool = True) -> list[str]:
         # Match the actual TLS client's verification policy. Recent Python
         # runtimes enable strict X.509 checks; reject unusable material before setup.
+        # Only the bundle upgrade's compatibility dry run skips the validity window.
         strict = ssl.create_default_context().verify_flags & ssl.VERIFY_X509_STRICT
         return [
             "openssl",
             "verify",
             *(["-x509_strict"] if strict else []),
+            *([] if check_time else ["-no_check_time"]),
             "-CAfile",
             str(self.path("/etc/ssl/certs/ca-certificates.crt")),
             "-purpose",
@@ -545,7 +591,7 @@ class MailSetup:
             atomic(temporary / name, content)
         return temporary
 
-    def publish_certificate_stage(self, temporary: Path, stage: Path) -> None:
+    def publish_stage(self, temporary: Path, stage: Path) -> None:
         os.rename(temporary, stage)
         descriptor = os.open(stage.parent, os.O_RDONLY)
         try:
@@ -761,7 +807,7 @@ class MailSetup:
             )
             atomic(self.state / "node.json", json.dumps(record).encode())
             atomic(tombstone, json.dumps({**record, "status": "applying"}).encode())
-            self.publish_certificate_stage(temporary, stage)
+            self.publish_stage(temporary, stage)
             self.node.stage = "certificate_installing"
             atomic(certificate, chain)
             atomic(key, private_key)
@@ -812,7 +858,7 @@ class MailSetup:
         )
         atomic(self.state / "node.json", json.dumps(record).encode())
         atomic(operations / (identity + ".json"), json.dumps({**record, "status": "applying"}).encode())
-        self.publish_certificate_stage(temporary, operations / (identity + ".stage"))
+        self.publish_stage(temporary, operations / (identity + ".stage"))
         return self.advance_certificate(expected, record, before)
 
     def resume_certificate(
@@ -852,7 +898,7 @@ class MailSetup:
         if tombstone is None:
             atomic(operations / (record["identity"] + ".json"), json.dumps({**record, "status": "applying"}).encode())
         if directory.name != record["identity"] + ".stage":
-            self.publish_certificate_stage(directory, operations / (record["identity"] + ".stage"))
+            self.publish_stage(directory, operations / (record["identity"] + ".stage"))
         return self.advance_certificate(expected, record, before)
 
     def advance_certificate(self, expected: str, record: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
@@ -1042,6 +1088,232 @@ class MailSetup:
             self.remove_certificate_fence()
         self.retire_certificate_stage(directory)
         return self.certificate_result(expected, record["new_certificate_sha256"], "unchanged")
+
+    def running_bundle(self) -> dict[str, bytes]:
+        files = {"/usr/lib/praho/mail/" + name: (self.bundle / name).read_bytes() for name in NATIVE_FILES}
+        return {**files, **dict.fromkeys(DROPIN_PATHS, UNIT_GUARD)}
+
+    @staticmethod
+    def bundle_entry(path: str) -> str:
+        """Stage file name for a bundle path: the helper's own name, or ``<unit>.conf`` for a drop-in."""
+        if path in DROPIN_PATHS:
+            return path.split("/")[4].removesuffix(".d") + ".conf"
+        return path.rsplit("/", 1)[-1]
+
+    @staticmethod
+    def bundle_result(expected: str, profile: str, digests: dict[str, str], outcome: str) -> dict[str, Any]:
+        listing = "".join(path + "=" + digests[path] + "\n" for path in BUNDLE_PATHS)
+        return {
+            "node_hostname": expected,
+            "profile": profile,
+            "outcome": outcome,
+            "bundle_sha256": hashlib.sha256(listing.encode()).hexdigest(),
+        }
+
+    def evidenced_bundle(self, installed: dict[str, str]) -> bool:
+        if any(installed[path] != hashlib.sha256(UNIT_GUARD).hexdigest() for path in DROPIN_PATHS):
+            return False
+        helpers = {self.bundle_entry(path): installed[path] for path in BUNDLE_PATHS if path not in DROPIN_PATHS}
+        return helpers in PREDECESSOR_BUNDLES.values()
+
+    def remove_bundle_stage(self, directory: Path) -> None:
+        self.private_directory(directory)
+        entries = {entry.name: entry for entry in directory.iterdir()}
+        if set(entries) - {"from", "to", "journal.json", "candidate.json"}:
+            self.refuse("mail_setup_review_required")
+        files = [entry for name, entry in entries.items() if name.endswith(".json")]
+        for name in {"from", "to"} & set(entries):
+            self.private_directory(entries[name])
+            children = tuple(entries[name].iterdir())
+            if {child.name for child in children} - {self.bundle_entry(path) for path in BUNDLE_PATHS}:
+                self.refuse("mail_setup_review_required")
+            files.extend(children)
+        for file in files:
+            metadata = file.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+                self.refuse("mail_setup_review_required")
+        for file in files:
+            file.unlink()
+        for name in {"from", "to"} & set(entries):
+            entries[name].rmdir()
+        directory.rmdir()
+        descriptor = os.open(directory.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def retire_bundle_stages(self) -> None:
+        """Remove upgrade staging no journal refers to: unpublished stages, and a published one whose
+        upgrade already committed or restored (its candidate or original equals the ready journal)."""
+        for entry in self.state.iterdir():
+            if re.fullmatch(r"\.bundle-upgrade-[0-9a-f]{16}", entry.name):
+                self.remove_bundle_stage(entry)
+        stage = self.state / "bundle-upgrade"
+        if stage.exists() or stage.is_symlink():
+            self.private_directory(stage)
+            current = (self.state / "node.json").read_bytes()
+            known = [stage / name for name in ("candidate.json", "journal.json") if (stage / name).is_file()]
+            if current not in {path.read_bytes() for path in known}:
+                self.refuse("mail_setup_review_required")
+            self.remove_bundle_stage(stage)
+
+    def upgrade_bundle(self, expected: str, identity: str) -> dict[str, Any]:
+        """Replace only the helpers and drop-ins of a ready node; never setup or configuration."""
+        self.node.stage = "bundle_preflight"
+        self.node.profile(expected)
+        if str(UUID(identity)) != identity:
+            self.refuse("mail_native_inspection_failed")
+        self.private_directory(self.state)
+        journal = self.journal(expected)
+        if journal.get("status") == "bundle_upgrading":
+            return self.resume_bundle_upgrade(expected, identity, journal)
+        if journal.get("status") in {"certificate_applying", "certificate_starting"}:
+            self.refuse("mail_node_operation_in_progress")
+        original = (self.state / "node.json").read_bytes()
+        before = self.marker(expected)
+        if before is None:
+            self.refuse("mail_setup_review_required")
+        if self.pending_certificate_operations(""):
+            self.refuse("mail_node_operation_in_progress")
+        self.retire_bundle_stages()
+        running = self.running_bundle()
+        target = {path: hashlib.sha256(content).hexdigest() for path, content in running.items()}
+        installed = {path: before["files"][path] for path in BUNDLE_PATHS}
+        if installed == target:
+            return self.bundle_result(expected, before["profile"], target, "unchanged")
+        if not self.evidenced_bundle(installed):
+            self.refuse("mail_setup_review_required")
+        # Offline checks only: an expired, stopped node has no listeners to prove.
+        self.security_configuration(expected)
+        self.node.stage = "bundle_staging"
+        temporary = self.state / (".bundle-upgrade-" + secrets.token_hex(8))
+        temporary.mkdir(mode=0o700)
+        for side, files in (("from", {path: self.path(path).read_bytes() for path in BUNDLE_PATHS}), ("to", running)):
+            (temporary / side).mkdir(mode=0o700)
+            for path in BUNDLE_PATHS:
+                atomic(temporary / side / self.bundle_entry(path), files[path])
+        atomic(temporary / "journal.json", original)
+        atomic(temporary / "candidate.json", json.dumps({**before, "files": {**before["files"], **target}}).encode())
+        record = {
+            "version": 1,
+            "node": expected,
+            "profile": before["profile"],
+            "status": "bundle_upgrading",
+            "identity": identity,
+            "from": installed,
+            "to": target,
+            "journal_sha256": hashlib.sha256(original).hexdigest(),
+        }
+        atomic(self.state / "node.json", json.dumps(record).encode())
+        self.publish_stage(temporary, self.state / "bundle-upgrade")
+        return self.advance_bundle_upgrade(expected, record)
+
+    def staged_bundle(
+        self, record: dict[str, Any], *, temporary: bool = False
+    ) -> tuple[Path, bytes, dict[str, Any], dict[str, dict[str, bytes]]]:
+        """Read and verify the upgrade stage against every digest the bundle_upgrading journal holds."""
+        directory = self.state / "bundle-upgrade"
+        if temporary and not directory.exists() and not directory.is_symlink():
+            hidden = [entry for entry in self.state.iterdir() if entry.name.startswith(".bundle-upgrade-")]
+            if len(hidden) != 1:
+                self.refuse("mail_setup_review_required")
+            directory = hidden[0]
+        self.private_directory(directory)
+        sides: dict[str, dict[str, bytes]] = {}
+        for side in ("from", "to"):
+            self.private_directory(directory / side)
+            sides[side] = {}
+            for path in BUNDLE_PATHS:
+                content = (directory / side / self.bundle_entry(path)).read_bytes()
+                if hashlib.sha256(content).hexdigest() != record[side][path]:
+                    self.refuse("mail_setup_review_required")
+                sides[side][path] = content
+        original = (directory / "journal.json").read_bytes()
+        before = json.loads(original)
+        candidate = {**before, "files": {**before["files"], **record["to"]}}
+        if (
+            hashlib.sha256(original).hexdigest() != record["journal_sha256"]
+            or set(before) != {"version", "node", "profile", "status", "files"}
+            or (before["version"], before["node"], before["profile"], before["status"])
+            != (1, record["node"], record["profile"], "ready")
+            or any(before["files"][path] != record["from"][path] for path in BUNDLE_PATHS)
+            or json.loads((directory / "candidate.json").read_bytes()) != candidate
+        ):
+            self.refuse("mail_setup_review_required")
+        return directory, original, candidate, sides
+
+    def resume_bundle_upgrade(self, expected: str, identity: str, journal: dict[str, Any]) -> dict[str, Any]:
+        """Roll on only when every bundle file is exactly its from or its to copy."""
+        self.node.stage = "bundle_resume"
+        if set(journal) != {"version", "node", "profile", "status", "identity", "from", "to", "journal_sha256"}:
+            self.refuse("mail_setup_review_required")
+        if any(
+            not isinstance(journal[side], dict) or set(journal[side]) != set(BUNDLE_PATHS) for side in ("from", "to")
+        ):
+            self.refuse("mail_setup_review_required")
+        if journal["identity"] != identity:
+            self.refuse("mail_node_operation_in_progress")
+        directory, _original, candidate, _sides = self.staged_bundle(journal, temporary=True)
+        installed = {path: hashlib.sha256(self.path(path).read_bytes()).hexdigest() for path in BUNDLE_PATHS}
+        if any(installed[path] not in {journal["from"][path], journal["to"][path]} for path in BUNDLE_PATHS):
+            self.refuse("mail_setup_review_required")
+        self.check_files({**candidate, "files": {**candidate["files"], **installed}})
+        if directory.name != "bundle-upgrade":
+            self.publish_stage(directory, self.state / "bundle-upgrade")
+        return self.advance_bundle_upgrade(expected, journal)
+
+    def advance_bundle_upgrade(self, expected: str, record: dict[str, Any]) -> dict[str, Any]:
+        """Helpers, then drop-ins, one daemon-reload, byte check, installed-guard dry run, then ready."""
+        directory, original, candidate, sides = self.staged_bundle(record)
+        committed = False
+        try:
+            self.node.stage = "bundle_replacing"
+            for path in BUNDLE_PATHS:
+                if hashlib.sha256(self.path(path).read_bytes()).hexdigest() != record["to"][path]:
+                    atomic(self.path(path), sides["to"][path])
+            self.execute(["systemctl", "daemon-reload"])
+            if any(self.path(path).read_bytes() != sides["to"][path] for path in BUNDLE_PATHS):
+                self.refuse("mail_setup_review_required")
+            self.node.stage = "bundle_compatibility"
+            self.compat_check()
+            self.node.stage = "bundle_commit"
+            self.check_files(candidate)
+            atomic(self.state / "node.json", json.dumps(candidate).encode())
+            committed = True
+        except Exception:
+            if not committed:
+                # An incompatible new guard is never committed: put back the evidenced predecessor.
+                failed = self.node.stage
+                self.restore_bundle(record, directory, original, sides["from"])
+                self.node.stage = failed
+            raise
+        self.remove_bundle_stage(directory)
+        return self.bundle_result(expected, record["profile"], record["to"], "upgraded")
+
+    def restore_bundle(
+        self, record: dict[str, Any], directory: Path, original: bytes, previous: dict[str, bytes]
+    ) -> None:
+        self.node.stage = "bundle_restore"
+        for path in BUNDLE_PATHS:
+            if hashlib.sha256(self.path(path).read_bytes()).hexdigest() != record["from"][path]:
+                atomic(self.path(path), previous[path])
+        self.execute(["systemctl", "daemon-reload"])
+        if any(self.path(path).read_bytes() != previous[path] for path in BUNDLE_PATHS):
+            self.refuse("mail_setup_review_required")
+        atomic(self.state / "node.json", original)
+        self.remove_bundle_stage(directory)
+
+    def compat_check(self) -> None:
+        """Dry-run the installed guard; it can never authorize a start in this mode."""
+        try:
+            output = self.execute(
+                ["/usr/bin/python3", GUARD_PATH, "--compat-check"], timeout=GUARD_COMPAT_TIMEOUT_SECONDS
+            )
+        except self.error as error:
+            raise self.error("mail_node_bundle_incompatible") from error
+        if output.strip() != COMPAT_RESULT:
+            self.refuse("mail_node_bundle_incompatible")
 
     def security(self, expected: str, *, allow_fence: bool = False) -> bool:
         self.node.stage = "verification_owned_files"
