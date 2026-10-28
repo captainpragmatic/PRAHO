@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from django.urls import reverse
 from django.utils import timezone, translation
 
-from apps.provisioning.virtualmin_migration_models import VirtualminMigration
+from apps.provisioning.virtualmin_migration_models import ACCOUNT_BUSY_REFUSAL, VirtualminMigration
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob, VirtualminServer
 from apps.settings.services import SettingsService
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
@@ -116,7 +116,7 @@ class VirtualminBackupPageCoverageTests(VirtualminViewsFixture):
             {"backup_type": "full", "include_files": "on"},
         )
         self.assertContains(response, "Failed to create backup")
-        self.assertIn("active migration or backup/restore", self.messages(response))
+        self.assertIn(ACCOUNT_BUSY_REFUSAL, self.messages(response))
         self.assertEqual(list(VirtualminProvisioningJob.objects.values_list("pk", flat=True)), [existing.pk])
 
     def test_restore_without_own_backups_redirects_with_reason(self) -> None:
@@ -184,7 +184,7 @@ class VirtualminBackupPageCoverageTests(VirtualminViewsFixture):
             {"backup_id": "bk-0", "restore_files": "on", "confirm_restore": "on", "force_restore": "on"},
         )
         self.assertContains(response, "Failed to create restore")
-        self.assertIn("active migration or backup/restore", self.messages(response))
+        self.assertIn(ACCOUNT_BUSY_REFUSAL, self.messages(response))
         self.assertEqual(list(VirtualminProvisioningJob.objects.values_list("pk", flat=True)), [existing.pk])
 
     def test_romanian_backup_labels_preserve_filter_values(self) -> None:

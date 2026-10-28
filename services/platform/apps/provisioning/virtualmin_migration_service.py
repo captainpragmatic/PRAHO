@@ -41,6 +41,7 @@ from .virtualmin_gateway import (
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import (
     _TERMINAL_STATUSES,
+    ACCOUNT_BUSY_REFUSAL,
     PRE_COMMIT_STATUSES,
     MigrationBridge,
     NodeDrain,
@@ -397,7 +398,7 @@ class VirtualminMigrationService:
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
         if account_has_active_operation(account):
-            raise ValueError("Account already has another active operation")
+            raise ValueError(ACCOUNT_BUSY_REFUSAL)
         assert_move_ready(account)
         if (
             MigrationBridge.objects.filter(migration__account_id=account.pk)

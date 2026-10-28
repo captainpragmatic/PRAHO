@@ -337,6 +337,9 @@ ACTIVE_JOB_STATUSES = _ACTIVE_JOB_STATUSES
 # (a delete mutates the very domain a backup or restore is reading or writing).
 _EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain")
 
+# The refusal every admission path gives while account_has_active_operation() holds.
+ACCOUNT_BUSY_REFUSAL = "Account already has another active operation"
+
 
 def account_has_active_operation(
     account: VirtualminAccount,

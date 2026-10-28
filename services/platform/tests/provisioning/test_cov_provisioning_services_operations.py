@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.provisioning.virtualmin_backup_service import BackupConfig, RestoreConfig
+from apps.provisioning.virtualmin_migration_models import ACCOUNT_BUSY_REFUSAL
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService, VirtualminServerManagementService
 from tests.provisioning.test_cov_provisioning_services_creation import VirtualminServiceCoverageCase
@@ -143,7 +144,7 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
         management = VirtualminBackupManagementService(self.server)
         backup = management.create_backup_job(account)
         restore = management.create_restore_job(account, RestoreConfig(backup_id="previous-backup"))
-        expected = "Account already has another active operation"
+        expected = ACCOUNT_BUSY_REFUSAL
         self.assertEqual(backup.unwrap_err(), expected)
         self.assertEqual(restore.unwrap_err(), expected)
         self.assertEqual(list(VirtualminProvisioningJob.objects.values_list("pk", flat=True)), [existing.pk])
