@@ -526,6 +526,8 @@ The following limits and ownership rules apply to all tasks:
 
 ## Phase 5: mail on the nodes
 
+The normative cross-component rules for this phase are in [Hosted mail contracts](account-hostnames-mail-contracts.md).
+
 1. **P5.1 Do the lab work first.** Postfix and Dovecot in the lab image; confirm the mail and DKIM programs Virtualmin 8 provides.
 2. **P5.2 Update the node playbook.**
    - `virtualmin.yml` and the existing-node mail-only playbook install Postfix and Dovecot through Virtualmin's supported selective setup, make `mail` available but default-off, and set `myhostname` to the node FQDN. Existing domains retain external mail until an explicit owner opt-in completes.
