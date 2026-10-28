@@ -7,6 +7,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.urls import reverse
 from django.utils import timezone
 
@@ -66,17 +67,18 @@ class DrainTests(MigrationTestBase):
         *,
         first_status: str = "completed",
         after_first: Callable[[], object] | None = None,
+        first_waits: bool = False,
     ) -> tuple[dict, list]:
         """Mock migration orchestration, while retaining real drain/account persistence."""
         attempted = []
 
-        def start(account, target, *, initiated_by, reason, enqueue):
+        def start(account, target, *, initiated_by, reason, enqueue, drain):  # noqa: PLR0913  # start_migration's
             self.assertEqual(reason, "drain")
             self.assertFalse(enqueue)
             attempted.append(account.pk)
             return Ok(VirtualminMigration.objects.create(
                 account=account, source_server=account.server, target_server=target,
-                initiated_by=initiated_by, reason=reason,
+                initiated_by=initiated_by, reason=reason, drain=drain,
             ))
 
         def execute(migration_id):
@@ -88,6 +90,14 @@ class DrainTests(MigrationTestBase):
                 account.save(update_fields=["server", "updated_at"])
             # fsm-bypass: emulate the terminal result of the mocked migration dependency.
             VirtualminMigration.objects.filter(pk=migration.pk).update(status=status)
+            if first_waits and len(attempted) == 1:
+                VirtualminMigration.objects.filter(pk=migration.pk).update(
+                    resume_after=timezone.now() + timedelta(minutes=5)
+                )
+            if status == "completed":  # The migration's finish counts it on its drain
+                NodeDrain.objects.filter(pk=migration.drain_id).update(
+                    accounts_migrated=F("accounts_migrated") + 1
+                )
             if len(attempted) == 1 and after_first:
                 after_first()
             return Ok({
@@ -154,6 +164,17 @@ class DrainTests(MigrationTestBase):
                 self.assertIn("draining", result.unwrap_err())
                 gateway.assert_not_called()
                 transaction.set_rollback(True)
+
+    def test_a_drain_waits_for_a_deferred_migration_instead_of_pausing(self) -> None:
+        drain = self._start_drain()
+        self.drain_queue.reset_mock()
+
+        result, attempted = self._fake_run(drain, first_status="quiescing", first_waits=True)
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(attempted, [self.account.pk], "nothing else starts while the migration waits")
+        self.assertEqual((drain.status, drain.accounts_migrated), ("pending", 0))
+        self.drain_queue.assert_not_called()  # the migration's finish wakes it
 
     def test_happy_path_requires_routing_finalization(self) -> None:
         """RED: drain orchestration, counts, exclusion, and finalization are absent."""

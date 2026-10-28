@@ -10,10 +10,18 @@
     {% csrf_token %}
     <p class="text-slate-100">{{ account.domain }} — {{ account.server.name }}</p>
     <p class="text-sm text-amber-300">
+      {% if form.managed_routing %}
+        {% trans "Downtime covers the source write barrier, backup, transfer, restore, and target verification. PRAHO then commits ownership, enables the target, verifies a bridge, and converges DNS." %}
+      {% else %}
       {% trans "Downtime starts when the source domain is disabled and continues through backup, transfer, restore, verification, and manual routing/DNS changes." %}
+      {% endif %}
     </p>
     <p class="text-sm text-slate-300">
+      {% if form.managed_routing %}
+        {% trans "Before ownership commits, a failed move restores the source. After commit, recovery continues on the target. The source bridge is removed automatically after its window." %}
+      {% else %}
       {% trans "The source copy is retained and remains disabled. Remove it manually only after validating the target. PRAHO does not change routing or DNS." %}
+      {% endif %}
     </p>
     <p class="text-sm text-slate-300">
       {% trans "A previously suspended account stays suspended on the target." %}

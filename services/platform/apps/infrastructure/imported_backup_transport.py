@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import paramiko
 from django.conf import settings
@@ -15,6 +15,8 @@ from apps.common.ssh import MAX_SSH_PORT
 from apps.common.types import Err, Ok, Result, Retriability
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from apps.provisioning.virtualmin_models import VirtualminServer
 
 BACKUP_PLAYBOOKS = frozenset(
@@ -26,7 +28,20 @@ BACKUP_PLAYBOOKS = frozenset(
         "virtualmin_pair_restore.yml",
     }
 )
+# The recovery playbook's other actions mutate a held target. Over the archive transport only the
+# owner-aging capture that precedes a recovery-capable backup may run.
+ACTION_SCOPED_PLAYBOOKS: dict[str, tuple[str, frozenset[str]]] = {
+    "virtualmin_recovery.yml": ("recovery_action", frozenset({"capture-owner"})),
+}
 DEFAULT_SSH_PORT = 22
+
+
+def transport_allows(playbook: str, extra_vars: Mapping[str, Any] | None) -> bool:
+    """Whether the archive transport may run this playbook with these variables."""
+    if playbook in BACKUP_PLAYBOOKS:
+        return True
+    scoped = ACTION_SCOPED_PLAYBOOKS.get(playbook)
+    return scoped is not None and (extra_vars or {}).get(scoped[0]) in scoped[1]
 
 
 def server_transport_ready(server: VirtualminServer) -> Result[None, str]:

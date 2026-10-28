@@ -112,6 +112,8 @@ class DnsRecordResult:
     name: str
     content: str
     owner_tag: str
+    # The TTL the provider reports for the record, so a lowered TTL is confirmed rather than assumed.
+    ttl: int | None = None
 
     def as_provenance(self) -> dict[str, str]:
         """Structured entry persisted to ``NodeDeployment.dns_record_ids``.
@@ -414,6 +416,7 @@ class CloudflareDnsGateway(DnsProviderGateway):
             name=spec.name,
             content=str(rec.get("content", spec.content)),
             owner_tag=spec.owner_tag,
+            ttl=ttl if isinstance(ttl := rec.get("ttl"), int) and not isinstance(ttl, bool) else None,
         )
 
     def _create(self, zone_id: str, spec: DnsRecordSpec) -> Result[DnsRecordResult, str]:

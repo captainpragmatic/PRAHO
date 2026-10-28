@@ -156,6 +156,36 @@ class WrapperTemplatesTests(SimpleTestCase):
         self.assertIn("backup_domain_failed", found)
 
 
+class ResolverScopeTests(SimpleTestCase):
+    """A local barrier action is not an audit wrapper's argument or a module global."""
+
+    def resolve(self, source: str, function: str) -> set[str] | None:
+        import ast  # noqa: PLC0415
+
+        tree = ast.parse(source)
+        scope = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function)
+        expression = next(node.value for node in scope.body if isinstance(node, ast.Return))
+        return action_vocabulary_scan._Resolver(tree, action_vocabulary_scan._parents(tree)).values(expression, scope)
+
+    def test_a_parameter_never_borrows_another_functions_loop_values(self) -> None:
+        source = (
+            "def emit(action):\n    return f'virtualmin_migration_{action}'\n"
+            "def barrier():\n    for action in ('apply', 'verify'):\n        pass\n"
+        )
+        self.assertIsNone(self.resolve(source, "emit"))
+
+    def test_another_functions_local_is_not_a_module_global(self) -> None:
+        source = "def emit():\n    return action\ndef other():\n    action = 'unrelated'\n"
+        self.assertIsNone(self.resolve(source, "emit"))
+
+    def test_real_globals_and_local_assignments_are_still_resolved(self) -> None:
+        self.assertEqual(self.resolve("action = 'global'\ndef emit():\n    return action\n", "emit"), {"global"})
+        self.assertEqual(
+            self.resolve("action = 'global'\ndef emit():\n    action = 'local'\n    return action\n", "emit"),
+            {"local"},
+        )
+
+
 class UnregisteredActionRuntimeTests(TestCase):
     def test_an_unregistered_action_is_refused_under_test(self) -> None:
         with self.assertRaises(UnregisteredAuditActionError):

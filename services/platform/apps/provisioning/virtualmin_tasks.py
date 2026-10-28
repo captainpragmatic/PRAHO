@@ -797,6 +797,30 @@ def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, An
     }
 
 
+def schedule_migration_wake(migration_id: UUID, until: datetime) -> bool:
+    """Wake a deferred migration at `until` (ADR-0061 P2.1). Never raises: the reclaim sweep is the fallback.
+
+    The name carries the wake time, so a later deferral of the same row never collides with this one.
+    """
+    from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    try:
+        schedule(
+            "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
+            str(migration_id),
+            name=f"migration-wake-{migration_id}-{int(until.timestamp())}",
+            schedule_type=ScheduleModel.ONCE,
+            next_run=until,
+            q_options={"timeout": migration_task_timeout()},
+        )
+    except Exception:
+        logger.exception(
+            "🔥 [VirtualminTask] Wake not scheduled; the reclaim sweep runs it: migration=%s", migration_id
+        )
+        return False
+    return True
+
+
 def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:
     return async_task(
         "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
@@ -1234,8 +1258,13 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     sweep such rows strand non-terminal forever — holding the account lock and
     the capacity reservation while the source domain stays disabled.
     """
+    from .migration_artifact_cleanup import reclaim_migration_artifacts  # noqa: PLC0415  # Circular
+    from .migration_bridge_cleanup import reclaim_bridges  # noqa: PLC0415  # Circular
     from .virtualmin_migration_models import _TERMINAL_STATUSES, VirtualminMigration  # noqa: PLC0415  # Circular
     from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    reclaim_bridges()
+    reclaim_migration_artifacts()
 
     stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
     counts = {
@@ -1251,8 +1280,10 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         # Oldest-first so newer stalls never starve older rows; the updated_at
         # bump after each dispatch is the per-row retry backoff.
         VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
+        .filter(parked_phase="")
         .filter(updated_at__lt=stale)
         .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .exclude(resume_after__gt=timezone.now())  # Waiting on a deferral; its wake, or this sweep once due
         .order_by("updated_at")
         .values_list("pk", flat=True)[:_RECLAIM_BATCH]
     )
@@ -1340,6 +1371,17 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
         return {"success": False, "error": f"Service {service_id} not found"}
 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+    if account is not None:
+        from .migration_enabled_state import (  # noqa: PLC0415  # Narrow ADR-0051 target permission.
+            reconcile_committed_target,
+        )
+
+        committed_policy = reconcile_committed_target(
+            str(service_id),
+            task_budget_seconds=task_budget_seconds if task_budget_seconds is not None else get_task_soft_time_limit(),
+        )
+        if committed_policy is not None:
+            return committed_policy
     if account is not None and _migration_locked(account):
         return {"success": True, "action": "migration_locked"}
     # A restore, a delete or any running job owns the account: converging its enabled state

@@ -589,6 +589,9 @@ class VirtualminMigrationForm(forms.Form):
         from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
 
         super().__init__(*args, **kwargs)
+        self.managed_routing = VirtualminMigrationService._contract(account) == "cutover"
+        if self.managed_routing:
+            self.fields["confirm"].label = _("I understand the downtime and automatic routing cutover.")
         targets = VirtualminMigrationService.eligible_targets(account)
         field = cast("forms.ModelChoiceField[VirtualminServer]", self.fields["target_server"])
         # Preserve the placement-policy order in the dropdown — a bare pk__in

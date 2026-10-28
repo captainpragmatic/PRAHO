@@ -30,6 +30,8 @@ class AuthoritativeAnswer:
     addresses: tuple[str, ...] = ()
     server_address: str = ""
     error: str = ""
+    # The highest TTL among the answered records; None when nothing was answered.
+    ttl: int | None = None
 
 
 def public_address(value: str, version: int | None = None) -> str:
@@ -84,21 +86,18 @@ def _query_authority(fqdn: str, nameserver: str, address: str, record_type: str)
             server_address=address,
             error="Alias found; the node requires direct A/AAAA records",
         )
-    addresses = tuple(
-        sorted(
-            {
-                record.to_text()
-                for rrset in response.answer
-                if rrset.name == query.question[0].name and rrset.rdtype == dns.rdatatype.from_text(record_type)
-                for record in rrset
-            }
-        )
-    )
+    answered = [
+        rrset
+        for rrset in response.answer
+        if rrset.name == query.question[0].name and rrset.rdtype == dns.rdatatype.from_text(record_type)
+    ]
+    addresses = tuple(sorted({record.to_text() for rrset in answered for record in rrset}))
     if not addresses and not any(rrset.rdtype == dns.rdatatype.SOA for rrset in response.authority):
         return AuthoritativeAnswer(
             nameserver, record_type, server_address=address, error="Empty answer lacks authoritative negative evidence"
         )
-    return AuthoritativeAnswer(nameserver, record_type, addresses, address)
+    ttl = max((rrset.ttl for rrset in answered), default=None)
+    return AuthoritativeAnswer(nameserver, record_type, addresses, address, ttl=ttl)
 
 
 def authoritative_addresses(fqdn: str) -> list[AuthoritativeAnswer]:

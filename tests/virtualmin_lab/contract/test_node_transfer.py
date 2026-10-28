@@ -86,7 +86,7 @@ def test_backup_archive_fetch_push_and_cleanup(lab: Lab) -> None:
             lab.exec_on(container, "sh", "-c", f"rm -f {REMOTE_ARCHIVE_DIR}/{archive}*")
 
 
-def test_migration_archive_fetch_and_push(lab: Lab) -> None:
+def test_migration_archive_fetch_push_and_terminal_cleanup(lab: Lab) -> None:
     spool = _spool()
     archive = f"migration_{uuid.uuid4()}.tar.gz"
     source = lab.server.node_deployment
@@ -123,6 +123,13 @@ def test_migration_archive_fetch_and_push(lab: Lab) -> None:
             },
         )
         assert _staged(lab, TARGET_CONTAINER, archive)
+        for container, deployment in ((SOURCE_CONTAINER, source), (TARGET_CONTAINER, target)):
+            # Cleanup also handles sidecars left by an interrupted pre-fetch backup.
+            lab.exec_on(container, "touch", f"{REMOTE_ARCHIVE_DIR}/{archive}.dom", f"{REMOTE_ARCHIVE_DIR}/{archive}.info")
+            _run(deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive})
+            for suffix in ("", ".dom", ".info"):
+                assert not _staged(lab, container, archive + suffix)
+            _run(deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive})
     finally:
         (spool / archive).unlink(missing_ok=True)
         for container in (SOURCE_CONTAINER, TARGET_CONTAINER):

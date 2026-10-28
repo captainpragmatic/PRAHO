@@ -10,11 +10,50 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 if TYPE_CHECKING:
     from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 _TERMINAL_STATUSES = ("completed", "failed", "rolled_back")
+# Before the point of no return (ADR-0061 Phase 2): only A holds the writable copy, so a failure here
+# compensates. From `activating` on, B does, and only keep-target actions exist.
+PRE_COMMIT_STATUSES = (
+    "lowering_ttl",
+    "quiescing",
+    "backing_up",
+    "fetching",
+    "pushing",
+    "restoring",
+    "verifying",
+)
+# The forward graph. Any live row may also park for review, and any write may keep its state (a
+# lease release); a terminal row never moves.
+TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"lowering_ttl", "quiescing", "fetching", "failed"}),
+    "lowering_ttl": frozenset({"quiescing", "compensating", "rolled_back"}),
+    "quiescing": frozenset({"backing_up", "compensating", "rolled_back"}),
+    "backing_up": frozenset({"fetching", "compensating", "rolled_back"}),
+    "fetching": frozenset({"pushing", "compensating", "rolled_back"}),
+    "pushing": frozenset({"restoring", "compensating", "rolled_back"}),
+    "restoring": frozenset({"verifying", "compensating", "rolled_back"}),
+    "verifying": frozenset({"activating", "compensating"}),
+    "activating": frozenset({"bridging", "repointing"}),
+    "bridging": frozenset({"repointing"}),
+    "repointing": frozenset({"completed"}),
+    "compensating": frozenset({"rolled_back"}),
+    "fencing": frozenset(),
+    "needs_review": frozenset({"failed", "compensating", "activating", "bridging", "repointing"}),
+}
+
+
+def migration_transition_allowed(from_status: str, to_status: str) -> bool:
+    """Whether the graph allows the move; the commit time is checked by `transition` itself."""
+    if from_status == to_status:
+        return True
+    if from_status in _TERMINAL_STATUSES:
+        return False
+    return to_status == "needs_review" or to_status in TRANSITIONS.get(from_status, frozenset())
 
 
 class VirtualminMigration(models.Model):
@@ -28,6 +67,10 @@ class VirtualminMigration(models.Model):
         VERIFYING = "verifying", _("Verifying")
         ACTIVATING = "activating", _("Activating")
         REPOINTING = "repointing", _("Repointing")
+        LOWERING_TTL = "lowering_ttl", _("Lowering TTL")
+        BRIDGING = "bridging", _("Bridging")
+        COMPENSATING = "compensating", _("Compensating")
+        FENCING = "fencing", _("Fencing")
         COMPLETED = "completed", _("Completed")
         FAILED = "failed", _("Failed")
         NEEDS_REVIEW = "needs_review", _("Needs Review")
@@ -36,6 +79,7 @@ class VirtualminMigration(models.Model):
     class Reason(models.TextChoices):
         MANUAL = "manual", _("Manual")
         DRAIN = "drain", _("Drain")
+        RECOVERY = "recovery", _("Recovery")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.ForeignKey("provisioning.VirtualminAccount", on_delete=models.PROTECT, related_name="migrations")
@@ -59,6 +103,23 @@ class VirtualminMigration(models.Model):
     restore_issued = models.BooleanField(default=False)
     routing_note_shown = models.BooleanField(default=False)
     pre_migration_snapshot = models.JSONField(default=dict, blank=True)
+
+    class Contract(models.TextChoices):
+        CUTOVER = "cutover", _("Cutover")  # The account has a live published name: DNS and bridge steps run
+        LEGACY = "legacy", _("Legacy")
+        RECOVERY = "recovery", _("Recovery from backup")
+
+    # ADR-0061 Phase 2: the cutover's own evidence.
+    contract = models.CharField(max_length=10, choices=Contract.choices, blank=True)
+    drain = models.ForeignKey(
+        "provisioning.NodeDrain", on_delete=models.SET_NULL, null=True, blank=True, related_name="migrations"
+    )
+    cutover_committed_at = models.DateTimeField(null=True, blank=True)  # The point of no return
+    dns_converged_at = models.DateTimeField(null=True, blank=True)
+    resume_after = models.DateTimeField(null=True, blank=True)  # A deferred step waits until then
+    parked_phase = models.CharField(max_length=20, blank=True)
+    barrier_state = models.JSONField(default=dict, blank=True)
+    cancel_requested = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -105,14 +166,117 @@ class VirtualminMigration(models.Model):
         )
 
     def transition(self, token: uuid.UUID, from_status: str, to_status: str, **fields: object) -> bool:
-        """Persist state and evidence only for the matching token and state."""
-        fields.update(status=to_status, updated_at=timezone.now())
-        return bool(type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status).update(**fields))
+        """Persist state and evidence only for the matching token and state, along the graph.
+
+        An edge outside the graph is refused (False), and so is compensation once the commit is
+        recorded: after the point of no return only keep-target actions exist.
+        """
+        if not migration_transition_allowed(from_status, to_status):
+            return False
+        rows = type(self).objects.filter(pk=self.pk, lease_token=token, status=from_status)
+        if from_status == "pending" and to_status == "fetching":
+            rows = rows.filter(contract="recovery")
+        if to_status == "compensating":
+            rows = rows.filter(cutover_committed_at__isnull=True)
+        if from_status == "needs_review" and to_status in {"activating", "bridging", "repointing"}:
+            rows = rows.filter(cutover_committed_at__isnull=False)
+        fields.update(status=to_status, updated_at=timezone.now())  # fsm-bypass: a dict for the guarded UPDATE
+        return bool(rows.update(**fields))  # fsm-bypass: this method is the guarded writer (graph + commit check)
 
     @classmethod
     def active_reservations(cls, server: VirtualminServer) -> int:
-        """Reservation rows are authoritative; needs_review retains capacity."""
-        return cls.objects.filter(target_server=server).exclude(status__in=_TERMINAL_STATUSES).count()
+        """Reservation rows are authoritative; needs_review retains capacity.
+
+        A committed row's domain is already counted on the target, so it no longer reserves it.
+        """
+        return (
+            cls.objects.filter(target_server=server, cutover_committed_at__isnull=True)
+            .exclude(status__in=_TERMINAL_STATUSES)
+            .count()
+        )
+
+
+class MigrationBridge(ConcurrentTransitionMixin, models.Model):
+    """The source node's reverse proxy to the target during a cutover (ADR-0061 P2.5).
+
+    It starts `pending`, serves once `active`, keeps serving while the retained source content is
+    removed (`removing_source`), and is `torn_down` only when the source no longer answers for the
+    domain. A bridge that cannot be proven or removed is `failed` and blocks a new move.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        ACTIVE = "active", _("Active")
+        REMOVING_SOURCE = "removing_source", _("Removing source")
+        TORN_DOWN = "torn_down", _("Torn down")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    migration = models.OneToOneField(VirtualminMigration, on_delete=models.PROTECT, related_name="bridge")
+    source_server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.PROTECT, related_name="bridges_out"
+    )
+    target_server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.PROTECT, related_name="bridges_in"
+    )
+    domain = models.CharField(max_length=253)
+    status = FSMField(max_length=20, choices=Status.choices, default=Status.PENDING, protected=True, db_index=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    torn_down_at = models.DateTimeField(null=True, blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "provisioning_migration_bridges"
+        db_table_comment = "The source node's reverse proxy to the target during a cutover (ADR-0061 Phase 2)."
+        verbose_name = _("Migration Bridge")
+        verbose_name_plural = _("Migration Bridges")
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["pending", "active", "removing_source", "torn_down", "failed"]),
+                name="migration_bridge_valid_status",
+            )
+        ]
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Allow refresh_from_db with FSMField(protected=True), as the other FSM models do."""
+        saved = {name: self.__dict__.pop(name) for name in ("status",) if name in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source=Status.PENDING, target=Status.ACTIVE)
+    def activate(self) -> None:
+        self.activated_at = timezone.now()
+
+    @transition(field=status, source=Status.ACTIVE, target=Status.REMOVING_SOURCE)
+    def start_removing_source(self) -> None:
+        """The retained source content is being removed; the proxy keeps answering meanwhile."""
+
+    @transition(field=status, source=Status.REMOVING_SOURCE, target=Status.TORN_DOWN)
+    def tear_down(self) -> None:
+        self.torn_down_at = timezone.now()
+
+    @transition(
+        field=status,
+        source=(Status.PENDING, Status.ACTIVE, Status.REMOVING_SOURCE),
+        target=Status.FAILED,
+    )
+    def fail(self) -> None:
+        """A bridge whose state cannot be proven or removed; it blocks a new move until resolved."""
+
+    @transition(field=status, source=Status.FAILED, target=Status.ACTIVE)
+    def retry_cleanup(self) -> None:
+        """Staff retries forward cleanup, retaining every previously verified checkpoint."""
 
 
 class NodeDrain(models.Model):
