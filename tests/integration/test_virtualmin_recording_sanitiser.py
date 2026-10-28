@@ -39,7 +39,7 @@ class TestSanitiseText:
         ("raw", "secret"),
         [
             ("IP address: 172.22.0.3 (Shared)", "172.22.0.3"),
-            ("External IP address: 89.44.228.9", "89.44.228.9"),
+            ("External IP address: 203.0.113.9", "203.0.113.9"),
             ("listening on fe80::42:acff:fe16:3 now", "fe80::42:acff:fe16:3"),
             ("hash $y$j9T$NCVK.A5ROd5l392gh1o8W.$bU3qnn.NyBOMTOmoPQFMp1pivNryGCxlZKskffB5RV1", "NCVK.A5ROd5l392"),
             ("hash $6$salt1234$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ", "abcdefghijklmnopqrstuvwxyz"),
@@ -196,7 +196,7 @@ class TestRecordingLeaks:
 
 class TestSanitiseBody:
     def test_a_json_body_comes_back_as_data_in_a_stable_order(self) -> None:
-        raw = '{"b" : 1, "a" : {"y": "89.44.228.9", "x": "ok"}}\n\n'
+        raw = '{"b" : 1, "a" : {"y": "203.0.113.9", "x": "ok"}}\n\n'
         assert sanitise_body(raw) == {"a": {"x": "ok", "y": "<ip>"}, "b": 1}
 
     def test_a_body_that_is_not_json_comes_back_as_sanitised_text(self) -> None:
@@ -206,7 +206,7 @@ class TestSanitiseBody:
 class TestLeakDetection:
     def test_a_planted_secret_is_reported(self) -> None:
         planted: dict[str, Any] = {
-            "ip": "external 89.44.228.9",
+            "ip": "external 203.0.113.9",
             "hash": "$6$salt1234$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ",
             "cert": PEM,
             "id": "17920605682563",
@@ -217,7 +217,7 @@ class TestLeakDetection:
 
     def test_sanitised_output_has_no_leaks(self) -> None:
         raw = {
-            "ip": "external 89.44.228.9",
+            "ip": "external 203.0.113.9",
             "hash": "$6$salt1234$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ",
             "cert": PEM,
             "id": "17920605682563",
