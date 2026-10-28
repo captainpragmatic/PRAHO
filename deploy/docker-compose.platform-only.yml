@@ -93,6 +93,8 @@ services:
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-enforce}
+      # ADR-0017 section 5: false only while Platform is ahead of Portal in a deploy.
+      - PORTAL_SESSION_REQUIRED=${PORTAL_SESSION_REQUIRED:-true}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:?PORTAL_HMAC_CREDENTIALS required}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       # Production settings refuse to start without these two and name the missing one; staging doesn't
