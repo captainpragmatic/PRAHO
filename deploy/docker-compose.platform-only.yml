@@ -95,6 +95,9 @@ services:
       - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-enforce}
       # ADR-0017 section 5: false only while Platform is ahead of Portal in a deploy.
       - PORTAL_SESSION_REQUIRED=${PORTAL_SESSION_REQUIRED:-true}
+      # ADR-0065: customer view; the portal origin defaults to https://PORTAL_DOMAIN.
+      - CUSTOMER_VIEW_ENABLED=${CUSTOMER_VIEW_ENABLED:-true}
+      - PORTAL_PUBLIC_ORIGIN=${PORTAL_PUBLIC_ORIGIN:-}
       - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:?PORTAL_HMAC_CREDENTIALS required}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       # Production settings refuse to start without these two and name the missing one; staging doesn't
