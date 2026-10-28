@@ -17,6 +17,7 @@ Security:
 
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import json
@@ -511,6 +512,10 @@ SENDGRID_SIGNATURE_MAX_AGE_SECONDS = 300
 # Mailgun retries a failed delivery for about eight hours and may keep its signed timestamp, so the
 # window covers that; post() applies each token once within it, which is the replay control.
 MAILGUN_SIGNATURE_MAX_AGE_SECONDS = 9 * 3600
+# How far ahead of this clock a Mailgun timestamp may be. A token's claim outlives the newest
+# timestamp that can still verify, so a claim never expires while its signature is accepted.
+MAILGUN_SIGNATURE_MAX_SKEW_SECONDS = 300
+MAILGUN_TOKEN_CLAIM_SECONDS = MAILGUN_SIGNATURE_MAX_AGE_SECONDS + MAILGUN_SIGNATURE_MAX_SKEW_SECONDS + 60
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -633,16 +638,15 @@ class MailgunWebhookView(View):
                 )
                 return HttpResponse("Invalid signature", status=403)
 
-            # Parse event data. A form posts single values: .dict(), not dict(), which made every
-            # value a list and silently dropped every form-encoded event.
+            # Parse event data. Mailgun's legacy form merges the sender's user-variables into the
+            # same fields after its own values, so an event field takes its FIRST value (a
+            # user-variable named "recipient" must not pick the address). dict(request.POST) made
+            # every value a list and silently dropped every form-encoded event.
             event_data = request.POST.get("event-data")
+            data: dict[str, Any] = {key: request.POST.getlist(key)[0] for key in request.POST}
             if event_data:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     data = json.loads(event_data)
-                except json.JSONDecodeError:
-                    data = request.POST.dict()
-            else:
-                data = request.POST.dict()
 
             # Each token is applied once. The claim and the event commit together: an overlapping
             # copy waits on the claim row and is refused, and a failure rolls the claim back so
@@ -650,9 +654,7 @@ class MailgunWebhookView(View):
             token = request.POST.get("token", "")
             with transaction.atomic():
                 # Only unsigned DEBUG requests lack a token; they get no replay guard.
-                if token and not counters.claim(
-                    f"mailgun-webhook-token:{token}", MAILGUN_SIGNATURE_MAX_AGE_SECONDS, token
-                ):
+                if token and not counters.claim(f"mailgun-webhook-token:{token}", MAILGUN_TOKEN_CLAIM_SECONDS, token):
                     # Applied already: answer 200 so Mailgun stops retrying, and apply nothing again.
                     return HttpResponse("Already processed", status=200)
                 self._process_event(data)
@@ -675,6 +677,7 @@ class MailgunWebhookView(View):
             logger.warning("Mailgun API key not configured - accepting unsigned (dev mode)")
             return True
 
+        # .get() is the LAST value: Mailgun's own, after any merged user-variable of the same name.
         timestamp = request.POST.get("timestamp", "")
         token = request.POST.get("token", "")
         signature = request.POST.get("signature", "")
@@ -688,11 +691,10 @@ class MailgunWebhookView(View):
             return False
         # The signature covers only timestamp and token, not the event: a captured triple must be
         # fresh, and post() accepts each token once.
-        return (
-            timestamp.isascii()
-            and timestamp.isdigit()
-            and abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
-        )
+        if not (timestamp.isascii() and timestamp.isdigit()):
+            return False
+        age = time.time() - int(timestamp)
+        return -MAILGUN_SIGNATURE_MAX_SKEW_SECONDS <= age <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
 
     def _process_event(self, data: dict[str, Any]) -> None:
         """Process a Mailgun event."""
@@ -710,7 +712,9 @@ class MailgunWebhookView(View):
         }
 
         if event_type in event_mapping and recipient:
-            EmailService.handle_delivery_event(
+            # The raising variant: inside post()'s transaction a failure rolls the token claim back,
+            # so Mailgun redelivers instead of the event being lost behind a 200.
+            EmailService.process_delivery_event(
                 event_type=event_mapping[event_type],
                 message_id=message_id,
                 recipient=recipient,

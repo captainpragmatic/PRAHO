@@ -10,11 +10,14 @@ from unittest.mock import patch
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from django.conf import settings
 from django.http import HttpRequest
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.notifications.webhooks import (
     MAILGUN_SIGNATURE_MAX_AGE_SECONDS,
+    MAILGUN_SIGNATURE_MAX_SKEW_SECONDS,
+    MAILGUN_TOKEN_CLAIM_SECONDS,
     SENDGRID_SIGNATURE_MAX_AGE_SECONDS,
     SendGridWebhookView,
 )
@@ -74,10 +77,11 @@ class MailgunReplayTests(TestCase):
 
     KEY = "mailgun-test-key"
 
-    def deliver(self, timestamp: str, token: str, recipient: str) -> int:
+    def deliver(self, timestamp: str, token: str, recipient: str | list[str], key: str = "") -> int:
         from apps.notifications.webhooks import MailgunWebhookView  # noqa: PLC0415
 
-        signature = hmac.new(self.KEY.encode(), f"{timestamp}{token}".encode(), hashlib.sha256).hexdigest()
+        signing_key = key or self.KEY
+        signature = hmac.new(signing_key.encode(), f"{timestamp}{token}".encode(), hashlib.sha256).hexdigest()
         request = RequestFactory().post(
             "/webhooks/email/mailgun/",
             {
@@ -106,8 +110,10 @@ class MailgunReplayTests(TestCase):
 
     def test_a_failure_while_applying_the_event_leaves_the_token_redeliverable(self) -> None:
         now = str(int(time.time()))
+        # The failure happens inside the real handler, which catches it: it must still reach post().
         with patch(
-            "apps.notifications.webhooks.EmailService.handle_delivery_event", side_effect=RuntimeError("worker stopped")
+            "apps.notifications.services.EmailSuppressionService.suppress_email",
+            side_effect=RuntimeError("database went away"),
         ):
             self.assertEqual(self.deliver(now, "crash-token", "bob@example.ro"), 500)
         self.assertEqual(self.deliver(now, "crash-token", "bob@example.ro"), 200)
@@ -117,3 +123,34 @@ class MailgunReplayTests(TestCase):
         stale = int(time.time()) - MAILGUN_SIGNATURE_MAX_AGE_SECONDS - 60
         self.assertEqual(self.deliver(str(stale), "old-token", "old@example.ro"), 403)
         self.assertFalse(self.suppressed("old@example.ro"))
+
+    def test_a_timestamp_from_the_future_is_refused_beyond_the_clock_skew(self) -> None:
+        ahead = int(time.time()) + MAILGUN_SIGNATURE_MAX_SKEW_SECONDS + 60
+        self.assertEqual(self.deliver(str(ahead), "future-token", "later@example.ro"), 403)
+        self.assertFalse(self.suppressed("later@example.ro"))
+        slightly_ahead = int(time.time()) + 30
+        self.assertEqual(self.deliver(str(slightly_ahead), "skewed-token", "skew@example.ro"), 200)
+        self.assertTrue(self.suppressed("skew@example.ro"))
+
+    def test_a_token_claim_outlives_every_timestamp_that_still_verifies(self) -> None:
+        # The newest verifiable timestamp is MAX_SKEW ahead and stays valid MAX_AGE after that.
+        self.assertGreater(MAILGUN_TOKEN_CLAIM_SECONDS, MAILGUN_SIGNATURE_MAX_AGE_SECONDS + MAILGUN_SIGNATURE_MAX_SKEW_SECONDS)
+
+    def test_a_user_variable_named_recipient_cannot_pick_the_address(self) -> None:
+        # Mailgun posts its own value first and the sender's user-variable of the same name after.
+        now = str(int(time.time()))
+        self.assertEqual(self.deliver(now, "merged-token", ["real@example.ro", "victim@example.ro"]), 200)
+        self.assertTrue(self.suppressed("real@example.ro"))
+        self.assertFalse(self.suppressed("victim@example.ro"))
+
+    @override_settings(ANYMAIL={"MAILGUN_API_KEY": "mailgun-test-key", "MAILGUN_WEBHOOK_SIGNING_KEY": "signing-key"})
+    def test_the_webhook_signing_key_verifies_when_configured(self) -> None:
+        now = str(int(time.time()))
+        self.assertEqual(self.deliver(now, "api-key-token", "api@example.ro"), 403)
+        self.assertEqual(self.deliver(now, "signing-token", "sign@example.ro", key="signing-key"), 200)
+        self.assertTrue(self.suppressed("sign@example.ro"))
+
+
+class MailgunSigningKeySettingTests(SimpleTestCase):
+    def test_the_signing_key_is_read_into_the_anymail_settings(self) -> None:
+        self.assertIn("MAILGUN_WEBHOOK_SIGNING_KEY", settings.ANYMAIL)
