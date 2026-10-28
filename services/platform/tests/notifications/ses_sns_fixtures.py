@@ -22,8 +22,8 @@ from tests.infrastructure.test_ssl_trust_reporting import _make_cert
 TOPIC_ARN = "arn:aws:sns:eu-west-1:123456789012:ses-events"
 OTHER_TOPIC_ARN = "arn:aws:sns:eu-west-1:999999999999:someone-elses-topic"
 CERT_URL = "https://sns.eu-west-1.amazonaws.com/SimpleNotificationService-0123456789abcdef.pem"
-SUBSCRIBE_URL = "https://sns.eu-west-1.amazonaws.com/?Action=ConfirmSubscription&Token=2336412f37fb687f5d51e6e2"
-TOKEN = "2336412f37fb687f5d51e6e2"  # noqa: S105  # public SNS token fixture, not a credential
+SUBSCRIBE_URL = "https://sns.eu-west-1.amazonaws.com/?Action=ConfirmSubscription&Token=fixture-token"
+TOKEN = "fixture-token"  # noqa: S105  # public SNS token fixture, not a credential
 
 NOTIFICATION = "Notification"
 SUBSCRIPTION = "SubscriptionConfirmation"

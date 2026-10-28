@@ -89,7 +89,7 @@ class SESWebhookSignatureTests(TestCase):
             "MessageId": "44444444-4444-4444-8444-444444444444",
             "Message": "Please confirm subscription",
             "SubscribeURL": "https://sns.us-east-1.amazonaws.com/confirm",
-            "Token": "2336412f37fb687f5d51e6e2",
+            "Token": "fixture-token",
             "Timestamp": "2026-03-26T10:00:00.000Z",
             "SignatureVersion": "1",
             "Signature": "",

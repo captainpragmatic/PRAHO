@@ -34,7 +34,7 @@ class SNSConfirmationOutboundTests(TestCase):
             "MessageId": "6f1c2a3e-4b5d-4c6e-8f70-1a2b3c4d5e6f",
             "Message": "You have chosen to subscribe to the topic.",
             "SubscribeURL": subscribe_url,
-            "Token": "2336412f37fb687f5d51e6e2",
+            "Token": "fixture-token",
             "Timestamp": "2026-10-28T10:00:00.000Z",
             "SignatureVersion": "1",
             "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-abc.pem",
