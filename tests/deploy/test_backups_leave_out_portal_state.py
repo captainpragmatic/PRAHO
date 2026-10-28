@@ -47,10 +47,26 @@ def _mounts(service: dict) -> list[tuple[str, str]]:
     return mounts
 
 
-def _volume_identity(compose: dict, source: str) -> str:
-    """The physical volume a mount source names: its top-level `name:` when set, else the source itself."""
-    declared = (compose.get("volumes") or {}).get(source)
-    return str(declared["name"]) if isinstance(declared, dict) and declared.get("name") else source
+def _volume_identity(compose: dict, source: str) -> tuple[str, str]:
+    """The physical volume a mount source names, as (kind, name).
+
+    A named or external volume, and a bind mount, have their literal name. Compose prefixes the
+    project's name to any other volume key, and no file pins the project, so that stays a suffix.
+    """
+    volumes = compose.get("volumes") or {}
+    if source not in volumes:
+        return ("literal", source)
+    declared = volumes[source] or {}
+    if declared.get("name"):
+        return ("literal", str(declared["name"]))
+    return ("literal", source) if declared.get("external") else ("project", source)
+
+
+def _same_volume(first: tuple[str, str], second: tuple[str, str]) -> bool:
+    if first[0] == second[0]:
+        return first[1] == second[1]
+    literal, key = (first[1], second[1]) if first[0] == "literal" else (second[1], first[1])
+    return literal.endswith(f"_{key}")  # <project>_<key>, for any project
 
 
 def _session_volume_users(compose: dict) -> list[str]:
@@ -64,7 +80,7 @@ def _session_volume_users(compose: dict) -> list[str]:
     return [
         name
         for name, service in services.items()
-        if any(_volume_identity(compose, source) == volume for source, _target in _mounts(service))
+        if any(_same_volume(_volume_identity(compose, source), volume) for source, _target in _mounts(service))
     ]
 
 
@@ -125,6 +141,12 @@ class PortalStateLocationTests(unittest.TestCase):
         compose = _compose("single-server")
         compose["volumes"]["portal_sessions"] = {"name": "praho_shared"}
         compose["volumes"]["media_files"] = {"name": "praho_shared"}
+        self.assertIn("platform", _session_volume_users(compose))
+
+    def test_a_name_matching_media_under_its_project_prefix_counts_as_sharing(self) -> None:
+        # The unnamed media_files volume is <project>_media_files, so this name joins it.
+        compose = _compose("single-server")
+        compose["volumes"]["portal_sessions"] = {"name": "praho_media_files"}
         self.assertIn("platform", _session_volume_users(compose))
 
     def test_the_native_portal_state_is_outside_the_backed_up_tree(self) -> None:
