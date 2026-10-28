@@ -561,7 +561,7 @@ class TestRollbackAndRestore:
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
         backup.write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
+        result = project.run("restore-platform.sh", "--env", "staging", str(backup), stdin="yes\n", DOCKER_START_FAILS="1")
         assert result.returncode != 0, result.stdout + result.stderr
         assert "starting the local services failed" in result.stdout
         assert env_file.read_text() == STAGING_ENV
@@ -575,13 +575,13 @@ class TestRollbackAndRestore:
         backups.mkdir()
         backup = backups / "praho_backup_20261007_000000.sql.gz"
         backup.write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
+        result = project.run("restore-platform.sh", str(backup), stdin="yes\n", DOCKER_HEALTH="unhealthy")
         assert "Starting services" in result.stdout, result.stdout + result.stderr
         assert result.returncode != 0, result.stdout
 
     @pytest.mark.integration
     @pytest.mark.parametrize(
-        ("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore.sh", ("--latest",))]
+        ("script", "args"), [("rollback.sh", ("version", "v1.2.3")), ("restore-platform.sh", ("--latest",))]
     )
     def test_recovery_refuses_a_production_file_without_its_keys_before_touching_anything(
         self, project: Project, script: str, args: tuple[str, ...]
@@ -676,14 +676,16 @@ class TestBackupFiles:
         assert being_written.exists()
 
     @pytest.mark.integration
-    def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, project: Project) -> None:
+    @pytest.mark.parametrize("directory", ["checkout", "checkout with spaces"])
+    def test_the_interactive_restore_restores_the_backup_chosen_from_the_list(self, tmp_path: Path, directory: str) -> None:
+        project = Project(tmp_path / directory)
         # The listing went to stdout inside $(...), so it reached the restore as part of the file
         # name: no operator saw it, and every interactive restore ended in "Backup file not found".
         project.write_env(".env.staging", STAGING_ENV)
         backups = project.root / "backups"
         backups.mkdir()
         (backups / "praho_backup_20261008_020000_4242.sql.gz").write_bytes(DUMP_GZIP)
-        result = project.run("restore.sh", "--env", "staging", stdin="1\nyes\n")
+        result = project.run("restore-platform.sh", "--env", "staging", stdin="1\nyes\n")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1) 20261008_020000 (" in result.stderr
         assert any(c["argv"][:4] == ["exec", "-i", "praho_db", "psql"] for c in project.calls())

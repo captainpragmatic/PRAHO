@@ -81,7 +81,7 @@ runtime. A change to one side is checked against the other:
 | Concern | Native | Compose |
 |---------|--------|---------|
 | Edge (TLS, HSTS, routing, staff allowlist) | `roles/praho-native/templates/Caddyfile.native.j2` | `deploy/caddy/Caddyfile`, `Caddyfile.platform`, `Caddyfile.portal` |
-| Backup, restore, health | `roles/praho-native/templates/{backup-native,restore-native,health-check}.sh.j2` | `deploy/scripts/{backup,restore,health-check}.sh` |
+| Backup, restore, health | `roles/praho-native/templates/{backup-native,restore-platform-native,health-check}.sh.j2` | `deploy/scripts/{backup,restore-platform,health-check}.sh` |
 | Required production variables | `playbooks/native-single-server.yml` preflight | `deploy/scripts/lib/compose.sh` and the compose files' `${VAR:?}` |
 
 ## Consequences
@@ -91,7 +91,7 @@ runtime. A change to one side is checked against the other:
 - Ansible no longer installs Docker or schedules backups on a Docker host. `deploy.sh` expects a host
   with Docker Compose v2, and an operator schedules `deploy/scripts/backup.sh` there.
 - `make deploy-dev-native` replaces `make deploy-dev` for the remote dev box; it uses the same inventory.
-- The two-server staging and production layout has no automated deploy. `restore.sh` can restore the
+- The two-server staging and production layout has no automated deploy. `restore-platform.sh` can restore the
   bundled database and existing local writers on a platform-only host; it does not operate the remote
   portal or an external database. Full rollback accepts an explicit checksummed database/media pair
   with source-image and PostgreSQL-major metadata for either local topology. It prepares and verifies

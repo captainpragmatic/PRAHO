@@ -1,5 +1,7 @@
 # PRAHO Deployment Guide
 
+For Platform database/media recovery, see [Restore a Platform backup](PLATFORM_RESTORE.md).
+
 This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents
@@ -656,7 +658,7 @@ sudo systemctl restart praho-platform
 /opt/praho/scripts/backup.sh
 
 # Restore from backup
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 #### Redeployment
@@ -1013,22 +1015,22 @@ Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, a
 
 ```bash
 # Interactive (choose from list)
-./deploy/scripts/restore.sh
+./deploy/scripts/restore-platform.sh
 
 # Restore specific file
-./deploy/scripts/restore.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
+./deploy/scripts/restore-platform.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
 
 # Restore latest backup
-./deploy/scripts/restore.sh --latest
+./deploy/scripts/restore-platform.sh --latest
 
 # Docker staging: the scripts read .env.prod unless told otherwise
-./deploy/scripts/restore.sh --latest --env staging
+./deploy/scripts/restore-platform.sh --latest --env staging
 
 # Using make (DEPLOY_ENV=staging for staging)
 make restore
 
 # Native deployment
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 Docker restore privately stages the selected dump and companion media archive before creating its
@@ -1134,7 +1136,7 @@ and the safety backup. The env file is not edited, so a later deploy still uses 
 make deploy-prod VERSION=v1.2.3
 
 # Restore the latest database backup (on the server)
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 ---
@@ -1449,7 +1451,7 @@ deploy/
 ├── scripts/
 │   ├── deploy.sh                      # Main deployment script
 │   ├── backup.sh                      # Database backup
-│   ├── restore.sh                     # Database restore
+│   ├── restore-platform.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
 │   ├── health-check.sh               # Health check script
 │   ├── portal-env.sh                  # Writes a portal host's env file from the full one
