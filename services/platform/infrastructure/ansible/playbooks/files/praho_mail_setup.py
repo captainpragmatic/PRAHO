@@ -30,6 +30,30 @@ MAX_CHAIN_CERTIFICATES = 16
 MAX_CERTIFICATE_OPERATION_BYTES = 4096
 CERTIFICATE_RELOAD_WAIT_SECONDS = 30
 CERTIFICATE_RELOAD_POLL_SECONDS = 0.25
+MAX_JOURNAL_BYTES = 64 * 1024
+CERTIFICATE_PEM = "/etc/praho-mail/node.pem"
+CERTIFICATE_KEY = "/etc/praho-mail/node.key"
+CERTIFICATE_STAGE_FILES = frozenset({"before.json", "old.pem", "old.key", "new.pem", "new.key"})
+LEGACY_RECORD_FIELDS = frozenset(
+    {
+        "version",
+        "node",
+        "profile",
+        "identity",
+        "status",
+        "old_certificate_sha256",
+        "new_certificate_sha256",
+        "before_sha256",
+    }
+)
+# Current records also bind the staged candidate file bytes, not only the leaf.
+RECORD_FIELDS = LEGACY_RECORD_FIELDS | {"new_pem_sha256", "new_key_sha256"}
+START_PERMIT_SECONDS = 120
+# A ready-guard run took at most 3.6 s on the owned clones (5 samples per profile); the certificate
+# path adds file and fence re-checks. Never start a unit with less permit time left than this.
+GUARD_START_SECONDS = 20
+UNIT_START_TIMEOUT_SECONDS = 60
+UNIT_STOP_TIMEOUT_SECONDS = 90
 NATIVE_FILES = (
     "praho-mail.py",
     "praho_mail_setup.py",
@@ -41,6 +65,52 @@ UNITS = ("postfix.service", "postfix@.service", "dovecot.service")
 # Like the packaged Postfix preflight, this short root-only check needs the host's
 # proc/firewall view. The daemon retains its native capability and mount restrictions.
 UNIT_GUARD = b"[Service]\nExecStartPre=+/usr/bin/python3 /usr/lib/praho/mail/praho-mail-boot.py\n"
+DROPIN_PATHS = tuple("/etc/systemd/system/" + name + ".d/praho-mail.conf" for name in UNITS)
+BUNDLE_PATHS = (*("/usr/lib/praho/mail/" + name for name in NATIVE_FILES), *DROPIN_PATHS)
+BUNDLE_STAGE_FILES = frozenset({"from", "to", "journal.json", "candidate.json"})
+BUNDLE_ENTRIES = frozenset({*NATIVE_FILES, *(name + ".conf" for name in UNITS)})
+# Helper bundles setup could have installed, keyed by the commit that shipped each (none reached
+# master; each was installed by setup on lab clones). The drop-ins were UNIT_GUARD in all of them.
+PREDECESSOR_BUNDLES: dict[str, dict[str, str]] = {
+    "660cfec9": {
+        "praho-mail.py": "cc615eaece5984136ab22e58dad57190962f17a96a758d24e051615853ea9e42",
+        "praho_mail_setup.py": "b18d7deebcd65cb893331c315dd9ed55e1f06297a8a4a4e30ebbdd7f6684983f",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "5e718359": {
+        "praho-mail.py": "cc615eaece5984136ab22e58dad57190962f17a96a758d24e051615853ea9e42",
+        "praho_mail_setup.py": "409be32aec85aa77e64b98077737678a919104aaaa515aacf73cada64e9eaeb3",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "47124809": {
+        "praho-mail.py": "2e93416554542e85b5f942feafb6e1cc363c21830285941e7736dbbc7bf73fa1",
+        "praho_mail_setup.py": "b941fbca1de5e36e939b10e6d8baf61710d613422789d0f86f507e89c227924a",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "62488151e1d2f9b98a02115fb8553d43912430a2576376eeeb0f2a25638b6186",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "7947ce12": {
+        "praho-mail.py": "2e93416554542e85b5f942feafb6e1cc363c21830285941e7736dbbc7bf73fa1",
+        "praho_mail_setup.py": "d9abc863509dba7518ed607dee051fec5a8e6d3ec9cffd52a523a34b5b1bd693",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "36c781821362ffd82481fe19cbf3592a51c5488b9a9625f215aafc3c342fb0f1",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+    "bd0d9651": {
+        "praho-mail.py": "04bc52973c66e5c59810361be95b30c049fa81e32965e926a2b23fa699bd7326",
+        "praho_mail_setup.py": "d9abc863509dba7518ed607dee051fec5a8e6d3ec9cffd52a523a34b5b1bd693",
+        "praho-mail-native.pl": "dc473408a4fabdbb04f8bbe568c52594af15c04e7c6c12b83348ce66c791e4bf",
+        "praho-mail-boot.py": "4a5329109d42eb86b975e2337b747e7d7f3c99ff77e815ab58c786e3c723b4f3",
+        "praho_mail_submitters.py": "9079f36b348845c730b5735fcd9db58d70fa4a2ade3809cd64d8f09b214858c8",
+    },
+}
+COMPAT_RESULT = "mail_bundle_compatible"
+GUARD_PATH = "/usr/lib/praho/mail/praho-mail-boot.py"
+GUARD_COMPAT_TIMEOUT_SECONDS = 120
 PACKAGES = (
     "postfix",
     "dovecot-imapd",
@@ -85,6 +155,85 @@ POSTFIX = {
     "allow_percent_hack": "no",
     "resolve_dequoted_address": "no",
 }
+UNIT_PROPERTIES = (
+    "Type",
+    "ActiveState",
+    "SubState",
+    "UnitFileState",
+    "LoadState",
+    "FragmentPath",
+    "DropInPaths",
+    "NeedDaemonReload",
+    "ExecStartPre",
+)
+GUARD_START = ("/usr/bin/python3", "/usr/bin/python3 /usr/lib/praho/mail/praho-mail-boot.py")
+STOPPED_STATES = frozenset({"inactive", "failed"})
+# Loaded systemd state after setup, read with ``systemctl show`` on owned clones (2026-10-28).
+# Eligible units start in this order; ``started`` is the state each must reach. Ubuntu's postfix@-
+# is a disabled template instance: it is never started and must stay inactive.
+UNIT_TOPOLOGY: dict[str, tuple[dict[str, Any], ...]] = {
+    "debian12-dovecot23": (
+        {
+            "unit": "postfix@-.service",
+            "type": "forking",
+            "file_state": "enabled-runtime",
+            "fragment": "/lib/systemd/system/postfix@.service",
+            "dropin": "/etc/systemd/system/postfix@.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            # The oneshot wrapper; it carries the guard drop-in too.
+            "unit": "postfix.service",
+            "type": "oneshot",
+            "file_state": "enabled",
+            "fragment": "/lib/systemd/system/postfix.service",
+            "dropin": "/etc/systemd/system/postfix.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "exited"),
+        },
+        {
+            "unit": "dovecot.service",
+            "type": "notify",
+            "file_state": "enabled",
+            "fragment": "/lib/systemd/system/dovecot.service",
+            "dropin": "/etc/systemd/system/dovecot.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+    ),
+    "ubuntu2604-dovecot24": (
+        {
+            "unit": "postfix.service",
+            "type": "forking",
+            "file_state": "enabled",
+            "fragment": "/usr/lib/systemd/system/postfix.service",
+            "dropin": "/etc/systemd/system/postfix.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            "unit": "dovecot.service",
+            "type": "notify",
+            "file_state": "enabled",
+            "fragment": "/usr/lib/systemd/system/dovecot.service",
+            "dropin": "/etc/systemd/system/dovecot.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            "unit": "postfix@-.service",
+            "type": "forking",
+            "file_state": "disabled",
+            "fragment": "/usr/lib/systemd/system/postfix@.service",
+            "dropin": "/etc/systemd/system/postfix@.service.d/praho-mail.conf",
+            "start": False,
+            "started": ("inactive", "dead"),
+        },
+    ),
+}
+MAX_FENCE_BYTES = 4 * 1024 * 1024
+FENCE_FAMILIES = {"iptables": "icmp-port-unreachable", "ip6tables": "icmp6-port-unreachable"}
 MASTER = """smtp inet n - y - - smtpd
   -o smtpd_sasl_auth_enable=no
 127.0.0.1:1465 inet n - n - - smtpd
@@ -98,6 +247,52 @@ MASTER = """smtp inet n - y - - smtpd
   -o smtpd_sender_restrictions=reject_authenticated_sender_login_mismatch
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 """
+
+
+def fence_rules(rejection: str) -> list[list[str]]:
+    """The certificate fence chain, in order: one loopback return, then the mail-port reject."""
+    return [
+        ["-A", CHAIN, "-i", "lo", "-j", "RETURN"],
+        ["-A", CHAIN, "-p", "tcp", "-m", "multiport", "--dports", PORTS, "-j", "REJECT", "--reject-with", rejection],
+    ]
+
+
+def certificate_fence(snapshot: object, rejection: str) -> str:
+    """Classify one family's ``*-save -t filter`` text as exact, absent, inert or foreign.
+
+    Shared by the worker and the boot guard. Exact means the jump is the first INPUT rule, the
+    chain is exactly the loopback return then the reject, and nothing else references the chain.
+    Inert is an unreferenced chain holding a prefix of those rules, as an interrupted install leaves.
+    """
+    if not isinstance(snapshot, str) or len(snapshot) > MAX_FENCE_BYTES:
+        return "foreign"
+    lines = [line for line in snapshot.splitlines() if line and not line.startswith("#")]
+    if lines.count("*filter") != 1 or lines.count("COMMIT") != 1:
+        return "foreign"
+    jump = "-A INPUT -j " + CHAIN
+    rules = [line for line in lines if line.startswith("-A ")]
+    declared = [line for line in lines if line.startswith(":" + CHAIN + " ")]
+    owned = [line for line in rules if line.startswith("-A " + CHAIN + " ")]
+    references = [line for line in rules if CHAIN in line.split() and line not in owned]
+    expected = [" ".join(rule) for rule in fence_rules(rejection)]
+    if not declared and not owned and not references:
+        return "absent"
+    if len(declared) == 1 and not references and owned == expected[: len(owned)]:
+        return "inert"
+    if (
+        len(declared) == 1
+        and next((line for line in rules if line.startswith("-A INPUT ")), None) == jump
+        and owned == expected
+        and references == [jump]
+    ):
+        return "exact"
+    return "foreign"
+
+
+def staged_name(name: str, allowed: frozenset[str]) -> bool:
+    """An expected stage entry, or atomic()'s temporary for one that a killed worker never renamed."""
+    temporary = re.fullmatch(r"\.(.+)\.[0-9a-f]{16}", name)
+    return name in allowed or (temporary is not None and temporary[1] in allowed)
 
 
 def atomic(path: Path, content: bytes, mode: int = 0o600) -> None:
@@ -129,18 +324,22 @@ class MailSetup:
         self.execute = node.execute
         self.state = node.state
         self.templates = Path(__file__).with_name("mail-templates")
+        # The running helper bundle; a certificate start permit names it as its owner.
+        self.bundle = Path(__file__).parent
 
     def refuse(self, code: str) -> NoReturn:
         raise self.error(code)
 
-    def certificate_verify_command(self, expected: str, certificate: Path) -> list[str]:
+    def certificate_verify_command(self, expected: str, certificate: Path, *, check_time: bool = True) -> list[str]:
         # Match the actual TLS client's verification policy. Recent Python
         # runtimes enable strict X.509 checks; reject unusable material before setup.
+        # Only the bundle upgrade's compatibility dry run skips the validity window.
         strict = ssl.create_default_context().verify_flags & ssl.VERIFY_X509_STRICT
         return [
             "openssl",
             "verify",
             *(["-x509_strict"] if strict else []),
+            *([] if check_time else ["-no_check_time"]),
             "-CAfile",
             str(self.path("/etc/ssl/certs/ca-certificates.crt")),
             "-purpose",
@@ -298,30 +497,84 @@ class MailSetup:
                 if time.monotonic() >= deadline:
                     raise
 
-    def completed_certificate_operation(self, path: Path, expected: str, identity: str) -> bool:
+    def journal(self, expected: str) -> dict[str, Any]:
+        """Read node.json in any state; a foreign, mutable or malformed journal is review evidence."""
+        path = self.state / "node.json"
+        try:
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_mode & 0o077
+                or metadata.st_size > MAX_JOURNAL_BYTES
+            ):
+                self.refuse("mail_setup_review_required")
+            data = json.loads(path.read_text())
+            if (
+                not isinstance(data, dict)
+                or (type(data.get("version")), data.get("version")) != (int, 1)
+                or (data.get("profile"), data.get("node")) != (self.node.profile_id, expected)
+            ):
+                self.refuse("mail_setup_review_required")
+            return data
+        except (ValueError, OSError, TypeError, AttributeError) as error:
+            raise self.error("mail_setup_review_required") from error
+
+    def operation_record(self, journal: dict[str, Any]) -> dict[str, Any]:
+        """The certificate_applying record a certificate journal carries, in the current or legacy shape."""
+        keys = set(journal) - ({"start", "files", "fenced"} if journal["status"] == "certificate_starting" else set())
+        if keys not in (RECORD_FIELDS, LEGACY_RECORD_FIELDS) or not isinstance(journal.get("identity"), str):
+            self.refuse("mail_setup_review_required")
+        try:
+            canonical = str(UUID(journal["identity"])) == journal["identity"]
+        except ValueError:
+            canonical = False
+        digests = [journal[key] for key in keys if key.endswith("_sha256")]
+        if not canonical or not all(
+            isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) for value in digests
+        ):
+            self.refuse("mail_setup_review_required")
+        return {**{key: journal[key] for key in keys}, "status": "certificate_applying"}
+
+    def certificate_operation(self, identity: str, expected: str) -> dict[str, Any] | None:
+        path = self.state / "certificate-operations" / (identity + ".json")
         if not path.exists() and not path.is_symlink():
-            return False
+            return None
         metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
             self.refuse("mail_setup_review_required")
         if metadata.st_size > MAX_CERTIFICATE_OPERATION_BYTES:
             self.refuse("mail_setup_review_required")
         record = json.loads(path.read_text())
-        if (type(record.get("version")), record.get("version")) != (int, 1) or (
-            record.get("node"),
-            record.get("profile"),
-            record.get("identity"),
-            record.get("status"),
-        ) != (expected, self.node.profile_id, identity, "completed"):
+        if (
+            not isinstance(record, dict)
+            or (type(record.get("version")), record.get("version")) != (int, 1)
+            or (record.get("node"), record.get("profile"), record.get("identity"))
+            != (
+                expected,
+                self.node.profile_id,
+                identity,
+            )
+            or record.get("status") not in {"applying", "completed"}
+        ):
             self.refuse("mail_setup_review_required")
-        return True
+        return record
+
+    def pending_certificate_operations(self, identity: str) -> bool:
+        """Another operation is in flight while its stage exists; it is retired last."""
+        operations = self.state / "certificate-operations"
+        if not operations.exists():
+            return False
+        return any(
+            entry.name.endswith(".stage") and entry.name != identity + ".stage" for entry in operations.iterdir()
+        )
 
     def retire_certificate_stage(self, stage: Path) -> None:
         if not stage.exists() and not stage.is_symlink():
             return
         self.private_directory(stage)
         entries = tuple(stage.iterdir())
-        if {entry.name for entry in entries} - {"old.pem", "old.key", "new.pem", "new.key", "before.json"}:
+        if not all(staged_name(entry.name, CERTIFICATE_STAGE_FILES) for entry in entries):
             self.refuse("mail_setup_review_required")
         for entry in entries:
             metadata = entry.lstat()
@@ -336,43 +589,189 @@ class MailSetup:
         finally:
             os.close(descriptor)
 
-    def certificate_record(self, before: dict[str, Any], identity: str, old: str, new: str) -> dict[str, Any]:
+    def stage_certificate(self, identity: str, files: dict[str, bytes]) -> Path:
+        """Build the private stage under a hidden name; it is published only after the journal and tombstone."""
+        operations = self.state / "certificate-operations"
+        self.private_directory(operations)
+        temporary = operations / ("." + identity + ".stage-" + secrets.token_hex(8))
+        temporary.mkdir(mode=0o700)
+        for name, content in files.items():
+            atomic(temporary / name, content)
+        return temporary
+
+    def publish_stage(self, temporary: Path, stage: Path) -> None:
+        os.rename(temporary, stage)
+        descriptor = os.open(stage.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def sweep_certificate_temporaries(self) -> None:
+        # Unpublished stages carry no intent: no journal or tombstone refers to them yet.
+        for entry in (self.state / "certificate-operations").iterdir():
+            if re.fullmatch(r"\.[0-9a-f-]{36}\.stage-[0-9a-f]{16}", entry.name):
+                self.retire_certificate_stage(entry)
+
+    def staged_certificate(
+        self, record: dict[str, Any], *, temporary: bool = False
+    ) -> tuple[Path, dict[str, Any], dict[str, bytes]]:
+        """Read and verify this operation's complete stage against every digest its record holds."""
+        operations = self.state / "certificate-operations"
+        directory = operations / (record["identity"] + ".stage")
+        if temporary and not directory.exists() and not directory.is_symlink():
+            hidden = [entry for entry in operations.iterdir() if entry.name.startswith("." + directory.name + "-")]
+            if len(hidden) != 1:
+                self.refuse("mail_setup_review_required")
+            directory = hidden[0]
+        if not directory.is_dir() or directory.is_symlink():
+            self.refuse("mail_setup_review_required")
+        self.private_directory(directory)
+        entries = {entry.name: entry for entry in directory.iterdir()}
+        if set(entries) != CERTIFICATE_STAGE_FILES:
+            self.refuse("mail_setup_review_required")
+        files = {}
+        for name, entry in entries.items():
+            metadata = entry.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_mode & 0o077
+                or metadata.st_size > MAX_CERTIFICATE_BYTES
+            ):
+                self.refuse("mail_setup_review_required")
+            files[name] = entry.read_bytes()
+        before = json.loads(files["before.json"])
+        if (
+            hashlib.sha256(files["before.json"]).hexdigest() != record["before_sha256"]
+            or not isinstance(before, dict)
+            or set(before) != {"version", "node", "profile", "status", "files"}
+            or (before["version"], before["node"], before["profile"], before["status"])
+            != (1, record["node"], record["profile"], "ready")
+            or not isinstance(before["files"], dict)
+            or set(before["files"]) != set(CONFIG_PATHS)
+        ):
+            self.refuse("mail_setup_review_required")
+        if (
+            hashlib.sha256(files["old.pem"]).hexdigest() != before["files"][CERTIFICATE_PEM]
+            or hashlib.sha256(files["old.key"]).hexdigest() != before["files"][CERTIFICATE_KEY]
+            or self.leaf_digest(files["old.pem"]) != record["old_certificate_sha256"]
+            or self.leaf_digest(files["new.pem"]) != record["new_certificate_sha256"]
+        ):
+            self.refuse("mail_setup_review_required")
+        if "new_pem_sha256" in record and (
+            hashlib.sha256(files["new.pem"]).hexdigest(),
+            hashlib.sha256(files["new.key"]).hexdigest(),
+        ) != (record["new_pem_sha256"], record["new_key_sha256"]):
+            self.refuse("mail_setup_review_required")
+        return directory, before, files
+
+    def certificate_record(
+        self, before: dict[str, Any], identity: str, old: bytes, chain: bytes, private_key: bytes
+    ) -> dict[str, Any]:
         return {
             "version": 1,
             "node": before["node"],
             "profile": before["profile"],
             "identity": identity,
             "status": "certificate_applying",
-            "old_certificate_sha256": old,
-            "new_certificate_sha256": new,
+            "old_certificate_sha256": self.leaf_digest(old),
+            "new_certificate_sha256": self.leaf_digest(chain),
+            "new_pem_sha256": hashlib.sha256(chain).hexdigest(),
+            "new_key_sha256": hashlib.sha256(private_key).hexdigest(),
             "before_sha256": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
         }
+
+    def not_after(self, certificate: Path) -> datetime:
+        try:
+            expiry = self.execute(["openssl", "x509", "-in", str(certificate), "-enddate", "-noout"]).strip()
+            return datetime.strptime(expiry.removeprefix("notAfter="), "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+        except (ValueError, self.error) as error:
+            raise self.error("mail_node_certificate_unproven") from error
+
+    def bundle_current(self, before: dict[str, Any]) -> bool:
+        """The guard admits a start only from helpers equal to the installed bundle."""
+        return all(
+            hashlib.sha256((self.bundle / name).read_bytes()).hexdigest()
+            == before["files"]["/usr/lib/praho/mail/" + name]
+            for name in NATIVE_FILES
+        )
 
     def reconcile_certificate(self, expected: str, identity: str) -> dict[str, Any]:
         self.node.stage = "certificate_preflight"
         self.node.profile(expected)
         if str(UUID(identity)) != identity:
             self.refuse("mail_native_inspection_failed")
+        self.private_directory(self.state)
+        journal = self.journal(expected)
+        operations = self.state / "certificate-operations"
+        if operations.exists() or operations.is_symlink():
+            self.private_directory(operations)
+        tombstone = self.certificate_operation(identity, expected)
+        # Identity first: an operation that left any state never starts a fresh recovery.
+        if journal.get("status") in {"certificate_applying", "certificate_starting"}:
+            record = self.operation_record(journal)
+            if record["identity"] != identity:
+                self.refuse("mail_node_operation_in_progress")
+            if tombstone is not None and tombstone["status"] == "completed":
+                return self.roll_forward_certificate(expected, journal, record)
+            return self.resume_certificate(expected, journal, record, tombstone)
+        if journal.get("status") == "bundle_upgrading":
+            self.refuse("mail_node_operation_in_progress")
+        return self.ready_certificate_operation(expected, identity, tombstone)
+
+    def ready_certificate_operation(
+        self, expected: str, identity: str, tombstone: dict[str, Any] | None
+    ) -> dict[str, Any]:
         before = self.marker(expected)
         if before is None:
             self.refuse("mail_setup_review_required")
-        self.private_directory(self.state)
+        stage = self.state / "certificate-operations" / (identity + ".stage")
+        if tombstone is not None and tombstone["status"] == "applying":
+            return self.finalize_certificate(expected, before, tombstone)
+        if tombstone is not None and tombstone.get("fence_owner") is True:
+            if self.pending_certificate_operations(identity):
+                self.refuse("mail_node_operation_in_progress")
+            return self.finish_certificate_cleanup(expected, tombstone)
+        if tombstone is not None:
+            # Completed: verification only. A later candidate is never installed for this identity.
+            self.security_configuration(expected)
+            current = self.leaf_digest(self.path(CERTIFICATE_PEM).read_bytes())
+            result = self.certificate_result(expected, current, "unchanged")
+            self.retire_certificate_stage(stage)
+            return result
+        if stage.exists() or stage.is_symlink():
+            self.refuse("mail_setup_review_required")
+        if self.pending_certificate_operations(identity):
+            self.refuse("mail_node_operation_in_progress")
+        return self.admit_certificate(expected, identity, before)
+
+    def admit_certificate(self, expected: str, identity: str, before: dict[str, Any]) -> dict[str, Any]:
         self.security_configuration(expected)
         if any(chain or jump for chain, jump in self.read_fences().values()):
             self.refuse("mail_setup_review_required")
-        certificate, key = self.path("/etc/praho-mail/node.pem"), self.path("/etc/praho-mail/node.key")
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
         if key.stat().st_mode & 0o077:
             self.refuse("mail_setup_review_required")
         current = self.leaf_digest(certificate.read_bytes())
+        phase = self.unit_phase()
+        if phase == "running":
+            return self.rotate_certificate(expected, identity, before, current)
+        # Stopped units with an unexpired leaf, or a mixed state, are not ours to start. Refuse
+        # before any write so the journal stays byte-identical.
+        if phase != "stopped" or self.not_after(certificate) > datetime.now(UTC):
+            self.refuse("mail_node_services_unavailable")
+        if not self.bundle_current(before):
+            self.refuse("mail_node_bundle_upgrade_required")
+        self.node.stage = "certificate_candidate"
+        chain, private_key = self.certificate(expected)
+        return self.recover_certificate(expected, identity, before, chain, private_key)
+
+    def rotate_certificate(self, expected: str, identity: str, before: dict[str, Any], current: str) -> dict[str, Any]:
+        """Routine rotation on live services: install, reload, prove; any failure parks for review."""
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
         operations = self.state / "certificate-operations"
         tombstone = operations / (identity + ".json")
-        stage = operations / (identity + ".stage")
-        if operations.exists() or operations.is_symlink():
-            self.private_directory(operations)
-            if self.completed_certificate_operation(tombstone, expected, identity):
-                result = self.certificate_result(expected, current, "unchanged")
-                self.retire_certificate_stage(stage)
-                return result
         self.node.stage = "certificate_candidate"
         try:
             chain, private_key = self.certificate(expected)
@@ -383,7 +782,7 @@ class MailSetup:
         if (certificate.read_bytes(), key.read_bytes()) == (chain, private_key):
             result = self.certificate_result(expected, current, "unchanged")
             self.private_directory(operations)
-            record = self.certificate_record(before, identity, current, current)
+            record = self.certificate_record(before, identity, chain, chain, private_key)
             atomic(tombstone, json.dumps({**record, "status": "completed"}).encode())
             return result
         return self.install_certificate(before, identity, chain, private_key)
@@ -393,28 +792,30 @@ class MailSetup:
     ) -> dict[str, Any]:
         expected = before["node"]
         self.check_files(before)
-        certificate, key = self.path("/etc/praho-mail/node.pem"), self.path("/etc/praho-mail/node.key")
-        current, candidate = self.leaf_digest(certificate.read_bytes()), self.leaf_digest(chain)
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
+        candidate = self.leaf_digest(chain)
         operations = self.state / "certificate-operations"
         tombstone, stage = operations / (identity + ".json"), operations / (identity + ".stage")
         self.private_directory(operations)
         if stage.exists() or stage.is_symlink():
             self.refuse("mail_setup_review_required")
-        stage.mkdir(mode=0o700)
-        record = self.certificate_record(before, identity, current, candidate)
+        record = self.certificate_record(before, identity, certificate.read_bytes(), chain, private_key)
         completed = False
         try:
             self.node.stage = "certificate_staging"
+            temporary = self.stage_certificate(
+                identity,
+                {
+                    "old.pem": certificate.read_bytes(),
+                    "old.key": key.read_bytes(),
+                    "new.pem": chain,
+                    "new.key": private_key,
+                    "before.json": json.dumps(before, sort_keys=True).encode(),
+                },
+            )
             atomic(self.state / "node.json", json.dumps(record).encode())
             atomic(tombstone, json.dumps({**record, "status": "applying"}).encode())
-            for name, content in {
-                "old.pem": certificate.read_bytes(),
-                "old.key": key.read_bytes(),
-                "new.pem": chain,
-                "new.key": private_key,
-                "before.json": json.dumps(before, sort_keys=True).encode(),
-            }.items():
-                atomic(stage / name, content)
+            self.publish_stage(temporary, stage)
             self.node.stage = "certificate_installing"
             atomic(certificate, chain)
             atomic(key, private_key)
@@ -429,8 +830,8 @@ class MailSetup:
                 **before,
                 "files": {
                     **before["files"],
-                    "/etc/praho-mail/node.pem": hashlib.sha256(chain).hexdigest(),
-                    "/etc/praho-mail/node.key": hashlib.sha256(private_key).hexdigest(),
+                    CERTIFICATE_PEM: hashlib.sha256(chain).hexdigest(),
+                    CERTIFICATE_KEY: hashlib.sha256(private_key).hexdigest(),
                 },
             }
             self.check_files(ready)
@@ -442,6 +843,491 @@ class MailSetup:
         finally:
             if not completed:
                 atomic(self.state / "node.json", json.dumps({**record, "status": "review_required"}).encode())
+
+    def recover_certificate(
+        self, expected: str, identity: str, before: dict[str, Any], chain: bytes, private_key: bytes
+    ) -> dict[str, Any]:
+        """Expired leaf, stopped units: stage, then journal and tombstone, then publish the stage."""
+        self.node.stage = "certificate_staging"
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
+        operations = self.state / "certificate-operations"
+        self.private_directory(operations)
+        self.sweep_certificate_temporaries()
+        record = self.certificate_record(before, identity, certificate.read_bytes(), chain, private_key)
+        temporary = self.stage_certificate(
+            identity,
+            {
+                "old.pem": certificate.read_bytes(),
+                "old.key": key.read_bytes(),
+                "new.pem": chain,
+                "new.key": private_key,
+                "before.json": json.dumps(before, sort_keys=True).encode(),
+            },
+        )
+        atomic(self.state / "node.json", json.dumps(record).encode())
+        atomic(operations / (identity + ".json"), json.dumps({**record, "status": "applying"}).encode())
+        self.publish_stage(temporary, operations / (identity + ".stage"))
+        return self.advance_certificate(expected, record, before)
+
+    def resume_certificate(
+        self,
+        expected: str,
+        journal: dict[str, Any],
+        record: dict[str, Any],
+        tombstone: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Continue this same operation only when every recorded digest still matches exactly."""
+        self.node.stage = "certificate_resume"
+        if set(record) != RECORD_FIELDS:
+            self.refuse("mail_setup_review_required")
+        if tombstone is not None and tombstone != {**record, "status": "applying"}:
+            self.refuse("mail_setup_review_required")
+        directory, before, _files = self.staged_certificate(record, temporary=True)
+        installed = tuple(
+            hashlib.sha256(self.path(name).read_bytes()).hexdigest() for name in (CERTIFICATE_PEM, CERTIFICATE_KEY)
+        )
+        old = (before["files"][CERTIFICATE_PEM], before["files"][CERTIFICATE_KEY])
+        new = (record["new_pem_sha256"], record["new_key_sha256"])
+        # The pem is replaced before the key: old/old, new/old and new/new are the only resumable pairs.
+        if installed not in {old, (new[0], old[1]), new}:
+            self.refuse("mail_setup_review_required")
+        self.check_files(
+            {**before, "files": {**before["files"], CERTIFICATE_PEM: installed[0], CERTIFICATE_KEY: installed[1]}}
+        )
+        if not self.bundle_current(before):
+            self.refuse("mail_node_bundle_upgrade_required")
+        self.unit_phase()
+        if "foreign" in self.certificate_fences().values():
+            self.refuse("mail_setup_review_required")
+        operations = self.state / "certificate-operations"
+        if journal["status"] == "certificate_starting":
+            # Revoke the dead owner's permit before anything else changes.
+            atomic(self.state / "node.json", json.dumps(record).encode())
+        if tombstone is None:
+            atomic(operations / (record["identity"] + ".json"), json.dumps({**record, "status": "applying"}).encode())
+        if directory.name != record["identity"] + ".stage":
+            self.publish_stage(directory, operations / (record["identity"] + ".stage"))
+        return self.advance_certificate(expected, record, before)
+
+    def advance_certificate(self, expected: str, record: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
+        """Fence, install, validate offline, start under one fresh permit, prove, then commit ready."""
+        operations = self.state / "certificate-operations"
+        _directory, _before, files = self.staged_certificate(record)
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
+        candidate = {
+            **before,
+            "files": {
+                **before["files"],
+                CERTIFICATE_PEM: record["new_pem_sha256"],
+                CERTIFICATE_KEY: record["new_key_sha256"],
+            },
+        }
+        starting = committed = False
+        try:
+            self.node.stage = "certificate_fence"
+            self.ensure_certificate_fence()
+            self.node.stage = "certificate_stop"
+            self.stop_mail_units()
+            self.node.stage = "certificate_installing"
+            for path, name, digest in (
+                (certificate, "new.pem", record["new_pem_sha256"]),
+                (key, "new.key", record["new_key_sha256"]),
+            ):
+                if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    atomic(path, files[name])
+            self.node.stage = "certificate_validation"
+            self.validate_candidate(expected, candidate)
+            self.node.stage = "certificate_start"
+            permit = self.start_permit()
+            starting = True
+            atomic(
+                self.state / "node.json",
+                json.dumps(
+                    {
+                        **record,
+                        "status": "certificate_starting",
+                        "fenced": True,
+                        "files": candidate["files"],
+                        "start": permit,
+                    }
+                ).encode(),
+            )
+            self.start_mail_units(permit)
+            self.node.stage = "certificate_verification"
+            self.wait_for_proof(expected, record["new_certificate_sha256"])
+            self._security_settings()
+            self.node.stage = "certificate_commit"
+            if set(self.certificate_fences().values()) != {"exact"}:
+                self.refuse("mail_node_certificate_unproven")
+            self.check_files(candidate)
+            atomic(self.state / "node.json", json.dumps(candidate).encode())
+            committed = True
+        except Exception:
+            if not committed:
+                self.hold_certificate(record, revoke=starting)
+            raise
+        tombstone = operations / (record["identity"] + ".json")
+        return self.finalize_certificate(expected, candidate, json.loads(tombstone.read_text()))
+
+    def hold_certificate(self, record: dict[str, Any], *, revoke: bool) -> None:
+        # First revoke: the guard refuses certificate_applying, so a queued start job cannot be
+        # admitted after this point even though killing systemctl never cancels it. Then stop.
+        try:
+            if revoke:
+                atomic(self.state / "node.json", json.dumps(record).encode())
+        finally:
+            try:
+                self.stop_mail_units()
+            except Exception:
+                print("mail_service_stop_unproven", file=sys.stderr)
+
+    def validate_candidate(self, expected: str, candidate: dict[str, Any]) -> None:
+        certificate, key = self.path(CERTIFICATE_PEM), self.path(CERTIFICATE_KEY)
+        certificate_public = self.execute(["openssl", "x509", "-in", str(certificate), "-pubkey", "-noout"])
+        key_public = self.execute(["openssl", "pkey", "-in", str(key), "-pubout"])
+        if not certificate_public.strip() or certificate_public.strip() != key_public.strip():
+            self.refuse("mail_node_certificate_unproven")
+        try:
+            self.execute(self.certificate_verify_command(expected, certificate))
+        except self.error as error:
+            raise self.error("mail_node_certificate_unproven") from error
+        if self.not_after(certificate) <= datetime.now(UTC):
+            self.refuse("mail_node_certificate_unproven")
+        self.check_files(candidate)
+        self._security_settings()
+
+    def start_permit(self) -> dict[str, Any]:
+        """One permit per start phase, bound to this live owner and its held exclusive lock."""
+        if self.node.operation_fd is None:
+            self.refuse("mail_native_inspection_failed")
+        arguments = self.path("/proc/self/cmdline").read_bytes().decode().split("\0")
+        helper = arguments[1] if len(arguments) > 1 else ""
+        if (
+            not re.fullmatch(r"/run/praho-mail-[A-Za-z0-9_-]{1,128}/praho-mail\.py", helper)
+            or self.path(helper).parent != self.bundle
+        ):
+            self.refuse("mail_native_inspection_failed")
+        issued = time.monotonic()
+        return {
+            "pid": os.getpid(),
+            "start_tick": self.path("/proc/self/stat").read_text().rpartition(") ")[2].split()[19],
+            "boot_id": self.path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            "lock_fd": self.node.operation_fd,
+            "issued_at": issued,
+            "expires_at": issued + START_PERMIT_SECONDS,
+            "helper_path": helper,
+            "action": "reconcile_node_certificate",
+        }
+
+    def start_mail_units(self, permit: dict[str, Any]) -> None:
+        eligible = [unit["unit"] for unit in UNIT_TOPOLOGY[self.node.profile_id] if unit["start"]]
+        self.execute(["systemctl", "reset-failed", *eligible], timeout=UNIT_START_TIMEOUT_SECONDS)
+        for unit in eligible:
+            # Each guard run re-checks the permit at its end; never start with less time than it needs.
+            remaining = permit["expires_at"] - time.monotonic()
+            if remaining < GUARD_START_SECONDS:
+                self.refuse("mail_node_certificate_unproven")
+            self.execute(["systemctl", "start", unit], timeout=int(min(remaining, UNIT_START_TIMEOUT_SECONDS)))
+        if self.unit_phase() != "running":
+            self.refuse("mail_node_certificate_unproven")
+
+    def stop_mail_units(self) -> None:
+        units = [unit["unit"] for unit in UNIT_TOPOLOGY[self.node.profile_id]]
+        self.execute(["systemctl", "stop", *units], timeout=UNIT_STOP_TIMEOUT_SECONDS)
+
+    def wait_for_proof(self, expected: str, digest: str) -> str:
+        deadline = time.monotonic() + CERTIFICATE_RELOAD_WAIT_SECONDS
+        while True:
+            try:
+                return self.certificate_proof(expected, digest)
+            except self.error as error:
+                if str(error) != "mail_node_certificate_unproven" or time.monotonic() >= deadline:
+                    raise
+                time.sleep(CERTIFICATE_RELOAD_POLL_SECONDS)
+
+    def finalize_certificate(self, expected: str, ready: dict[str, Any], tombstone: dict[str, Any]) -> dict[str, Any]:
+        """After the ready commit: mark completed with the fence owner, then clean up."""
+        self.node.stage = "certificate_cleanup"
+        record = {key: value for key, value in tombstone.items() if key != "status"}
+        if set(tombstone) != RECORD_FIELDS or (ready["files"][CERTIFICATE_PEM], ready["files"][CERTIFICATE_KEY]) != (
+            record["new_pem_sha256"],
+            record["new_key_sha256"],
+        ):
+            self.refuse("mail_setup_review_required")
+        completed = {**record, "status": "completed", "fence_owner": True}
+        atomic(self.state / "certificate-operations" / (record["identity"] + ".json"), json.dumps(completed).encode())
+        return self.finish_certificate_cleanup(expected, completed)
+
+    def finish_certificate_cleanup(self, expected: str, tombstone: dict[str, Any]) -> dict[str, Any]:
+        """Readiness is already committed; cleanup failures are resumable, never a downgrade."""
+        self.node.stage = "certificate_cleanup"
+        operations = self.state / "certificate-operations"
+        record = {key: value for key, value in tombstone.items() if key != "fence_owner"}
+        self.remove_certificate_fence()
+        # Clear the owner marker before retiring the stage, so a stale replay never removes a later fence.
+        atomic(operations / (record["identity"] + ".json"), json.dumps(record).encode())
+        self.retire_certificate_stage(operations / (record["identity"] + ".stage"))
+        return self.certificate_result(expected, record["new_certificate_sha256"], "recovered")
+
+    def roll_forward_certificate(
+        self, expected: str, journal: dict[str, Any], record: dict[str, Any]
+    ) -> dict[str, Any]:
+        """A completed tombstone whose ready write never landed: publish ready; never touch certificates."""
+        self.node.stage = "certificate_resume"
+        directory, before, files = self.staged_certificate(record)
+        installed = {name: self.path(name).read_bytes() for name in (CERTIFICATE_PEM, CERTIFICATE_KEY)}
+        if (installed[CERTIFICATE_PEM], installed[CERTIFICATE_KEY]) != (files["new.pem"], files["new.key"]):
+            self.refuse("mail_setup_review_required")
+        ready = {
+            **before,
+            "files": {
+                **before["files"],
+                **{name: hashlib.sha256(content).hexdigest() for name, content in installed.items()},
+            },
+        }
+        fenced = journal["status"] == "certificate_starting"
+        if fenced and journal.get("files") != ready["files"]:
+            self.refuse("mail_setup_review_required")
+        self.check_files(ready)
+        if fenced and "foreign" in self.certificate_fences().values():
+            self.refuse("mail_setup_review_required")
+        atomic(self.state / "node.json", json.dumps(ready).encode())
+        if fenced:
+            self.remove_certificate_fence()
+        self.retire_certificate_stage(directory)
+        return self.certificate_result(expected, record["new_certificate_sha256"], "unchanged")
+
+    def running_bundle(self) -> dict[str, bytes]:
+        files = {"/usr/lib/praho/mail/" + name: (self.bundle / name).read_bytes() for name in NATIVE_FILES}
+        return {**files, **dict.fromkeys(DROPIN_PATHS, UNIT_GUARD)}
+
+    @staticmethod
+    def bundle_entry(path: str) -> str:
+        """Stage file name for a bundle path: the helper's own name, or ``<unit>.conf`` for a drop-in."""
+        if path in DROPIN_PATHS:
+            return path.split("/")[4].removesuffix(".d") + ".conf"
+        return path.rsplit("/", 1)[-1]
+
+    @staticmethod
+    def bundle_result(expected: str, profile: str, digests: dict[str, str], outcome: str) -> dict[str, Any]:
+        listing = "".join(path + "=" + digests[path] + "\n" for path in BUNDLE_PATHS)
+        return {
+            "node_hostname": expected,
+            "profile": profile,
+            "outcome": outcome,
+            "bundle_sha256": hashlib.sha256(listing.encode()).hexdigest(),
+        }
+
+    def evidenced_bundle(self, installed: dict[str, str]) -> bool:
+        if any(installed[path] != hashlib.sha256(UNIT_GUARD).hexdigest() for path in DROPIN_PATHS):
+            return False
+        helpers = {self.bundle_entry(path): installed[path] for path in BUNDLE_PATHS if path not in DROPIN_PATHS}
+        return helpers in PREDECESSOR_BUNDLES.values()
+
+    def remove_bundle_stage(self, directory: Path) -> None:
+        self.private_directory(directory)
+        entries = {entry.name: entry for entry in directory.iterdir()}
+        if not all(staged_name(name, BUNDLE_STAGE_FILES) for name in entries):
+            self.refuse("mail_setup_review_required")
+        files = [entry for name, entry in entries.items() if name not in {"from", "to"}]
+        for name in {"from", "to"} & set(entries):
+            self.private_directory(entries[name])
+            children = tuple(entries[name].iterdir())
+            if not all(staged_name(child.name, BUNDLE_ENTRIES) for child in children):
+                self.refuse("mail_setup_review_required")
+            files.extend(children)
+        for file in files:
+            metadata = file.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+                self.refuse("mail_setup_review_required")
+        for file in files:
+            file.unlink()
+        for name in {"from", "to"} & set(entries):
+            entries[name].rmdir()
+        directory.rmdir()
+        descriptor = os.open(directory.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def discard_bundle_stage(self, directory: Path) -> None:
+        """Unpublish first: an interrupted removal then leaves only a hidden stage the next admission sweeps."""
+        hidden = self.state / (".bundle-upgrade-" + secrets.token_hex(8))
+        self.publish_stage(directory, hidden)
+        self.remove_bundle_stage(hidden)
+
+    def retire_bundle_stages(self) -> None:
+        """Remove upgrade staging no journal refers to: unpublished stages, and a published one whose
+        upgrade already committed or restored (its candidate or original equals the ready journal)."""
+        for entry in self.state.iterdir():
+            if re.fullmatch(r"\.bundle-upgrade-[0-9a-f]{16}", entry.name):
+                self.remove_bundle_stage(entry)
+        stage = self.state / "bundle-upgrade"
+        if stage.exists() or stage.is_symlink():
+            self.private_directory(stage)
+            current = (self.state / "node.json").read_bytes()
+            known = [stage / name for name in ("candidate.json", "journal.json") if (stage / name).is_file()]
+            if current not in {path.read_bytes() for path in known}:
+                self.refuse("mail_setup_review_required")
+            self.discard_bundle_stage(stage)
+
+    def upgrade_bundle(self, expected: str, identity: str) -> dict[str, Any]:
+        """Replace only the helpers and drop-ins of a ready node; never setup or configuration."""
+        self.node.stage = "bundle_preflight"
+        self.node.profile(expected)
+        if str(UUID(identity)) != identity:
+            self.refuse("mail_native_inspection_failed")
+        self.private_directory(self.state)
+        journal = self.journal(expected)
+        if journal.get("status") == "bundle_upgrading":
+            return self.resume_bundle_upgrade(expected, identity, journal)
+        if journal.get("status") in {"certificate_applying", "certificate_starting"}:
+            self.refuse("mail_node_operation_in_progress")
+        original = (self.state / "node.json").read_bytes()
+        before = self.marker(expected)
+        if before is None:
+            self.refuse("mail_setup_review_required")
+        if self.pending_certificate_operations(""):
+            self.refuse("mail_node_operation_in_progress")
+        self.retire_bundle_stages()
+        running = self.running_bundle()
+        target = {path: hashlib.sha256(content).hexdigest() for path, content in running.items()}
+        installed = {path: before["files"][path] for path in BUNDLE_PATHS}
+        if installed == target:
+            return self.bundle_result(expected, before["profile"], target, "unchanged")
+        if not self.evidenced_bundle(installed):
+            self.refuse("mail_setup_review_required")
+        # Offline checks only: an expired, stopped node has no listeners to prove.
+        self.security_configuration(expected)
+        self.node.stage = "bundle_staging"
+        temporary = self.state / (".bundle-upgrade-" + secrets.token_hex(8))
+        temporary.mkdir(mode=0o700)
+        for side, files in (("from", {path: self.path(path).read_bytes() for path in BUNDLE_PATHS}), ("to", running)):
+            (temporary / side).mkdir(mode=0o700)
+            for path in BUNDLE_PATHS:
+                atomic(temporary / side / self.bundle_entry(path), files[path])
+        atomic(temporary / "journal.json", original)
+        atomic(temporary / "candidate.json", json.dumps({**before, "files": {**before["files"], **target}}).encode())
+        record = {
+            "version": 1,
+            "node": expected,
+            "profile": before["profile"],
+            "status": "bundle_upgrading",
+            "identity": identity,
+            "from": installed,
+            "to": target,
+            "journal_sha256": hashlib.sha256(original).hexdigest(),
+        }
+        atomic(self.state / "node.json", json.dumps(record).encode())
+        self.publish_stage(temporary, self.state / "bundle-upgrade")
+        return self.advance_bundle_upgrade(expected, record)
+
+    def staged_bundle(
+        self, record: dict[str, Any], *, temporary: bool = False
+    ) -> tuple[Path, bytes, dict[str, Any], dict[str, dict[str, bytes]]]:
+        """Read and verify the upgrade stage against every digest the bundle_upgrading journal holds."""
+        directory = self.state / "bundle-upgrade"
+        if temporary and not directory.exists() and not directory.is_symlink():
+            hidden = [entry for entry in self.state.iterdir() if entry.name.startswith(".bundle-upgrade-")]
+            if len(hidden) != 1:
+                self.refuse("mail_setup_review_required")
+            directory = hidden[0]
+        self.private_directory(directory)
+        sides: dict[str, dict[str, bytes]] = {}
+        for side in ("from", "to"):
+            self.private_directory(directory / side)
+            sides[side] = {}
+            for path in BUNDLE_PATHS:
+                content = (directory / side / self.bundle_entry(path)).read_bytes()
+                if hashlib.sha256(content).hexdigest() != record[side][path]:
+                    self.refuse("mail_setup_review_required")
+                sides[side][path] = content
+        original = (directory / "journal.json").read_bytes()
+        before = json.loads(original)
+        candidate = {**before, "files": {**before["files"], **record["to"]}}
+        if (
+            hashlib.sha256(original).hexdigest() != record["journal_sha256"]
+            or set(before) != {"version", "node", "profile", "status", "files"}
+            or (before["version"], before["node"], before["profile"], before["status"])
+            != (1, record["node"], record["profile"], "ready")
+            or any(before["files"][path] != record["from"][path] for path in BUNDLE_PATHS)
+            or json.loads((directory / "candidate.json").read_bytes()) != candidate
+        ):
+            self.refuse("mail_setup_review_required")
+        return directory, original, candidate, sides
+
+    def resume_bundle_upgrade(self, expected: str, identity: str, journal: dict[str, Any]) -> dict[str, Any]:
+        """Roll on only when every bundle file is exactly its from or its to copy."""
+        self.node.stage = "bundle_resume"
+        if set(journal) != {"version", "node", "profile", "status", "identity", "from", "to", "journal_sha256"}:
+            self.refuse("mail_setup_review_required")
+        if any(
+            not isinstance(journal[side], dict) or set(journal[side]) != set(BUNDLE_PATHS) for side in ("from", "to")
+        ):
+            self.refuse("mail_setup_review_required")
+        if journal["identity"] != identity:
+            self.refuse("mail_node_operation_in_progress")
+        directory, _original, candidate, _sides = self.staged_bundle(journal, temporary=True)
+        installed = {path: hashlib.sha256(self.path(path).read_bytes()).hexdigest() for path in BUNDLE_PATHS}
+        if any(installed[path] not in {journal["from"][path], journal["to"][path]} for path in BUNDLE_PATHS):
+            self.refuse("mail_setup_review_required")
+        self.check_files({**candidate, "files": {**candidate["files"], **installed}})
+        if directory.name != "bundle-upgrade":
+            self.publish_stage(directory, self.state / "bundle-upgrade")
+        return self.advance_bundle_upgrade(expected, journal)
+
+    def advance_bundle_upgrade(self, expected: str, record: dict[str, Any]) -> dict[str, Any]:
+        """Helpers, then drop-ins, one daemon-reload, byte check, installed-guard dry run, then ready."""
+        directory, original, candidate, sides = self.staged_bundle(record)
+        committed = False
+        try:
+            self.node.stage = "bundle_replacing"
+            for path in BUNDLE_PATHS:
+                if hashlib.sha256(self.path(path).read_bytes()).hexdigest() != record["to"][path]:
+                    atomic(self.path(path), sides["to"][path])
+            self.execute(["systemctl", "daemon-reload"])
+            if any(self.path(path).read_bytes() != sides["to"][path] for path in BUNDLE_PATHS):
+                self.refuse("mail_setup_review_required")
+            self.node.stage = "bundle_compatibility"
+            self.compat_check()
+            self.node.stage = "bundle_commit"
+            self.check_files(candidate)
+            atomic(self.state / "node.json", json.dumps(candidate).encode())
+            committed = True
+        except Exception:
+            if not committed:
+                # An incompatible new guard is never committed: put back the evidenced predecessor.
+                failed = self.node.stage
+                self.restore_bundle(record, directory, original, sides["from"])
+                self.node.stage = failed
+            raise
+        self.discard_bundle_stage(directory)
+        return self.bundle_result(expected, record["profile"], record["to"], "upgraded")
+
+    def restore_bundle(
+        self, record: dict[str, Any], directory: Path, original: bytes, previous: dict[str, bytes]
+    ) -> None:
+        self.node.stage = "bundle_restore"
+        for path in BUNDLE_PATHS:
+            if hashlib.sha256(self.path(path).read_bytes()).hexdigest() != record["from"][path]:
+                atomic(self.path(path), previous[path])
+        self.execute(["systemctl", "daemon-reload"])
+        if any(self.path(path).read_bytes() != previous[path] for path in BUNDLE_PATHS):
+            self.refuse("mail_setup_review_required")
+        atomic(self.state / "node.json", original)
+        self.discard_bundle_stage(directory)
+
+    def compat_check(self) -> None:
+        """Dry-run the installed guard; it can never authorize a start in this mode."""
+        try:
+            output = self.execute(
+                ["/usr/bin/python3", GUARD_PATH, "--compat-check"], timeout=GUARD_COMPAT_TIMEOUT_SECONDS
+            )
+        except self.error as error:
+            raise self.error("mail_node_bundle_incompatible") from error
+        if output.strip() != COMPAT_RESULT:
+            self.refuse("mail_node_bundle_incompatible")
 
     def security(self, expected: str, *, allow_fence: bool = False) -> bool:
         self.node.stage = "verification_owned_files"
@@ -637,6 +1523,83 @@ class MailSetup:
     def allow_local_probe(self) -> None:
         for program in ("iptables", "ip6tables"):
             self.execute([program, "-w", "5", "-I", CHAIN, "1", "-i", "lo", "-j", "RETURN"])
+
+    def unit_states(self) -> dict[str, tuple[str, str]]:
+        """Read each profile unit's loaded state; anything outside the pinned topology is review evidence."""
+        states = {}
+        for unit in UNIT_TOPOLOGY[self.node.profile_id]:
+            output = self.execute(["systemctl", "show", unit["unit"], "--property=" + ",".join(UNIT_PROPERTIES)])
+            values = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+            starts = re.findall(r"\{ path=([^ ;]*) ; argv\[\]=([^;]*?) ; ", values.get("ExecStartPre", ""))
+            if (
+                set(values) != set(UNIT_PROPERTIES)
+                or (
+                    values["LoadState"],
+                    values["Type"],
+                    values["UnitFileState"],
+                    values["FragmentPath"],
+                    values["DropInPaths"],
+                    values["NeedDaemonReload"],
+                )
+                != ("loaded", unit["type"], unit["file_state"], unit["fragment"], unit["dropin"], "no")
+                or starts != [GUARD_START]
+                or values["ExecStartPre"].count("{") != 1
+            ):
+                self.refuse("mail_setup_review_required")
+            states[unit["unit"]] = (values["ActiveState"], values["SubState"])
+        return states
+
+    def unit_phase(self) -> str:
+        """Classify the profile's mail units as running, stopped or mixed."""
+        states = self.unit_states()
+        topology = UNIT_TOPOLOGY[self.node.profile_id]
+        if any(states[unit["unit"]] != unit["started"] for unit in topology if not unit["start"]):
+            self.refuse("mail_setup_review_required")
+        eligible = [unit for unit in topology if unit["start"]]
+        if all(states[unit["unit"]] == unit["started"] for unit in eligible):
+            return "running"
+        if all(states[unit["unit"]][0] in STOPPED_STATES for unit in eligible):
+            return "stopped"
+        return "mixed"
+
+    def certificate_fences(self) -> dict[str, str]:
+        return {
+            program: certificate_fence(self.execute([program + "-save", "-t", "filter"]), rejection)
+            for program, rejection in FENCE_FAMILIES.items()
+        }
+
+    def ensure_certificate_fence(self) -> None:
+        """Install the exact fence in both families; the loopback return is inserted only here.
+
+        Live rules do not survive a reboot, so every start phase calls this again. Read both
+        families before changing either; any rule we did not write is review evidence.
+        """
+        states = self.certificate_fences()
+        if "foreign" in states.values():
+            self.refuse("mail_setup_review_required")
+        for program, rejection in FENCE_FAMILIES.items():
+            if states[program] == "exact":
+                continue
+            self.execute([program, "-w", "5", "-N" if states[program] == "absent" else "-F", CHAIN])
+            for rule in fence_rules(rejection):
+                self.execute([program, "-w", "5", *rule])
+            # The jump goes last, so a half-built chain is never active.
+            self.execute([program, "-w", "5", "-I", "INPUT", "1", "-j", CHAIN])
+        if set(self.certificate_fences().values()) != {"exact"}:
+            self.refuse("mail_setup_review_required")
+
+    def remove_certificate_fence(self) -> None:
+        states = self.certificate_fences()
+        if not set(states.values()) <= {"exact", "inert", "absent"}:
+            self.refuse("mail_setup_review_required")
+        for program, state in states.items():
+            if state == "exact":
+                self.execute([program, "-w", "5", "-D", "INPUT", "-j", CHAIN])
+            if state != "absent":
+                self.execute([program, "-w", "5", "-F", CHAIN])
+                self.execute([program, "-w", "5", "-X", CHAIN])
+        if set(self.certificate_fences().values()) != {"absent"}:
+            self.refuse("mail_setup_review_required")
 
     @contextlib.contextmanager
     def package_policy(self) -> Iterator[None]:

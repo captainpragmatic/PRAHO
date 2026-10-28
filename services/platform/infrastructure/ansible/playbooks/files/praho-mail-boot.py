@@ -25,9 +25,10 @@ CHAIN = "PRAHO_MAIL_SETUP"
 PORTS = "25,110,143,465,587,993,995"
 START_SECONDS = 120
 MAX_FILE_BYTES = 4 * 1024 * 1024
+# procfs sysctl files refuse a single read count of 4 MiB or more with ENOMEM; read in chunks.
+PROC_READ_BYTES = 64 * 1024
 MAX_LOCK_FD = 1_048_576
 MAX_HOSTNAME_LENGTH = 253
-START_UNITS = frozenset({"postfix.service", "postfix@-.service", "dovecot.service"})
 CERTIFICATE_PATHS = frozenset({"/etc/praho-mail/node.pem", "/etc/praho-mail/node.key"})
 RECORD_FIELDS = frozenset(
     {
@@ -38,6 +39,8 @@ RECORD_FIELDS = frozenset(
         "status",
         "old_certificate_sha256",
         "new_certificate_sha256",
+        "new_pem_sha256",
+        "new_key_sha256",
         "before_sha256",
     }
 )
@@ -86,33 +89,53 @@ def protocol() -> Any:
     return module
 
 
-def configured(marker: dict[str, Any]) -> bool:
+def node_setup(marker: dict[str, Any]) -> Any:
     spec = importlib.util.spec_from_file_location("praho_mail_node", Path(__file__).with_name("praho-mail.py"))
     if spec is None or spec.loader is None:
         raise ValueError("mail node helper is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     node = module.MailNode()
-    expected = marker["node"]
-    node.profile(expected)
+    node.profile(marker["node"])
     if node.profile_id != marker["profile"]:
+        return None
+    return node.setup_driver()
+
+
+def candidate_pair(setup: Any, marker: dict[str, Any]) -> bool:
+    """The complete candidate manifest, offline settings, and a key that matches the installed leaf."""
+    setup.check_files(marker)
+    setup._security_settings()
+    certificate_public = setup.execute(["openssl", "x509", "-in", "/etc/praho-mail/node.pem", "-pubkey", "-noout"])
+    key_public = setup.execute(["openssl", "pkey", "-in", "/etc/praho-mail/node.key", "-pubout"])
+    return bool(certificate_public.strip()) and certificate_public.strip() == key_public.strip()
+
+
+def configured(marker: dict[str, Any]) -> bool:
+    setup = node_setup(marker)
+    if setup is None:
         return False
-    setup = node.setup_driver()
     if marker["status"] == "ready":
-        setup.security_configuration(expected)
-    elif marker["status"] == "certificate_starting":
-        # The boot guard has already proved the complete candidate manifest and
-        # live operation. Do not forge a ready journal before wire verification.
-        setup.check_files(marker)
-        setup._security_settings()
-        certificate_public = setup.execute(["openssl", "x509", "-in", "/etc/praho-mail/node.pem", "-pubkey", "-noout"])
-        key_public = setup.execute(["openssl", "pkey", "-in", "/etc/praho-mail/node.key", "-pubout"])
-        if not certificate_public.strip() or certificate_public.strip() != key_public.strip():
-            return False
-    else:
+        setup.security_configuration(marker["node"])
+    # The boot guard has already proved the complete candidate manifest and live
+    # operation. Do not forge a ready journal before wire verification.
+    elif marker["status"] != "certificate_starting" or not candidate_pair(setup, marker):
         return False
     # Verify the actual owned server certificate, rather than the later Webmin source file.
-    execute(setup.certificate_verify_command(expected, Path("/etc/praho-mail/node.pem")))
+    execute(setup.certificate_verify_command(marker["node"], Path("/etc/praho-mail/node.pem")))
+    return True
+
+
+def compatible_configuration(candidate: dict[str, Any]) -> bool:
+    """Every ready check on the upgrade candidate, except the leaf's validity window.
+
+    An evidenced expired leaf must not strand a node on its old guard; chain, trust, name and
+    key are still checked. Real starts keep strict validity in configured().
+    """
+    setup = node_setup(candidate)
+    if setup is None or candidate["status"] != "ready" or not candidate_pair(setup, candidate):
+        return False
+    execute(setup.certificate_verify_command(candidate["node"], Path("/etc/praho-mail/node.pem"), check_time=False))
     return True
 
 
@@ -124,11 +147,43 @@ class MailBootGuard:
         execute: Callable[[list[str]], str | None] = execute,
         configured: Callable[[dict[str, Any]], bool] = configured,
         clock: Callable[[], float] = time.monotonic,
+        compatible_configuration: Callable[[dict[str, Any]], bool] = compatible_configuration,
     ) -> None:
         self.root = root
         self.execute = execute
         self.configured = configured
         self.clock = clock
+        self.compatible_configuration = compatible_configuration
+
+    def compatible(self) -> bool:
+        """``--compat-check``: the installed bundle accepts the bundle upgrade's candidate journal.
+
+        It refuses inside any mail unit, so its success can never stand in for a start approval.
+        """
+        try:
+            specification = protocol()
+            units = {unit["unit"] for profile in specification.UNIT_TOPOLOGY.values() for unit in profile}
+            if any(line.rsplit("/", 1)[-1] in units for line in self.proc_bytes("self/cgroup").decode().splitlines()):
+                return False
+            journal = read_object(self.owned_bytes("/var/lib/praho/mail/node.json", private=True))
+            candidate = read_object(self.owned_bytes("/var/lib/praho/mail/bundle-upgrade/candidate.json", private=True))
+            target = journal.get("to")
+            if (
+                journal.get("status") != "bundle_upgrading"
+                or journal.get("profile") not in PROFILES
+                or set(candidate) != {"version", "node", "profile", "status", "files"}
+                or type(candidate["version"]) is not int
+                or (candidate["version"], candidate["node"], candidate["profile"], candidate["status"])
+                != (1, journal.get("node"), journal["profile"], "ready")
+                or type(target) is not dict
+                or set(target) != set(specification.BUNDLE_PATHS)
+                or type(candidate["files"]) is not dict
+                or any(candidate["files"].get(path) != digest for path, digest in target.items())
+            ):
+                return False
+            return self.compatible_configuration(candidate)
+        except Exception:
+            return False
 
     def allowed(self) -> bool:
         try:
@@ -201,12 +256,16 @@ class MailBootGuard:
 
     def proc_bytes(self, name: str) -> bytes:
         # Every path is fixed or derived from a strictly typed PID/descriptor.
-        # proc files report size zero, so bound the actual read instead.
-        with (self.root / "proc" / name).open("rb") as stream:
-            value = stream.read(MAX_FILE_BYTES + 1)
-        if len(value) > MAX_FILE_BYTES:
-            raise ValueError("oversized process evidence")
-        return value
+        # proc files report size zero, so bound the total actually read instead.
+        chunks: list[bytes] = []
+        total = 0
+        with (self.root / "proc" / name).open("rb", buffering=0) as stream:
+            while chunk := stream.read(PROC_READ_BYTES):
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    raise ValueError("oversized process evidence")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
     @staticmethod
     def digest(data: bytes) -> str:
@@ -269,9 +328,11 @@ class MailBootGuard:
             if [value for name, separator, value in environment if name == key and separator] != [expected]:
                 raise ValueError("unrelated owner environment")
 
-    def service_unit(self) -> None:
+    def service_unit(self, record: dict[str, Any]) -> None:
+        # Only the recorded profile's eligible units; Ubuntu's disabled postfix@- never qualifies.
+        eligible = {unit["unit"] for unit in protocol().UNIT_TOPOLOGY[record["profile"]] if unit["start"]}
         groups = self.proc_bytes("self/cgroup").decode().splitlines()
-        if len(groups) != 1 or not groups[0].startswith("0::/") or groups[0].rsplit("/", 1)[-1] not in START_UNITS:
+        if len(groups) != 1 or not groups[0].startswith("0::/") or groups[0].rsplit("/", 1)[-1] not in eligible:
             raise ValueError("unapproved service unit")
 
     def owner_lock(self, permit: dict[str, Any]) -> None:
@@ -306,7 +367,7 @@ class MailBootGuard:
 
     def start_owner(self, record: dict[str, Any]) -> None:
         self.operation_owner(record)
-        self.service_unit()
+        self.service_unit(record)
 
     def certificate_original(self, record: dict[str, Any]) -> dict[str, Any]:
         stage = "/var/lib/praho/mail/certificate-operations/" + record["identity"] + ".stage"
@@ -369,7 +430,11 @@ class MailBootGuard:
                 self.owned_bytes(stage + "/old." + name, private=True),
                 self.owned_bytes(stage + "/new." + name, private=True),
             )
-            if self.digest(old) != before["files"][path] or self.digest(new) != record["files"][path]:
+            if (
+                self.digest(old) != before["files"][path]
+                or self.digest(new) != record["files"][path]
+                or record["files"][path] != record["new_" + name + "_sha256"]
+            ):
                 raise ValueError("staged certificate pair changed")
             if name == "pem" and (self.leaf_digest(old), self.leaf_digest(new)) != (
                 record["old_certificate_sha256"],
@@ -386,29 +451,11 @@ class MailBootGuard:
                 raise ValueError("unrelated staged helper")
 
     def certificate_fences(self) -> None:
-        for program, rejection in (
-            ("iptables-save", "icmp-port-unreachable"),
-            ("ip6tables-save", "icmp6-port-unreachable"),
-        ):
-            snapshot = self.execute([program, "-t", "filter"])
-            if not isinstance(snapshot, str) or len(snapshot) > MAX_FILE_BYTES:
-                raise ValueError("missing firewall evidence")
-            lines = [line for line in snapshot.splitlines() if line and not line.startswith("#")]
-            jump = "-A INPUT -j " + CHAIN
-            rules = [line for line in lines if line.startswith("-A ")]
-            owned = [line for line in rules if line.startswith("-A " + CHAIN + " ")]
-            if (
-                lines.count("*filter") != 1
-                or lines.count("COMMIT") != 1
-                or len([line for line in lines if line.startswith(":" + CHAIN + " ")]) != 1
-                or next((line for line in rules if line.startswith("-A INPUT ")), None) != jump
-                or owned
-                != [
-                    "-A " + CHAIN + " -i lo -j RETURN",
-                    "-A " + CHAIN + " -p tcp -m multiport --dports " + PORTS + " -j REJECT --reject-with " + rejection,
-                ]
-                or [line for line in rules if CHAIN in line.split() and line not in owned] != [jump]
-            ):
+        # The worker verifies its fence with this same checker before it issues a permit.
+        specification = protocol()
+        for program, rejection in specification.FENCE_FAMILIES.items():
+            snapshot = self.execute([program + "-save", "-t", "filter"])
+            if specification.certificate_fence(snapshot, rejection) != "exact":
                 raise ValueError("mail fence is bypassable")
 
     def certificate_start(self, record: dict[str, Any]) -> bool:
@@ -447,6 +494,15 @@ class MailBootGuard:
 
 
 if __name__ == "__main__":
-    if os.geteuid() != 0 or not MailBootGuard().allowed():
+    # systemd passes no argument. The fixed dry-run argument only ever answers the upgrade worker.
+    if os.geteuid() != 0 or sys.argv[1:] not in ([], ["--compat-check"]):
+        print("mail_startup_unproven", file=sys.stderr)
+        raise SystemExit(1)
+    if sys.argv[1:]:
+        if not MailBootGuard().compatible():
+            print("mail_bundle_incompatible", file=sys.stderr)
+            raise SystemExit(1)
+        print(protocol().COMPAT_RESULT)
+    elif not MailBootGuard().allowed():
         print("mail_startup_unproven", file=sys.stderr)
         raise SystemExit(1)

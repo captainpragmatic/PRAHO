@@ -37,6 +37,27 @@ MAX_HOSTNAME_LABEL = 63
 MAX_DOMAINS = 5000
 MAX_RESERVED_ZONES = 64
 MIN_SS_FIELDS = 4
+# Read-only observations share the node lock; every other action, known or not, is exclusive.
+SHARED_ACTIONS = frozenset({"inspect_node", "inspect_domain"})
+PUBLIC_ERRORS = frozenset(
+    {
+        "mail_profile_unsupported",
+        "mail_node_identity_mismatch",
+        "mail_domain_identity_mismatch",
+        "mail_native_inspection_failed",
+        "mail_setup_incomplete",
+        "mail_unmanaged_mta",
+        "mail_queue_uncertain",
+        "mail_node_certificate_unproven",
+        "mail_setup_review_required",
+        "mail_unrelated_configuration_changed",
+        "mail_operation_busy",
+        "mail_node_operation_in_progress",
+        "mail_node_services_unavailable",
+        "mail_node_bundle_upgrade_required",
+        "mail_node_bundle_incompatible",
+    }
+)
 
 
 class MailError(Exception):
@@ -215,6 +236,9 @@ class MailNode:
 
     def reconcile_node_certificate(self, expected: str, identity: str) -> dict[str, Any]:
         return cast(dict[str, Any], self.setup_driver().reconcile_certificate(expected, identity))
+
+    def upgrade_bundle(self, expected: str, identity: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self.setup_driver().upgrade_bundle(expected, identity))
 
     def path(self, path: str) -> Path:
         return self.root / path.lstrip("/")
@@ -513,15 +537,7 @@ def main() -> None:
         hostname(expected)
         with operation_lock() as lock:
             try:
-                fcntl.flock(
-                    lock,
-                    (
-                        fcntl.LOCK_EX
-                        if action in {"setup", "reconcile_submitters", "reconcile_node_certificate"}
-                        else fcntl.LOCK_SH
-                    )
-                    | fcntl.LOCK_NB,
-                )
+                fcntl.flock(lock, (fcntl.LOCK_SH if action in SHARED_ACTIONS else fcntl.LOCK_EX) | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise MailError("mail_operation_busy") from error
             node = MailNode(operation_fd=lock.fileno())
@@ -540,6 +556,8 @@ def main() -> None:
                 payload = node.setup(expected)
             elif action == "reconcile_node_certificate":
                 payload = node.reconcile_node_certificate(expected, identity)
+            elif action == "upgrade_bundle":
+                payload = node.upgrade_bundle(expected, identity)
             else:
                 raise MailError("mail_setup_incomplete")
         encoded = json.dumps(payload)
@@ -547,21 +565,8 @@ def main() -> None:
             raise MailError("mail_native_inspection_failed")
     except MailError as error:
         code = str(error)
-        allowed = {
-            "mail_profile_unsupported",
-            "mail_node_identity_mismatch",
-            "mail_domain_identity_mismatch",
-            "mail_native_inspection_failed",
-            "mail_setup_incomplete",
-            "mail_unmanaged_mta",
-            "mail_queue_uncertain",
-            "mail_node_certificate_unproven",
-            "mail_setup_review_required",
-            "mail_unrelated_configuration_changed",
-            "mail_operation_busy",
-        }
         payload = {
-            "error": code if code in allowed else "mail_native_inspection_failed",
+            "error": code if code in PUBLIC_ERRORS else "mail_native_inspection_failed",
             "stage": getattr(node, "stage", "inspection"),
         }
     except Exception:

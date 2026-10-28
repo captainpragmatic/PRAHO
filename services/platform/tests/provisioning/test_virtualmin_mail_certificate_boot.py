@@ -2,11 +2,13 @@
 
 import base64
 import copy
+import errno
 import hashlib
 import importlib.util
 import json
 import os
 import ssl
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -90,6 +92,8 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
             "status": "certificate_applying",
             "old_certificate_sha256": hashlib.sha256(ssl.PEM_cert_to_DER_cert(old_pem)).hexdigest(),
             "new_certificate_sha256": hashlib.sha256(ssl.PEM_cert_to_DER_cert(new_pem)).hexdigest(),
+            "new_pem_sha256": hashlib.sha256(new_pem.encode()).hexdigest(),
+            "new_key_sha256": hashlib.sha256(b"new fixture key").hexdigest(),
             "before_sha256": hashlib.sha256(json.dumps(self.before, sort_keys=True).encode()).hexdigest(),
         }
         self.operation_file = self.private(
@@ -172,6 +176,18 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 self.private("proc/self/cgroup", "0::/system.slice/" + unit + "\n")
                 self.assertEqual(self.guard.allowed(), unit != "unrelated.service")
 
+    def test_ubuntu_never_approves_its_disabled_postfix_instance_even_with_a_valid_permit(self):
+        self.recovery("ubuntu2604-dovecot24")
+        for unit, expected in (
+            ("postfix.service", True),
+            ("dovecot.service", True),
+            ("postfix@-.service", False),
+            ("system-postfix.slice/postfix@-.service", False),
+        ):
+            with self.subTest(unit=unit):
+                self.private("proc/self/cgroup", "0::/system.slice/" + unit + "\n")
+                self.assertEqual(self.guard.allowed(), expected)
+
     def test_the_fixed_worker_can_prove_ownership_without_gaining_service_start_permission(self):
         self.assertTrue(self.guard.allowed())
         self.private("proc/self/cgroup", "0::/system.slice/ssh.service\n")
@@ -239,6 +255,17 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 self.assertFalse(self.guard.allowed())
                 path.write_bytes(original)
 
+    def test_the_candidate_manifest_must_name_the_recorded_staged_file_digests(self):
+        self.assertTrue(self.guard.allowed())
+        for field in ("new_pem_sha256", "new_key_sha256"):
+            with self.subTest(field=field):
+                operation = json.loads(self.operation_file.read_text())
+                self.operation_file.write_text(json.dumps({**operation, field: "0" * 64}))
+                self.record[field] = "0" * 64
+                self.save_marker()
+                self.assertFalse(self.guard.allowed())
+                self.recovery()
+
     def test_original_journal_and_operation_tombstone_must_match_the_same_live_attempt(self):
         self.assertTrue(self.guard.allowed())
         original = self.operation_file.read_text()
@@ -260,6 +287,11 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 original.replace("-A INPUT -j PRAHO_MAIL_SETUP\n", ""),
                 original.replace("-A INPUT -j", "-A INPUT -j ACCEPT\n-A INPUT -j", 1),
                 original.replace("-A PRAHO_MAIL_SETUP -i lo -j RETURN", "-A PRAHO_MAIL_SETUP -j RETURN"),
+                # A second loopback allowance (a later allow_local_probe) is not the verified fence.
+                original.replace(
+                    "-A PRAHO_MAIL_SETUP -i lo -j RETURN",
+                    "-A PRAHO_MAIL_SETUP -i lo -j RETURN\n-A PRAHO_MAIL_SETUP -i lo -j RETURN",
+                ),
             ):
                 with self.subTest(program=program, rules=changed):
                     self.rules[program] = changed
@@ -375,3 +407,32 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
         with specification, loader, patch.object(self.module, "execute") as openssl:
             self.assertFalse(self.module.configured(self.record))
             openssl.assert_not_called()
+
+    def test_process_evidence_is_read_in_counts_procfs_accepts(self):
+        # Kernel sysctl files such as boot_id refuse any read count of KMALLOC_MAX_SIZE (4 MiB) or more.
+        original = Path.open
+        proc = self.root / "proc"
+
+        class ProcStream:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def read(self, size=-1):
+                if size < 0 or size >= 4 * 1024 * 1024:
+                    raise OSError(errno.ENOMEM, "Cannot allocate memory")
+                return self.stream.read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *details):
+                self.stream.close()
+
+        def procfs_open(path, *args, **kwargs):
+            stream = original(path, *args, **kwargs)
+            return ProcStream(stream) if path.is_relative_to(proc) else stream
+
+        environment = self.root / "proc/1234/environ"
+        environment.write_text(environment.read_text() + "PADDING=" + "x" * 200_000 + "\0")
+        with patch.object(Path, "open", procfs_open):
+            self.assertTrue(self.guard.allowed())
