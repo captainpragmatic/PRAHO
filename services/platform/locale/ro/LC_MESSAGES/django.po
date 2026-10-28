@@ -7538,6 +7538,18 @@ msgstr "Adresă de e-mail nevalidă"
 msgid "Reason for suppression"
 msgstr "Motiv pentru supresie"
 
+#: apps/notifications/models.py
+msgid "Why delivery is blocked; empty when the address only opted out of marketing"
+msgstr "De ce este blocată livrarea; gol când adresa doar s-a dezabonat de la marketing"
+
+#: apps/notifications/models.py
+msgid "When the address opted out of marketing; lifting a delivery block never clears it"
+msgstr "Când s-a dezabonat adresa de la marketing; ridicarea blocării livrării nu șterge această dată"
+
+#: apps/notifications/models.py
+msgid "Marketing opt-out"
+msgstr "Dezabonare de la marketing"
+
 #: apps/notifications/models.py:692
 msgid "When suppression expires (null = permanent)"
 msgstr "Când expiră supresia (null = permanent)"

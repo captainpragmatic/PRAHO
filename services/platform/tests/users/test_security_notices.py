@@ -13,14 +13,16 @@ failed, or whose send failed, was lost.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.core import mail
 from django.db import DatabaseError, transaction
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from apps.notifications.models import EmailLog
+from apps.notifications.models import EmailLog, EmailSuppression
 from apps.notifications.services import EmailService, EmailSuppressionService
 from apps.notifications.tasks import send_email_task
 from apps.users.forms import apply_password_change
@@ -144,10 +146,35 @@ class NoticeSuppressionTests(TestCase):
         result = EmailService.send_email(to="unsubscribed@example.ro", subject="News", body_text="Offers")
         self.assertFalse(result.success)
 
-    def test_an_unsubscribe_never_replaces_a_bounce(self) -> None:
-        user = User.objects.create_user(email="bounced-then-unsubscribed@example.ro", password=PASSWORD)
+    def test_an_unsubscribe_outlives_a_temporary_block(self) -> None:
+        # The opt-out is kept apart from the block, so it is never lost when that block runs out.
+        EmailSuppressionService.suppress_email("opted-out@example.ro", "manual", duration_days=1)
+        EmailSuppressionService.suppress_email("opted-out@example.ro", "unsubscribe")
+        with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=2)):
+            self.assertTrue(EmailSuppression.is_suppressed("opted-out@example.ro"))
+
+    def test_soft_bounces_on_security_notices_never_end_an_unsubscribe(self) -> None:
+        # Security notices are logged sends to an opted-out address, so their soft bounces can reach the
+        # threshold. The 30-day block that follows must not replace the opt-out, or other mail resumes after it.
+        user = User.objects.create_user(email="opted-out@example.ro", password=PASSWORD)
+        EmailSuppressionService.suppress_email(user.email, "unsubscribe")
+        MFAService.enable_totp(user, None)
+        MFAService.generate_backup_codes(User.objects.get(pk=user.pk))
+        MFAService.disable_totp(User.objects.get(pk=user.pk))
+        _deliver()
+        sent = EmailLog.objects.filter(to_addr=user.email, status="sent").values_list("pk", flat=True)
+        for number, pk in enumerate(sent):
+            EmailLog.objects.filter(pk=pk).update(provider_id=f"notice-{number}")
+            self.assertTrue(EmailService.handle_delivery_event("soft_bounced", f"notice-{number}", user.email))
+        # The threshold was reached through the real delivery path, not a planted suppression.
+        self.assertEqual(EmailLog.objects.filter(to_addr=user.email, status="soft_bounced").count(), 3)
+        with patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=31)):
+            self.assertTrue(EmailSuppression.is_suppressed(user.email))
+
+    def test_control_a_hard_bounce_after_an_unsubscribe_still_stops_notices(self) -> None:
+        user = User.objects.create_user(email="opted-out@example.ro", password=PASSWORD)
+        EmailSuppressionService.suppress_email(user.email, "unsubscribe")
         EmailSuppressionService.suppress_email(user.email, "hard_bounce")
-        EmailSuppressionService.suppress_email(user.email, "unsubscribe")  # an old marketing link, used later
         MFAService.enable_totp(user, None)
         self.assertEqual(_notices(), [])
 

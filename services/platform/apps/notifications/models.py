@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -823,7 +823,15 @@ class EmailSuppression(models.Model):
     """
     Email suppression list for managing bounced, complained, and unsubscribed addresses.
     Persisted suppression data for compliance and deliverability.
+
+    A row holds two separate facts: a delivery block (``reason``, empty when there is none) and a
+    marketing opt-out (``marketing_opt_out_at``). Neither replaces the other, so an expiring block
+    never takes an opt-out with it. Ordinary mail is stopped by either; essential mail (security
+    notices) only by a live block.
     """
+
+    # The reason an unsubscribe is recorded with: it sets the opt-out, never the block.
+    OPT_OUT: ClassVar[str] = "unsubscribe"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -846,14 +854,19 @@ class EmailSuppression(models.Model):
         ("hard_bounce", _("Hard Bounce")),
         ("soft_bounce_threshold", _("Soft Bounce Threshold Exceeded")),
         ("complaint", _("Spam Complaint")),
-        ("unsubscribe", _("User Unsubscribed")),
         ("manual", _("Manually Suppressed")),
         ("invalid", _("Invalid Email Address")),
     )
     reason = models.CharField(
         max_length=30,
         choices=REASON_CHOICES,
-        help_text=_("Reason for suppression"),
+        blank=True,
+        help_text=_("Why delivery is blocked; empty when the address only opted out of marketing"),
+    )
+    marketing_opt_out_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the address opted out of marketing; lifting a delivery block never clears it"),
     )
 
     # Timing
@@ -883,7 +896,7 @@ class EmailSuppression(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display()})"
+        return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display() or _('Marketing opt-out')})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         _update_fields, written = written_fields(kwargs, ("email_encrypted",))
@@ -893,9 +906,6 @@ class EmailSuppression(models.Model):
 
     def get_decrypted_email(self) -> str:
         return decrypt_model_secret(self, "email_encrypted", self.email_encrypted)
-
-    # Reasons that keep an address blocked when a marketing unsubscribe arrives for it.
-    OUTRANKS_UNSUBSCRIBE: ClassVar[frozenset[str]] = frozenset({"hard_bounce", "complaint", "manual", "invalid"})
 
     @classmethod
     def suppress(
@@ -910,69 +920,87 @@ class EmailSuppression(models.Model):
 
         Args:
             email: Email address to suppress
-            reason: Suppression reason code
+            reason: Suppression reason code; OPT_OUT records a marketing opt-out
             provider: Email provider that reported the issue
-            expires_days: Days until suppression expires (None = permanent)
+            expires_days: Days until a delivery block expires (None = permanent)
         """
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
-        expires_at = None
-        if expires_days:
-            expires_at = timezone.now() + timedelta(days=expires_days)
-
         now = timezone.now()
+        opt_out = reason == cls.OPT_OUT
+        expires_at = now + timedelta(days=expires_days) if expires_days and not opt_out else None
 
         # Use transaction with select_for_update to prevent TOCTOU race
         with transaction.atomic():
             # Try to get existing suppression with row lock
             existing = cls.objects.select_for_update().filter(email_hash=email_hash).first()
-
-            # A marketing unsubscribe never replaces a bounce, a complaint or a manual block that still
-            # holds: essential mail (security notices) ignores an unsubscribe, and must keep honouring those.
-            if (
-                existing
-                and reason == "unsubscribe"
-                and existing.reason in cls.OUTRANKS_UNSUBSCRIBE
-                and (existing.expires_at is None or existing.expires_at > now)
-            ):
-                return existing
-            if existing:
-                # Update existing - increment bounce count atomically
-                existing.reason = reason
-                existing.provider = provider
-                existing.expires_at = expires_at
-                existing.bounce_count = models.F("bounce_count") + 1
-                existing.last_bounce_at = now
-                # Only what a bounce changes: the stored address is never rewritten (or re-checked) here.
-                existing.save(update_fields=["reason", "provider", "expires_at", "bounce_count", "last_bounce_at"])
-                # Refresh to get actual bounce_count value after F() expression
-                existing.refresh_from_db()
-                return existing
-            else:
-                # Create new suppression
-                return cls.objects.create(
-                    email_hash=email_hash,
-                    reason=reason,
-                    provider=provider,
-                    expires_at=expires_at,
-                    bounce_count=1,
-                    last_bounce_at=now,
+            if existing is None:
+                fields: dict[str, Any] = (
+                    {"reason": "", "bounce_count": 0, "marketing_opt_out_at": now}
+                    if opt_out
+                    else {"reason": reason, "provider": provider, "expires_at": expires_at, "last_bounce_at": now}
                 )
+                try:
+                    with transaction.atomic():
+                        return cls.objects.create(email_hash=email_hash, **fields)
+                except IntegrityError:
+                    # A concurrent first write for the address won the insert: add to its row instead.
+                    existing = cls.objects.select_for_update().get(email_hash=email_hash)
+
+            if opt_out:
+                # The first opt-out stands; the block, if any, is left as it is.
+                if existing.marketing_opt_out_at is None:
+                    existing.marketing_opt_out_at = now
+                    existing.save(update_fields=["marketing_opt_out_at"])
+                return existing
+
+            # Update existing - increment bounce count atomically; the opt-out, if any, is left as it is.
+            existing.reason = reason
+            existing.provider = provider
+            existing.expires_at = expires_at
+            existing.bounce_count = models.F("bounce_count") + 1
+            existing.last_bounce_at = now
+            # Only what a bounce changes: the stored address is never rewritten (or re-checked) here.
+            existing.save(update_fields=["reason", "provider", "expires_at", "bounce_count", "last_bounce_at"])
+            # Refresh to get actual bounce_count value after F() expression
+            existing.refresh_from_db()
+            return existing
 
     @classmethod
-    def is_suppressed(cls, email: str, *, ignore_reasons: tuple[str, ...] = ()) -> bool:
-        """Check if an email is currently suppressed; a suppression for one of ignore_reasons does not count."""
+    def lift_block(cls, email_hash: str, *, expired_only: bool = False) -> tuple[bool, "EmailSuppression | None"]:
+        """Lift an address's delivery block, decided on the locked row as it is now; an opt-out stays.
+
+        Returns whether a block was lifted, and the row left behind (None when no row is left).
+        """
+        with transaction.atomic():
+            row = cls.objects.select_for_update().filter(email_hash=email_hash).first()
+            if row is None or not row.reason:
+                return False, row
+            if expired_only and not (row.expires_at and row.expires_at < timezone.now()):
+                return False, row
+            if row.marketing_opt_out_at is None:
+                row.delete()
+                return True, None
+            row.reason, row.provider, row.expires_at = "", "", None
+            row.save(update_fields=["reason", "provider", "expires_at"])
+            return True, row
+
+    @classmethod
+    def is_suppressed(cls, email: str, *, essential: bool = False) -> bool:
+        """Check if an email is currently suppressed.
+
+        Ordinary mail is stopped by a live delivery block or a marketing opt-out; essential mail
+        (security notices) only by a live delivery block.
+        """
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
         suppression = cls.objects.filter(email_hash=email_hash).first()
+        if suppression and suppression.reason and suppression.expires_at and suppression.expires_at < timezone.now():
+            _lifted, suppression = cls.lift_block(email_hash, expired_only=True)
         if not suppression:
             return False
 
-        # Check if expired
-        if suppression.expires_at and suppression.expires_at < timezone.now():
-            suppression.delete()
-            return False
-
-        return suppression.reason not in ignore_reasons
+        blocked = bool(suppression.reason)
+        return blocked if essential else blocked or suppression.marketing_opt_out_at is not None
 
 
 # ===============================================================================

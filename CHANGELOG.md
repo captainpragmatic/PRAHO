@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - A personal data export request goes to the person who asked.
     - A revealed gift-card code goes to the person who revealed it.
   - **What they say:** notices name the fields that changed, never their values, and are written in each recipient's language.
+  - **Who still gets them:** a person who unsubscribed from marketing still gets security notices; a bounce, a complaint or a manual block still stops them.
+- **A marketing unsubscribe is never lost to a delivery block.** The suppression list kept one reason per address, and each new one replaced the last. An unsubscribe replaced by a temporary block (soft bounces, a timed manual block) ended with that block, and marketing resumed with no new consent. The opt-out is now kept apart from delivery blocks: neither replaces the other, a block that expires leaves the opt-out, and lifting a block keeps it.
 - **Every password check a signed-in session can reach counts toward the account lockout.**
   - **What was wrong:**
     - Enabling 2FA, disabling it and creating new backup codes (through the Portal and the API) checked the password without the lockout. So did backup codes and the password change on the staff pages.

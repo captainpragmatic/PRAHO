@@ -25,7 +25,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -194,31 +194,28 @@ class EmailSuppressionService:
     # Cache timeout for suppression lookups (5 minutes)
     CACHE_TIMEOUT = 300
 
-    # A person who unsubscribed from marketing still gets what protects their account (security
-    # notices); bounces, complaints and manual or invalid-address suppressions still apply to it.
-    ESSENTIAL_IGNORES: ClassVar[tuple[str, ...]] = ("unsubscribe",)
-
     @classmethod
     def is_suppressed(cls, email: str, *, essential: bool = False) -> bool:
         """
         Check if an email address is suppressed.
-        Uses cache with database fallback; an essential email reads the database, by reason.
+
+        A person who unsubscribed from marketing still gets what protects their account (essential
+        mail, read from the database); a live delivery block stops both. Only a suppressed answer
+        for ordinary mail is cached, so a stale "not suppressed" never reaches an opted-out address.
         """
         if essential:
-            return EmailSuppression.is_suppressed(email, ignore_reasons=cls.ESSENTIAL_IGNORES)
+            return EmailSuppression.is_suppressed(email, essential=True)
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         cache_key = f"{SUPPRESSION_CACHE_PREFIX}{email_hash}"
 
         # Check cache first
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return bool(cached)
+        if cache.get(cache_key):
+            return True
 
         # Check database
         is_suppressed = EmailSuppression.is_suppressed(email)
-
-        # Cache the result (both positive and negative)
-        cache.set(cache_key, is_suppressed, timeout=cls.CACHE_TIMEOUT)
+        if is_suppressed:
+            cache.set(cache_key, True, timeout=cls.CACHE_TIMEOUT)
 
         return is_suppressed
 
@@ -255,17 +252,16 @@ class EmailSuppressionService:
 
     @classmethod
     def unsuppress_email(cls, email: str) -> bool:
-        """Remove an email from the suppression list."""
+        """Lift an address's delivery block; a marketing opt-out stays, as only the person can withdraw it."""
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
-        # Delete from database
-        deleted_count, _ = EmailSuppression.objects.filter(email_hash=email_hash).delete()
+        lifted, _row = EmailSuppression.lift_block(email_hash)
 
         # Invalidate cache
         cache_key = f"{SUPPRESSION_CACHE_PREFIX}{email_hash}"
         cache.delete(cache_key)
 
-        return deleted_count > 0
+        return lifted
 
 
 # ===============================================================================
