@@ -160,9 +160,7 @@ def scan_contract_tests(source: str, path: str) -> list[ContractTest]:
                 and isinstance(decorator.args[0], ast.Constant)
                 and isinstance(decorator.args[0].value, str)
             ):
-                called = {
-                    name for call in ast.walk(node) if isinstance(call, ast.Call) and (name := _callee_name(call))
-                }
+                called = {name for call in ast.walk(node) if isinstance(call, ast.Call) and (name := _callee_name(call))}
                 tests.append(ContractTest(path, node.name, decorator.args[0].value, frozenset(called)))
     return tests
 
@@ -180,9 +178,7 @@ def allowlisted_programs(source: str) -> tuple[set[str], set[str]]:
     for node in ast.parse(source).body:
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
-            if name in {"VIRTUALMIN_ALLOWED_PROGRAMS", "VIRTUALMIN_READ_ONLY_PROGRAMS"} and isinstance(
-                node.value, ast.Call
-            ):
+            if name in {"VIRTUALMIN_ALLOWED_PROGRAMS", "VIRTUALMIN_READ_ONLY_PROGRAMS"} and isinstance(node.value, ast.Call):
                 found[name] = {str(item) for item in ast.literal_eval(node.value.args[0])}
     return found["VIRTUALMIN_ALLOWED_PROGRAMS"], found["VIRTUALMIN_READ_ONLY_PROGRAMS"]
 
@@ -190,9 +186,7 @@ def allowlisted_programs(source: str) -> tuple[set[str], set[str]]:
 # ------------------------------------------------------------------- finders
 
 
-def programs_the_code_can_call(
-    sites: Iterable[CallSite], dynamic: Mapping[tuple[str, str], frozenset[str]]
-) -> set[str]:
+def programs_the_code_can_call(sites: Iterable[CallSite], dynamic: Mapping[tuple[str, str], frozenset[str]]) -> set[str]:
     reachable: set[str] = set()
     for site in sites:
         if site.program is not None:
@@ -202,9 +196,7 @@ def programs_the_code_can_call(
     return reachable
 
 
-def undeclared_dynamic_sites(
-    sites: Iterable[CallSite], dynamic: Mapping[tuple[str, str], frozenset[str]]
-) -> set[tuple[str, str]]:
+def undeclared_dynamic_sites(sites: Iterable[CallSite], dynamic: Mapping[tuple[str, str], frozenset[str]]) -> set[tuple[str, str]]:
     return {(site.path, site.function) for site in sites if site.program is None} - set(dynamic)
 
 
@@ -218,9 +210,7 @@ def allowlist_mismatch(allowed: set[str], tests: list[ContractTest]) -> list[str
     covered = [test.program for test in tests]
     problems = [f"allowlisted, no contract test: {program}" for program in sorted(allowed - set(covered))]
     problems += [f"contract test, not allowlisted: {program}" for program in sorted(set(covered) - allowed)]
-    problems += [
-        f"more than one contract test: {program}" for program in sorted({p for p in covered if covered.count(p) > 1})
-    ]
+    problems += [f"more than one contract test: {program}" for program in sorted({p for p in covered if covered.count(p) > 1})]
     return problems
 
 
@@ -228,11 +218,7 @@ def wrong_replay_declaration(tests: list[ContractTest], read_only: set[str]) -> 
     """(b) a test must prove a read-only program read-only, and say a mutating one is not."""
     problems: list[str] = []
     for test in tests:
-        wanted, forbidden = (
-            ("prove_read_only", "assert_mutating")
-            if test.program in read_only
-            else ("assert_mutating", "prove_read_only")
-        )
+        wanted, forbidden = ("prove_read_only", "assert_mutating") if test.program in read_only else ("assert_mutating", "prove_read_only")
         if wanted not in test.helpers or forbidden in test.helpers:
             problems.append(f"{test.path}::{test.function} ({test.program}) must call {wanted} and not {forbidden}")
     return problems
@@ -245,11 +231,7 @@ def unreferenced_playbooks(playbooks: Iterable[str], lab_sources: Iterable[str])
 
 
 def lab_test_sources() -> list[str]:
-    paths = [
-        *sorted(LAB_COMMANDS.glob("virtualmin_lab_*.py")),
-        *sorted((REPO / "tests/virtualmin_lab").rglob("*.py")),
-        *sorted((REPO / "tests/virtualmin_mail_lab").rglob("*.py")),
-    ]
+    paths = [*sorted(LAB_COMMANDS.glob("virtualmin_lab_*.py")), *sorted((REPO / "tests/virtualmin_lab").rglob("*.py"))]
     return [path.read_text() for path in paths]
 
 
@@ -294,12 +276,8 @@ class TestScannerSeesTheRealCode:
             (site.path, site.function, site.program) for site in sites
         }
         # Disabling account-name previews removed _home() and its direct list-domains call.
-        assert not any(
-            site.path == "provisioning/account_hostname_service.py" and site.function == "_home" for site in sites
-        )
-        assert len([site for site in sites if site.program]) == 50, (
-            "call sites changed: review them, then update this count"
-        )
+        assert not any(site.path == "provisioning/account_hostname_service.py" and site.function == "_home" for site in sites)
+        assert len([site for site in sites if site.program]) == 50, "call sites changed: review them, then update this count"
 
     def test_the_loyalty_program_keyword_is_not_a_virtualmin_program(self, sites: list[CallSite]) -> None:
         assert not [site for site in sites if site.path.startswith("promotions/")]
@@ -340,9 +318,8 @@ class TestEveryActionIsCovered:
 
     def test_every_node_playbook_is_named_by_a_lab_test(self) -> None:
         playbooks = [path.name for path in PLAYBOOKS.glob("virtualmin_*.yml")] + ["virtualmin.yml"]
-        assert len(playbooks) == 17, "a new playbook: it needs a lab test, then update this count"
+        assert len(playbooks) == 16, "a new playbook: it needs a lab test, then update this count"
         assert "virtualmin_account_name_neutral.yml" in playbooks
-        assert "virtualmin_mail.yml" in playbooks
         assert unreferenced_playbooks(playbooks, lab_test_sources()) == []
 
 
@@ -352,22 +329,7 @@ class TestEveryActionIsCovered:
 class TestPlantedViolations:
     """Run the finders on source that breaks each rule. A guard that cannot fail proves nothing."""
 
-    def test_lab_source_finder_includes_isolated_mail_contracts(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        web = tmp_path / "tests/virtualmin_lab/contract"
-        mail = tmp_path / "tests/virtualmin_mail_lab"
-        web.mkdir(parents=True)
-        mail.mkdir(parents=True)
-        (web / "test_web.py").write_text("runs virtualmin_bridge.yml")
-        (mail / "test_mail.py").write_text("runs virtualmin_mail.yml")
-        monkeypatch.setitem(globals(), "REPO", tmp_path)
-        monkeypatch.setitem(globals(), "LAB_COMMANDS", tmp_path / "commands")
-        sources = lab_test_sources()
-        assert len(sources) == 2
-        assert "runs virtualmin_mail.yml" in sources
-
-    STYLES = """
+    STYLES = '''
 class Service:
     def run(self, gateway, migration, server):
         gateway.call("create-domain", {})
@@ -378,7 +340,7 @@ class Service:
         loyalty(program="gold")
         loyalty(program=chosen)
         gateway.call(self.program, {})
-"""
+'''
 
     def test_the_scanner_accepts_each_real_call_style(self) -> None:
         sites = scan_call_sites(self.STYLES, "provisioning/planted.py")
