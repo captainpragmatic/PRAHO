@@ -1,5 +1,6 @@
 """Provider outcomes are recoverable checkpoints; uncertainty never exposes a nameserver switch."""
 
+import time
 from dataclasses import replace
 from datetime import timedelta
 from unittest.mock import Mock, patch
@@ -8,9 +9,11 @@ from uuid import uuid4
 from django.db import transaction
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 import apps.domains.dns_zone_tasks as tasks
 from apps.common.types import Err, Ok, Retriability
+from apps.domains import dns_zone_deletion as deletion
 from apps.domains import dns_zone_services as zones
 from apps.domains.dns_zone_models import HostedZoneOperation
 from apps.domains.models import TLD, Domain, Registrar
@@ -484,6 +487,112 @@ class ZoneWorkerTests(TransactionTestCase):
         self.tick()
         self.assertEqual(self.provider.calls.count("delete_zone"), 1)
         self.assertTrue(self.provider.records)
+
+    def test_a_resumed_delete_does_not_remove_a_zone_whose_delegation_was_restored(self):
+        # The worker committed the in-flight phase and stopped; the customer then delegated back to us.
+        self.begin_ready_delete()
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.cloudflare.example", "ns2.cloudflare.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 300,
+        }
+        self.tick()
+        self.assertNotIn("delete_zone", self.provider.calls)
+        self.assertTrue(self.provider.records)
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_parent")
+        self.assertEqual(self.operation.last_error, "move_away_proof_required")
+        self.assertNotIn("parent_moved_since", self.operation.evidence)
+        self.assertEqual(self.zone.status, "deleting")
+        self.assertFalse(self.zone.deletion["parent_moved_away"])
+
+    def test_an_observation_that_aged_while_waiting_for_locks_never_authorizes_the_delete(self):
+        self.begin_ready_delete()
+        with patch.object(deletion, "PROOF_MAX_AGE", timedelta(0), create=True):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.assertNotIn("delete_zone", self.provider.calls)
+        self.assertEqual(self.operation.phase, "delete_provider_inflight")
+        self.assertEqual(self.operation.last_error, "move_away_proof_stale")
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.zone.status, "deleted")
+        self.assertEqual(self.provider.calls.count("delete_zone"), 1)
+
+    def test_a_slow_parent_observation_counts_toward_the_proof_age(self):
+        self.begin_ready_delete()
+        moved = dict(self.handover.return_value)
+
+        def slow_snapshot(name):
+            time.sleep(0.5)
+            return moved
+
+        self.handover.side_effect = slow_snapshot
+        with patch.object(deletion, "PROOF_MAX_AGE", timedelta(milliseconds=250)):
+            self.tick()
+        self.handover.side_effect = None
+        self.operation.refresh_from_db()
+        self.assertNotIn("delete_zone", self.provider.calls)
+        self.assertEqual(self.operation.last_error, "move_away_proof_stale")
+
+    def test_a_resumed_delete_restarts_the_cache_wait_when_the_delegation_changed(self):
+        self.begin_ready_delete()
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.third.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 900,
+        }
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_parent")
+        self.tick()
+        self.operation.refresh_from_db()
+        restarted = parse_datetime(self.operation.evidence["parent_moved_since"])
+        self.assertGreater(restarted, timezone.now() - timedelta(minutes=1))
+        self.assertEqual(self.operation.evidence["old_ns_ttl"], 900)
+        self.assertNotIn("delete_zone", self.provider.calls)
+        aged = (timezone.now() - timedelta(seconds=901)).isoformat()
+        self.operation.evidence.update(parent_moved_since=aged, ds_absent_since=aged)
+        self.operation.save(update_fields=["evidence"])
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.zone.status, "deleted")
+        self.assertEqual(self.provider.calls.count("delete_zone"), 1)
+
+    def test_a_delegation_change_during_the_cache_wait_restarts_it(self):
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        zones.export_zone_file(self.zone, actor=self.actor).unwrap()
+        self.operation = zones.request_zone_delete(
+            self.zone, self.zone.current_revision, zones.cached_zone_status(self.zone)["export_digest"], actor=self.actor
+        ).unwrap()
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.other.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 0,
+        }
+        self.tick()
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_parent")
+        aged = (timezone.now() - timedelta(hours=1)).isoformat()
+        self.operation.evidence.update(parent_moved_since=aged, ds_absent_since=aged)
+        self.operation.save(update_fields=["evidence"])
+        self.handover.return_value = {**self.handover.return_value, "nameservers": ["ns.third.example"]}
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_parent")
+        self.assertGreater(
+            parse_datetime(self.operation.evidence["parent_moved_since"]), timezone.now() - timedelta(minutes=1)
+        )
+        self.assertNotIn("delete_zone", self.provider.calls)
 
     def test_provider_active_does_not_activate_without_parent_delegation_and_fresh_inventory(self):
         self.finish_apply()
