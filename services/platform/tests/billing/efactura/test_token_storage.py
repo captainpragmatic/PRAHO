@@ -18,6 +18,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.efactura.settings import EFacturaEnvironment
 from apps.billing.efactura.token_storage import (
     OAuthToken,
     TokenStorageService,
@@ -279,7 +280,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        result = OAuthToken.objects.get_valid_token("12345678")
+        result = OAuthToken.objects.get_valid_token("12345678", EFacturaEnvironment.TEST)
         self.assertEqual(result.id, token.id)
 
     def test_get_valid_token_skips_expired(self):
@@ -292,7 +293,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        result = OAuthToken.objects.get_valid_token("12345678")
+        result = OAuthToken.objects.get_valid_token("12345678", EFacturaEnvironment.TEST)
         self.assertIsNone(result)
 
     def test_get_valid_token_skips_inactive(self):
@@ -305,7 +306,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=False,
         )
 
-        result = OAuthToken.objects.get_valid_token("12345678")
+        result = OAuthToken.objects.get_valid_token("12345678", EFacturaEnvironment.TEST)
         self.assertIsNone(result)
 
     def test_get_valid_token_returns_most_recent(self):
@@ -326,7 +327,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        result = OAuthToken.objects.get_valid_token("12345678")
+        result = OAuthToken.objects.get_valid_token("12345678", EFacturaEnvironment.TEST)
         self.assertEqual(result.id, newer.id)
 
     def test_get_refreshable_token(self):
@@ -340,7 +341,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        result = OAuthToken.objects.get_refreshable_token("12345678")
+        result = OAuthToken.objects.get_refreshable_token("12345678", EFacturaEnvironment.TEST)
         self.assertEqual(result.id, token.id)
 
     def test_get_refreshable_token_skips_empty_refresh(self):
@@ -354,7 +355,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        result = OAuthToken.objects.get_refreshable_token("12345678")
+        result = OAuthToken.objects.get_refreshable_token("12345678", EFacturaEnvironment.TEST)
         self.assertIsNone(result)
 
     def test_deactivate_all(self):
@@ -381,7 +382,7 @@ class OAuthTokenManagerTestCase(TestCase):
             is_active=True,
         )
 
-        count = OAuthToken.objects.deactivate_all("12345678")
+        count = OAuthToken.objects.deactivate_all("12345678", EFacturaEnvironment.TEST)
         self.assertEqual(count, 2)
 
         # Verify all for 12345678 are inactive
@@ -457,7 +458,7 @@ class TokenStorageServiceTestCase(TestCase):
 
         self.assertEqual(token, "test-token")
 
-    def test_get_access_token_uses_cache(self):
+    def test_get_access_token_cache_never_outlives_the_row(self):
         """Test access token is cached."""
         expires_at = timezone.now() + timedelta(hours=1)
         OAuthToken.objects.create(
@@ -475,13 +476,13 @@ class TokenStorageServiceTestCase(TestCase):
 
         # First call
         token1 = service.get_access_token("12345678")
+        self.assertEqual(token1, "test-token")
 
-        # Delete from DB
+        # The cache holds the row id, never the token (#751 follow-up, M24): a token gone from the
+        # database is not served from the cache.
         OAuthToken.objects.all().delete()
-
-        # Second call should still work from cache
         token2 = service.get_access_token("12345678")
-        self.assertEqual(token1, token2)
+        self.assertIsNone(token2)
 
     def test_get_access_token_uses_settings_cui(self):
         """Test get_access_token uses settings CUI when not provided."""
@@ -606,8 +607,8 @@ class TokenStorageEdgeCasesTestCase(TestCase):
             is_active=True,
         )
 
-        token1 = OAuthToken.objects.get_valid_token("11111111")
-        token2 = OAuthToken.objects.get_valid_token("22222222")
+        token1 = OAuthToken.objects.get_valid_token("11111111", EFacturaEnvironment.TEST)
+        token2 = OAuthToken.objects.get_valid_token("22222222", EFacturaEnvironment.TEST)
 
         self.assertEqual(token1.decrypted_access_token, "token-1")
         self.assertEqual(token2.decrypted_access_token, "token-2")

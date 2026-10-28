@@ -1,0 +1,17 @@
+# Optional managed-node operator keys. Add after a Platform Compose base file.
+# PRAHO_SSH_PUBLIC_KEYS_FILE must name an existing absolute host file.
+services:
+  platform:
+    environment:
+      PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE: /etc/praho/operator_authorized_keys
+    volumes: &node-ssh-keys
+      - type: bind
+        source: ${PRAHO_SSH_PUBLIC_KEYS_FILE:?Set an absolute path to the approved operator public-key file}
+        target: /etc/praho/operator_authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+  qcluster:
+    environment:
+      PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE: /etc/praho/operator_authorized_keys
+    volumes: *node-ssh-keys

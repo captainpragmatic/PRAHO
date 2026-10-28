@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from django.db import transaction
@@ -37,12 +38,16 @@ except Exception:  # pragma: no cover - import guard for test/runtime isolation
     InvoiceDoesNotExist = Exception  # type: ignore[misc, assignment]
 
 try:
-    from django_q.models import Schedule
+    from django_q.models import Schedule as DjangoQSchedule
+
+    Schedule: type[DjangoQSchedule] | None = DjangoQSchedule
 except Exception:  # pragma: no cover - optional dependency
     Schedule = None
 
 try:
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task as django_async_task
+
+    async_task: Callable[..., str] | None = django_async_task
 except Exception:  # pragma: no cover - optional dependency
     async_task = None
 

@@ -65,6 +65,9 @@ _DURATION = re.compile(r"(?i)\b\d+(?:\.\d+)?(?= ?(?:seconds?|secs?|milliseconds?
 _FEATURE_COUNTS = re.compile(r"(?m)^fcount:[ \t]*\n(?:[ \t]+\S.*\n?)+")
 _BARE_NUMBER_LINE = re.compile(r"(?m)^(\s*(?:\* )?)-?\d+(?:\.\d+)?$")
 _LABELLED_NUMBER_LINE = re.compile(r"(?m)^(\s*[A-Za-z_][A-Za-z_ ]*:)[ \t]*-?\d+(?:\.\d+)?$")
+# Virtualmin warns when a domain's file changed under its own steps (a restore re-reads and saves it within
+# the same second): it depends on timing, appears in one run and not the next, and nothing classifies on it.
+_STALE_READ_WARNING = re.compile(r"(?m)^Domain \S+ was modified since last read!\r?\n?")
 
 _FINDING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("pem block", re.compile(r"-----BEGIN [A-Z0-9 ]+-----")),
@@ -82,6 +85,7 @@ _FINDING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 def sanitise_text(text: str, *, dates: bool = True) -> str:
     """One string, with secrets and run-to-run noise replaced by stable placeholders."""
     cleaned = _PEM_BLOCK.sub(PEM_MARKER, text)
+    cleaned = _STALE_READ_WARNING.sub("", cleaned)
     cleaned = _SECRET_LINE.sub(rf"\1 {REDACTED}", cleaned)
     cleaned = _PASSWORD_HASH.sub("<hash>", cleaned)
     for pattern in _TIMESTAMPS:

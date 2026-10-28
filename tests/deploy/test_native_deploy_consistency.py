@@ -20,11 +20,13 @@ import re
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ANSIBLE = PROJECT_ROOT / "deploy/ansible"
@@ -37,6 +39,25 @@ GUIDE = PROJECT_ROOT / "docs/deployment/DEPLOYMENT.md"
 # Modules outside ansible.builtin that the playbooks and roles use.
 EXTERNAL_SHORT_NAME = re.compile(r"^\s*-?\s*(synchronize|ufw|timezone|postgresql_\w+):", re.MULTILINE)
 QUALIFIED_MODULE = re.compile(r"^\s*-?\s*([a-z_]+\.[a-z_]+)\.[a-z_]+:", re.MULTILINE)
+
+
+def test_native_dependency_resolution_contains_the_portals_runtime_packages(tmp_path: Path) -> None:
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    sync = next(task["command"] for task in tasks if task.get("name") == "Install dependencies with uv")
+    import shlex  # noqa: PLC0415 -- Parse the actual deployment command, without running a shell.
+
+    arguments = shlex.split(sync)[2:]
+    exported = subprocess.run(  # noqa: S603 -- uv exports the frozen lockfile, no environment mutation.
+        [shutil.which("uv") or "uv", "export", "--format", "requirements-txt", "--no-hashes",
+         "--no-header", "--no-annotate", *arguments],
+        cwd=PROJECT_ROOT, env={**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")},
+        capture_output=True, text=True, check=False,
+    )
+    assert exported.returncode == 0, exported.stderr
+    resolved = {Requirement(line).name for line in exported.stdout.splitlines() if line and not line.startswith("#")}
+    configuration = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+    required = {Requirement(spec).name for spec in configuration["dependency-groups"]["portal"]}
+    assert required <= resolved, f"Native deployment omits Portal packages: {sorted(required - resolved)}"
 
 
 def _flat_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -59,6 +80,13 @@ def _version(text: str) -> tuple[int, ...]:
 
 
 class TestBackupPlaybook:
+    def test_backup_runs_as_the_directory_owner(self) -> None:
+        run = next(task for task in _backup_tasks() if task.get("name") == "Run the legacy backup before the first service deployment")
+        assert run["become_user"] == "{{ project_user }}"
+        unit = (PROJECT_ROOT / "deploy/ansible/roles/praho-native/templates/praho-backup.service.j2").read_text()
+        assert "User={{ project_user }}" in unit
+        assert "EnvironmentFile=" in unit
+
     @pytest.mark.integration
     def test_it_targets_a_group_every_inventory_defines(self) -> None:
         play = yaml.safe_load(BACKUP_PLAYBOOK.read_text())[0]
@@ -160,6 +188,10 @@ class TestSingleServerMakeTarget:
     def test_a_production_version_reaches_the_playbook(self) -> None:
         assert "--version v9.9.9" in _dry_run("ansible-single-server", "ENV=prod", "VERSION=v9.9.9")
 
+    @pytest.mark.integration
+    def test_staging_can_deploy_an_explicit_reviewed_revision(self) -> None:
+        assert "--version abcdef123456" in _dry_run("deploy-staging", "VERSION=abcdef123456")
+
 
 class TestNativeMakeTargets:
     @pytest.mark.integration
@@ -208,6 +240,10 @@ class TestNativeBackupScript:
         """The rendered script, and an environment whose `date` is pinned and `pg_dump` is a stub."""
         stubs = tmp_path / "bin"
         stubs.mkdir()
+        runtime = tmp_path / ".venv-linux/bin/python"
+        runtime.parent.mkdir(parents=True)
+        runtime.write_text("#!/bin/sh\n# Fixed uploader boundary is exercised separately.\nexit 0\n")
+        runtime.chmod(0o755)
         (stubs / "date").write_text("#!/bin/sh\necho 20261008_020000\n")
         (stubs / "pg_dump").write_text(pg_dump)
         for stub in stubs.iterdir():
@@ -399,3 +435,32 @@ def test_platform_passthrough_carries_the_audit_session_digest_secret() -> None:
     tasks = yaml.safe_load(NATIVE_TASKS.read_text())
     task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
     assert "AUDIT_SESSION_DIGEST_SECRET" in task["vars"]["praho_passthrough"]
+
+
+def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
+    """Migrations run while the previous release still serves; one of its processes can write a secret under the
+    previous binding meanwhile. rebind_secrets (idempotent) runs after the restart that moves every writer onto
+    the new release (#751 follow-up, M19)."""
+    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    names = [task.get("name", "") for task in tasks]
+    migrate = names.index("Run database migrations")
+    restart = next(i for i, task in enumerate(tasks) if task.get("meta") == "flush_handlers")
+    rebind = [i for i, task in enumerate(tasks) if "rebind_secrets" in str(task.get("command", ""))]
+    assert len(rebind) == 1
+    assert migrate < restart < rebind[0]
+    task = tasks[rebind[0]]
+    assert task["environment"] == "{{ django_env }}"
+    assert task.get("no_log") is True
+
+
+def test_node_ssh_overlay_mounts_only_public_keys_in_both_platform_processes() -> None:
+    overlay = yaml.safe_load((PROJECT_ROOT / "deploy/docker-compose.node-ssh.yml").read_text())
+    assert set(overlay["services"]) == {"platform", "qcluster"}
+    for service in overlay["services"].values():
+        assert service["environment"]["PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE"] == "/etc/praho/operator_authorized_keys"
+        mount, = service["volumes"]
+        assert mount["type"] == "bind"
+        assert mount["source"].startswith("${PRAHO_SSH_PUBLIC_KEYS_FILE:?")
+        assert mount["target"] == "/etc/praho/operator_authorized_keys"
+        assert mount["read_only"] is True
+        assert mount["bind"]["create_host_path"] is False

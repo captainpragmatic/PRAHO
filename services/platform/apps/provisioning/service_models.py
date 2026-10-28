@@ -17,7 +17,12 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import (
+    NaturalKeyQuerySet,
+    NaturalKeySecretsMixin,
+    decrypt_model_secret,
+    encrypt_model_secret,
+)
 from apps.common.utils import operator_local_date
 
 
@@ -202,8 +207,12 @@ class ServicePlanPrice(models.Model):
         return int(value)
 
 
-class Server(models.Model):
+class Server(NaturalKeySecretsMixin, models.Model):
     """Physical/virtual servers for hosting services"""
+
+    # The API password is bound to the hostname, like VirtualminServer's (#751 follow-up, M19).
+    SECRET_NATURAL_KEY: ClassVar[tuple[str, ...]] = ("hostname",)
+    BOUND_SECRET_FIELDS: ClassVar[tuple[str, ...]] = ("_api_password_encrypted",)
 
     encryption_context_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
@@ -290,6 +299,8 @@ class Server(models.Model):
     is_active = models.BooleanField(default=True, verbose_name=_("Active"))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = models.Manager.from_queryset(NaturalKeyQuerySet)()
 
     class Meta:
         db_table = "provisioning_servers"

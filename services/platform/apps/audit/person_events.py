@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
 from django.db.models import Q
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ REMOVED = "[removed]"
 # Network identity copied into metadata, which the column scrub alone would miss. It is the actor's.
 _NETWORK_KEYS = frozenset({"ip_address", "user_agent", "user_agent_info", "client_ip"})
 # Values erasure itself writes, and empty ones: matching them would touch other people's rows.
-_PLACEHOLDERS = frozenset({"anonymized", "user", "anonymized user", "+40700000000", "0.0.0.0"})
+_PLACEHOLDERS = frozenset({"anonymized", "user", "anonymized user", "+40700000000", "0.0.0.0"})  # nosec B104 - the placeholder erasure writes into ip columns, not a bind address
 _ANONYMIZED_EMAIL = re.compile(r"^anonymized_[0-9a-f]+@example\.com$")
 # Shorter values (initials, empty names) would match unrelated text.
 _MIN_IDENTIFIER_LENGTH = 3
@@ -257,7 +258,19 @@ def remove_identity(event: AuditEvent, subject: ErasureSubject, *, removed_at: s
     was the actor, or there was none: a staff member's IP on an action against the person is theirs.
     The row is never marked anonymized, so a later retention policy can still fully scrub it.
     Returns whether the row held anything of the person; a row that did not is left as it was.
+    The row is rewritten from its state under the chain head and event locks, never from the caller's
+    earlier read, and only its evidence fields are written.
     """
+    from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: import cycle
+
+    with transaction.atomic(using=event._state.db):
+        locked = AuditIntegrityService.lock_for_evidence_write(event.pk, event._state.db)
+        if locked is None:
+            return False
+        return _remove_identity_locked(locked, subject, removed_at=removed_at)
+
+
+def _remove_identity_locked(event: AuditEvent, subject: ErasureSubject, *, removed_at: str) -> bool:
     from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: import cycle
 
     # A row with no actor (a failed login for the person's address) records the person's network.
@@ -284,7 +297,7 @@ def remove_identity(event: AuditEvent, subject: ErasureSubject, *, removed_at: s
     event.description, event.old_values, event.new_values, kept_metadata = scrubbed
     event.metadata = {**kept_metadata, "identity_removed_at": removed_at}
     event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
-    event.save()
+    event.save(update_fields=list(AuditIntegrityService.EVIDENCE_FIELDS))
     return True
 
 

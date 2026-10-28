@@ -22,16 +22,18 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext
 
-from apps.common.types import Err, Ok, Result, Retriability, retriability_of
-from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
+from apps.common.types import Err, Ok, Result, retriability_of
+from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import (
-    STANDARD_FIREWALL_RULES,
     CloudProviderGateway,
+    FirewallRule,
     ServerCreateRequest,
     ServerCreateResult,
     get_cloud_gateway,
+    node_firewall_rules,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, get_dns_gateway
@@ -108,12 +110,38 @@ class NodeDeploymentService:
         "complete": (100, "Deployment complete"),
     }
 
+    @staticmethod
+    def _node_firewall_rules() -> list[FirewallRule]:
+        return node_firewall_rules(node_admin_allowed_cidrs())
+
     def __init__(self) -> None:
         """Initialize deployment service with all required sub-services"""
         self._ssh_manager = get_ssh_key_manager()
         self._ansible = get_ansible_service()
         self._validation = get_validation_service()
         self._registration = get_registration_service()
+
+    def _deployment_preflight(self, deployment: NodeDeployment) -> Result[tuple[str, ...], str]:
+        """Reject unverified cloud image selectors before any deployment side effects."""
+        from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Deferred app model import.
+
+        provider_type = CloudProvider.objects.values_list("provider_type", flat=True).get(pk=deployment.provider_id)
+        if provider_type != "hetzner":
+            return Err(
+                gettext(
+                    "Automatic node deployment currently supports Hetzner Ubuntu 26.04 only. "
+                    "Other provider image selectors require Ubuntu 24.04/26.04 verification before deployment or retry."
+                )
+            )
+        try:
+            return Ok(self._ansible.operator_public_keys())
+        except (OSError, ValueError):
+            return Err(
+                gettext(
+                    "Approved operator public keys are missing or invalid. "
+                    "Configure PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE before deployment or retry."
+                )
+            )
 
     def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self,
@@ -136,6 +164,9 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
+        provider_result = self._deployment_preflight(deployment)
+        if provider_result.is_err():
+            return Err(provider_result.unwrap_err())
         fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
         if fqdn_result.is_err():
             return Err(fqdn_result.unwrap_err())
@@ -186,6 +217,13 @@ class NodeDeploymentService:
                 if not locked or locked.status not in ("pending", "failed"):
                     return Err(f"Cannot deploy node in status '{locked.status if locked else 'unknown'}'")
 
+                from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Claim the current provider too.
+
+                claimed_provider = CloudProvider.objects.select_for_update().get(pk=locked.provider_id)
+                if claimed_provider.provider_type != "hetzner":
+                    return Err(gettext("Provider image support changed before deployment claim; no VM was created."))
+                claimed_provider_type = claimed_provider.provider_type
+
                 # Transition to provisioning (transition_to saves internally)
                 try:
                     locked.transition_to("provisioning_node")
@@ -214,58 +252,31 @@ class NodeDeploymentService:
                 return Err(dns_config_result.unwrap_err())
             dns_token, dns_zone_id = dns_config_result.unwrap()
 
-            # Stage 1: Generate SSH key
+            # Existing VMs still authorize their original deployment identity.
             report_progress("ssh_key")
-            log_deployment("info", "Generating deployment SSH key")
+            log_deployment(
+                "info", "Reusing deployment SSH key" if deployment.external_node_id else "Generating deployment SSH key"
+            )
 
-            key_result = self._ssh_manager.generate_deployment_key(
-                deployment,
-                user=user,
+            key_result = (
+                self._ssh_manager.get_deployment_key(deployment, user=user)
+                if deployment.external_node_id
+                else self._ssh_manager.generate_deployment_key(deployment, user=user)
             )
 
             if key_result.is_err():
-                # generate_deployment_key is a MUTATION; an UNKNOWN failure may
-                # have created the key already, so the compound operation can
-                # never be MORE retriable than that ambiguity — a RETRIABLE
-                # fallback failure must not mask it into a replay that would
-                # generate the key a second time (#253/#254).
-                key_retriability = retriability_of(key_result)
-
-                def _aggregate(fallback: Result[Any, str]) -> Retriability:
-                    if key_retriability is Retriability.UNKNOWN:
-                        return Retriability.UNKNOWN
-                    return retriability_of(fallback)
-
-                # Try master key fallback
-                master_result = self._ssh_manager.get_master_key()
-                if master_result.is_err():
-                    self._mark_failed(
-                        deployment,
-                        f"SSH key generation failed; master key fallback failed: {master_result.unwrap_err()}",
-                        stage="ssh_key",
-                        audit_ctx=audit_ctx,
-                    )
-                    return Err(
-                        f"SSH key generation failed; master key fallback failed: {master_result.unwrap_err()}",
-                        retriability=_aggregate(master_result),
-                    )
-                master_pub_result = self._ssh_manager.get_master_public_key()
-                if master_pub_result.is_err():
-                    self._mark_failed(
-                        deployment,
-                        f"SSH key generation failed and master public key unavailable: {master_pub_result.unwrap_err()}",
-                        stage="ssh_key",
-                        audit_ctx=audit_ctx,
-                    )
-                    return Err(
-                        f"SSH key generation failed and master public key unavailable: {master_pub_result.unwrap_err()}",
-                        retriability=_aggregate(master_pub_result),
-                    )
-                ssh_public_key = master_pub_result.unwrap()
-                log_deployment("warning", "Using master SSH key (fallback)")
+                if deployment.external_node_id:
+                    message = "Existing VM authentication key is unavailable; refusing to generate or replace it"
+                    self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx)
+                    return Err(message)
+                # Do not create a paid VM without a persisted authentication key.
+                # An ambiguous key-generation mutation also retains UNKNOWN (#253/#254).
+                message = "SSH key generation failed; no VM was created"
+                self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx)
+                return Err(message, retriability=retriability_of(key_result))
             else:
                 ssh_public_key = key_result.unwrap().public_key
-                log_deployment("info", "SSH key generated successfully")
+                log_deployment("info", "Deployment SSH key ready")
 
             stages_completed.append("ssh_key")
 
@@ -278,7 +289,8 @@ class NodeDeploymentService:
                 self._mark_failed(deployment, "No API token provided", stage="provision_server", audit_ctx=audit_ctx)
                 return Err("No API token provided")
 
-            provider_type = deployment.provider.provider_type
+            # Retain the supported adapter selected under the claim, never a refreshed relation's type.
+            provider_type = claimed_provider_type
             gateway = get_cloud_gateway(provider_type, api_token)
 
             # Idempotent: skip server creation if external_node_id already set (retry scenario)
@@ -338,7 +350,7 @@ class NodeDeploymentService:
                 log_deployment("info", f"Creating firewall '{firewall_name}'")
                 firewall_result = gateway.create_firewall(
                     name=firewall_name,
-                    rules=STANDARD_FIREWALL_RULES,
+                    rules=self._node_firewall_rules(),
                     labels={
                         "managed-by": "praho",
                         "deployment-id": str(deployment.correlation_id),
@@ -421,12 +433,18 @@ class NodeDeploymentService:
                 deployment.external_node_id = server_create_result.server_id
                 deployment.ipv4_address = server_create_result.ipv4_address
                 deployment.ipv6_address = server_create_result.ipv6_address or ""
+                identity_fields = []
+                if any(kind == "server" for kind, _identifier in created_resources):
+                    deployment.ssh_port = 22  # Fresh provider images retain their bootstrap listener.
+                    deployment.ssh_host_keys = None  # Explicit first-enrollment marker, never set by a retry.
+                    identity_fields = ["ssh_port", "ssh_host_keys"]
                 deployment.save(
                     update_fields=[
                         "external_node_id",
                         "ipv4_address",
                         "ipv6_address",
                         "updated_at",
+                        *identity_fields,
                     ]
                 )
                 deployment.transition_to("configuring_dns")
@@ -519,6 +537,7 @@ class NodeDeploymentService:
                     deployment=deployment,
                     playbook=playbook,
                     extra_vars=stage_extra_vars,
+                    operator_public_keys=provider_result.unwrap(),
                 )
 
                 if playbook_result.is_err():
@@ -874,6 +893,9 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
+        provider_result = self._deployment_preflight(deployment)
+        if provider_result.is_err():
+            return Err(provider_result.unwrap_err())
         if deployment.status != "failed":
             return Err(f"Can only retry failed deployments, current status: {deployment.status}")
 

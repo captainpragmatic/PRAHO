@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Setup checklist" %} - PRAHO Platform{% endblock %}
+{% block content %}
+<div class="px-4 py-6 grid grid-cols-12 gap-6">
+  {% include 'settings/partials/_sidebar.html' %}
+  <div class="col-span-12 lg:col-span-9 space-y-6">
+    {% trans "Setup checklist" as title %}
+    {% page_header title=title subtitle=_("Configure the essentials for your hosting business. You can finish these tasks in any order.") icon="clipboard" %}{% end_page_header %}
+    <p class="text-slate-300">{% blocktrans with count=setup_report.remaining %}{{ count }} required items remaining.{% endblocktrans %}</p>
+    {% for section in setup_report.sections %}
+    {% section_card title=section.label %}
+      <ul class="divide-y divide-slate-700">
+        {% for item in section.items %}
+        <li class="py-4 flex flex-col sm:flex-row gap-4 justify-between">
+          <div>
+            <h2 class="text-white font-semibold"><a class="hover:underline" href="{{ item.action_url }}">{{ item.label }}</a></h2>
+            <p class="text-sm text-slate-400 mt-1">{{ item.description }}</p>
+          </div>
+          <div class="shrink-0">
+            {% if item.configured %}{% trans "Configured" as label %}{% badge label variant="success" %}
+            {% elif item.required %}{% trans "Required" as label %}{% badge label variant="danger" %}
+            {% else %}{% trans "Optional" as label %}{% badge label variant="warning" %}{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    {% end_section_card %}
+    {% endfor %}
+    <a href="{% url 'system_status' %}" class="text-blue-400 hover:underline">{% trans "View ongoing health in System Status" %}</a>
+  </div>
+</div>
+{% endblock %}

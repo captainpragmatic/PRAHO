@@ -74,6 +74,27 @@ python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_
 
 > For standards rationale (NIST SP 800-38D, RFC 5116, ISO 19772, GDPR mapping), see [ADR-0033: Encryption Architecture Consolidation](../ADRs/ADR-0033-encryption-architecture-consolidation.md).
 
+**Binding**: each stored secret is bound (AES-GCM associated data) to its table, field and row. Vault credentials
+are also bound to the `(service_type, service_identifier)` they are found by, and a Virtualmin node's or server's
+API password to its `hostname`. A value copied to another row, or a row renamed in the database, no longer
+decrypts. The global master and SSH credentials are only used for a node whose own credential resolves.
+
+- Rename a node through the application (the server form): its API password is re-bound to the new hostname.
+- Never `UPDATE` a vault credential's `service_identifier` or a server's `hostname` in SQL, and never bulk-update
+  them (the ORM refuses): store the credential again under the new name instead.
+- Upgrading to the release that adds this binding re-encrypts existing secrets (migrations `common 0005`,
+  `provisioning 0012`). A process still on the previous release writes the old binding, and cannot read the new
+  one, until it restarts: `deploy.sh` and the native role run `manage.py rebind_secrets` (idempotent) once every
+  service runs the new release. A manual upgrade stops the platform and its workers before `migrate`, or runs
+  `rebind_secrets` after restarting them. Both abort with nothing changed on a secret that opens under neither
+  binding (a wrong `CREDENTIAL_VAULT_MASTER_KEY` looks the same).
+- Rolling back: an older release ignores these applied migrations and cannot read re-bound secrets. Every released
+  tag also predates the row binding itself, so roll back to one with a full rollback from a pre-upgrade backup
+  (`rollback.sh full`); take that backup with this checkout's `deploy/scripts/backup.sh` before upgrading, which
+  writes the media and metadata files the full rollback needs. Only a build that has the row binding but not the natural-key binding can be reached by
+  reversing: stop the platform and its workers, run `manage.py migrate common 0004` and
+  `manage.py migrate provisioning 0011` on this release, and keep the writers stopped until the target starts.
+
 ### 2.1 Key Isolation (HKDF Domain Separation)
 
 Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys** using HKDF-SHA256 (RFC 5869) for HMAC operations and non-encryption crypto. This implements NIST SP 800-57 Part 1 Section 5.2 (key separation) — a compromise of one derived key does not affect others.
@@ -84,6 +105,7 @@ Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys
 | `unsubscribe` | Unsubscribe token generation | `UNSUBSCRIBE_TOKEN_SECRET` |
 | `siem-hash-chain` | SIEM audit log hash chain | `SIEM_HASH_CHAIN_SECRET` (recommended for production) |
 | `sensitive-data-hash` | HMAC for sensitive data hashing | `SENSITIVE_DATA_HASH_KEY` |
+| `email-recipient-digest` | Keyed digests of stored email recipients, for GDPR erasure and export | `EMAIL_RECIPIENT_DIGEST_SECRET` |
 
 **How it works**: `apps/common/key_derivation.py` uses `HKDF(SHA256, length=32, info=f"praho-{domain}")` with `settings.SECRET_KEY` as input key material. If a domain-specific env var is set (>= 32 chars), it is used directly instead of HKDF derivation.
 

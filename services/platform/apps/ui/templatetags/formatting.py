@@ -527,10 +527,8 @@ def highlight_search(text: str, search_term: str) -> SafeString:
         search_term: Term to highlight
     """
     if not text or not search_term:
-        # SECURITY: escape() converts HTML special chars before mark_safe — standard Django pattern
-        return mark_safe(  # nosemgrep: avoid-mark-safe  # noqa: S308
-            escape(text) if text else ""
-        )
+        # SECURITY: escape() converts HTML special chars and returns SafeString
+        return escape(text) if text else SafeString("")
 
     # First escape HTML to prevent XSS
     escaped_text = escape(text)

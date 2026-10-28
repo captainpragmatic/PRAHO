@@ -628,7 +628,7 @@ class EFacturaClient:
             logger.error(f"Token refresh failed: {e}")
             raise AuthenticationError(f"Failed to refresh token: {e}") from e
 
-    def _get_access_token(self) -> str:
+    def _get_access_token(self, *, allow_refresh: bool = True) -> str:
         """Get valid access token, refreshing if needed."""
         # Check cached token
         token = self._get_cached_token()
@@ -636,7 +636,7 @@ class EFacturaClient:
             return token.access_token
 
         # Try to refresh
-        if token and token.refresh_token:
+        if allow_refresh and token and token.refresh_token:
             try:
                 token = self.refresh_token(token.refresh_token)
                 return token.access_token
@@ -659,6 +659,28 @@ class EFacturaClient:
             _("No valid access token for e-Factura environment %(environment)s. Complete OAuth2 authorization.")
             % {"environment": environment}
         )
+
+    def prepare_status_probe(self, cui: str) -> dict[str, object]:
+        """Reserve one read-only listing request using an existing token, never refreshing it.
+
+        Execution and strict response validation belong to the bounded status probe process.
+        Preparing here preserves the normal client/environment token scope and quota accounting.
+        """
+        access_token = self._get_access_token(allow_refresh=False)
+        end = timezone.now()
+        params = {
+            "startTime": int((end - timedelta(days=1)).timestamp() * 1000),
+            "endTime": int(end.timestamp() * 1000),
+            "pagina": 1,
+            "cif": cui,
+        }
+        url = f"{self.config.base_url}/listaMesajePaginatieFactura"
+        self._reserve_request_quota(url, params)
+        return {
+            "url": url,
+            "params": params,
+            "headers": {**self._default_headers, "Authorization": f"Bearer {access_token}"},
+        }
 
     @property
     def token_cache_key(self) -> str:

@@ -330,6 +330,30 @@ class VirtualminAuthenticationManager:
         except Exception as e:
             return Err(VirtualminAPIError(f"ACL request failed: {e!s}", self.server.hostname, program))
 
+    def _node_credential_resolves(self, method: AuthMethod, program: str) -> Result[None, AuthFailure]:
+        """A privileged method runs only for a node whose own credential resolves (#751 follow-up, M19).
+
+        The node's credential is bound to its hostname: a hostname changed in the database leaves it
+        unreadable. Checking it first keeps the global master and SSH credentials from going to such a host,
+        whatever order the methods are tried in (a cached ordering, the health check).
+        """
+        from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_credential_vault,
+        )
+
+        try:
+            vault = get_credential_vault()
+        except Exception:
+            vault = None  # As the ACL path: the server field alone
+        creds = resolve_server_credentials(self.server, vault=vault, reason=f"{method.value} gate: {program}")
+        if creds.is_err():
+            return Err(
+                ACLCredentialResolutionError(
+                    f"No usable credential for {self.server.hostname}; refusing {method.value}: {creds.unwrap_err()}"
+                )
+            )
+        return Ok(None)
+
     def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using master admin credentials via proxy service"""
         try:
@@ -339,6 +363,9 @@ class VirtualminAuthenticationManager:
 
             if not master_username or not master_password:
                 return Err(AuthMethodUnavailableError("Master admin credentials not configured"))
+            gate = self._node_credential_resolves(AuthMethod.MASTER_PROXY, program)
+            if gate.is_err():
+                return Err(gate.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
 
             # Use master credentials with same gateway
             config = VirtualminConfig.from_credentials(
@@ -370,6 +397,9 @@ class VirtualminAuthenticationManager:
     def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using SSH + sudo to virtualmin CLI"""
         try:
+            gate = self._node_credential_resolves(AuthMethod.SSH_SUDO, program)
+            if gate.is_err():
+                return Err(gate.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
             # Build virtualmin CLI command
             cmd_parts = ["/usr/sbin/virtualmin", program]
 
@@ -410,7 +440,7 @@ class VirtualminAuthenticationManager:
             if not self._ssh_client:
                 return Err("Failed to establish SSH connection")
 
-            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=get_sudo_command_timeout())
+            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=get_sudo_command_timeout())  # nosec B601 - callers build it with shlex.join
 
             # Read output
             output = stdout.read().decode("utf-8")
@@ -432,34 +462,31 @@ class VirtualminAuthenticationManager:
 
         try:
             self._ssh_client = paramiko.SSHClient()
-            configure_strict_host_key_checking(self._ssh_client)
+            configure_strict_host_key_checking(
+                self._ssh_client,
+                host_keys=self.server.enrolled_ssh_host_keys,
+                hostnames=(self.server.hostname,),
+                port=self.server.effective_ssh_port,
+            )
 
             # Get SSH credentials from settings
             ssh_username = getattr(settings, "VIRTUALMIN_SSH_USERNAME", "virtualmin-praho")
             ssh_private_key = getattr(settings, "VIRTUALMIN_SSH_PRIVATE_KEY_PATH", None)
-            ssh_password = getattr(settings, "VIRTUALMIN_SSH_PASSWORD", None)
             ssh_timeout = get_ssh_timeout()
 
             if ssh_private_key:
                 # Use private key authentication
                 self._ssh_client.connect(
                     hostname=self.server.hostname,
-                    port=22,
+                    port=self.server.effective_ssh_port,
                     username=ssh_username,
                     key_filename=ssh_private_key,
                     timeout=ssh_timeout,
-                )
-            elif ssh_password:
-                # Use password authentication
-                self._ssh_client.connect(
-                    hostname=self.server.hostname,
-                    port=22,
-                    username=ssh_username,
-                    password=ssh_password,
-                    timeout=ssh_timeout,
+                    allow_agent=False,
+                    look_for_keys=False,
                 )
             else:
-                raise Exception("No SSH credentials configured")
+                raise RuntimeError("Virtualmin SSH access requires an explicit private key; password login is disabled")
 
             logger.info(f"✅ [SSH] Connected to {self.server.hostname}")
 

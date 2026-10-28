@@ -341,15 +341,14 @@ def run_pair_step(
         or re.fullmatch(CHAIN_RUN_ID_PATTERN, str(variables.get("chain_token", ""))) is None
     ):
         return Err("The pair step inputs are not acceptable to the node", retriability=Retriability.NOT_RETRIABLE)
-    deployment = getattr(server, "node_deployment", None)
-    if deployment is None:
-        return Err(
-            f"Server {server.hostname} is manually registered (no managed node_deployment); pair restore is unavailable",
-            retriability=Retriability.NOT_RETRIABLE,
-        )
-    result = AnsibleService().run_playbook(deployment, PAIR_PLAYBOOK, variables, timeout_seconds=timeout_seconds)
+    from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+    readiness = server_transport_ready(server)
+    if readiness.is_err():
+        return Err(readiness.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
+    result = AnsibleService().run_server_playbook(server, PAIR_PLAYBOOK, variables, timeout_seconds=timeout_seconds)
     if result.is_err():
-        return Err(f"Pair step could not run: {result.unwrap_err()}", retriability=Retriability.UNKNOWN)
+        return Err(f"Pair step could not run: {result.unwrap_err()}", retriability=retriability_of(result))
     run = result.unwrap()
     if not run.success:
         return Err(
@@ -377,6 +376,8 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
     note_sink: Callable[[dict[str, Any]], int] | None,
 ) -> Result[dict[str, Any], str]:
     """The pair restore workflow (see the module docstring). Never raises for an expected failure."""
+    from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
     from .spool import (  # noqa: PLC0415
         estimated_transfer_bytes,
         release_spool_reservation,
@@ -389,6 +390,9 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         backup_task_timeout,
     )
 
+    readiness = server_transport_ready(target_server)
+    if readiness.is_err():
+        return Err(readiness.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
     if not (config.restore_email and config.restore_databases and config.restore_files and config.restore_ssl):
         return Err("A pair restore restores every component", retriability=Retriability.NOT_RETRIABLE)
     token = config.pair_token
@@ -483,6 +487,10 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         if not service._owns_execution():
             determinate = True
             return _superseded()
+        readiness = server_transport_ready(target_server)
+        if readiness.is_err():
+            determinate = True
+            return Err(readiness.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
         if (
             note_sink is not None
             and note_sink(
@@ -527,6 +535,8 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         )
         outcome = run_pair_step(target_server, variables, token=token, domain_id=domain_id, timeout_seconds=timeout)
         if outcome.is_err():
+            if retriability_of(outcome) is Retriability.NOT_RETRIABLE:
+                determinate = True
             return Err(outcome.unwrap_err(), retriability=retriability_of(outcome))
         step = outcome.unwrap()
         checkpoints = step.checkpoint_dicts()

@@ -20,9 +20,41 @@
   gather_facts: no
 
   tasks:
-    - name: Run backup script
+    - name: Detect the environment-aware backup service
+      stat:
+        path: /etc/systemd/system/praho-backup.service
+      register: backup_unit
+
+    - name: Run the environment-aware backup service
+      command: systemctl start --wait praho-backup.service
+      when: backup_unit.stat.exists
+
+    - name: Read this backup invocation identity
+      command: systemctl show praho-backup.service --property=InvocationID --value
+      register: backup_invocation
+      changed_when: false
+      when: backup_unit.stat.exists
+
+    - name: Read this backup invocation output
+      command:
+        argv:
+          - journalctl
+          - "_SYSTEMD_INVOCATION_ID={{ backup_invocation.stdout }}"
+          - --no-pager
+          - --output=cat
+      register: backup_service_result
+      changed_when: false
+      when: backup_unit.stat.exists
+
+    - name: Run the legacy backup before the first service deployment
+      become_user: "{{ project_user }}"
       command: "{{ project_root }}/scripts/backup.sh"
-      register: backup_result
+      register: backup_legacy_result
+      when: not backup_unit.stat.exists
+
+    - name: Select this backup output
+      set_fact:
+        backup_result: "{{ backup_service_result if backup_unit.stat.exists else backup_legacy_result }}"
 
     - name: Show backup result
       debug:

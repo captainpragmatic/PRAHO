@@ -493,6 +493,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 # Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
 # Credentials are stored in the encrypted credential vault.
 PRAHO_SSH_KNOWN_HOSTS_PATH = os.environ.get("PRAHO_SSH_KNOWN_HOSTS_PATH", "")
+VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH = os.environ.get("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", "")
 
 # e-Factura API settings
 EFACTURA_API_URL = os.environ.get("EFACTURA_API_URL")
@@ -703,6 +704,11 @@ Q_CLUSTER = {
     "recycle": 500,  # Restart workers after 500 tasks
     "sync": False,  # Async execution
 }
+
+# Approved human public keys used by node deployment, separate from private credentials.
+PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE = os.environ.get(
+    "PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE", "/etc/praho/operator_authorized_keys"
+)
 
 # ===============================================================================
 # 🚀 PERFORMANCE & SCALABILITY CONFIGURATION

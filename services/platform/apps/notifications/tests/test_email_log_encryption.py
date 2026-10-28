@@ -29,7 +29,7 @@ class TestEmailLogEncryptionSave(TestCase):
 
     def test_encryption_failure_cannot_save_plaintext(self) -> None:
         with (
-            patch("apps.notifications.models.encrypt_model_secret", side_effect=RuntimeError("encryption failed")),
+            patch("apps.notifications.models.seal_model_secret", side_effect=RuntimeError("encryption failed")),
             self.assertRaises(RuntimeError),
         ):
             EmailLog.objects.create(to_addr="customer@example.com", subject="Reset", body_text="secret")
@@ -39,7 +39,7 @@ class TestEmailLogEncryptionSave(TestCase):
         row = EmailLog(to_addr="customer@example.com", subject="Invoice", body_text="text", body_html="html")
         with (
             patch(
-                "apps.notifications.models.encrypt_model_secret", side_effect=["aes:v2:first", RuntimeError("failed")]
+                "apps.notifications.models.seal_model_secret", side_effect=["aes:v2:first", RuntimeError("failed")]
             ),
             self.assertRaises(RuntimeError),
         ):
@@ -52,7 +52,7 @@ class TestEmailLogEncryptionSave(TestCase):
         original = row.body_text
         row.body_text = "replacement"
         with (
-            patch("apps.notifications.models.encrypt_model_secret", side_effect=EncryptionError("key unavailable")),
+            patch("apps.notifications.models.seal_model_secret", side_effect=EncryptionError("key unavailable")),
             self.assertRaises(EncryptionError),
         ):
             row.save()
@@ -115,13 +115,13 @@ class TestReencryptEmailLogsCommand(TestCase):
             body_encrypted=False,
         )
 
-        already_encrypted_text = encrypt_value("Already encrypted")
-        already_encrypted_html = encrypt_value("<p>Already encrypted</p>")
-        already_encrypted = EmailLog.objects.create(
-            to_addr="encrypted@example.com",
-            subject="Encrypted row",
-            body_text=already_encrypted_text or "",
-            body_html=already_encrypted_html or "",
+        # Ciphertext the command must leave alone. Unbound (v1) values are refused by the save hook now, so
+        # they are planted as stored data, the way an older row would hold them.
+        already_encrypted_text = encrypt_value("Already encrypted") or ""
+        already_encrypted_html = encrypt_value("<p>Already encrypted</p>") or ""
+        already_encrypted = EmailLog.objects.create(to_addr="encrypted@example.com", subject="Encrypted row")
+        EmailLog.objects.filter(pk=already_encrypted.pk).update(
+            body_text=already_encrypted_text, body_html=already_encrypted_html
         )
 
         call_command("reencrypt_email_logs")

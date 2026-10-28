@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 API_USER = "praho-api"
 PLAYBOOK_TIMEOUT = 3600
-FACT_CACHE = Path("/tmp/ansible_facts_cache")  # noqa: S108  # Ansible's own fact cache (ansible.cfg), keyed by inventory hostname
+FACT_CACHE = Path("/tmp/ansible_facts_cache")  # noqa: S108  # nosec B108 - Ansible's own fact cache (ansible.cfg), keyed by inventory hostname
 SSH_PORT = 22
 HTTP_PORT = 80
 WEBMIN_PORT = 10000
@@ -174,11 +174,10 @@ class Command(BaseCommand):
         shutil.rmtree(FACT_CACHE, ignore_errors=True)
         # Nothing of an earlier run may survive: the server row (and its vault credential) belongs to a node
         # whose certificate and API password no longer exist.
-        ensure_lab_deployment(DEPLOY_NODE, state_dir, dns_zone=DEPLOY_NODE_ZONE)
-
         # Host keys are generated at every boot: pin this run's, next to the two lab nodes' keys.
         known_hosts = Path(state.known_hosts).read_text() + _scan_host_keys(DEPLOY_NODE.ssh_port)
         write_private(Path(with_deploy_node(state).known_hosts), known_hosts)
+        ensure_lab_deployment(DEPLOY_NODE, state_dir, dns_zone=DEPLOY_NODE_ZONE)
 
         allowed = [f"{container_address(DEPLOY_NODE.container, 'Gateway')}/32"]
         result = SettingsService.update_setting("infrastructure.node_admin_allowed_cidrs", allowed)

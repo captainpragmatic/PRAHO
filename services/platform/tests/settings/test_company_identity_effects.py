@@ -12,6 +12,7 @@ behaviour deserves rather than the one that would look tidier - see `NoReplyAddr
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -191,8 +192,8 @@ class NoReplyAddressPrecedenceTests(TestCase):
 
     def synchronous_sender(self, sender: str | None) -> str:
         mail.outbox.clear()
-        result = EmailService._send_now(
-            to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender
+        result = EmailService.send_email(
+            to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender, async_send=False
         )
         self.assertTrue(result.success, result.error)
         self.assertEqual(len(mail.outbox), 1)
@@ -201,9 +202,14 @@ class NoReplyAddressPrecedenceTests(TestCase):
         return mail.outbox[0].from_email
 
     def queued_sender(self, sender: str | None, *, rate_limited: bool = False) -> str:
-        send = EmailService._queue_email_for_retry if rate_limited else EmailService._send_async
-        with patch("django_q.tasks.async_task", return_value="wp5-queued"):
-            result = send(to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender)
+        limited = patch(
+            "apps.notifications.services.EmailRateLimiter.check_rate_limit",
+            return_value=(not rate_limited, 0),
+        )
+        with patch("django_q.tasks.async_task", return_value="wp5-queued"), limited:
+            result = EmailService.send_email(
+                to=["recipient@example.test"], subject="Subject", body_text="Body", from_email=sender, async_send=True
+            )
         self.assertTrue(result.success, result.error)
         log = EmailLog.objects.get(pk=result.email_log_id)
         resolved = log.from_addr
@@ -211,15 +217,10 @@ class NoReplyAddressPrecedenceTests(TestCase):
 
         # Delivery must retain the queued sender after the live setting changes.
         self.configure_sender("changed-after-queue@example.test")
+        if rate_limited:
+            EmailLog.objects.filter(pk=log.pk).update(next_attempt_at=None)  # Its scheduled retry is due
         mail.outbox.clear()
-        delivered = send_email_task(
-            email_log_id=str(log.pk),
-            to=[log.to_addr],
-            subject=log.subject,
-            body_text="Body",
-            from_email=resolved,
-            retry_count=1,
-        )
+        delivered = send_email_task(str(log.pk))
         self.assertTrue(delivered["success"], delivered)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].from_email, resolved)
@@ -229,17 +230,16 @@ class NoReplyAddressPrecedenceTests(TestCase):
         return resolved
 
     def task_sender(self, sender: str | None) -> str:
+        # The sender is whatever the row stores (written by the producer); empty means the default.
         log = EmailLog.objects.create(
-            to_addr="recipient@example.test", from_addr="", subject="Subject", status="queued"
+            to_addr="recipient@example.test",
+            from_addr=sender or "",
+            subject="Subject",
+            body_text="Body",
+            envelope=json.dumps({"to": ["recipient@example.test"]}),
         )
         mail.outbox.clear()
-        result = send_email_task(
-            email_log_id=str(log.pk),
-            to=[log.to_addr],
-            subject=log.subject,
-            body_text="Body",
-            from_email=sender,
-        )
+        result = send_email_task(str(log.pk))
         self.assertTrue(result["success"], result)
         self.assertEqual(len(mail.outbox), 1)
         log.refresh_from_db()
@@ -261,21 +261,16 @@ class NoReplyAddressPrecedenceTests(TestCase):
     def test_task_sender_uses_row_then_default_and_preserves_override(self) -> None:
         self.assert_precedence(self.task_sender)
 
-    def test_retry_without_sender_argument_preserves_logged_sender(self) -> None:
+    def test_retry_preserves_logged_sender_despite_stale_argument(self) -> None:
         self.configure_sender(self.RUNTIME)
         log = EmailLog.objects.create(
             to_addr="recipient@example.test",
             from_addr="original-logged@example.test",
             subject="Retry",
             status="queued",
+            envelope=json.dumps({"to": ["recipient@example.test"]}),
         )
-        result = send_email_task(
-            email_log_id=str(log.pk),
-            to=[log.to_addr],
-            subject=log.subject,
-            body_text="Retry body",
-            retry_count=1,
-        )
+        result = send_email_task(str(log.pk), from_email=self.EXPLICIT)
         self.assertTrue(result["success"], result)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].from_email, "original-logged@example.test")
@@ -283,17 +278,8 @@ class NoReplyAddressPrecedenceTests(TestCase):
         self.assertEqual(log.status, "sent")
         self.assertEqual(log.from_addr, "original-logged@example.test")
 
-        # A caller-provided sender remains authoritative even with an existing log.
-        mail.outbox.clear()
-        result = send_email_task(
-            email_log_id=str(log.pk),
-            to=[log.to_addr],
-            subject=log.subject,
-            body_text="Explicit retry body",
-            from_email=self.EXPLICIT,
-            retry_count=2,
-        )
-        self.assertTrue(result["success"], result)
-        self.assertEqual(mail.outbox[0].from_email, self.EXPLICIT)
+        # Legacy arguments cannot replace the stored sender or resend a delivered message.
+        send_email_task(str(log.pk), from_email=self.EXPLICIT)
+        self.assertEqual(len(mail.outbox), 1)
         log.refresh_from_db()
-        self.assertEqual(log.from_addr, self.EXPLICIT)
+        self.assertEqual(log.from_addr, "original-logged@example.test")

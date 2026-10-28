@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Before you deploy" %} - PRAHO Platform{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-6 space-y-6">
+  {% trans "Before you deploy a node" as title %}
+  {% page_header title=title subtitle=_("Complete these prerequisites, then return to create your node.") icon="server" %}{% end_page_header %}
+  {% trans "Required configuration" as section_title %}
+  {% section_card title=section_title %}
+  <ul class="divide-y divide-slate-700">
+    {% for issue in issues %}<li class="py-4">
+      <h2 class="text-white font-semibold">{{ issue.label }}</h2>
+      <p class="text-sm text-slate-400 mt-1">{{ issue.description }}</p>
+      <a class="inline-block text-blue-400 hover:underline mt-2" href="{{ issue.deployment_action_url }}">{% trans "Configure" %} {{ issue.label }}</a>
+    </li>{% endfor %}
+  </ul>
+  {% end_section_card %}
+  <a class="inline-block text-blue-400 hover:underline mr-4" href="{% url 'infrastructure:deployment_create' %}">{% trans "Return to node creation" %}</a>
+  <a class="text-blue-400 hover:underline" href="{% url 'settings:setup_checklist' %}">{% trans "View the full setup checklist" %}</a>
+</div>
+{% endblock %}

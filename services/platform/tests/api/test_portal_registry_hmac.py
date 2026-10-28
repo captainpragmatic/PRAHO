@@ -167,7 +167,8 @@ class PortalHmacStartupValidationTests(TestCase):  # nonce claims live in the co
     @override_settings(
         PORTAL_HMAC_REQUIRE_ISOLATION=True,
         PORTAL_HMAC_MODE="enforce",
-        PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": "same-key", "portal-b": "same-key"}),
+        # Strong keys: the refusal must come from the sharing, not from the key length.
+        PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": "s" * 40, "portal-b": "s" * 40}),
     )
     def test_deployed_registry_refuses_keys_shared_between_portals(self):
         with self.assertRaises(ImproperlyConfigured):
@@ -221,3 +222,37 @@ class PortalHmacStartupValidationTests(TestCase):  # nonce claims live in the co
         portal_hmac._parse.cache_clear()
         portal_hmac.validate_at_startup()  # must NOT raise
         self.assertEqual(portal_hmac.get_registry(), {})
+
+
+
+PLATFORM_SECRET = "p" * 40
+
+
+@override_settings(PORTAL_HMAC_REQUIRE_ISOLATION=True, PORTAL_HMAC_MODE="enforce", PLATFORM_API_SECRET=PLATFORM_SECRET)
+class DeployedPortalKeyStrengthTests(TestCase):
+    """A deployed Platform refuses weak portal keys and the platform's own secret (#751 follow-up, M18)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        portal_hmac._parse.cache_clear()
+        self.addCleanup(portal_hmac._parse.cache_clear)
+
+    def _validate(self, keyring: object) -> None:
+        with override_settings(PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": keyring})):
+            portal_hmac._parse.cache_clear()
+            portal_hmac.validate_at_startup()
+
+    def test_a_key_shorter_than_32_characters_is_refused(self) -> None:
+        with self.assertRaises(ImproperlyConfigured):
+            self._validate("x" * 31)
+
+    def test_a_short_key_in_a_rotation_keyring_is_refused_too(self) -> None:
+        with self.assertRaises(ImproperlyConfigured):
+            self._validate(["a" * 40, "x" * 31])
+
+    def test_the_platform_api_secret_is_refused_as_a_portal_key(self) -> None:
+        with self.assertRaises(ImproperlyConfigured):
+            self._validate(PLATFORM_SECRET)
+
+    def test_a_strong_distinct_key_is_accepted(self) -> None:
+        self._validate("a" * 40)

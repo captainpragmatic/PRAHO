@@ -145,7 +145,6 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <!-- HTMX Content Container -->
     <div id="product-results"
-         hx-sync="this:drop"
          hx-get="{% url 'products:product_list_htmx' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"
          hx-trigger="load"
          hx-target="#product-results"

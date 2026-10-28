@@ -81,12 +81,14 @@ def send_proforma_email(
     email = recipient_email or proforma.customer.primary_email
     logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")
     try:
-        pdf_bytes = generate_proforma_pdf(proforma)
+        from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415  # Deferred: avoids circular import
+
+        # By reference: every send (and any retry) makes the PDF again and checks it is the one first sent.
         email_result = EmailService.send_email(
             to=email,
             subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
             body_text=gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
-            attachments=[(f"proforma_{proforma.number}.pdf", pdf_bytes, "application/pdf")],
+            attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))],
         )
         if not email_result.success:
             logger.error(f"🔥 [Email] Proforma {proforma.number} send failed: {email_result.error}")

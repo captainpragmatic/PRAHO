@@ -45,6 +45,7 @@ class DeriveKeyTests(SimpleTestCase):
         self.assertIn("unsubscribe", VALID_DOMAINS)
         self.assertIn("siem-hash-chain", VALID_DOMAINS)
         self.assertIn("sensitive-data-hash", VALID_DOMAINS)
+        self.assertIn("email-recipient-digest", VALID_DOMAINS)
 
     def test_env_var_override_uses_hkdf(self) -> None:
         env_value = "A" * 40  # 40 chars, well above minimum

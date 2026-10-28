@@ -315,6 +315,42 @@
     "cluster": null
   },
   {
+    "name": "email-failed-retry",
+    "func": "apps.notifications.tasks.retry_failed_emails",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "email-log-cleanup",
+    "func": "apps.notifications.tasks.cleanup_old_email_logs",
+    "schedule_type": "D",
+    "minutes": null,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "email-queue-sweep",
+    "func": "apps.notifications.tasks.process_email_queue",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "email-sending-recovery",
+    "func": "apps.notifications.tasks.recover_sending_emails",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
     "name": "fx-bnr-daily-fetch",
     "func": "apps.billing.tasks.fetch_bnr_exchange_rates",
     "schedule_type": "C",
@@ -479,11 +515,11 @@
   {
     "name": "system_status_check",
     "func": "apps.common.tasks.system_status_check",
-    "schedule_type": "D",
-    "minutes": 0,
+    "schedule_type": "I",
+    "minutes": 10,
     "cron": null,
     "repeats": -1,
-    "cluster": null
+    "cluster": "praho-cluster"
   },
   {
     "name": "tickets-auto-close-inactive",
@@ -592,5 +628,23 @@
     "cron": "0 */6 * * *",
     "repeats": -1,
     "cluster": "praho-cluster"
+  },
+  {
+    "name": "webhooks-process-pending",
+    "func": "apps.integrations.webhooks.base.process_pending_webhooks",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "webhooks-retry-failed",
+    "func": "apps.integrations.webhooks.base.retry_failed_webhooks",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
   }
 ]

@@ -419,7 +419,7 @@ def _accepted_notice_email(offer: DomainCurrencyTransition) -> EmailLog | None:
         to_addr=offer.notice_recipient,
         subject=offer.notice_subject,
     ).order_by("sent_at"):
-        if email.get_decrypted_body_text() == offer.notice_body:
+        if email.body_text_matches(offer.notice_body):
             return email
     return None
 

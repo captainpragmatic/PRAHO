@@ -1,0 +1,9 @@
+"""The croniter surface used by Platform scheduling (runtime dependency supplied by Q2)."""
+
+from datetime import datetime
+
+class croniter:  # noqa: N801 -- Public third-party API spelling.
+    def __init__(self, expr_format: str, start_time: datetime) -> None: ...
+    @staticmethod
+    def is_valid(expression: str) -> bool: ...
+    def get_prev(self, ret_type: type[datetime]) -> datetime: ...

@@ -174,7 +174,7 @@ repos:
       # FSM guardrail lint — detects FSM bypass patterns (ADR-0034)
       - id: fsm-guardrail-check
         name: "FSM: Guardrail Lint (ADR-0034)"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/lint_fsm_guardrails.py]
         language: system
         files: ^services/platform/apps/.*\.py$

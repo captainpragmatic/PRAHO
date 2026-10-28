@@ -54,7 +54,7 @@ variable "server_type" {
 variable "server_image" {
   description = "Server OS image"
   type        = string
-  default     = "ubuntu-22.04"
+  default     = "ubuntu-26.04"
 }
 
 variable "location" {
@@ -87,8 +87,8 @@ variable "firewall_ssh_sources" {
     Example: ["203.0.113.0/24"]  # office/VPN CIDR
     Never use ["0.0.0.0/0", "::/0"] in production.
   EOT
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
 
   validation {
     condition     = length(var.firewall_ssh_sources) > 0
@@ -107,8 +107,8 @@ variable "firewall_webmin_sources" {
     WARNING: No permissive default — must be set explicitly.
     Never use ["0.0.0.0/0", "::/0"] in production.
   EOT
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
 
   validation {
     condition     = length(var.firewall_webmin_sources) > 0

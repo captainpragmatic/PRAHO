@@ -17,7 +17,7 @@ never touches the round-trip domain on vm-a. Each check fails the command:
    root-owned 0700 directory that an unprivileged user cannot read; a
    verified fetch leaves nothing behind; a staging directory others can read
    makes the fetch refuse and the archive is cleaned up.
-4. Node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
+4. Local node backup (virtualmin_backup.yml, applied twice): exactly one enabled,
    non-differential schedule and no legacy one; Webmin cron runs it; running
    it as cron does writes a non-empty archive and keeps the differential base.
 4c. Chain state through the service entry points (take_base_backup, take_differential_backup,
@@ -315,14 +315,14 @@ class Command(BaseCommand):
         self._ok(f"{playbook} applied through AnsibleService", ok, detail)
 
     def _check_node_backup_playbook(self, server: Any, node: LabNode, base: str) -> None:
-        """The nightly node backup exists, runs from Webmin cron, backs up, keeps the base."""
+        """Explicit local mode keeps its nightly Webmin backup and differential base."""
         import json  # noqa: PLC0415
 
         self.stdout.write("Check 4: the node's nightly backup (virtualmin_backup.yml)")
         dest = "/var/backups/virtualmin/%Y-%m-%d"
         before = self._file_state(node, base)
         for run in (1, 2):
-            self._run_playbook(server, "virtualmin_backup.yml")
+            self._run_playbook(server, "virtualmin_backup.yml", {"backup_enabled": True, "backup_storage": "local"})
             listing = json.loads(node_exec(node.container, "virtualmin", "list-scheduled-backups", "--json"))
             mine = [row for row in listing["data"] if row["values"].get("destination") == [dest]]
             self._ok(f"run {run}: exactly one schedule for {dest}", len(mine) == 1, listing["data"])
@@ -874,7 +874,7 @@ class Command(BaseCommand):
         home = f"/home/{CHECK_USER}/public_html"
         management = VirtualminBackupManagementService(account.server)
         flag = "provisioning.incremental_backups_enabled"
-        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # Inside the lab container
+        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # nosec B108 - path inside the throwaway lab container, not the host /tmp
 
         def write(name: str, content: str) -> None:
             node_exec(

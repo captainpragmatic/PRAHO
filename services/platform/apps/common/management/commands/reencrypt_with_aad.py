@@ -252,14 +252,14 @@ class Command(BaseCommand):
         with connection.cursor() as cursor:
             if last_pk is None:
                 cursor.execute(
-                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608
+                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608  # nosec B608 - identifiers pre-quoted via connection.ops.quote_name; values bound as params
                     f"FROM {field.q_table} WHERE {field.q_col} IS NOT NULL "
                     f"ORDER BY {field.q_pk} LIMIT %s",
                     [batch_size],
                 )
             else:
                 cursor.execute(
-                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608
+                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608  # nosec B608 - identifiers pre-quoted via connection.ops.quote_name; values bound as params
                     f"FROM {field.q_table} WHERE {field.q_col} IS NOT NULL "
                     f"AND {field.q_pk} > %s ORDER BY {field.q_pk} LIMIT %s",
                     [last_pk, batch_size],
@@ -377,7 +377,7 @@ class Command(BaseCommand):
         cas = f"{field.q_col}::text = %s" if connection.vendor == "postgresql" else f"{field.q_col} = %s"
         with connection.cursor() as cursor:
             cursor.execute(
-                f"UPDATE {field.q_table} SET {field.q_col} = %s "  # noqa: S608
+                f"UPDATE {field.q_table} SET {field.q_col} = %s "  # noqa: S608  # nosec B608 - identifiers pre-quoted via connection.ops.quote_name; values bound as params
                 f"WHERE {field.q_pk} = %s AND {cas}",
                 [new_stored, pk, old_raw],
             )
@@ -387,7 +387,7 @@ class Command(BaseCommand):
         raw_column = f"{field.q_col}::text" if connection.vendor == "postgresql" else field.q_col
         with connection.cursor() as cursor:
             cursor.execute(
-                f"SELECT {raw_column} FROM {field.q_table} "  # noqa: S608
+                f"SELECT {raw_column} FROM {field.q_table} "  # noqa: S608  # nosec B608 - identifiers pre-quoted via connection.ops.quote_name; values bound as params
                 f"WHERE {field.q_pk} = %s",
                 [pk],
             )

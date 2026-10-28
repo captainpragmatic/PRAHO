@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import secrets
 import subprocess
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "deploy/ansible/roles/praho-native"
 PORTAL_KEY = secrets.token_urlsafe(64)
 API_KEY = secrets.token_urlsafe(48)
+PORTAL_SIGNING_KEY = secrets.token_urlsafe(48)  # A portal's own key, never the platform secret
 
 
 def portal_environment(root: Path, profile: str) -> dict[str, str]:
@@ -27,7 +29,8 @@ def portal_environment(root: Path, profile: str) -> dict[str, str]:
         "django_settings_module": f"config.settings.{profile}",
         "deployed_env": {"PORTAL_DOMAIN": "portal.example.test", "PORTAL_DJANGO_SECRET_KEY": PORTAL_KEY,
                          "DJANGO_SECRET_KEY": "s" * 60, "DB_PASSWORD": "private-platform-password",
-                         "HMAC_SECRET": API_KEY, "PORTAL_HMAC_SECRET": API_KEY},
+                         "HMAC_SECRET": API_KEY, "PORTAL_HMAC_SECRET": PORTAL_SIGNING_KEY,
+                         "PORTAL_ID": "portal-001"},
     }
     base = {key: template.from_string(str(value)).render(context)
             for key, value in task["vars"]["praho_portal_env_base"].items()}
@@ -42,7 +45,13 @@ def test_collectstatic_and_rendered_portal_use_the_caddy_directory(tmp_path: Pat
     assert environment["STATIC_ROOT"] == str(tmp_path / "portal-static")
     assert environment["DJANGO_SECRET_KEY"] == PORTAL_KEY
     assert not {"DB_PASSWORD", "CREDENTIAL_VAULT_MASTER_KEY", "DJANGO_ENCRYPTION_KEY", "HMAC_SECRET"} & environment.keys()
-    environment["PORTAL_LOG_DIR"] = ""
+    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    collect = next(task for task in tasks if task["name"] == "Collect Portal static files")
+    renderer = Environment(undefined=StrictUndefined)  # noqa: S701 -- Deployment environment, not HTML.
+    renderer.filters["combine"] = lambda left, right: {**left, **right}
+    environment = ast.literal_eval(renderer.from_string(collect["environment"]).render(portal_django_env=environment))
+    # The project user can write static assets but cannot enter Portal's private logs.
+    assert environment["PORTAL_LOG_DIR"] == ""
     environment["PLATFORM_TO_PORTAL_WEBHOOK_SECRET"] = "w" * 48
     code = '''
 import django

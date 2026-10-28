@@ -33,6 +33,11 @@ _DOMAIN_ENV_VARS: dict[str, str] = {
     # export or SIEM feed never holds a usable session. A DISTINCT domain: the digest key must not
     # double as integrity or chain material.
     "audit-session-digest": "AUDIT_SESSION_DIGEST_SECRET",
+    # Keyed digests of email recipients (#751 follow-up): erasure and export find a person's stored
+    # messages by them, never by a stored address list. A DISTINCT domain. Changing this key (or
+    # DJANGO_SECRET_KEY without it) leaves older digests unmatched; the first recipient still matches
+    # by its address.
+    "email-recipient-digest": "EMAIL_RECIPIENT_DIGEST_SECRET",
 }
 
 VALID_DOMAINS: frozenset[str] = frozenset(_DOMAIN_ENV_VARS.keys())

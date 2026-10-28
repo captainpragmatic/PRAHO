@@ -1,0 +1,18 @@
+--- /dev/null
++++ b/services/platform/apps/provisioning/migrations/0016_merge_ssh_cutover.py
+@@ -0,0 +1,9 @@
++from django.db import migrations
++
++
++class Migration(migrations.Migration):
++    dependencies = [
++        ("provisioning", "0014_migrationbridge"),
++        ("provisioning", "0015_ssh_transport_state"),
++    ]
++    operations = []
+--- a/scripts/migration_checksums.json
++++ b/scripts/migration_checksums.json
+@@ -95,2 +95,3 @@
+     "services/platform/apps/provisioning/migrations/0015_ssh_transport_state.py": "ad2042b32da66d6169fc87125033577fcf52a496a527df89b0b08c9a720527de",
++    "services/platform/apps/provisioning/migrations/0016_merge_ssh_cutover.py": "9ede5a442db4c574a11b2f1e4b4a9b399b6d31f7a6dc2c84935368bc6731cd21",
+     "services/platform/apps/settings/migrations/0001_initial.py": "871979fab3cd12b6043a52acee99bef62a7007e2bf90ed6430411d6082cb2f24",

@@ -165,7 +165,7 @@ class TerraformService:
         api_token_var = tf_vars.get("api_token_var", "api_token")
         server_type_var = tf_vars.get("server_type_var", "server_type")
         region_var = tf_vars.get("region_var", "region")
-        image_default = tf_vars.get("image_default", "ubuntu-22.04")
+        image_default = tf_vars.get("image_default", "ubuntu-26.04")
 
         # Get terraform provider block (deprecated — SDK-based provisioning replaces Terraform per ADR-0027)
         config = get_provider_config(deployment.provider.provider_type)

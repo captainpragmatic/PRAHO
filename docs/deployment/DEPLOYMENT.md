@@ -1,5 +1,7 @@
 # PRAHO Deployment Guide
 
+For Platform database/media recovery, see [Restore a Platform backup](PLATFORM_RESTORE.md).
+
 This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents
@@ -20,6 +22,95 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 - [Troubleshooting](#troubleshooting)
 
 ---
+
+## Queued email across the durable-envelope upgrade
+
+Upgrade all Platform writers and Django-Q workers together. The new publishers queue only an email id;
+old workers cannot execute those tasks. Old publishers still create rows without a durable envelope,
+so a mixed-version rollout is not supported. This patch adds no schema or status migration.
+
+1. Take the normal restricted database backup before the upgrade. Keep the original ORM queue,
+   Schedule and Task rows. Do not purge jobs or delete their kwargs to make worker errors disappear.
+2. Stop incoming writes and let any in-flight email sends finish before stopping workers. For native
+   hosts the units are `praho-platform`, `praho-portal`, and `praho-qcluster`; the Compose service names
+   are `platform`, `portal`, and `qcluster` (Portal is on its own host for split deployments). Confirm
+   the topology in this guide before operating it. An old `sending` row, even without a lease, has an
+   uncertain provider outcome and needs review, not an automatic resend.
+3. With those processes stopped, install the same build for every Platform writer and worker. Use
+   the normal migration/deploy procedure. Do not restart workers until the checks below are safe.
+4. In the Platform runtime, from `services/platform`, run the read-only inventory below with its
+   normal production settings and credentials. It prints ids and counts only. An unsafe global
+   setting, per-task acknowledgement override, or unreadable package is a rollout blocker: keep the
+   original signed packages in the restricted backup and reconcile them before starting workers.
+
+```python
+# Run in `python manage.py shell` in the configured Platform runtime.
+import ast
+from collections import Counter
+from django.db.models import Q
+from django_q.conf import Conf
+from django_q.models import OrmQ, Schedule
+from django_q.signing import SignedPackage
+from apps.notifications.models import EmailLog
+
+send_task = "apps.notifications.tasks.send_email_task"
+counts = Counter()
+counts["unsafe_global_retention"] = int(bool(Conf.ACK_FAILURES) or Conf.MAX_ATTEMPTS != 0)
+for job in OrmQ.objects.iterator():
+    try:
+        task = SignedPackage.loads(job.payload)
+        if task.get("func") == send_task:
+            counts["email_packages"] += 1
+            counts["unsafe_ack_override"] += int(bool(task.get("ack_failure")))
+    except Exception:
+        counts["unreadable_packages"] += 1
+for entry in Schedule.objects.filter(func=send_task).iterator():
+    try:
+        kwargs = ast.literal_eval(entry.kwargs or "{}")
+        options = kwargs.get("q_options", {})
+        counts["unsafe_schedule_ack_override"] += int(bool(kwargs.get("ack_failure") or options.get("ack_failure")))
+    except Exception:
+        counts["unreadable_schedule_kwargs"] += 1
+print(dict(counts))
+for row in EmailLog.objects.filter(Q(envelope__isnull=True) | Q(envelope=""), status__in=["queued", "failed", "sending"]).values("id", "status").iterator():
+    print(row)
+```
+
+The required retention settings are `ack_failures=False` and `max_attempts=0` (the Django-Q defaults).
+A held invocation raises `LegacyEmailRecoveryRequiredError` outside the provider error handler; under
+those settings the worker/monitor retains its original signed ORM package. A per-task
+`ack_failure=True` overrides that protection. Never interpret a returned `{"success": False}` as a
+broker failure: Django-Q acknowledges a normally returned function as successful execution.
+
+5. Resume the new writers and workers. All new sends and retries still carry only their email id.
+   The compatibility path imports only complete original calls with no explicitly supplied
+   `retry_count`, addressed solely to a bare primary mailbox already on the row. Historical display-name
+   primaries are held too: erasure before recipient digests existed may have missed them. It checks the stored
+   identity and bodies, seals the envelope, then claims the row under the same lock. Stored envelopes
+   remain authoritative over stale task arguments. Old lossy sweep payloads, their retries (including
+   full-shaped retries), additional To/CC/BCC recipients, and unresolved `sending` rows are held.
+   A hidden recipient's earlier erasure may have missed the old row, so importing that address is not
+   safe merely because the package survived. Staff must reconstruct these messages from their source.
+6. Confirm recoverable messages reach the provider and review held ids with staff. A missing-key
+   failure before preparation commits preserves the original package for redelivery after keys are
+   fixed. Raw legacy attachment bytes are available only to that claiming invocation; if it fails or
+   dies, an id-only retry refuses instead of sending without the attachment. Reconstruct the source
+   document explicitly. Never bulk resend `sent` or `delivered` messages, or assume a timeout proves
+   that the provider accepted nothing.
+
+A held package can be redelivered on the existing broker retry interval until it is reconciled.
+There is no new retry loop. Empty-envelope rows are excluded before drain batch limits, so they do
+not block newer complete messages. Malformed decoded envelopes fail permanently at the sending
+boundary; historical log displays can still show their first recorded recipient.
+
+Django-Q already copies old args/kwargs into Task results, and old one-off schedules with `repeats=1`
+may remain with `repeats=0` and their original kwargs. This fix adds no attachment blob store and does
+not claim to erase those historical copies. Keep unresolved payloads restricted and recoverable.
+Review their existing retention/erasure separately; clean up resolved originals only after approved
+reconciliation. Do not expose a queue export or Task kwargs in logs or support replies.
+
+A version rollback to an old worker is unsafe while id-only tasks remain. Follow the full database
+and release rollback procedure rather than restarting old workers against the new queue.
 
 ## Managed-node SSH Trust
 
@@ -320,7 +411,7 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 
 **What it installs:**
 - PostgreSQL 16 (from official APT repo)
-- Python 3.13 (from deadsnakes PPA)
+- Python 3.13 (managed by uv under `/opt/praho-python`, readable by both service users)
 - uv (Python package manager)
 - Caddy (automatic HTTPS via Let's Encrypt)
 - 3 systemd services: `praho-platform`, `praho-portal`, `praho-qcluster`
@@ -328,10 +419,10 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 
 #### Prerequisites
 
-1. **Ubuntu 24.04 LTS** server
+1. **Ubuntu 26.04 LTS** server (24.04 remains supported for existing hosts)
 2. **Ansible** installed on your local machine
 3. **Two DNS A records** pointing to the server IP — both must resolve before deploying (Caddy ACME will fail without them)
-4. **SSH access** to the server as root (or a user with passwordless sudo)
+4. **Root SSH key access**, approved operator public keys and a pinned server host key
 
 ```bash
 # Install Ansible and required collections
@@ -418,6 +509,81 @@ Before deploying, the playbook checks:
 3. The `.env.{praho_env}` file exists and contains all required variables (`DJANGO_SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`, and for `prod` also `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
+The shared SSH role requires a verified server key in `PRAHO_DEPLOY_KNOWN_HOSTS_FILE`
+and approved operator public keys in `PRAHO_SSH_PUBLIC_KEYS_FILE`. Leave
+`PRAHO_SSH_KEY` empty to use the SSH agent, or provide an explicit identity file.
+For a first bootstrap set `PRAHO_SSH_PORT=22`; normal access uses 9876. Run
+`make ssh-harden ENV=staging` to establish SSH access independently of application
+configuration. It installs keys additively, disables password and keyboard-interactive
+authentication for everyone, allows root with keys, and verifies a fresh connection
+before removing the old listener. Timed rollback protects an incomplete handoff.
+A retry detects a completed cutover using the same pinned server identity.
+
+The common role prepares 2 GB of swap (`swap_size_mb: 2048`), verifies kernel
+activation, then records it in fstab. Existing files must already be valid swap
+with the requested size and root-only permissions; they are never reformatted or
+resized. New files require ext4/XFS and at least 1 GiB of free disk after allocation.
+Failed creation retains one protected, bounded candidate for retry. Staging uses
+one web worker per service; production defaults to two. Swap helps memory spikes
+but does not establish production load capacity.
+
+### Promoting a release to staging
+
+Staging receives only release candidates, and the `staging` branch always names the
+commit staging runs. Nothing is merged into `staging`; commits flow one way:
+pull request → `master` → release candidate → staging → (later) production.
+
+1. **Run the release candidate.** Actions → *Release candidate* → *Run workflow*, or
+   `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank SHA means
+   the current `master` commit; the run title names it. The run checks that the
+   commit's pull request passed every required check on exactly the commit's tree,
+   then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that
+   SHA. Expect an hour or more. On success the commit shows the status
+   `release-candidate`.
+2. **If it is red,** staging is untouched: fix it through a pull request into `master`
+   and start a new candidate.
+3. **If it is green,** from an approved operator IP:
+   `make promote-staging SHA=<sha>` (add `DRY_RUN=1` to see the checks only). It
+   refuses a commit that is not on `master` or has no successful release-candidate run
+   from `master`'s copy of the workflow (the run is the proof, not the status, which
+   anyone who can push could post). It deploys from a clean detached checkout of that
+   commit, so the playbooks and templates are the reviewed ones (environment/DNS and
+   HTTP/HTTPS checks included), refuses any `DEPLOY_METHOD` but git, and only after a
+   successful deploy fast-forwards `staging`. Promote from one machine at a time.
+   `scripts/promote_staging.sh --rollback <sha>` deploys an older approved release
+   and moves the branch back.
+4. **Accept it on staging,** then record the deployed SHA.
+
+A release candidate is not a GitHub Release; a `v*` tag publishes one. For production
+the order will be: release candidate → staging accepted → tag that same commit →
+deploy the tag.
+
+`make deploy-staging VERSION=<commit-or-tag>` still deploys any revision without
+moving a branch, for emergencies. Deploys stay manual: staging admits only the
+operator IPs and the deploy inputs live on the operator's machine. A "Promote to
+staging" button (a `workflow_dispatch` behind a protected `staging` environment that
+joins the tailnet and calls the same script) is future work and needs its own
+security review first. The production service split is a separate rollout
+requirement.
+
+Native staging restricts **both entire sites** to `PLATFORM_ALLOWED_CIDRS`, including
+API, health, webhook and static routes. Supply space-separated canonical CIDRs in
+the ignored `.env.staging`; include loopback for local callers. Empty/unset defaults
+to loopback only. Internet-wide `/0` ranges are refused. Caddy checks the connection
+address, so forwarded headers cannot grant access. Automatic ACME challenges remain
+managed by Caddy. Keep staging DNS records DNS-only so Caddy sees the caller's IP.
+
+Apply an allowlist or Caddy configuration change with `make deploy-caddy ENV=staging`.
+This reads local configuration, validates and installs the Caddyfile, restarts Caddy
+only if changed, and checks both HTTPS endpoints from the controller. Run it from
+an approved source address. It skips SSH changes, packages, migrations and application
+restarts. The full deployment uses the same controller-side HTTPS checks.
+
+Production Portal remains public. Production Platform retains the staff restriction
+and its existing API/webhook routes; service-to-service and provider access must be
+configured separately before the production rollout. Staging's all-route guard is
+not automatically applied to production.
+
 #### Post-Deploy
 
 After deployment completes, the playbook verifies all services over HTTP and HTTPS.
@@ -428,7 +594,7 @@ The database starts empty — no users exist. Create a superuser on the server:
 
 ```bash
 # SSH to the server and create the admin user interactively
-ssh root@<server-ip>
+ssh -p 9876 root@<server-ip>
 cd /opt/praho/src
 sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
   source /opt/praho/.venv-linux/bin/activate && \
@@ -467,7 +633,7 @@ sudo nano /opt/praho/.env
 sudo systemctl restart praho-platform praho-portal praho-qcluster
 ```
 
-**System Status Dashboard:** After deployment, the Platform dashboard shows real-time status of all integrations (green/amber/red/grey). Staging automatically shows "Not required" (grey) for features that staging settings override (email, Stripe, e-Factura).
+**System Status Dashboard:** The staff dashboard displays the latest check snapshot (green/amber/red/grey), its actual check time, and a warning after 26 hours. Refresh runs bounded read-only checks; ordinary page loads only recompute date-sensitive FX freshness. Checks follow the effective runtime configuration in every environment. A local email backend or explicitly disabled integration is grey. See [System Status checks](SYSTEM_STATUS.md) for what each result proves and how to interpret warnings.
 
 > **Note about `.env.example.dev`:** That file is a **developer reference** for local `make dev` usage. For deployment, use `.env.example.prod` or `.env.example.staging`.
 
@@ -492,7 +658,7 @@ sudo systemctl restart praho-platform
 /opt/praho/scripts/backup.sh
 
 # Restore from backup
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 #### Redeployment
@@ -506,7 +672,7 @@ make deploy-staging   # or: make deploy-prod
 To rebuild a server from scratch (e.g., after an OS upgrade):
 ```bash
 # Hetzner example: rebuild the server image
-hcloud server rebuild praho-staging --image ubuntu-24.04
+hcloud server rebuild praho-staging --image ubuntu-26.04
 
 # Wait for server to come up, then deploy
 make deploy-staging
@@ -524,7 +690,7 @@ Override defaults with `-e` flags:
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
-| `deploy_method` | rsync | `rsync` (dev/staging) or `git` (prod) |
+| `deploy_method` | git | `git` (always for prod), or `DEPLOY_METHOD=rsync` in a dev/staging env file |
 | `platform_allowed_ips` | `[]` | IP whitelist for Platform access |
 
 Example: deploy production with 4 Gunicorn workers:
@@ -576,7 +742,7 @@ Access lines go to stdout on every deploy path. Each line is gunicorn's default 
    - Docker: `PRAHO_ENV_FILE=$PWD/.env.prod docker compose --env-file .env.prod -f deploy/docker-compose.single-server.yml logs portal | grep "Using worker"`.
 
 **Caveats:**
-- Ubuntu 24.04 LTS only (relies on deadsnakes PPA for Python 3.13)
+- Ubuntu 26.04 LTS is the new-server baseline; existing Ubuntu 24.04 hosts remain supported
 - Single-server only — no built-in horizontal scaling
 
 ---
@@ -849,22 +1015,22 @@ Each backup also archives the media directory (`MEDIA_ROOT`) next to its dump, a
 
 ```bash
 # Interactive (choose from list)
-./deploy/scripts/restore.sh
+./deploy/scripts/restore-platform.sh
 
 # Restore specific file
-./deploy/scripts/restore.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
+./deploy/scripts/restore-platform.sh ./backups/praho_backup_20240115_120000_4242.sql.gz
 
 # Restore latest backup
-./deploy/scripts/restore.sh --latest
+./deploy/scripts/restore-platform.sh --latest
 
 # Docker staging: the scripts read .env.prod unless told otherwise
-./deploy/scripts/restore.sh --latest --env staging
+./deploy/scripts/restore-platform.sh --latest --env staging
 
 # Using make (DEPLOY_ENV=staging for staging)
 make restore
 
 # Native deployment
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 Docker restore privately stages the selected dump and companion media archive before creating its
@@ -970,7 +1136,7 @@ and the safety backup. The env file is not edited, so a later deploy still uses 
 make deploy-prod VERSION=v1.2.3
 
 # Restore the latest database backup (on the server)
-/opt/praho/scripts/restore.sh --latest
+/opt/praho/scripts/restore-platform.sh --latest
 ```
 
 ---
@@ -1285,7 +1451,7 @@ deploy/
 ├── scripts/
 │   ├── deploy.sh                      # Main deployment script
 │   ├── backup.sh                      # Database backup
-│   ├── restore.sh                     # Database restore
+│   ├── restore-platform.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
 │   ├── health-check.sh               # Health check script
 │   ├── portal-env.sh                  # Writes a portal host's env file from the full one

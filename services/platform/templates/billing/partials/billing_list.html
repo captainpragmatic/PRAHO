@@ -117,7 +117,7 @@ This template includes both the table content and header count update.
 
     <!-- Enhanced Pagination with HTMX -->
     {% url 'billing:billing_list_htmx' as billing_url %}
-    {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target='#billing-results' htmx_url=billing_url %}
+    {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target='#billing-results' htmx_url=billing_url htmx_sync='#billing-results:replace' %}
 
   {% else %}
     <!-- Empty State -->

@@ -13,13 +13,19 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from django.core.validators import MinValueValidator
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.model_secrets import (
+    NaturalKeyQuerySet,
+    NaturalKeySecretsMixin,
+    decrypt_model_secret,
+    encrypt_model_secret,
+)
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
 
@@ -55,7 +61,7 @@ def without_secrets(value: Any) -> Any:
     return value
 
 
-class VirtualminServer(models.Model):
+class VirtualminServer(NaturalKeySecretsMixin, models.Model):
     """
     Virtualmin server instance for hosting services.
 
@@ -70,6 +76,11 @@ class VirtualminServer(models.Model):
         ("failed", _("Failed")),
     )
 
+    # The API password is bound to the hostname it authenticates to: a hostname changed in the database
+    # leaves it unreadable instead of sending it to another host (#751 follow-up, M19).
+    SECRET_NATURAL_KEY: ClassVar[tuple[str, ...]] = ("hostname",)
+    BOUND_SECRET_FIELDS: ClassVar[tuple[str, ...]] = ("encrypted_api_password",)
+
     # Server identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, unique=True, verbose_name=_("Server Name"))
@@ -80,6 +91,9 @@ class VirtualminServer(models.Model):
 
     # API configuration
     api_port = models.PositiveIntegerField(default=10000, verbose_name=_("API Port"))
+    ssh_port = models.PositiveIntegerField(
+        default=22, validators=[MinValueValidator(1), MaxValueValidator(65535)], verbose_name=_("SSH Port")
+    )
     api_path = models.CharField(max_length=100, default="/virtual-server/remote.cgi", verbose_name=_("API Path"))
     use_ssl = models.BooleanField(default=True, verbose_name=_("Use SSL"))
     ssl_verify = models.BooleanField(default=True, verbose_name=_("Verify SSL Certificate"))
@@ -123,6 +137,8 @@ class VirtualminServer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = models.Manager.from_queryset(NaturalKeyQuerySet)()
+
     class Meta:
         db_table = "provisioning_virtualmin_servers"
         verbose_name = _("Virtualmin Server")
@@ -163,6 +179,27 @@ class VirtualminServer(models.Model):
                 kwargs["api_username"] = "test_user"
 
         super().__init__(*args, **kwargs)
+
+    @property
+    def effective_ssh_port(self) -> int:
+        """A managed deployment owns its live port; manual servers use their own."""
+        try:
+            return int(self.node_deployment.ssh_port)
+        except ObjectDoesNotExist:
+            return int(self.ssh_port)
+
+    @property
+    def enrolled_ssh_host_keys(self) -> str | None:
+        """Public host keys shared with provisioning, or configured manual trust."""
+        from apps.infrastructure.ssh_transport import (  # noqa: PLC0415 -- Avoid model import cycle.
+            resolve_node_host_keys,
+        )
+
+        try:
+            deployment = self.node_deployment
+        except ObjectDoesNotExist:
+            return None
+        return resolve_node_host_keys(deployment)
 
     @property
     def api_url(self) -> str:

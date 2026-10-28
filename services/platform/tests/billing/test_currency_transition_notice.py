@@ -1,6 +1,8 @@
 """The notice promises an exact price and thirty days before document preparation."""
 
+import os
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
@@ -72,6 +74,66 @@ class CurrencyNoticeLedgerTests(TestCase):
         self.offer.notice_accepted_at = timezone.now() - timedelta(days=90)
         self.offer.preparation_not_before = timezone.now() - timedelta(days=60)
         return log
+
+    def test_an_unreadable_proof_email_is_no_proof(self) -> None:
+        log = self.email_proof()
+        EmailLog.objects.filter(pk=log.pk).update(body_text="aes:v1:bm90LXJlYWRhYmxl")  # A superseded format
+        self.offer.notice_email = EmailLog.objects.get(pk=log.pk)
+
+        try:
+            self.offer.accept_notice()
+        except ValidationError:
+            pass
+        except Exception as error:
+            self.fail(f"an unreadable proof must be refused as a mismatch, not raise {type(error).__name__}")
+        else:
+            self.fail("an unreadable email was accepted as proof")
+
+    def _logged(self, *, readable: bool, age: timedelta) -> EmailLog:
+        log = EmailLog.objects.create(
+            customer=self.customer, to_addr=self.offer.notice_recipient, subject=self.offer.notice_subject,
+            body_text=self.offer.notice_body, status="sent",
+            template_key=f"subscription_currency_notice:{self.offer.pk}",
+        )
+        fields: dict[str, object] = {"sent_at": timezone.now() - age}
+        if not readable:
+            fields["body_text"] = "aes:v1:bm90LXJlYWRhYmxl"
+        EmailLog.objects.filter(pk=log.pk).update(**fields)
+        return log
+
+    def _recover(self) -> bool:
+        from apps.billing.currency_transitions import _accept_logged_notice  # noqa: PLC0415
+
+        try:
+            return _accept_logged_notice(self.offer)
+        except Exception as error:
+            self.fail(f"an unreadable logged email must not stop recovery ({type(error).__name__})")
+
+    def test_recovery_skips_an_unreadable_log_and_accepts_the_readable_proof(self) -> None:
+        self._logged(readable=False, age=timedelta(hours=2))
+        proof = self._logged(readable=True, age=timedelta(hours=1))
+
+        self.assertTrue(self._recover())
+
+        self.assertEqual(SubscriptionCurrencyTransition.objects.get(pk=self.offer.pk).notice_email_id, proof.pk)
+
+    def test_recovery_with_only_an_unreadable_log_leaves_the_notice_to_be_sent(self) -> None:
+        self._logged(readable=False, age=timedelta(hours=1))
+
+        self.assertFalse(self._recover())
+        self.assertEqual(SubscriptionCurrencyTransition.objects.get(pk=self.offer.pk).status, "pending")
+
+    def test_recovery_waits_for_the_keys_instead_of_resending_an_accepted_notice(self) -> None:
+        from apps.billing.currency_transitions import _accept_logged_notice  # noqa: PLC0415
+        from apps.common.encryption import KeyringDecryptionError  # noqa: PLC0415
+
+        self._logged(readable=True, age=timedelta(hours=1))  # Written with a key this worker lacks (below)
+
+        with (
+            patch("apps.common.encryption.get_encryption_keys", return_value=[os.urandom(32)]),
+            self.assertRaises(KeyringDecryptionError, msg="a key rotation mid-rollout is not a missing proof"),
+        ):
+            _accept_logged_notice(self.offer)
 
     def test_queued_email_cannot_start_notice_period(self) -> None:
         self.email_proof(status="queued")

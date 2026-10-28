@@ -10,10 +10,13 @@ Security hardening:
 """
 
 import hashlib
+import hmac
+import json
 import logging
 import re
 import uuid
 from datetime import timedelta
+from email.utils import parseaddr
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -23,8 +26,16 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
-from apps.common.encryption import EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
-from apps.common.model_secrets import decrypt_model_secret, encrypt_model_secret
+from apps.common.encryption import (
+    DecryptionError,
+    EncryptionError,
+    KeyringDecryptionError,
+    decrypt_if_needed,
+    encrypt_value,
+    is_encrypted,
+)
+from apps.common.key_derivation import get_key_hex
+from apps.common.model_secrets import decrypt_model_secret, seal_model_secret, written_fields
 
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
@@ -147,6 +158,22 @@ def validate_email_subject(subject: str) -> None:
     # Check for dangerous patterns
     if re.search(r"<script", subject, flags=re.IGNORECASE):
         raise ValidationError(_("Subject contains dangerous content"))
+
+
+def recipient_digest(address: str) -> str:
+    """A keyed digest of one recipient address, normalised: erasure finds a person's messages by it.
+
+    The address itself is never stored for this; `Name <Address@Example.com>` and `address@example.com`
+    give the same digest.
+    """
+    _name, bare = parseaddr(address)
+    normalised = (bare or address).strip().lower()
+    return hmac.new(get_key_hex("email-recipient-digest").encode(), normalised.encode(), "sha256").hexdigest()
+
+
+def recipient_digest_term(address: str) -> str:
+    """The `recipient_hashes` substring that names `address` (digests are space-delimited)."""
+    return f" {recipient_digest(address)} "
 
 
 def encrypt_sensitive_content(content: str) -> str:
@@ -383,6 +410,33 @@ class EmailLog(models.Model):
         default=0, db_comment="Durable count of claimed provider sends, shared by retries and recovery."
     )
 
+    # One worker at a time (apps/notifications/delivery.py): the claim it holds, until when, and when a
+    # scheduled retry is due. Nullable additions, so SQLite adds columns without a table rebuild.
+    claim_token = models.UUIDField(
+        null=True, blank=True, db_comment="The claim the sending worker holds; every completion compares it."
+    )
+    lease_until = models.DateTimeField(
+        null=True, blank=True, db_comment="Until when the claim holds; past it the row may be reclaimed."
+    )
+    next_attempt_at = models.DateTimeField(
+        null=True, blank=True, db_comment="When the next attempt is due; recovery waits for it."
+    )
+    # The whole message beyond its first recipient (all of to, cc, bcc, tags), encrypted like the bodies:
+    # every send rebuilds the message from the row, never from task arguments. Nullable: no table rebuild.
+    operator_blocked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the provider last refused for a reason the operator must fix; cleared on success"),
+    )
+    recipient_hashes = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True,
+        blank=True,
+        help_text=_("Keyed digests of every to, cc and bcc address, space-delimited; never the addresses"),
+    )
+    envelope = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True, blank=True, db_comment="Encrypted JSON: to, cc, bcc and tags. Rebuilt into every send."
+    )
+
     # User context
     sent_by = models.ForeignKey(
         "users.User",
@@ -410,21 +464,53 @@ class EmailLog(models.Model):
     def __str__(self) -> str:
         return f"{self.subject} → {self.to_addr} ({self.status})"
 
+    _SECRET_FIELDS = ("body_text", "body_html", "envelope")
+
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Encrypt new bodies; encryption failures never persist plaintext."""
+        """Seal the secret fields being written for this row; refuse anything that is not.
+
+        Every field is sealed before any is changed, so a refusal leaves the instance as it was. The
+        recipient digests are written with the envelope or the first recipient they are made from.
+        """
         if not ENCRYPTION_AVAILABLE and (self.body_text or self.body_html):
             raise EncryptionError("Email body encryption is unavailable")
-        original_text, original_html = self.body_text, self.body_html
-        try:
-            for field in ("body_text", "body_html"):
-                value = getattr(self, field)
-                if value and not is_encrypted(value):
-                    setattr(self, field, encrypt_model_secret(self, field, value))
-            self.body_encrypted = True
-        except Exception:
-            self.body_text, self.body_html = original_text, original_html
-            raise
+        update_fields, written = written_fields(kwargs, self._SECRET_FIELDS)
+        sealed = {field: seal_model_secret(self, field, getattr(self, field) or "") for field in written}
+        if update_fields is None:
+            recompute = not self.recipient_hashes or bool(self.envelope and not is_encrypted(self.envelope))
+        else:
+            recompute = bool({"envelope", "to_addr"} & set(update_fields))
+        if recompute:
+            digests = {recipient_digest(address) for address in self._recipient_addresses() if address}
+            self.recipient_hashes = f" {' '.join(sorted(digests))} " if digests else None
+            if update_fields is not None and "recipient_hashes" not in update_fields:
+                update_fields.append("recipient_hashes")
+        for field, value in sealed.items():
+            if value:
+                setattr(self, field, value)
+        self.body_encrypted = True
+        bodies_written = {"body_text", "body_html"} & set(written)
+        if update_fields is not None and bodies_written and "body_encrypted" not in update_fields:
+            update_fields.append("body_encrypted")
         super().save(*args, **kwargs)
+
+    def _recipient_addresses(self) -> list[str]:
+        """Every address the message names: from the plaintext envelope, or the one already sealed for this row."""
+        addresses = [self.to_addr]
+        if not self.envelope:
+            return addresses
+        data = json.loads(self.envelope) if not is_encrypted(self.envelope) else self.get_envelope()
+        if isinstance(data, dict):
+            for key in ("to", "cc", "bcc"):
+                addresses.extend(str(address) for address in data.get(key) or [])
+        return addresses
+
+    def get_envelope(self) -> dict[str, Any]:
+        """The decrypted envelope; a row written before envelopes existed has only its first recipient."""
+        if not self.envelope:
+            return {"to": [self.to_addr], "cc": [], "bcc": [], "tags": {}}
+        data = json.loads(decrypt_model_secret(self, "envelope", self.envelope))
+        return data if isinstance(data, dict) else {"to": [self.to_addr], "cc": [], "bcc": [], "tags": {}}
 
     def get_status_display_color(self) -> str:
         """Get color for status display in admin"""
@@ -467,9 +553,40 @@ class EmailLog(models.Model):
             except Exception as e:  # pragma: no cover - logging shouldn't break
                 logger.debug(f"Failed to log email sent: {e}")
 
+    def body_text_matches(self, expected: str) -> bool:
+        """Whether the stored text body is exactly `expected`. A body no key can decrypt matches nothing.
+
+        Notices are accepted only on an email whose body is the exact offer; one stored under a superseded
+        format, or garbled, is simply not that email. A keyring that lacks the key (a rotation still rolling
+        out) raises: the email may well be the proof, and treating it as missing would send a second notice.
+        """
+        try:
+            return self.get_decrypted_body_text() == expected
+        except KeyringDecryptionError:
+            raise
+        except DecryptionError:
+            return False
+
+    def body_text_readable(self) -> bool:
+        """Whether the stored text body can ever be read: False for a superseded or malformed ciphertext.
+
+        A keyring that lacks the key (a rotation still rolling out) raises KeyringDecryptionError instead:
+        the body is readable once the configuration is right.
+        """
+        try:
+            self.get_decrypted_body_text()
+        except KeyringDecryptionError:
+            raise
+        except DecryptionError:
+            return False
+        return True
+
     def get_safe_content_preview(self) -> str:
         """Return a short, decrypted preview suitable for logs/UI."""
-        content = self.get_decrypted_body_text()
+        try:
+            content = self.get_decrypted_body_text()
+        except DecryptionError:
+            return str(_("[unreadable]"))
         preview = content[:CONTENT_PREVIEW_LENGTH]
         return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 
@@ -480,6 +597,88 @@ class EmailLog(models.Model):
     def get_decrypted_body_text(self) -> str:
         """Read only authenticated ciphertext belonging to this row and field."""
         return decrypt_model_secret(self, "body_text", self.body_text or "")
+
+
+class EmailAttachment(models.Model):
+    """One attachment of a queued email, by reference: no bytes are stored (#751 follow-up, H4).
+
+    Every send regenerates the bytes from `source_type`/`source_id` (apps/notifications/attachments.py)
+    and refuses if their SHA-256 is not the one first sent, so a retry never carries a different document.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email_log = models.ForeignKey(EmailLog, on_delete=models.CASCADE, related_name="attachment_refs")
+    position = models.PositiveSmallIntegerField(help_text=_("Order of the attachment in the message"))
+    source_type = models.CharField(max_length=40, help_text=_("Registered source the bytes are made from"))
+    source_id = models.CharField(max_length=64, help_text=_("The source object's id"))
+    filename = models.CharField(max_length=255, help_text=_("File name as first sent"))
+    sha256 = models.CharField(max_length=64, help_text=_("SHA-256 of the bytes first sent"))
+    size = models.PositiveIntegerField(help_text=_("Size in bytes as first sent"))
+    language = models.CharField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        max_length=10, null=True, blank=True, help_text=_("Language of the first render; every render uses it")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_email_attachments"
+        db_table_comment = "Attachments of queued emails by reference; the bytes are regenerated at send time."
+        verbose_name = _("Email Attachment")
+        verbose_name_plural = _("Email Attachments")
+        ordering: ClassVar[tuple[str, ...]] = ("email_log", "position")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("email_log", "position"), name="email_attachment_position_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.filename} ({self.source_type})"
+
+
+class PendingDeliveryEvent(models.Model):
+    """A verified provider callback for a message whose provider id is not recorded yet.
+
+    The provider id is known only once the send returns, so a fast bounce or complaint can arrive
+    first. It waits here, matched by provider id alone (never by address), and the send's success
+    write applies it under the same row lock. Unmatched events expire after a window.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider_id = models.CharField(max_length=255, db_index=True, help_text=_("Provider's message ID"))
+    event_type = models.CharField(max_length=20, help_text=_("delivered, bounced, soft_bounced or complained"))
+    metadata = models.JSONField(default=dict, blank=True, help_text=_("The callback's event data"))
+    recipient = models.TextField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        null=True, blank=True, help_text=_("The callback's recipient, encrypted; the soft-bounce count needs it")
+    )
+    recipient_hash = models.CharField(  # noqa: DJ001  # Nullable with no default: SQLite adds it without a table rebuild
+        max_length=64, null=True, blank=True, db_index=True, help_text=_("Keyed digest of the recipient, for erasure")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_pending_delivery_events"
+        db_table_comment = "Verified delivery callbacks waiting for their message's provider id to be recorded."
+        verbose_name = _("Pending Delivery Event")
+        verbose_name_plural = _("Pending Delivery Events")
+        ordering: ClassVar[tuple[str, ...]] = ("created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.event_type} for {self.provider_id}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Seal the recipient for this row and write its digest with it."""
+        update_fields, written = written_fields(kwargs, ("recipient",))
+        if written and self.recipient:
+            sealed = seal_model_secret(self, "recipient", self.recipient)
+            plain = self.recipient if sealed != self.recipient else decrypt_model_secret(self, "recipient", sealed)
+            self.recipient_hash = recipient_digest(plain)
+            self.recipient = sealed
+            if update_fields is not None and "recipient_hash" not in update_fields:
+                update_fields.append("recipient_hash")
+        super().save(*args, **kwargs)
+
+    def get_recipient(self) -> str:
+        return decrypt_model_secret(self, "recipient", self.recipient) if self.recipient else ""
 
 
 # ===============================================================================
@@ -687,8 +886,9 @@ class EmailSuppression(models.Model):
         return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display()})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if self.email_encrypted and not is_encrypted(self.email_encrypted):
-            self.email_encrypted = encrypt_model_secret(self, "email_encrypted", self.email_encrypted)
+        _update_fields, written = written_fields(kwargs, ("email_encrypted",))
+        if written and self.email_encrypted:
+            self.email_encrypted = seal_model_secret(self, "email_encrypted", self.email_encrypted)
         super().save(*args, **kwargs)
 
     def get_decrypted_email(self) -> str:
@@ -730,7 +930,8 @@ class EmailSuppression(models.Model):
                 existing.expires_at = expires_at
                 existing.bounce_count = models.F("bounce_count") + 1
                 existing.last_bounce_at = now
-                existing.save()
+                # Only what a bounce changes: the stored address is never rewritten (or re-checked) here.
+                existing.save(update_fields=["reason", "provider", "expires_at", "bounce_count", "last_bounce_at"])
                 # Refresh to get actual bounce_count value after F() expression
                 existing.refresh_from_db()
                 return existing

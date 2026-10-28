@@ -19,7 +19,7 @@ from django.urls import reverse
 
 import apps.common.credential_vault as vault_module
 from apps.common.credential_vault import EncryptedCredential
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.infrastructure.models import (
     CloudProvider,
     DriftCheck,
@@ -203,6 +203,18 @@ class _DeploymentTestMixin:
             node_size=size, region=region, panel_type=panel,
             hostname=hostname, node_number=1, status=status,
         )
+
+
+class TestMissingProviderCredentials(_DeploymentTestMixin, TestCase):
+    def test_retry_links_directly_to_the_provider_token_without_queuing(self) -> None:
+        admin = User.objects.create_superuser(email="retry-admin@test.com", password="testpass123")
+        self.client.force_login(admin)
+        deployment = self._create_deployment(status="failed")
+        with patch("apps.infrastructure.views.get_provider_token", return_value=Err("Missing token")), patch("apps.infrastructure.views.queue_retry_deployment") as queue:
+            response = self.client.post(reverse("infrastructure:deployment_retry", args=[deployment.pk]), follow=True)
+        self.assertContains(response, "Configure provider credentials")
+        self.assertContains(response, reverse("infrastructure:provider_edit", args=[deployment.provider_id]) + "#id_api_token")
+        queue.assert_not_called()
 
 
 class TestDeploymentDetailProgress(_DeploymentTestMixin, TestCase):
@@ -446,10 +458,12 @@ class TestDeploymentCreateDnsZone(TestCase):
 
     @patch("apps.infrastructure.views.queue_deploy_node", return_value="task-123")
     @patch("apps.infrastructure.views.get_provider_token", return_value=Ok("secret"))
+    @patch("apps.infrastructure.views.deployment_configuration_issues", return_value=[])
     @patch("apps.infrastructure.views.SettingsService.get_setting")
     def test_post_persists_normalized_dns_zone(
         self,
         mock_get_setting: MagicMock,
+        _mock_prerequisites: MagicMock,
         _mock_token: MagicMock,
         _mock_queue: MagicMock,
     ) -> None:
@@ -483,5 +497,7 @@ class TestDeploymentCreateDnsZone(TestCase):
 
         response = self.client.get(self.url)
 
-        self.assertRedirects(response, reverse("infrastructure:deployment_list"))
+        self.assertContains(response, "Before you deploy")
+        self.assertContains(response, "#setting-node_deployment.dns_default_zone")
+        self.assertNotContains(response, 'name="node_size"')
         self.assertEqual(NodeDeployment.objects.count(), 0)

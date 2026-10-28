@@ -141,7 +141,7 @@ class DeploymentFallbackTests(TestCase):
     def test_deployment_credentials_are_configured_without_disclosure(self) -> None:
         response = self.page()
         self.assertContains(response, "Inherited from deployment")
-        self.assertContains(response, 'x-data="settingsSecretRow(true)"')
+        self.assertContains(response, 'x-data="settingsSecretRow(true, false)"')
         self.assertNotContains(response, "deployment-secret-do-not-render")
         row = self.write("efactura.oauth.client_secret", "stored-secret")
         cleared = self.client.post(

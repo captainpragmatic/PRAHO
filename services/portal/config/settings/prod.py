@@ -167,3 +167,5 @@ SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurren
 LOGGING = portal_logging(portal_log_dir())
 
 PORTAL_HMAC_REQUIRE_ISOLATION = True
+# No default when deployed: an unset PORTAL_ID stops startup instead of signing as another portal.
+PORTAL_ID = os.environ.get("PORTAL_ID", "")

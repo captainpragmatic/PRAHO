@@ -3,8 +3,11 @@
 # ===============================================================================
 # Three runs, one lab (deploy/virtualmin-lab, see its README):
 #
-#   pull request   Touches provisioning, the node playbooks, the lab or its tests: the round trip, the contract
-#                  suite, the workflow suite and the lab checks (make test-virtualmin-lab) on the PINNED version.
+#   pull request   virtualmin-lab-pr.yml: the round trip, the contract suite, the workflow suite and the lab checks
+#                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
+#                  workflow of its own so that its required check never shares a name with a job this workflow
+#                  skips on a schedule or a dispatch.
+#   release        release-candidate.yml calls this workflow (suite: full) with the candidate SHA in `ref`.
 #   nightly full   03:30 UTC, skipped when nothing changed in 24h: the same, plus the from-scratch node deploy,
 #                  fault injection and the browser smoke tests (make test-virtualmin-lab-full), PINNED version.
 #   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
@@ -19,16 +22,16 @@
 name: Virtualmin Lab
 
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'services/platform/apps/provisioning/**'
-      - 'services/platform/infrastructure/ansible/**'
-      - 'deploy/virtualmin-lab/**'
-      - 'Makefile'
-      - 'tests/virtualmin_lab/**'
-      - '.github/workflows/virtualmin-lab.yml'
-      - '.github/actions/virtualmin-lab-setup/**'
+  # A caller's event is what this workflow sees, so a release candidate dispatched with suite `full` runs
+  # nightly-full exactly as a manual dispatch does, checked out at `ref`.
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: full
+      ref:
+        type: string
+        default: ''
   schedule:
     - cron: '30 3 * * *'
     - cron: '30 5 * * *'
@@ -44,8 +47,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: virtualmin-lab-${{ github.event_name }}-${{ github.ref }}-${{ github.event.schedule }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A release candidate calls this with its commit in inputs.ref: each candidate gets its own group.
+  group: virtualmin-lab-${{ github.event_name }}-${{ github.ref }}-${{ github.event.schedule }}-${{ inputs.ref }}
+  cancel-in-progress: false
 
 env:
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
@@ -86,51 +90,6 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Pull requests: the lab suites on the pinned Virtualmin.
-  # ---------------------------------------------------------------------------
-  pull-request:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/virtualmin-lab-setup
-
-      - name: Fetch the published lab image, if there is one
-        env:
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          version="$(sed -n 's/^ARG VIRTUAL_SERVER_VERSION=\([0-9][0-9.]*\).*/\1/p' deploy/virtualmin-lab/virtualmin/Dockerfile)"
-          # Built by virtualmin-lab-image.yml. A missing or private image only costs the build below.
-          if docker pull "ghcr.io/${owner}/praho-virtualmin-lab:${version}"; then
-            docker tag "ghcr.io/${owner}/praho-virtualmin-lab:${version}" "praho-virtualmin-lab:${version}"
-          else
-            echo "No published image: make virtualmin-lab-up will build it"
-          fi
-
-      - name: Start the lab
-        run: make virtualmin-lab-up
-
-      - name: Lab suites (round trip, contract, workflows, checks)
-        run: make test-virtualmin-lab
-
-      - name: Lab diagnostics
-        if: failure()
-        run: |
-          docker ps -a
-          for node in vmlab-a vmlab-b vmlab-minio; do
-            echo "::group::docker logs ${node}"
-            docker logs --tail 200 "${node}" || true
-            echo "::endgroup::"
-          done
-
-      - name: Stop the lab
-        if: always()
-        run: make virtualmin-lab-down
-
-  # ---------------------------------------------------------------------------
   # Nightly: everything, on the pinned Virtualmin.
   # ---------------------------------------------------------------------------
   nightly-full:
@@ -140,10 +99,12 @@ jobs:
         (needs.check-activity.result == 'success' && needs.check-activity.outputs.run == 'true') ||
         (github.event_name == 'workflow_dispatch' && inputs.suite == 'full')
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Its browser tests need Playwright, which does not support Ubuntu 26.04.
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: ./.github/actions/virtualmin-lab-setup
         with:

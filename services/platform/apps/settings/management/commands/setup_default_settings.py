@@ -16,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.encryption import is_encrypted
+from apps.common.encryption import DecryptionError, EncryptionError, is_encrypted
 from apps.common.model_secrets import decrypt_model_secret
 from apps.settings.catalog import CATALOG, SettingDef
 from apps.settings.models import SettingActivation, SystemSetting
@@ -133,26 +133,54 @@ def _row_defaults(definition: SettingDef) -> dict[str, object]:
 def _reconcile(setting: SystemSetting, definition: SettingDef, force: bool, rewrite: bool) -> list[str]:
     defaults = _row_defaults(definition)
     dirty_fields: list[str] = []
+    unreadable = False
     if (
         setting.is_sensitive
         and not definition.sensitive
         and setting.value is not None
         and is_encrypted(str(setting.value))
     ):
-        setting.value = decrypt_model_secret(setting, "value", str(setting.value))
-        dirty_fields.append("value")
+        try:
+            setting.value = decrypt_model_secret(setting, "value", str(setting.value))
+            dirty_fields.append("value")
+        except DecryptionError:
+            # One unreadable secret must not stop setup (and every deploy with it). Kept sensitive, since
+            # its value is still ciphertext; once it is replaced, the next run finishes the downgrade.
+            unreadable = True
+            logger.warning(f"⚠️ [Settings] {setting.key}: stored value cannot be decrypted; kept sensitive, replace it")
+    if (
+        setting.is_sensitive
+        and definition.sensitive
+        and setting.value not in (None, "")
+        and not (isinstance(setting.value, str) and is_encrypted(setting.value))
+    ):
+        dirty_fields.append("value")  # Left in plaintext by an earlier hook: the save seals it
     for field_name in _METADATA_FIELDS:
+        if unreadable and field_name == "is_sensitive":
+            continue
         if getattr(setting, field_name) != defaults[field_name]:
             setattr(setting, field_name, defaults[field_name])
             dirty_fields.append(field_name)
-    if setting.get_typed_default_value() != definition.default:
+    try:
+        default_differs = setting.get_typed_default_value() != definition.default
+    except DecryptionError:
+        default_differs = True  # Unreadable: the catalogue default replaces it
+    if default_differs:
         setting.default_value = definition.default
         dirty_fields.append("default_value")
     if (force or rewrite) and setting.value != definition.default:
         setting.value = definition.default
         dirty_fields.append("value")
     if dirty_fields:
-        setting.save(update_fields=[*dict.fromkeys(dirty_fields), "updated_at"])
+        try:
+            # Its own savepoint: setup runs as one transaction, and one value that cannot be sealed must
+            # not stop it (or the deploy that runs it). The row is left as it was.
+            with transaction.atomic():
+                setting.save(update_fields=[*dict.fromkeys(dirty_fields), "updated_at"])
+        except (EncryptionError, DecryptionError) as refused:
+            # DecryptionError includes a keyring that lacks the key: the row waits for the right keys.
+            logger.warning(f"⚠️ [Settings] {setting.key}: left as it was, its value cannot be sealed: {refused}")
+            return []
     return dirty_fields
 
 
@@ -174,8 +202,8 @@ def _retained_value_is_effective(setting: SystemSetting, definition: SettingDef)
         if definition.data_type == "list":
             return isinstance(value, list | str)
         validator._validate_value(value, "value")
-    except (ValidationError, ValueError, TypeError, DecimalException):
-        return False
+    except (ValidationError, ValueError, TypeError, DecimalException, DecryptionError):
+        return False  # An unreadable value takes no effect
     return True
 
 

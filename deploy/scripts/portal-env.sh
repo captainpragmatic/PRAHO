@@ -147,7 +147,7 @@ while read -r name; do
     if [ -z "$(PRAHO_ENV_FILE="$tmp" praho_env_value "$name")" ]; then
         missing="${missing} ${name}"
     fi
-done < <(praho_portal_required)
+done < <(praho_stack_required portal-only)
 if [ -n "$missing" ]; then
     praho_die "${PRAHO_ENV_FILE} leaves${missing} empty; the portal stack requires them."
 fi

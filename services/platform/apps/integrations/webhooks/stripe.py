@@ -14,11 +14,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.models import Payment
+from apps.common.encryption import DecryptionError
 from apps.common.types import Retriability, retriability_of
 from apps.customers.models import Customer
 from apps.integrations.models import WebhookEvent
 
-from .base import BaseWebhookProcessor, verify_stripe_signature
+from .base import BaseWebhookProcessor, WebhookConfigurationError, verify_stripe_signature
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            # Get encrypted webhook secret from settings system
-            webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
+            # Get encrypted webhook secret from settings system. A stored secret no key can decrypt is a
+            # configuration error, with no fallback to the environment's secret: it is a fault to fix,
+            # not a reason to verify against something else.
+            try:
+                webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
+            except DecryptionError as error:
+                raise WebhookConfigurationError("the stored Stripe webhook secret cannot be decrypted") from error
 
             if not webhook_secret:
                 # Fallback to Django settings
@@ -104,6 +110,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             return verify_stripe_signature(
                 payload_body=payload_body, stripe_signature=signature, webhook_secret=str(webhook_secret)
             )
+        except WebhookConfigurationError:
+            raise
         except Exception as e:
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
             return False
@@ -181,6 +189,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     return False, error
                 logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
                 return self._missing_local(f"Payment not found for PaymentIntent: {stripe_payment_id}")
+            if retriability_of(convergence) is Retriability.NOT_RETRIABLE:
+                # The gateway's facts contradict the local payment: no redelivery can change that. Recorded
+                # (the mismatch evidence row and a critical log) and acknowledged instead of retried.
+                return self._acknowledge_permanent_rejection(f"Gateway facts refused for {stripe_payment_id}: {error}")
             logger.critical("Stripe success convergence rejected for %s: %s", stripe_payment_id, error)
             return False, error
         payment = convergence.unwrap()
@@ -574,6 +586,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             payment_intent_id,
         )
 
+        # What no redelivery can change is recorded here and escalated with the dispute, never retried.
+        note = ""
         if payment_intent_id:
             from apps.promotions.gift_refunds import freeze_purchase_for_dispute  # noqa: PLC0415
 
@@ -583,8 +597,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
                 )
                 if payment is None and not gift_dispute:
-                    return StripeWebhookProcessor._missing_local(f"Payment not found for dispute: {dispute_id}")
-                if payment is not None and payment.status != "disputed" and not gift_dispute:
+                    note = "PRAHO has no payment for this PaymentIntent"
+                elif payment is not None and payment.status != "disputed" and not gift_dispute:
                     changed = payment.apply_gateway_event(
                         "disputed",
                         {
@@ -603,21 +617,23 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                             payment.id,
                             payment.status,
                         )
-                        return False, f"Payment {payment.id} cannot transition to disputed"
+                        note = f"Its payment {payment.id} is {payment.status} and was not marked disputed"
         else:
-            return StripeWebhookProcessor._missing_local(f"PaymentIntent not found for dispute: {dispute_id}")
+            note = "The dispute names no PaymentIntent"
 
+        alerted = False
         try:
             from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
                 NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            NotificationService.send_admin_alert(
+            alerted = NotificationService.send_admin_alert(
                 subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
                 message=f"A dispute has been created for PaymentIntent {payment_intent_id}.\n"
                 f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
                 f"Reason: {charge.get('reason', 'Unknown')}\n"
-                f"Please review immediately.",
+                + (f"Note: {note}\n" if note else "")
+                + "Please review immediately.",
                 alert_type="dispute",
                 metadata={
                     "dispute_id": dispute_id,
@@ -628,7 +644,11 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         except Exception as notify_error:
             logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
 
-        return True, f"Dispute created: {dispute_id}"
+        if note and not alerted:
+            # Acknowledging would end it: staff would never hear of a dispute nothing local records. Nothing
+            # was written for it, so failing leaves it to the retry drain until the alert gets through.
+            return False, f"Dispute {dispute_id} escalation not delivered; retrying ({note})"
+        return True, f"Dispute created: {dispute_id}" + (f" ({note})" if note else "")
 
     def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💰 Handle Stripe Charge events"""

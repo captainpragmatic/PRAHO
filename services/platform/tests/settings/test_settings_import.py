@@ -302,3 +302,44 @@ class ExportImportRoundTripTests(TestCase):
         self.assertEqual(body["imported"], 0)
         self.assertEqual(body["skipped"][0]["key"], "billing.vat_rate")
         self.assertIn("unknown", body["skipped"][0]["reason"])
+
+
+class EncryptedImportTests(TestCase):
+    """An exported secret is ciphertext bound to its row: an import refuses it and asks to re-enter (M21)."""
+
+    KEY = "backup.aws_secret_access_key"
+
+    def setUp(self) -> None:
+        self.admin = User.objects.create_user(
+            email="secret-admin@test.ro", password="TestPass123!", is_staff=True, is_superuser=True
+        )
+        self.client.force_login(self.admin)
+        self.assertTrue(SettingsService.update_setting(self.KEY, "first-secret-value").is_ok())
+        export = self.client.get(reverse("settings:export_settings_full"))
+        self.assertEqual(export.status_code, 200)
+        self.payload = {"settings": [s for s in json.loads(export.content)["settings"] if s["key"] == self.KEY]}
+        self.assertTrue(self.payload["settings"][0]["value"].startswith("aes:"))
+
+    def _import(self) -> dict[str, object]:
+        response = self.client.post(
+            reverse("settings:import_settings") + "?include_sensitive=true",
+            data=json.dumps(self.payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def test_a_recreated_setting_asks_for_the_secret_again(self) -> None:
+        SystemSetting.objects.filter(key=self.KEY).delete()
+        self.assertTrue(SettingsService.update_setting(self.KEY, "second-secret-value").is_ok())
+        body = self._import()
+        self.assertEqual(body["imported"], 0)
+        self.assertEqual(body["errors"], [])
+        self.assertEqual(body["skipped"], [{"key": self.KEY, "reason": "encrypted value: re-enter this secret in Settings"}])
+        self.assertEqual(SettingsService.get_setting(self.KEY), "second-secret-value")
+
+    def test_the_same_row_also_asks_rather_than_silently_keeping_it(self) -> None:
+        body = self._import()
+        self.assertEqual(body["imported"], 0)
+        self.assertEqual(body["skipped"], [{"key": self.KEY, "reason": "encrypted value: re-enter this secret in Settings"}])
+        self.assertEqual(SettingsService.get_setting(self.KEY), "first-secret-value")

@@ -121,6 +121,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ /app/services/platform/
 COPY shared/ /app/shared/
+COPY deploy/ansible/roles/ssh-hardening/ /app/deploy/ansible/roles/ssh-hardening/
 
 # Copy entrypoint script
 COPY deploy/platform/entrypoint.sh /app/deploy/platform/entrypoint.sh

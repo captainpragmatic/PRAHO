@@ -7,7 +7,9 @@ import hashlib
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar, cast
@@ -555,6 +557,43 @@ class SecureErrorHandler:
 # ===============================================================================
 # AUDIT LOGGING INTEGRATION
 # ===============================================================================
+
+
+# Refusal evidence queued while a webhook executes (see refusal_evidence_kept); None outside one. Each entry is
+# the write itself, bound where it is recorded, so the action stays a literal at its caller.
+_REFUSAL_EVIDENCE: ContextVar[list[Callable[[], None]] | None] = ContextVar("refusal_evidence", default=None)
+
+
+@contextmanager
+def refusal_evidence_kept() -> Iterator[list[Callable[[], None]]]:
+    """Queue refusal evidence recorded inside the block; the caller writes it once its savepoint is settled.
+
+    A narrow, documented exception to ADR-0016's committed-state audits: the evidence that a gateway fact
+    was refused must outlive the rollback of the work it refused. State-change audits stay transaction-bound.
+    """
+    queue: list[Callable[[], None]] = []
+    token = _REFUSAL_EVIDENCE.set(queue)
+    try:
+        yield queue
+    finally:
+        _REFUSAL_EVIDENCE.reset(token)
+
+
+def record_refusal_evidence(event_type: str, details: dict[str, Any]) -> None:
+    """Security evidence of a refusal: queued inside refusal_evidence_kept, written at once elsewhere."""
+    queue = _REFUSAL_EVIDENCE.get()
+    kept = dict(details)
+    if queue is None:
+        log_security_event(event_type, kept)
+    else:
+        queue.append(lambda: log_security_event(event_type, kept))
+
+
+def write_refusal_evidence(queue: list[Callable[[], None]]) -> None:
+    """Write queued refusal evidence, once each (log_security_event isolates every write)."""
+    for write in queue:
+        write()
+    queue.clear()
 
 
 def log_security_event(

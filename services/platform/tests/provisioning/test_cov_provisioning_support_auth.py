@@ -34,7 +34,7 @@ from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViews
     VIRTUALMIN_MASTER_PASSWORD=None,
     VIRTUALMIN_SSH_USERNAME="support-ssh",
     VIRTUALMIN_SSH_PASSWORD="support-ssh-password",
-    VIRTUALMIN_SSH_PRIVATE_KEY_PATH=None,
+    VIRTUALMIN_SSH_PRIVATE_KEY_PATH="/coverage/key",
     PRAHO_SSH_KNOWN_HOSTS_PATH="",
 )
 class ProvisioningAuthenticationTests(VirtualminViewsFixture):
@@ -101,14 +101,14 @@ class ProvisioningAuthenticationTests(VirtualminViewsFixture):
         self.assertIsNone(cache.get(failure_key))
         self.assertIsNone(manager._ssh_client)
 
-    def test_ssh_password_and_plain_output_return_success(self) -> None:
+    @override_settings(VIRTUALMIN_SSH_PRIVATE_KEY_PATH=None)
+    def test_ssh_password_only_is_refused_before_connecting(self) -> None:
         self.stdout.read.return_value = b"tenant.example.com\n"
         with VirtualminAuthenticationManager(self.server) as manager:
             result = manager.execute_virtualmin_command("list-domains", {}, force_method=AuthMethod.SSH_SUDO)
-        self.assertTrue(result.is_ok(), result)
-        self.assertEqual(result.unwrap(), {"success": True, "message": "tenant.example.com"})
-        self.assertEqual(self.ssh.connect.call_args.kwargs["password"], "support-ssh-password")
-        self.assertNotIn("key_filename", self.ssh.connect.call_args.kwargs)
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("private key", result.unwrap_err())
+        self.ssh.connect.assert_not_called()
 
     def test_ssh_exit_failure_and_cli_failure_return_errors(self) -> None:
         cases = (
@@ -135,11 +135,11 @@ class ProvisioningAuthenticationTests(VirtualminViewsFixture):
         self.assertIsNone(manager._ssh_client)
 
     def test_missing_ssh_credentials_fail_without_caching_success(self) -> None:
-        with self.settings(VIRTUALMIN_SSH_PASSWORD=None):
+        with self.settings(VIRTUALMIN_SSH_PASSWORD=None, VIRTUALMIN_SSH_PRIVATE_KEY_PATH=None):
             manager = VirtualminAuthenticationManager(self.server)
             result = manager.execute_virtualmin_command("list-domains", {}, force_method=AuthMethod.SSH_SUDO)
         self.assertTrue(result.is_err())
-        self.assertIn("No SSH credentials configured", result.unwrap_err())
+        self.assertIn("private key", result.unwrap_err())
         self.assertIsNone(manager._ssh_client)
         self.assertIsNone(cache.get(f"{CACHE_AUTH_METHOD_PREFIX}{self.server.pk}"))
 

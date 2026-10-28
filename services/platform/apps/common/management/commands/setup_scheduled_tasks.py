@@ -15,6 +15,8 @@ from apps.billing.issuers.tasks import setup_issuance_scheduled_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
+from apps.integrations.tasks import setup_webhook_scheduled_tasks
+from apps.notifications.tasks import setup_notification_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
 from apps.promotions.tasks import setup_gift_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
@@ -192,6 +194,13 @@ class Command(BaseCommand):
         if run_all or flags["domains_only"]:
             self.stdout.write("\n🌐 Domains:\n  - Renewal notices for expiring domains: Daily")
 
+        if run_all:
+            self.stdout.write(
+                "\n📧 Email recovery:\n  - Queue sweep, failed retries, dead-worker recovery: Every 5 minutes"
+            )
+            self.stdout.write("  - Old email log cleanup: Daily")
+            self.stdout.write("\n🔗 Webhooks:\n  - Pending deliveries and due retries: Every 5 minutes")
+
         self.stdout.write("")
         self.stdout.write("🔧 Start workers: python manage.py qcluster")
         self.stdout.write("📊 Monitor tasks: /admin/django_q/")
@@ -228,8 +237,6 @@ class Command(BaseCommand):
                 self._setup_task_category("issuance", "🧾", setup_issuance_scheduled_tasks, all_results)
                 self._setup_task_category("fx rates", "💱", setup_fx_scheduled_tasks, all_results)
                 self._setup_task_category("gift funding", "🎁", setup_gift_scheduled_tasks, all_results)
-
-            if run_all or flags["billing_only"]:
                 self._setup_task_category("billing", "💳", setup_billing_scheduled_tasks, all_results)
 
             # Set up System Status tasks
@@ -245,6 +252,10 @@ class Command(BaseCommand):
 
             if run_all or flags["domains_only"]:
                 self._setup_task_category("domains", "🌐", setup_domain_scheduled_tasks, all_results)
+
+            if run_all:
+                self._setup_task_category("email recovery", "📧", setup_notification_scheduled_tasks, all_results)
+                self._setup_task_category("webhook drains", "🔗", setup_webhook_scheduled_tasks, all_results)
 
             # Summary header
             self.stdout.write("")

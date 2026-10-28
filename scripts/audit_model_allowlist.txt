@@ -36,6 +36,8 @@ billing.RefundStatusHistory     # refund status change log
 integrations.WebhookDelivery    # append-only delivery attempt records
 integrations.WebhookEvent       # append-only inbound webhook records
 notifications.EmailLog          # append-only email delivery records
+notifications.EmailAttachment     # a reference (source type, id, hash) owned by its EmailLog, which is audited
+notifications.PendingDeliveryEvent  # short-lived buffer of verified provider callbacks; applied to its EmailLog (audited there) or expired
 notifications.UnsubscribeToken  # ephemeral GDPR unsubscribe tokens (short-lived, append-only)
 orders.OrderStatusHistory       # order status change log
 users.UserLoginLog              # security audit trail for login attempts
@@ -108,6 +110,8 @@ notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (
 promotions.LoyaltyTier          # tier definitions (changes audited via LoyaltyProgram parent)
 billing.SmartBillRateGate       # outbound call scheduler: one timestamp per API token, no business/financial/customer data. Issuance itself stays fully audited.
 common.Counter                  # infrastructure counters and claims: expiring rows with no business, financial or customer data
+common.SystemCheckState         # bounded current operational evidence and claims, not business history; security and backup jobs retain their own audits (ADR-0064)
+common.NodeResourceHourlySummary # 30-day aggregate telemetry, no customer data; per-poll auditing would create an unbounded duplicate history (ADR-0064)
 common.LegalDocument            # publish_legal_document() writes legal_document_published in the same transaction; rows are immutable, so there is no other write to audit
 users.UserSession               # session revocation index (key to user); the sessions it mirrors are not audited either
 users.UserCredentialVersion     # monotonic MFA binding version; every change is written by an audited MFA state change

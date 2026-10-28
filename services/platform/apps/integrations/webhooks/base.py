@@ -4,8 +4,9 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import UUID
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from apps.common.constants import DAYS_PER_WEEK
@@ -24,6 +25,16 @@ class WebhookHandlerError(Exception):
 
 class SecurityError(Exception):
     """🔒 Security-related errors in webhook processing"""
+
+
+class WebhookConfigurationError(Exception):
+    """The endpoint cannot verify deliveries (its secret is unreadable): the operator's fault to fix.
+
+    It is not a forged request, so the sender is told to try again (503), not that its signature is bad.
+    """
+
+
+WEBHOOK_CONFIGURATION_ERROR = "Webhook endpoint unavailable; try again later"
 
 
 # ===============================================================================
@@ -208,7 +219,15 @@ class BaseWebhookProcessor(ABC):
 
     def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
         """Step 3: Verify webhook signature using context."""
-        if not self.verify_signature(context.payload, context.signature, context.headers, context.raw_body):
+        try:
+            verified = self.verify_signature(context.payload, context.signature, context.headers, context.raw_body)
+        except WebhookConfigurationError as error:
+            # Logged here, once per delivery: the self-test at construction swallows it silently.
+            logger.critical(
+                f"🔥 [Webhooks] {self.source_name} webhook secret cannot be read, deliveries get 503: {error}"
+            )
+            return Err(WEBHOOK_CONFIGURATION_ERROR)
+        if not verified:
             return Err("❌ Invalid webhook signature")
 
         return Ok(context)
@@ -288,7 +307,22 @@ class BaseWebhookProcessor(ABC):
             return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
 
     def _execute_locked(self, event: WebhookEvent) -> WebhookProcessingResult:
-        """Run effects in a savepoint while the caller retains the event claim."""
+        """Run effects in a savepoint while the caller retains the event claim.
+
+        Refusal evidence recorded by the handler is written once the savepoint is settled, so it survives a
+        refusal's rollback (record_refusal_evidence).
+        """
+        from apps.common.validators import (  # noqa: PLC0415  # Deferred: common imports users at module level
+            refusal_evidence_kept,
+            write_refusal_evidence,
+        )
+
+        with refusal_evidence_kept() as evidence:
+            result = self._run_locked(event)
+        write_refusal_evidence(evidence)
+        return result
+
+    def _run_locked(self, event: WebhookEvent) -> WebhookProcessingResult:
         try:
             with transaction.atomic():
                 success, message = self.handle_event(event)
@@ -560,6 +594,33 @@ def retry_failed_webhooks(source: str | None = None) -> dict[str, int]:
             result = processor._execute_locked(event)
             stats["retried" if result.success else "failed"] += 1
     return stats
+
+
+WEBHOOK_BUSY = "Webhook is being processed; try again shortly"
+WEBHOOK_NO_LONGER_FAILED = "Webhook is no longer failed; nothing to retry"
+
+
+def reprocess_failed_event(event_pk: UUID | str) -> Result[WebhookProcessingResult, str]:
+    """Retry one failed event as any other processing runs it (#751 follow-up, M8).
+
+    The event is claimed under its row lock without waiting (a redelivery or a drain holding it means it is
+    being processed now), re-checked under the lock, and run in the executor's savepoint, so a refusal keeps
+    nothing and the failure follow-up runs.
+    """
+    with transaction.atomic():
+        try:
+            with transaction.atomic():  # Its own savepoint: a lock refusal must not poison the transaction
+                event = WebhookEvent.objects.select_for_update(nowait=True).get(pk=event_pk)
+        except WebhookEvent.DoesNotExist:
+            return Err("Webhook not found")
+        except DatabaseError:  # narrow-db-catch: only a nowait lock refusal is busy; a dead connection propagates
+            return Err(WEBHOOK_BUSY)
+        if event.status != "failed":
+            return Err(WEBHOOK_NO_LONGER_FAILED)
+        processor = get_webhook_processor(event.source)
+        if processor is None:
+            return Err(f"No processor found for source: {event.source}")
+        return Ok(processor._execute_locked(event))
 
 
 def get_webhook_processor(source: str) -> BaseWebhookProcessor | None:

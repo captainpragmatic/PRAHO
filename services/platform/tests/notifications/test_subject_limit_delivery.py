@@ -79,9 +79,10 @@ class SubjectLimitDeliveryTests(TestCase):
 
         result = SettingsService.update_setting("notifications.max_subject_length", 11)
         self.assertTrue(result.is_ok(), result)
-        queued = EmailService.send_email(
-            to="subject-limit@example.test", subject="x" * 11, body_text="Body", async_send=True
-        )
+        with self.captureOnCommitCallbacks(execute=True):  # The task is published when the row commits
+            queued = EmailService.send_email(
+                to="subject-limit@example.test", subject="x" * 11, body_text="Body", async_send=True
+            )
         self.assertTrue(queued.success, queued.error)
         log = EmailLog.objects.get(pk=queued.email_log_id)
         self.assertEqual((log.subject, log.status), ("x" * 11, "queued"))
@@ -93,7 +94,8 @@ class SubjectLimitDeliveryTests(TestCase):
         ]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["func"], "apps.notifications.tasks.send_email_task")
-        self.assertEqual(cast("dict[str, object]", matching[0]["kwargs"])["subject"], "x" * 11)
+        # The task carries only the id; the subject it will send is the row's (checked above).
+        self.assertEqual(set(cast("dict[str, object]", matching[0]["kwargs"])), {"email_log_id"})
         self.assertEqual(mail.outbox, [])
 
     def test_internal_synchronous_delivery_also_rejects_the_live_limit(self) -> None:

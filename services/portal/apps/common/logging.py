@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from apps.common.secret_urls import redact_text
+from apps.common.secret_urls import redact_text, redact_urls
 
 
 class PortalJSONFormatter(logging.Formatter):
@@ -29,4 +29,6 @@ class PortalJSONFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[1] is not None:
             log_entry["exception"] = self.formatException(record.exc_info)
-        return redact_text(json.dumps(log_entry, default=str))
+        # Redacted as data, then encoded: redacting the encoded text could swallow the backslash of an
+        # escaped quote after a secret and break the JSON. Values json cannot encode are redacted as text.
+        return json.dumps(redact_urls(log_entry), default=lambda value: redact_text(str(value)))

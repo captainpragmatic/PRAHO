@@ -62,11 +62,13 @@ rollback_version() {
     # replace the running version with one that cannot start.
     praho_load_env
     praho_require_production_keys
+    # Rollback starts containers, so a missing variable is refused rather than given a placeholder.
+    praho_require_stack_vars single-server
 
     log_info "Rolling back to version: ${VERSION}"
 
     echo -e "${YELLOW}WARNING: This will restart services with version ${VERSION}${NC}"
-    read -p "Continue? (yes/no): " CONFIRM
+    read -r -p "Continue? (yes/no): " CONFIRM
 
     if [ "$CONFIRM" != "yes" ]; then
         log_info "Rollback cancelled"
@@ -95,7 +97,7 @@ rollback_version() {
 
 rollback_database() {
     log_info "Rolling back database to latest backup..."
-    "${SCRIPT_DIR}/restore.sh" --latest "${ENV_ARGS[@]}"
+    "${SCRIPT_DIR}/restore-platform.sh" --latest "${ENV_ARGS[@]}"
 }
 
 rollback_full() {
@@ -115,6 +117,7 @@ rollback_full() {
     done
     [ -n "$backup" ] || praho_die 'Full rollback requires --backup PATH and its media/metadata companions; --latest is not a compatibility decision'
     case "$topology" in single-server) portal_flag=(--portal) ;; platform-only) ;; *) praho_die 'Full rollback topology must be single-server or platform-only' ;; esac
+    praho_require_stack_vars "$topology"
     if ! names=$(docker ps -a --format '{{.Names}}'); then praho_die 'Cannot determine local topology'; fi
     printf '%s\n' "$names" | grep -Fxq praho_platform || praho_die 'Local Platform container required'
     printf '%s\n' "$names" | grep -Fxq praho_db || praho_die 'Full rollback requires the bundled local database'
@@ -137,7 +140,7 @@ rollback_full() {
     [[ "$server_version" =~ ^[0-9]+$ ]] && [ "$server_version" -ge 100000 ] || praho_die 'Cannot determine database major'
     major=$((server_version / 10000))
     python3 "$SCRIPT_DIR/backup_manifest.py" validate "$backup" --database-major "$major" ${portal_flag[@]+"${portal_flag[@]}"} > "$FULL_STAGE/expected"
-    "$SCRIPT_DIR/restore.sh" "$backup" --check "${ENV_ARGS[@]}"
+    "$SCRIPT_DIR/restore-platform.sh" "$backup" --check "${ENV_ARGS[@]}"
     # Only image references leave the parser; Compose's secret-bearing environment stays in-process.
     VERSION="$VERSION" praho_compose "$topology" config --format json |
         python3 "$SCRIPT_DIR/backup_manifest.py" images ${portal_flag[@]+"${portal_flag[@]}"} > "$FULL_STAGE/images"
@@ -152,7 +155,7 @@ rollback_full() {
     read -r -p "Restore the explicit backup and start ${VERSION}? (yes/no): " CONFIRM
     if [ "$CONFIRM" != yes ]; then log_info 'Rollback cancelled'; return 0; fi
     # Restore never starts the current entrypoint: the old image is selected before any application starts.
-    printf 'yes\n' | "$SCRIPT_DIR/restore.sh" "$backup" --leave-stopped "${ENV_ARGS[@]}"
+    printf 'yes\n' | "$SCRIPT_DIR/restore-platform.sh" "$backup" --leave-stopped "${ENV_ARGS[@]}"
     if ! VERSION="$VERSION" praho_compose "$topology" up -d --no-build --no-deps --wait --wait-timeout "$WAIT_TIMEOUT" "${FULL_SERVICES[@]}"; then
         docker stop "${FULL_NAMES[@]}" || log_error 'Could not hold every application offline; operator intervention required'
         praho_die 'Target startup failed; recover from the safety backup before restarting applications'

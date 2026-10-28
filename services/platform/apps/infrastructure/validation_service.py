@@ -33,6 +33,7 @@ from apps.common.outbound_http import (
 from apps.common.ssh import configure_strict_host_key_checking
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
+from apps.infrastructure.ssh_transport import resolve_node_host_keys
 
 if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment
@@ -210,7 +211,12 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            configure_strict_host_key_checking(client)
+            configure_strict_host_key_checking(
+                client,
+                host_keys=resolve_node_host_keys(deployment),
+                hostnames=(str(deployment.ipv4_address), deployment.fqdn),
+                port=deployment.ssh_port,
+            )
 
             # Load private key
 
@@ -220,7 +226,7 @@ class NodeValidationService:
             # Connect
             client.connect(
                 hostname=deployment.ipv4_address,  # type: ignore[arg-type]
-                port=22,
+                port=deployment.ssh_port,
                 username="root",
                 pkey=pkey,
                 timeout=self.timeout,
@@ -229,7 +235,7 @@ class NodeValidationService:
             )
 
             # Test command execution
-            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)
+            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             client.close()
 
@@ -292,11 +298,16 @@ class NodeValidationService:
         client: paramiko.SSHClient | None = None
         try:
             client = paramiko.SSHClient()
-            configure_strict_host_key_checking(client)
+            configure_strict_host_key_checking(
+                client,
+                host_keys=resolve_node_host_keys(deployment),
+                hostnames=(str(deployment.ipv4_address), deployment.fqdn),
+                port=deployment.ssh_port,
+            )
             pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key_content))
             client.connect(
                 hostname=deployment.ipv4_address,
-                port=22,
+                port=deployment.ssh_port,
                 username="root",
                 pkey=pkey,
                 timeout=self.timeout,
@@ -308,7 +319,7 @@ class NodeValidationService:
                 "openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null "
                 "| openssl x509 -noout -fingerprint -sha256"
             )
-            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)
+            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             if stdout.channel.recv_exit_status() != 0:
                 error_output = stderr.read().decode().strip()
@@ -347,7 +358,8 @@ class NodeValidationService:
         open_ports: list[tuple[int, str]] = []
         closed_ports: list[tuple[int, str]] = []
 
-        for port, name in self.REQUIRED_PORTS:
+        for default_port, name in self.REQUIRED_PORTS:
+            port = deployment.ssh_port if name == "SSH" else default_port
             if self._is_port_open(ip, port):  # type: ignore[arg-type]
                 open_ports.append((port, name))
             else:
@@ -646,7 +658,7 @@ class NodeValidationService:
         if not deployment.ipv4_address:
             return False
 
-        ssh_ok = self._is_port_open(deployment.ipv4_address, 22)
+        ssh_ok = self._is_port_open(deployment.ipv4_address, deployment.ssh_port)
         webmin_ok = self._is_port_open(deployment.ipv4_address, 10000)
 
         return ssh_ok and webmin_ok

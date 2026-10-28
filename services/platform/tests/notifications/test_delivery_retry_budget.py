@@ -1,5 +1,6 @@
 """Recovery must share the worker's durable budget and isolate terminal failures."""
 
+import json
 import smtplib
 from datetime import timedelta
 from unittest.mock import patch
@@ -27,6 +28,7 @@ class DeliveryRetryBudgetTests(TestCase):
 
     def log(self, **kwargs) -> EmailLog:
         row = EmailLog.objects.create(
+            envelope=json.dumps({"to": ["recipient@example.com"]}),
             to_addr="recipient@example.com",
             from_addr="sender@example.com",
             subject="Delivery contract",
@@ -38,12 +40,12 @@ class DeliveryRetryBudgetTests(TestCase):
         return row
 
     def send(self, row: EmailLog):
-        return send_email_task(str(row.pk), [row.to_addr], row.subject, "Body", from_email=row.from_addr)
+        return send_email_task(str(row.pk))
 
     def test_permanent_provider_rejection_is_not_retried(self) -> None:
         row = self.log()
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")),
+            patch("django.core.mail.EmailMessage.send", side_effect=smtplib.SMTPDataError(550, b"Rejected")),
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
         ):
             result = self.send(row)
@@ -54,18 +56,20 @@ class DeliveryRetryBudgetTests(TestCase):
         self.assertIs(row.provider_response["permanent_failure"], True)
 
     def test_permanent_api_rejections_end_the_row_without_scheduling(self) -> None:
-        errors = [self.api_error(status) for status in (400, 401, 403, 422)]
+        # 401, 403 and 404 (a missing SES configuration set among them) are the operator's to fix: they
+        # block sending instead (test_email_operator_blocked).
+        errors = [self.api_error(status) for status in (400, 422)]
         errors.append(
             AnymailAPIError(
-                "SES configuration set missing",
-                response={"Error": {"Code": "NotFoundException"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+                "SES message rejected",
+                response={"Error": {"Code": "MessageRejected"}, "ResponseMetadata": {"HTTPStatusCode": 400}},
             )
         )
         for error in errors:
             with self.subTest(error=str(error)):
                 row = self.log()
                 with (
-                    patch("apps.notifications.tasks.EmailMessage.send", side_effect=error),
+                    patch("django.core.mail.EmailMessage.send", side_effect=error),
                     patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
                 ):
                     result = self.send(row)
@@ -88,7 +92,7 @@ class DeliveryRetryBudgetTests(TestCase):
             with self.subTest(error=str(error)):
                 row = self.log()
                 with (
-                    patch("apps.notifications.tasks.EmailMessage.send", side_effect=error),
+                    patch("django.core.mail.EmailMessage.send", side_effect=error),
                     patch("apps.notifications.tasks._schedule_email_retry", return_value=True) as retry,
                 ):
                     result = self.send(row)
@@ -100,7 +104,7 @@ class DeliveryRetryBudgetTests(TestCase):
     def test_stale_task_arguments_cannot_reset_delivery_attempts(self) -> None:
         row = self.log()
         with (
-            patch("apps.notifications.tasks.EmailMessage.send", side_effect=TimeoutError("temporary")) as send,
+            patch("django.core.mail.EmailMessage.send", side_effect=TimeoutError("temporary")) as send,
             patch("apps.notifications.tasks._schedule_email_retry", return_value=True),
             patch(
                 "apps.notifications.tasks.SettingsService.get_integer_setting",
@@ -108,7 +112,9 @@ class DeliveryRetryBudgetTests(TestCase):
             ),
         ):
             self.send(row)
+            EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)  # The scheduled retry is due
             self.send(row)
+            EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)
             final = self.send(row)
         self.assertEqual(send.call_count, 2)
         self.assertFalse(final["retry_scheduled"])
@@ -125,36 +131,25 @@ class DeliveryRetryBudgetTests(TestCase):
         self.assertEqual(enqueue.call_args.kwargs["email_log_id"], str(second.pk))
 
     def test_queue_recovery_keeps_persisted_retry_count(self) -> None:
-        self.log(provider_response={"retry_count": 2})
+        # The task carries only the id; the claim reads the persisted count from the row.
+        row = self.log(provider_response={"retry_count": 2})
         with patch("django_q.tasks.async_task", return_value="queued") as enqueue:
             process_email_queue()
-        self.assertEqual(enqueue.call_args.kwargs["retry_count"], 2)
+        self.assertEqual(set(enqueue.call_args.kwargs) - {"task_name"}, {"email_log_id"})
+        claimed, refused = claim_delivery(str(row.pk))
+        self.assertIsNone(refused)
+        self.assertEqual(claimed.delivery_attempts, 3, "the row's count, not a fresh budget")
 
     def test_retry_is_a_future_schedule_with_valid_worker_arguments(self) -> None:
         row = self.log()
         started = timezone.now()
-        self.assertTrue(
-            _schedule_email_retry(
-                email_log_id=str(row.pk),
-                to=[row.to_addr],
-                subject=row.subject,
-                body_text="Body",
-                body_html=None,
-                from_email=row.from_addr,
-                reply_to=None,
-                cc=None,
-                bcc=None,
-                tags=None,
-                track_opens=True,
-                track_clicks=True,
-                retry_count=1,
-            )
-        )
+        self.assertTrue(_schedule_email_retry(str(row.pk), 1))
         schedule = Schedule.objects.filter(func="apps.notifications.tasks.send_email_task").first()
         self.assertIsNotNone(schedule)
         self.assertGreater(schedule.next_run, started)
         self.assertEqual(schedule.schedule_type, Schedule.ONCE)
         self.assertNotIn("'schedule':", schedule.kwargs)
+        self.assertEqual(schedule.kwargs, f"{{'email_log_id': '{row.pk}'}}", "a schedule carries only the id")
 
 
 class EmailRetryLimitSettingsTests(TestCase):
@@ -170,14 +165,22 @@ class EmailRetryLimitSettingsTests(TestCase):
                         "category": "notifications",
                     },
                 )
-                row = EmailLog.objects.create(to_addr="retry@example.com", subject="Budget", body_text="Body")
+                row = EmailLog.objects.create(
+                    envelope=json.dumps({"to": ["retry@example.com"]}),
+                    to_addr="retry@example.com",
+                    subject="Budget",
+                    body_text="Body",
+                )
                 for attempt in range(maximum + 1):
                     claimed, refused = claim_delivery(str(row.pk), row.subject, None, supplied_retry=0)
                     self.assertIsNone(refused)
                     self.assertEqual(claimed.delivery_attempts, attempt + 1)
-                    failed, retry = record_failure(str(row.pk), TimeoutError("provider unavailable"))
+                    failed, retry = record_failure(
+                        str(row.pk), TimeoutError("provider unavailable"), claimed.claim_token
+                    )
                     self.assertEqual(retry, attempt < maximum)
                     self.assertEqual(failed.status, "queued" if retry else "failed")
+                    EmailLog.objects.filter(pk=row.pk).update(next_attempt_at=None)  # The retry is due
                 _, refused = claim_delivery(str(row.pk), row.subject, None, supplied_retry=0)
                 self.assertFalse(refused["retry_scheduled"])
                 # A stale queue row cannot obtain a new budget from recovery.

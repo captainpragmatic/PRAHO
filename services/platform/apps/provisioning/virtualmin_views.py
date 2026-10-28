@@ -28,6 +28,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django_q.tasks import async_task
 
 from apps.common.decorators import admin_required
+from apps.common.encryption import DecryptionError, EncryptionError
 from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
@@ -1014,9 +1015,16 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
     if request.method == "POST":
         form = VirtualminServerForm(request.POST, instance=server)
         if form.is_valid():
-            server = form.save()
-            messages.success(request, f"Server '{server.name}' updated successfully!")
-            return redirect("provisioning:virtualmin_server_detail", server_id=server.id)
+            try:
+                server = form.save()
+            except (EncryptionError, DecryptionError) as error:
+                # A rename re-binds the stored API password to the new hostname; one that cannot be read
+                # is entered again rather than kept unreadable (a stale keyring says so in the log).
+                logger.warning("⚠️ [Virtualmin] Server %s: API password not re-bound: %s", server.pk, error)
+                form.add_error("api_password", _("The stored API password cannot be kept: enter it again."))
+            else:
+                messages.success(request, f"Server '{server.name}' updated successfully!")
+                return redirect("provisioning:virtualmin_server_detail", server_id=server.id)
     else:
         form = VirtualminServerForm(instance=server)
 

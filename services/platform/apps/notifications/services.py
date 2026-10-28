@@ -19,11 +19,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import html
+import json
 import logging
 import re
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -36,11 +38,15 @@ from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
 
 from apps.common import counters, validators
+from apps.common.encryption import EncryptionError
+from apps.notifications.attachments import AttachmentInput, ResolvedAttachment, resolve_attachments
 from apps.notifications.models import (
+    EmailAttachment,
     EmailCampaign,
     EmailLog,
     EmailSuppression,
     EmailTemplate,
+    PendingDeliveryEvent,
     validate_email_subject,
     validate_template_content,
 )
@@ -310,6 +316,171 @@ class EmailRateLimiter:
 # ===============================================================================
 
 
+# Delivery callbacks that change a message's status, and the statuses each may replace. A status never
+# moves backwards: a bounce or a complaint is final, and a late "delivered" never overwrites it.
+DELIVERY_STATUS_EVENTS: dict[str, frozenset[str]] = {
+    "delivered": frozenset({"sent", "soft_bounced"}),
+    "soft_bounced": frozenset({"sent"}),
+    "bounced": frozenset({"sent", "delivered", "soft_bounced"}),
+    "complained": frozenset({"sent", "delivered", "soft_bounced", "bounced"}),
+}
+PENDING_DELIVERY_EVENT_WINDOW = timedelta(days=2)
+
+
+def apply_delivery_event(email_log: EmailLog, event_type: str, metadata: dict[str, Any] | None, now: Any) -> list[str]:
+    """Apply one callback to a locked row; the fields changed (empty: nothing to write)."""
+    if isinstance(email_log.provider_response, dict) and email_log.provider_response.get("erased"):
+        return []  # Its recipient was erased: a late callback writes nothing about them
+    fields: list[str] = []
+    replaces = DELIVERY_STATUS_EVENTS.get(event_type)
+    if replaces is not None and email_log.status in replaces:
+        email_log.status = event_type
+        fields.append("status")
+        if event_type == "delivered":
+            email_log.delivered_at = now
+            fields.append("delivered_at")
+    elif event_type == "opened" and not email_log.opened_at:
+        email_log.opened_at = now
+        fields.append("opened_at")
+    elif event_type == "clicked" and not email_log.clicked_at:
+        email_log.clicked_at = now
+        fields.append("clicked_at")
+    if metadata:
+        current = email_log.provider_response if isinstance(email_log.provider_response, dict) else {}
+        email_log.provider_response = {**current, f"{event_type}_event": metadata}
+        fields.append("provider_response")
+    return fields
+
+
+def suppress_after_soft_bounce(recipient: str, now: datetime) -> None:
+    """Suppress an address for 30 days once its soft bounces in the last week reach the threshold."""
+    soft_bounce_count = EmailLog.objects.filter(
+        to_addr=recipient,
+        status="soft_bounced",
+        sent_at__gte=now - timedelta(days=7),
+    ).count()
+    threshold = getattr(settings, "EMAIL_DELIVERABILITY", {}).get("SOFT_BOUNCE_THRESHOLD", 3)
+    if soft_bounce_count >= threshold:
+        EmailSuppressionService.suppress_email(recipient, "soft_bounce_threshold", duration_days=30)
+
+
+def apply_pending_delivery_events(email_log: EmailLog) -> None:
+    """Apply the callbacks that arrived before this row's provider id was recorded. The caller holds the lock."""
+    pending = list(PendingDeliveryEvent.objects.filter(provider_id=email_log.provider_id).order_by("created_at"))
+    if not pending:
+        return
+    fields: set[str] = set()
+    for event in pending:
+        fields.update(apply_delivery_event(email_log, event.event_type, event.metadata, event.created_at))
+    if fields:
+        email_log.save(update_fields=sorted(fields))
+    PendingDeliveryEvent.objects.filter(pk__in=[event.pk for event in pending]).delete()
+    if email_log.status != "soft_bounced":
+        return
+    soft_bounces = [event for event in pending if event.event_type == "soft_bounced" and event.recipient]
+    if soft_bounces:
+        # Counted once this commits, like a live callback: two replays for one address, each in its own
+        # transaction, would otherwise each miss the other's bounce. The recipients are decrypted there
+        # too, and robust: an unreadable recipient or a failed suppression never undoes the status just
+        # recorded.
+        transaction.on_commit(lambda: _suppress_replayed_soft_bounces(soft_bounces), robust=True)
+
+
+def _suppress_replayed_soft_bounces(events: list[PendingDeliveryEvent]) -> None:
+    """Count each address once, however many times the provider delivered its soft bounce."""
+    recipients: dict[str, str] = {}  # Lower-cased address -> the address as the provider gave it
+    for event in events:
+        try:
+            recipient = event.get_recipient()
+        except Exception:
+            logger.exception(f"🔥 [Email] Unreadable recipient on buffered callback {event.pk}")
+            continue
+        if recipient:
+            recipients.setdefault(recipient.lower(), recipient)
+    for recipient in recipients.values():
+        suppress_after_soft_bounce(recipient, timezone.now())
+
+
+@dataclass
+class OutgoingEmail:
+    """One message as written: what the row stores and what every send rebuilds."""
+
+    to: list[str]
+    subject: str
+    body_text: str
+    body_html: str | None = None
+    from_email: str = ""
+    reply_to: str | None = None
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
+    attachments: list[ResolvedAttachment] = field(default_factory=list)
+    tags: dict[str, str] = field(default_factory=dict)
+    track_opens: bool = True
+    track_clicks: bool = True
+    customer: Customer | None = None
+    sent_by: User | None = None
+    template_key: str = ""
+    priority: str = "normal"
+
+
+def compose_message(message: OutgoingEmail, attachments: list[tuple[str, bytes, str]]) -> EmailMessage:
+    """The one place a message is built, for the synchronous send and the worker alike."""
+    msg: Any
+    if message.body_html:
+        msg = EmailMultiAlternatives(
+            subject=message.subject,
+            body=message.body_text,
+            from_email=message.from_email,
+            to=message.to,
+            cc=message.cc,
+            bcc=message.bcc,
+            reply_to=[message.reply_to] if message.reply_to else None,
+        )
+        msg.attach_alternative(message.body_html, "text/html")
+    else:
+        msg = EmailMessage(
+            subject=message.subject,
+            body=message.body_text,
+            from_email=message.from_email,
+            to=message.to,
+            cc=message.cc,
+            bcc=message.bcc,
+            reply_to=[message.reply_to] if message.reply_to else None,
+        )
+    for filename, content, mimetype in attachments:
+        msg.attach(filename, content, mimetype)
+    # ESP metadata Anymail backends read; a plain Django backend ignores these attributes.
+    if message.tags:
+        msg.tags = list(message.tags.keys())
+        msg.metadata = message.tags
+    msg.track_opens = message.track_opens
+    msg.track_clicks = message.track_clicks
+    return cast("EmailMessage", msg)
+
+
+def stored_message(email_log: EmailLog) -> OutgoingEmail:
+    """The message a row holds, decrypted: what a worker sends."""
+    from apps.notifications.legacy import delivery_envelope  # noqa: PLC0415  # Deferred delivery validation
+
+    envelope = delivery_envelope(email_log)
+    meta = email_log.meta or {}
+    return OutgoingEmail(
+        to=list(envelope["to"]),
+        subject=email_log.subject,
+        body_text=email_log.get_decrypted_body_text(),
+        body_html=email_log.get_decrypted_body_html() or None,
+        from_email=email_log.from_addr,
+        reply_to=email_log.reply_to or None,
+        cc=list(envelope["cc"]),
+        bcc=list(envelope["bcc"]),
+        tags=dict(envelope["tags"]),
+        track_opens=bool(meta.get("track_opens", True)),
+        track_clicks=bool(meta.get("track_clicks", True)),
+        template_key=email_log.template_key,
+        priority=email_log.priority,
+    )
+
+
 def validate_email_log_subject(email_log: EmailLog, subject: str) -> str | None:
     """Reject invalid queued subjects permanently; return the persisted failure reason."""
     response = email_log.provider_response or {}
@@ -378,7 +549,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
+    def send_email(  # noqa: PLR0913  # One public entry: its parameters
         cls,
         to: str | list[str],
         subject: str,
@@ -388,7 +559,7 @@ class EmailService:
         reply_to: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
+        attachments: list[AttachmentInput] | None = None,
         customer: Customer | None = None,
         sent_by: User | None = None,
         template_key: str | None = None,
@@ -447,177 +618,66 @@ class EmailService:
                 error="All recipients are suppressed",
             )
 
-        # Check rate limit
-        allowed, _remaining = EmailRateLimiter.check_rate_limit()
-        if not allowed:
-            logger.warning("Email rate limit exceeded")
-            if async_send:
-                # Queue for later sending
-                return cls._queue_email_for_retry(
-                    to=active_recipients,
-                    subject=subject,
-                    body_text=body_text,
-                    body_html=body_html,
-                    from_email=from_email,
-                    reply_to=reply_to,
-                    cc=cc,
-                    bcc=bcc,
-                    attachments=attachments,
-                    tags=tags,
-                    track_opens=track_opens,
-                    track_clicks=track_clicks,
-                    customer=customer,
-                    sent_by=sent_by,
-                    template_key=template_key,
-                    priority=priority,
-                )
-            return EmailResult(
-                success=False,
-                error="Rate limit exceeded",
-            )
-
-        # #358: async tasks travel by value through the django-q2 Postgres ORM broker, so full
-        # attachment bytes (base64-inflated ~1.33x) would be persisted in django_q_ormq and
-        # re-persisted on retry. Above a configurable cap, send synchronously instead: the bytes
-        # are handled in-process and never bloat the broker table. Delivery is preserved.
-        if async_send and attachments:
-            total_attachment_bytes = sum(len(content) for _name, content, _mimetype in attachments)
-            max_async_attachment_bytes = (
-                SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
-            )
-            if max_async_attachment_bytes > 0 and total_attachment_bytes > max_async_attachment_bytes:
-                logger.warning(
-                    "Email attachments total %d bytes exceed the async cap (%d bytes); "
-                    "sending synchronously to avoid bloating the task broker (#358)",
-                    total_attachment_bytes,
-                    max_async_attachment_bytes,
-                )
-                async_send = False
-
-        # Send asynchronously if requested
-        if async_send:
-            return cls._send_async(
-                to=active_recipients,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                customer=customer,
-                sent_by=sent_by,
-                template_key=template_key,
-                priority=priority,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-            )
-
-        # Synchronous sending
-        return cls._send_now(
+        # Every attachment with its bytes: a reference is made from its source now, so its hash can be kept.
+        try:
+            parts = resolve_attachments(attachments)
+        except Exception as exc:
+            logger.warning("⚠️ [Email] Attachment could not be made: %s", exc)
+            return EmailResult(success=False, error=f"Attachment could not be made: {exc}")
+        message = OutgoingEmail(
             to=active_recipients,
             subject=subject,
             body_text=body_text,
             body_html=body_html,
-            from_email=from_email,
+            from_email=get_default_from_email() if from_email is None else from_email,
             reply_to=reply_to,
-            cc=cc,
-            bcc=bcc,
-            attachments=attachments,
-            customer=customer,
-            sent_by=sent_by,
-            template_key=template_key,
-            priority=priority,
-            tags=tags,
+            cc=list(cc or []),
+            bcc=list(bcc or []),
+            attachments=parts,
+            tags=dict(tags or {}),
             track_opens=track_opens,
             track_clicks=track_clicks,
-        )
-
-    @classmethod
-    def _send_now(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-    ) -> EmailResult:
-        """Send email synchronously."""
-        from_email = get_default_from_email() if from_email is None else from_email
-        provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        # Create email log entry
-        email_log = cls._create_email_log(
-            to=to[0],  # Primary recipient
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
             customer=customer,
             sent_by=sent_by,
+            template_key=template_key or "",
             priority=priority,
-            provider=provider,
         )
+        # Raw bytes have no source to make them again, so they never travel through the task tables: such a
+        # message is sent at once. References over the async cap are sent at once too (#358).
+        if async_send and any(part.ref is None for part in parts):
+            async_send = False
+        if async_send and parts:
+            cap = SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
+            if cap > 0 and sum(len(part.content) for part in parts) > cap:
+                async_send = False
 
         try:
-            # Build email message
-            msg: EmailMessage
-            if body_html:
-                msg = EmailMultiAlternatives(
-                    subject=subject,
-                    body=body_text,
-                    from_email=from_email,
-                    to=to,
-                    cc=cc,
-                    bcc=bcc,
-                    reply_to=[reply_to] if reply_to else None,
-                )
-                msg.attach_alternative(body_html, "text/html")
-            else:
-                msg = EmailMessage(
-                    subject=subject,
-                    body=body_text,
-                    from_email=from_email,
-                    to=to,
-                    cc=cc,
-                    bcc=bcc,
-                    reply_to=[reply_to] if reply_to else None,
-                )
+            return cls._dispatch(message, async_send=async_send)
+        except EncryptionError as refused:
+            # The message could not be stored sealed (a body that looks like ciphertext): nothing was kept.
+            logger.error(f"🔥 [Email] Message refused, not stored: {refused}")
+            return EmailResult(success=False, error=f"Message refused: {refused}")
 
-            # Add attachments
-            if attachments:
-                for filename, content, mimetype in attachments:
-                    msg.attach(filename, content, mimetype)
+    @classmethod
+    def _dispatch(cls, message: OutgoingEmail, *, async_send: bool) -> EmailResult:
+        allowed, _remaining = EmailRateLimiter.check_rate_limit()
+        if not allowed:
+            logger.warning("Email rate limit exceeded")
+            if async_send:
+                return cls._queue_email_for_retry(message)
+            return EmailResult(success=False, error="Rate limit exceeded")
+        if async_send:
+            return cls._send_async(message)
+        return cls._send_now(message)
 
-            # Add ESP-specific metadata for Anymail
-            # These attributes are supported when using Anymail backends
-            # and silently ignored with standard Django email backends
-            try:
-                if tags:
-                    msg.tags = list(tags.keys())  # type: ignore[attr-defined]
-                    msg.metadata = tags  # type: ignore[attr-defined]
-                msg.track_opens = track_opens  # type: ignore[attr-defined]
-                msg.track_clicks = track_clicks  # type: ignore[attr-defined]
-            except AttributeError:
-                # Standard Django EmailMessage doesn't support these
-                pass
-
-            reserved = False
+    @classmethod
+    def _send_now(cls, message: OutgoingEmail) -> EmailResult:
+        """Send at once; the row holds its claim from creation, as a worker's does."""
+        provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
+        email_log = cls._create_email_log(message, provider=provider, status="sending")
+        reserved = False
+        try:
+            msg = compose_message(message, [part.as_tuple() for part in message.attachments])
             # Reserve before delivery so a failed store or exhausted budget
             # cannot send an uncounted email.
             count = EmailRateLimiter.increment_counter()
@@ -625,26 +685,24 @@ class EmailService:
             maximum = getattr(settings, "EMAIL_RATE_LIMIT", {}).get("MAX_PER_MINUTE", 50)
             if count > maximum:
                 raise DjangoValidationError(_("Rate limit exceeded"))
+            from apps.notifications.delivery import record_success, renew_claim  # noqa: PLC0415  # Circular
+
+            if not renew_claim(str(email_log.id), email_log.claim_token):
+                raise RuntimeError("Claim lost before sending")
             msg.send(fail_silently=False)
             reserved = False
 
-            # Update log with success
-            email_log.status = "sent"
-            email_log.sent_at = timezone.now()
-
-            # Try to get message ID from anymail
             message_id = None
+            response: dict[str, Any] = {}
             if hasattr(msg, "anymail_status"):
                 message_id = msg.anymail_status.message_id
-                email_log.provider_id = message_id or ""
-                email_log.provider_response = {
+                response = {
                     "status": str(msg.anymail_status.status),
                     "esp_response": getattr(msg.anymail_status, "esp_response", {}),
                 }
+            record_success(str(email_log.id), email_log.claim_token, provider_id=message_id or "", response=response)
 
-            email_log.save()
-
-            logger.info(f"Email sent successfully: {subject[:50]}... to {to[0][:3]}***")
+            logger.info(f"Email sent successfully: {message.subject[:50]}... to {message.to[0][:3]}***")
 
             return EmailResult(
                 success=True,
@@ -658,10 +716,9 @@ class EmailService:
                 # The reservation was taken but nothing was delivered.
                 with contextlib.suppress(Error):
                     EmailRateLimiter.release_counter()
-            # Update log with failure
-            email_log.status = "failed"
-            email_log.provider_response = {"error": str(e)}
-            email_log.save()
+            from apps.notifications.delivery import record_sync_failure  # noqa: PLC0415  # Circular
+
+            record_sync_failure(str(email_log.id), e, email_log.claim_token)
 
             logger.error(f"Email sending failed: {e}")
 
@@ -673,217 +730,108 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-    ) -> EmailResult:
-        """Queue email for async sending via Django-Q2."""
-        from_email = get_default_from_email() if from_email is None else from_email
+    def _send_async(cls, message: OutgoingEmail) -> EmailResult:
+        """Store the whole message, then queue its id once the row has committed (never the content)."""
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        # Create email log entry with queued status
-        email_log = cls._create_email_log(
-            to=to[0],
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status="queued",
-        )
-
+        email_log = cls._create_email_log(message, provider=provider, status="queued")
         try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
-            )
-
-            # Queue the email task
-            task_id = async_task(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=str(email_log.id),
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                task_name=f"email:{template_key or 'direct'}:{to[0][:10]}",
-            )
-
-            logger.info(f"Email queued for async sending: {subject[:50]}... (task: {task_id})")
-
-            return EmailResult(
-                success=True,
-                email_log_id=str(email_log.id),
-                provider=provider,
-            )
-
+            from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
         except ImportError:
             # Django-Q2 not available, fall back to sync sending
             logger.warning("Django-Q2 not available, falling back to sync email sending")
             email_log.delete()
-            return cls._send_now(
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                customer=customer,
-                sent_by=sent_by,
-                template_key=template_key,
-                priority=priority,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-            )
+            return cls._send_now(message)
+
+        email_log_id = str(email_log.id)
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.notifications.tasks.send_email_task",
+                email_log_id=email_log_id,
+                task_name=f"email:{message.template_key or 'direct'}:{email_log_id}",
+            ),
+            # The caller's work has committed: an enqueue that fails must not be reported as its failure.
+            # The row stays queued, and the queue sweep sends it once it is overdue.
+            robust=True,
+        )
+        logger.info(f"Email queued for async sending: {message.subject[:50]}...")
+        return EmailResult(success=True, email_log_id=email_log_id, provider=provider)
 
     @classmethod
-    def _queue_email_for_retry(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        cls,
-        to: list[str],
-        subject: str,
-        body_text: str,
-        body_html: str | None = None,
-        from_email: str | None = None,
-        reply_to: str | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
-        tags: dict[str, str] | None = None,
-        track_opens: bool = True,
-        track_clicks: bool = True,
-        customer: Customer | None = None,
-        sent_by: User | None = None,
-        template_key: str | None = None,
-        priority: str = "normal",
-    ) -> EmailResult:
-        """Queue email for later retry due to rate limiting.
+    def _queue_email_for_retry(cls, message: OutgoingEmail) -> EmailResult:
+        """Rate limited: store the whole message and schedule its id for later (#228: nothing is degraded).
 
-        Forwards the FULL email — cc, bcc, attachments, tags, tracking — to the
-        queued task; the rate-limited path previously degraded the email
-        silently (#228 sibling).
+        The retry is a one-off schedule at the due time, written in the message's transaction: the
+        scheduler sees both once they commit, and neither without the other. (`async_task` has no delay:
+        a `schedule=` argument is handed to the task itself.)
         """
-        from_email = get_default_from_email() if from_email is None else from_email
+        from apps.notifications.tasks import _schedule_email_retry  # noqa: PLC0415  # Circular
+
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-
-        email_log = cls._create_email_log(
-            to=to[0],
-            from_addr=from_email,
-            reply_to=reply_to or "",
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html or "",
-            template_key=template_key or "",
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status="queued",
-        )
-
-        try:
-            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
-            )
-
-            validation_error = validate_email_log_subject(email_log, subject)
+        retry_delay = getattr(settings, "EMAIL_RETRY", {}).get("RETRY_DELAY_SECONDS", 60)
+        with transaction.atomic():
+            email_log = cls._create_email_log(message, provider=provider, status="queued")
+            validation_error = validate_email_log_subject(email_log, message.subject)
             if validation_error is not None:
                 return EmailResult(success=False, email_log_id=str(email_log.pk), error=validation_error)
-
-            retry_config = getattr(settings, "EMAIL_RETRY", {})
-            retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
-
-            async_task(
-                "apps.notifications.tasks.send_email_task",
-                email_log_id=str(email_log.id),
-                to=to,
-                subject=subject,
-                body_text=body_text,
-                body_html=body_html,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                attachments=attachments,
-                tags=tags,
-                track_opens=track_opens,
-                track_clicks=track_clicks,
-                schedule=timedelta(seconds=retry_delay),
-                task_name=f"email_retry:{template_key or 'direct'}:{to[0][:10]}",
+            email_log_id = str(email_log.id)
+            EmailLog.objects.filter(pk=email_log_id).update(
+                next_attempt_at=timezone.now() + timedelta(seconds=retry_delay)
             )
-
-            return EmailResult(
-                success=True,
-                email_log_id=str(email_log.id),
-                provider=provider,
-            )
-
-        except ImportError:
-            return EmailResult(
-                success=False,
-                error="Cannot queue email - Django-Q2 not available",
-            )
+            if not _schedule_email_retry(email_log_id, 0):
+                logger.warning(f"⚠️ [Email] Retry for {email_log_id} not scheduled; the queue sweep sends it")
+        return EmailResult(success=True, email_log_id=email_log_id, provider=provider)
 
     @staticmethod
-    def _create_email_log(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
-        to: str,
-        from_addr: str,
-        reply_to: str,
-        subject: str,
-        body_text: str,
-        body_html: str,
-        template_key: str,
-        customer: Customer | None,
-        sent_by: User | None,
-        priority: str,
-        provider: str,
-        status: str = "sending",
-    ) -> EmailLog:
-        """Create an email log entry."""
-        return EmailLog.objects.create(
-            to_addr=to,
-            from_addr=from_addr,
-            reply_to=reply_to,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            template_key=template_key,
-            customer=customer,
-            sent_by=sent_by,
-            priority=priority,
-            provider=provider,
-            status=status,
-        )
+    def _create_email_log(message: OutgoingEmail, *, provider: str, status: str) -> EmailLog:
+        """Store the whole message, with its attachments by reference, in one transaction.
+
+        A row created `sending` (the synchronous path) holds its claim from creation. Attachments with no
+        source are marked: such a message is never resent, because it could not be resent whole.
+        """
+        claim: dict[str, Any] = {}
+        if status == "sending":
+            from apps.notifications.delivery import CLAIM_LEASE  # noqa: PLC0415  # Circular
+
+            claim = {"claim_token": uuid.uuid4(), "lease_until": timezone.now() + CLAIM_LEASE, "delivery_attempts": 1}
+        meta: dict[str, Any] = {"track_opens": message.track_opens, "track_clicks": message.track_clicks}
+        if any(part.ref is None for part in message.attachments):
+            meta["attachments_unrecoverable"] = True
+        envelope = {"to": message.to, "cc": message.cc, "bcc": message.bcc, "tags": message.tags}
+        with transaction.atomic():
+            email_log = EmailLog.objects.create(
+                to_addr=message.to[0],
+                from_addr=message.from_email,
+                reply_to=message.reply_to or "",
+                subject=message.subject,
+                body_text=message.body_text,
+                body_html=message.body_html or "",
+                envelope=json.dumps(envelope),
+                meta=meta,
+                template_key=message.template_key,
+                customer=message.customer,
+                sent_by=message.sent_by,
+                priority=message.priority,
+                provider=provider,
+                status=status,
+                **claim,
+            )
+            EmailAttachment.objects.bulk_create(
+                [
+                    EmailAttachment(
+                        email_log=email_log,
+                        position=position,
+                        source_type=part.ref.source_type,
+                        source_id=part.ref.source_id,
+                        filename=part.filename,
+                        sha256=part.sha256,
+                        size=len(part.content),
+                        language=part.language,
+                    )
+                    for position, part in enumerate(message.attachments)
+                    if part.ref is not None
+                ]
+            )
+        return email_log
 
     # ===============================================================================
     # TEMPLATE-BASED EMAIL SENDING
@@ -902,7 +850,7 @@ class EmailService:
         reply_to: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
-        attachments: list[tuple[str, bytes, str]] | None = None,
+        attachments: list[AttachmentInput] | None = None,
         async_send: bool = True,
         **kwargs: Any,
     ) -> EmailResult:
@@ -1237,7 +1185,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def handle_delivery_event(  # Complexity: multi-step workflow  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    def handle_delivery_event(
         cls,
         event_type: str,
         message_id: str,
@@ -1259,59 +1207,30 @@ class EmailService:
             True if event was processed successfully
         """
         try:
-            # Find the email log
-            email_log = EmailLog.objects.filter(provider_id=message_id).first()
-            if not email_log:
-                email_log = EmailLog.objects.filter(to_addr=recipient).order_by("-sent_at").first()
-
-            if not email_log:
-                logger.warning(f"No email log found for delivery event: {message_id}")
-                return False
-
             now = timezone.now()
-
-            if event_type == "delivered":
-                email_log.status = "delivered"
-                email_log.delivered_at = now
-
-            elif event_type == "bounced":
-                email_log.status = "bounced"
-                # Suppress the email address for hard bounces
+            # Suppression is about the address, so it applies whether or not the message is known yet.
+            if event_type == "bounced":
                 EmailSuppressionService.suppress_email(recipient, "hard_bounce")
-
-            elif event_type == "soft_bounced":
-                email_log.status = "soft_bounced"
-                # Check soft bounce threshold
-                soft_bounce_count = EmailLog.objects.filter(
-                    to_addr=recipient,
-                    status="soft_bounced",
-                    sent_at__gte=now - timedelta(days=7),
-                ).count()
-                threshold = getattr(settings, "EMAIL_DELIVERABILITY", {}).get("SOFT_BOUNCE_THRESHOLD", 3)
-                if soft_bounce_count >= threshold:
-                    EmailSuppressionService.suppress_email(recipient, "soft_bounce_threshold", duration_days=30)
-
             elif event_type == "complained":
-                email_log.status = "complained"
-                # Always suppress complained addresses
                 EmailSuppressionService.suppress_email(recipient, "complaint")
-
-            elif event_type == "opened":
-                if not email_log.opened_at:
-                    email_log.opened_at = now
-
-            elif event_type == "clicked":
-                if not email_log.clicked_at:
-                    email_log.clicked_at = now
-
-            # Store metadata
-            if metadata:
-                email_log.provider_response = {
-                    **(email_log.provider_response or {}),
-                    f"{event_type}_event": metadata,
-                }
-
-            email_log.save()
+            with transaction.atomic():
+                # Matched by provider id ONLY: matching by address put one message's bounce on another.
+                email_log = (
+                    EmailLog.objects.select_for_update().filter(provider_id=message_id).first() if message_id else None
+                )
+                if email_log is None:
+                    if message_id and event_type in DELIVERY_STATUS_EVENTS:
+                        # The send may not have recorded its provider id yet: applied when it does.
+                        PendingDeliveryEvent.objects.create(
+                            provider_id=message_id, event_type=event_type, metadata=metadata or {}, recipient=recipient
+                        )
+                    logger.warning(f"No email log yet for delivery event: {message_id}")
+                    return False
+                fields = apply_delivery_event(email_log, event_type, metadata, now)
+                if fields:
+                    email_log.save(update_fields=fields)
+            if event_type == "soft_bounced" and email_log.status == "soft_bounced":
+                suppress_after_soft_bounce(recipient, now)
 
             logger.info(f"Processed {event_type} event for {recipient[:3]}***")
             return True

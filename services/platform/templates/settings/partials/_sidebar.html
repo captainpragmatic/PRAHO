@@ -10,8 +10,11 @@
     {% trans 'Search settings' as search_settings_label %}
     {% trans 'Search settings…' as search_settings_placeholder %}
     {% url 'settings:search' as settings_search_url %}
-    {% input_field "q" input_type="search" aria_label=search_settings_label placeholder=search_settings_placeholder autocomplete="off" container_class="mb-4" hx_get=settings_search_url hx_trigger="input changed delay:300ms" hx_target="#search-results" hx_swap="innerHTML" %}
+    {% input_field "q" input_type="search" aria_label=search_settings_label placeholder=search_settings_placeholder autocomplete="off" container_class="mb-4" hx_get=settings_search_url hx_trigger="input changed delay:300ms" hx_target="#search-results" hx_swap="innerHTML" hx_sync="this:replace" %}
     <div id="search-results"></div>
+    {% if is_admin %}
+    <a href="{% url 'settings:setup_checklist' %}" class="block px-3 py-2 mb-3 rounded-md text-sm font-semibold text-blue-300">{% trans "Setup checklist" %}</a>
+    {% endif %}
     <nav class="space-y-5" x-show="navOpen" x-cloak x-transition.opacity>
       {% for zone in nav_zones %}
       <div>

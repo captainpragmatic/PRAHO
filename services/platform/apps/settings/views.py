@@ -29,6 +29,7 @@ from django.views.decorators.http import require_http_methods
 from django_q.models import OrmQ, Schedule, Task
 
 from apps.common.decorators import admin_required
+from apps.common.encryption import ENCRYPTED_PREFIX, DecryptionError
 from apps.common.http import mark_download
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Err, Ok
@@ -396,6 +397,12 @@ def _build_import_updates(
             skipped.append({"key": key, "reason": "unknown setting key"})
             continue
 
+        # An exported secret is ciphertext bound to the row it came from: it never decrypts on a recreated
+        # row, and taking it as is would hide that. The operator types the secret again instead.
+        if isinstance(entry["value"], str) and entry["value"].startswith(ENCRYPTED_PREFIX):
+            skipped.append({"key": key, "reason": "encrypted value: re-enter this secret in Settings"})
+            continue
+
         if not include_sensitive and SystemSetting.objects.filter(key=key, is_sensitive=True).exists():
             skipped.append({"key": key, "reason": "sensitive (use ?include_sensitive=true)"})
             continue
@@ -523,8 +530,15 @@ def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str,
     """Template context for one setting row, with deployment inheritance explicit."""
     inherited = definition.deployment_fallback and row is None
     fallback = definition.deployment_default() if definition.deployment_fallback else definition.default
-    current: object = row.get_typed_value() if row is not None else fallback
-    configured = bool(current not in (None, ""))
+    unreadable = False
+    try:
+        current: object = row.get_typed_value() if row is not None else fallback
+    except DecryptionError:
+        logger.warning("⚠️ [Settings] Stored setting cannot be read: %s", definition.key)
+        current = None
+        unreadable = True
+    configured = not unreadable and current not in (None, "")
+    modified = row is not None and (unreadable or current != definition.default)
     # Credentials remain write-only, including values inherited from deployment.
     if definition.sensitive:
         current = None
@@ -548,8 +562,9 @@ def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str,
         # the CATALOG default as JSON — never the baseline/current value.
         "default_json": json.dumps(definition.default, ensure_ascii=False, default=str),
         "baseline": row.updated_at.isoformat() if row is not None else "",
-        "modified": row is not None and row.get_typed_value() != definition.default,
+        "modified": modified,
         "configured": configured,
+        "unreadable": unreadable,
         "updated_at": row.updated_at if row is not None else None,
         "choices": [
             (value, definition.choice_labels.get(str(value), str(value)))
@@ -593,14 +608,13 @@ def settings_home(request: HttpRequest) -> HttpResponse:
     definitions = {d.key: d for d in CATALOG}
     rows = {row.key: row for row in SystemSetting.objects.filter(key__in=list(definitions))}
 
-    modified_count = sum(
-        1 for key, row in rows.items() if key in definitions and row.get_typed_value() != definitions[key].default
-    )
+    contexts = {key: _row_context(definitions[key], row) for key, row in rows.items()}
+    modified_count = sum(bool(context["modified"]) for context in contexts.values())
 
     integration_state = []
     for group in groups_in_zone(ZONE_INTEGRATIONS):
         secret_defs = [d for d in defs_for_group(group.slug) if d.sensitive]
-        configured = all(rows.get(d.key) is not None and rows[d.key].value not in (None, "") for d in secret_defs)
+        configured = all(bool(contexts.get(d.key, {}).get("configured")) for d in secret_defs)
         integration_state.append(
             {
                 "group": group,
@@ -847,12 +861,36 @@ def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
     return JsonResponse({"success": False, "error": result.error.message}, status=400)
 
 
+def _test_node_dns_configuration() -> tuple[bool, str]:
+    from apps.infrastructure.deployment_preflight import validate_deployment_dns_zone  # noqa: PLC0415
+    from apps.infrastructure.dns_gateway import CloudflareDnsGateway  # noqa: PLC0415
+
+    token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "").strip()
+    zone_id = str(SettingsService.get_setting("node_deployment.dns_cloudflare_zone_id", "") or "").strip()
+    suffix = validate_deployment_dns_zone(
+        str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+    )
+    if not token or not zone_id or suffix.is_err():
+        return False, str(_("Configure the DNS suffix, Cloudflare token and zone ID first."))
+    result = CloudflareDnsGateway(token, timeout=5, max_retries=0).get_zone_name(zone_id)
+    zone = result.unwrap().lower().rstrip(".") if result.is_ok() else ""
+    ok = bool(zone and (suffix.unwrap() == zone or suffix.unwrap().endswith("." + zone)))
+    message = (
+        _("Cloudflare zone access and DNS suffix verified. No records were changed.")
+        if ok
+        else _("Cloudflare zone access or DNS suffix verification failed. Check the token and zone ID.")
+    )
+    return ok, str(message)
+
+
 @admin_required
 @require_http_methods(["POST"])
 def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
     """🔌 Test an integration's connectivity using its real gateway"""
     try:
-        if integration == "stripe":
+        if integration == "node-deployment":
+            ok, message = _test_node_dns_configuration()
+        elif integration == "stripe":
             from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415  # ADR-0007
 
             ok = StripeGateway().validate_configuration()
@@ -893,7 +931,7 @@ def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
             from apps.billing.efactura.token_storage import OAuthToken  # noqa: PLC0415  # ADR-0007
 
             cui = efactura_settings.company_cui
-            token = OAuthToken.objects.get_valid_token(cui) if cui else None
+            token = OAuthToken.objects.get_valid_token(cui, efactura_settings.environment) if cui else None
             ok = token is not None
             message = _("Active ANAF OAuth token present") if ok else _("No valid ANAF OAuth token — authorize first")
         else:

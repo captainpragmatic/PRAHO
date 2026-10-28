@@ -74,7 +74,7 @@ class EmailTemplateSecurityTests(TestCase):
             category="system",
         )
 
-        safe_html, safe_text = template.get_sanitized_content()
+        safe_html, _safe_text = template.get_sanitized_content()
 
         # Should strip dangerous HTML tags
         self.assertNotIn("<script>", safe_html)
@@ -85,11 +85,7 @@ class EmailTemplateSecurityTests(TestCase):
 class EmailLogSecurityTests(TestCase):
     """🔒 Tests for EmailLog model security"""
 
-    @patch("apps.notifications.models.ENCRYPTION_AVAILABLE", True)
-    @patch("apps.notifications.models.encrypt_model_secret", return_value="aes:encrypted")
-    @patch("apps.notifications.models.is_encrypted", return_value=False)
-    def test_email_content_encryption_on_save(self, mock_is_encrypted, mock_encrypt):
-
+    def test_email_content_encryption_on_save(self):
         email_log = EmailLog(
             to_addr="test@example.com",
             subject="Test Email",
@@ -101,9 +97,13 @@ class EmailLogSecurityTests(TestCase):
 
         email_log.save()
 
-        # Should have called encryption and marked as encrypted
-        mock_encrypt.assert_called()
-        self.assertTrue(email_log.body_encrypted)
+        # Both bodies are stored sealed for this row, and read back as written.
+        stored = EmailLog.objects.get(pk=email_log.pk)
+        self.assertTrue(stored.body_text.startswith("aes:v2:"))
+        self.assertTrue(stored.body_html.startswith("aes:v2:"))
+        self.assertEqual(stored.get_decrypted_body_text(), "Sensitive content")
+        self.assertEqual(stored.get_decrypted_body_html(), "<p>Sensitive content</p>")
+        self.assertTrue(stored.body_encrypted)
 
     def test_email_validation_on_clean(self):
         """🔒 Test that EmailLog validates fields on clean()"""
