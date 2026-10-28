@@ -157,7 +157,10 @@ def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
     assert harden(container).returncode == 0
     # A server an earlier deploy left open to everyone, as every deploy did before the allowlist was fed.
     docker("exec", container, "ufw", "allow", "9876/tcp")
-    assert "ufw allow 9876/tcp" in docker("exec", container, "ufw", "show", "added").stdout
+    docker("exec", container, "ufw", "allow", "9876")
+    added = docker("exec", container, "ufw", "show", "added").stdout
+    assert "ufw allow 9876/tcp" in added
+    assert "ufw allow 9876\n" in added
     again = harden(container, 9876, sources="127.0.0.1/32 198.51.100.7/32")
     assert again.returncode == 0, again.stdout[-7000:] + again.stderr[-1000:]
     rules = [line for line in docker("exec", container, "ufw", "show", "added").stdout.splitlines() if "9876" in line]

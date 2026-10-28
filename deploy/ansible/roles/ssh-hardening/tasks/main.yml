@@ -198,8 +198,9 @@
       community.general.ufw:
         rule: allow
         port: "{{ ssh_target_port }}"
-        proto: tcp
+        proto: "{{ item }}"
         delete: true
+      loop: [tcp, any]
 
     # A source dropped from the list keeps its rule unless it is removed. The controller is in the list.
     - name: Find SSH source rules the allowlist no longer names

@@ -17,8 +17,12 @@ def stale_sources(added: str, port: int, allowed: list[str]) -> list[dict[str, s
     stale = []
     for line in added.splitlines():
         match = RULE.fullmatch(line.strip())
-        if match and int(match.group(2)) == port and ipaddress.ip_network(match.group(1), strict=False) not in wanted:
-            stale.append({"source": match.group(1), "proto": match.group(3) or "any"})
+        if not match or int(match.group(2)) != port:
+            continue
+        source = match.group(1)
+        # "from any" opens the port to everyone, so it is never on the list.
+        if source == "any" or ipaddress.ip_network(source, strict=False) not in wanted:
+            stale.append({"source": source, "proto": match.group(3) or "any"})
     return stale
 
 
