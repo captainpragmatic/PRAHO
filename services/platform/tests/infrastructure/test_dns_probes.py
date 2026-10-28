@@ -14,8 +14,15 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.rrset
 import pytest
+from django.test import SimpleTestCase
 
-from apps.infrastructure.dns_probes import DnsProbeTransport, ProbeBudget, ProbeTarget, probe_hosted_domain_dns
+from apps.infrastructure.dns_probes import (
+    DnsProbeTransport,
+    ProbeBudget,
+    ProbeError,
+    ProbeTarget,
+    probe_hosted_domain_dns,
+)
 
 DOMAIN = "customer.example.net"
 ACCOUNT = "a1b2c3d4.accounts.example.org"
@@ -480,3 +487,53 @@ def test_hosted_mx_exchange_names_are_case_insensitive():
     wire.records[(DOMAIN, "MX")] = (f"10 {ACCOUNT.upper()}.",)
     result, _ = report(wire, target=replace(TARGET, hosted_mail=True))
     assert result["components"]["mx"]["state"] == "healthy"
+
+
+class DnsTreeClimbStopsBelowTheRootTests(SimpleTestCase):
+    """RFC 8659 climbs to the TLD and stops: the DNS root is never asked for CAA nor taken as a zone."""
+
+    ROOT_SOA = dns.rrset.from_text(
+        ".", 86400, "IN", "SOA", "a.root-servers.net. nstld.verisign-grs.com. 1 1800 900 604800 86400"
+    )
+
+    def test_no_caa_anywhere_up_to_the_tld_is_unrestricted_and_the_root_is_never_asked(self):
+        wire = Wire()
+        self.assertEqual([key for key in wire.records if key[1] == "CAA"], [])
+        result, fixture = report(wire)
+        caa = result["components"]["caa"]
+        self.assertEqual((caa["state"], caa["code"]), ("healthy", "caa_unrestricted"))
+        asked = {question.name for question in fixture.calls if question.record_type == "CAA"}
+        self.assertLessEqual({DOMAIN, "example.net", "net"}, asked)
+        self.assertFalse(asked & {"", "."})
+
+    def test_a_caa_policy_at_the_tld_or_the_parent_is_still_found(self):
+        for owner in ("net", "example.net"):
+            with self.subTest(owner=owner):
+                wire = Wire()
+                wire.records[(owner, "CAA")] = ('0 issue "other.example"',)
+                result, _ = report(wire)
+                caa = result["components"]["caa"]
+                self.assertEqual((caa["state"], caa["code"]), ("broken", "caa_excludes_letsencrypt"))
+
+    def test_zone_discovery_never_takes_the_dns_root_as_a_zone(self):
+        for case, authority in (("root SOA only", self.ROOT_SOA), ("no SOA at all", None)):
+            with self.subTest(case):
+                asked = []
+
+                def discovery(question, authority=authority, asked=asked):
+                    asked.append(question.name)
+                    response = dns.message.make_response(dns.message.make_query(question.name, question.record_type))
+                    response.set_rcode(dns.rcode.NXDOMAIN)
+                    if authority is not None:
+                        response.authority.append(authority)
+                    return response
+
+                transport = DnsProbeTransport(query=discovery, recursive_servers=("1.1.1.1",))
+                try:
+                    outcome = f"zone {transport.zone('customer.nosuchtld')}"
+                except ProbeError as error:
+                    outcome = error.code
+                except dns.exception.DNSException as error:
+                    outcome = type(error).__name__
+                self.assertEqual(outcome, "dns_zone_unknown")
+                self.assertNotIn(".", asked)

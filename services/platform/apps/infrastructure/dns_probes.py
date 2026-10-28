@@ -155,7 +155,12 @@ def _name(value: str) -> str:
 
 
 def _parent(value: str) -> str:
-    return dns.name.from_text(value).parent().to_text(omit_final_dot=True)
+    """The parent name, or "" above a TLD: no climb asks the DNS root (RFC 8659 stops at the TLD).
+
+    The root renders as ".", which is truthy, so a `while current:` climb needs this to end.
+    """
+    parent = dns.name.from_text(value).parent()
+    return "" if parent == dns.name.root else parent.to_text(omit_final_dot=True)
 
 
 def _tcp_question(question: WireQuestion) -> dns.message.Message:
@@ -233,9 +238,10 @@ class DnsProbeTransport:
                 if rrset.rdtype == dns.rdatatype.SOA and dns.name.from_text(current).is_subdomain(rrset.name)
             ]
             if candidates:
-                zone = max(candidates, key=lambda candidate: len(candidate.labels)).to_text(omit_final_dot=True)
-                if not zone:
+                closest = max(candidates, key=lambda candidate: len(candidate.labels))
+                if closest == dns.name.root:  # A nonexistent TLD: the root is never a customer's zone.
                     raise ProbeError("dns_zone_unknown")
+                zone = closest.to_text(omit_final_dot=True)
                 self._zones[name] = zone
                 return zone
             current = _parent(current)
