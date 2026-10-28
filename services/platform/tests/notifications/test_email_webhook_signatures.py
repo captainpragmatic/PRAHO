@@ -6,11 +6,12 @@ import base64
 import hashlib
 import hmac
 import time
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.http import HttpRequest
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.notifications.webhooks import SENDGRID_SIGNATURE_MAX_AGE_SECONDS, SendGridWebhookView
 
@@ -63,29 +64,32 @@ class SendGridSignatureTests(SimpleTestCase):
         self.assertFalse(self.valid(_sign(self.private, self.now), "not-a-number"))
 
 
-class MailgunReplayTests(SimpleTestCase):
-    """Mailgun's signature covers only timestamp and token, so a token is good once and only while fresh."""
+@override_settings(ANYMAIL={"MAILGUN_API_KEY": "mailgun-test-key"}, DEBUG=False)
+class MailgunReplayTests(TestCase):
+    """Mailgun's signature covers only timestamp and token: each token is applied once, while fresh."""
 
     KEY = "mailgun-test-key"
 
-    def valid(self, timestamp: str, token: str) -> bool:
+    def deliver(self, timestamp: str, token: str, process: object = None) -> int:
         from apps.notifications.webhooks import MailgunWebhookView  # noqa: PLC0415
 
         signature = hmac.new(self.KEY.encode(), f"{timestamp}{token}".encode(), hashlib.sha256).hexdigest()
         request = RequestFactory().post(
-            "/webhooks/email/mailgun/", {"timestamp": timestamp, "token": token, "signature": signature}
+            "/webhooks/email/mailgun/",
+            {"timestamp": timestamp, "token": token, "signature": signature, "event": "delivered"},
         )
-        with override_settings(
-            ANYMAIL={"MAILGUN_API_KEY": self.KEY},
-            DEBUG=False,
-            CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "mailgun"}},
-        ):
-            return MailgunWebhookView()._validate_signature(request)
+        with patch.object(MailgunWebhookView, "_process_event", side_effect=process):
+            return MailgunWebhookView().post(request).status_code
 
-    def test_a_token_is_accepted_once(self) -> None:
+    def test_a_token_is_applied_once(self) -> None:
         now = str(int(time.time()))
-        self.assertTrue(self.valid(now, "fresh-token"))
-        self.assertFalse(self.valid(now, "fresh-token"))
+        self.assertEqual(self.deliver(now, "fresh-token"), 200)
+        self.assertEqual(self.deliver(now, "fresh-token"), 403)
+
+    def test_a_failure_before_the_event_is_applied_leaves_the_token_redeliverable(self) -> None:
+        now = str(int(time.time()))
+        self.assertEqual(self.deliver(now, "crash-token", RuntimeError("worker stopped")), 500)
+        self.assertEqual(self.deliver(now, "crash-token"), 200)
 
     def test_a_stale_timestamp_is_refused(self) -> None:
-        self.assertFalse(self.valid(str(int(time.time()) - 3600), "old-token"))
+        self.assertEqual(self.deliver(str(int(time.time()) - 3600), "old-token"), 403)

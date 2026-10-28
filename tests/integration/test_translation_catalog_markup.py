@@ -26,10 +26,12 @@ TAG = re.compile(r"<[^>]*>")
 
 
 def _added_markup(msgid: str, msgstr: str) -> list[str]:
-    if TAG.search(msgid):
-        # A message with markup keeps exactly its tags; only the text between them may change.
-        return [] if sorted(TAG.findall(msgid)) == sorted(TAG.findall(msgstr)) else ["tags"]
-    return [char for char in MARKUP if msgstr.count(char) > msgid.count(char)]
+    if sorted(TAG.findall(msgid)) != sorted(TAG.findall(msgstr)):
+        return ["tags"]  # a message keeps exactly its own tags
+    # Outside its tags, a translation may not gain markup characters either: an unclosed
+    # "<img ..." borrows its ">" from the template around it.
+    source, text = TAG.sub("", msgid), TAG.sub("", msgstr)
+    return [char for char in MARKUP if text.count(char) > source.count(char)]
 
 
 def _offenders(catalog: Path) -> list[str]:
@@ -61,6 +63,7 @@ def test_the_check_catches_a_hostile_translation() -> None:
     assert _added_markup("Save", "Save\n</script>")
     assert not _added_markup("<b>Note</b>: done", "<b>Notă</b>: gata")
     assert _added_markup("<b>Note</b>", "<b onclick=x>Notă</b>")
+    assert _added_markup("<b>Note</b>", "<b>Notă</b><img src=x onerror=alert(1) ")
 
 
 # Sites where a translated value reaches a component or element and is escaped explicitly (2026-10-28

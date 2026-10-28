@@ -39,6 +39,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
+from apps.common import counters
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.validators import log_security_event
 from apps.notifications.services import EmailPreferenceService, EmailService
@@ -506,7 +507,7 @@ def _sendgrid_signature_valid(public_key_b64: str, signature_b64: str, signed: b
 
 # How old a signed SendGrid delivery may be (seconds); SendGrid retries with a fresh timestamp.
 SENDGRID_SIGNATURE_MAX_AGE_SECONDS = 300
-# The same for Mailgun, whose signed tokens are also refused a second time within twice this.
+# The same for Mailgun; post() also refuses a token it already processed, for twice this long.
 MAILGUN_SIGNATURE_MAX_AGE_SECONDS = 300
 
 
@@ -630,6 +631,12 @@ class MailgunWebhookView(View):
                 )
                 return HttpResponse("Invalid signature", status=403)
 
+            # Once per token, recorded only after the event is applied: a crash before that lets
+            # Mailgun redeliver. The counter table never drops a row before it expires.
+            replay_key = f"mailgun-webhook-token:{request.POST.get('token', '')}"
+            if counters.peek(replay_key):
+                return HttpResponse("Already processed", status=403)
+
             # Parse event data
             event_data = request.POST.get("event-data")
             if event_data:
@@ -641,6 +648,7 @@ class MailgunWebhookView(View):
                 data = dict(request.POST)
 
             self._process_event(data)
+            counters.increment(replay_key, MAILGUN_SIGNATURE_MAX_AGE_SECONDS * 2)
 
             return HttpResponse("OK", status=200)
 
@@ -670,12 +678,8 @@ class MailgunWebhookView(View):
         if not hmac.compare_digest(signature, expected):
             return False
         # The signature covers only timestamp and token, not the event: a captured triple must be
-        # fresh and used once, or it could carry any event body again.
-        try:
-            fresh = abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
-        except ValueError:
-            return False
-        return fresh and cache.add(f"mailgun-webhook-token:{token}", 1, MAILGUN_SIGNATURE_MAX_AGE_SECONDS * 2)
+        # fresh, and post() accepts each token once.
+        return timestamp.isdigit() and abs(time.time() - int(timestamp)) <= MAILGUN_SIGNATURE_MAX_AGE_SECONDS
 
     def _process_event(self, data: dict[str, Any]) -> None:
         """Process a Mailgun event."""
