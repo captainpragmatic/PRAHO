@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Opening the customer portal' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-16 max-w-md mx-auto text-center">
+  <p class="text-slate-200" role="status">
+    {% blocktrans trimmed with name=target.get_full_name %}Opening the customer portal as {{ name }}…{% endblocktrans %}
+  </p>
+  {# The one-time code travels in the body of this POST only: never in a URL, a log or history. #}
+  <form id="customer-view-handoff" method="post" action="{{ redeem_url }}" class="mt-6" data-single-submit>
+    <input type="hidden" name="code" value="{{ code }}">
+    <noscript>{% trans 'Continue' as continue_label %}{% button continue_label type="submit" variant="primary" %}</noscript>
+  </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('customer-view-handoff').requestSubmit();
+  });
+</script>
+{% endblock %}

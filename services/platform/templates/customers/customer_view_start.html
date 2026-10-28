@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Sign in as customer' %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-2xl mx-auto">
+  <a href="{% url 'customers:detail' customer.id %}" class="text-slate-400 hover:text-white">
+    ← {% trans 'Back to customer details' %}
+  </a>
+
+  <h1 class="text-2xl font-bold text-white mt-4">{% trans 'Sign in as customer' %}</h1>
+  <p class="text-slate-400 text-sm mt-1">
+    {% blocktrans trimmed with name=target.get_full_name email=target.email customer_name=customer.get_display_name %}
+      Open the customer portal as {{ name }} ({{ email }}) for {{ customer_name }}. You can look, not change anything, for 30 minutes at most.
+    {% endblocktrans %}
+  </p>
+
+  {% if error %}
+    <div class="mt-4">{% alert error variant="danger" %}</div>
+  {% endif %}
+
+  {% for blocker in blockers %}
+    <div class="mt-4" data-customer-view-blocker="{{ blocker.code }}">
+      {% alert blocker.message variant="warning" %}
+      {% if blocker.remedy_url %}
+        <a href="{{ blocker.remedy_url }}" class="inline-block mt-2 text-sm text-primary-400 hover:text-primary-300">{% trans 'Fix this' %} →</a>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  {% if target_refusal %}
+    <div class="mt-4" data-customer-view-blocker="target">{% alert target_refusal variant="info" %}</div>
+  {% endif %}
+
+  {% if not blockers and not target_refusal %}
+    <form method="post" class="mt-6 space-y-4 bg-slate-800 rounded-lg border border-slate-700 p-6" data-single-submit>
+      {% csrf_token %}
+      {% trans 'Reason category' as category_label %}
+      {% input_field "reason_category" input_type="select" html_id="customer-view-reason-category" label=category_label options=reason_options value=values.reason_category required=True %}
+      {% trans 'Reason' as reason_label %}
+      {% trans 'What you need to see, in 10 to 500 characters. It is kept in the audit trail.' as reason_help %}
+      {% input_field "reason" input_type="textarea" html_id="customer-view-reason" label=reason_label help_text=reason_help value=values.reason rows=3 maxlength=500 required=True %}
+      {% trans 'Ticket reference (optional)' as ticket_label %}
+      {% input_field "ticket_reference" html_id="customer-view-ticket" label=ticket_label value=values.ticket_reference maxlength=100 %}
+      {% trans 'Open the portal' as submit_label %}
+      {% url 'customers:detail' customer.id as cancel_url %}
+      {% form_actions submit_label=submit_label cancel_url=cancel_url %}
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
