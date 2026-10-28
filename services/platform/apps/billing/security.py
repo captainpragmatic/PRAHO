@@ -41,7 +41,7 @@ def validate_efactura_url(url: str) -> str:
         raise ValidationError(str(exc)) from None
 
     # Additional e-Factura-specific suspicious pattern check
-    if any(suspicious in url.lower() for suspicious in ["localhost", "0.0.0.0", "metadata"]):
+    if any(suspicious in url.lower() for suspicious in ["localhost", "0.0.0.0", "metadata"]):  # nosec B104 - deny-list pattern matched against a URL, not a bind address
         raise ValidationError(_("URL contains suspicious patterns"))
 
     return url

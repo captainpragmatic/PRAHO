@@ -238,7 +238,7 @@ class SESWebhookView(View):
                 signature,
                 canonical_message.encode("utf-8"),
                 padding.PKCS1v15(),
-                hashes.SHA1(),  # noqa: S303  — AWS SNS uses SHA1 for signature v1
+                hashes.SHA1(),  # noqa: S303  # nosec B303 - AWS SNS SignatureVersion 1 mandates RSA-SHA1; any other version is rejected above
             )
             return True
         except Exception:

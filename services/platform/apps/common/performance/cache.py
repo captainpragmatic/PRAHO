@@ -220,7 +220,8 @@ class CacheService:
         """Generate a cache key for a queryset count."""
         # Create a hash of the query SQL
         sql = str(queryset.query)
-        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]  # noqa: S324  # Safe: cache key hashing, not cryptographic
+        # Safe: cache key hashing, not cryptographic
+        query_hash = hashlib.md5(sql.encode(), usedforsecurity=False).hexdigest()[:12]
         model = queryset.model._meta.label
         return f"{self.PREFIX_QUERYSET}:count:{model}:{query_hash}"
 
@@ -324,7 +325,8 @@ def cached_queryset[ModelT: models.Model](
                     key_parts.append(f"{k}={str(v)[:50]}")
 
             key = f"{CacheService.PREFIX_QUERYSET}:{':'.join(key_parts)}"
-            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]  # noqa: S324  # Safe: cache key hashing, not cryptographic
+            # Safe: cache key hashing, not cryptographic
+            key_hash = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:16]
             cache_key = f"qs:{func.__name__}:{key_hash}"
 
             cached_result = cache.get(cache_key)

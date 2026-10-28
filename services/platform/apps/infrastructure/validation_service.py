@@ -235,7 +235,7 @@ class NodeValidationService:
             )
 
             # Test command execution
-            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)
+            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             client.close()
 
@@ -319,7 +319,7 @@ class NodeValidationService:
                 "openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null "
                 "| openssl x509 -noout -fingerprint -sha256"
             )
-            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)
+            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)  # nosec B601 - constant command, no interpolated input
             output = stdout.read().decode().strip()
             if stdout.channel.recv_exit_status() != 0:
                 error_output = stderr.read().decode().strip()

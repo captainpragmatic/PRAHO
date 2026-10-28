@@ -874,7 +874,7 @@ class Command(BaseCommand):
         home = f"/home/{CHECK_USER}/public_html"
         management = VirtualminBackupManagementService(account.server)
         flag = "provisioning.incremental_backups_enabled"
-        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # Inside the lab container
+        probe_log, probe_stop = "/tmp/pair-probe.log", "/tmp/pair-probe.stop"  # noqa: S108  # nosec B108 - path inside the throwaway lab container, not the host /tmp
 
         def write(name: str, content: str) -> None:
             node_exec(
