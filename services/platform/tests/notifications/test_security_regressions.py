@@ -113,10 +113,23 @@ class SSRFProtectionTests(TestCase):
         for url in malicious_urls:
             data = {"SubscribeURL": url}
             with patch("apps.notifications.webhooks.safe_request") as mock_req:
-                mock_req.side_effect = OutboundSecurityError("Rejected by policy")
-                response = view._handle_subscription_confirmation(data)
+                with self.assertLogs("apps.notifications.webhooks", level="WARNING") as logs:
+                    response = view._handle_subscription_confirmation(data)
                 self.assertEqual(response.status_code, 400, f"URL should be rejected: {url}")
-                mock_req.reset_mock()
+                self.assertTrue(any("Rejected SubscribeURL" in line for line in logs.output), logs.output)
+                mock_req.assert_not_called()
+
+    def test_policy_rejection_of_an_sns_shaped_url_is_still_a_400(self):
+        """The outbound policy stays a second line of defence behind the host check."""
+        from apps.notifications.webhooks import SESWebhookView
+
+        with patch("apps.notifications.webhooks.safe_request") as mock_req:
+            mock_req.side_effect = OutboundSecurityError("Rejected by policy")
+            response = SESWebhookView()._handle_subscription_confirmation(
+                {"SubscribeURL": "https://sns.us-east-1.amazonaws.com/confirm"}
+            )
+        self.assertEqual(response.status_code, 400)
+        mock_req.assert_called_once()
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
