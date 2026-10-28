@@ -1226,3 +1226,49 @@ passdb praho-proxy {
         envelope = json.loads(base64.b64decode(output.getvalue().partition("MAIL_RESULT=")[2]))
         self.assertEqual(envelope["identity"], operation_id)
         self.assertEqual(envelope["action"], "reconcile_node_certificate")
+
+    def run_main(self, action, native):
+        output = io.StringIO()
+        with (
+            tempfile.TemporaryFile(mode="w+") as lock,
+            patch.object(self.module, "operation_lock", return_value=lock),
+            patch.object(self.module, "MailNode", return_value=native),
+            patch.object(self.module.os, "geteuid", return_value=0),
+            patch.object(self.module.fcntl, "flock") as flock,
+            patch.dict(
+                os.environ,
+                {"PRAHO_MAIL_ACTION": action, "PRAHO_MAIL_ID": self.operation_id, "PRAHO_MAIL_NODE": "node.example"},
+            ),
+            patch("sys.stdout", output),
+        ):
+            self.module.main()
+        envelope = json.loads(base64.b64decode(output.getvalue().partition("MAIL_RESULT=")[2]))
+        return flock.call_args.args[1], envelope
+
+    def test_bundle_upgrade_and_every_unlisted_action_take_the_exclusive_lock(self):
+        self.operation_id = str(uuid4())
+        native = SimpleNamespace(upgrade_bundle=Mock(return_value={"outcome": "upgraded"}))
+        mode, envelope = self.run_main("upgrade_bundle", native)
+        self.assertEqual(mode, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        native.upgrade_bundle.assert_called_once_with("node.example", self.operation_id)
+        self.assertEqual((envelope["action"], envelope["payload"]), ("upgrade_bundle", {"outcome": "upgraded"}))
+        for action in ("unknown_action", ""):
+            with self.subTest(action=action):
+                mode, envelope = self.run_main(action, SimpleNamespace())
+                self.assertEqual(mode, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertEqual(envelope["payload"]["error"], "mail_setup_incomplete")
+        mode, _envelope = self.run_main("inspect_node", SimpleNamespace(inspect_node=Mock(return_value={})))
+        self.assertEqual(mode, fcntl.LOCK_SH | fcntl.LOCK_NB)
+
+    def test_recovery_and_upgrade_codes_cross_the_node_boundary_unchanged(self):
+        self.operation_id = str(uuid4())
+        for code in (
+            "mail_node_operation_in_progress",
+            "mail_node_services_unavailable",
+            "mail_node_bundle_upgrade_required",
+            "mail_node_bundle_incompatible",
+        ):
+            with self.subTest(code=code):
+                native = SimpleNamespace(reconcile_node_certificate=Mock(side_effect=self.module.MailError(code)))
+                _mode, envelope = self.run_main("reconcile_node_certificate", native)
+                self.assertEqual(envelope["payload"]["error"], code)
