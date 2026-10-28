@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import configparser
 import fcntl
@@ -10,6 +11,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import ssl
 import tempfile
@@ -19,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+import yaml
 from django.conf import settings
 from django.test import SimpleTestCase
 
@@ -1272,3 +1275,11 @@ passdb praho-proxy {
                 native = SimpleNamespace(reconcile_node_certificate=Mock(side_effect=self.module.MailError(code)))
                 _mode, envelope = self.run_main("reconcile_node_certificate", native)
                 self.assertEqual(envelope["payload"]["error"], code)
+
+    def test_the_playbook_allowlist_names_exactly_the_dispatched_native_actions(self):
+        playbook = yaml.safe_load((HELPER.parent.parent / "virtualmin_mail.yml").read_text())
+        checks = playbook[0]["tasks"][0]["ansible.builtin.assert"]["that"]
+        allowed = next(check for check in checks if check.startswith("mail_action in "))
+        dispatched = set(re.findall(r'action == "([a-z_]+)"', HELPER.read_text()))
+        self.assertEqual(set(ast.literal_eval(allowed.removeprefix("mail_action in "))), dispatched)
+        self.assertIn("upgrade_bundle", dispatched)
