@@ -3,6 +3,7 @@ adapts only the lab node names."""
 
 from __future__ import annotations
 
+import secrets
 import stat
 import tempfile
 import threading
@@ -226,10 +227,12 @@ class LabAccountPasswordTests(TestCase):
         self.assertIsNone(SecureInputValidator.first_malicious_pattern(self.account.get_password()))
 
     def test_a_stored_password_the_parameter_validator_accepts_is_kept(self) -> None:
-        self._store("cC2_" + "d" * 20)
+        kept = "Qz9" + secrets.token_hex(10)  # hexadecimal never matches an injection heuristic
+        self.assertIsNone(SecureInputValidator.first_malicious_pattern(kept))
+        self._store(kept)
         self.command._ensure_account()
         self.account.refresh_from_db()
-        self.assertEqual(self.account.get_password(), "cC2_" + "d" * 20)
+        self.assertEqual(self.account.get_password(), kept)
 
 
 class LabStaffTests(TestCase):
