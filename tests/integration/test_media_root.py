@@ -108,7 +108,7 @@ def test_a_restore_puts_the_media_back_before_the_services_start(project: Projec
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
     dump.write_bytes(DUMP_GZIP)
     (backups / "praho_backup_20261007_000000_1.media.tar.gz").write_bytes(MEDIA_GZIP)
-    result = project.run("restore.sh", str(dump), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     argvs = [call["argv"] for call in project.calls()]
     restore = argvs.index(["cp", "-a", "-", "praho_platform:/app"])
@@ -140,7 +140,7 @@ def test_a_restore_that_could_not_restore_the_media_changes_nothing(
     project: Project, case: str, media: bytes, env: dict[str, str]
 ) -> None:
     dump = _dump_with_media(project, media)
-    result = project.run("restore.sh", str(dump), stdin="yes\n", **env)
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n", **env)
     assert result.returncode != 0, case
     assert "nothing was restored" in result.stdout, result.stdout
     assert not _dropped(project), case
@@ -148,7 +148,7 @@ def test_a_restore_that_could_not_restore_the_media_changes_nothing(
 
 def test_a_media_failure_after_the_database_still_brings_the_services_back(project: Project) -> None:
     dump = _dump_with_media(project)
-    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_MEDIA_RESTORE_FAILS="1")
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n", DOCKER_MEDIA_RESTORE_FAILS="1")
     assert result.returncode != 0
     assert "restoring the media failed" in result.stdout, result.stdout
     assert ["start", "praho_platform", "praho_portal", "praho_qcluster"] in [call["argv"] for call in project.calls()]
@@ -171,7 +171,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
     backups.mkdir()
     dump = backups / "praho_backup_20261007_000000_1.sql.gz"
     dump.write_bytes(DUMP_GZIP)
-    result = project.run("restore.sh", str(dump), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "No media archive" in result.stdout
     assert ["cp", "-a", "-", "praho_platform:/app"] not in [call["argv"] for call in project.calls()]
@@ -213,12 +213,28 @@ def _native(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (stubs / "pg_restore").write_text('#!/bin/sh\n[ "$1" = --list ] && echo "1; 0 1 TABLE DATA public django_migrations praho"\nexit 0\n')
     (stubs / "curl").write_text('#!/bin/sh\nprintf 200\n')
     (stubs / "psql").write_text('#!/bin/sh\necho 2026-10-25T00:00:00+00:00\n')
+    (stubs / "systemctl").write_text(
+        '#!/bin/sh\n'
+        'if [ "$1" = show ]; then printf "%032d\\n" 0; fi\n'
+        'if [ "$1" = start ] && [ "$2" = --wait ]; then\n'
+        '  printf dump > "$NATIVE_ROOT/backups/praho_backup_safety.dump"\n'
+        '  printf media > "$NATIVE_ROOT/backups/praho_backup_safety.media.tar.gz"\n'
+        '  exec "$NATIVE_ROOT/scripts/backup.sh"\n'
+        'fi\n'
+    )
+    (stubs / "journalctl").write_text(
+        '#!/bin/sh\n'
+        '[ "$1" = --sync ] && exit 0\n'
+        'case " $* " in *" --show-cursor "*) echo "-- cursor: recovery-test-cursor"; exit 0 ;; esac\n'
+        'echo "[time] Backup created: $NATIVE_ROOT/backups/praho_backup_safety.dump"\n'
+        'echo "[time] Backup completed successfully"\n'
+    )
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     (root / "scripts").mkdir()
     (root / "scripts" / "backup.sh").write_text("#!/bin/sh\nexit 0\n")
     (root / "scripts" / "backup.sh").chmod(0o755)
-    return root, {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
+    return root, {**os.environ, "NATIVE_ROOT": str(root), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"}
 
 
 def _run(script: str, env: dict[str, str], *args: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
@@ -276,7 +292,7 @@ def test_a_native_restore_puts_the_media_back(tmp_path: Path) -> None:
     assert _run(_render("backup-native.sh.j2", root), env).returncode == 0
     [dump] = (root / "backups").glob("praho_backup_*.dump")
     (root / "media" / "efactura" / "response.zip").unlink()
-    result = _run(_render("restore-native.sh.j2", root), env, str(dump), stdin="yes\n")
+    result = _run(_render("restore-platform-native.sh.j2", root), env, str(dump), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "media" / "efactura" / "response.zip").read_bytes() == b"anaf"
     assert "Orphaned-media sweep paused until 2026-10-25" in result.stdout

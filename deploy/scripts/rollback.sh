@@ -97,7 +97,7 @@ rollback_version() {
 
 rollback_database() {
     log_info "Rolling back database to latest backup..."
-    "${SCRIPT_DIR}/restore.sh" --latest "${ENV_ARGS[@]}"
+    "${SCRIPT_DIR}/restore-platform.sh" --latest "${ENV_ARGS[@]}"
 }
 
 rollback_full() {
@@ -140,7 +140,7 @@ rollback_full() {
     [[ "$server_version" =~ ^[0-9]+$ ]] && [ "$server_version" -ge 100000 ] || praho_die 'Cannot determine database major'
     major=$((server_version / 10000))
     python3 "$SCRIPT_DIR/backup_manifest.py" validate "$backup" --database-major "$major" ${portal_flag[@]+"${portal_flag[@]}"} > "$FULL_STAGE/expected"
-    "$SCRIPT_DIR/restore.sh" "$backup" --check "${ENV_ARGS[@]}"
+    "$SCRIPT_DIR/restore-platform.sh" "$backup" --check "${ENV_ARGS[@]}"
     # Only image references leave the parser; Compose's secret-bearing environment stays in-process.
     VERSION="$VERSION" praho_compose "$topology" config --format json |
         python3 "$SCRIPT_DIR/backup_manifest.py" images ${portal_flag[@]+"${portal_flag[@]}"} > "$FULL_STAGE/images"
@@ -155,7 +155,7 @@ rollback_full() {
     read -r -p "Restore the explicit backup and start ${VERSION}? (yes/no): " CONFIRM
     if [ "$CONFIRM" != yes ]; then log_info 'Rollback cancelled'; return 0; fi
     # Restore never starts the current entrypoint: the old image is selected before any application starts.
-    printf 'yes\n' | "$SCRIPT_DIR/restore.sh" "$backup" --leave-stopped "${ENV_ARGS[@]}"
+    printf 'yes\n' | "$SCRIPT_DIR/restore-platform.sh" "$backup" --leave-stopped "${ENV_ARGS[@]}"
     if ! VERSION="$VERSION" praho_compose "$topology" up -d --no-build --no-deps --wait --wait-timeout "$WAIT_TIMEOUT" "${FULL_SERVICES[@]}"; then
         docker stop "${FULL_NAMES[@]}" || log_error 'Could not hold every application offline; operator intervention required'
         praho_die 'Target startup failed; recover from the safety backup before restarting applications'

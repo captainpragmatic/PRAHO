@@ -1512,14 +1512,14 @@ backup-list:
 	@./deploy/scripts/backup.sh --list
 
 restore:
-	@echo "🔄 [Restore] Interactive database restore..."
+	@echo "🔄 [Restore] Interactive Platform database and media restore..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --env $(DEPLOY_ENV)
+	@./deploy/scripts/restore-platform.sh --env $(DEPLOY_ENV)
 
 restore-latest:
 	@echo "🔄 [Restore] Restoring latest backup..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@./deploy/scripts/restore.sh --latest --env $(DEPLOY_ENV)
+	@./deploy/scripts/restore-platform.sh --latest --env $(DEPLOY_ENV)
 
 # ===============================================================================
 # ROLLBACK PROCEDURES ⏪

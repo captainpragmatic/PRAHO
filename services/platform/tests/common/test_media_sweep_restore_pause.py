@@ -21,8 +21,8 @@ from apps.settings.models import SystemSetting
 
 REPOSITORY = Path(__file__).resolve().parents[4]
 SCRIPTS = (
-    REPOSITORY / "deploy/scripts/restore.sh",
-    REPOSITORY / "deploy/ansible/roles/praho-native/templates/restore-native.sh.j2",
+    REPOSITORY / "deploy/scripts/restore-platform.sh",
+    REPOSITORY / "deploy/ansible/roles/praho-native/templates/restore-platform-native.sh.j2",
 )
 STATEMENT = re.compile(r'^PAUSE_MEDIA_SWEEP_SQL="([^"]+)"$', re.MULTILINE)
 

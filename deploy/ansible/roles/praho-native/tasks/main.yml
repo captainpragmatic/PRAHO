@@ -693,12 +693,17 @@
 
 - name: Template restore script
   template:
-    src: restore-native.sh.j2
-    dest: "{{ project_root }}/scripts/restore.sh"
+    src: restore-platform-native.sh.j2
+    dest: "{{ project_root }}/scripts/restore-platform.sh"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
     mode: "0700"
   diff: false
+
+- name: Remove obsolete generic restore entrypoint
+  file:
+    path: "{{ project_root }}/scripts/restore.sh"
+    state: absent
 
 - name: Template health check script
   template:

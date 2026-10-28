@@ -40,7 +40,7 @@ def _assert_untouched(project: Project) -> None:
     [b"", b"not gzip", EMPTY_GZIP, DUMP_GZIP[:-5], gzip.compress(b"SELECT 1;\n"), gzip.compress(SQL_DUMP.split(b"-- PostgreSQL database dump complete")[0])],
 )
 def test_bad_database_archives_change_nothing(project: Project, data: bytes) -> None:
-    result = project.run("restore.sh", str(_dump(project, data)), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(_dump(project, data)), stdin="yes\n")
     assert result.returncode != 0
     assert "nothing was restored" in result.stdout
     _assert_untouched(project)
@@ -49,7 +49,7 @@ def test_bad_database_archives_change_nothing(project: Project, data: bytes) -> 
 def test_an_unreadable_dump_changes_nothing(project: Project) -> None:
     dump = _dump(project)
     dump.chmod(0)
-    result = project.run("restore.sh", str(dump), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n")
     assert result.returncode != 0
     _assert_untouched(project)
 
@@ -57,28 +57,28 @@ def test_an_unreadable_dump_changes_nothing(project: Project) -> None:
 def test_a_gzip_stream_that_is_not_a_media_tar_changes_nothing(project: Project) -> None:
     dump = _dump(project)
     dump.with_name(dump.name.replace(".sql.gz", ".media.tar.gz")).write_bytes(gzip.compress(b"not tar"))
-    result = project.run("restore.sh", str(dump), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n")
     assert result.returncode != 0
     assert "not a tar archive" in result.stdout
     _assert_untouched(project)
 
 
 def test_a_failed_safety_backup_changes_nothing(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_EXEC_FAILS="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_EXEC_FAILS="1")
     assert result.returncode != 0
     assert "Pre-restore backup failed" in result.stdout
     _assert_untouched(project)
 
 
 def test_a_failed_safety_media_backup_changes_nothing(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_CP_FAILS="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_CP_FAILS="1")
     assert result.returncode != 0
     assert "Pre-restore backup failed" in result.stdout
     _assert_untouched(project)
 
 
 def test_a_failed_stop_never_drops_the_schema(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_STOP_FAILS="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_STOP_FAILS="1")
     assert result.returncode != 0
     assert "database was left unchanged" in result.stdout
     assert not any("DROP SCHEMA" in " ".join(call["argv"]) for call in project.calls())
@@ -87,14 +87,14 @@ def test_a_failed_stop_never_drops_the_schema(project: Project) -> None:
 
 
 def test_unknown_container_state_changes_nothing(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PS_FAILS="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_PS_FAILS="1")
     assert result.returncode != 0
     assert "Cannot determine the local application containers" in result.stdout
     _assert_untouched(project)
 
 
 def test_platform_only_restores_only_its_local_services(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_ABSENT_PORTAL="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_ABSENT_PORTAL="1")
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [call["argv"] for call in project.calls()]
     assert ["stop", "praho_platform", "praho_qcluster"] in calls
@@ -105,7 +105,7 @@ def test_platform_only_restores_only_its_local_services(project: Project) -> Non
 
 @pytest.mark.parametrize("failure", ["DOCKER_SQL_ERROR", "DOCKER_PREPARE_FAILS"])
 def test_database_errors_hold_applications_offline_for_recovery(project: Project, failure: str) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", **{failure: "1"})
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", **{failure: "1"})
     assert result.returncode != 0
     assert "Applications remain stopped" in result.stdout
     assert "Restore completed successfully" not in result.stdout
@@ -123,7 +123,7 @@ def test_retention_cannot_remove_the_staged_selected_dump_or_media(project: Proj
     for path in (dump, media):
         os.utime(path, (0, 0))
     sql_input = project.root / "restored.sql"
-    result = project.run("restore.sh", str(dump), stdin="yes\n", DOCKER_SQL_INPUT=str(sql_input))
+    result = project.run("restore-platform.sh", str(dump), stdin="yes\n", DOCKER_SQL_INPUT=str(sql_input))
     assert result.returncode == 0, result.stdout + result.stderr
     assert not dump.exists() and not media.exists()  # safety backup applied ordinary retention
     assert sql_input.read_bytes() == SQL_DUMP
@@ -133,7 +133,7 @@ def test_retention_cannot_remove_the_staged_selected_dump_or_media(project: Proj
 
 
 def test_restore_pauses_the_media_sweep_before_any_worker_starts(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n")
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [call["argv"] for call in project.calls()]
     restored = next(i for i, call in enumerate(calls) if call[:3] == ["exec", "-i", "praho_db"])
@@ -144,14 +144,14 @@ def test_restore_pauses_the_media_sweep_before_any_worker_starts(project: Projec
 
 
 def test_a_failed_sweep_pause_keeps_every_worker_stopped(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_FAILS="1")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_FAILS="1")
     assert result.returncode != 0
     assert "Applications remain stopped" in result.stdout
     assert not any(call["argv"][0] == "start" for call in project.calls())
 
 
 def test_a_sweep_pause_that_writes_nothing_keeps_every_worker_stopped(project: Project) -> None:
-    result = project.run("restore.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_ANSWER="")
+    result = project.run("restore-platform.sh", str(_dump(project)), stdin="yes\n", DOCKER_PAUSE_ANSWER="")
     assert result.returncode != 0
     assert "Applications remain stopped" in result.stdout
     assert not any(call["argv"][0] == "start" for call in project.calls())
