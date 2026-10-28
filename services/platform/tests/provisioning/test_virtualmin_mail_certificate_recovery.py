@@ -760,3 +760,18 @@ class CertificateResumeTests(RecoveryFixture, SimpleTestCase):
         self.assertEqual(self.journal()["status"], "ready")
         self.assertEqual(self.firewall.state(), {"iptables": (None, False), "ip6tables": (None, False)})
         self.assertFalse(any(argv[:2] in (["systemctl", "start"], ["systemctl", "stop"]) for argv in self.commands))
+
+    def test_a_crash_inside_a_staging_write_leaves_only_a_sweepable_temporary(self):
+        driver = self.driver()
+
+        def interrupted(path, content, *args):
+            # SIGKILL between atomic()'s temporary write and its rename.
+            temporary = path.with_name("." + path.name + "." + "0" * 16)
+            temporary.write_bytes(content)
+            temporary.chmod(0o600)  # atomic() creates its temporary private
+            raise Crash("inside a staging write")
+
+        with patch.dict(driver.reconcile_certificate.__globals__, atomic=interrupted), self.assertRaises(Crash):
+            self.recover(driver)
+        self.assertEqual(self.journal(), self.ready)
+        self.resume()

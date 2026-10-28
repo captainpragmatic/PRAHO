@@ -67,6 +67,8 @@ UNITS = ("postfix.service", "postfix@.service", "dovecot.service")
 UNIT_GUARD = b"[Service]\nExecStartPre=+/usr/bin/python3 /usr/lib/praho/mail/praho-mail-boot.py\n"
 DROPIN_PATHS = tuple("/etc/systemd/system/" + name + ".d/praho-mail.conf" for name in UNITS)
 BUNDLE_PATHS = (*("/usr/lib/praho/mail/" + name for name in NATIVE_FILES), *DROPIN_PATHS)
+BUNDLE_STAGE_FILES = frozenset({"from", "to", "journal.json", "candidate.json"})
+BUNDLE_ENTRIES = frozenset({*NATIVE_FILES, *(name + ".conf" for name in UNITS)})
 # Helper bundles setup could have installed, keyed by the commit that shipped each (none reached
 # master; each was installed by setup on lab clones). The drop-ins were UNIT_GUARD in all of them.
 PREDECESSOR_BUNDLES: dict[str, dict[str, str]] = {
@@ -285,6 +287,12 @@ def certificate_fence(snapshot: object, rejection: str) -> str:
     ):
         return "exact"
     return "foreign"
+
+
+def staged_name(name: str, allowed: frozenset[str]) -> bool:
+    """An expected stage entry, or atomic()'s temporary for one that a killed worker never renamed."""
+    temporary = re.fullmatch(r"\.(.+)\.[0-9a-f]{16}", name)
+    return name in allowed or (temporary is not None and temporary[1] in allowed)
 
 
 def atomic(path: Path, content: bytes, mode: int = 0o600) -> None:
@@ -566,7 +574,7 @@ class MailSetup:
             return
         self.private_directory(stage)
         entries = tuple(stage.iterdir())
-        if {entry.name for entry in entries} - CERTIFICATE_STAGE_FILES:
+        if not all(staged_name(entry.name, CERTIFICATE_STAGE_FILES) for entry in entries):
             self.refuse("mail_setup_review_required")
         for entry in entries:
             metadata = entry.lstat()
@@ -1119,13 +1127,13 @@ class MailSetup:
     def remove_bundle_stage(self, directory: Path) -> None:
         self.private_directory(directory)
         entries = {entry.name: entry for entry in directory.iterdir()}
-        if set(entries) - {"from", "to", "journal.json", "candidate.json"}:
+        if not all(staged_name(name, BUNDLE_STAGE_FILES) for name in entries):
             self.refuse("mail_setup_review_required")
-        files = [entry for name, entry in entries.items() if name.endswith(".json")]
+        files = [entry for name, entry in entries.items() if name not in {"from", "to"}]
         for name in {"from", "to"} & set(entries):
             self.private_directory(entries[name])
             children = tuple(entries[name].iterdir())
-            if {child.name for child in children} - {self.bundle_entry(path) for path in BUNDLE_PATHS}:
+            if not all(staged_name(child.name, BUNDLE_ENTRIES) for child in children):
                 self.refuse("mail_setup_review_required")
             files.extend(children)
         for file in files:
@@ -1143,6 +1151,12 @@ class MailSetup:
         finally:
             os.close(descriptor)
 
+    def discard_bundle_stage(self, directory: Path) -> None:
+        """Unpublish first: an interrupted removal then leaves only a hidden stage the next admission sweeps."""
+        hidden = self.state / (".bundle-upgrade-" + secrets.token_hex(8))
+        self.publish_stage(directory, hidden)
+        self.remove_bundle_stage(hidden)
+
     def retire_bundle_stages(self) -> None:
         """Remove upgrade staging no journal refers to: unpublished stages, and a published one whose
         upgrade already committed or restored (its candidate or original equals the ready journal)."""
@@ -1156,7 +1170,7 @@ class MailSetup:
             known = [stage / name for name in ("candidate.json", "journal.json") if (stage / name).is_file()]
             if current not in {path.read_bytes() for path in known}:
                 self.refuse("mail_setup_review_required")
-            self.remove_bundle_stage(stage)
+            self.discard_bundle_stage(stage)
 
     def upgrade_bundle(self, expected: str, identity: str) -> dict[str, Any]:
         """Replace only the helpers and drop-ins of a ready node; never setup or configuration."""
@@ -1288,7 +1302,7 @@ class MailSetup:
                 self.restore_bundle(record, directory, original, sides["from"])
                 self.node.stage = failed
             raise
-        self.remove_bundle_stage(directory)
+        self.discard_bundle_stage(directory)
         return self.bundle_result(expected, record["profile"], record["to"], "upgraded")
 
     def restore_bundle(
@@ -1302,7 +1316,7 @@ class MailSetup:
         if any(self.path(path).read_bytes() != previous[path] for path in BUNDLE_PATHS):
             self.refuse("mail_setup_review_required")
         atomic(self.state / "node.json", original)
-        self.remove_bundle_stage(directory)
+        self.discard_bundle_stage(directory)
 
     def compat_check(self) -> None:
         """Dry-run the installed guard; it can never authorize a start in this mode."""

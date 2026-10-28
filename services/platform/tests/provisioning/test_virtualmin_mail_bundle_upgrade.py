@@ -326,3 +326,37 @@ class CompatibilityModeTests(BundleUpgradeFixture, SimpleTestCase):
                     self.assertEqual(guard.compatible(), expected)
                 openssl.assert_called_once()
                 self.assertEqual(setup.certificate_verify_command.call_args.kwargs, {"check_time": False})
+
+
+class BundleStageCleanupTests(BundleUpgradeFixture, SimpleTestCase):
+    def test_a_crash_inside_a_staging_write_leaves_only_a_sweepable_temporary(self):
+        driver = self.driver()
+
+        def interrupted(path, content, *args):
+            temporary = path.with_name("." + path.name + "." + "0" * 16)
+            temporary.write_bytes(content)
+            temporary.chmod(0o600)  # atomic() creates its temporary private
+            raise Crash("inside a staging write")
+
+        with patch.dict(driver.upgrade_bundle.__globals__, atomic=interrupted), self.assertRaises(Crash):
+            self.upgrade(driver)
+        self.assertEqual(self.node_journal(), self.original)
+        self.assert_upgraded(self.upgrade())
+
+    def test_an_interrupted_stage_removal_after_commit_never_blocks_a_replay(self):
+        original, removed = Path.unlink, []
+
+        def interrupted(path, *args, **kwargs):
+            committed = self.journal()["status"] == "ready" and self.installed() == self.running_bundle
+            if committed and "bundle-upgrade" in str(path) and path.exists():
+                removed.append(path.name)
+                if len(removed) == 3:  # both journal copies are already gone
+                    raise Crash("inside stage removal")
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", interrupted), self.assertRaises(Crash):
+            self.upgrade()
+        self.assertEqual(self.journal()["status"], "ready")
+        result = self.upgrade()
+        self.assertEqual(result["outcome"], "unchanged")
+        self.assert_upgraded({**result, "outcome": "upgraded"})
