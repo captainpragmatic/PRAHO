@@ -249,6 +249,7 @@ class HostedZoneImportRevision(models.Model):
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     objects = HostedZoneRevisionQuerySet.as_manager()
 
     class Meta:

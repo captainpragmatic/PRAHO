@@ -55,6 +55,7 @@
     "services/platform/apps/domains/migrations/0004_order_item_link.py": "1b777b5e5c59d426020a63fd9cb73a89a9566d608f98764cc3b70742737236e8",
     "services/platform/apps/domains/migrations/0005_persistent_secret_contexts.py": "48da85854502fa9b79e3835a268feb6947804cf17dc04a7dda204530325bf0a6",
     "services/platform/apps/domains/migrations/0006_hostedzone_hostedzoneimportrevision_and_more.py": "5328913fcb41097bb9e17179f33c762f64eeb573cb2b598cdb12b25a8a9e11bc",
+    "services/platform/apps/domains/migrations/0007_hostedzoneimportrevision_updated_at.py": "d2975986f2a63eb3c8c8bf18d29f6a523ae45d3e21dd920913865ae025c38216",
     "services/platform/apps/infrastructure/migrations/0001_initial.py": "9fec21fd9462935db58c176d4b2742152d98dd443929ddd742b3adf947cc458a",
     "services/platform/apps/infrastructure/migrations/0002_initial.py": "c478751138fa45fc826b2329cba888a2435f0bbf0201c7478a9beb24e3b6b9d9",
     "services/platform/apps/infrastructure/migrations/0003_ssh_transport_state.py": "8eed9e4c62494b9562df9d33958a4a948e693ba93d9c77fd4e00fff14b962365",
