@@ -53,6 +53,7 @@ from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 
+from .credentials import check_password_locked, proof_passed
 from .forms import (
     LockedPasswordChangeForm,
     LockedSetPasswordForm,
@@ -926,18 +927,18 @@ def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
 def _confirm_both_factors(request: HttpRequest, locked_user: User, password: str, token: str) -> str | None:
     """Check the posted password and a current second factor; return an error, or None.
 
-    Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user,
-    and a wrong code is not charged to the login lockout, as on the API. A wrong password and a
-    wrong code get the same answer, and the per-user hourly limit on the calling view bounds
-    guessing. The code is checked only after the password, so a backup code offered with a wrong
-    password is not spent.
+    Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user, a
+    locked account is refused and a wrong password counts toward the lockout; a wrong code is not
+    charged to it, as on the API. A wrong password and a wrong code get the same answer. The code
+    is checked only after the password, so a backup code offered with a wrong password is not spent.
     """
     incorrect = _("The password or the code is incorrect.")
-    if not password or not locked_user.check_password(password):
+    if not locked_user.two_factor_enabled or not check_password_locked(locked_user, password):
         return incorrect
     token = token.strip()
-    if not locked_user.two_factor_enabled or not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
+    if not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
         return incorrect
+    proof_passed(locked_user)
     return None
 
 

@@ -61,6 +61,7 @@ from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
+from apps.users.credentials import check_password_locked, proof_passed
 from apps.users.mfa import (
     BrowserOrigin,
     MFAService,
@@ -1339,8 +1340,7 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
         return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
-        if user.is_account_locked() or not user.check_password(current):
-            user.increment_failed_login_attempts()
+        if not check_password_locked(user, current):
             return Response({"success": False, "error": "Current password is incorrect"}, status=400)
         try:
             validate_password(new_password, user=user)
@@ -1351,6 +1351,7 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             and not MFAService.verify_mfa_code(user, str(request.data.get("token", "")), request)["success"]
         ):
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
+        proof_passed(user)
         user.set_password(new_password)
         user.save(update_fields=["password"])
         discard_pending_totp(user.pk)  # A secret shown before the change must not be confirmable after it.

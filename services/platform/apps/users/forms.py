@@ -17,6 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.identity_fields import normalize_phone
 from apps.common.localisation import DATE_FORMAT_CHOICES, INHERIT_LABEL, LANGUAGE_CHOICES, TIMEZONES
 
+from .credentials import check_password_locked, proof_passed
 from .models import CustomerMembership, User, UserProfile
 
 T = TypeVar("T")
@@ -464,8 +465,16 @@ def apply_password_change(user_pk: int, new_password: str, *, still_authorised: 
 class LockedPasswordChangeForm(PasswordChangeForm):
     """Django's change form, with the write done by apply_password_change.
 
-    save(commit=False) sets the password on the instance only, as Django's does.
+    save(commit=False) sets the password on the instance only, as Django's does. The old password
+    is checked like every other signed-in password check: refused while the account is locked,
+    and a wrong one counts toward the lockout.
     """
+
+    def clean_old_password(self) -> str:
+        old_password = cast(str, self.cleaned_data["old_password"])
+        if not check_password_locked(self.user, old_password):
+            raise ValidationError(self.error_messages["password_incorrect"], code="password_incorrect")
+        return old_password
 
     def save(self, commit: bool = True) -> User:
         if not commit:
@@ -476,6 +485,7 @@ class LockedPasswordChangeForm(PasswordChangeForm):
             self.cleaned_data["new_password1"],
             still_authorised=lambda locked: locked.check_password(old_password),
         )
+        proof_passed(written)
         self.user = written
         return written
 
