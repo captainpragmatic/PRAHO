@@ -122,6 +122,15 @@ SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurren
 # ADR-0017 section 5: Platform owns every portal session. A browser session without the id of its
 # Platform session (one from before this release) is ended at its next request.
 PORTAL_SESSION_ID_REQUIRED = True
+# ADR-0065: Platform staff may open a read-only customer view here. False refuses new ones and
+# ends live ones at their next request.
+CUSTOMER_VIEW_ENABLED = os.environ.get("CUSTOMER_VIEW_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# Platform's public origin: the only page allowed to hand a customer-view code to this portal.
+PLATFORM_PUBLIC_ORIGIN = os.environ.get("PLATFORM_PUBLIC_ORIGIN", "").strip() or (
+    f"https://{_platform_domain}"
+    if (_platform_domain := os.environ.get("PLATFORM_DOMAIN", "").strip())
+    else "http://localhost:8700"
+)
 
 # Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
 # Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.

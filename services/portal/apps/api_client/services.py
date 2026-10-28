@@ -974,6 +974,12 @@ class PlatformAPIClient:
             data=request_data,  # Context in body, signed by HMAC
         )
 
+    def redeem_customer_view(self, code: str, client_ip: str) -> dict[str, Any]:
+        """Exchange a one-time customer-view code for its scoped session (ADR-0065)."""
+        return self._make_request(
+            "POST", "/users/customer-view/redeem/", data={"code": code, **_client_ip_payload(client_ip)}
+        )
+
     def end_session(self, user_id: int, session_id: str) -> None:
         """End this portal session on Platform (logout). Raises PlatformAPIError like every call."""
         self._make_request(

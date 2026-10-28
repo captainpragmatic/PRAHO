@@ -1,0 +1,16 @@
+{% load i18n %}
+{# ADR-0065: shown only in the staff browser's customer view, never to the customer. #}
+<div class="sticky top-0 z-50 bg-amber-500 text-slate-900" role="status" data-customer-view-banner>
+  <div class="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+    <p class="font-medium">
+      {% blocktrans trimmed with customer=request.session.customer_view_customer_name staff=request.session.customer_view_staff_label %}
+        Customer view: you see the portal as {{ customer }} (staff: {{ staff }}). Nothing can be changed.
+      {% endblocktrans %}
+    </p>
+    <form method="post" action="{% url 'users:customer_view_leave' %}">
+      {% csrf_token %}
+      {# tmpl-allow TMPL002: high-contrast control on the amber banner; the button component has no variant for it #}
+      <button type="submit" class="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-amber-300 hover:bg-slate-800">{% trans "Leave customer view" %}</button>
+    </form>
+  </div>
+</div>

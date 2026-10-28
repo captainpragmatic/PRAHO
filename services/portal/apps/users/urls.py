@@ -5,13 +5,15 @@ Customer login/logout routes.
 
 from django.urls import path
 
-from . import views
+from . import customer_view_views, views
 
 app_name = "users"
 
 urlpatterns = [
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
+    path("customer-view/redeem/", customer_view_views.redeem, name="customer_view_redeem"),
+    path("customer-view/leave/", customer_view_views.leave, name="customer_view_leave"),
     path("register/", views.register_view, name="register"),
     path("company-lookup/", views.company_lookup_view, name="company_lookup"),
     path("register/confirm/", views.register_confirm_view, name="register_confirm"),
