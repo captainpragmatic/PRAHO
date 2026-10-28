@@ -12,7 +12,7 @@ from typing import cast
 from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils.translation import gettext as _
@@ -79,7 +79,7 @@ def customer_view_start(request: HttpRequest, customer_id: int, user_id: int) ->
     except customer_view.CustomerViewBlocked as exc:
         context["error"] = exc.message
         return render(request, "customers/customer_view_start.html", context, status=403)
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         logger.exception("🔥 [CustomerView] Grant not issued: database or audit unavailable")
         context["error"] = _("Nothing was issued: the database or the audit trail is unavailable. Try again shortly.")
         return render(request, "customers/customer_view_start.html", context, status=503)
