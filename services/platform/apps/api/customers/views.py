@@ -8,7 +8,7 @@ from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Field, Model, Q, QuerySet
 from django.http import HttpRequest
 from django.utils import translation
 from django.utils.translation import gettext as _
@@ -52,6 +52,7 @@ from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.mfa import staff_must_enrol
 from apps.users.models import CustomerMembership, User
+from apps.users.security_notices import notify_company_changed, notify_team_change
 from apps.users.services import SecureCustomerUserService
 
 from .serializers import (
@@ -1019,6 +1020,17 @@ def _check_self_action(user_id: int | str | None, target_user_id: int | str | No
     return None
 
 
+def _field_label(model: type[Model], name: str) -> Any:
+    """A changed field's label, translated when the notice is written; the name for anything else."""
+    field = model._meta.get_field(name)
+    return field.verbose_name if isinstance(field, Field) else name
+
+
+def _actor_email(user_id: int) -> str:
+    """The signed-in person who made a team change, for the notice that names them."""
+    return User.objects.filter(pk=user_id).values_list("email", flat=True).first() or ""
+
+
 def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
     """Return error response if user is not an owner of the customer."""
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
@@ -1189,6 +1201,9 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             # They must complete account setup via the password-reset link sent separately.
             new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
             CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
+            notify_team_change(
+                customer, "team_member_added", actor_email=_actor_email(user_id), member=new_user, new_role=role
+            )
     except IntegrityError:
         # Race: a concurrent request created the same email between the SELECT and the INSERT.
         # Mirror the cross-tenant generic message; do not disclose where the row landed.
@@ -1266,6 +1281,14 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:  
     old_role = membership.role
     membership.role = new_role
     membership.save(update_fields=["role", "updated_at"])
+    notify_team_change(
+        customer,
+        "team_role_changed",
+        actor_email=_actor_email(user_id),
+        member=membership.user,
+        old_role=old_role,
+        new_role=new_role,
+    )
     logger.info(
         f"✅ [User Management API] Role changed for user {target_user_id} on customer {customer.id}: {old_role} → {new_role}"
     )
@@ -1319,6 +1342,7 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
 
     membership.is_active = False
     membership.save(update_fields=["is_active", "updated_at"])
+    notify_team_change(customer, "team_member_removed", actor_email=_actor_email(user_id), member=membership.user)
     logger.info(f"✅ [User Management API] User {target_user_id} removed from customer {customer.id}")
     return Response({"success": True, "message": "User removed from customer."})
 
@@ -1390,6 +1414,7 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
         return _uniform_error_response()
 
     updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
+    before = {field: getattr(customer, field) for field in updatable_fields}
     update_fields = []
     for field in updatable_fields:
         if field in data:
@@ -1409,8 +1434,16 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
             update_fields.append(field)
 
     if update_fields:
+        changed = sorted(field for field in update_fields if getattr(customer, field) != before[field])
         with transaction.atomic():
             customer.save(update_fields=[*update_fields, "updated_at"])
+            if changed:
+                notify_company_changed(
+                    customer,
+                    "company_contact_changed",
+                    fields=[_field_label(Customer, field) for field in changed],
+                    old_email=before["primary_email"] if "primary_email" in changed else "",
+                )
         logger.info(f"✅ [Customer API] Updated fields {update_fields} for customer {customer.id}")
 
     return Response({"success": True, "message": "Customer updated."})
@@ -1421,7 +1454,7 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @permission_classes([AllowAny])
 @require_customer_authentication
 @transaction.atomic
-def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate each permitted field before saving the profile
+def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Validate each permitted field, save, and tell the owners
     request: HttpRequest, customer: Customer
 ) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
@@ -1452,6 +1485,8 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate eac
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(
         customer=customer, defaults={"is_vat_payer": bool(str(data.get("vat_number") or "").strip())}
     )
+    tax_fields = (*tax_bool_fields, *tax_string_fields, "cnp")
+    before = {field: getattr(tax_profile, field) for field in tax_fields}
     update_fields = []
     for field in tax_bool_fields | tax_string_fields:
         if field in data:
@@ -1499,6 +1534,13 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate eac
     if update_fields:
         with transaction.atomic():
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
+            changed = sorted(field for field in tax_fields if getattr(tax_profile, field) != before[field])
+            if changed:
+                notify_company_changed(
+                    customer,
+                    "company_tax_changed",
+                    fields=[_field_label(CustomerTaxProfile, field) for field in changed],
+                )
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
     if cnp is not None:

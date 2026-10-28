@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Security notices are no longer lost, and more changes send one.**
+  - **Delivery:** a notice is now a queued email written in the same transaction as the change, so the email queue delivers it and retries it. A notice whose queueing failed, or whose send failed, used to be lost.
+  - **New notices:**
+    - Team changes (member added, role changed, member removed) go to every owner of the company. A role change or a removal also goes to the member.
+    - A change to the company's contact details goes to every owner, and also to the old contact address when the contact email changed.
+    - A change to the company's legal or tax details goes to every owner.
+    - A personal data export request goes to the person who asked.
+    - A revealed gift-card code goes to the person who revealed it.
+  - **What they say:** notices name the fields that changed, never their values, and are written in each recipient's language.
 - **Every password check a signed-in session can reach counts toward the account lockout.**
   - **What was wrong:**
     - Enabling 2FA, disabling it and creating new backup codes (through the Portal and the API) checked the password without the lockout. So did backup codes and the password change on the staff pages.

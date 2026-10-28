@@ -32,6 +32,7 @@ from apps.common.http import mark_download
 from apps.common.performance.rate_limiting import BurstRateThrottle, CustomerRateThrottle
 from apps.users.mfa import staff_must_enrol
 from apps.users.models import User
+from apps.users.security_notices import notify_data_export_requested
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
         # portal waits. A message lost on the way is picked up by process_pending_data_exports.
         export_id = str(export_request.id)
         transaction.on_commit(lambda: async_task("apps.audit.tasks.process_data_export_task", export_id))
+        notify_data_export_requested(user)
     return Response(
         {
             "success": True,
