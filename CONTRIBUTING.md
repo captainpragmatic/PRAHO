@@ -50,7 +50,7 @@ Pull Request Checklist
 - [ ] I agree my contribution is GPL-3.0-or-later
 - [ ] I grant maintainers the right to relicense my contribution under
       AGPL-3.0-or-later or another OSI-approved license used by PRAHO
-- [ ] Tests pass locally / CI green
+- [ ] Focused tests pass locally, and every required CI check is green
 
 How to build and test
 ---------------------
@@ -59,10 +59,15 @@ the repository's `README.md`.
 
     make install    # dependencies for both services, plus the pre-commit hooks
     make dev        # Platform on :8700, Portal on :8701
-    make lint       # what every pull request must pass
+    make lint       # every lint phase (CI runs it on each pull request)
     make test       # platform, portal and cross-service suites
 
-The browser suite runs separately; see `docs/testing/manual-e2e.md`.
+Pull request CI is the full gate, and `master` requires every check to pass: platform, portal,
+integration, browser and strict-CSP, the Virtualmin lab when the change can reach it, and DCO (see
+`docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md`). Locally, run what takes seconds on what you
+touched: the pre-commit hooks, `make lint FILE=<path>`, `make test-file FILE=<label>` for platform
+tests (or `pytest <path>` for portal), and `make check-types FILE=<path>`. There is no need to run
+the full gate before pushing; push at logical checkpoints and let CI run it.
 
 Security
 --------

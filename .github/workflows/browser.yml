@@ -1,0 +1,140 @@
+# ===============================================================================
+# BROWSER CI — Playwright suite and strict-CSP gates on every pull request
+# ===============================================================================
+# Both services run live against each other (real HMAC, seeded fixtures, their own SQLite files),
+# and Playwright drives them. UI behaviour changes through auth, middleware, settings and services,
+# not only through templates, so this runs on every PR rather than on a path filter.
+#
+# browser-e2e and browser-csp are required checks on master (.github/rulesets/master.json). The
+# strict-CSP gates get a stack of their own: they assert the enforced phase2 profile, which the
+# default stack does not serve.
+
+name: Browser CI
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+# A new push to a PR supersedes the run on its previous head: cancel it so it stops holding job slots.
+# Every other event gets a group of its own, so it is never cancelled or queued behind another run of this
+# workflow (it can still wait for free runners).
+concurrency:
+  group: browser-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    # `make build-css` shells out to `npx --no-install`, so node_modules must exist.
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install node dependencies
+      run: npm ci
+
+    - name: Install the browser Playwright drives
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
+    - name: Start the browser-test stack
+      run: make dev-e2e-bg
+
+    - name: Browser suite
+      run: make test-e2e
+
+    - name: Stop the browser-test stack
+      if: always()
+      run: make stop-e2e
+
+    - name: Upload browser evidence
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: browser-e2e-evidence
+        path: |
+          output/playwright/runs/
+          logs/
+        if-no-files-found: warn
+        retention-days: 14
+
+  browser-csp:
+    runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install node dependencies
+      run: npm ci
+
+    - name: Install the browser Playwright drives
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+
+    # test-e2e-csp refuses to run unless the live stack serves this profile enforced.
+    - name: Start the strict-CSP stack
+      run: make dev-e2e-csp-bg CSP_PROFILE=phase2-target
+
+    - name: Strict-CSP gates
+      run: make test-e2e-csp CSP_PROFILE=phase2-target
+
+    - name: Stop the strict-CSP stack
+      if: always()
+      run: make stop-e2e
+
+    - name: Upload strict-CSP evidence
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: browser-csp-evidence
+        path: |
+          output/playwright/runs/
+          logs/
+        if-no-files-found: warn
+        retention-days: 14

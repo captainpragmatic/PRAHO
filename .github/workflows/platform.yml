@@ -2,18 +2,22 @@
 # PLATFORM SERVICE CI/CD
 # ===============================================================================
 # All events:  SQLite (fast, reliable — matches local dev + test.py settings)
-# PRs:         Affected-module detection for focused test runs (~30s)
+# PRs:         the full suite with coverage floors (coverage-gate), plus affected-module detection
+#              for a fast first signal (platform-test)
 # Master push: Full suite + coverage
 #
 # PostgreSQL: every PR and push also runs the PostgreSQL-gated tests (platform-postgres), which
-# skip themselves on SQLite. The full suite on PostgreSQL is in nightly.yml and full-test.yml.
-# Linting is consolidated in integration.yml (make lint).
+# skip themselves on SQLite. The whole suite on PostgreSQL runs nightly (nightly.yml) and for every
+# release candidate (release-candidate.yml). Linting is consolidated in integration.yml (make lint).
+#
+# Every job is a required check on master (.github/rulesets/master.json), so pull_request has no
+# paths filter. Staging is never pushed to: it is promoted from master (make promote-staging).
 
 name: Platform Service CI/CD
 
 on:
   push:
-    branches: [master, staging]
+    branches: [master]
     paths:
       - 'services/platform/**'
       - 'shared/**'
@@ -31,13 +35,20 @@ on:
       - 'package-lock.json'
       - '.gitignore'
   pull_request:
-    branches: [master, staging]
+    branches: [master]
   workflow_dispatch:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
   DJANGO_SECRET_KEY: test-secret-key-for-ci
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+# A new push to a PR supersedes the run on its previous head: cancel it so it stops holding job slots.
+# Every other event gets a group of its own, so it is never cancelled or queued behind another run of this
+# workflow (it can still wait for free runners).
+concurrency:
+  group: platform-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   coverage-gate:
@@ -182,7 +193,6 @@ jobs:
 
   platform-security:
     runs-on: ubuntu-latest
-    needs: platform-test
 
     steps:
     - uses: actions/checkout@v4
@@ -198,11 +208,15 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
+    # Blocking: any finding of medium-or-higher severity and confidence (-ll -ii) fails the job. A finding
+    # that is safe by construction carries an inline `# nosec <id> - <reason>`.
     - name: Run Bandit SAST Security Scan
-      continue-on-error: true
       run: |
         cd services/platform
-        "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f json -o bandit-report.json
+        if ! "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f json -o bandit-report.json; then
+          "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || true
+          exit 1
+        fi
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4
