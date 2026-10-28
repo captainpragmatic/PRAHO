@@ -129,7 +129,7 @@
 {% block extra_js %}
 {% if payment %}
 {{ payment|json_script:"gift-card-payment-config" }}
-{# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
+{# nosemgrep: missing-integrity — accepted risk: Stripe.js v3 is versionless and must load from js.stripe.com, so no SRI hash can be pinned; CSP allows external scripts only from that host #}
 <script src="https://js.stripe.com/v3/"></script>
 <script src="{% static 'js/gift-card-purchases.js' %}" defer></script>
 {% endif %}

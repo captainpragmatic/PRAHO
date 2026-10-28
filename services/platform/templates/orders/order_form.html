@@ -138,8 +138,8 @@
           {% if order %}
             {% trans "Update Order" as bt3 %}{% button bt3 type="submit" variant="primary" %}
           {% else %}
-            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-            {% trans "Create Order" as bt4 %}{% button bt4 type="submit" variant="outline" %}
+            {# nosemgrep: template-translate-as-no-escape — translated text is printed through force_escape (Django marks translated template literals safe) #}
+            {% trans "Create Order" as bt4 %}{% button bt4|force_escape type="submit" variant="outline" %}
             {% url 'orders:order_create_with_item' as create_with_item_url %}
             {# tmpl-allow TMPL002: formaction= posts the form to the create-with-item URL; button attrs drop formaction (apps/ui/attributes.py) #}
             <button type="submit" formaction="{{ create_with_item_url }}"
