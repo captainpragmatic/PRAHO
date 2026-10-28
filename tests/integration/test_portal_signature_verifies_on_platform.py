@@ -127,7 +127,7 @@ def transport(*, method, url, headers, data=None, params=None, **kwargs):
 
 def bound_call(client):
     # As inside a portal request: the auth middleware has bound the customer's Platform session.
-    with request_context.bound(SESSION_ID):
+    with request_context.bound(SESSION_ID, 1):
         return client.get_user_customers(1)
 
 

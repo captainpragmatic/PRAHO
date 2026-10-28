@@ -41,23 +41,27 @@ class SignedBodyTests(SimpleTestCase):
         return json.loads(self.client_._prepare_json_body(data, user_id)[0])
 
     def test_a_call_for_a_customer_names_the_bound_session(self) -> None:
-        with request_context.bound(SESSION_ID):
+        with request_context.bound(SESSION_ID, 42):
             self.assertEqual(self.body({}, 42)["session_id"], SESSION_ID)
             self.assertIs(self.body({"user_id": 42}, None)["interactive"], True)
             with request_context.background():
                 self.assertIs(self.body({}, 42)["interactive"], False)
 
-    def test_a_call_that_names_no_customer_carries_no_session(self) -> None:
-        with request_context.bound(SESSION_ID):
-            self.assertNotIn("session_id", self.body({"email": "a@example.ro"}, None))
+    def test_every_call_inside_a_signed_in_request_names_the_user_and_session(self) -> None:
+        with request_context.bound(SESSION_ID, 42):
+            # A call that names only a customer is bound too, so no endpoint escapes the session check.
+            body = self.body({"customer_id": 7}, None)
+            self.assertEqual((body["user_id"], body["session_id"]), (42, SESSION_ID))
         self.assertNotIn("session_id", self.body({}, 42))  # nothing bound outside a request
+        with request_context.bound(SESSION_ID, None):  # a session without its user binds nothing
+            self.assertNotIn("session_id", self.body({"customer_id": 7}, None))
 
     def test_an_explicit_session_is_never_overwritten(self) -> None:
-        with request_context.bound(SESSION_ID):
+        with request_context.bound(SESSION_ID, 42):
             self.assertEqual(self.body({"session_id": "other"}, 42)["session_id"], "other")
 
     def test_a_refusal_is_recorded_for_the_bound_session_only(self) -> None:
-        with request_context.bound(SESSION_ID):
+        with request_context.bound(SESSION_ID, 42):
             with self.assertRaises(PlatformAPIError):
                 self.client_._handle_api_response(_refusal(), "/customers/")
             self.assertTrue(request_context.rejected())

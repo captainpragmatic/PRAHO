@@ -13,29 +13,39 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 _session_id: ContextVar[str | None] = ContextVar("portal_session_id", default=None)
+_user_id: ContextVar[object] = ContextVar("portal_session_user_id", default=None)
 _interactive: ContextVar[bool] = ContextVar("portal_session_interactive", default=True)
 _rejected: ContextVar[bool] = ContextVar("portal_session_rejected", default=False)
+# Inside a request scope opened by bound(); bind() outside one would outlive the request.
+_scoped: ContextVar[bool] = ContextVar("portal_session_scoped", default=False)
 
 
 @contextmanager
-def bound(session_id: object) -> Iterator[None]:
-    """Bind one request's session; everything is restored when the request ends."""
+def bound(session_id: object, user_id: object = None) -> Iterator[None]:
+    """Bind one request's session and its user; everything is restored when the request ends."""
+    live_id = session_id if isinstance(session_id, str) and session_id and user_id is not None else None
     tokens = (
-        _session_id.set(session_id if isinstance(session_id, str) and session_id else None),
+        _session_id.set(live_id),
+        _user_id.set(user_id if live_id is not None else None),
         _interactive.set(True),
         _rejected.set(False),
+        _scoped.set(True),
     )
     try:
         yield
     finally:
-        _rejected.reset(tokens[2])
-        _interactive.reset(tokens[1])
+        _scoped.reset(tokens[4])
+        _rejected.reset(tokens[3])
+        _interactive.reset(tokens[2])
+        _user_id.reset(tokens[1])
         _session_id.reset(tokens[0])
 
 
-def bind(session_id: str) -> None:
-    """Use a session opened during this request (login), for the rest of it."""
-    _session_id.set(session_id)
+def bind(session_id: str, user_id: object) -> None:
+    """Use a session opened during this request (login), for the rest of it; outside one, nothing."""
+    if _scoped.get():
+        _session_id.set(session_id)
+        _user_id.set(user_id)
 
 
 @contextmanager
@@ -49,9 +59,15 @@ def background() -> Iterator[None]:
 
 
 def signed_fields() -> dict[str, object]:
-    """What a signed body that names a user carries; empty when no session is bound."""
+    """What every signed body made inside a signed-in request carries; empty when no session is bound.
+
+    The user too: a call that names only a customer is bound like one that names the user, so no
+    Platform endpoint is reached outside the session check.
+    """
     session_id = _session_id.get()
-    return {} if session_id is None else {"session_id": session_id, "interactive": _interactive.get()}
+    if session_id is None:
+        return {}
+    return {"user_id": _user_id.get(), "session_id": session_id, "interactive": _interactive.get()}
 
 
 def mark_rejected() -> None:

@@ -29,7 +29,12 @@ class ContendedKeyRotationTests(TestCase):
     def test_login_answers_503_when_the_rotation_gives_up(self) -> None:
         client = self.client_class(raise_request_exception=False)
         with patch("apps.users.views.api_client") as platform, CONTENDED:
-            platform.authenticate_customer.return_value = {"valid": True, "user_id": 123, "customer_id": 456}
+            platform.authenticate_customer.return_value = {
+                "valid": True,
+                "user_id": 123,
+                "customer_id": 456,
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",
+            }
             response = client.post("/login/", {"email": "test@example.com", "password": "pass123"})
         self.assertEqual(response.status_code, 503)
         self.assertIn("Retry-After", response)

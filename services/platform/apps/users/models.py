@@ -802,6 +802,9 @@ class PortalSession(models.Model):
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["user", "revoked_at"], name="idx_portal_session_user_live"),
             models.Index(fields=["expires_at"], name="idx_portal_session_expires"),
+            # The hourly sweep's three conditions, each on its own index.
+            models.Index(fields=["idle_deadline"], name="idx_portal_session_idle"),
+            models.Index(fields=["revoked_at"], name="idx_portal_session_revoked"),
         ]
 
     def __str__(self) -> str:

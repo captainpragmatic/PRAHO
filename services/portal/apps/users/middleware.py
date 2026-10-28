@@ -98,7 +98,7 @@ class PortalAuthenticationMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # ADR-0017 section 5: bind the Platform session for the whole request, public routes
         # included, so every signed call made for this customer names it.
-        with request_context.bound(request.session.get("portal_session_id")):
+        with request_context.bound(request.session.get("portal_session_id"), request.session.get("user_id")):
             response = self._authenticate(request)
             if request_context.rejected():
                 # Platform ended the session during the view; the view may have caught the error.

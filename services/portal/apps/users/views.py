@@ -324,13 +324,16 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
             try:
                 # Validate credentials via Platform API
                 mfa_token = form.cleaned_data.get("mfa_token", "")
-                auth_response = (
-                    api_client.authenticate_customer(
-                        email, password, mfa_token=mfa_token, client_ip=get_safe_client_ip(request)
-                    )
-                    if mfa_token
-                    else api_client.authenticate_customer(email, password, client_ip=get_safe_client_ip(request))
+                auth_response = api_client.authenticate_customer(
+                    email,
+                    password,
+                    mfa_token=mfa_token,
+                    client_ip=get_safe_client_ip(request),
+                    user_agent=request.META.get("HTTP_USER_AGENT", ""),
                 )
+                if auth_response and auth_response.get("valid") and not auth_response.get("session_id"):
+                    # ADR-0017 section 5: a login Platform opened no session for cannot be used.
+                    raise PlatformAPIError("Login answered without a Platform session", is_unavailable=True)
 
                 if auth_response and auth_response.get("valid"):
                     # Successful authentication - create Django session
@@ -356,11 +359,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["authenticated_at"] = timezone.now().isoformat()
                     request.session["remember_me"] = remember_me
                     request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
-                    portal_session_id = auth_response.get("session_id") or ""
+                    portal_session_id = str(auth_response["session_id"])
                     request.session["portal_session_id"] = portal_session_id
-                    if portal_session_id:
-                        # The membership and profile calls below already belong to this session.
-                        request_context.bind(portal_session_id)
+                    # The membership and profile calls below already belong to this session.
+                    request_context.bind(portal_session_id, user_id)
 
                     # Fetch and cache user's customer memberships for role-based access
 

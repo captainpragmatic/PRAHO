@@ -386,10 +386,9 @@ class PlatformAPIClient:
         payload: dict[str, Any] = {} if data is None else dict(data)
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
-        if "user_id" in payload:
-            # ADR-0017 section 5: every call made for a customer names the portal session it is for.
-            for key, value in request_context.signed_fields().items():
-                payload.setdefault(key, value)
+        # ADR-0017 section 5: every call made inside a signed-in request names its Platform session.
+        for key, value in request_context.signed_fields().items():
+            payload.setdefault(key, value)
         if "timestamp" not in payload:
             payload["timestamp"] = int(time.time())
 
@@ -802,7 +801,7 @@ class PlatformAPIClient:
         return self._make_request("POST", "/legal/document/", data=request)
 
     def authenticate_customer(
-        self, email: str, password: str, mfa_token: str = "", client_ip: str = ""
+        self, email: str, password: str, mfa_token: str = "", client_ip: str = "", user_agent: str = ""
     ) -> dict[str, Any] | None:
         """Authenticate a customer, propagating throttles and service failures to the caller."""
         start_time = time.perf_counter()
@@ -813,7 +812,7 @@ class PlatformAPIClient:
                 "email": email,
                 "password": password,
                 **({"mfa_token": mfa_token} if mfa_token else {}),
-                **_client_ip_payload(client_ip),
+                **_browser_payload(client_ip, user_agent),
             }
             data = self._make_request(
                 "POST",

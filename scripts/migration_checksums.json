@@ -119,7 +119,7 @@
     "services/platform/apps/users/migrations/0008_pending_registration_no_cnp.py": "8d35ec391744145ec1e07708f690e4d62c36779d16a5eb0b67b91ebebdbf398a",
     "services/platform/apps/users/migrations/0009_pending_registration_intent.py": "826559bf5039481369db183ebc69fabbfbb818d3d063906667de24f4dbd3933d",
     "services/platform/apps/users/migrations/0010_persistent_secret_contexts.py": "4abf8d0c5de24f8c42db0ca31cdd843bdcefc39bd032c44f817a3bcbdf8ba485",
-    "services/platform/apps/users/migrations/0011_portal_session.py": "7b5e78e69f0e3676373c5745df04b727e87c731cc4f423d257507bec1970ffcb",
+    "services/platform/apps/users/migrations/0011_portal_session.py": "574cb6e9a44894d02eeba15a951d95973e56ef346b699fa4913f067fced20ccb",
     "services/portal/apps/common/migrations/0001_initial.py": "65b7089126ce34c4a247d2f06c45c6cad4deed56468e4c707c0ae0a9eeccfeca"
   },
   "version": 1

@@ -95,7 +95,7 @@ def open_session(user: User, *, ip: str = "", user_agent: str = "") -> PortalSes
             user=user,
             credential_snapshot=user.get_session_auth_hash(),
             last_seen_at=now,
-            idle_deadline=min(now + IDLE_TIMEOUT, now + ABSOLUTE_TIMEOUT),
+            idle_deadline=now + IDLE_TIMEOUT,
             expires_at=now + ABSOLUTE_TIMEOUT,
             reauth_at=now,
             ip_digest=_digest(ip),
