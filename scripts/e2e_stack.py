@@ -422,6 +422,12 @@ def serve(instance: str) -> None:
                 STATE.unlink()
 
 
+# How long migrate, seeding and both servers get to come up. A GitHub runner migrates the SQLite
+# database from scratch: 4 min 19 s on 2026-10-28 against the previous 5-minute budget, so two
+# more migrations ran out of time. A stuck start still fails, just later.
+_SETUP_SECONDS = 600
+
+
 def start() -> None:
     require_free_ports()
     LOGS.mkdir(exist_ok=True)
@@ -435,7 +441,7 @@ def start() -> None:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    for _ in range(600):
+    for _ in range(int(_SETUP_SECONDS / 0.5)):
         if process.poll() is not None:
             raise RuntimeError("E2E setup failed. See logs/e2e-supervisor.log and logs/*_e2e.log.")
         if STATE.exists():
