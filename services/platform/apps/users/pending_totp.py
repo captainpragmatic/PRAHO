@@ -167,9 +167,9 @@ def complete_enrolment(  # noqa: PLR0913  # keyword-only enrolment contract
         if row is None or row.expires_at <= timezone.now():
             return EnrolmentResult("expired")
         secret = row.secret()
+        before = locked_user.get_session_auth_hash()  # before check_password can rehash the password
         if not locked_user.check_password(password) or not TOTPService.verify_enrolment_code(locked_user, secret, code):
             return EnrolmentResult("incorrect")
-        before = locked_user.get_session_auth_hash()
         _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret, origin=origin)
         row.delete()
         enrolled = User.objects.select_related("credential_version").get(pk=user_pk)

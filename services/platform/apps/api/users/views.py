@@ -753,11 +753,10 @@ def _keep_calling_session(request: HttpRequest) -> Callable[[str, str], bool]:
     """
     row = getattr(request, "portal_session", None)
 
-    def keep(_before: str, new_hash: str) -> bool:
-        # The snapshot this request was bound with, not a hash recomputed after check_password:
-        # a password rehash on a Django upgrade would otherwise end the caller's own session.
-        old_hash = row.credential_snapshot if row is not None else ""
-        return portal_sessions.restamp(row, old_hash=old_hash, new_hash=new_hash)
+    def keep(before: str, new_hash: str) -> bool:
+        # before is the locked user's hash read before check_password: equal to the session's
+        # snapshot unless another credential change landed first, which must still end it.
+        return portal_sessions.restamp(row, old_hash=before, new_hash=new_hash)
 
     return keep
 
@@ -865,6 +864,7 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     """Require current password and a second factor before removing MFA."""
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
+        before = user.get_session_auth_hash()  # before check_password can rehash the password
         if staff_cannot_disable_mfa(user):
             # The code lets the Portal tell this refusal from wrong credentials.
             return Response(
@@ -879,7 +879,6 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
             data=request.data, context={"request": request, "user": user, "origin": _browser_origin(request)}
         )
         if serializer.is_valid():
-            before = user.get_session_auth_hash()
             result = serializer.save()
             result["session_auth_hash"] = user.get_session_auth_hash()
             _keep_calling_session(request)(before, result["session_auth_hash"])
@@ -1386,6 +1385,7 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
         return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
+        before = user.get_session_auth_hash()  # before check_password can rehash the password
         if user.is_account_locked() or not user.check_password(current):
             user.increment_failed_login_attempts()
             return Response({"success": False, "error": "Current password is incorrect"}, status=400)
@@ -1398,7 +1398,6 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             and not MFAService.verify_mfa_code(user, str(request.data.get("token", "")), request)["success"]
         ):
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
-        before = user.get_session_auth_hash()
         user.set_password(new_password)
         user.save(update_fields=["password"])
         _keep_calling_session(request)(before, user.get_session_auth_hash())

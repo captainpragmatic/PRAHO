@@ -127,16 +127,18 @@ class PortalSessionServiceTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.credential_snapshot, "new")
 
-    def test_the_caller_is_kept_from_its_bound_snapshot_not_a_recomputed_hash(self) -> None:
+    def test_the_caller_is_kept_only_from_the_hash_its_session_was_bound_to(self) -> None:
         from django.test import RequestFactory  # noqa: PLC0415
 
         from apps.api.users.views import _keep_calling_session  # noqa: PLC0415
 
         row = portal_sessions.open_session(self.user)
         request = RequestFactory().post("/")
-        request.portal_session = row  # type: ignore[attr-defined]  # as the HMAC middleware sets it
-        # A password rehash during check_password changes the hash computed before the change.
-        self.assertTrue(_keep_calling_session(request)("rehashed-before", "after"))
+        vars(request)["portal_session"] = row  # as the HMAC middleware sets it
+        keep = _keep_calling_session(request)
+        # Another credential change landed before this one took the lock: the session must end.
+        self.assertFalse(keep("hash-after-someone-else", "after"))
+        self.assertTrue(keep(row.credential_snapshot, "after"))
         row.refresh_from_db()
         self.assertEqual(row.credential_snapshot, "after")
 
@@ -233,6 +235,37 @@ class PortalSessionBindingTests(HMACTestMixin, TestCase):
         self.assertEqual(self._post(SESSION_END, bound), 200)
         self.assertEqual(self._post(PROBE, bound), 401)
         self.assertEqual(self._post(PROBE, {"user_id": self.user.pk, "session_id": str(self.row.pk)}), 404)
+
+    def test_a_credential_change_landing_after_binding_still_ends_the_caller(self) -> None:
+        from apps.users.mfa import MFAService  # noqa: PLC0415
+
+        original = portal_sessions.resolve
+
+        def bind_then_change(raw_session_id: object, user_id: int, *, interactive: bool) -> PortalSession | None:
+            row = original(raw_session_id, user_id, interactive=interactive)
+            # Another request rotates a second factor after this one was bound, before its lock.
+            MFAService.apply_state_change(User.objects.get(pk=self.user.pk), action="rotate")
+            return row
+
+        body = json.dumps(
+            {
+                "user_id": self.user.pk,
+                "session_id": str(self.row.pk),
+                "current_password": PASSWORD,
+                "new_password": "Another-Horse-Battery-7",
+                "timestamp": int(time.time()),
+            }
+        ).encode()
+        with patch("apps.users.portal_sessions.resolve", side_effect=bind_then_change):
+            response = self.client.put(
+                PASSWORD_CHANGE,
+                body,
+                content_type="application/json",
+                **hmac_headers("PUT", PASSWORD_CHANGE, body, portal_id=self.portal_id),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        # The caller's session was bound to the hash before the rotation, so it is not kept.
+        self.assertEqual(self._post(PROBE, {"user_id": self.user.pk, "session_id": str(self.row.pk)}), 401)
 
     def test_a_password_change_keeps_the_calling_session_and_ends_the_others(self) -> None:
         other = portal_sessions.open_session(self.user)
