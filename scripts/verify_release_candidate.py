@@ -12,7 +12,7 @@ It exits non-zero, saying why, unless all of these hold:
 - every check master's ruleset requires concluded `success` in that head's latest pull_request run,
   read per workflow, so a same-named job from a dispatched or scheduled run can never stand in for
   it. The one check allowed to be `skipped` is the lab's, and only when its own `changes` job
-  succeeded in the same run (it decided the lab was not needed).
+  succeeded in the same run and that run completed successfully (a cancelled run also skips it).
 
 Needs `gh` (authenticated) and `git` with the PR head fetchable from origin.
 """
@@ -32,6 +32,7 @@ JSONObject = dict[str, Any]
 
 RULESET = Path(__file__).resolve().parents[1] / ".github" / "rulesets" / "master.json"
 SELECTIVE = {"pull-request": "changes"}  # a check allowed to skip -> the job whose success must explain it
+RUN_CONCLUSION = " run"  # key for each workflow run's own conclusion (job names never start with a space)
 
 
 class VerificationError(Exception):
@@ -55,6 +56,8 @@ def check_conclusions(runs: Iterable[JSONObject]) -> dict[str, list[tuple[str, s
             newest[path] = run
     jobs: dict[str, list[tuple[str, str]]] = {}
     for path, run in newest.items():
+        # The run's own conclusion, under a name no job can have: a cancelled run skips jobs too.
+        jobs.setdefault(RUN_CONCLUSION, []).append((path, str(run.get("conclusion"))))
         for job in run["jobs"]:
             jobs.setdefault(str(job["name"]), []).append((path, str(job.get("conclusion"))))
     return jobs
@@ -72,7 +75,12 @@ def failed_checks(contexts: Iterable[str], jobs: Mapping[str, list[tuple[str, st
         if conclusion == "success":
             continue
         decider = SELECTIVE.get(context)
-        if conclusion == "skipped" and decider and (path, "success") in jobs.get(decider, []):
+        if (
+            conclusion == "skipped"
+            and decider
+            and (path, "success") in jobs.get(decider, [])
+            and (path, "success") in jobs.get(RUN_CONCLUSION, [])
+        ):
             continue
         problems.append(f"{context}: {conclusion} ({path})")
     return problems

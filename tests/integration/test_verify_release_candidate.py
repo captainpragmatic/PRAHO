@@ -28,8 +28,9 @@ LAB = ".github/workflows/virtualmin-lab-pr.yml"
 CONTEXTS = ["coverage-gate", "pull-request"]
 
 
-def run(run_id: int, path: str, **jobs: str) -> dict[str, Any]:
-    return {"id": run_id, "path": path, "jobs": [{"name": name.replace("_", "-"), "conclusion": c} for name, c in jobs.items()]}
+def run(run_id: int, path: str, conclusion: str = "success", **jobs: str) -> dict[str, Any]:
+    named = [{"name": name.replace("_", "-"), "conclusion": c} for name, c in jobs.items()]
+    return {"id": run_id, "path": path, "conclusion": conclusion, "jobs": named}
 
 
 def green_runs() -> list[dict[str, Any]]:
@@ -72,6 +73,10 @@ def test_the_lab_may_skip_only_when_its_own_selection_succeeded() -> None:
 
     failed_selection = [run(1, PLATFORM, coverage_gate="success"), run(2, LAB, changes="failure", pull_request="skipped")]
     assert failed_checks(CONTEXTS, check_conclusions(failed_selection)) == [f"pull-request: skipped ({LAB})"]
+
+    # Cancelled after `changes` chose the lab: the lab job is skipped too, and must not count as a pass.
+    cancelled = [run(1, PLATFORM, coverage_gate="success"), run(2, LAB, "cancelled", changes="success", pull_request="skipped")]
+    assert failed_checks(CONTEXTS, check_conclusions(cancelled)) == [f"pull-request: skipped ({LAB})"]
 
 
 def test_only_the_lab_may_skip() -> None:

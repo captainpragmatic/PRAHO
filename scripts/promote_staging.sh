@@ -66,7 +66,8 @@ staging="$(git rev-parse origin/staging)"
 git merge-base --is-ancestor "$sha" origin/master || die "$sha is not on master"
 info "On master: $sha"
 
-runs="$(gh api "repos/{owner}/{repo}/actions/workflows/release-candidate.yml/runs?event=workflow_dispatch&status=success&per_page=100" \
+# --paginate: a rollback may name a release approved hundreds of runs ago.
+runs="$(gh api --paginate "repos/{owner}/{repo}/actions/workflows/release-candidate.yml/runs?event=workflow_dispatch&status=success&per_page=100" \
     --jq ".workflow_runs[] | select(.display_title == \"Release candidate $sha\" and .path == \".github/workflows/release-candidate.yml\" and .conclusion == \"success\") | \"\(.id) \(.head_sha)\"")" \
     || die "Could not read the release-candidate runs from GitHub (is gh authenticated?)"
 approved=""
