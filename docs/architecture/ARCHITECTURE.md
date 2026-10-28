@@ -167,16 +167,11 @@ a current export and verified move-away/cache-age proof. See the [ADR-0061 imple
 Portal's `apps/dns` contains forms, view orchestration and a bounded signed API client; staff diagnostics show
 saved private evidence on Platform. Neither interface runs customer DNS probes or provider calls inline.
 
-### Phase 5: explicit mail enrollment, integration in progress
+### Phase 5: withdrawn
 
-Native Postfix/Dovecot lab work and mail-node preparation do not establish a completed hosted-mail lifecycle.
-Platform now has `VirtualminMailConfiguration` for external/hosted mode and `VirtualminMailOperation` for
-immutable owner consent and recoverable work. A missing configuration means external mail. Fresh native/DNS
-proof is bound to current ownership, node addresses and the stable account name; retirement proof is bound
-to one enrollment UUID. Meaningful persisted changes are audited, while a lease heartbeat is coordination.
-Per-domain owner opt-in, managed mail records, mailbox-safe move/restore, relay/proxy cleanup and customer mail
-settings remain Phase 5 gates in the execution plan. Mail stays default-off until that workflow is proven;
-customer-zone import preserves external mail routing. Do not infer production mail support from a successful lab case.
+Mail on the Virtualmin web nodes is withdrawn. Customer mail moves to a dedicated mail node (#790, #791).
+Mailboxes already on the web nodes stay where they are, mail-enabled moves and recoveries stay refused, and
+customer-zone import preserves external mail routing.
 
 ## Deployment and isolation
 
@@ -208,6 +203,6 @@ verified separately in the Virtualmin lab; passing unit tests does not establish
 
 The [diagram index](README.md) links the system, request/worker flow, deployment and selected dependency views.
 The [ER diagram](diagrams/entity-relationships.mmd) is a selected subset with actual model PK/FK types.
-The [table taxonomy](diagrams/database-tables.mmd) is the 2026-10-27 snapshot of 168 concrete local Platform model
+The [table taxonomy](diagrams/database-tables.mmd) is the 2026-10-27 snapshot of 166 concrete local Platform model
 tables; it excludes framework tables and automatically created many-to-many tables. Neither diagram replaces
 the model definitions or migrations. No latency or availability benchmark is asserted by this guide.

@@ -7,11 +7,13 @@
 
 ## Implementation clarifications (2026-10-27)
 
-This ADR remains Proposed. Phase 2 is delivered by PR #749. Phases 3 to 5 are delivered together in one follow-up PR, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
+This ADR remains Proposed. Phase 2 is delivered by PR #749. Phases 3 and 4 are delivered together in one follow-up PR, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
 
-The agreed first release imports a complete customer-uploaded zone file, keeps account-name previews disabled, and makes native mail available on eligible nodes without enabling it for existing or new domains until their owner opts in. Temporary forwarding stays on the account's source node using Apache for web and native Postfix/Dovecot for mail; HAProxy is not a prerequisite. The detailed cutover below distinguishes the ownership commit from later bridge retention and cleanup.
+The agreed first release imports a complete customer-uploaded zone file and keeps account-name previews disabled. Temporary forwarding stays on the account's source node using Apache; HAProxy is not a prerequisite. The detailed cutover below distinguishes the ownership commit from later bridge retention and cleanup.
 
-Account-name sites remain root-owned and neutral even after PSL inclusion, with independently observed source/target bindings. Mail-enabled moves and recoveries remain refused until the native Postfix/Dovecot lifecycle and all-mailbox safety gates pass.
+Account-name sites remain root-owned and neutral even after PSL inclusion, with independently observed source/target bindings.
+
+**Phase 5 is withdrawn (2026-10-28).** Mail on the web nodes (section 7) will not be built. Customer mail moves to a dedicated mail node (#790, #791); its ADR comes with #790. Mailboxes already on the nodes stay where they are, and mail-enabled moves and recoveries remain refused.
 
 ## Context at proposal (2026-10-14)
 
@@ -57,7 +59,7 @@ Migration gains a **cutover** contract with one point of no return:
 1. **Before a planned move,** record every owned-name and managed customer-web record's actual original TTL, lower it to the configured cutover TTL (default 60 s), confirm provider readback, and wait the maximum original TTL. Routine sync preserves the lowered values.
 2. **Freeze and restore held.** Fence and verify source write paths before backup. Restore the target behind maintenance with credentials, cron and writes still held; verify archive lineage, account identity, certificates and current quotas. Prepare and verify the encrypted bridge prerequisites before committing ownership.
 3. **Commit ownership once.** Move `VirtualminAccount.server` and the account name's `target_server` together under the live operation lease and publication lock. Before this commit, compensation releases exactly the source state recorded by this operation. After it, recovery proceeds toward the committed target and never reopens the source for writes.
-4. **Activate, bridge and repoint.** Release the verified target through its activation protocol, verify source-to-target forwarding, and publish the owned name and managed apex/`www` records toward B. Confirm authoritative agreement against the still-current routing generation. Web forwarding uses Apache and verified TLS between nodes. Mail-enabled moves remain refused until the native all-mailbox freeze, held restore, proxy and queue contracts are implemented and proven.
+4. **Activate, bridge and repoint.** Release the verified target through its activation protocol, verify source-to-target forwarding, and publish the owned name and managed apex/`www` records toward B. Confirm authoritative agreement against the still-current routing generation. Web forwarding uses Apache and verified TLS between nodes. Mail-enabled moves remain refused; mailboxes already on the nodes stay where they are.
 5. **Finish and retain.** Complete the account move after activation, bridge verification and DNS convergence, allowing normal account reconciliation and backups to resume. A separate durable cleanup operation retains the source bridge for its DNS/cache window and certificate lifetime, removes the retained source only after its gates pass, and confirms each original TTL is restored. Failed cleanup retains routing and blocks a subsequent move.
 
 - Drain uses the same cutover, so its manual "routing and DNS confirmed" box goes away for accounts on these paths.
@@ -83,10 +85,11 @@ The Portal shows cached results and the exact records to set. Requests do not ru
 
 ### 7. Mail on the nodes
 
-- Eligible existing and new nodes gain Postfix and Dovecot through Virtualmin's selective setup. Mail stays default-off per domain until an explicit owner opt-in; external MX/SPF/DKIM and existing mail routing remain external until that workflow succeeds. Advertised client ports are implicit TLS 993, 995 and 465. A hosted domain's MX and client settings point at the account name, so mail follows its moves.
+Withdrawn on 2026-10-28 (see the implementation clarifications); kept as proposed.
+
+- Nodes gain Postfix and Dovecot. A domain's MX and the mail client settings point at the account name, so mail follows every move.
 - **Each node sends outgoing mail from its own IP,** with a PTR record matching the node name. PRAHO keeps one SPF record, `_spf.<zone>`, listing every node's addresses, and customers include it. Moves and new nodes then never break SPF.
 - DKIM keys are generated per domain and published by PRAHO in our zones, or shown as records to add elsewhere.
-- Native bridge clients authenticate at the destination and use its single writable mailbox copy. Source TLS termination uses independently retained certificates; onward TLS verifies the fixed target's identity. Source SMTP preserves original envelope recipients, queues rather than falling back to local delivery, and verifies target TLS. Mailbox-specific throttling and source client-IP abuse controls remain enforced. Mail queues and live forwarding sessions hold source deletion and node retirement until safely drained.
 - **Trade-off.** Sending reputation is per node, and a new node starts cold. Dedicated mail servers (for example mailcow) with stable outbound addresses remain a later option.
 
 ## Consequences

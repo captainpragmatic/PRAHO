@@ -1,7 +1,7 @@
 # PRAHO architecture diagrams
 
 **Source snapshot: 2026-10-27.** These Mermaid sources describe the current repository, including ADR-0061
-Phase 3/4 implementation branches. They do not assert deployment or Phase 5 completion. Read the
+Phase 3/4 implementation branches. They do not assert deployment; Phase 5 (mail on the web nodes) is withdrawn. Read the
 [architecture guide](ARCHITECTURE.md) and [execution plan](account-hostnames-dns-mail-plan.md) for scope.
 
 | Diagram | Scope |
