@@ -155,8 +155,15 @@ class SESTopicAllowlistTests(SESWebhookTestBase):
         self.assertProcessed(response)
 
     def test_allowlisted_body_topic_with_signature_over_a_different_topic_is_rejected(self) -> None:
-        forged = fx.sign(fx.envelope(), sign_over=fx.envelope(TopicArn=fx.OTHER_TOPIC_ARN))
-        self.assertRejected(self.post(forged), 403)
+        received = fx.envelope()
+        # Only the TopicArn differs between what is received and what was signed.
+        signed_elsewhere = {**received, "TopicArn": fx.OTHER_TOPIC_ARN}
+        forged = fx.sign(received, sign_over=signed_elsewhere)
+        self.assertRejected(self.post(forged), 403, reason="signature_mismatch")
+
+    def test_signature_over_the_received_envelope_is_the_control(self) -> None:
+        received = fx.envelope()
+        self.assertProcessed(self.post(fx.sign(received, sign_over=dict(received))))
 
     @override_settings(DEBUG=True, SES_SNS_TOPIC_ARNS=())
     def test_debug_with_an_empty_allowlist_accepts_an_unsigned_message(self) -> None:
