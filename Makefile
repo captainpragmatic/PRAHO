@@ -1373,12 +1373,16 @@ test-virtualmin-contract:
 
 # Separate, opt-in disposable mail-node capability proofs; never mutate the shared P2 lab.
 export MAIL_LAB_PROFILE MAIL_LAB_DNS MAIL_LAB_DEBIAN_IMAGE MAIL_LAB_UBUNTU_IMAGE MAIL_LAB_CLEANUP_FAILURE
-.PHONY: test-virtualmin-mail-node test-virtualmin-mail-node-unit
+.PHONY: test-virtualmin-mail-node test-virtualmin-mail-node-unit test-virtualmin-mail-expiry
 test-virtualmin-mail-node:
 	@$(PYTHON_SHARED) -m pytest -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. tests/virtualmin_mail_lab/test_node_capability.py
 
 test-virtualmin-mail-node-unit:
 	@$(PYTHON_SHARED) -m pytest -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. tests/virtualmin_mail_lab/test_harness_ownership.py
+
+# Expired node-certificate recovery and the helper bundle upgrade on owned disposable clones.
+test-virtualmin-mail-expiry:
+	@$(PYTHON_SHARED) -m pytest -x -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. tests/virtualmin_mail_lab/test_certificate_expiry.py
 
 test-virtualmin-workflows:
 	@echo "🧪 [Virtualmin lab] Workflow suite: PRAHO's services, jobs and tasks against the real nodes (needs make virtualmin-lab-up)..."

@@ -61,8 +61,8 @@ These cases cover live-service reload; they do not reset a review/applying journ
 same owned-clone harness (one clone per case, run them with `-x` so a failure retains at most one clone):
 
 ```sh
-MAIL_LAB_PROFILE=debian12 python -m pytest -x -c tests/virtualmin_mail_lab/pytest.ini --rootdir=. \
-  tests/virtualmin_mail_lab/test_certificate_expiry.py
+make test-virtualmin-mail-expiry MAIL_LAB_PROFILE=debian12
+make test-virtualmin-mail-expiry MAIL_LAB_PROFILE=ubuntu2604
 ```
 
 Its in-clone helper `expiry_checks.py` forges a trusted, correctly named leaf that expired a day ago, with matching
