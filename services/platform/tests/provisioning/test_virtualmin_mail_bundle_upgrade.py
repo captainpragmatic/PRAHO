@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -310,3 +311,18 @@ class CompatibilityModeTests(BundleUpgradeFixture, SimpleTestCase):
 
     def test_upgrade_journal_paths_point_at_the_fixed_private_stage(self):
         self.assertEqual(Path(self.root / "var/lib/praho/mail/bundle-upgrade").stat().st_mode & 0o777, 0o700)
+
+    def test_a_chain_the_installed_trust_store_rejects_fails_the_dry_run(self):
+        self.cgroup("user.slice/session-4.scope")
+        guard = self.boot.MailBootGuard(self.root, execute=Mock(), configured=Mock())
+        for verify, expected in ((None, True), (subprocess.CalledProcessError(2, ["openssl", "verify"]), False)):
+            with self.subTest(verify=verify):
+                setup = Mock()
+                setup.execute.side_effect = ["public candidate", "public candidate"]
+                with (
+                    patch.object(self.boot, "node_setup", return_value=setup),
+                    patch.object(self.boot, "execute", side_effect=verify) as openssl,
+                ):
+                    self.assertEqual(guard.compatible(), expected)
+                openssl.assert_called_once()
+                self.assertEqual(setup.certificate_verify_command.call_args.kwargs, {"check_time": False})
