@@ -124,6 +124,10 @@ class MigrationCancelledBeforeCommitError(ValueError):
     """A cancellation won the row lock before the ownership commit."""
 
 
+class MigrationBarrierBrokenBeforeCommitError(ValueError):
+    """The source's write barrier does not provably hold at the ownership commit."""
+
+
 def source_is_fenced(migration: VirtualminMigration) -> bool:
     """Only an audited staff attestation may replace source RPCs after a cutover commits."""
     control = migration.barrier_state.get("source_fenced_control")
@@ -1037,13 +1041,38 @@ class VirtualminMigrationService:
     def _commit_cutover(self, migration: VirtualminMigration, token: UUID) -> None:
         try:
             self._commit_cutover_transaction(migration, token)
-        except MigrationCancelledBeforeCommitError as error:
+        except (MigrationCancelledBeforeCommitError, MigrationBarrierBrokenBeforeCommitError) as error:
             self._abort(migration, token, error)
+
+    def _reverify_barrier(self, migration: VirtualminMigration) -> None:
+        """The whole fence must still hold now: a write after the backup would be lost by the commit."""
+        state = migration.barrier_state or {}
+        record = BarrierRecord.from_state(state.get("record"))
+        if record.is_err():
+            raise ValueError(f"The original barrier record is unusable: {record.unwrap_err()}")
+        result = self._barrier(
+            migration,
+            "verify",
+            token=str(uuid4()),
+            saved_token=str(state.get("token") or migration.pk),
+            record=record.unwrap(),
+            killed_at=int(state.get("killed_at") or 0),
+        )
+        self._defer_if_node_busy(result)
+        if result.is_err():
+            raise MigrationBarrierBrokenBeforeCommitError(
+                f"The write barrier could not be verified before the ownership commit: {result.unwrap_err()}"
+            )
+        if not result.unwrap().ok:
+            raise MigrationBarrierBrokenBeforeCommitError(
+                f"The write barrier no longer holds before the ownership commit: {result.unwrap().reason}"
+            )
 
     def _commit_cutover_transaction(self, migration: VirtualminMigration, token: UUID) -> None:
         """The sole point of no return, before target activation or any routing publication."""
         if self._domain(migration.source_server, migration.account.domain)["enabled"] is not False:
             raise ValueError("The source is not fenced before the ownership commit")
+        self._reverify_barrier(migration)
         with transaction.atomic():
             locked = VirtualminMigration.objects.select_for_update().get(pk=migration.pk)
             if locked.cancel_requested:
