@@ -18,8 +18,10 @@ only as a SHA-256 digest, valid for 60 seconds, consumed once by a conditional u
 a page that posts the code to the portal's `/customer-view/redeem/` in the request body, so the code
 never appears in a URL, a log or browser history. Only that response widens `form-action` to the
 portal's origin. The portal accepts the code only with Platform's exact `Origin`, exchanges it over
-the signed channel, replaces the browser session (ending the displaced one on Platform), rotates CSRF
-and sets a cookie that ends with the browser.
+the signed channel, replaces the browser session, rotates CSRF and sets a cookie that ends with the
+browser. A displaced portal session is ended on Platform when the browser sends it; across registrable
+domains a `SameSite=Lax` cookie is withheld from that POST, so the replaced cookie's session is held
+by no browser and ends at its own deadline.
 
 **Who and whom.** The staff member must be active, have the `admin` or `support` role, have two-factor
 authentication enrolled, and be in a console session whose login completed the second factor. The
@@ -39,9 +41,11 @@ viewed one. The portal refuses every page that is not a reading page, public rou
 any view runs. Both lists are deny by default, and tests call every other route with a customer view
 and expect a refusal. Logout and leaving are the only writes.
 
-**What is recorded.** Issue, refused issue, start, every data access, every refusal and the end are
-audit events with the staff member as actor, the customer member as subject, the reason and the
-grant. Session ids appear only as keyed digests.
+**What is recorded.** Issue, refused issue, start, every data access, every refusal on Platform and the
+end are audit events with the staff member as actor, the customer member as subject, the reason and
+the grant. A page the portal refuses never reaches Platform and is logged, not audited; any write it
+would have made is refused on Platform too. Session ids appear only as keyed digests. A grant names
+the staff console session that issued it and is deleted a day after its view ends.
 
 **What the customer sees.** Nothing: no indicator, notification or email. The amber banner and
 "Leave customer view" exist only in the staff browser.

@@ -16,6 +16,7 @@ import hashlib
 import logging
 import re
 import secrets
+import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -69,7 +70,7 @@ class CustomerViewBlocked(PermissionDenied):
 
 @dataclass(frozen=True)
 class IssuedGrant:
-    grant_id: Any
+    grant_id: uuid.UUID
     code: str = field(repr=False)
 
 
@@ -245,11 +246,16 @@ def consume(code: object) -> PortalSession:
     """Redeem a code once and open the customer view; PermissionDenied for anything else."""
     if not enabled() or not isinstance(code, str) or CODE_PATTERN.fullmatch(code) is None:
         raise PermissionDenied("customer_view_forbidden")
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: cross-app, deferred
+
     candidate = CustomerViewGrant.objects.filter(code_digest=_digest(code)).first()
     if candidate is None:
         raise PermissionDenied("customer_view_forbidden")
     with transaction.atomic():
-        staff, target, customer = _lock_authority(candidate.staff_id, candidate.target_id, candidate.customer_id)
+        try:
+            staff, target, customer = _lock_authority(candidate.staff_id, candidate.target_id, candidate.customer_id)
+        except (Customer.DoesNotExist, KeyError) as exc:  # the customer was deleted, or a person removed
+            raise PermissionDenied("customer_view_forbidden") from exc
         grant = CustomerViewGrant.objects.select_for_update().get(pk=candidate.pk)
         now = timezone.now()
         if (
@@ -378,4 +384,10 @@ def sweep(now: datetime | None = None) -> int:
     CustomerViewGrant.objects.filter(consumed_at__isnull=True, voided_at__isnull=True, expires_at__lte=now).update(
         voided_at=now
     )
+    # A grant names the staff console session that issued it. Once its view has ended (or it was never
+    # used), keep it no longer than the portal session rows: its audit events hold the record.
+    cutoff = now - timedelta(days=1)
+    CustomerViewGrant.objects.filter(expires_at__lt=cutoff).exclude(
+        portal_session__revoked_at__isnull=True, portal_session__isnull=False
+    ).delete()
     return ended

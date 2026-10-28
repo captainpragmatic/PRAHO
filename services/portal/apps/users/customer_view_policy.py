@@ -33,6 +33,7 @@ READS: frozenset[str] = frozenset(
         "billing:proforma_detail",
         "billing:proforma_pdf_export",
         "billing:dashboard_widget",
+        "billing:recurring_payments",
         "tickets:list",
         "tickets:detail",
         "tickets:attachment_download",

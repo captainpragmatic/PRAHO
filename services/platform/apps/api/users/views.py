@@ -793,14 +793,22 @@ def customer_view_redeem_api(request: HttpRequest, request_data: dict[str, Any])
     client_ip = request_data.get("client_ip")
     if not isinstance(code, str) or customer_view.CODE_PATTERN.fullmatch(code) is None:
         return Response({"error": "Invalid grant"}, status=400)
-    if counters.increment(f"customer-view-redeem:{client_ip or 'unknown'}", 60) > CUSTOMER_VIEW_REDEEM_LIMIT:
+    # Per address only when the portal could tell addresses apart: one shared bucket would let anyone
+    # lock every staff member out. The HMAC throttles on this view still apply either way.
+    if (
+        isinstance(client_ip, str)
+        and client_ip
+        and counters.increment(f"customer-view-redeem:{client_ip}", 60) > CUSTOMER_VIEW_REDEEM_LIMIT
+    ):
         return Response({"error": "Too many attempts"}, status=429, headers={"Retry-After": "60"})
     try:
         row = customer_view.consume(code)
     except PermissionDenied:
         customer_view.audit_refused_redemption(code)
         return Response({"error": "customer_view_forbidden"}, status=403, headers={"Cache-Control": "no-store"})
-    membership = CustomerMembership.objects.get(user=row.user, customer=row.customer_view_customer, is_active=True)
+    membership = CustomerMembership.objects.filter(
+        user=row.user, customer=row.customer_view_customer, is_active=True
+    ).first()
     staff = row.viewed_as_customer_by
     return Response(
         {
@@ -808,8 +816,9 @@ def customer_view_redeem_api(request: HttpRequest, request_data: dict[str, Any])
             "user": {"id": row.user_id, "email": row.user.email},
             "customer": {
                 "id": row.customer_view_customer_id,
-                "name": membership.customer.name,
-                "role": membership.role,
+                "name": row.customer_view_customer.name if row.customer_view_customer else "",
+                # Ended meanwhile: the view's next request is refused anyway.
+                "role": membership.role if membership is not None else "",
             },
             "staff_label": staff.get_full_name() if staff is not None else "",
         },
