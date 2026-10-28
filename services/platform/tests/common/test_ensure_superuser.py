@@ -119,3 +119,16 @@ class EnsureSuperuserTestCase(TestCase):
             call_command("ensure_superuser", stdout=out)
 
         self.assertIn("already exists", out.getvalue())
+
+    @override_settings(DEBUG=False)
+    def test_rejects_password_the_configured_validators_refuse_in_prod(self) -> None:
+        # Twelve characters and not on the deny list, but all digits: Django's validators refuse it.
+        with (
+            patch.dict(
+                "os.environ",
+                {"DJANGO_SUPERUSER_EMAIL": "admin@example.com", "DJANGO_SUPERUSER_PASSWORD": "123456789012"},
+            ),
+            self.assertRaises(CommandError),
+        ):
+            call_command("ensure_superuser")
+        self.assertFalse(User.objects.filter(email="admin@example.com").exists())

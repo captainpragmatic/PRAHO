@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
 
+from django.conf import settings  # After django.setup()
 from django.contrib.auth import get_user_model  # After django.setup()
 from django.db import transaction  # After django.setup()
 from django.utils import timezone  # After django.setup()
@@ -1227,6 +1228,9 @@ def main() -> (  # Complexity: multi-step business logic
     None
 ):  # Complexity: test data generation  # Complexity: multi-step business logic
     """Main function."""
+    # It creates superusers with published passwords and writes sample business data: never outside DEBUG.
+    if not settings.DEBUG:
+        sys.exit("🚫 setup_test_data.py seeds superusers with published passwords; it runs only with DEBUG=True.")
     if check_existing_data():
         print("ℹ️  Test data already exists. Retrieving existing data...")  # Intentional: emoji logging
 
