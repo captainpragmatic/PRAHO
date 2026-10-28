@@ -526,6 +526,7 @@ def _complete_apply(operation: HostedZoneOperation, zone: HostedZone, token: UUI
         zone.retry()
     if zone.status == "pending_import":
         zone.await_nameservers()
+    zone.last_error = ""
     zone.save()
     _save(operation, token, status="completed", last_error="")
     if not zone.activation.get("activated_at"):

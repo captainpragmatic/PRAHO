@@ -107,12 +107,19 @@ def request_operation_retry(zone: HostedZone, *, actor: User | None) -> Result[H
         operation.status = "waiting"  # fsm-bypass: CharField operation status; explicit retry under its row lock.
         if operation.kind == "delete":
             operation.phase = "delete_parent"
+        elif operation.kind == "activate":
+            # A parked poll proves nothing about the provider now: the whole chain runs again,
+            # under a poll deadline of its own.
+            operation.phase = "activation_identity"
+            operation.cursor = 0
+            operation.evidence = {**operation.evidence, "poll_started_at": timezone.now().isoformat()}
         operation.last_error = ""
         operation.next_attempt_at = timezone.now()
         operation.save(
             update_fields=[
                 "status",
                 "phase",
+                "cursor",
                 "evidence",
                 "registrar_operation",
                 "last_error",
@@ -235,6 +242,7 @@ def _parent(identifier: UUID, token: UUID) -> int:
         }
         if zone.status != "deleting":
             zone.start_deleting()
+        zone.last_error = ""
         zone.save()
         worker._save(operation, token, phase="delete_provider_inflight", evidence=evidence)
         return 0

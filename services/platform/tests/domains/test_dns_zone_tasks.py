@@ -280,6 +280,109 @@ class ZoneWorkerTests(TransactionTestCase):
         self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
         self.assertEqual(self.finish_apply()["action"], "completed")
 
+    def test_a_completed_apply_retry_clears_the_parked_zone_error(self):
+        self.provider.rejected_record = True
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "record_create_unconfirmed"))
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+        self.assertEqual(self.finish_apply()["action"], "completed")
+        self.zone.refresh_from_db()
+        self.assertEqual(self.zone.status, "awaiting_ns")
+        self.assertEqual(self.zone.last_error, "")
+
+    def park_activation(self):
+        """Apply, then park the follow-up activation poll on a definite provider refusal."""
+        self.finish_apply()
+        self.operation = HostedZoneOperation.objects.get(zone=self.zone, kind="activate", status="waiting")
+        refused = Err("definite refusal", retriability=Retriability.NOT_RETRIABLE)
+        with patch.object(self.provider, "read_zone", return_value=refused):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.operation.status, "parked")
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "activation_status_unproven"))
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+
+    def poll_activation(self):
+        for _ in range(30):
+            self.tick()
+            self.operation.refresh_from_db()
+            if self.operation.status != "waiting":
+                break
+        self.zone.refresh_from_db()
+
+    def test_a_successful_activation_retry_activates_the_failed_zone_and_clears_its_error(self):
+        self.park_activation()
+        self.provider.identity = replace(self.provider.identity, status="active")
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.cloudflare.example", "ns2.cloudflare.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 300,
+        }
+        self.poll_activation()
+        self.assertEqual(self.operation.status, "completed")
+        self.assertEqual(self.zone.status, "active")
+        self.assertEqual(self.zone.last_error, "")
+        self.assertTrue(self.zone.activation["activated_at"])
+
+    def test_an_activation_retry_reads_the_inventory_again_before_activating(self):
+        self.finish_apply()
+        self.operation = HostedZoneOperation.objects.get(zone=self.zone, kind="activate", status="waiting")
+        self.provider.identity = replace(self.provider.identity, status="active")
+        refused = Err("definite refusal", retriability=Retriability.NOT_RETRIABLE)
+        with patch.object(self.provider, "get_dnssec", return_value=refused):
+            self.poll_activation()
+        self.assertEqual((self.operation.status, self.operation.phase), ("parked", "activation_dnssec"))
+        key = next(iter(self.provider.records))
+        row = self.provider.records[key]
+        self.provider.records[key] = replace(row, spec=replace(row.spec, ttl=row.spec.ttl + 60))
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.cloudflare.example", "ns2.cloudflare.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 300,
+        }
+        self.poll_activation()
+        self.assertEqual(self.operation.status, "parked")
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "provider_inventory_mismatch"))
+
+    def test_a_retry_after_the_poll_deadline_gets_a_fresh_deadline(self):
+        self.finish_apply()
+        self.operation = HostedZoneOperation.objects.get(zone=self.zone, kind="activate", status="waiting")
+        HostedZoneOperation.objects.filter(pk=self.operation.pk).update(created_at=timezone.now() - timedelta(days=8))
+        self.tick()
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual((self.operation.status, self.zone.last_error), ("parked", "activation_deadline"))
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+        self.provider.identity = replace(self.provider.identity, status="active")
+        self.handover.return_value = {
+            "state": "verified",
+            "nameservers": ["ns.cloudflare.example", "ns2.cloudflare.example"],
+            "ds": [],
+            "ds_ttl": 0,
+            "ns_ttl": 300,
+        }
+        self.poll_activation()
+        self.assertEqual(self.operation.status, "completed")
+        self.assertEqual((self.zone.status, self.zone.last_error), ("active", ""))
+
+    def test_an_activation_retry_that_reproves_readiness_offers_the_nameservers_again(self):
+        self.park_activation()
+        for _ in range(8):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.operation.status, "waiting")
+        self.assertEqual(self.zone.status, "awaiting_ns")
+        self.assertEqual(self.zone.last_error, "")
+        self.assertEqual(zones.cached_zone_status(self.zone)["nameservers"], list(self.zone.assigned_nameservers))
+
     def test_unowned_record_drift_blocks_whole_inventory_readback(self):
         for _ in range(100):
             self.tick()
@@ -472,6 +575,21 @@ class ZoneWorkerTests(TransactionTestCase):
         self.finish_apply()
         self.assertEqual(self.operation.status, "parked")
         self.assertTrue(self.provider.records)
+
+    def test_a_retried_delete_clears_the_parked_zone_error(self):
+        self.begin_ready_delete()
+        key = next(iter(self.provider.records))
+        row = self.provider.records[key]
+        self.provider.records[key] = replace(row, spec=replace(row.spec, ttl=row.spec.ttl + 60))
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "zone_delete_refused"))
+        self.provider.records[key] = row
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.operation.status, "completed")
+        self.assertEqual((self.zone.status, self.zone.last_error), ("deleted", ""))
 
     def test_unknown_delete_rechecks_delegation_before_a_retry_can_remove_the_zone(self):
         self.begin_ready_delete()
