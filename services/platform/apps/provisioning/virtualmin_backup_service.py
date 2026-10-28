@@ -1548,9 +1548,13 @@ class VirtualminBackupService:
 
         if not self._owns_execution():
             return Err("Backup execution superseded before owner aging capture")
-        if getattr(self.server, "node_deployment", None) is None:
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
             return Err(
-                "Owner login aging capture requires a managed node with SSH; enroll the API-only server before creating a recovery-capable backup",
+                "Owner login aging capture needs a verified SSH transport; enroll the API-only server as a managed node "
+                f"or configure its imported root key and trust ({readiness.unwrap_err()})",
                 retriability=Retriability.NOT_RETRIABLE,
             )
         identity = self._read_domain_id(account)
