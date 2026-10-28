@@ -44,6 +44,30 @@ class HostedZoneOwnershipTests(TestCase):
         self.assertNotIn("virtualmin_account_server_migrated", actions)
         self.assertNotIn("virtualmin_account_status_changed", actions)
 
+    def _service_actions(self):
+        return list(AuditEvent.objects.filter(object_id=str(self.service.pk)).values_list("action", flat=True))
+
+    @override_settings(DISABLE_AUDIT_SIGNALS=False)
+    def test_full_service_save_records_no_status_change_it_did_not_make(self):
+        stale = Service.objects.get(pk=self.service.pk)
+        Service.objects.filter(pk=stale.pk).update(customer=self.other)
+        stale.service_name = "Renamed hosting"
+        stale.save()
+        self.service.refresh_from_db()
+        self.assertEqual((self.service.customer_id, self.service.status), (self.other.pk, "active"))
+        self.assertEqual(self._service_actions().count("service_status_changed"), 0)
+        stale.customer = self.third
+        with self.assertRaises(ValidationError):
+            stale.save()
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.customer_id, self.other.pk)
+
+    @override_settings(DISABLE_AUDIT_SIGNALS=False)
+    def test_a_real_service_status_change_is_still_audited(self):
+        self.service.suspend(reason="ownership audit test")
+        self.service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+        self.assertEqual(self._service_actions().count("service_status_changed"), 1)
+
     def setUp(self):
         self.account, self.hostname, _actor = hosting_fixture()
         self.service = self.account.service

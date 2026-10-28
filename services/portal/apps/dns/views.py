@@ -224,7 +224,7 @@ def zone_action(  # noqa: PLR0913  # Decorator supplies both authenticated ident
 
 @require_http_methods(["POST"])
 @csrf_protect
-@_access()
+@_access(write=True)
 def zone_export(request: HttpRequest, customer_id: int, user_id: int, zone_id: UUID, *, can_edit: bool) -> HttpResponse:
     raw = dns_api.export_zone(customer_id, user_id, zone_id)
     return HttpResponse(

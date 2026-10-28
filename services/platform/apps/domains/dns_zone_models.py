@@ -249,6 +249,7 @@ class HostedZoneImportRevision(models.Model):
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     objects = HostedZoneRevisionQuerySet.as_manager()
 
     class Meta:
@@ -259,6 +260,9 @@ class HostedZoneImportRevision(models.Model):
         ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if kwargs.get("update_fields"):
+            # auto_now is written only for listed fields; an empty list stays Django's no-op save.
+            kwargs["update_fields"] = {*kwargs["update_fields"], "updated_at"}
         old = type(self).objects.filter(pk=self.pk).values(*_REVISION_FIELDS, "confirmed_at", "confirmed_by_id").first()
         if old:
             fields = set(kwargs.get("update_fields") or (*_REVISION_FIELDS, "confirmed_at", "confirmed_by_id"))

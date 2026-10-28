@@ -743,15 +743,17 @@ def _withdraw(hostname: AccountHostname) -> Result[str, str]:
 
     Publishing means only a name with an unexpired certificate installed on its node is in DNS; a name
     that lost it would send customers to a node that cannot serve it. Called under the name's lock.
+    PRAHO's own records go whatever a customer zone's state; each customer zone is handled on its own
+    (`withdraw_managed_locked`), and one still to retry keeps the name's records so the sweep returns.
     """
     from .managed_dns_service import withdraw_managed_locked  # noqa: PLC0415  # Deferred customer-zone seam
 
     managed = withdraw_managed_locked(hostname)
-    if managed.is_err():
-        return Err(managed.unwrap_err(), retriability=retriability_of(managed))
     deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
     if deleted.is_err():
         return Err(f"Record withdrawal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+    if managed.is_err():
+        return Err(managed.unwrap_err(), retriability=retriability_of(managed))
     AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(
         records={}, last_reconciled_at=None, updated_at=timezone.now()
     )
@@ -1031,6 +1033,8 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
 
     Withdrawal is durable even when private cleanup fails. The target and unretired row keep that
     cleanup reachable by the sweep; DNS retirement never deletes a native child or customer parent.
+    The name's own records go whatever a customer zone's state; a customer zone still to retry keeps
+    the name unretired, so the sweep comes back to it.
     """
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
@@ -1039,8 +1043,6 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
         from .managed_dns_service import withdraw_managed_locked  # noqa: PLC0415  # Deferred customer-zone seam
 
         managed = withdraw_managed_locked(locked)
-        if managed.is_err():
-            return Err(managed.unwrap_err(), retriability=retriability_of(managed))
         account = locked.account
         server = locked.target_server or (account.server if account else None)
         metadata_only = _never_placed(locked)
@@ -1051,6 +1053,8 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
             deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(locked))
             if deleted.is_err():
                 return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+        if managed.is_err():
+            return Err(managed.unwrap_err(), retriability=retriability_of(managed))
         locked.records = {}
         locked.last_reconciled_at = None
         locked.save(update_fields=["records", "last_reconciled_at", "updated_at"])

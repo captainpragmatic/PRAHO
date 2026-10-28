@@ -20,6 +20,8 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 
 CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "zone-api-tests"}}
 UPLOAD = b'$ORIGIN customer.example.\n$TTL 900\n@ IN A 95.217.0.10\nselector-q._domainkey IN TXT "must-survive"\n'
+APEX = b"@ IN SOA ns.old.example. hostmaster.customer.example. (1 3600 600 86400 300)\n@ IN NS ns.old.example.\n"
+EXPORTABLE = UPLOAD.replace(b"$TTL 900\n", b"$TTL 900\n" + APEX)
 
 
 @override_settings(CACHES=CACHE, PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -65,10 +67,10 @@ class DnsZoneApiTests(HMACTestMixin, TestCase):
     def identity(self, **values):
         return {"customer_id": self.customer.pk, "user_id": self.user.pk, **values}
 
-    def stage(self):
+    def stage(self, raw=UPLOAD):
         response = self.portal_post(
             self.path + "import/",
-            self.identity(service_id=self.service.pk, zone_file=base64.b64encode(UPLOAD).decode()),
+            self.identity(service_id=self.service.pk, zone_file=base64.b64encode(raw).decode()),
         )
         self.assertEqual(response.status_code, 201, response.content)
         return HostedZone.objects.get(account=self.account)
@@ -102,6 +104,42 @@ class DnsZoneApiTests(HMACTestMixin, TestCase):
                     403,
                 )
         self.assertFalse(HostedZone.objects.exists())
+
+    def test_zone_export_records_a_deletion_receipt_so_only_technical_roles_may_export(self):
+        zone = self.stage(EXPORTABLE)
+        self.assertTrue(zone.revisions.get(number=zone.current_revision).valid)
+        path = f"{self.path}{zone.pk}/export/"
+        for role in ("viewer", "billing"):
+            with self.subTest(role=role):
+                self.membership.role = role
+                self.membership.save(update_fields=["role"])
+                self.assertEqual(self.portal_post(f"{self.path}{zone.pk}/", self.identity()).status_code, 200)
+                self.assertEqual(self.portal_post(path, self.identity()).status_code, 403)
+        zone.refresh_from_db()
+        self.assertNotIn("export_digest", zone.deletion)
+        self.membership.role = "tech"
+        self.membership.save(update_fields=["role"])
+        response = self.portal_post(path, self.identity())
+        self.assertEqual(response.status_code, 200, response.content)
+        exported = base64.b64decode(response.json()["data"]["zone_file"])
+        self.assertIn(b"selector-q._domainkey", exported)
+        zone.refresh_from_db()
+        self.assertEqual(zone.deletion["exported_by"], str(self.user.pk))
+        digest = zone.deletion["export_digest"]
+        detail = self.portal_post(f"{self.path}{zone.pk}/", self.identity())
+        self.assertEqual(detail.json()["data"]["zone"]["export_digest"], digest)
+        # Another technical member neither sees that receipt nor deletes on it.
+        colleague = User.objects.create_user(email="zone-tech@example.net")
+        CustomerMembership.objects.create(user=colleague, customer=self.customer, role="tech")
+        detail = self.portal_post(f"{self.path}{zone.pk}/", self.identity(user_id=colleague.pk))
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(detail.json()["data"]["zone"]["export_digest"], "")
+        refused = self.portal_post(
+            f"{self.path}{zone.pk}/delete/",
+            self.identity(user_id=colleague.pk, expected_revision=zone.current_revision, export_digest=digest),
+        )
+        self.assertEqual((refused.status_code, refused.json()["error"]), (409, "current_export_required"))
+        self.assertFalse(zone.operations.filter(kind="delete").exists())
 
     def test_technical_contact_can_stage_and_revocation_is_immediate(self):
         self.membership.role = "tech"

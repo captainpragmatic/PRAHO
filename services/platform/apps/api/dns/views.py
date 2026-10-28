@@ -1,4 +1,4 @@
-"""Tenant-scoped database-only DNS reads and durable owner/tech mutation intents."""
+"""Tenant-scoped database-only DNS reads and durable owner/tech mutation intents, export included."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def zone_detail_api(request: Request, customer: Customer, zone_id: UUID) -> Resp
         page = positive_integer(request.data.get("page", 1))
     except ValueError as error:
         return _error(str(error), status=HTTPStatus.BAD_REQUEST)
-    return _response({"zone": zones.cached_zone_status(zone, page=page)})
+    return _response({"zone": zones.cached_zone_status(zone, page=page, actor=_actor(request))})
 
 
 @never_cache
@@ -125,7 +125,7 @@ def zone_import_api(request: Request, customer: Customer) -> Response:
     result = zones.preview_zone_import(account, raw, actor=actor)
     if result.is_err():
         return _error(result.unwrap_err())
-    return _response({"zone": zones.cached_zone_status(result.unwrap().zone)}, status=HTTPStatus.CREATED)
+    return _response({"zone": zones.cached_zone_status(result.unwrap().zone, actor=actor)}, status=HTTPStatus.CREATED)
 
 
 @never_cache
@@ -156,14 +156,14 @@ def zone_action_api(request: Request, customer: Customer, zone_id: UUID, action:
         return _error(str(error), status=HTTPStatus.BAD_REQUEST)
     if result.is_err():
         return _error(result.unwrap_err())
-    return _response({"zone": zones.cached_zone_status(zone)}, status=HTTPStatus.ACCEPTED)
+    return _response({"zone": zones.cached_zone_status(zone, actor=actor)}, status=HTTPStatus.ACCEPTED)
 
 
 @never_cache
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@require_customer_authentication
+@require_customer_role_in(*TECH_ROLES)
 def zone_export_api(request: Request, customer: Customer, zone_id: UUID) -> Response:
     actor = _actor(request)
     if actor is None:
@@ -208,4 +208,4 @@ def zone_record_api(request: Request, customer: Customer, zone_id: UUID, record_
         return _error(str(error), status=HTTPStatus.BAD_REQUEST)
     if result.is_err():
         return _error(result.unwrap_err())
-    return _response({"zone": zones.cached_zone_status(zone)}, status=HTTPStatus.ACCEPTED)
+    return _response({"zone": zones.cached_zone_status(zone, actor=actor)}, status=HTTPStatus.ACCEPTED)

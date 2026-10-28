@@ -1,4 +1,4 @@
-"""Explicit whole-zone removal requires a real export and a proven, cached-out move away."""
+"""Explicit whole-zone removal requires the requester's own real export and a proven, cached-out move away."""
 
 from __future__ import annotations
 
@@ -24,6 +24,11 @@ SHA256_LENGTH = 64
 # The parent is observed outside the zone's locks, whose wait has no bound. An observation started
 # longer ago than this when the locks are held is repeated before any provider deletion.
 PROOF_MAX_AGE = timedelta(seconds=30)
+# A parent whose lookups always outlast PROOF_MAX_AGE would bounce the delete forever. After this many
+# stale observations in a row (about an hour of retries) the delete parks for staff review instead.
+STALE_PROOF_LIMIT = 12
+STALE_PROOF_PARK_CODE = "move_away_proof_stale_limit"
+STALE_PROOFS = "stale_proofs"
 
 
 def _export_current(zone: HostedZone, digest: str) -> bool:
@@ -57,7 +62,11 @@ def request_zone_delete(
         current = lock_data_zone(zone, actor)
         if current is None:
             return Err("zone_access_denied")
-        if current.current_revision != expected_revision or not _export_current(current, export_digest):
+        if (
+            current.current_revision != expected_revision
+            or not _export_current(current, export_digest)
+            or not service.exported_by(current, actor)
+        ):
             return Err("current_export_required")
         from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415
 
@@ -107,6 +116,8 @@ def request_operation_retry(zone: HostedZone, *, actor: User | None) -> Result[H
         operation.status = "waiting"  # fsm-bypass: CharField operation status; explicit retry under its row lock.
         if operation.kind == "delete":
             operation.phase = "delete_parent"
+            # A retry observes the parent afresh: earlier stale observations no longer count.
+            operation.evidence = {key: value for key, value in operation.evidence.items() if key != STALE_PROOFS}
         elif operation.kind == "activate":
             # A parked poll proves nothing about the provider now: the whole chain runs again,
             # under a poll deadline of its own.
@@ -258,6 +269,7 @@ def _delete(identifier: UUID, token: UUID) -> int:
     proof = checks.handover_snapshot(original.zone.name)
     with worker._guard(identifier, token) as (operation, zone):
         evidence, moved, waited = _move_away(operation, zone, proof)
+        stale = int(evidence.pop(STALE_PROOFS, 0))
         if not waited:
             zone.deletion = {**zone.deletion, "parent_moved_away": False, "ds_safe": False}
             zone.save(update_fields=["deletion", "updated_at"])
@@ -265,7 +277,12 @@ def _delete(identifier: UUID, token: UUID) -> int:
             worker._save(operation, token, phase="delete_parent", evidence=evidence, **refusal)
             return worker.RETRY_SECONDS
         if timezone.now() - observed_at > PROOF_MAX_AGE:
-            worker._save(operation, token, evidence=evidence, last_error="move_away_proof_stale")
+            if stale + 1 >= STALE_PROOF_LIMIT:
+                worker._park(identifier, token, STALE_PROOF_PARK_CODE)
+                return 0
+            worker._save(
+                operation, token, evidence={**evidence, STALE_PROOFS: stale + 1}, last_error="move_away_proof_stale"
+            )
             return worker.RETRY_SECONDS
         if zone.provider_zone_id:
             expected = tuple(service.spec_from_record(record) for record in zone.records.filter(desired_deleted=False))
@@ -277,12 +294,14 @@ def _delete(identifier: UUID, token: UUID) -> int:
                     worker._park(identifier, token, "zone_delete_refused")
                     return 0
                 # DELETE of this immutable owned binding is idempotent, including a lost response.
-                worker._save(operation, token, phase="delete_parent", last_error="zone_delete_unconfirmed")
+                worker._save(
+                    operation, token, phase="delete_parent", evidence=evidence, last_error="zone_delete_unconfirmed"
+                )
                 return worker.RETRY_SECONDS
         zone.deletion = {**zone.deletion, "provider_absent": True}
         zone.mark_deleted()
         zone.save()
-        worker._save(operation, token, status="completed", last_error="")
+        worker._save(operation, token, status="completed", evidence=evidence, last_error="")
         service._audit(
             zone, "dns_zone_state_changed", metadata={"status": "deleted", "revision": zone.current_revision}
         )

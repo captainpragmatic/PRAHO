@@ -711,6 +711,54 @@ class ZoneWorkerTests(TransactionTestCase):
         self.assertNotIn("delete_zone", self.provider.calls)
         self.assertEqual(self.operation.last_error, "move_away_proof_stale")
 
+    def stale_ticks(self, count):
+        with patch.object(deletion, "PROOF_MAX_AGE", timedelta(0)):
+            for _ in range(count):
+                self.tick()
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+
+    def test_twelve_consecutive_stale_proofs_park_the_delete_for_review_and_never_delete(self):
+        self.begin_ready_delete()
+        self.stale_ticks(11)
+        self.assertEqual(
+            (self.operation.status, self.operation.phase, self.operation.last_error),
+            ("waiting", "delete_provider_inflight", "move_away_proof_stale"),
+        )
+        self.stale_ticks(1)
+        self.assertEqual((self.operation.status, self.operation.last_error), ("parked", "move_away_proof_stale_limit"))
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "move_away_proof_stale_limit"))
+        self.assertNotIn("delete_zone", self.provider.calls)
+        self.assertTrue(self.provider.records)
+        # Staff retry starts a fresh count: one more stale proof does not park it again.
+        self.operation = zones.request_operation_retry(self.zone, actor=self.actor).unwrap()
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_provider_inflight")
+        self.stale_ticks(1)
+        self.assertEqual((self.operation.status, self.operation.last_error), ("waiting", "move_away_proof_stale"))
+        self.finish_apply()
+        self.zone.refresh_from_db()
+        self.assertEqual(self.zone.status, "deleted")
+        self.assertEqual(self.provider.calls.count("delete_zone"), 1)
+
+    def test_a_fresh_proof_resets_the_stale_proof_count(self):
+        self.begin_ready_delete()
+        self.stale_ticks(5)
+        self.provider.ambiguous_delete = True
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(
+            (self.operation.phase, self.operation.last_error), ("delete_parent", "zone_delete_unconfirmed")
+        )
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "delete_provider_inflight")
+        self.stale_ticks(11)
+        self.assertEqual((self.operation.status, self.operation.last_error), ("waiting", "move_away_proof_stale"))
+        self.assertEqual(self.zone.status, "deleting")
+        self.assertEqual(self.provider.calls.count("delete_zone"), 1)
+
     def test_a_resumed_delete_restarts_the_cache_wait_when_the_delegation_changed(self):
         self.begin_ready_delete()
         self.handover.return_value = {
