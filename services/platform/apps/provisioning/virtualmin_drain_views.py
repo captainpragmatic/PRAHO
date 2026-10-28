@@ -43,4 +43,14 @@ def node_drain(request: HttpRequest, server_id: str) -> HttpResponse:
         else:
             messages.error(request, result.unwrap_err())
         return redirect("provisioning:node_drain", server_id=server.pk)
-    return render(request, "provisioning/virtualmin/drain.html", {"server": server, "drain": server.drains.first()})
+    current_drain = server.drains.first()
+    managed_routing = bool(
+        current_drain
+        and current_drain.migrations.exists()
+        and not current_drain.migrations.exclude(contract="cutover").exists()
+    )
+    return render(
+        request,
+        "provisioning/virtualmin/drain.html",
+        {"server": server, "drain": current_drain, "managed_routing": managed_routing},
+    )

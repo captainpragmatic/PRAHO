@@ -24,6 +24,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
 from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeRegion, NodeSize, PanelType
 from apps.provisioning import virtualmin_tasks
+from apps.provisioning.migration_barrier import BarrierStep
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_gateway import VirtualminAPIError, VirtualminGateway
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration, account_has_active_migration
@@ -113,7 +114,10 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.addCleanup(settings_patch.stop)
         self.source_gateway = MockVirtualminGateway(server_hostname=self.server.hostname)
         self.target_gateway = MockVirtualminGateway(server_hostname=self.target.hostname)
-        self.source_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=True)
+        source_domain = self.source_gateway.seed_domain(
+            self.account.domain, username=self.account.virtualmin_username, enabled=True
+        )
+        source_domain.features = ["unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"]
         self.gateways = {"source": self.source_gateway, "target": self.target_gateway}
         self.events: list[tuple[str, str, dict[str, Any], int | None]] = []
         self.effects: dict[tuple[str, str], Any] = {}
@@ -141,9 +145,38 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.ansible = ansible_patch.start()
         self.addCleanup(ansible_patch.stop)
         self.ansible.return_value.run_playbook.side_effect = self._transport
+        # Numeric owner capture is a separate node boundary; its archive binding,
+        # lease refusal and native restoration have focused unit/lab coverage.
+        capture_patch = patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow")
+        self.owner_capture = capture_patch.start()
+        self.addCleanup(capture_patch.stop)
+        self._account_name_boundaries()
         enqueue_patch = patch("apps.provisioning.virtualmin_tasks.async_task", return_value="migration-task")
         self.enqueue = enqueue_patch.start()
         self.addCleanup(enqueue_patch.stop)
+        # Node-idle proof is an external boundary; its real process checks have script/lab coverage.
+        idle_patch = patch(
+            "apps.provisioning.virtualmin_migration_service.run_barrier",
+            return_value=Ok(BarrierStep("ok", "idle")),
+        )
+        idle_patch.start()
+        self.addCleanup(idle_patch.stop)
+
+    def _account_name_boundaries(self) -> None:
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.prepare_account_name_neutral", return_value=Ok("a" * 64))
+        )
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.ensure_account_name_neutral", return_value=Ok("a" * 64))
+        )
+        self.enterContext(
+            patch(
+                "apps.provisioning.account_hostname_service.expected_certificate_fingerprint", return_value=Ok("a" * 64)
+            )
+        )
+        self.enterContext(
+            patch("apps.provisioning.account_hostname_service.retire_removed_node_name", return_value=Ok(None))
+        )
 
     def _call(self, side: str, program: str, params: dict[str, Any], **kwargs: Any) -> Any:
         self.events.append((side, program, params, kwargs.get("timeout_seconds")))
@@ -399,6 +432,18 @@ class MigrationTests(MigrationTestBase):
         self.assertEqual(self._programs("source")[-2:], ["enable-domain", "list-domains"])
         self.assertTrue(self.source_gateway.domain_state_of(self.account.domain).enabled)
 
+    def test_owner_capture_that_outlives_the_lease_never_dispatches_a_backup(self) -> None:
+        migration = self._start()
+
+        def expire_during_capture(*args: Any, **kwargs: Any) -> None:
+            VirtualminMigration.objects.filter(pk=migration.pk).update(
+                worker_lease_expires_at=timezone.now() - timedelta(seconds=1)
+            )
+
+        self.owner_capture.side_effect = expire_during_capture
+        virtualmin_tasks.run_virtualmin_migration(str(migration.pk))
+        self.assertNotIn("backup-domain", self._programs("source"))
+
     def test_backup_unknown_retains_quiesce_without_retry(self) -> None:
         self.effects[("source", "backup-domain")] = self._error("source", "backup-domain", unknown=True)
         migration = self._run(self._start())
@@ -487,8 +532,8 @@ class MigrationTests(MigrationTestBase):
         self.effects[("source", "backup-domain")] = self._error("source", "backup-domain")
         self.effects[("source", "enable-domain")] = self._error("source", "enable-domain")
         migration = self._run(self._start())
-        self.assertEqual(migration.status, "needs_review")
-        event = AuditEvent.objects.get(action="virtualmin_migration_needs_review", object_id=str(migration.pk))
+        self.assertEqual((migration.status, migration.parked_phase), ("compensating", "compensating"))
+        event = AuditEvent.objects.get(action="virtualmin_migration_compensation_parked", object_id=str(migration.pk))
         self.assertTrue(event.metadata["compensation_failure"])
 
     def test_resume_busy_and_interrupted_states(self) -> None:
@@ -508,16 +553,14 @@ class MigrationTests(MigrationTestBase):
                     )
                     self.assertEqual(len(self.events), before)
                 else:
-                    self.assertTrue(
-                        migration.transition(
-                            token,
-                            "pending",
-                            status,
-                            restore_issued=status in {"restoring", "verifying"},
-                            lease_token=None,
-                            worker_lease_expires_at=None,
-                        )
+                    # fsm-bypass: place the row in the interrupted phase under test, past the graph's edges.
+                    placed = VirtualminMigration.objects.filter(pk=migration.pk, lease_token=token).update(
+                        status=status,
+                        restore_issued=status in {"restoring", "verifying"},
+                        lease_token=None,
+                        worker_lease_expires_at=None,
                     )
+                    self.assertEqual(placed, 1)
                     self.source_gateway.domain_state_of(self.account.domain).enabled = False
                     if status == "verifying":
                         self.target_gateway._domains[self.account.domain] = deepcopy(
@@ -725,7 +768,10 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-migration-key"))
         deployment = NodeDeployment(ipv4_address="203.0.113.1", hostname="migration-node", ssh_port=9876)
         with (
-            patch("apps.infrastructure.ansible_service.trusted_node_known_hosts", return_value=Path("nonexistent-migration-pins")),
+            patch(
+                "apps.infrastructure.ansible_service.trusted_node_known_hosts",
+                return_value=Path("nonexistent-migration-pins"),
+            ),
             patch("apps.infrastructure.ansible_service.recover_connection_port", return_value=9876),
             patch.object(service, "_wait_for_ssh", return_value=Ok(True)),
             patch.object(service, "_configured_known_hosts_covers", return_value=True),

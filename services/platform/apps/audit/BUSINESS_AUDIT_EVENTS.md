@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-556 actions, in 9 categories.
+566 actions, in 9 categories.
 
 ## Account management
 
@@ -458,6 +458,13 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `virtualmin_auto_provisioning_scheduled` | low | no | no | provisioning |
 | `virtualmin_backup_form_failed` | low | no | no | provisioning |
 | `virtualmin_backup_form_success` | low | no | no | provisioning |
+| `virtualmin_bridge_active` | low | no | no | provisioning |
+| `virtualmin_bridge_extended` | low | no | no | provisioning |
+| `virtualmin_bridge_failed` | low | no | no | provisioning |
+| `virtualmin_bridge_origin_attested` | low | no | no | provisioning |
+| `virtualmin_bridge_pending` | low | no | no | provisioning |
+| `virtualmin_bridge_removing_source` | low | no | no | provisioning |
+| `virtualmin_bridge_torn_down` | low | no | no | provisioning |
 | `virtualmin_cert_pin_set_manually` | low | no | no | infrastructure |
 | `virtualmin_chain_backup_alert` | high | yes | no | provisioning |
 | `virtualmin_chain_backup_failed` | low | no | no | provisioning |
@@ -475,8 +482,11 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `virtualmin_job_retry_success` | low | no | no | provisioning |
 | `virtualmin_migrate_form_failed` | low | no | no | provisioning |
 | `virtualmin_migrate_form_success` | low | no | no | provisioning |
+| `virtualmin_migration_compensation_parked` | low | no | no | provisioning |
 | `virtualmin_migration_completed` | low | no | no | provisioning |
 | `virtualmin_migration_failed` | low | no | no | provisioning |
+| `virtualmin_migration_keep_source` | low | no | no | provisioning |
+| `virtualmin_migration_keep_target` | low | no | no | provisioning |
 | `virtualmin_migration_needs_review` | low | yes | no | provisioning |
 | `virtualmin_migration_resolve_failed` | low | no | no | provisioning |
 | `virtualmin_migration_resolve_success` | low | no | no | provisioning |

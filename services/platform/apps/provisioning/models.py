@@ -13,7 +13,7 @@ from .account_hostname_models import (
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
 from .service_request_models import ServiceRequest
-from .virtualmin_migration_models import NodeDrain, VirtualminMigration
+from .virtualmin_migration_models import MigrationBridge, NodeDrain, VirtualminMigration
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminDriftRecord,
@@ -27,6 +27,7 @@ __all__ = [
     "AccountNameCertificate",
     "AccountNameCertificateBudget",
     "AccountNameCertificateInstall",
+    "MigrationBridge",
     "NodeDrain",
     "ProvisioningTask",
     "Server",

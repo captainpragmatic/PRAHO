@@ -10,7 +10,7 @@ import requests
 from django.core.cache import cache
 from django.test import override_settings
 
-from apps.common.types import Retriability, retriability_of
+from apps.common.types import Ok, Retriability, retriability_of
 from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeRegion, NodeSize, PanelType
 from apps.provisioning.virtualmin_backup_service import (
     REMOTE_ARCHIVE_DIR,
@@ -116,6 +116,8 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
         ):
             with (
                 self.subTest(config=config),
+                # This case isolates remote.cgi flags; node capture has its own contract tests.
+                patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
                 patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport),
             ):
                 metadata = self.backups._initialize_backup_metadata(self.account, "full", "full-id", config)
@@ -137,7 +139,10 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
 
         config = BackupConfig(backup_type="config_only")
         metadata = self.backups._initialize_backup_metadata(self.account, "config_only", "config-id", config)
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport):
+        with (
+            patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
+            patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=transport),
+        ):
             result = self.backups._execute_backup_by_type(config, self.account, "config-id", metadata)
         self.assertEqual(result.unwrap(), f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
         self.assertEqual(sent[0]["feature"], ["virtualmin", "dir"])
@@ -154,6 +159,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
             ):
                 with (
                     self.subTest(backup_type=backup_type, diagnostic=diagnostic),
+                    patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
                     patch(
                         "apps.provisioning.virtualmin_gateway.safe_request",
                         return_value=http_response(payload, status),
@@ -169,6 +175,7 @@ class BackupServiceCoverageTests(VirtualminTaskTestBase):
         for backup_type, diagnostic in (("full", "Full backup failed"), ("config_only", "Config backup failed")):
             with (
                 self.subTest(backup_type=backup_type),
+                patch.object(self.backups, "_capture_owner_shadow", return_value=Ok(None)),
                 patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=RuntimeError("transport broke")),
             ):
                 config = BackupConfig(backup_type=backup_type)

@@ -1,12 +1,12 @@
 """Account names: the node side and the DNS side (ADR-0061 P1.4).
 
-An account name `<label>.<zone>` is a Virtualmin sub-server of the customer's domain, its web root
-linked to the customer's (P1.15), its certificate its own (P1.10). PRAHO publishes A and AAAA
+An account name `<label>.<zone>` is a Virtualmin sub-server of the customer's domain, with a
+node-controlled neutral HTTP site and its own certificate (P1.10). PRAHO publishes A and AAAA
 records for it in the account zone, pointing at `AccountHostname.target_server`.
 
 - `ensure_node_account_name` makes one node serve the name: ownership read from the node's full
-  listing, the sub-server created if absent, its state set BEFORE its content, the web root linked
-  (only once the zone's Public Suffix List entry has shipped), the current certificate installed.
+  listing, the neutral site proved before creation, the sub-server created if absent and its state
+  set, the current certificate installed and the neutral site refreshed with that certificate.
 - `remove_node_account_name` deletes the name's sub-server only, after the same ownership check.
 - `sync_account_hostname` converges the DNS records to `target_server`, publishing only a name
   whose certificate is installed there, after proving the token reads the configured zone.
@@ -21,6 +21,7 @@ import logging
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from django.db import IntegrityError, transaction
@@ -29,20 +30,22 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from . import account_hostname_config as config
-from .account_hostname_models import AccountHostname
-from .account_name_node import link_account_name_web_root
+from . import account_name_node
+from .account_hostname_models import AccountHostname, AccountNameCertificateInstall
+from .account_name_node import CERTIFICATE_MISMATCH, retire_account_name_neutral
 from .virtualmin_domain_state import domain_state_params
 from .virtualmin_gateway import (
     TOP_LEVEL_SERVER,
     VirtualminConfig,
     VirtualminGateway,
     explicit_rejection,
-    listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 if TYPE_CHECKING:
-    from apps.infrastructure.dns_gateway import DnsRecordType
+    from uuid import UUID
+
+    from apps.infrastructure.dns_gateway import DnsRecordSpec
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,10 @@ _LABEL_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 _LABEL_LENGTH = 8
 _LABEL_ATTEMPTS = 20
 SYNCABLE_STATUSES = frozenset({"active", "suspended"})
+# The cutover lowers the name's TTL for the move and the bridge (ADR-0061 P2.3). The provider's
+# reported TTL on every owned record is what proves the change is live; the wait is bounded, and a
+# name that never confirms is rolled back rather than moved on stale routing.
+TTL_LOWER_DEADLINE = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,7 @@ class EnsureOutcome:
     enabled: bool
     linked: bool
     certificate_installed: bool
+    neutral: bool
 
 
 def owner_tag(hostname: AccountHostname) -> str:
@@ -72,11 +80,70 @@ def owner_tag(hostname: AccountHostname) -> str:
 # announced only once an unexpired certificate for it is installed on the node DNS points at.
 
 
+def prepare_account_name_neutral(
+    server: VirtualminServer, *, zone: str, name: str, customer_user: str
+) -> Result[str, str]:
+    """Prove HTTP privacy before creation or certificate repair; this is not TLS readiness."""
+    return account_name_node.prepare_account_name_neutral(server, zone=zone, name=name, customer_user=customer_user)
+
+
+def ensure_account_name_neutral(
+    server: VirtualminServer,
+    *,
+    zone: str,
+    name: str,
+    customer_user: str,
+    expected_certificate_sha256: str | None = None,
+) -> Result[str, str]:
+    """Typed node seam shared by publication and migration orchestration."""
+    return account_name_node.ensure_account_name_neutral(
+        server,
+        zone=zone,
+        name=name,
+        customer_user=customer_user,
+        expected_certificate_sha256=expected_certificate_sha256,
+    )
+
+
 def certificate_ready_on(hostname: AccountHostname, server: VirtualminServer) -> bool:
     """Whether an unexpired certificate for the name is installed on `server`."""
     from .account_name_certificates import certificate_installed_on  # noqa: PLC0415  # Deferred: imports acme
 
     return certificate_installed_on(hostname, server.pk)
+
+
+def expected_certificate_fingerprint(hostname: AccountHostname, server: VirtualminServer) -> Result[str, str]:
+    """The Platform-issued public leaf recorded on this specific node."""
+    from .account_name_certificates import expected_certificate_fingerprint as expected  # noqa: PLC0415
+
+    return expected(hostname, server)
+
+
+def _prove_current_certificate(
+    hostname: AccountHostname, server: VirtualminServer, customer_user: str
+) -> Result[str, str]:
+    from .account_name_certificates import forget_installation  # noqa: PLC0415  # Certificate evidence owner
+
+    pinned_ref = (
+        AccountNameCertificateInstall.objects.filter(hostname=hostname, server=server, not_after__gt=timezone.now())
+        .values_list("certificate_ref", flat=True)
+        .first()
+    )
+    expected = expected_certificate_fingerprint(hostname, server)
+    if expected.is_err():
+        return Err(expected.unwrap_err(), retriability=retriability_of(expected))
+    proof = ensure_account_name_neutral(
+        server,
+        zone=hostname.zone,
+        name=hostname.fqdn,
+        customer_user=customer_user,
+        expected_certificate_sha256=expected.unwrap(),
+    )
+    if proof.is_err() and proof.unwrap_err() == CERTIFICATE_MISMATCH and pinned_ref is not None:
+        # The RPC runs without an installation-row lock. An authorized installer
+        # may have committed a newer leaf meanwhile; an old pin cannot erase it.
+        forget_installation(hostname, server, expected_ref=pinned_ref)
+    return proof
 
 
 def install_certificate(hostname: AccountHostname, server: VirtualminServer) -> Result[bool, str]:
@@ -197,18 +264,6 @@ def _name_state(gateway: VirtualminGateway, name: str) -> Result[dict[str, Any],
     return Ok(state.unwrap())
 
 
-def _home(gateway: VirtualminGateway, name: str) -> Result[str, str]:
-    result = gateway.call("list-domains", {"domain": name, "multiline": ""})
-    if result.is_err() or not result.unwrap().success:
-        return Err(f"Home of {name} unreadable", retriability=Retriability.UNKNOWN)
-    for item in result.unwrap().data.get("data") or []:
-        if isinstance(item, dict) and item.get("name") == name:
-            home = listing_attribute(item.get("values") or {}, "Home directory")
-            if home:
-                return Ok(home)
-    return Err(f"Home of {name} unreadable", retriability=Retriability.UNKNOWN)
-
-
 def _set_state(gateway: VirtualminGateway, name: str, *, enabled: bool) -> Result[None, str]:
     """Bring the name's sub-server to the wanted state and verify it from the node."""
     state = _name_state(gateway, name)
@@ -244,29 +299,14 @@ def _create_name(gateway: VirtualminGateway, account: VirtualminAccount, name: s
     return Ok(None)
 
 
-def _link_when_shipped(
-    gateway: VirtualminGateway, server: VirtualminServer, account: VirtualminAccount, name: str
-) -> Result[bool, str]:
-    """Link the web root, only once the zone is a public suffix in shipped browsers (ADR-0061 §1)."""
-    if not config.account_zone_psl_shipped():
-        return Ok(False)
-    home = _home(gateway, name)
-    if home.is_err():
-        return Err(home.unwrap_err(), retriability=retriability_of(home))
-    link = link_account_name_web_root(server, home=home.unwrap(), customer_user=account.virtualmin_username)
-    if link.is_err():
-        return Err(link.unwrap_err(), retriability=retriability_of(link))
-    return Ok(True)
-
-
 def ensure_node_account_name(
     account: VirtualminAccount, server: VirtualminServer, *, enabled: bool, operation_owner: bool = False
 ) -> Result[EnsureOutcome, str]:
-    """Make `server` serve the account's name: owned, in the wanted state, linked, certified. Idempotent.
+    """Make `server` serve the name: owned, in the wanted state, neutral, certified. Idempotent.
 
     `enabled` is False for a suspended account and for a migration target not yet activated: a
     child created under a disabled customer domain starts enabled (lab S10), so its state is set
-    and verified before its content is linked.
+    and verified explicitly. Customer content stays unreachable independently of that state.
 
     One node step runs per name at a time (`account_name_lease`). A caller that does not own an
     operation on the account (the create task, the sweep) changes the node only while it holds the
@@ -298,7 +338,7 @@ def _ensure_held(
     if preflight.is_err():
         return Err(preflight.unwrap_err(), retriability=retriability_of(preflight))
     if operation_owner:
-        placed = _place_name(gateway, hostname, account, enabled=enabled, rows=preflight.unwrap())
+        placed = _place_name(gateway, hostname, account, server, enabled=enabled, rows=preflight.unwrap())
     else:
         with transaction.atomic():
             locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
@@ -307,22 +347,24 @@ def _ensure_held(
                 return refusal
             # Read again under the lock: the account and the node may have moved since the preflight.
             wanted = enabled and locked.status == "active"
-            placed = _place_name(gateway, hostname, locked, enabled=wanted, rows=None)
+            placed = _place_name(gateway, hostname, locked, server, enabled=wanted, rows=None)
     if placed.is_err():
         return Err(placed.unwrap_err(), retriability=retriability_of(placed))
     created, now_enabled = placed.unwrap()
 
-    name = hostname.fqdn
-    linked = _link_when_shipped(gateway, server, account, name)
-    if linked.is_err():
-        return Err(linked.unwrap_err(), retriability=retriability_of(linked))
-
     certificate = install_certificate(hostname, server)
     if certificate.is_err():
         return Err(certificate.unwrap_err(), retriability=retriability_of(certificate))
+    neutral = _prove_current_certificate(hostname, server, account.virtualmin_username)
+    if neutral.is_err():
+        return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
     return Ok(
         EnsureOutcome(
-            created=created, enabled=now_enabled, linked=linked.unwrap(), certificate_installed=certificate.unwrap()
+            created=created,
+            enabled=now_enabled,
+            linked=False,
+            certificate_installed=certificate.unwrap(),
+            neutral=True,
         )
     )
 
@@ -361,10 +403,11 @@ def _admission_refusal(account: VirtualminAccount) -> Err[str] | None:
     return None
 
 
-def _place_name(
+def _place_name(  # noqa: PLR0913  # Fresh ownership rows and the managed node are separate placement inputs.
     gateway: VirtualminGateway,
     hostname: AccountHostname,
     account: VirtualminAccount,
+    server: VirtualminServer,
     *,
     enabled: bool,
     rows: dict[str, dict[str, str]] | None,
@@ -380,6 +423,11 @@ def _place_name(
         if refusal is not None:
             return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
 
+    neutral = prepare_account_name_neutral(
+        server, zone=hostname.zone, name=name, customer_user=account.virtualmin_username
+    )
+    if neutral.is_err():
+        return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
     created = name not in rows
     if created:
         create = _create_name(gateway, account, name)
@@ -407,14 +455,47 @@ def remove_node_account_name(account: VirtualminAccount, server: VirtualminServe
     if rows.is_err():
         return Err(rows.unwrap_err(), retriability=retriability_of(rows))
     if name not in rows.unwrap():
-        return Ok(False)
+        retired = _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+        return Ok(False) if retired.is_ok() else Err(retired.unwrap_err(), retriability=retriability_of(retired))
     refusal = _ownership_refusal(rows.unwrap(), account, name)
     if refusal is not None:
         return Err(f"Refused: {refusal}", retriability=Retriability.NOT_RETRIABLE)
     deleted = _program(gateway, "delete-domain", {"domain": name})
     if deleted.is_err():
         return Err(deleted.unwrap_err(), retriability=retriability_of(deleted))
-    return Ok(True)
+    retired = _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+    return Ok(True) if retired.is_ok() else Err(retired.unwrap_err(), retriability=retriability_of(retired))
+
+
+def retire_removed_node_name(account: VirtualminAccount, server: VirtualminServer) -> Result[None, str]:
+    """Retire one removed node's private name guard, including a name already retired from DNS."""
+    hostname = AccountHostname.objects.filter(account_id=account.pk).first()
+    if hostname is None:
+        return Ok(None)
+    return _retire_removed_name(hostname, server, customer_user=account.virtualmin_username)
+
+
+def _retire_removed_name(
+    hostname: AccountHostname, server: VirtualminServer, *, customer_user: str
+) -> Result[None, str]:
+    """Never remove a live native child's neutral guard; the node repeats this absence proof."""
+    from .account_name_certificates import forget_installation  # noqa: PLC0415  # Deferred: imports acme
+
+    rows = _rows(_gateway(server))
+    if rows.is_err():
+        return Err(rows.unwrap_err(), retriability=Retriability.UNKNOWN)
+    if hostname.fqdn in rows.unwrap():
+        return Err(
+            "The native account name is still present; its neutral guard must remain", retriability=Retriability.UNKNOWN
+        )
+    # Native absence invalidates readiness even if private guard retirement still needs a retry.
+    forget_installation(hostname, server)
+    retired = retire_account_name_neutral(server, zone=hostname.zone, name=hostname.fqdn, customer_user=customer_user)
+    if retired.is_err():
+        return Err(
+            f"Neutral guard private cleanup is unproven: {retired.unwrap_err()}", retriability=Retriability.UNKNOWN
+        )
+    return Ok(None)
 
 
 # ----------------------------------------------------------------------------- DNS side
@@ -433,6 +514,22 @@ def _syncable(hostname: AccountHostname) -> str | None:
     account = hostname.account
     if account is None or hostname.retired_at is not None:
         return "retired"
+    from .virtualmin_migration_models import (  # noqa: PLC0415  # Keep publication and admission under one name lock.
+        _TERMINAL_STATUSES,
+        VirtualminMigration,
+    )
+
+    # A legacy admission saw no published name. Both publication phases repeat this
+    # check under the same name lock admission holds until its contract is durable.
+    # Cutover/recovery own their DNS publication and must remain able to converge.
+    if (
+        VirtualminMigration.objects.filter(
+            account_id=account.pk, contract__in=(VirtualminMigration.Contract.LEGACY, "")
+        )
+        .exclude(status__in=_TERMINAL_STATUSES)
+        .exists()
+    ):
+        return "migration_locked"
     if account.status not in SYNCABLE_STATUSES or account.provisioned_at is None:
         return "account_not_ready"
     server = hostname.target_server
@@ -453,53 +550,155 @@ def _prove_zone(gateway: Any, zone_id: str, zone: str) -> Result[None, str]:
     return Ok(None)
 
 
-def sync_account_hostname(hostname: AccountHostname) -> Result[str, str]:
-    """Converge the name's A and AAAA records to its target server. Ok(reason) says what was done."""
+def lock_for_publication(pk: UUID, *, skip_locked: bool = False) -> AccountHostname | None:
+    """The name's row, locked for a change to its records and read afresh. Call inside `atomic()`.
+
+    Every publisher of the name's A and AAAA records (sync, withdraw, retire, and the cutover's
+    commit) changes the provider only while holding this lock, deciding on what the row says under
+    it, so a caller holding an older copy never publishes a node the name has left nor a name retired
+    meanwhile (ADR-0061 Phase 2, invariant 3). The certificate's challenge TXT records are not
+    routing and stay under the order's own claim. Nothing takes the account's lock while holding this
+    one: the cutover's commit takes the account's first.
+
+    The row is locked first and read with its relations after: on PostgreSQL a locking query that
+    waited re-reads only the locked row, so a join in it would pair the new `target_server_id` with
+    the server row seen before the wait, which reads as no target at all.
+    """
+    # Publishers retain FK key-share access while admission waits on this row.
+    locked = AccountHostname.objects.select_for_update(no_key=True, skip_locked=skip_locked).filter(pk=pk)
+    if not list(locked.values_list("pk", flat=True)):
+        return None
+    return AccountHostname.objects.select_related("account", "account__server", "target_server").get(pk=pk)
+
+
+def sync_account_hostname(hostname: AccountHostname, *, skip_locked: bool = False) -> Result[str, str]:
+    """Converge the name's A and AAAA records to its target server. Ok(reason) says what was done.
+
+    Only the row's id is used: everything is decided again under the name's lock. `skip_locked`
+    (the sweep) passes over a name being published instead of waiting for it.
+    """
     if not config.account_hostnames_enabled():
         return Ok("disabled")
+    # Twice under the lock. The intent is committed first, alone, so a worker killed during the
+    # provider call still leaves the name marked as published, and so withdrawn or retired later.
+    planned = _publication_step(hostname.pk, skip_locked=skip_locked)
+    if planned is not None:
+        return planned
+    zone_id = config.account_zone_id()
+    gateway = _dns_gateway()
+    proven = _prove_zone(gateway, zone_id, hostname.zone)  # A read: outside the lock, to keep it short
+    if proven.is_err():
+        return Err(proven.unwrap_err(), retriability=retriability_of(proven))
+    return _publish(hostname.pk, gateway, zone_id)
+
+
+def _publication_step(pk: UUID, *, skip_locked: bool) -> Result[str, str] | None:
+    """Record the intent under the lock, or say why nothing is published (None: go on to publish)."""
+    with transaction.atomic():
+        hostname = lock_for_publication(pk, skip_locked=skip_locked)
+        if hostname is None:
+            return Ok("skipped:busy" if skip_locked else "skipped:retired")
+        decided = _decide(hostname)
+        if decided is None:
+            _store_intent(hostname, _specs(hostname))
+        return decided
+
+
+def _decide(hostname: AccountHostname) -> Result[str, str] | None:
+    """On the locked row: withdraw, skip with a reason, or None when the name is to be published."""
     reason = _syncable(hostname)
     if reason == "certificate_not_ready" and hostname.records:
         return _withdraw(hostname)
     if reason is not None:
         return Ok(f"skipped:{reason}")
-    server = hostname.target_server
-    ipv4 = server.ipv4_address if server is not None else None
-    if server is None or not ipv4:
-        return Ok("skipped:no_target_address")
-    zone_id = config.account_zone_id()
-    gateway = _dns_gateway()
+    return None
 
-    proven = _prove_zone(gateway, zone_id, hostname.zone)
-    if proven.is_err():
-        return Err(proven.unwrap_err(), retriability=retriability_of(proven))
 
+def _specs(hostname: AccountHostname, *, ttl: int | Mapping[str, int] | None = None) -> list[DnsRecordSpec]:
     from apps.infrastructure.dns_gateway import DnsRecordSpec  # noqa: PLC0415  # Deferred: see _dns_gateway
 
-    ttl = config.account_record_ttl_seconds()
-    specs = [DnsRecordSpec(record_type="A", name=hostname.fqdn, content=ipv4, owner_tag=owner_tag(hostname), ttl=ttl)]
+    server = hostname.target_server
+    if server is None or not server.ipv4_address:  # _syncable refused these; kept for the type
+        return []
+
+    def _ttl(record_type: str) -> int:
+        if ttl is None:
+            # A routine sync during a cutover must not undo the lowering; only the restore raises it.
+            return (
+                config.account_cutover_ttl_seconds()
+                if hostname.previous_ttl is not None
+                else config.account_record_ttl_seconds()
+            )
+        if isinstance(ttl, Mapping):
+            return int(ttl.get(record_type, config.account_record_ttl_seconds()))
+        return ttl
+
+    tag = owner_tag(hostname)
+    specs = [
+        DnsRecordSpec(record_type="A", name=hostname.fqdn, content=server.ipv4_address, owner_tag=tag, ttl=_ttl("A"))
+    ]
     if server.ipv6_address:
         specs.append(
             DnsRecordSpec(
-                record_type="AAAA",
-                name=hostname.fqdn,
-                content=server.ipv6_address,
-                owner_tag=owner_tag(hostname),
-                ttl=ttl,
+                record_type="AAAA", name=hostname.fqdn, content=server.ipv6_address, owner_tag=tag, ttl=_ttl("AAAA")
             )
         )
-    # The intent first: a crash after the provider call still leaves what was meant on record.
-    intended = {spec.record_type: {"intended": spec.content, "ttl": spec.ttl} for spec in specs}
-    AccountHostname.objects.filter(pk=hostname.pk).update(records=intended, updated_at=timezone.now())
+    return specs
 
-    outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
-    return _record_outcome(gateway, zone_id, hostname, intended, outcome)
+
+def _merged(previous: Mapping[str, Any], intended: Mapping[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    """Each intended record keeps what was learned about it while its content is unchanged.
+
+    A record whose content changes starts again, and a type no longer intended is dropped: the
+    provider deletes it, and an entry left behind would read as published.
+    """
+    merged: dict[str, dict[str, object]] = {}
+    for record_type, entry in intended.items():
+        before = previous.get(record_type) or {}
+        kept = before if before.get("intended") == entry.get("intended") else {}
+        merged[record_type] = {**kept, **entry}
+        if "previous_ttl" in before:
+            # The TTL to restore belongs to the name, not to the content that happened to be live then.
+            merged[record_type]["previous_ttl"] = before["previous_ttl"]
+    return merged
+
+
+def _store_intent(hostname: AccountHostname, specs: list[DnsRecordSpec]) -> dict[str, dict[str, object]]:
+    intended: dict[str, dict[str, object]] = {
+        spec.record_type: {"intended": spec.content, "ttl": spec.ttl} for spec in specs
+    }
+    merged = _merged(hostname.records or {}, intended)
+    AccountHostname.objects.filter(pk=hostname.pk).update(records=merged, updated_at=timezone.now())
+    hostname.records = merged
+    return merged
+
+
+def _publish(pk: UUID, gateway: Any, zone_id: str, *, ttl: int | Mapping[str, int] | None = None) -> Result[str, str]:
+    """The provider call, under the lock, for what the row says now: a commit since may have moved it."""
+    with transaction.atomic():
+        hostname = lock_for_publication(pk)
+        if hostname is None:
+            return Ok("skipped:retired")
+        decided = _decide(hostname)
+        if decided is not None:
+            return decided
+        # _decide admits only a live account with a target address.
+        assert hostname.target_server is not None and hostname.account is not None
+        neutral = _prove_current_certificate(hostname, hostname.target_server, hostname.account.virtualmin_username)
+        if neutral.is_err():
+            return Err(neutral.unwrap_err(), retriability=retriability_of(neutral))
+        specs = _specs(hostname, ttl=ttl)
+        intended = _store_intent(hostname, specs)
+        outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
+        # An Err from here commits what was stored, on purpose: a partial apply is still what exists.
+        return _record_outcome(gateway, zone_id, hostname, intended, outcome)
 
 
 def _withdraw(hostname: AccountHostname) -> Result[str, str]:
     """A published name whose certificate is gone stops being published, and is due again at every sweep.
 
     Publishing means only a name with an unexpired certificate installed on its node is in DNS; a name
-    that lost it would send customers to a node that cannot serve it.
+    that lost it would send customers to a node that cannot serve it. Called under the name's lock.
     """
     deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
     if deleted.is_err():
@@ -511,16 +710,44 @@ def _withdraw(hostname: AccountHostname) -> Result[str, str]:
     return Ok("withdrawn")
 
 
+def withdraw_drained_node(server: VirtualminServer) -> Result[None, str]:
+    """Withdraw non-live names before node retirement, preserving labels for recovery."""
+    names = AccountHostname.objects.filter(target_server=server, retired_at__isnull=True).values_list(
+        "pk", "account_id"
+    )
+    for hostname_id, account_id in list(names):
+        with transaction.atomic():
+            account = (
+                VirtualminAccount.objects.select_for_update().filter(pk=account_id).first() if account_id else None
+            )
+            hostname = lock_for_publication(hostname_id)
+            if hostname is None or hostname.target_server_id != server.pk:
+                continue
+            if account is not None and account.status in SYNCABLE_STATUSES:
+                return Err("A live account still has a hostname on this node")
+            if hostname.records:
+                withdrawn = _withdraw(hostname)
+                if withdrawn.is_err():
+                    return Err(withdrawn.unwrap_err(), retriability=retriability_of(withdrawn))
+            AccountHostname.objects.filter(pk=hostname.pk).update(target_server=None, updated_at=timezone.now())
+    return Ok(None)
+
+
 def _record_outcome(
     gateway: Any,
     zone_id: str,
     hostname: AccountHostname,
-    intended: Mapping[DnsRecordType, dict[str, object]],
+    intended: Mapping[str, dict[str, object]],
     outcome: Any,
 ) -> Result[str, str]:
     """Store what the provider applied; a name retired meanwhile has its records deleted again."""
     applied = {
-        record.record_type: {**intended.get(record.record_type, {}), "applied": record.content, "id": record.record_id}
+        record.record_type: {
+            **intended.get(record.record_type, {}),
+            "applied": record.content,
+            "applied_ttl": record.ttl,
+            "id": record.record_id,
+        }
         for record in outcome.applied
     }
     kept = AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(
@@ -541,17 +768,219 @@ def _record_outcome(
     return Ok("published")
 
 
+def _effective_ttl(hostname: AccountHostname) -> int:
+    """The TTL the name currently runs on, from what the provider reported or what was asked for."""
+    for entry in (hostname.records or {}).values():
+        for key in ("applied_ttl", "ttl"):
+            value = entry.get(key)
+            if isinstance(value, int):
+                return value
+    return config.account_record_ttl_seconds()
+
+
+def ttl_is(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> bool:
+    """Every owned record the provider reports carries the TTL asked for, record type by record type."""
+    records = hostname.records or {}
+    if not records:
+        return False
+    for record_type, entry in records.items():
+        expected = int(ttl.get(record_type, -1)) if isinstance(ttl, Mapping) else ttl
+        if entry.get("applied_ttl") != expected:
+            return False
+    return True
+
+
+def ttl_is_lowered(hostname: AccountHostname, *, ttl: int | None = None) -> bool:
+    """Every owned record the provider reports carries the lower TTL; one holdout is not converged."""
+    threshold = config.account_cutover_ttl_seconds() if ttl is None else ttl
+    return ttl_is(hostname, threshold)
+
+
+def _previous_ttls(hostname: AccountHostname) -> dict[str, int]:
+    """The TTL to restore for each record type, from what was recorded when the lowering began."""
+    fallback = hostname.previous_ttl or config.account_record_ttl_seconds()
+    return {
+        record_type: int(entry.get("previous_ttl") or fallback)
+        for record_type, entry in (hostname.records or {}).items()
+    }
+
+
+def _begin_lowering(hostname: AccountHostname) -> bool:
+    """Record the TTL each record had, once, under the name's lock. False when nothing is published."""
+    now = timezone.now()
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None or locked.retired_at is not None or not locked.records:
+            return False
+        records = locked.records
+        for entry in records.values():
+            if "previous_ttl" not in entry:
+                entry["previous_ttl"] = (
+                    entry.get("applied_ttl") or entry.get("ttl") or config.account_record_ttl_seconds()
+                )
+        fields: dict[str, object] = {"records": records}
+        # Keep the longest original TTL even if a record type is removed during the move.
+        fields["previous_ttl"] = max(
+            locked.previous_ttl or 0,
+            *(int(entry["previous_ttl"]) for entry in records.values()),
+        )
+        if locked.ttl_lowered_at is None:
+            fields["ttl_lowered_at"] = now
+        AccountHostname.objects.filter(pk=locked.pk).update(updated_at=now, **fields)
+        return True
+
+
+def _apply_ttl(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> Result[str, str]:
+    """Publish the name's records with `ttl`, proving the zone first; says whether that landed."""
+    zone_id = config.account_zone_id()
+    gateway = _dns_gateway()
+    proven = _prove_zone(gateway, zone_id, hostname.zone)
+    if proven.is_err():
+        return Err(proven.unwrap_err(), retriability=retriability_of(proven))
+    published = _publish(hostname.pk, gateway, zone_id, ttl=ttl)
+    if published.is_err():
+        return published
+    state = published.unwrap()
+    if state != "published":
+        return Err(f"Account name cannot set its TTL: {state}", retriability=Retriability.NOT_RETRIABLE)
+    return Ok("published")
+
+
+def lower_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
+    """Lower every owned record's TTL, then wait one maximum previous TTL after confirmation.
+
+    `waiting` covers provider propagation and the old answers still held by caches. The provider
+    deadline applies before confirmation; a legitimately longer old TTL is allowed to expire.
+    """
+    if not config.account_hostnames_enabled():
+        return Ok("disabled")
+    if not _begin_lowering(hostname):
+        return Ok("skipped:not_published")
+    applied = _apply_ttl(hostname, config.account_cutover_ttl_seconds())
+    if applied.is_err():
+        return applied
+    outcome = _lowering_progress(hostname)
+    hostname.refresh_from_db()
+    return outcome
+
+
+def _lowering_progress(hostname: AccountHostname) -> Result[str, str]:
+    """Confirm the provider's result and the cache deadline on the current, locked record set."""
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None or locked.retired_at is not None:
+            return Ok("skipped:retired")
+        now = timezone.now()
+        if not ttl_is_lowered(locked):
+            if locked.ttl_confirmed_at is not None:
+                # The provider reports an older TTL again: confirmation and its cache wait restart.
+                AccountHostname.objects.filter(pk=locked.pk).update(
+                    ttl_confirmed_at=None, ttl_lowered_at=now, updated_at=now
+                )
+            elif locked.ttl_lowered_at is not None and now >= locked.ttl_lowered_at + TTL_LOWER_DEADLINE:
+                return Err(
+                    "The provider did not confirm the lower TTL in time", retriability=Retriability.NOT_RETRIABLE
+                )
+            return Ok("waiting")
+        confirmed = locked.ttl_confirmed_at
+        if confirmed is None:
+            confirmed = now
+            AccountHostname.objects.filter(pk=locked.pk).update(ttl_confirmed_at=confirmed, updated_at=now)
+        previous_ttl = locked.previous_ttl or max(_previous_ttls(locked).values())
+        return Ok("converged" if now >= confirmed + timedelta(seconds=previous_ttl) else "waiting")
+
+
+def restore_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
+    """Restore and clear evidence under the publication lock, including empty and stale callers."""
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None or locked.retired_at is not None:
+            return Ok("skipped:retired")
+        if locked.previous_ttl is None:
+            return Ok("noop")
+        if not locked.records:
+            AccountHostname.objects.filter(pk=locked.pk).update(
+                previous_ttl=None, ttl_lowered_at=None, ttl_confirmed_at=None, updated_at=timezone.now()
+            )
+            return Ok("restored")
+        if not config.account_hostnames_enabled():
+            return Ok("disabled")
+        recorded_ttls = _previous_ttls(locked)
+        applied = _apply_ttl(locked, recorded_ttls)
+        if applied.is_err():
+            return applied
+        return _confirm_restored(hostname, recorded_ttls)
+
+
+def _confirm_restored(hostname: AccountHostname, recorded_ttls: Mapping[str, int]) -> Result[str, str]:
+    """Under the name's lock: only clear the evidence when the provider reports the restored TTLs."""
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None:
+            return Ok("skipped:retired")
+        if not ttl_is(locked, recorded_ttls):
+            # The provider still reports the lowered value, or a sync raced in: keep the evidence so a
+            # retry can finish rather than falsely reporting the restore done.
+            return Ok("waiting")
+        records = locked.records or {}
+        for entry in records.values():
+            entry.pop("previous_ttl", None)
+        AccountHostname.objects.filter(pk=locked.pk).update(
+            records=records, previous_ttl=None, ttl_lowered_at=None, ttl_confirmed_at=None, updated_at=timezone.now()
+        )
+    hostname.refresh_from_db()
+    return Ok("restored")
+
+
 def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
-    """Delete the name's records and retire it. The label stays taken for ever."""
+    """Withdraw DNS, retire a removed native guard, then finish the permanent label retirement.
+
+    Withdrawal is durable even when private cleanup fails. The target and unretired row keep that
+    cleanup reachable by the sweep; DNS retirement never deletes a native child or customer parent.
+    """
     if hostname.retired_at is not None:
         return Ok(None)
-    if config.account_hostnames_enabled() or hostname.records:
-        deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
-        if deleted.is_err():
-            return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
-    # A save, not a queryset update: the retirement is audited by the row's own signals.
-    hostname.retired_at = timezone.now()
-    hostname.records = {}
-    hostname.target_server = None  # A retired name holds no node, so the node can be unregistered
-    hostname.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        if locked is None or locked.retired_at is not None:
+            return Ok(None)
+        account = locked.account
+        server = locked.target_server or (account.server if account else None)
+        metadata_only = _never_placed(locked)
+        if server is not None and locked.target_server_id is None and not metadata_only:
+            locked.target_server = server
+            locked.save(update_fields=["target_server", "updated_at"])
+        if config.account_hostnames_enabled() or locked.records:
+            deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(locked))
+            if deleted.is_err():
+                return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+        locked.records = {}
+        locked.last_reconciled_at = None
+        locked.save(update_fields=["records", "last_reconciled_at", "updated_at"])
+        if not metadata_only:
+            if server is None:
+                return Err(
+                    "The retired name's node placement is unknown; private cleanup needs review",
+                    retriability=Retriability.UNKNOWN,
+                )
+            retired = _retire_removed_name(locked, server, customer_user=account.virtualmin_username if account else "")
+            if retired.is_err():
+                return retired
+        # A save of the locked row, not a queryset update: the retirement is audited by its own signals.
+        locked.retired_at = timezone.now()
+        locked.target_server = None  # A retired name holds no node, so the node can be unregistered
+        locked.save(update_fields=["retired_at", "records", "target_server", "updated_at"])
     return Ok(None)
+
+
+def _never_placed(hostname: AccountHostname) -> bool:
+    """A legacy allocation that never qualified for any managed node step: retire metadata only."""
+    account = hostname.account
+    return bool(
+        account is not None
+        and account.provisioned_at is None
+        and hostname.target_server_id is None
+        and not hostname.records
+        and not hostname.certificate_installs.exists()
+        and getattr(account.server, "node_deployment", None) is None
+    )

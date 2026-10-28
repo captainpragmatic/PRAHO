@@ -58,7 +58,7 @@ from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from .virtualmin_migration_service import MigrationResumeOutcome
 
@@ -73,6 +73,21 @@ _MAX_PASSWORD_ATTEMPTS = 100
 # Username generation defaults
 MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+
+
+def generate_virtualmin_parameter_secret(candidate: Callable[[], str]) -> str:
+    """A random secret from ``candidate`` that Virtualmin's parameter validation accepts.
+
+    Every remote.cgi parameter value is checked against SecureInputValidator's injection
+    heuristics, and a random secret can match one (two adjacent "-" read as an SQL comment).
+    A candidate the validator would reject is drawn again instead of failing the call permanently.
+    """
+    for _attempt in range(_MAX_PASSWORD_ATTEMPTS):
+        secret = candidate()
+        # The side-effect-free check: a discarded candidate is not an attack to alert on
+        if SecureInputValidator.first_malicious_pattern(secret) is None:
+            return secret
+    raise RuntimeError("Could not generate a Virtualmin password that passes parameter validation")
 
 
 def create_domain_params(  # noqa: PLR0913  # One keyword per remote.cgi parameter
@@ -1551,12 +1566,7 @@ class VirtualminProvisioningService:
         Returns:
             Secure password string
         """
-        for _attempt in range(_MAX_PASSWORD_ATTEMPTS):
-            candidate = self._password_candidate(length)
-            # The side-effect-free check: a discarded candidate is not an attack to alert on
-            if SecureInputValidator.first_malicious_pattern(candidate) is None:
-                return candidate
-        raise RuntimeError("Could not generate a Virtualmin password that passes parameter validation")
+        return generate_virtualmin_parameter_secret(lambda: self._password_candidate(length))
 
     def _password_candidate(self, length: int) -> str:
         """One random password with at least one lowercase, uppercase, digit and special character."""

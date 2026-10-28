@@ -328,16 +328,17 @@ class VirtualminMigrationFoundationTests(TestCase):
         self.assertTrue(migration.acquire_lease(owner, timedelta(minutes=5)))
         model = self._migration_model()
         before = model.objects.values().get(pk=migration.pk)
+        # Edges the graph allows, so each refusal below is the token or the status, not the graph.
         with self.assertNumQueries(1):
-            self.assertFalse(migration.transition(stale, "pending", "restoring", restore_issued=True))
+            self.assertFalse(migration.transition(stale, "pending", "quiescing", restore_issued=True))
         self.assertEqual(model.objects.values().get(pk=migration.pk), before)
         with self.assertNumQueries(1):
-            self.assertFalse(migration.transition(owner, "fetching", "restoring", restore_issued=True))
+            self.assertFalse(migration.transition(owner, "pushing", "restoring", restore_issued=True))
         self.assertEqual(model.objects.values().get(pk=migration.pk), before)
         with self.assertNumQueries(1):
-            self.assertTrue(migration.transition(owner, "pending", "restoring", restore_issued=True))
+            self.assertTrue(migration.transition(owner, "pending", "quiescing", restore_issued=True))
         migration.refresh_from_db()
-        self.assertEqual(migration.status, "restoring")
+        self.assertEqual(migration.status, "quiescing")
         self.assertTrue(migration.restore_issued)
 
     def test_mf_nonpositive_lease_ttl_is_rejected(self) -> None:

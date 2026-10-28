@@ -1103,6 +1103,13 @@ class VirtualminBackupService:
         )
         if pinned.exists():
             return f"Backup {backup_id} is named by a restore that has not finished"
+        from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+
+        recoveries = VirtualminMigration.objects.filter(contract="recovery").exclude(
+            status__in=("completed", "failed", "rolled_back")
+        )
+        if any(backup_id in row.barrier_state.get("recovery_backups", []) for row in recoveries.iterator()):
+            return f"Backup {backup_id} is pinned by an unfinished node recovery"
         if account is not None and account.restore_hold_safety_backup_id == backup_id:
             return f"Backup {backup_id} is the safety backup of a half-restored domain; resolve the hold first"
         if (
@@ -1508,6 +1515,9 @@ class VirtualminBackupService:
     ) -> Result[str, str]:
         """Execute full domain backup using Virtualmin API."""
         try:
+            captured = self._capture_owner_shadow(account, metadata)
+            if captured.is_err():
+                return Err(captured.unwrap_err(), retriability=retriability_of(captured))
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
@@ -1528,6 +1538,48 @@ class VirtualminBackupService:
         except Exception as e:
             logger.error(f"Full backup execution failed: {e}")
             return Err(f"Full backup failed: {e!s}")
+
+    def _capture_owner_shadow(  # noqa: PLR0911  # Each refusal fences a distinct source identity, ownership, or dispatch boundary.
+        self,
+        account: VirtualminAccount,
+        metadata: dict[str, Any],
+    ) -> Result[None, str]:
+        from .migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
+        if not self._owns_execution():
+            return Err("Backup execution superseded before owner aging capture")
+        from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+        readiness = server_transport_ready(self.server)
+        if readiness.is_err():
+            return Err(
+                "Owner login aging capture needs a verified SSH transport; enroll the API-only server as a managed node "
+                f"or configure its imported root key and trust ({readiness.unwrap_err()})",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        identity = self._read_domain_id(account)
+        if identity.is_err():
+            return Err(identity.unwrap_err(), retriability=retriability_of(identity))
+        if not self._owns_execution():
+            return Err("Backup execution superseded after source identity read; owner aging was not dispatched")
+        name = str(metadata["archive_name"])
+        operation = uuid.UUID(hex=name.removeprefix("virtualmin_backup_").removesuffix(".tar.gz"))
+        try:
+            capture_backup_owner_shadow(
+                self.server,
+                domain=account.domain,
+                owner=account.virtualmin_username,
+                domain_id=identity.unwrap(),
+                archive_name=name,
+                operation_id=operation,
+            )
+        except (RuntimeError, ValueError) as error:
+            return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
+        if not self._owns_execution():
+            return Err("Backup execution superseded after owner aging capture; backup was not dispatched")
+        metadata["owner_shadow_version"] = 1
+        metadata["owner_shadow_owner"] = account.virtualmin_username
+        return Ok(None)
 
     def _read_domain_id(self, account: VirtualminAccount) -> Result[str, str]:
         """Virtualmin's numeric id of the domain, from list-domains; digits only."""
@@ -1685,6 +1737,8 @@ class VirtualminBackupService:
                 f"Chain {config.chain_role} {where}: {step.reason} {step.detail}".strip(), retriability=retriability
             )
         metadata["chain_remote_sha256"] = step.sha256
+        metadata["owner_shadow_version"] = 1
+        metadata["owner_shadow_owner"] = account.virtualmin_username
         return Ok(f"{REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}")
 
     def _execute_config_backup(
@@ -1692,6 +1746,9 @@ class VirtualminBackupService:
     ) -> Result[str, str]:
         """Execute configuration-only backup."""
         try:
+            captured = self._capture_owner_shadow(account, metadata)
+            if captured.is_err():
+                return Err(captured.unwrap_err(), retriability=retriability_of(captured))
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
@@ -1796,6 +1853,16 @@ class VirtualminBackupService:
                 return Err(
                     _("Backup is missing requested feature members: %(features)s")
                     % {"features": ", ".join(missing_features)}
+                )
+
+            if metadata.get("owner_shadow_version") == 1:
+                from .backup_owner_shadow import read_archive_owner_shadow  # noqa: PLC0415
+
+                read_archive_owner_shadow(
+                    Path(backup_path),
+                    domain=domain,
+                    owner=str(metadata["owner_shadow_owner"]),
+                    archive_name=str(metadata["archive_name"]),
                 )
 
             metadata["verified_at"] = timezone.now().isoformat()

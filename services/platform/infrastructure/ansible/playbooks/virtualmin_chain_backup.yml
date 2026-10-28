@@ -47,6 +47,24 @@
         mode: '0700'
       when: chain_action == 'run'
 
+    - name: Keep owner capture private
+      ansible.builtin.file:
+        path: /var/lib/praho/recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: chain_action == 'run'
+
+    - name: Install the native owner capture callback
+      ansible.builtin.copy:
+        src: files/praho-recovery-credentials.pl
+        dest: /var/lib/praho/recovery/credentials.pl
+        owner: root
+        group: root
+        mode: '0700'
+      when: chain_action == 'run'
+
     - name: Run the step under the per-domain lock
       ansible.builtin.script:
         cmd: files/praho-chain-backup.sh

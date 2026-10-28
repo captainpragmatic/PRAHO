@@ -277,8 +277,21 @@ class E2EStackContractTests(TestCase):
             ('pytest.xfail("unverified")', 1),
         ]:
             (suite / "test_policy.py").write_text(f"import pytest\ndef test_policy():\n    {body}\n")
+            # Keep parent-directory collection inside this generated fixture.
             result = subprocess.run(  # noqa: S603 -- the generated test is fixed, trusted input
-                [sys.executable, "-m", "pytest", "-p", "no:django", "-c", "/dev/null", str(suite), "-q"],
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "no:django",
+                    "-c",
+                    "/dev/null",
+                    "--confcutdir",
+                    str(suite),
+                    str(suite),
+                    "-q",
+                ],
                 cwd=suite,
                 env=env,
                 capture_output=True,
@@ -418,8 +431,7 @@ class CoverageUnionGateCanFailTests(TestCase):
             # where the Django runner happens to run - and every coverage call was "No such file".
             # MAKELEVEL and MAKEFLAGS are dropped because this suite is itself launched from make,
             # and inheriting them turns this into a recursive sub-make.
-            env={k: v for k, v in os.environ.items() if k not in {"MAKELEVEL", "MAKEFLAGS"}}
-            | {"PWD": str(ROOT)},
+            env={k: v for k, v in os.environ.items() if k not in {"MAKELEVEL", "MAKEFLAGS"}} | {"PWD": str(ROOT)},
             capture_output=True,
             text=True,
             check=False,
@@ -588,7 +600,11 @@ class CSPCheckTests(TestCase):
                 self.assertEqual(self._check({"Content-Security-Policy": _csp(profile)}, expected=profile), profile)
 
     def test_csp_check_refuses_a_missing_nonce_or_extra_script_source(self) -> None:
-        for header in (_csp("phase2-target", nonces=0), _csp("phase2-target", nonces=2), _csp("phase2-target", extra="https://cdn.example")):
+        for header in (
+            _csp("phase2-target", nonces=0),
+            _csp("phase2-target", nonces=2),
+            _csp("phase2-target", extra="https://cdn.example"),
+        ):
             with self.subTest(header=header), self.assertRaisesRegex(RuntimeError, "expected phase2-target"):
                 self._check({"Content-Security-Policy": header})
 
@@ -598,13 +614,17 @@ class CSPCheckTests(TestCase):
 
     def test_csp_check_reports_a_stack_that_is_not_running(self) -> None:
         refused = stack.requests.ConnectionError("Connection refused")
-        with patch.object(stack.requests, "get", side_effect=refused), self.assertRaisesRegex(
-            RuntimeError, "No E2E stack answered"
+        with (
+            patch.object(stack.requests, "get", side_effect=refused),
+            self.assertRaisesRegex(RuntimeError, "No E2E stack answered"),
         ):
             stack.csp_check("phase2-target")
 
     def test_csp_check_refuses_an_unknown_expected_profile(self) -> None:
-        with patch.object(stack.requests, "get") as get, self.assertRaisesRegex(RuntimeError, "phase2-target or phase3-target"):
+        with (
+            patch.object(stack.requests, "get") as get,
+            self.assertRaisesRegex(RuntimeError, "phase2-target or phase3-target"),
+        ):
             stack.csp_check("phase1")
         get.assert_not_called()
 

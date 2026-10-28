@@ -119,6 +119,7 @@ class StaffActivateTests(_StaffButtonBase):
             customer=self.customer,
             product=product,
             currency=self.currency,
+            subscription_number="SUB-PANEL-DELINQUENT",
             service_id=self.service.id,
             unit_price_cents=5000,
             billing_cycle="monthly",

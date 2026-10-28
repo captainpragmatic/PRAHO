@@ -27,7 +27,7 @@ from django.conf import settings
 
 from apps.common.ssh import PUBLIC_KEY_FIELDS, parse_ssh_host_keys
 from apps.common.types import Err, Ok, Result, Retriability
-from apps.infrastructure.imported_backup_transport import BACKUP_PLAYBOOKS, imported_identity
+from apps.infrastructure.imported_backup_transport import imported_identity, transport_allows
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.ssh_transport import (
     TARGET_SSH_PORT,
@@ -128,8 +128,12 @@ class AnsibleService:
             "virtualmin_backup_push.yml",
             "virtualmin_chain_backup.yml",
             "virtualmin_pair_restore.yml",
+            "virtualmin_recovery.yml",
+            "virtualmin_write_barrier.yml",
+            "virtualmin_bridge.yml",
             "virtualmin_remote_cleanup.yml",
             "virtualmin_account_name_link.yml",
+            "virtualmin_account_name_neutral.yml",
             "virtualmin_install_account_cert.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",
@@ -426,7 +430,7 @@ class AnsibleService:
         timeout_seconds: int | None = None,
     ) -> Result[AnsibleResult, str]:
         """Use managed enrollment or a narrowly scoped imported root identity, never a fallback."""
-        if playbook not in BACKUP_PLAYBOOKS:
+        if not transport_allows(playbook, extra_vars):
             return Err("Playbook not allowed for archive transport", retriability=Retriability.NOT_RETRIABLE)
         deployment = getattr(server, "node_deployment", None)
         if deployment is not None:

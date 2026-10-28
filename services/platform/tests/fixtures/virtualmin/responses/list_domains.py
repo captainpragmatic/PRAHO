@@ -5,6 +5,7 @@ Fixture factories for Virtualmin list-domains responses.
 from __future__ import annotations
 
 from typing import Any
+from uuid import NAMESPACE_DNS, uuid5
 
 
 def multiline_response(
@@ -39,6 +40,7 @@ def multiline_response(
         {
             "name": d["name"],
             "values": {
+                "ID": str(d.get("domain_id") or uuid5(NAMESPACE_DNS, d["name"]).int % 10**18),
                 "Username": d.get("username", d["name"].split(".")[0]),
                 "Disk space used": d.get("disk_usage", "0 MB"),
                 "Server byte quota": d.get("disk_quota", "Unlimited"),
@@ -79,7 +81,7 @@ def empty() -> dict[str, Any]:
     }
 
 
-def single_domain(
+def single_domain(  # noqa: PLR0913  # Fixture callers select independent native response fields by name.
     domain: str = "example.com",
     username: str = "example",
     disk_usage: str = "150 MB",
@@ -89,12 +91,14 @@ def single_domain(
 ) -> dict[str, Any]:
     """Single domain multiline response (used by get_domain_info)."""
     return multiline_response(
-        domains=[{
-            "name": domain,
-            "username": username,
-            "disk_usage": disk_usage,
-            "disk_quota": disk_quota,
-            "bandwidth_usage": bandwidth_usage,
-            "bandwidth_quota": bandwidth_quota,
-        }]
+        domains=[
+            {
+                "name": domain,
+                "username": username,
+                "disk_usage": disk_usage,
+                "disk_quota": disk_quota,
+                "bandwidth_usage": bandwidth_usage,
+                "bandwidth_quota": bandwidth_quota,
+            }
+        ]
     )

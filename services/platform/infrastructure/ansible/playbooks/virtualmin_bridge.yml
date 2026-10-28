@@ -1,0 +1,104 @@
+---
+# The node helper locks config validation, reload and migration-owned hosts entries together.
+- name: Prepare, install, verify or remove a migration-owned bridge
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate single-host bridge inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - bridge_action in ['prepare', 'origin_install', 'origin_verify', 'install', 'verify', 'remove', 'origin_remove', 'fetch_crontab', 'stage_activation', 'activate', 'retire_activation', 'reconcile_policy']
+          - bridge_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          - bridge_domain is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
+          - bridge_action in ['activate', 'retire_activation', 'reconcile_policy'] or bridge_source_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
+          - bridge_action in ['activate', 'retire_activation', 'reconcile_policy'] or bridge_target_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
+          - bridge_enabled is not defined or bridge_enabled is boolean
+
+    - name: Install the private native current-policy helper on the target
+      when: bridge_action in ['activate', 'reconcile_policy']
+      block:
+        - name: Create the root-only native helper directory
+          ansible.builtin.file:
+            path: /var/lib/praho/recovery
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+        - name: Install the native policy callbacks
+          ansible.builtin.copy:
+            src: files/praho-recovery-credentials.pl
+            dest: /var/lib/praho/recovery/credentials.pl
+            owner: root
+            group: root
+            mode: '0700'
+
+    - name: Fetch the original cron directly into the private controller spool
+      when: bridge_action == 'fetch_crontab'
+      ansible.builtin.fetch:
+        src: "{{ bridge_crontab_source }}"
+        dest: "{{ bridge_crontab_spool }}"
+        flat: true
+        fail_on_missing: true
+        validate_checksum: true
+      no_log: true
+
+    - name: Create the target's private activation directory
+      when: bridge_action == 'stage_activation'
+      ansible.builtin.file:
+        path: "/var/lib/praho/bridges/{{ bridge_id }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copy the original cron into the target's private activation directory
+      when: bridge_action == 'stage_activation'
+      ansible.builtin.copy:
+        src: "{{ bridge_crontab_spool }}"
+        dest: "/var/lib/praho/bridges/{{ bridge_id }}/activation.incoming"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install the root-private shared Apache binding library
+      when: bridge_action in ['prepare', 'origin_install', 'install', 'remove', 'origin_remove']
+      ansible.builtin.script:
+        cmd: files/praho-apache-bindings.py
+        executable: python3
+      changed_when: true
+
+    - name: Run the migration-owned node operation
+      ansible.builtin.script:
+        cmd: files/praho-bridge.py
+        executable: python3
+      environment:
+        PRAHO_BRIDGE_ID: "{{ bridge_id }}"
+        PRAHO_BRIDGE_ACTION: "{{ bridge_action }}"
+        PRAHO_BRIDGE_DOMAIN: "{{ bridge_domain }}"
+        PRAHO_ACCOUNT_NAME: "{{ bridge_account_name | default('') }}"
+        PRAHO_BRIDGE_TARGET: "{{ bridge_target_ipv4 | default('') }}"
+        PRAHO_BRIDGE_SOURCE: "{{ bridge_source_ipv4 | default('') }}"
+        PRAHO_BRIDGE_MANIFEST: "{{ bridge_manifest | default({}) | to_json }}"
+        PRAHO_BRIDGE_ORIGIN_CERTIFICATE: "{{ bridge_origin_certificate | default('') }}"
+        PRAHO_BRIDGE_OWNER: "{{ bridge_owner | default('') }}"
+        PRAHO_BRIDGE_DOMAIN_ID: "{{ bridge_domain_id | default('') }}"
+        PRAHO_BRIDGE_ENABLED: "{{ ('1' if bridge_enabled else '0') if bridge_enabled is defined else '' }}"
+        PRAHO_BARRIER_RECORD: "{{ bridge_barrier_record | default({}) | to_json }}"
+        PRAHO_BRIDGE_CERT_MIN_SECONDS: "{{ bridge_certificate_min_seconds | default(172800) }}"
+        PRAHO_CLEANUP_SOURCE_RECORD: "{{ cleanup_source_record | default('') }}"
+      register: bridge_step
+      changed_when: bridge_action != 'verify'
+
+    - name: Require exactly one structured result
+      vars:
+        bridge_results: "{{ bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+      ansible.builtin.assert:
+        that:
+          - bridge_results | length == 1
+
+    - name: Emit the bridge's structured result
+      ansible.builtin.debug:
+        msg: "{{ bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | first }}"

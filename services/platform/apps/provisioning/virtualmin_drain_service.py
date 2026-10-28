@@ -17,7 +17,13 @@ from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
-from .virtualmin_migration_models import _TERMINAL_STATUSES, NodeDrain, VirtualminMigration
+from .virtualmin_migration_models import (
+    _TERMINAL_STATUSES,
+    PRE_COMMIT_STATUSES,
+    MigrationBridge,
+    NodeDrain,
+    VirtualminMigration,
+)
 from .virtualmin_migration_service import VirtualminMigrationService, migration_task_timeout
 from .virtualmin_models import HEALTH_AUTO_FAIL_THRESHOLD, VirtualminAccount, VirtualminServer
 
@@ -104,6 +110,8 @@ class NodeDrainService:
             VirtualminServer.objects.filter(pk=drain.server_id).update(is_draining=False, updated_at=timezone.now())
         action = "paused" if status == "paused_needs_review" else status
         _audit(drain, f"node_drain_{action}", drain.initiated_by, detail)
+        if status == "completed":
+            transaction.on_commit(lambda: NodeDrainService.finalize_managed_drain(drain.pk), robust=True)
         logger.info("✅ [NodeDrain] drain=%s status=%s", drain.pk, status)
 
     @classmethod
@@ -153,9 +161,18 @@ class NodeDrainService:
                 return Err("Only a non-terminal drain can be cancelled")
             migration = drain.current_migration
             if migration is not None and migration.status not in _TERMINAL_STATUSES:
-                # Cancelling would clear is_draining and re-admit the server to
-                # placement while its account is still mid-migration.
-                return Err("Resolve the in-flight migration before cancelling the drain")
+                # A migration before the point of no return can still be undone: ask its worker to
+                # compensate at the next step (the barrier's cancel marker releases the node). A
+                # migration parked for review, or already committed, needs an operator.
+                if migration.status not in PRE_COMMIT_STATUSES:
+                    return Err("Resolve the in-flight migration before cancelling the drain")
+                VirtualminMigration.objects.filter(pk=migration.pk).update(
+                    cancel_requested=True, updated_at=timezone.now()
+                )
+                drain.cancel_requested = True
+                drain.save(update_fields=["cancel_requested", "updated_at"])
+                transaction.on_commit(lambda: VirtualminMigrationService()._enqueue(migration.pk))
+                return Ok(drain)  # The migration's finish wakes the drain after compensation.
             drain.cancel_requested = True
             drain.save(update_fields=["cancel_requested", "updated_at"])
             if drain.status != "running":
@@ -163,7 +180,7 @@ class NodeDrainService:
         return Ok(drain)
 
     @classmethod
-    def finalize_drain(cls, drain: NodeDrain, *, confirmed_by: User) -> Result[NodeDrain, str]:
+    def finalize_drain(cls, drain: NodeDrain, *, confirmed_by: User | None) -> Result[NodeDrain, str]:
         with transaction.atomic():
             drain = NodeDrain.objects.select_for_update().get(pk=drain.pk)
             server = VirtualminServer.objects.select_for_update().get(pk=drain.server_id)
@@ -175,6 +192,8 @@ class NodeDrainService:
                 return Err("Server is not fully drained")
             if server_has_active_migration(server):
                 return Err("Server still has an active migration")
+            if MigrationBridge.objects.filter(source_server=server).exclude(status="torn_down").exists():
+                return Err("Server still has a migration bridge awaiting teardown")
             drain.routing_confirmed = True
             drain.save(update_fields=["routing_confirmed", "updated_at"])
             # fsm-bypass: VirtualminServer status is a CharField; locked operator finalization.
@@ -184,7 +203,50 @@ class NodeDrainService:
         return Ok(drain)
 
     @classmethod
+    def finalize_managed_drain(cls, drain_id: UUID) -> Result[NodeDrain, str]:
+        """System confirmation only when every managed cutover and its cleanup are complete."""
+        from .account_hostname_service import withdraw_drained_node  # noqa: PLC0415
+
+        with transaction.atomic():
+            drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
+            server = VirtualminServer.objects.select_for_update().get(pk=drain.server_id)
+            if drain.routing_confirmed:
+                return Ok(drain)
+            if drain.status != "completed":
+                return Err("The drain is not complete")
+            if drain.migrations.exclude(contract="cutover", status="completed").exists():
+                return Err("Legacy routing still requires manual confirmation")
+            if MigrationBridge.objects.filter(source_server=server).exclude(status="torn_down").exists():
+                return Err("The drain is waiting for bridge teardown")
+            withdrawn = withdraw_drained_node(server)
+            if withdrawn.is_err():
+                return Err(withdrawn.unwrap_err())
+            return cls.finalize_drain(drain, confirmed_by=None)
+
+    @classmethod
+    def wake(cls, drain_id: UUID) -> None:
+        """A migration of the drain finished: a drain that checkpointed to wait for it runs again."""
+        drain = NodeDrain.objects.filter(pk=drain_id, status="pending").first()
+        if drain is not None:
+            cls._enqueue(drain.pk, drain.task_token)
+
+    @staticmethod
+    def _checkpoint(drain: NodeDrain) -> None:
+        """Wait for the current migration: pending again, under a fresh token its finish wakes."""
+        # fsm-bypass: persist a checkpoint under the drain row lock; the token fences old deliveries.
+        drain.status, drain.task_token = "pending", uuid4()
+        drain.save(update_fields=["status", "task_token", "updated_at"])
+
+    @classmethod
     def _next(cls, drain: NodeDrain, deadline: float) -> VirtualminAccount | None:
+        current = drain.current_migration
+        if current is not None and current.status not in _TERMINAL_STATUSES:
+            # A deferred migration is still running, only not here: wait for it, never start another.
+            if current.status == "needs_review" or current.parked_phase:
+                cls._close(drain, "paused_needs_review", f"Migration {current.pk}: needs_review")
+            else:
+                cls._checkpoint(drain)
+            return None
         if drain.cancel_requested:
             cls._close(drain, "cancelled")
             return None
@@ -213,13 +275,14 @@ class NodeDrainService:
         return account
 
     @classmethod
-    def _migrate(cls, drain: NodeDrain, account: VirtualminAccount) -> str:
+    def _migrate(cls, drain: NodeDrain, account: VirtualminAccount) -> str | None:
+        """Run one account's migration: "" when it completed, None while it waits, else the error."""
         service = VirtualminMigrationService()
         targets = service.eligible_targets(account, preferred_region=drain.server.region)
         if not targets:
             return "No eligible migration target"
         result = service.start_migration(
-            account, targets[0], initiated_by=drain.initiated_by, reason="drain", enqueue=False
+            account, targets[0], initiated_by=drain.initiated_by, reason="drain", enqueue=False, drain=drain
         )
         if result.is_err():
             return result.unwrap_err()
@@ -231,6 +294,8 @@ class NodeDrainService:
         migration.refresh_from_db()
         if execution.is_err():
             return execution.unwrap_err()
+        if migration.status not in _TERMINAL_STATUSES and migration.resume_after is not None:
+            return None
         return "" if migration.status == "completed" else f"Migration {migration.pk}: {migration.status}"
 
     @classmethod
@@ -266,15 +331,27 @@ class NodeDrainService:
             except Exception as exc:
                 logger.exception("🔥 [NodeDrain] Migration interrupted: %s", drain.pk)
                 error = str(exc)
-            with transaction.atomic():
-                drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
-                if drain.status != "running" or drain.task_token != token:
-                    return Ok(drain)
-                if error:
-                    cls._close(drain, "paused_needs_review", error)
-                    return Ok(drain)
-                drain.accounts_migrated += 1
-                drain.save(update_fields=["accounts_migrated", "updated_at"])
+            stopped = cls._after_account(drain_id, token, error)
+            if stopped is not None:
+                return Ok(stopped)
+
+    @classmethod
+    def _after_account(cls, drain_id: UUID, token: UUID, error: str | None) -> NodeDrain | None:
+        """After one account's migration: the drain to return if the run stops here, else None.
+
+        A completed migration is counted by its own finish, which also wakes a drain that waited.
+        """
+        with transaction.atomic():
+            drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
+            if drain.status != "running" or drain.task_token != token:
+                return drain
+            if error is None:
+                cls._checkpoint(drain)
+                return drain
+            if error:
+                cls._close(drain, "paused_needs_review", error)
+                return drain
+        return None
 
 
 def coordinate_health_failure(server: VirtualminServer) -> None:

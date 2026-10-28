@@ -7,11 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import paramiko
 from django.test import SimpleTestCase, override_settings
 
-from apps.common.types import Err, Retriability, retriability_of
+from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
 from apps.provisioning.virtualmin_models import VirtualminServer
@@ -103,6 +104,76 @@ class ImportedBackupTransportTests(SimpleTestCase):
         self.assertFalse(result.unwrap().success)
         self.assertTrue(self.key.exists())
         self.assertTrue(self.trust.exists())
+
+    def test_imported_transport_runs_only_the_owner_aging_capture_from_the_recovery_playbook(self) -> None:
+        # A recovery-capable backup first records the owner's login aging; no held-restore
+        # action of the same playbook may run over an imported server's root identity.
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch("apps.infrastructure.ansible_service.subprocess.run", return_value=completed) as run:
+            captured = self.service.run_server_playbook(
+                self.server, "virtualmin_recovery.yml", {"recovery_action": "capture-owner"}
+            )
+            self.assertTrue(captured.is_ok(), captured)
+            for action in ("stage", "verify-held", "activate", "cleanup", "reconcile_policy", ""):
+                refused = self.service.run_server_playbook(self.server, "virtualmin_recovery.yml", {"recovery_action": action})
+                self.assertTrue(refused.is_err(), action)
+            self.assertTrue(self.service.run_server_playbook(self.server, "virtualmin_recovery.yml").is_err())
+        self.assertEqual(run.call_count, 1)
+
+    def test_owner_aging_capture_on_an_imported_server_uses_the_verified_transport(self) -> None:
+        from apps.provisioning.migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
+        succeeded = Ok(SimpleNamespace(success=True, stdout=""))
+        with (
+            patch.object(AnsibleService, "__init__", return_value=None),
+            patch.object(AnsibleService, "run_server_playbook", return_value=succeeded) as server_run,
+            patch.object(AnsibleService, "run_playbook") as managed_run,
+        ):
+            capture_backup_owner_shadow(
+                self.server,
+                domain="customer.example",
+                owner="customer",
+                domain_id="7",
+                archive_name="virtualmin_backup_" + "a" * 32 + ".tar.gz",
+                operation_id=uuid4(),
+            )
+        server_run.assert_called_once()
+        self.assertEqual(server_run.call_args.args[:2], (self.server, "virtualmin_recovery.yml"))
+        self.assertEqual(server_run.call_args.args[2]["recovery_action"], "capture-owner")
+        managed_run.assert_not_called()
+
+    def test_owner_aging_capture_without_a_verified_transport_refuses_before_dispatch(self) -> None:
+        from apps.provisioning.migration_target_hold import capture_backup_owner_shadow  # noqa: PLC0415
+
+        with (
+            override_settings(VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH=""),
+            patch.object(AnsibleService, "run_server_playbook") as server_run,
+            self.assertRaisesRegex(ValueError, "VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH"),
+        ):
+            capture_backup_owner_shadow(
+                self.server,
+                domain="customer.example",
+                owner="customer",
+                domain_id="7",
+                archive_name="virtualmin_backup_" + "a" * 32 + ".tar.gz",
+                operation_id=uuid4(),
+            )
+        server_run.assert_not_called()
+
+    def test_recovery_capable_backup_of_an_imported_server_captures_owner_aging(self) -> None:
+        service = object.__new__(VirtualminBackupService)
+        service.server = self.server
+        metadata: dict[str, object] = {"archive_name": "virtualmin_backup_" + "b" * 32 + ".tar.gz"}
+        account = SimpleNamespace(domain="customer.example", virtualmin_username="customer")
+        with (
+            patch.object(VirtualminBackupService, "_owns_execution", return_value=True),
+            patch.object(VirtualminBackupService, "_read_domain_id", return_value=Ok("7")),
+            patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow") as capture,
+        ):
+            result = service._capture_owner_shadow(account, metadata)
+        self.assertTrue(result.is_ok(), result)
+        capture.assert_called_once()
+        self.assertEqual(metadata["owner_shadow_version"], 1)
 
     def test_imported_transport_cannot_run_hardening_or_override_connection(self) -> None:
         with patch("apps.infrastructure.ansible_service.subprocess.run") as run:

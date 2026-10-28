@@ -96,7 +96,9 @@ class RepairDnsTests(VirtualminViewsFixture):
             response = self.client.post(self.url())
 
         self.assertEqual(response.status_code, 302)
-        enqueue.assert_called_once_with(ENSURE_TASK, str(self.account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS)
+        enqueue.assert_called_once_with(
+            ENSURE_TASK, str(self.account.pk), timeout=ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
+        )
         dns.assert_not_called()
         node.assert_not_called()
 
