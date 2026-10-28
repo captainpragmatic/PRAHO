@@ -27,7 +27,6 @@ START_SECONDS = 120
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_LOCK_FD = 1_048_576
 MAX_HOSTNAME_LENGTH = 253
-START_UNITS = frozenset({"postfix.service", "postfix@-.service", "dovecot.service"})
 CERTIFICATE_PATHS = frozenset({"/etc/praho-mail/node.pem", "/etc/praho-mail/node.key"})
 RECORD_FIELDS = frozenset(
     {
@@ -269,9 +268,11 @@ class MailBootGuard:
             if [value for name, separator, value in environment if name == key and separator] != [expected]:
                 raise ValueError("unrelated owner environment")
 
-    def service_unit(self) -> None:
+    def service_unit(self, record: dict[str, Any]) -> None:
+        # Only the recorded profile's eligible units; Ubuntu's disabled postfix@- never qualifies.
+        eligible = {unit["unit"] for unit in protocol().UNIT_TOPOLOGY[record["profile"]] if unit["start"]}
         groups = self.proc_bytes("self/cgroup").decode().splitlines()
-        if len(groups) != 1 or not groups[0].startswith("0::/") or groups[0].rsplit("/", 1)[-1] not in START_UNITS:
+        if len(groups) != 1 or not groups[0].startswith("0::/") or groups[0].rsplit("/", 1)[-1] not in eligible:
             raise ValueError("unapproved service unit")
 
     def owner_lock(self, permit: dict[str, Any]) -> None:
@@ -306,7 +307,7 @@ class MailBootGuard:
 
     def start_owner(self, record: dict[str, Any]) -> None:
         self.operation_owner(record)
-        self.service_unit()
+        self.service_unit(record)
 
     def certificate_original(self, record: dict[str, Any]) -> dict[str, Any]:
         stage = "/var/lib/praho/mail/certificate-operations/" + record["identity"] + ".stage"
@@ -386,29 +387,11 @@ class MailBootGuard:
                 raise ValueError("unrelated staged helper")
 
     def certificate_fences(self) -> None:
-        for program, rejection in (
-            ("iptables-save", "icmp-port-unreachable"),
-            ("ip6tables-save", "icmp6-port-unreachable"),
-        ):
-            snapshot = self.execute([program, "-t", "filter"])
-            if not isinstance(snapshot, str) or len(snapshot) > MAX_FILE_BYTES:
-                raise ValueError("missing firewall evidence")
-            lines = [line for line in snapshot.splitlines() if line and not line.startswith("#")]
-            jump = "-A INPUT -j " + CHAIN
-            rules = [line for line in lines if line.startswith("-A ")]
-            owned = [line for line in rules if line.startswith("-A " + CHAIN + " ")]
-            if (
-                lines.count("*filter") != 1
-                or lines.count("COMMIT") != 1
-                or len([line for line in lines if line.startswith(":" + CHAIN + " ")]) != 1
-                or next((line for line in rules if line.startswith("-A INPUT ")), None) != jump
-                or owned
-                != [
-                    "-A " + CHAIN + " -i lo -j RETURN",
-                    "-A " + CHAIN + " -p tcp -m multiport --dports " + PORTS + " -j REJECT --reject-with " + rejection,
-                ]
-                or [line for line in rules if CHAIN in line.split() and line not in owned] != [jump]
-            ):
+        # The worker verifies its fence with this same checker before it issues a permit.
+        specification = protocol()
+        for program, rejection in specification.FENCE_FAMILIES.items():
+            snapshot = self.execute([program + "-save", "-t", "filter"])
+            if specification.certificate_fence(snapshot, rejection) != "exact":
                 raise ValueError("mail fence is bypassable")
 
     def certificate_start(self, record: dict[str, Any]) -> bool:

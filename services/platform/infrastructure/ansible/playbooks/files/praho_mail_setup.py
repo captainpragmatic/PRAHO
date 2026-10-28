@@ -85,6 +85,85 @@ POSTFIX = {
     "allow_percent_hack": "no",
     "resolve_dequoted_address": "no",
 }
+UNIT_PROPERTIES = (
+    "Type",
+    "ActiveState",
+    "SubState",
+    "UnitFileState",
+    "LoadState",
+    "FragmentPath",
+    "DropInPaths",
+    "NeedDaemonReload",
+    "ExecStartPre",
+)
+GUARD_START = ("/usr/bin/python3", "/usr/bin/python3 /usr/lib/praho/mail/praho-mail-boot.py")
+STOPPED_STATES = frozenset({"inactive", "failed"})
+# Loaded systemd state after setup, read with ``systemctl show`` on owned clones (2026-10-28).
+# Eligible units start in this order; ``started`` is the state each must reach. Ubuntu's postfix@-
+# is a disabled template instance: it is never started and must stay inactive.
+UNIT_TOPOLOGY: dict[str, tuple[dict[str, Any], ...]] = {
+    "debian12-dovecot23": (
+        {
+            "unit": "postfix@-.service",
+            "type": "forking",
+            "file_state": "enabled-runtime",
+            "fragment": "/lib/systemd/system/postfix@.service",
+            "dropin": "/etc/systemd/system/postfix@.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            # The oneshot wrapper; it carries the guard drop-in too.
+            "unit": "postfix.service",
+            "type": "oneshot",
+            "file_state": "enabled",
+            "fragment": "/lib/systemd/system/postfix.service",
+            "dropin": "/etc/systemd/system/postfix.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "exited"),
+        },
+        {
+            "unit": "dovecot.service",
+            "type": "notify",
+            "file_state": "enabled",
+            "fragment": "/lib/systemd/system/dovecot.service",
+            "dropin": "/etc/systemd/system/dovecot.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+    ),
+    "ubuntu2604-dovecot24": (
+        {
+            "unit": "postfix.service",
+            "type": "forking",
+            "file_state": "enabled",
+            "fragment": "/usr/lib/systemd/system/postfix.service",
+            "dropin": "/etc/systemd/system/postfix.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            "unit": "dovecot.service",
+            "type": "notify",
+            "file_state": "enabled",
+            "fragment": "/usr/lib/systemd/system/dovecot.service",
+            "dropin": "/etc/systemd/system/dovecot.service.d/praho-mail.conf",
+            "start": True,
+            "started": ("active", "running"),
+        },
+        {
+            "unit": "postfix@-.service",
+            "type": "forking",
+            "file_state": "disabled",
+            "fragment": "/usr/lib/systemd/system/postfix@.service",
+            "dropin": "/etc/systemd/system/postfix@.service.d/praho-mail.conf",
+            "start": False,
+            "started": ("inactive", "dead"),
+        },
+    ),
+}
+MAX_FENCE_BYTES = 4 * 1024 * 1024
+FENCE_FAMILIES = {"iptables": "icmp-port-unreachable", "ip6tables": "icmp6-port-unreachable"}
 MASTER = """smtp inet n - y - - smtpd
   -o smtpd_sasl_auth_enable=no
 127.0.0.1:1465 inet n - n - - smtpd
@@ -98,6 +177,46 @@ MASTER = """smtp inet n - y - - smtpd
   -o smtpd_sender_restrictions=reject_authenticated_sender_login_mismatch
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 """
+
+
+def fence_rules(rejection: str) -> list[list[str]]:
+    """The certificate fence chain, in order: one loopback return, then the mail-port reject."""
+    return [
+        ["-A", CHAIN, "-i", "lo", "-j", "RETURN"],
+        ["-A", CHAIN, "-p", "tcp", "-m", "multiport", "--dports", PORTS, "-j", "REJECT", "--reject-with", rejection],
+    ]
+
+
+def certificate_fence(snapshot: object, rejection: str) -> str:
+    """Classify one family's ``*-save -t filter`` text as exact, absent, inert or foreign.
+
+    Shared by the worker and the boot guard. Exact means the jump is the first INPUT rule, the
+    chain is exactly the loopback return then the reject, and nothing else references the chain.
+    Inert is an unreferenced chain holding a prefix of those rules, as an interrupted install leaves.
+    """
+    if not isinstance(snapshot, str) or len(snapshot) > MAX_FENCE_BYTES:
+        return "foreign"
+    lines = [line for line in snapshot.splitlines() if line and not line.startswith("#")]
+    if lines.count("*filter") != 1 or lines.count("COMMIT") != 1:
+        return "foreign"
+    jump = "-A INPUT -j " + CHAIN
+    rules = [line for line in lines if line.startswith("-A ")]
+    declared = [line for line in lines if line.startswith(":" + CHAIN + " ")]
+    owned = [line for line in rules if line.startswith("-A " + CHAIN + " ")]
+    references = [line for line in rules if CHAIN in line.split() and line not in owned]
+    expected = [" ".join(rule) for rule in fence_rules(rejection)]
+    if not declared and not owned and not references:
+        return "absent"
+    if len(declared) == 1 and not references and owned == expected[: len(owned)]:
+        return "inert"
+    if (
+        len(declared) == 1
+        and next((line for line in rules if line.startswith("-A INPUT ")), None) == jump
+        and owned == expected
+        and references == [jump]
+    ):
+        return "exact"
+    return "foreign"
 
 
 def atomic(path: Path, content: bytes, mode: int = 0o600) -> None:
@@ -637,6 +756,83 @@ class MailSetup:
     def allow_local_probe(self) -> None:
         for program in ("iptables", "ip6tables"):
             self.execute([program, "-w", "5", "-I", CHAIN, "1", "-i", "lo", "-j", "RETURN"])
+
+    def unit_states(self) -> dict[str, tuple[str, str]]:
+        """Read each profile unit's loaded state; anything outside the pinned topology is review evidence."""
+        states = {}
+        for unit in UNIT_TOPOLOGY[self.node.profile_id]:
+            output = self.execute(["systemctl", "show", unit["unit"], "--property=" + ",".join(UNIT_PROPERTIES)])
+            values = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+            starts = re.findall(r"\{ path=([^ ;]*) ; argv\[\]=([^;]*?) ; ", values.get("ExecStartPre", ""))
+            if (
+                set(values) != set(UNIT_PROPERTIES)
+                or (
+                    values["LoadState"],
+                    values["Type"],
+                    values["UnitFileState"],
+                    values["FragmentPath"],
+                    values["DropInPaths"],
+                    values["NeedDaemonReload"],
+                )
+                != ("loaded", unit["type"], unit["file_state"], unit["fragment"], unit["dropin"], "no")
+                or starts != [GUARD_START]
+                or values["ExecStartPre"].count("{") != 1
+            ):
+                self.refuse("mail_setup_review_required")
+            states[unit["unit"]] = (values["ActiveState"], values["SubState"])
+        return states
+
+    def unit_phase(self) -> str:
+        """Classify the profile's mail units as running, stopped or mixed."""
+        states = self.unit_states()
+        topology = UNIT_TOPOLOGY[self.node.profile_id]
+        if any(states[unit["unit"]] != unit["started"] for unit in topology if not unit["start"]):
+            self.refuse("mail_setup_review_required")
+        eligible = [unit for unit in topology if unit["start"]]
+        if all(states[unit["unit"]] == unit["started"] for unit in eligible):
+            return "running"
+        if all(states[unit["unit"]][0] in STOPPED_STATES for unit in eligible):
+            return "stopped"
+        return "mixed"
+
+    def certificate_fences(self) -> dict[str, str]:
+        return {
+            program: certificate_fence(self.execute([program + "-save", "-t", "filter"]), rejection)
+            for program, rejection in FENCE_FAMILIES.items()
+        }
+
+    def ensure_certificate_fence(self) -> None:
+        """Install the exact fence in both families; the loopback return is inserted only here.
+
+        Live rules do not survive a reboot, so every start phase calls this again. Read both
+        families before changing either; any rule we did not write is review evidence.
+        """
+        states = self.certificate_fences()
+        if "foreign" in states.values():
+            self.refuse("mail_setup_review_required")
+        for program, rejection in FENCE_FAMILIES.items():
+            if states[program] == "exact":
+                continue
+            self.execute([program, "-w", "5", "-N" if states[program] == "absent" else "-F", CHAIN])
+            for rule in fence_rules(rejection):
+                self.execute([program, "-w", "5", *rule])
+            # The jump goes last, so a half-built chain is never active.
+            self.execute([program, "-w", "5", "-I", "INPUT", "1", "-j", CHAIN])
+        if set(self.certificate_fences().values()) != {"exact"}:
+            self.refuse("mail_setup_review_required")
+
+    def remove_certificate_fence(self) -> None:
+        states = self.certificate_fences()
+        if not set(states.values()) <= {"exact", "inert", "absent"}:
+            self.refuse("mail_setup_review_required")
+        for program, state in states.items():
+            if state == "exact":
+                self.execute([program, "-w", "5", "-D", "INPUT", "-j", CHAIN])
+            if state != "absent":
+                self.execute([program, "-w", "5", "-F", CHAIN])
+                self.execute([program, "-w", "5", "-X", CHAIN])
+        if set(self.certificate_fences().values()) != {"absent"}:
+            self.refuse("mail_setup_review_required")
 
     @contextlib.contextmanager
     def package_policy(self) -> Iterator[None]:

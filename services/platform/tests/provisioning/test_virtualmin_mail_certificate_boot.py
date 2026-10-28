@@ -172,6 +172,18 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 self.private("proc/self/cgroup", "0::/system.slice/" + unit + "\n")
                 self.assertEqual(self.guard.allowed(), unit != "unrelated.service")
 
+    def test_ubuntu_never_approves_its_disabled_postfix_instance_even_with_a_valid_permit(self):
+        self.recovery("ubuntu2604-dovecot24")
+        for unit, expected in (
+            ("postfix.service", True),
+            ("dovecot.service", True),
+            ("postfix@-.service", False),
+            ("system-postfix.slice/postfix@-.service", False),
+        ):
+            with self.subTest(unit=unit):
+                self.private("proc/self/cgroup", "0::/system.slice/" + unit + "\n")
+                self.assertEqual(self.guard.allowed(), expected)
+
     def test_the_fixed_worker_can_prove_ownership_without_gaining_service_start_permission(self):
         self.assertTrue(self.guard.allowed())
         self.private("proc/self/cgroup", "0::/system.slice/ssh.service\n")
@@ -260,6 +272,11 @@ class CertificateStartGuardTests(MailBootGuardFixture, SimpleTestCase):
                 original.replace("-A INPUT -j PRAHO_MAIL_SETUP\n", ""),
                 original.replace("-A INPUT -j", "-A INPUT -j ACCEPT\n-A INPUT -j", 1),
                 original.replace("-A PRAHO_MAIL_SETUP -i lo -j RETURN", "-A PRAHO_MAIL_SETUP -j RETURN"),
+                # A second loopback allowance (a later allow_local_probe) is not the verified fence.
+                original.replace(
+                    "-A PRAHO_MAIL_SETUP -i lo -j RETURN",
+                    "-A PRAHO_MAIL_SETUP -i lo -j RETURN\n-A PRAHO_MAIL_SETUP -i lo -j RETURN",
+                ),
             ):
                 with self.subTest(program=program, rules=changed):
                     self.rules[program] = changed
