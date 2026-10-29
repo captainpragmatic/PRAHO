@@ -10,6 +10,7 @@ from .account_hostname_models import (
     AccountNameCertificateBudget,
     AccountNameCertificateInstall,
 )
+from .hosted_domain_dns_models import HostedDomainDnsStatus
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
 from .service_request_models import ServiceRequest
@@ -27,6 +28,7 @@ __all__ = [
     "AccountNameCertificate",
     "AccountNameCertificateBudget",
     "AccountNameCertificateInstall",
+    "HostedDomainDnsStatus",
     "MigrationBridge",
     "NodeDrain",
     "ProvisioningTask",

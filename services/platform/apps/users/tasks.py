@@ -820,7 +820,12 @@ def deliver_security_notice(user_id: int, event: str, actor_email: str, by_opera
         if event not in subjects:
             logger.error("🔥 [Security Notice] Unknown event %r for user %s", event, user_id)
             return {"sent": False, "reason": "unknown_event"}
-        context = {"user": user, "event": event, "actor_email": actor_email, "by_operator": by_operator}
+        context = {
+            "name": user.first_name or user.email,
+            "event": event,
+            "actor_email": actor_email,
+            "by_operator": by_operator,
+        }
         subject = subjects[event]
         text_message = render_to_string("users/emails/security_notice.txt", context)
         html_message = render_to_string("users/emails/security_notice.html", context)

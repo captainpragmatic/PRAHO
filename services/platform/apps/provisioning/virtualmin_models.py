@@ -9,6 +9,7 @@ import contextlib
 import logging
 import re
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
@@ -28,6 +29,8 @@ from apps.common.model_secrets import (
 )
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE
+
+from .hosted_zone_ownership import AccountOwnershipQuerySet, remember_ownership, save_with_ownership
 
 logger = logging.getLogger(__name__)
 
@@ -434,6 +437,8 @@ class VirtualminAccount(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = AccountOwnershipQuerySet.as_manager()
+
     class Meta:
         db_table = "provisioning_virtualmin_accounts"
         verbose_name = _("Virtualmin Account")
@@ -448,9 +453,24 @@ class VirtualminAccount(models.Model):
     def __str__(self) -> str:
         return f"{self.domain} ({self.get_status_display()})"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        save_with_ownership(self, "account", super().save, args, kwargs)
+
     def get_absolute_url(self) -> str:
         """Get URL for account detail view"""
         return reverse("provisioning:virtualmin_account_detail", kwargs={"account_id": self.id})
+
+    @classmethod
+    def from_db(cls, db: str | None, field_names: Collection[str], values: Collection[Any]) -> VirtualminAccount:
+        instance = super().from_db(db, field_names, values)
+        remember_ownership(instance, "account")
+        return instance
+
+    def refresh_from_db(self, *args: Any, **kwargs: Any) -> None:
+        super().refresh_from_db(*args, **kwargs)
+        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)
+        if fields is None or {"service", "service_id"}.intersection(fields):
+            remember_ownership(self, "account")
 
     @property
     def is_active(self) -> bool:

@@ -1,43 +1,26 @@
-%% PRAHO Platform - Docker Deployment Architecture
-%% Updated: 2026-10-06 to match deploy/docker-compose.single-server.yml (Caddy edge)
-%% Shows network isolation and container layout
-
-graph TB
-    subgraph "Docker Host"
-        subgraph "internal<br/>(Database network)"
-            PostgreSQL[(PostgreSQL<br/>:5432)]
+%% Source snapshot: 2026-10-27; deploy/docker-compose.single-server.yml.
+%% Dual-network services are drawn outside the individual network subgraphs.
+flowchart TB
+    Internet(["Internet"]) -->|"HTTPS"| Caddy
+    subgraph Host["Single Docker host"]
+        subgraph Web["web network"]
+            Caddy["Caddy<br/>80/443"]
+            Portal["Portal<br/>8701"]
         end
-
-        subgraph "web<br/>(Edge network)"
-            Caddy[Caddy<br/>:80/:443<br/>automatic HTTPS]
-            Portal[Portal Service<br/>:8701]
+        subgraph Internal["internal network"]
+            PostgreSQL[("PostgreSQL<br/>5432")]
         end
-
-        Platform[Platform Service<br/>:8700<br/>joins web and internal]
-
-        Caddy -->|portal domain| Portal
-        Caddy -->|platform domain<br/>staff UI: staff CIDRs only<br/>public: /api, webhooks,<br/>unsubscribe, health| Platform
-        Platform <-->|Full Access| PostgreSQL
-        Portal -.->|HTTP API<br/>HMAC Auth| Platform
+        Platform["Platform<br/>8700; joins web and internal"]
+        Qcluster["qcluster<br/>Platform image; no HTTP<br/>joins web and internal"]
+        SQLite[("Portal local volume<br/>SQLite sessions and counters")]
+        Caddy -->|"Portal hostname"| Portal
+        Caddy -->|"Platform hostname<br/>Public API/webhook paths<br/>Staff paths: allowed CIDRs"| Platform
+        Portal -->|"Signed API"| Platform
+        Portal --> SQLite
+        Platform <--> PostgreSQL
+        Qcluster <--> PostgreSQL
     end
-
-    Internet([Internet]) -->|HTTPS| Caddy
-
-    subgraph "External Services"
-        Virtualmin[Virtualmin]
-        Stripe[Stripe]
-        ANAF[ANAF]
-    end
-
-    Platform -.->|API Calls| Virtualmin
-    Platform -.->|API Calls| Stripe
-    Platform -.->|API Calls| ANAF
-
-    classDef network fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    classDef service fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-
-    class Platform,Portal,Caddy service
-    class PostgreSQL db
-    class Virtualmin,Stripe,ANAF external
+    Providers["Provider APIs, node API/SSH and public DNS"]
+    Platform -->|"Applicable request-side integrations"| Providers
+    Qcluster -->|"Provisioning, DNS and other durable jobs"| Providers
+    Note["Portal has no PostgreSQL network connection.<br/>Native deployment uses praho-platform, praho-portal<br/>and praho-qcluster systemd services behind Caddy."]

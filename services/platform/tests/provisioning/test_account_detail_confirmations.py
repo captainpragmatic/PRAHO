@@ -121,6 +121,7 @@ class AccountDetailConfirmationTests(SimpleTestCase):
                     {
                         "account": {
                             "id": ACCOUNT_ID,
+                            "pk": ACCOUNT_ID,
                             "domain": domain,
                             "protected_from_deletion": protected,
                             "can_be_deleted": not protected,

@@ -299,7 +299,7 @@ class User(AbstractUser):
 
         return timezone.now() < self.account_locked_until
 
-    def increment_failed_login_attempts(self) -> None:
+    def increment_failed_login_attempts(self, *, source: str = "login") -> None:
         """Increment failed login attempts and apply progressive lockout.
 
         Account lockout begins at ACCOUNT_LOCKOUT_THRESHOLD consecutive failures
@@ -312,7 +312,9 @@ class User(AbstractUser):
         and remain capped at four hours.
 
         The deprecated MAX_LOGIN_ATTEMPTS constant in constants.py is NOT used.
-        Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout.
+        Configure ACCOUNT_LOCKOUT_THRESHOLD and lockout_delays to adjust lockout. source names
+        the check that failed (``login``, or a signed-in check such as ``mfa_disable``) and is
+        recorded on the lockout's audit event.
 
 
         The increment and the lockout decision happen on the locked row in one
@@ -347,12 +349,12 @@ class User(AbstractUser):
 
             locked.save(update_fields=update_fields)
             if "account_locked_until" in update_fields:
-                locked._audit_account_locked()
+                locked._audit_account_locked(source)
 
         self.failed_login_attempts = locked.failed_login_attempts
         self.account_locked_until = locked.account_locked_until
 
-    def _audit_account_locked(self) -> None:
+    def _audit_account_locked(self, source: str = "login") -> None:
         """Record that failed sign-ins locked this account (best effort, in its own savepoint)."""
         from apps.audit.services import (  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
             AccountEventData,
@@ -366,7 +368,8 @@ class User(AbstractUser):
                     trigger_reason="failed_login_threshold",
                     failed_attempts=self.failed_login_attempts,
                     metadata={
-                        "locked_until": self.account_locked_until.isoformat() if self.account_locked_until else ""
+                        "locked_until": self.account_locked_until.isoformat() if self.account_locked_until else "",
+                        "source": source,
                     },
                 )
             )

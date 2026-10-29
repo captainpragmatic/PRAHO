@@ -1,0 +1,5 @@
+{% load i18n %}
+<p class="text-sm text-slate-300">
+  {% if can_manage_dns %}<a href="{% url 'dns:import' service_id %}" class="text-primary-400 underline">{% trans "Import DNS for this hosting domain" %}</a> · {% endif %}
+  <a href="{% url 'dns:list' %}" class="text-primary-400 underline">{% trans "Your DNS zones" %}</a>
+</p>

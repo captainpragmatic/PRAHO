@@ -14,13 +14,14 @@ from typing import Any
 from unittest.mock import patch
 
 import pyotp
-from django.contrib.auth.forms import PasswordChangeForm, SetPasswordForm
+from django.contrib.auth.forms import SetPasswordForm
 from django.contrib.auth.tokens import default_token_generator
 from django.test import TestCase
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
+from apps.users.forms import LockedPasswordChangeForm
 from apps.users.mfa import MFAService, TOTPService
 from apps.users.models import User, UserProfile
 from apps.users.pending_totp import PendingTOTPEnrolment, get_or_create_pending
@@ -71,16 +72,17 @@ class PasswordChangeWriteTests(TestCase):
         self.assertEqual(UserProfile.objects.get(user=self.user).timezone, "America/New_York")
 
     def test_a_password_changed_meanwhile_is_not_overwritten(self) -> None:
-        real_clean = PasswordChangeForm.clean_old_password
+        # The form's own old-password check, which the page runs (it adds the lockout to Django's).
+        real_clean = LockedPasswordChangeForm.clean_old_password
 
-        def checked_then_changed_elsewhere(form: PasswordChangeForm) -> str:
+        def checked_then_changed_elsewhere(form: LockedPasswordChangeForm) -> str:
             value = real_clean(form)
             other = User.objects.get(pk=form.user.pk)
             other.set_password(CONCURRENT)
             other.save(update_fields=["password"])
             return str(value)
 
-        with patch.object(PasswordChangeForm, "clean_old_password", checked_then_changed_elsewhere):
+        with patch.object(LockedPasswordChangeForm, "clean_old_password", checked_then_changed_elsewhere):
             response = _change(self.client)
 
         self.assertEqual(response.status_code, 200)

@@ -38,6 +38,7 @@ LOCAL_APPS: list[str] = [
     "apps.billing",  # Customer billing views (API client)
     "apps.tickets",  # Customer support tickets (API client)
     "apps.services",  # Customer service management (API client)
+    "apps.dns",  # Customer DNS zones (signed Platform client)
     "apps.customers",  # Customer team, tax profile, and address management
     "apps.ui",  # Template tags and components
     "apps.api_client",  # Platform API integration service
@@ -94,12 +95,12 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # ===============================================================================
-# DATABASE - SQLITE FOR SESSION STORAGE ONLY (ALL ENVIRONMENTS)
+# DATABASE - SQLITE FOR SESSIONS AND INFRASTRUCTURE COUNTERS (ALL ENVIRONMENTS)
 # ===============================================================================
 
-# SESSION DATABASE — used for Django session storage only, no business data.
+# LOCAL INFRASTRUCTURE DATABASE — sessions plus shared counters and expiring claims.
 # Portal fetches all domain data from Platform via HMAC-signed API calls.
-# Losing portal.sqlite3 forces re-login but loses no business data.
+# Losing portal.sqlite3 forces re-login and loses coordination state, not Platform business records.
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

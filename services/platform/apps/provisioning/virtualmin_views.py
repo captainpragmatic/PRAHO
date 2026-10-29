@@ -506,6 +506,12 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "repair_dns_url": reverse("provisioning:virtualmin_account_repair_dns", args=[account.id]),
     }
 
+    from .hosted_domain_dns_service import cached_status  # noqa: PLC0415  # DNS status is entirely local state.
+    from .hosted_domain_dns_views import stored_evidence  # noqa: PLC0415  # View module imports the staff guard above.
+
+    context["hosted_dns_status"] = cached_status(account)
+    context["hosted_dns_evidence"] = stored_evidence(account)
+
     response = render(request, "provisioning/virtualmin/account_detail.html", context)
     if migration is not None and migration.status == "completed" and not migration.routing_note_shown:
         account.migrations.filter(pk=migration.pk, status="completed").update(routing_note_shown=True)

@@ -18,6 +18,7 @@ from apps.common.types import Ok
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.spool import acquire_spool_reservation, release_spool_reservation
 from apps.provisioning.virtualmin_migration_models import (
+    ACCOUNT_BUSY_REFUSAL,
     SpoolReservation,
     VirtualminMigration,
     account_has_active_operation,
@@ -64,7 +65,7 @@ class BackupJobAdmissionTests(task_tests.VirtualminTaskTestBase):
         )
         refused = self.management.create_backup_job(self.account)
         self.assertTrue(refused.is_err())
-        self.assertIn("active migration or backup/restore", refused.unwrap_err())
+        self.assertEqual(refused.unwrap_err(), ACCOUNT_BUSY_REFUSAL)
         # fsm-bypass: clear the migration so the job side can be tested.
         VirtualminMigration.objects.filter(pk=migration.pk).update(status="failed")
 
@@ -81,7 +82,7 @@ class BackupJobAdmissionTests(task_tests.VirtualminTaskTestBase):
             self.account, self.server, initiated_by=None
         )
         self.assertTrue(migration_refused.is_err())
-        self.assertIn("active migration or backup/restore", migration_refused.unwrap_err())
+        self.assertIn(ACCOUNT_BUSY_REFUSAL, migration_refused.unwrap_err())
 
     def test_attention_status_retains_exclusion(self) -> None:
         """An uncertain restore keeps the account locked until resolved."""

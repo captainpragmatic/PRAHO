@@ -53,6 +53,7 @@ urlpatterns = [
     path("tickets/", include((ticket_urls, "tickets"))),
     # Services & Hosting APIs
     path("services/", include((services_urls, "services"))),
+    path("dns/", include("apps.api.dns.urls")),
     # Orders & Product Catalog APIs
     path("orders/", include((order_urls, "orders"))),
     # GDPR compliance APIs (cookie consent, consent history, data export)

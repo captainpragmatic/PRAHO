@@ -54,8 +54,11 @@ from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 
+from .credentials import check_password_locked, proof_passed
 from .customer_view import MFA_LOGIN_MARKER as CUSTOMER_VIEW_MFA_MARKER
 from .forms import (
+    LOCKED_PASSWORD_CHANGE,
+    AccountLockedDuringChange,
     LockedPasswordChangeForm,
     LockedSetPasswordForm,
     LoginForm,
@@ -588,6 +591,9 @@ class SecurePasswordChangeView(PasswordChangeView):
         """Write the password under the row lock (#689), then rotate and rebind this session to it."""
         try:
             user = cast(LockedPasswordChangeForm, form).save()
+        except AccountLockedDuringChange:
+            form.add_error(None, LOCKED_PASSWORD_CHANGE)
+            return self.form_invalid(form)
         except PasswordAuthorityChanged:
             form.add_error(None, _("Your password was changed while this form was open. Enter it again."))
             return self.form_invalid(form)
@@ -694,6 +700,8 @@ def _enrol_totp(request: HttpRequest, user: User, form: TwoFactorSetupForm) -> E
         form.add_error(None, _("The password or the code is incorrect."))
     elif result.status == "expired":
         form.add_error(None, _("This setup expired. Scan the new code and try again."))
+    elif result.status == "locked":
+        form.add_error(None, LOCKED_STAFF_CHECK)
     return result
 
 
@@ -927,21 +935,29 @@ def mfa_backup_codes(request: HttpRequest) -> HttpResponse:
     return redirect("users:user_profile")
 
 
+# A locked account on the staff 2FA pages, in the words of their own request limit.
+LOCKED_STAFF_CHECK = gettext_lazy("Too many attempts. Please wait an hour and try again.")
+
+
 def _confirm_both_factors(request: HttpRequest, locked_user: User, password: str, token: str) -> str | None:
     """Check the posted password and a current second factor; return an error, or None.
 
-    Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user,
-    and a wrong code is not charged to the login lockout, as on the API. A wrong password and a
-    wrong code get the same answer, and the per-user hourly limit on the calling view bounds
-    guessing. The code is checked only after the password, so a backup code offered with a wrong
-    password is not spent.
+    Mirrors the API's MFADisableSerializer: the caller holds select_for_update on the user, a
+    locked account is refused and a wrong password counts toward the lockout; a wrong code is not
+    charged to it, as on the API. A wrong password and a wrong code get the same answer. The code
+    is checked only after the password, so a backup code offered with a wrong password is not spent.
     """
+    if locked_user.is_account_locked():  # answered before the password, so it says nothing about it
+        return str(LOCKED_STAFF_CHECK)
     incorrect = _("The password or the code is incorrect.")
-    if not password or not locked_user.check_password(password):
+    if not locked_user.two_factor_enabled or not check_password_locked(
+        locked_user, password, source="staff_second_factor_change"
+    ):
         return incorrect
     token = token.strip()
-    if not locked_user.two_factor_enabled or not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
+    if not MFAService.verify_mfa_code(locked_user, token, request)["success"]:
         return incorrect
+    proof_passed(locked_user)
     return None
 
 

@@ -222,6 +222,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     # Type guard: @staff_required_strict ensures authenticated user
     user = cast(User, request.user)
     service = get_object_or_404(Service, pk=pk)
+    response_status = 200
 
     # Security check
     if not user.can_access_customer(service.customer):
@@ -258,10 +259,17 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
             service.customer = customer
             service.service_plan = plan
             service.domain = domain
-            service.save()
-
-            messages.success(request, _("✅ Service {domain} has been updated!").format(domain=domain))
-            return redirect("provisioning:service_detail", pk=service.pk)
+            try:
+                service.save()
+            except ValidationError:
+                service.refresh_from_db()
+                messages.warning(
+                    request, _("The service's owner changed. Review the current details before submitting again.")
+                )
+                response_status = 409
+            else:
+                messages.success(request, _("✅ Service {domain} has been updated!").format(domain=domain))
+                return redirect("provisioning:service_detail", pk=service.pk)
         else:
             messages.error(request, _("❌ All fields are required."))
 
@@ -273,7 +281,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "is_edit": True,
     }
 
-    return render(request, "provisioning/service_form.html", context)
+    return render(request, "provisioning/service_form.html", context, status=response_status)
 
 
 @staff_required_strict

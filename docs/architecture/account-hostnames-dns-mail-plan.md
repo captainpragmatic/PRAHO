@@ -1,6 +1,6 @@
 # Implementation plan: account hostnames, customer DNS and mail (ADR-0061)
 
-Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Phase 2 is delivered by PR #749. Phases 3 through 5 follow together in one later PR; local phase branches are verification checkpoints.
+Every task: a test that fails first (quote the failure line), the fix, green, `make lint FILE=` for every changed file, then a sibling check (grep the defect's shape). Node-side steps are proven in the Virtualmin lab. Cloudflare and public DNS are faked in tests through `register_dns_gateway` and a patched `authoritative_addresses`. Phase 2 is delivered by PR #749. Phases 3 and 4 follow together in one later PR; local phase branches are verification checkpoints. Phase 5 (mail on the web nodes) is withdrawn; see [Phase 5](#phase-5-mail-on-the-nodes).
 
 **Branch base.** This work changes the same provisioning code as #693 and the differential-backup work (provisioning migrations 0003 and 0004). Phase 0 starts on the differential-backup branch's tip once its stage 2 is committed; each phase rebases onto master as #693 and the differential-backup PR land. New provisioning migrations follow the current leaf. That was `0007_legacy_price_labels` when this was written; P1.1 then added `0008_account_hostnames`. Each later task takes the next number after whatever the leaf is when it lands, never a number fixed in this plan.
 
@@ -44,22 +44,25 @@ from the later phases so a passing bridge test cannot be mistaken for a complete
 
 Owner decisions for the remaining phases:
 
-- Merge Phase 2 through PR #749 once its pull request checks pass. Deliver Phases 3 through 5 together in one later PR, not one PR per phase. Keep phase-specific verification evidence and keep that PR in draft until combined review and verification pass.
+- Merge Phase 2 through PR #749 once its pull request checks pass. Deliver Phases 3 and 4 together in one later PR, not one PR per phase. Keep phase-specific verification evidence and keep that PR in draft until combined review and verification pass.
 - Keep website previews off. Use complete zone-file uploads for the first zone import.
-- Install mail on all eligible existing and new nodes through Virtualmin's supported setup.
-  Existing external mail stays external until the domain's owner enables hosted mail.
-- Advertise implicit TLS client ports 993, 995 and 465.
-- Investigate native Postfix/Dovecot forwarding in the mail lab before adding a proxy dependency.
-  Native proxying may terminate TLS at the source and use a verified encrypted onward connection;
-  the invariant is one authoritative writable mailbox copy, with credentials checked at the target.
+- Withdraw Phase 5 (2026-10-28). Customer mail moves to a dedicated mail node (#790, #791); its ADR
+  comes with #790. Mailboxes already on the web nodes stay where they are, and mail-enabled moves and
+  recoveries stay refused.
 - Finish a migration after target activation, bridge verification and DNS convergence. The bridge's
   own retryable task owns retention and teardown, so backups and billing reconciliation resume.
 - Phase 4 extends the complete TTL/cutover/restore contract to managed customer-zone records.
+
+This document is the implementation plan and verification record for every phase. The ADR owns
+the architecture contract. Phase branches are local checkpoints for the same PR, and temporary
+debugging journals and raw test logs stay outside the repository documentation.
 
 Review findings to close, each with a failing regression and recorded green result:
 
 | Finding | State / evidence |
 |---|---|
+| Native backups omit original owner password aging/expiry | Phase 2 owner capture/held activation and native archive-binding proof pass |
+| A service/domain hold introduced during a move waits for DNS completion | Current-policy activation and identity-bound reconciliation pass focused SQLite/PostgreSQL and native active/suspended proofs; replay preserves current credentials and cron |
 | Original barrier record and saved-crontab token survive replay | Regression green; migration review suite: 100 tests + 90 subtests |
 | Compensation preserves each child's enabled state | Regression green in the migration review suite |
 | Cancellation removes only the owned, idle target copy | Regression green in the migration review suite |
@@ -115,9 +118,39 @@ The audit CI failures mentioning `virtualmin_migration_apply` and
 variables were mistaken for audit wrapper parameters. Fix the scanner's lexical
 scope handling rather than registering events that no operation emits.
 
-P2.6-P2.11 are implemented and have passed the local gates above. Phases 3-5 keep
-separate implementation and integration gates; the native mail lifecycle remains
-unfinished and mail-enabled migrations remain refused.
+The Phase 2 base has passed the local gates above. The integrated Phase 3 checkpoint
+also passes the complete local test pipeline: Platform runs 14,314 tests with 136
+skipped, Portal passes 1,997 with three skipped, integration passes 1,038 with 11
+skipped and 944 subtests, and the cache/isolation phases pass. Full lint and typing,
+120 checksums and both schema checks pass. The later two-value native default-site
+recording correction passes all eight recorded-gateway cases on that checkpoint.
+
+Phase 3 is implemented on its own branch. The transport shares a 90-second/96-query
+budget, records five independent component results and explicitly limits DNSSEC to
+DS/DNSKEY consistency. Offline reads invalidate old results against current ownership,
+tenant and bridge maintenance state. Manual rechecks persist intent; a bounded
+dispatcher queues probes outside requests. EmailLog creation, incident state and
+the observation commit share one transaction, with delivery dispatched after commit.
+Per-component definitive history prevents unknown observations from inventing a
+healthy baseline or hiding a later healthy-to-broken transition. Customer output
+excludes private evidence, while staff see bounded, escaped recorded observations.
+Focused tests include real signed API requests, revocation, rollback, slow-render
+lease expiry, malformed Portal receipts and concurrent PostgreSQL workers. These
+phase results do not replace final verification of the complete Phases 3–4 PR tree.
+
+### Phase 4 verification
+
+The typed customer-zone gateway, complete-file import revisions, fenced background operations,
+signed APIs, Portal pages and staff diagnostics are implemented. Customer-zone records share the
+name's publication lock, complete per-record TTL contract and migration/recovery ownership checks.
+Legacy moves now update the linked zone binding and invalidate readiness in the ownership transaction;
+both the missing update and missing rollback on ownership refusal were first reproduced by regressions.
+The latest integrated checkpoint passes 145 focused Platform cases, 59 Portal cases, 21 route/action
+contracts and 31 PostgreSQL cases with actual publication/ownership and admission contention.
+Full lint and typing pass for 650 Platform and 107 Portal modules; 122 checksums and both schema
+checks pass. Chromium has exercised signed upload, CSRF, preview, redirect, HTMX and responsive layout.
+The complete Phase 4 test pipeline and final combined-PR gates remain pending. Controlled provider
+tests do not prove live account permissions; no real customer zone or registrar delegation was changed.
 
 The HTTP bridge uses a migration-owned TLS origin on the target's existing port 443,
 restricted to its source and admitted hostnames; HTTPS uses the customer's verified
@@ -314,7 +347,7 @@ These are live defects today. Each ships with a test that fails without it.
    - The barrier: `disable-domain`, the account's cron jobs suspended, its processes stopped, and database writes blocked (privileges revoked on its databases).
    - **Before applying it,** PRAHO records the cron state and the database grants on the migration.
    - **A failure before step 5** restores exactly that state and verifies it with a real database write and a cron listing.
-   - Mail accounts do not migrate until phase 5 adds queue drain and forwarding.
+   - Mail accounts do not migrate: mail-enabled moves are refused (Phase 5 is withdrawn).
 3. **Back up, restore onto the target, verify it.** The target stays disabled and unreachable: no DNS change and no bridge, so nothing has written to it yet.
 4. **Point of no return,** before anything can write to the target.
    - In one fenced transaction, set `account.server` and `AccountHostname.target_server` to the target.
@@ -367,6 +400,17 @@ These are live defects today. Each ships with a test that fails without it.
 
 ## Phase 3: watching customer DNS
 
+Implementation paths are `infrastructure/dns_probes.py`, `provisioning/hosted_domain_dns_*`,
+`api/services/dns_views.py` and the Portal service DNS card. One account probe shares a 90-second,
+96-query budget, bounded CNAME/authority walks and a 120-second task timeout. A five-minute dispatcher
+selects at most 50 due accounts, normally hourly; manual requests persist deduplicated intent and
+respect cooldowns. No page or API call performs probes. Active tenant members can read; owner/tech
+roles can request rechecks through the existing signed-body HMAC boundary. Unknown CDN/redirect
+origins and external MX are not invented failures. Optional validating-resolver evidence requires
+verified TLS and has no plaintext fallback. DNSSEC consistency remains explicitly distinct from
+cryptographic validation. One durable EmailLog per healthy-to-broken incident is committed with the
+observation; unknown states retain history and do not manufacture a healthy baseline or outage.
+
 1. **P3.1 Add the status model.** `HostedDomainDnsStatus`, OneToOne on `VirtualminAccount`:
    - `dns_path`, a results JSON;
    - `healthy`, `first_failed_at`, `notified_at`, `checked_at`;
@@ -374,7 +418,7 @@ These are live defects today. Each ships with a test that fails without it.
 2. **P3.2 Write probes that follow CNAMEs.**
    - New `apps/infrastructure/dns_probes.py`. Checks: `www` reaching the account name, the apex, MX, stray AAAA, CAA allowing Let's Encrypt, and DNSSEC (DS against DNSKEY).
    - Test: `tests/infrastructure/test_dns_probes.py`.
-3. **P3.3 Classify and schedule.** An hourly batched task. Email template `hosting_dns_broken`, sent once per healthy-to-broken change. Test: `tests/provisioning/test_dns_check_task.py`.
+3. **P3.3 Classify and schedule.** Hourly observations, dispatched in bounded batches every five minutes. Email template `hosting_dns_broken`, sent once per healthy-to-broken incident. Tests: `tests/provisioning/test_hosted_domain_dns_status.py`.
 4. **P3.4 Add the API and the Portal status card.**
    - `TECH_ROLES = {"owner", "tech"}` in `api/secure_auth.py`.
    - Platform `services/<id>/dns-status/` and `.../recheck/`.
@@ -382,9 +426,34 @@ These are live defects today. Each ships with a test that fails without it.
    - Tests:
      - `tests/api/test_service_dns_status_api.py`: another customer gets 404; a viewer cannot recheck;
      - Portal `tests/services/test_service_dns_status_card.py`.
-4. **P3.5 Add the staff check results.** A panel on account detail and a list of broken domains.
+5. **P3.5 Add the staff check results.** A panel on account detail and a list of recorded broken/unknown domains. Tests: `tests/provisioning/test_hosted_domain_dns_views.py`.
 
 ## Phase 4: our nameservers on Cloudflare
+
+Implementation paths are `infrastructure/dns_zone_gateway.py`, `dns_zone_cloudflare.py`,
+`domains/dns_zone_*`, `provisioning/managed_dns_service.py`, the signed DNS API and Portal `apps/dns`.
+The following limits and ownership rules apply to all tasks:
+
+- First import accepts a complete uploaded zone file for the customer's hosting primary domain.
+  Unsupported records refuse the whole import; SOA/apex NS replacements are visible in the diff.
+  Child delegations and signed material require a supported adapter or explicit refusal.
+- Parsing is bounded to 2 MiB, 2,000 records and 128 values per RRset. Only `$ORIGIN` and `$TTL`
+  directives are allowed. Capture each parsed owner, value and original TTL before dnspython union;
+  reject out-of-zone owners and conflicting RRset TTLs rather than silently dropping/normalizing them.
+- Exact revision/digest confirmation, complete provider readback, old-provider cross-check and DS
+  handover precede nameserver instructions. Verify parent delegation and provider activation separately.
+  A supported registrar change uses the existing durable registrar service; external registrars get instructions.
+- Use a distinct encrypted account-level token, never the restricted account-name token. Provider
+  success requires typed identity and complete pagination. Ambiguous creates retain intent and may
+  recover only from positive ownership; they never blindly repeat POST or adopt an unrelated zone.
+- Customer edits support A/AAAA/CNAME/MX/TXT/SRV/CAA with numeric DNS-only TTLs 60–86400. Protect managed
+  slots against shadow records and CNAME conflicts; preserve unrelated mail, verification and proxy state.
+- The zone belongs to its customer independently of hosting. Publication locks follow account → fresh
+  name → zones/records in UUID order. Ownership transfers invalidate readiness without transferring the zone.
+- Lower, confirm, wait and restore every managed web record's own TTL, including www CNAME, under the
+  name lock. Record replacement retains original cache evidence; routine sync preserves lowered TTLs.
+  Hosting termination withdraws only managed web slots. Whole-zone deletion requires explicit consent,
+  a current export and verified move-away/cache-age evidence.
 
 1. **P4.1 Add the zone provider interface and its Cloudflare implementation.**
    - Records: A, AAAA, CNAME, MX, TXT, SRV and CAA.
@@ -397,7 +466,7 @@ These are live defects today. Each ships with a test that fails without it.
    - Audit wiring.
    - Test: `tests/domains/test_hosted_zone_fsm.py`.
 3. **P4.3 Import the complete zone before activation.** Arbitrary subdomains, verification TXT records, uncommon DKIM selectors and custom service records cannot be found by lookups, so querying common names is not an import.
-   - Take the zone from its current provider (a zone-file export or the provider's API), or from a zone file the customer uploads.
+   - Take a complete zone-file export uploaded by the customer. Provider-account import is outside the first release.
    - Probing common names (apex, `www`, `mail`, `_dmarc`, `autodiscover`, common DKIM selectors and SRV names) only cross-checks the import; a probe answer missing from the import blocks activation.
    - The customer confirms the imported record inventory before the nameserver switch is offered.
    - Test with a fixture zone holding records no probe would find.
@@ -419,22 +488,9 @@ These are live defects today. Each ships with a test that fails without it.
 
 ## Phase 5: mail on the nodes
 
-1. **P5.1 Do the lab work first.** Postfix and Dovecot in the lab image; confirm the mail and DKIM programs Virtualmin 8 provides.
-2. **P5.2 Update the node playbook.**
-   - `virtualmin.yml` installs Postfix and Dovecot, adds `mail` to the default features, and sets `myhostname` to the node FQDN.
-   - The failing-first test is `test_feature_set_matches_a_minimal_node`, which is replaced.
-3. **P5.3 Allowlist the confirmed programs,** with the read-only ones in the read-only set.
-4. **P5.4 Publish the mail records (depends on P4.1).**
-   - A `_spf.<zone>` TXT record, rebuilt on node register and destroy.
-   - DKIM published in our zones, or shown as records to add.
-   - MX as a managed record.
-   - PTR through a new optional `set_reverse_dns` on the cloud gateway (Hetzner API), and a checked manual step elsewhere.
-5. **P5.5 Relay mail during the bridge.**
-   - Inbound delivery: the bridge playbook adds a Postfix transport `<domain> smtp:[B]:25`.
-   - Mail clients: prove native Dovecot proxying and Postfix relay behavior in the lab before choosing a forwarding topology. Advertise implicit TLS ports 993, 995 and 465. A stale-DNS client must authenticate against the destination and use its single authoritative mailbox copy, with verified encryption between nodes. Source TLS termination is acceptable with an independently retained certificate; HAProxy is not a prerequisite.
-   - The source is retired only after the client forwards are torn down at the end of the window.
-6. **P5.6 Add the mail settings page.** Platform `services/<id>/mail-settings/`; Portal `partials/mail_settings.html` and a tab on the service page.
-7. **P5.7 Watch deliverability.** A per-node blocklist check. The server page shows PTR, SPF membership and blocklist status.
+**Withdrawn (2026-10-28).** Mail on the Virtualmin web nodes will not be built. Customer mail moves to a
+dedicated mail node (#790, #791); its ADR comes with #790. Mailboxes already on the web nodes stay where
+they are, and Phase 2's refusals of mail-enabled moves and recoveries stay in force.
 
 ## Paths that must keep records in sync
 
@@ -460,4 +516,4 @@ These are live defects today. Each ships with a test that fails without it.
 - `make test-platform`, `make test-portal`, `make test-integration`, `make lint`, `make lint-fsm`, `make check-types` and `make check-types-portal` (cold caches), `make check-migrations`, `make lint-templates`.
 - `make test-virtualmin-lab` for node-side tasks.
 - e2e for the Portal pages.
-- A final review of each PR before merge.
+- A final review of the complete Phases 3–4 PR tree before merge. Component or earlier-phase green results do not replace combined verification.

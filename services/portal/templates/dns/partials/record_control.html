@@ -1,0 +1,7 @@
+{% load i18n %}
+{% if record.managed %}{% trans "Managed by PRAHO" %}
+{% elif record.infrastructure %}{% trans "Provider infrastructure" %}
+{% elif editable and record.id and can_edit %}
+  <a href="{% url 'dns:record_edit' zone.id record.id %}" class="text-primary-400 underline">{% trans "Edit" %}</a>
+  <a href="{% url 'dns:record_delete' zone.id record.id %}" class="ml-2 text-primary-400 underline">{% trans "Delete" %}</a>
+{% else %}{{ record.managed_by }}{% endif %}
