@@ -8,7 +8,9 @@ with a session opened as login opens it:
   request as ``PortalServiceHMACMiddleware`` would;
 - ``BoundSessionMixin`` before ``HMACTestMixin``, for signed calls through the real middleware.
 
-Either way the session is the one of the user the signed body names, opened once per test.
+Either way the session is the one of the user the signed body names, opened once per test, and the
+request echoes the session's current 300-second window (``step_up_at``) as the portal would. A body
+that names its session itself is left as written, so a test can send a missing or wrong echo.
 """
 
 from __future__ import annotations
@@ -27,6 +29,12 @@ from apps.users.models import PortalSession, User
 def fresh_session(user: User) -> PortalSession:
     """A live session whose identity check is current, as a login leaves it."""
     return portal_sessions.open_session(user)
+
+
+def bound_fields(row: PortalSession) -> dict[str, str]:
+    """What a signed body names for this session: its id and its window as it is now."""
+    current = PortalSession.objects.get(pk=row.pk)
+    return {"session_id": str(row.pk), "step_up_at": portal_sessions.step_up_stamp(current)}
 
 
 def _session_of(sessions: dict[str, PortalSession], user_id: object) -> PortalSession | None:
@@ -51,6 +59,7 @@ class _Binding:
         row = _session_of(self.__dict__.setdefault("_sessions", {}), user_id) if user_id is not None else None
         if row is not None:
             request.portal_session = row  # type: ignore[attr-defined]  # as bind_request sets it
+            request.portal_step_up_at = bound_fields(row)["step_up_at"]  # type: ignore[attr-defined]  # likewise
         return request
 
 
@@ -80,5 +89,5 @@ class BoundSessionMixin:
             return body
         row = _session_of(self.__dict__.setdefault("_portal_sessions", {}), user_id)
         if row is not None:
-            body["session_id"] = str(row.pk)
+            body.update(bound_fields(row))
         return body

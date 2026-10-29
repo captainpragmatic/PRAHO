@@ -16,8 +16,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import transaction
@@ -30,9 +29,6 @@ from apps.audit.session_digest import session_key_digest
 
 from . import session_policy
 from .models import PortalSession, User
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -258,13 +254,36 @@ def record_step_up(row: PortalSession, *, confirmed: bool) -> None:
         _audit("step_up_failed", row, description="Identity check for sensitive actions failed")
 
 
-def mark_reauth(row: PortalSession) -> bool:
-    """Record a passed identity check on a live session; an ended one is never marked."""
+def mark_reauth(row: PortalSession) -> datetime | None:
+    """Record a passed identity check on a live session, and return its new window; an ended one is never marked."""
     now = timezone.now()
     marked = PortalSession.objects.filter(_live(now), pk=row.pk).update(reauth_at=now)
-    if marked:
-        row.reauth_at = now
-    return bool(marked)
+    if not marked:
+        return None
+    row.reauth_at = now
+    return now
+
+
+def step_up_stamp(row: PortalSession) -> str:
+    """The window a login or identity check opened, as the portal must echo it to act in it."""
+    return row.reauth_at.isoformat() if row.reauth_at is not None else ""
+
+
+def window_open(row: PortalSession, echoed: object, now: datetime) -> bool:
+    """Whether a request may act in the session's 300 s window (ADR-0017 section 7).
+
+    Read from the row as it is now, not as the request bound it: a check made meanwhile replaces the
+    window. The request must echo exactly that window, which only the browser that opened it holds,
+    so a request that loaded the session before the person confirmed cannot act in what they opened.
+    """
+    current = PortalSession.objects.filter(_live(now), pk=row.pk).values_list("reauth_at", flat=True).first()
+    if current is None or not isinstance(echoed, str):
+        return False
+    try:
+        echoed_at = datetime.fromisoformat(echoed)
+    except ValueError:
+        return False
+    return echoed_at == current and timedelta(0) <= now - current <= STEP_UP_WINDOW
 
 
 def sweep_expired(*, now: datetime | None = None) -> int:
@@ -315,6 +334,7 @@ def bind_request(request: HttpRequest, data: dict[str, object]) -> HttpResponse 
     if row is None:
         return session_refused()
     request.portal_session = row  # type: ignore[attr-defined]  # read by the endpoints that end or re-stamp it
+    request.portal_step_up_at = data.get("step_up_at")  # type: ignore[attr-defined]  # read by step_up_refusal
     if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
         from apps.api.customer_view_policy import check  # noqa: PLC0415  # ADR-0007: cross-app, deferred
 

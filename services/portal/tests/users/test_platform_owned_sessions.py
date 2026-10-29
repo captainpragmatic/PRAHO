@@ -60,6 +60,16 @@ class SignedBodyTests(SimpleTestCase):
         with request_context.bound(SESSION_ID, 42):
             self.assertEqual(self.body({"session_id": "other"}, 42)["session_id"], "other")
 
+    def test_every_call_echoes_the_window_its_browser_was_given_and_nothing_else(self) -> None:
+        window = "2026-10-29T18:00:00.123456+00:00"
+        with request_context.bound(SESSION_ID, 42, window):
+            self.assertEqual(self.body({}, 42)["step_up_at"], window)
+            # A caller's own value never replaces the browser's (ADR-0017 section 7).
+            self.assertEqual(self.body({"step_up_at": "forged"}, 42)["step_up_at"], window)
+        with request_context.bound(SESSION_ID, 42):  # a session that was never given a window
+            self.assertNotIn("step_up_at", self.body({"step_up_at": "forged"}, 42))
+        self.assertNotIn("step_up_at", self.body({"step_up_at": "forged"}, 42))  # nothing bound
+
     def test_a_refusal_is_recorded_for_the_bound_session_only(self) -> None:
         with request_context.bound(SESSION_ID, 42):
             with self.assertRaises(PlatformAPIError):

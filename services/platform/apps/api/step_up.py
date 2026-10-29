@@ -1,7 +1,7 @@
 """The identity check a sensitive customer action needs within the last 300 seconds (ADR-0017).
 
 Login counts as a check. A guarded view calls ``step_up_refusal`` after its own owner and role
-checks and before it writes anything.
+checks and before it writes anything. The request must echo the window it was given (``step_up_at``).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def step_up_refusal(request: HttpRequest) -> Response | None:
     row = getattr(request, "portal_session", None)
     if row is None:
         return portal_sessions.session_refused()
-    if portal_sessions.recently_reauthenticated(row, timezone.now()):
+    if portal_sessions.window_open(row, getattr(request, "portal_step_up_at", None), timezone.now()):
         return None
     response = Response({"success": False, "code": "reauth_required"}, status=403)
     response["Cache-Control"] = "no-store"

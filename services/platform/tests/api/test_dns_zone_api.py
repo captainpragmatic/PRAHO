@@ -21,7 +21,7 @@ from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
-from tests.helpers.portal_session import BoundSessionMixin, fresh_session
+from tests.helpers.portal_session import BoundSessionMixin, bound_fields, fresh_session
 
 CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "zone-api-tests"}}
 UPLOAD = b'$ORIGIN customer.example.\n$TTL 900\n@ IN A 95.217.0.10\nselector-q._domainkey IN TXT "must-survive"\n'
@@ -282,7 +282,7 @@ class DnsZoneApiTests(BoundSessionMixin, HMACTestMixin, TestCase):
                 PortalSession.objects.filter(pk=session.pk).update(
                     reauth_at=timezone.now() - timedelta(seconds=seconds_ago)
                 )
-                body = self.identity(session_id=str(session.pk), expected_revision=zone.current_revision, **data)
+                body = self.identity(**bound_fields(session), expected_revision=zone.current_revision, **data)
                 with self.subTest(action=name, session=checked), patch.object(zones, service, return_value=Ok(None)) as call:
                     response = self.portal_post(f"{self.path}{zone.pk}/{suffix}", body)
                     if checked == "stale" and name != "crosscheck":

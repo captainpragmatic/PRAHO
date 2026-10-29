@@ -384,8 +384,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["portal_session_id"] = portal_session_id
                     if deadlines is not None:  # always, past the check above
                         session_deadlines.store(request.session, deadlines)
+                    step_up_at = _window(auth_response)
+                    if step_up_at:
+                        request.session["step_up_at"] = step_up_at
                     # The membership and profile calls below already belong to this session.
-                    request_context.bind(portal_session_id, user_id)
+                    request_context.bind(portal_session_id, user_id, step_up_at)
 
                     # Fetch and cache user's customer memberships for role-based access
 
@@ -1477,6 +1480,12 @@ def _relative_next(raw: str) -> str:
     return "/dashboard/"
 
 
+def _window(answer: object) -> str:
+    """The 300 s window an answer from Platform gives this browser, or "" (ADR-0017 section 7)."""
+    value = answer.get("step_up_at") if isinstance(answer, dict) else None
+    return value if isinstance(value, str) else ""
+
+
 @never_cache
 @sensitive_post_parameters("password", "token")
 @require_http_methods(["GET", "POST"])
@@ -1500,8 +1509,13 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
             two_factor = None  # unknown: the code is offered but optional
     form = ConfirmIdentityForm(request.POST or None, two_factor=two_factor)
     if request.method == "POST" and form.is_valid():
+        # A new key before Platform opens the window (section 7): a copy of the old cookie, or a second
+        # submit of it, never holds the window this check opens.
+        request.session.cycle_key()
         try:
-            api_client.confirm_identity(user_id, form.cleaned_data["password"], form.cleaned_data.get("token", ""))
+            answer = api_client.confirm_identity(
+                user_id, form.cleaned_data["password"], form.cleaned_data.get("token", "")
+            )
         except PlatformAPIError as exc:
             code = (exc.response_data or {}).get("code")
             if code == "reauth_failed":
@@ -1513,8 +1527,11 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, _("We could not check that right now. Please try again in a moment."))
         else:
             mark_auth_success(request)
-            # A new key, as at login: a copy of the old cookie must not share the window just opened.
-            request.session.cycle_key()
+            # Only the new key's session holds the window, so only this browser can act in it.
+            if step_up_at := _window(answer):
+                request.session["step_up_at"] = step_up_at
+            else:
+                request.session.pop("step_up_at", None)
             return redirect(next_url)
     remaining = int(status.get("backup_codes_remaining") or 0)
     low = two_factor is True and remaining <= LOW_BACKUP_CODES

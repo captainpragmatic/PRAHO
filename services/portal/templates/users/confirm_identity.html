@@ -8,7 +8,7 @@
   {% if backup_codes_warning %}
     {% alert backup_codes_warning variant="warning" css_class="mb-4" %}
   {% endif %}
-  <form method="post" action="?next={{ next|urlencode }}" class="space-y-4">
+  <form method="post" action="?next={{ next|urlencode }}" class="space-y-4" data-submit-once>
     {% csrf_token %}
     {% form_error_summary form %}
     {% form_field form.password icon_left="lock" autocomplete="current-password" %}

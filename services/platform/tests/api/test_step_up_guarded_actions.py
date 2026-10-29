@@ -27,6 +27,7 @@ from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.users import portal_sessions
 from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
+from tests.helpers.portal_session import bound_fields
 
 REAUTH = {"success": False, "code": "reauth_required"}
 
@@ -121,7 +122,7 @@ class StepUpCoverageTests(HMACTestMixin, TestCase):
         PortalSession.objects.filter(pk=self.session.pk).update(reauth_at=timezone.now())
 
     def call(self, path: str, data: dict[str, Any], *, method: str = "post") -> Any:
-        body = {"user_id": self.owner.pk, "customer_id": self.customer.pk, "session_id": str(self.session.pk), **data}
+        body = {"user_id": self.owner.pk, "customer_id": self.customer.pk, **bound_fields(self.session), **data}
         if method == "put":
             body["timestamp"] = time.time()
             raw = json.dumps(body).encode()
@@ -262,7 +263,7 @@ class ExportDownloadStepUpTests(HMACTestMixin, TestCase):
     def download(self) -> Any:
         return self.portal_post(
             f"/api/gdpr/data-export/{self.export.pk}/download/",
-            {"user_id": self.user.pk, "session_id": str(self.session.pk)},
+            {"user_id": self.user.pk, **bound_fields(self.session)},
         )
 
     def test_a_download_needs_a_check(self) -> None:

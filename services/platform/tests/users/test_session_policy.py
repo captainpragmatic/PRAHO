@@ -144,3 +144,17 @@ class LoginTierTests(HMACTestMixin, TestCase):
                 self.assertEqual(answer["session_tier"], tier)
                 self.assertEqual(answer["session_expires_at"], row.expires_at.isoformat())
                 self.assertEqual(answer["session_idle_deadline"], row.idle_deadline.isoformat())
+                self.assertEqual(answer["step_up_at"], row.reauth_at.isoformat())  # login opens the window
+
+    def test_a_validation_answer_carries_the_deadlines_and_never_the_window(self) -> None:
+        User.objects.create_user(email="validated@example.ro", password=PASSWORD)
+        login = self.portal_post("/api/users/login/", {"email": "validated@example.ro", "password": PASSWORD}).json()
+        user_id = login["user"]["id"]
+        answer = self.portal_post(
+            "/api/users/session/validate/",
+            {"user_id": user_id, "session_id": login["session_id"], "session_auth_hash": login["session_auth_hash"]},
+        ).json()
+        self.assertTrue(answer["active"], answer)
+        self.assertEqual(answer["session_expires_at"], login["session_expires_at"])
+        # Only login and the identity check hand the window to the browser that opened it.
+        self.assertNotIn("step_up_at", answer)

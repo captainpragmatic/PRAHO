@@ -249,6 +249,8 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 "user": user_data,
                 "session_auth_hash": session_auth_hash,
                 **portal_sessions.deadlines(portal_session).as_payload(),
+                # Login counts as an identity check; the portal echoes this window to act in it.
+                "step_up_at": portal_sessions.step_up_stamp(portal_session),
                 "message": "Authentication successful",
             }
         )
@@ -953,7 +955,8 @@ def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # 
     except DatabaseFailure:
         logger.exception("🔥 [Auth] Identity check could not be recorded")
         return store_unavailable_response()
-    return Response({"success": True})
+    # The window just opened: the portal stores it under the browser's new session key and echoes it.
+    return Response({"success": True, "step_up_at": portal_sessions.step_up_stamp(session)})
 
 
 def _browser_origin(request: HttpRequest) -> BrowserOrigin:

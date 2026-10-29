@@ -174,6 +174,13 @@ compensating control.
 - **The window.** Each Platform session records when its identity was last checked (`reauth_at`).
   Login sets it, and an action counts the check as fresh from 0 to 300 s after it, both included; a
   missing or future time never counts.
+- **The window belongs to the browser that opened it.** Login and each check return it
+  (`step_up_at`). The confirm page turns the browser's session key before asking Platform and keeps
+  the window only under the new key, and every signed call echoes it. A guarded action must echo
+  exactly the window the row holds now, read when the action is checked. A request that loaded the
+  session before the person confirmed echoes the earlier window and is refused, so a copy of the
+  cookie never acts in a window its owner opened. The window is not secret: the portal sends only
+  what its own session holds.
 - **The refusal.** A guarded view calls `apps.api.step_up.step_up_refusal` after its own owner and
   role checks and before it writes. Outside the window it answers `403 {"code": "reauth_required"}`,
   `no-store`, with no `active` key, so the portal never reads it as an ended session. A request
@@ -216,6 +223,10 @@ compensating control.
 Accepted: a compromised *running* portal sees passwords as customers type them, at login and on the
 confirm page, so it can pass the re-check at will. Protecting against that needs a confirmation
 outside the portal.
+
+Accepted: a request the person already had in flight in another tab when they confirmed is asked to
+confirm once more, since it looks the same as a copy's. A double submit that gets past the form's
+submit-once guard can sign the browser out, as any key rotation can.
 
 ### Accepted risk
 

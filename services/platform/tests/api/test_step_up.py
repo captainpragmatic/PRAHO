@@ -4,6 +4,10 @@ A stolen portal session could otherwise reveal a gift-card code, or change who c
 for as long as the session lives. Login counts as a check; after 300 seconds Platform answers
 ``reauth_required`` until the person confirms their identity again. A request with no bound session
 never reaches a guarded action, whatever ``PORTAL_SESSION_REQUIRED`` says.
+
+The window belongs to the browser that opened it: a request must echo the exact window it was given
+(``step_up_at``), checked against the row as it is now. A request that loaded the session before the
+person confirmed echoes the earlier window, so someone holding a copy of the cookie cannot act in it.
 """
 
 from __future__ import annotations
@@ -59,10 +63,14 @@ class WindowTests(TestCase):
 
 @override_settings(PORTAL_SESSION_REQUIRED=False)
 class RefusalTests(TestCase):
-    def _request(self, row: PortalSession | None) -> object:
+    def _request(self, row: PortalSession | None, echo: object = "same") -> object:
         request = RequestFactory().post("/api/billing/gift-cards/reveal/")
         if row is not None:
             request.portal_session = row  # type: ignore[attr-defined]  # as bind_request sets it
+            # What the portal sends back: by default the window this browser was given.
+            request.portal_step_up_at = (  # type: ignore[attr-defined]  # as bind_request sets it
+                portal_sessions.step_up_stamp(row) if echo == "same" else echo
+            )
         return request
 
     def test_an_unbound_request_is_refused_as_an_ended_session(self) -> None:
@@ -82,3 +90,23 @@ class RefusalTests(TestCase):
         self.assertEqual(response.data, {"success": False, "code": "reauth_required"})
         self.assertNotIn("active", response.data)  # never read by the portal as an ended session
         self.assertEqual(response["Cache-Control"], "no-store")
+
+    def test_only_the_window_s_own_stamp_opens_it(self) -> None:
+        row = _session()
+        other = (row.reauth_at - timedelta(seconds=1)).isoformat()
+        for echo in (None, "", "not a time", 42, other):
+            with self.subTest(echo=echo):
+                response = step_up_refusal(self._request(row, echo))
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.data, {"success": False, "code": "reauth_required"})
+        self.assertIsNone(step_up_refusal(self._request(row)))
+
+    def test_a_new_confirmation_closes_the_window_to_every_earlier_stamp(self) -> None:
+        row = _session()
+        earlier = portal_sessions.step_up_stamp(row)
+        bound_before = PortalSession.objects.get(pk=row.pk)  # a request that loaded the session first
+        PortalSession.objects.filter(pk=row.pk).update(reauth_at=row.reauth_at - timedelta(seconds=5))
+        confirmed = PortalSession.objects.get(pk=row.pk)
+        self.assertIsNotNone(mark_reauth(confirmed))  # the person confirms
+        self.assertEqual(step_up_refusal(self._request(bound_before, earlier)).status_code, 403)
+        self.assertIsNone(step_up_refusal(self._request(confirmed)))

@@ -47,6 +47,12 @@ class LoginSessionTierTests(TestCase):
                 _response, platform = self.sign_in(session_fields(), **form)
                 self.assertIs(platform.authenticate_customer.call_args.kwargs["remember_me"], sent)
 
+    def test_the_window_login_opened_is_kept_to_be_echoed(self) -> None:
+        window = "2026-10-29T18:00:00.123456+00:00"
+        response, _platform = self.sign_in({**session_fields(), "step_up_at": window})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.session["step_up_at"], window)
+
     def test_platform_s_deadlines_are_stored_as_given(self) -> None:
         answer = session_fields("remember")
         response, _platform = self.sign_in(answer, remember_me="on")

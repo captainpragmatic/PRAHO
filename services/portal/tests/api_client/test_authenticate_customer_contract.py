@@ -63,6 +63,7 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
             "session_tier": "remember",
             "session_expires_at": "2026-11-28T10:00:00+00:00",
             "session_idle_deadline": "2026-11-05T10:00:00+00:00",
+            "step_up_at": "2026-10-29T10:00:00+00:00",  # the window login opened (ADR-0017 section 7)
         }
 
         with patch("apps.api_client.services.portal_request", return_value=response):
@@ -82,6 +83,7 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
                 "session_tier": "remember",
                 "session_expires_at": "2026-11-28T10:00:00+00:00",
                 "session_idle_deadline": "2026-11-05T10:00:00+00:00",
+                "step_up_at": "2026-10-29T10:00:00+00:00",
             },
 
         )

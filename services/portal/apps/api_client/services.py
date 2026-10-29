@@ -410,8 +410,13 @@ class PlatformAPIClient:
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
         # ADR-0017 section 5: every call made inside a signed-in request names its Platform session.
-        for key, value in request_context.signed_fields().items():
+        bound = request_context.signed_fields()
+        for key, value in bound.items():
             payload.setdefault(key, value)
+        # Section 7: the window is the bound browser's alone, never a value a caller passed.
+        payload.pop("step_up_at", None)
+        if "step_up_at" in bound:
+            payload["step_up_at"] = bound["step_up_at"]
         if "timestamp" not in payload:
             payload["timestamp"] = int(time.time())
 
@@ -871,6 +876,8 @@ class PlatformAPIClient:
                     "session_tier": data.get("session_tier"),
                     "session_expires_at": data.get("session_expires_at"),
                     "session_idle_deadline": data.get("session_idle_deadline"),
+                    # The 300 s window login opened, echoed by every later call (section 7).
+                    "step_up_at": data.get("step_up_at"),
                 }
             return None
 

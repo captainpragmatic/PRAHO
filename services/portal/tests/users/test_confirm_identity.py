@@ -13,6 +13,7 @@ from http.cookies import SimpleCookie
 from typing import Any
 from unittest.mock import patch
 
+from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -107,6 +108,27 @@ class ConfirmIdentityTests(TestCase):
         self.assertNotEqual(self.client.session.session_key, before)  # the person's browser has a new key
         self.assertEqual(self.client.session["portal_session_id"], SESSION_ID)  # the same Platform session
         self.assertNotIn("user_id", copy.session)  # the copied key no longer signs anyone in
+
+    def test_the_key_turns_before_platform_is_asked_and_the_new_window_lives_only_under_it(self) -> None:
+        old_key = self.client.session.session_key
+        seen: list[bool] = []
+
+        def confirm(*args: object) -> dict[str, object]:
+            # The old key is gone before Platform opens the window, so a second submit of it loses first.
+            seen.append(SessionStore().exists(old_key))
+            return {"success": True, "step_up_at": "2026-10-29T18:00:00.123456+00:00"}
+
+        with patch(PLATFORM) as platform:
+            platform.confirm_identity.side_effect = confirm
+            response = self.client.post(f"{PATH}?next=/billing/", {"password": "secret-1"})
+        self.assertRedirects(response, "/billing/", fetch_redirect_response=False)
+        self.assertEqual(seen, [False])
+        self.assertEqual(self.client.session["step_up_at"], "2026-10-29T18:00:00.123456+00:00")
+        self.assertFalse(SessionStore().exists(old_key))
+
+    def test_the_confirm_button_submits_once(self) -> None:
+        page = self.get(two_factor=False).content.decode()
+        self.assertIn("data-submit-once", page)
 
     def test_the_cursor_starts_in_the_password(self) -> None:
         page = self.get(two_factor=True).content.decode()

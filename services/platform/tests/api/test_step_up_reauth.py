@@ -67,7 +67,8 @@ class ReauthTests(HMACTestMixin, TestCase):
         User.objects.filter(pk=self.user.pk).update(failed_login_attempts=2)
         response = self._confirm(password=PASSWORD)
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json(), {"success": True})
+        # The window it opened, which the portal echoes back to act in it.
+        self.assertEqual(response.json(), {"success": True, "step_up_at": self._row().reauth_at.isoformat()})
         self.assertTrue(portal_sessions.recently_reauthenticated(self._row(), timezone.now()))
         self.assertEqual(self._failures(), 0)
         (event,) = AuditEvent.objects.filter(action="step_up_confirmed")

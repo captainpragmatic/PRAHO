@@ -22,6 +22,7 @@ from apps.settings.services import SettingsService
 from apps.users import portal_sessions
 from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import bound_fields
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -59,7 +60,7 @@ class GiftPurchaseAPITests(HMACTestMixin, TestCase):
 
     def post(self, action: str, payload: dict | None = None):
         return self.portal_post(f"/api/billing/gift-cards/{action}/", {
-            "customer_id": self.customer.pk, "user_id": self.actor.pk, "session_id": str(self.session.pk),
+            "customer_id": self.customer.pk, "user_id": self.actor.pk, **bound_fields(self.session),
             **(payload or {}),
         })
 
