@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any
+from unittest import skipUnless
 from unittest.mock import patch
 
 import pyotp
-from django.db import DatabaseError
+from django.db import DatabaseError, connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
@@ -208,3 +210,21 @@ class ReauthTests(HMACTestMixin, TestCase):
             response = self._confirm(password=PASSWORD)
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("active", response.json())
+
+
+@skipUnless(connection.vendor == "postgresql", "row lock modes are PostgreSQL's")
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE, HMAC_ALLOW_LEGACY_SECRET=True)
+class ReauthLockTests(HMACTestMixin, TestCase):
+    def test_the_user_is_locked_without_blocking_a_revocation_s_audit_insert(self) -> None:
+        # end() holds the session row while its audit insert takes a key-share lock on the user; a FOR
+        # UPDATE on the user here, then a wait for the session, would deadlock with it.
+        user = User.objects.create_user(email="lock@example.ro", password=PASSWORD)
+        session = portal_sessions.open_session(user)
+        with CaptureQueriesContext(connection) as queries:
+            response = self.portal_post(PATH, {"user_id": user.pk, "session_id": str(session.pk), "password": PASSWORD})
+        self.assertEqual(response.status_code, 200, response.content)
+        locks = [q["sql"] for q in queries.captured_queries if " FOR " in q["sql"] and "UPDATE" in q["sql"]]
+        user_lock = next(i for i, sql in enumerate(locks) if 'FROM "users" ' in sql)
+        session_lock = next(i for i, sql in enumerate(locks) if f'FROM "{PortalSession._meta.db_table}" ' in sql)
+        self.assertIn("FOR NO KEY UPDATE", locks[user_lock])
+        self.assertLess(user_lock, session_lock)

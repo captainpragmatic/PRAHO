@@ -922,7 +922,9 @@ def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # 
         return Response(_REAUTH_FAILED, status=400)
     try:
         with transaction.atomic():
-            locked = User.objects.select_for_update().get(pk=user.pk)
+            # NO KEY UPDATE: a concurrent end() holds the session row while its audit insert takes a
+            # key-share lock on this user; a plain FOR UPDATE here would make the two deadlock.
+            locked = User.objects.select_for_update(no_key=True).get(pk=user.pk)
             session = PortalSession.objects.select_for_update().filter(pk=row.pk).first()
             if session is None or not portal_sessions.still_live(session, locked):
                 raise _SessionGone
