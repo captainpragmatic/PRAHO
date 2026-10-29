@@ -35,9 +35,21 @@ from apps.provisioning.virtualmin_tasks import (
 from apps.provisioning.virtualmin_usage_models import NodeUsageSyncState, UsageReading
 from apps.provisioning.virtualmin_usage_service import public_usage
 from apps.provisioning.virtualmin_usage_tasks import sync_node_usage, transport_identity
+from tests.virtualmin_lab.contract.harness import Lab
 from tests.virtualmin_lab.workflows.harness import Bench, DomainData
 
 DOMAIN = "wfsync.example.com"
+
+
+def _verify_new_domain_binding(bench: Bench, lab: Lab) -> None:
+    """Prove native template substitution before the first deferred repair."""
+    with bench.hosted("wfusagefuture.example.com", node=lab.node.key) as future:
+        DomainData(lab, future).write("usage.txt", "future usage\n")
+        domain_id = lab.exec("virtualmin", "list-domains", "--domain", future.domain, "--id-only").strip()
+        code = lab.exec("curl", "-sk", "--resolve", f"{future.domain}:443:127.0.0.1", "-o", "/dev/null", "-w", "%{http_code}", f"https://{future.domain}/usage.txt")
+        assert code == "200", code
+        lines = [line.split() for line in lab.exec("cat", "/var/log/praho/usage.log").splitlines()]
+        assert any(line[2] == domain_id and int(line[4]) == len("future usage\n") for line in lines)
 
 
 @pytest.fixture(scope="module")
@@ -58,6 +70,10 @@ def test_usage_measures_independent_file_database_growth_and_real_http(bench: Be
         lab.exec("chmod", "0700", f"/usr/local/libexec/{name}")
     lab.exec("/usr/bin/python3", "/usr/local/libexec/praho_usage.py", "init")
     lab.exec("perl", "/usr/local/libexec/praho-usage-metadata.pl", "reconcile")
+
+    # Creation must inherit the literal account ID before any collector/repair
+    # runs. This exercises Virtualmin's real ${ID} template substitution.
+    _verify_new_domain_binding(bench, lab)
 
     def collect():
         lab.exec("/usr/bin/python3", "/usr/local/libexec/praho_usage.py", "refresh")
