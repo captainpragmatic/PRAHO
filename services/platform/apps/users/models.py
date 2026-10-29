@@ -776,10 +776,13 @@ class PortalSession(models.Model):
     next request, without a hook at each place a credential changes.
     """
 
+    # Each tier's lifetimes live in apps.users.session_policy, and nowhere else.
     TIER_STANDARD = "standard"
+    TIER_REMEMBER = "remember"
     TIER_CUSTOMER_VIEW = "customer_view"
     TIER_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         (TIER_STANDARD, _("Standard")),
+        (TIER_REMEMBER, _("Remembered")),
         (TIER_CUSTOMER_VIEW, _("Customer view")),
     )
 

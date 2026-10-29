@@ -573,8 +573,8 @@ msgstr[2] "%(count)d de zile"
 
 #: apps/common/views.py:129
 #, python-format
-msgid "%(default)s, or %(remember)s if you choose to stay signed in"
-msgstr "%(default)s sau %(remember)s dacă alegeți să rămâneți autentificat"
+msgid "Until you close your browser, or up to %(remember)s if you choose to stay signed in"
+msgstr "Până la închiderea browserului sau cel mult %(remember)s dacă alegeți să rămâneți autentificat"
 
 #: apps/common/views.py:135
 msgid "Keeps you signed in"
@@ -7001,6 +7001,33 @@ msgstr "Înregistrați-vă din nou"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: templates/users/confirm_identity.html
+msgid "Confirm it is you"
+msgstr "Confirmați că sunteți dumneavoastră"
+
+#: templates/users/confirm_identity.html
+msgid "This action needs your password again. You will go back to where you were."
+msgstr "Această acțiune necesită din nou parola dumneavoastră. Veți reveni apoi unde erați."
+
+#: templates/users/confirm_identity.html
+msgid "Confirm"
+msgstr "Confirmă"
+
+#: apps/users/views.py
+msgid "The password or code is not right."
+msgstr "Parola sau codul nu sunt corecte."
+
+#: apps/users/views.py
+msgid "We could not check that right now. Please try again in a moment."
+msgstr "Nu am putut verifica acum. Vă rugăm să încercați din nou în câteva momente."
+
+#: apps/users/views.py
+msgid "You have %(count)s backup code left."
+msgid_plural "You have %(count)s backup codes left."
+msgstr[0] "Vă mai rămâne %(count)s cod de rezervă."
+msgstr[1] "Vă mai rămân %(count)s coduri de rezervă."
+msgstr[2] "Vă mai rămân %(count)s de coduri de rezervă."
+
 #~ msgid "Romanian phone number (+40.XX.XXX.XXXX)"
 #~ msgstr "Număr de telefon din România (+40.XX.XXX.XXXX)"
 
@@ -7588,9 +7615,6 @@ msgstr "Mergeți la pagina următoare"
 
 #~ msgid "Close"
 #~ msgstr "Închideți"
-
-#~ msgid "Confirm"
-#~ msgstr "Confirmă"
 
 #, python-format
 #~ msgid ""

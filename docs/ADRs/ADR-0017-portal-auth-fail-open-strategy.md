@@ -60,14 +60,15 @@ cannot reach Platform to re-check?
 |------|-----------|
 | Schedule | Every 600 s plus 0-120 s of jitter (`REVALIDATE_EVERY`, `JITTER_MAX`). A session with no validation record or no binding validates on its next request; login records none, so the first request after login validates. |
 | Soft grace | Up to 300 s past due (`SOFT_TTL_GRACE`), one request per session validates under a single-flight lease (the longest Platform call plus 5 s) while the session's other requests continue. |
-| Hard deadline | 6 h after the scheduled validation (`HARD_TTL_GRACE`, counted from `next_validate_at`), the session ends without calling Platform. |
+| Hard grace | 6 h after the scheduled validation (`HARD_TTL_GRACE`, counted from `next_validate_at`), the portal asks Platform before the request goes on, without failing open: a live session continues, any error ends it. |
+| Platform's deadlines | The portal keeps the tier, the end and the idle deadline Platform answers at login and at every validation. At the end, which never moves, the session ends without calling Platform. Once the stored idle deadline passes (a lower bound: the customer's activity moves Platform's without a validation), the portal asks Platform as at the hard grace, as a background call that never extends the idle deadline. |
 | Authoritative denial | A 401 or 403 whose body says `"active": false` ends the session at once. |
 | Fail-open | Any other `PlatformAPIError` (a transport error, a 5xx, a 429, a 401 or 403 without `"active": false` such as an HMAC fault) lets the request through. Nothing is recorded, so the next request tries again. |
 | Breaker | Each fail-open increments `auth:fail_open:{user_id}` in the counter table, with a one-hour window; the fifth ends the session (`_MAX_FAIL_OPEN_COUNT = 5`). If the counter store itself fails, access is denied. A successful validation resets the breaker. |
 | Programming errors | Any other exception fails closed. |
 
 In plain terms: during a Platform outage an authenticated customer gets about four more requests in
-the hour before being logged out. Pages need Platform for their data anyway, so fail-open smooths
+the hour before being logged out, and never runs past the idle deadline Platform last gave. Pages need Platform for their data anyway, so fail-open smooths
 over brief faults (a restart, a slow call); it does not keep customers working through a long outage.
 New logins fail whenever Platform is unreachable.
 
@@ -76,15 +77,14 @@ New logins fail whenever Platform is unreachable.
 `SessionSecurityMiddleware` (`services/portal/apps/common/middleware.py`) runs on every authenticated
 request and fails closed on any error:
 
-- idle timeout 1 h (`SESSION_TIMEOUT_SECONDS`), with the activity stamp written at most every 60 s;
-- absolute limit 8 h (`MAX_SESSION_AGE_SECONDS`), counted from the first request after login;
-- binding to the IP address and the user agent seen on that first request (`IP_CHANGE_TOLERANCE = False`);
+- binding to the browser that signed in: its family and operating system, without versions, stamped
+  at login. A browser update keeps the session (the stored user agent is re-stamped); another browser
+  or operating system ends it, and so does a session login did not stamp
+  (`PORTAL_BROWSER_FINGERPRINT_REQUIRED`). A new network address never does;
 - it decides whether a session is authenticated from `user_id` in the session, never from
   `session_key` (History).
 
-The authentication middleware separately ends a session 24 h after login, or 30 days with
-"remember me" (`SESSION_COOKIE_AGE_DEFAULT`, `SESSION_COOKIE_AGE_REMEMBER_ME`); the 8 h limit above
-ends every session first.
+It keeps no lifetime of its own: the session's deadlines are Platform's (sections 3 and 5).
 
 ### 5. Session policy (decided 2026-10-28)
 
@@ -95,7 +95,7 @@ both.
 | Tier | Who | Absolute | Idle | Browser cookie | NIST SP 800-63B-4 |
 |------|-----|----------|------|----------------|-------------------|
 | `standard` | "Remember me" unticked, and every staff account | 24 h | 1 h | Ends with the browser | AAL2: overall <= 24 h, inactivity <= 1 h |
-| `remember` | "Remember me" ticked, customers only | 30 days | 7 days | Kept 30 days | AAL1: overall <= 30 days, inactivity optional |
+| `remember` | "Remember me" ticked, customers only | 30 days | 7 days | Kept until the session's end | AAL1: overall <= 30 days, inactivity optional |
 
 Rules that apply to both tiers:
 
@@ -110,7 +110,8 @@ Rules that apply to both tiers:
   when authentication need not persist across browser sessions. Platform still enforces every limit,
   because browsers that restore sessions can keep such cookies.
 - **Sessions are bound to the browser, not the IP address.** A network change (mobile data to Wi-Fi,
-  home to office) keeps the session; a different user agent ends it.
+  home to office) keeps the session, and so does a browser update; a different browser family or
+  operating system ends it.
 - **A credential change keeps the session that made it and ends every other one.**
 - **Platform owns the policy and enforces it server-side.** OWASP requires server-side enforcement of
   timeouts; the portal follows the deadlines Platform returns and computes none of its own.
@@ -122,18 +123,21 @@ sensitive action. OWASP's cheat sheet suggests stricter values for high-value ap
 2-5 min, absolute 4-8 h); NIST's current revision is followed instead, with the re-check as the
 compensating control.
 
-**Gap until the implementation lands.** Platform-owned sessions (section 6) closed the last item
-of the original list: Platform ends a single session, logout reaches it, and only the customer's own
-activity extends Platform's idle limit. What remains, deliberately, because the longer lifetimes are
-acceptable only together with the 300 s re-check:
+**Implemented (2026-10-29).**
 
-- every session ends after 8 h (section 4), so "remember me" does not last longer, and Platform
-  enforces the same idle 1 h and absolute 8 h;
-- the portal still checks its own idle and absolute limits beside Platform's, instead of following
-  the deadlines Platform returns;
-- sessions are still bound to the IP address;
-- the cookie of a standard session persists for 24 h;
-- there is no 300 s re-check on sensitive actions.
+- `apps/users/session_policy.py` on Platform is the only owner of each tier's lifetimes, a staff
+  member's view as a customer (ADR-0065, 30 min with 10 min idle) included. A row whose tier it does
+  not know ends, and a remembered row ends once its person becomes staff.
+- The login sends "remember me" as a signed boolean (anything else is no); Platform opens the
+  remembered tier only for a customer who asked.
+- The portal signs in only with deadlines that can be Platform's (a known tier, aware times in the
+  future, the idle deadline no later than the end, the end at most 30 days plus the clock difference
+  Platform accepts away), keeps them, and follows them as section 3 describes. A browser session
+  without them (one from before this release) ends once (`PORTAL_SESSION_DEADLINES_REQUIRED`).
+- A standard session's cookie ends with the browser; a remembered one's lasts until Platform's end.
+  Either way the portal's stored row expires at Platform's end.
+- A page that makes no call to Platform does not extend the idle deadline; almost every portal page
+  makes one.
 
 ### 6. Platform-owned sessions (implemented 2026-10-28)
 
@@ -154,9 +158,75 @@ acceptable only together with the 300 s re-check:
 - **Portal.** The session id is bound for the whole request, public routes included. A Platform
   refusal during a view ends the browser session even when the view caught the error. A browser
   session without a Platform session id (one from before this release) ends at its next request.
+- **Operator revocation.** `manage.py revoke_portal_sessions` ends one person's sessions (`--user`),
+  every session (`--all`), or every session live during a window (`--active-between`, by overlap, so
+  quiet sessions are included), with one audit event naming the operator, the selector and the reason.
+  The selection is taken when the command starts, so for an incident disable the account or reset its
+  password first. A revoked session is refused at its next call to Platform or periodic validation: at
+  most about 12 minutes while Platform is reachable; during an outage, the bounded fail-open of
+  section 3 applies.
 - **Deploying.** Deploy Platform with `PORTAL_SESSION_REQUIRED=false`, then Portal, then set it true
   (the default in production and staging). Roll back in the reverse order: set it false, roll Portal
   back, then Platform. A new Portal against an old Platform ends every login at once.
+
+### 7. Fresh proof for sensitive actions (implemented 2026-10-29)
+
+- **The window.** Each Platform session records when its identity was last checked (`reauth_at`).
+  Login sets it, and an action counts the check as fresh from 0 to 300 s after it, both included; a
+  missing or future time never counts.
+- **The window belongs to the browser that opened it.** Login and each check return it
+  (`step_up_at`). The confirm page turns the browser's session key before asking Platform and keeps
+  the window only under the new key, and every signed call echoes it. A guarded action must echo
+  exactly the window the row holds now, read when the action is checked. A request that loaded the
+  session before the person confirmed echoes the earlier window and is refused, so a copy of the
+  cookie never acts in a window its owner opened. The window is not secret: the portal sends only
+  what its own session holds.
+- **The refusal.** A guarded view calls `apps.api.step_up.step_up_refusal` after its own owner and
+  role checks and before it writes. Outside the window it answers `403 {"code": "reauth_required"}`,
+  `no-store`, with no `active` key, so the portal never reads it as an ended session. A request
+  with no bound session is refused as an ended one, whatever `PORTAL_SESSION_REQUIRED` says.
+- **The check.** `POST /api/users/session/reauth/` takes the password and, when 2FA is on, the
+  code. It locks the user, then the session, re-checks the session there, and checks both factors as
+  login does: each failure counts toward the lockout and answers `reauth_failed`, a locked account
+  is told so first, a 2FA account with no code is refused before its password is checked, and a
+  spent second-factor budget answers 429. A window that cannot be recorded rolls the check back, so
+  a backup code used for it stays unspent.
+- **What is guarded.** Members and roles, the company's contact details and addresses, a change to
+  an existing legal or tax identity (a first fill is free), the person's name or phone, a GDPR export
+  request and its download, revealing a gift-card code, every change to what a hosted DNS zone
+  publishes (confirming an import, switching name servers, deleting the zone, adding, changing or
+  deleting a record), a request to upgrade, downgrade, suspend or cancel a service, and authorizing
+  a saved card for automatic charges. Payments the portal can start all need the cardholder present;
+  only that authorization lets a card be charged without them.
+  `tests/api/test_step_up_inventory.py` lists every route under `api/` as guarded or exempt with a
+  reason, and fails on a new one nobody has classified.
+- **Portal.** The API client raises `StepUpRequiredError` and records it; once the view returns, the
+  auth middleware sends the browser to `/confirm-identity/` with the page to come back to (HTMX gets
+  `HX-Redirect`; a fetch that asks for JSON gets `403 {"error": "reauth_required", "redirect": …}`
+  and goes there), and drops the messages the refused view queued. A session refusal in the same
+  request still wins. The confirm page reads the 2FA state from Platform each time, and only a wrong
+  answer spends the per-person re-auth budget.
+- **Deploying.** After section 6 is deployed everywhere: Portal first (it handles a refusal it does
+  not yet receive), then Platform. Every portal session open at the deploy ends once: none carries
+  the browser stamp or Platform's deadlines yet.
+- **Rolling back**, this section and the tiers of section 5 together, before rolling back section 6.
+  An old Platform enforces neither the re-check nor the tiers, so no session the new one opened may
+  outlive it:
+  1. on the new Platform, run `manage.py revoke_portal_sessions --all --reason rollback` (the
+     operator is recorded from the login name);
+  2. roll Platform back;
+  3. end every row still live, of any tier: those the new code opened between steps 1 and 2 would
+     otherwise outlive it, without the re-check: `PortalSession.objects.filter(revoked_at__isnull=True)
+     .update(revoked_at=now(), revoke_reason="operator")`. Customers sign in once more;
+  4. roll the Portal back. The users migration only widens the tier choices, so it stays.
+
+Accepted: a compromised *running* portal sees passwords as customers type them, at login and on the
+confirm page, so it can pass the re-check at will. Protecting against that needs a confirmation
+outside the portal.
+
+Accepted: a request the person already had in flight in another tab when they confirmed is asked to
+confirm once more, since it looks the same as a copy's. A double submit that gets past the form's
+submit-once guard can sign the browser out, as any key rotation can.
 
 ### Accepted risk
 
@@ -176,7 +246,7 @@ between a disable and an outage that starts right after it.
 ### Negative
 - During a real outage customers are logged out after a few requests.
 - A session row is a credential; the portal's SQLite file must be protected accordingly.
-- Until the 300 s re-check lands, the longer "remember me" lifetimes of section 5 stay off.
+- Sensitive actions ask for the password again after 5 minutes, also within a long session.
 
 ### Neutral
 - Fail-open events are logged: the Platform error at ERROR, each fail-open decision at INFO with the
@@ -205,3 +275,4 @@ between a disable and an outage that starts right after it.
   data", and the session policy of section 5 recorded.
 - **2026-10-28.** Platform-owned sessions implemented (section 6). Lifetimes unchanged until the
   300 s re-check lands.
+- **2026-10-29.** The 300 s re-check implemented (section 7).

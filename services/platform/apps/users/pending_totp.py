@@ -87,7 +87,9 @@ def enrolment_lifetime() -> timedelta:
 def _lock_user(user_pk: int) -> User:
     from .models import User  # noqa: PLC0415  # Circular: models import this module's app
 
-    return User.objects.select_for_update().get(pk=user_pk)
+    # NO KEY UPDATE: completing an enrolment re-stamps the calling portal session under this lock,
+    # and a concurrent end() holds that session while it takes a key-share lock on the user.
+    return User.objects.select_for_update(no_key=True).get(pk=user_pk)
 
 
 def _locked_row(user_pk: int) -> PendingTOTPEnrolment | None:

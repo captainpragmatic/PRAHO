@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError as DjangoIntegrityError
-from django.test import RequestFactory, TestCase, override_settings
+from django.test import TestCase, override_settings
 
 from apps.api.customers.views import (
     customer_addresses_add,
@@ -32,6 +32,7 @@ from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundRequestFactory, BoundSessionMixin
 
 User = get_user_model()
 
@@ -47,7 +48,7 @@ def _make_request(factory, url, data, method="POST"):
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class TaxProfileEvidenceAPITests(HMACTestMixin, TestCase):
+class TaxProfileEvidenceAPITests(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self) -> None:
         self.owner = User.objects.create_user(email="vat-evidence-owner@example.test", password="test-password")
         self.customer = Customer.objects.create(name="Evidence API", customer_type="company", status="active")
@@ -146,7 +147,7 @@ class CustomerUsersListAPITests(TestCase):
 
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.viewer_user = User.objects.create_user(email="viewer@example.com", password="pass123")
         self.customer = Customer.objects.create(
@@ -186,7 +187,7 @@ class CustomerUsersAddAPITests(TestCase):
     """Test adding users to customer via API."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.target_user = User.objects.create_user(email="new@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Add User Co", customer_type="company", status="active")
@@ -224,7 +225,7 @@ class CustomerUsersCreateAPITests(TestCase):
     """Test creating a new user and adding them to a customer."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Create Test Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -382,7 +383,7 @@ class CustomerUsersRoleAPITests(TestCase):
     """Test user role changes via API."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner1 = User.objects.create_user(email="owner1@example.com", password="pass123")
         self.owner2 = User.objects.create_user(email="owner2@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Role Co", customer_type="company", status="active")
@@ -431,7 +432,7 @@ class CustomerProfileUpdateAPITests(TestCase):
     """Test customer profile and tax profile update APIs."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.viewer_user = User.objects.create_user(email="viewer@example.com", password="pass123")
         self.customer = Customer.objects.create(
@@ -500,7 +501,7 @@ class CustomerAddressAPITests(TestCase):
     """Test address management API endpoints."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Address Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -586,7 +587,7 @@ class SuspendedMembershipAuthTests(TestCase):
     """F1: is_active=False membership must be rejected by secure_auth."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.user = User.objects.create_user(email="suspended@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Susp Co", customer_type="company", status="active")
         self.membership = CustomerMembership.objects.create(
@@ -615,7 +616,7 @@ class AddressSoftDeleteTests(TestCase):
     """F2: address_delete must soft-delete, not hard-delete."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Soft Del Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -656,7 +657,7 @@ class CustomerUpdateTypeValidationTests(TestCase):
     """F5: non-string values for string fields must return 400."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(
             name="Type Co", customer_type="company", status="active",
@@ -700,7 +701,7 @@ class DuplicateUserAddTests(TestCase):
     """F8: adding a user who is already a member must return 400."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.existing_user = User.objects.create_user(email="existing@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Dup Co", customer_type="company", status="active")
@@ -731,7 +732,7 @@ class SelfActionGuardTests(TestCase):
     """F9: users must not be able to take destructive actions on themselves."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Self Guard Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -789,7 +790,7 @@ class UsersListMembershipActiveTests(TestCase):
     """F10: is_active in response must reflect membership.is_active."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.caller = User.objects.create_user(email="caller@example.com", password="pass123")
         self.other_user = User.objects.create_user(email="other@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Active Co", customer_type="company", status="active")
@@ -827,7 +828,7 @@ class AddressLine2Tests(TestCase):
     """F11: address_line2 must be accepted in create and update."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Line2 Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -879,7 +880,7 @@ class AddressRequiredFieldTests(TestCase):
     """F12: empty address_line1 or city must return 400."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Req Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
@@ -924,7 +925,7 @@ class InactiveUserCompanyCreationTests(TestCase):
     """#143: deactivated users must not be able to create companies."""
 
     def setUp(self):
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.inactive_user = User.objects.create_user(email="banned@example.com", password="pass123")
         self.inactive_user.is_active = False
         self.inactive_user.save(update_fields=["is_active"])

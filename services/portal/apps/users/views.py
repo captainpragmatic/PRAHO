@@ -10,7 +10,6 @@ from http import HTTPStatus
 from typing import Any
 from uuid import UUID
 
-from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
@@ -18,9 +17,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy
+from django.utils.translation import gettext_lazy, ngettext
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
@@ -34,6 +34,7 @@ from apps.common.decorators import (
 from apps.common.http import mark_download
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import company_lookup_available, store_localisation_preferences
+from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -46,6 +47,7 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
+from apps.users import session_deadlines
 from apps.users.constants import (
     PASSWORD_RESET_SESSION_KEY,
     REGISTRATION_CONFIRM_SESSION_KEY,
@@ -57,6 +59,7 @@ from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
     CompanyProfileForm,
+    ConfirmIdentityForm,
     CustomerLoginForm,
     CustomerProfileForm,
     CustomerRegistrationForm,
@@ -339,10 +342,14 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     mfa_token=mfa_token,
                     client_ip=get_safe_client_ip(request),
                     user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                    remember_me=remember_me is True,
                 )
-                if auth_response and auth_response.get("valid") and not auth_response.get("session_id"):
-                    # ADR-0017 section 5: a login Platform opened no session for cannot be used.
-                    raise PlatformAPIError("Login answered without a Platform session", is_unavailable=True)
+                deadlines = None
+                if auth_response and auth_response.get("valid"):
+                    deadlines = session_deadlines.from_platform(auth_response, timezone.now())
+                    if not auth_response.get("session_id") or deadlines is None:
+                        # ADR-0017 section 5: a login Platform opened no usable session for cannot be used.
+                        raise PlatformAPIError("Login answered without a usable Platform session", is_unavailable=True)
 
                 if auth_response and auth_response.get("valid"):
                     # Successful authentication - create Django session
@@ -355,6 +362,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session.cycle_key()
                     for key in SIGNED_OUT_FLOW_SESSION_KEYS:
                         request.session.pop(key, None)
+                    # Bound to the browser that signed in, before any later request can claim it.
+                    SessionSecurityMiddleware.stamp_fingerprint(
+                        request.session, request.META.get("HTTP_USER_AGENT", "")
+                    )
 
                     # Store in Django session (secure, handled by framework)
                     # Store correct user_id (platform user.id) and primary customer_id separately
@@ -368,12 +379,16 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["customer_id"] = customer_id  # Legacy field, prefer active_customer_id
                     request.session["email"] = email
                     request.session["authenticated_at"] = timezone.now().isoformat()
-                    request.session["remember_me"] = remember_me
                     request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
                     portal_session_id = str(auth_response["session_id"])
                     request.session["portal_session_id"] = portal_session_id
+                    if deadlines is not None:  # always, past the check above
+                        session_deadlines.store(request.session, deadlines)
+                    step_up_at = _window(auth_response)
+                    if step_up_at:
+                        request.session["step_up_at"] = step_up_at
                     # The membership and profile calls below already belong to this session.
-                    request_context.bind(portal_session_id, user_id)
+                    request_context.bind(portal_session_id, user_id, step_up_at)
 
                     # Fetch and cache user's customer memberships for role-based access
 
@@ -397,15 +412,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     except Exception:
                         logger.debug("Could not fetch memberships on login")
 
-                    # Set session expiry based on remember me checkbox
-                    if remember_me:
-                        session_age = settings.SESSION_COOKIE_AGE_REMEMBER_ME  # 30 days
-                        logger.info(f"✅ [Portal Session] Extended session set for {email} (30 days)")
-                    else:
-                        session_age = settings.SESSION_COOKIE_AGE_DEFAULT  # 24 hours
-                        logger.info(f"✅ [Portal Session] Standard session set for {email} (24 hours)")
-
-                    request.session.set_expiry(session_age)
+                    # The cookie lives as Platform's session does (ADR-0017 section 5): a remembered one
+                    # until its end, any other until the browser closes (the stored row still ends at
+                    # Platform's end; see apps.common.session_store).
+                    if deadlines is not None:  # always, past the check above
+                        request.session.set_expiry(deadlines.expires_at if deadlines.tier == "remember" else 0)
 
                     # Get customer name for personalized message
                     try:
@@ -1455,6 +1466,88 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
         request,
         "users/mfa_backup_codes.html",
         {"backup_codes": [], "remaining": profile.get("backup_codes_count", 0), "form": form},
+    )
+
+
+# Warn on the confirm page when this few backup codes are left.
+LOW_BACKUP_CODES = 3
+
+
+def _relative_next(raw: str) -> str:
+    """A page on this site to go back to after confirming; any other target goes to the dashboard."""
+    if raw.startswith("/") and not raw.startswith("//") and url_has_allowed_host_and_scheme(raw, allowed_hosts=set()):
+        return raw
+    return "/dashboard/"
+
+
+def _window(answer: object) -> str:
+    """The 300 s window an answer from Platform gives this browser, or "" (ADR-0017 section 7)."""
+    value = answer.get("step_up_at") if isinstance(answer, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+@never_cache
+@sensitive_post_parameters("password", "token")
+@require_http_methods(["GET", "POST"])
+def confirm_identity_view(request: HttpRequest) -> HttpResponse:
+    """Ask for the password, and the code when 2FA is on, before a sensitive action (ADR-0017 section 6).
+
+    Platform sends the browser here when an action needs an identity check from the last 300
+    seconds; every signed-in role reaches it. Whether to ask for a code is read from Platform each
+    time. Only a wrong answer spends the person's re-auth budget.
+    """
+    user_id = int(request.session["user_id"])
+    next_url = _relative_next(request.GET.get("next") or request.POST.get("next") or "")
+    # Read on the page only: an answer is checked by Platform, which decides whether a code is needed.
+    status: dict[str, Any] = {}
+    two_factor: bool | None = None
+    if request.method == "GET":
+        try:
+            status = api_client.get_mfa_status(user_id)
+            two_factor = bool(status.get("enabled"))
+        except PlatformAPIError:
+            two_factor = None  # unknown: the code is offered but optional
+    form = ConfirmIdentityForm(request.POST or None, two_factor=two_factor)
+    if request.method == "POST" and form.is_valid():
+        # A new key before Platform opens the window (section 7): a copy of the old cookie, or a second
+        # submit of it, never holds the window this check opens.
+        request.session.cycle_key()
+        try:
+            answer = api_client.confirm_identity(
+                user_id, form.cleaned_data["password"], form.cleaned_data.get("token", "")
+            )
+        except PlatformAPIError as exc:
+            code = (exc.response_data or {}).get("code")
+            if code == "reauth_failed":
+                mark_auth_failure(request, bucket="reauth")
+                form.add_error(None, _("The password or code is not right."))
+            elif code == ACCOUNT_LOCKED or exc.is_rate_limited:
+                form.add_error(None, LOCKED_MESSAGE)
+            else:
+                form.add_error(None, _("We could not check that right now. Please try again in a moment."))
+        else:
+            mark_auth_success(request)
+            # Only the new key's session holds the window, so only this browser can act in it.
+            if step_up_at := _window(answer):
+                request.session["step_up_at"] = step_up_at
+            else:
+                request.session.pop("step_up_at", None)
+            return redirect(next_url)
+    remaining = int(status.get("backup_codes_remaining") or 0)
+    low = two_factor is True and remaining <= LOW_BACKUP_CODES
+    return render(
+        request,
+        "users/confirm_identity.html",
+        {
+            "form": form,
+            "next": next_url,
+            "backup_codes_warning": (
+                ngettext("You have %(count)s backup code left.", "You have %(count)s backup codes left.", remaining)
+                % {"count": remaining}
+                if low
+                else ""
+            ),
+        },
     )
 
 

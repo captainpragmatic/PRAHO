@@ -21,7 +21,7 @@ from django.utils import timezone
 from apps.api import customer_view_policy
 from apps.audit.models import AuditEvent
 from apps.customers.models import Customer
-from apps.users import customer_view, portal_sessions
+from apps.users import customer_view, portal_sessions, session_policy
 from apps.users.models import CustomerMembership, CustomerViewGrant, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
@@ -145,7 +145,7 @@ class ConsumeTests(CustomerViewFixture):
         self.assertEqual(row.tier, PortalSession.TIER_CUSTOMER_VIEW)
         self.assertEqual(row.user, self.target)
         self.assertEqual(row.viewed_as_customer_by, self.staff)
-        self.assertLessEqual(row.expires_at - row.created_at, customer_view.ABSOLUTE_TIMEOUT + timedelta(seconds=1))
+        self.assertLessEqual(row.expires_at - row.created_at, session_policy.TIERS["customer_view"].absolute + timedelta(seconds=1))
         with self.assertRaises(PermissionDenied):
             customer_view.consume(code)
 
@@ -320,7 +320,7 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
         self.row.refresh_from_db()
         self.assertGreaterEqual(self.row.last_seen_at, before)  # the touch happened
         self.assertGreater(self.row.idle_deadline, stale + timedelta(minutes=10))  # and extended idle
-        self.assertLessEqual(self.row.idle_deadline - self.row.last_seen_at, customer_view.IDLE_TIMEOUT)
+        self.assertLessEqual(self.row.idle_deadline - self.row.last_seen_at, session_policy.TIERS["customer_view"].idle)
 
     def test_the_sweep_ends_unusable_views_and_voids_stale_grants(self) -> None:
         stale = CustomerViewGrant.objects.create(

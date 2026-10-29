@@ -11,6 +11,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, cast
+from urllib.parse import quote, urlsplit
 
 from django.conf import settings
 from django.core.cache import cache
@@ -18,8 +19,9 @@ from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
+from django.urls import reverse
 from django.utils import timezone as django_timezone
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.api_client.services import (
     PlatformAPIError,
@@ -30,13 +32,56 @@ from apps.api_client.services import (
 from apps.common import counters, request_context
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.store_unavailable import end_session_or_unavailable, wants_json
-from apps.users import customer_view_policy
+from apps.users import customer_view_policy, session_deadlines
 
 logger = logging.getLogger(__name__)
 
 # Circuit breaker: max consecutive fail-open validations before forced logout (#130/M1)
 _MAX_FAIL_OPEN_COUNT = 5
 _VALIDATION_LOCK = threading.Lock()
+
+
+def _message_state(request: HttpRequest) -> tuple[list[Any], bool, bool] | None:
+    """The message storage's queue and read state before the view runs."""
+    storage = getattr(request, "_messages", None)
+    if storage is None:
+        return None
+    return list(storage._queued_messages), storage.used, storage.added_new
+
+
+def _restore_messages(request: HttpRequest, state: tuple[list[Any], bool, bool] | None) -> None:
+    """Undo what a view that needs confirmation did to the messages.
+
+    Its own messages are dropped, and the ones waiting before it stay unread: rendering a page
+    marks every message read, even when that page is then thrown away for the confirm redirect.
+    """
+    storage = getattr(request, "_messages", None)
+    if storage is not None and state is not None:
+        storage._queued_messages, storage.used, storage.added_new = list(state[0]), state[1], state[2]
+
+
+def _same_site_path(request: HttpRequest, url: str) -> str:
+    """The path and query of a URL on this site, or "" for any other."""
+    if not url or not url_has_allowed_host_and_scheme(
+        url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return ""
+    parts = urlsplit(url)
+    if not parts.path.startswith("/"):
+        return ""
+    return parts.path + (f"?{parts.query}" if parts.query else "")
+
+
+def _step_up_return_path(request: HttpRequest) -> str:
+    """Where the browser goes back to after confirming: the page the action was made from."""
+    if request.headers.get("HX-Request"):
+        source = request.headers.get("HX-Current-URL", "")
+    elif request.method == "GET" and not request_context.step_up_from_download():
+        return request.get_full_path()
+    else:
+        # A form post or a download link: back to the page that holds them, never the action itself.
+        source = request.META.get("HTTP_REFERER", "")
+    return _same_site_path(request, source) or "/dashboard/"
 
 
 class PortalAuthenticationMiddleware:
@@ -101,21 +146,51 @@ class PortalAuthenticationMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # ADR-0017 section 5: bind the Platform session for the whole request, public routes
         # included, so every signed call made for this customer names it.
-        with request_context.bound(request.session.get("portal_session_id"), request.session.get("user_id")):
+        with request_context.bound(
+            request.session.get("portal_session_id"), request.session.get("user_id"), request.session.get("step_up_at")
+        ):
+            messages_before = _message_state(request)
             response = self._authenticate(request)
             if request_context.rejected():
                 # Platform ended the session during the view; the view may have caught the error.
                 logger.warning("🚨 [Auth] Platform ended the portal session during %s", request.path)
                 return self._end_session(request)
+            if request_context.step_up_required():
+                # Platform wants the password again before this action (ADR-0017 section 6).
+                _restore_messages(request, messages_before)
+                return self._ask_to_confirm(request)
         if request.session.get("customer_view"):
             # A customer view's pages are never kept by the browser or a shared cache (ADR-0065).
             response["Cache-Control"] = "no-store"
         return response
 
+    def _ask_to_confirm(self, request: HttpRequest) -> HttpResponse:
+        """Send the browser to confirm its identity, and from there back to where the action began."""
+        target = f"{reverse('users:confirm_identity')}?next={quote(_step_up_return_path(request), safe='')}"
+        logger.info("🔐 [Auth] Platform asked for a fresh identity check during %s", request.path)
+        if request.headers.get("HX-Request"):
+            # A 302 would be followed by HTMX and swapped into the page; HX-Redirect navigates.
+            response = HttpResponse(status=200)
+            response["HX-Redirect"] = target
+            return response
+        if wants_json(request):
+            return JsonResponse({"error": "reauth_required", "redirect": target}, status=403)
+        return redirect(target)
+
     def _end_session(self, request: HttpRequest) -> HttpResponse:
+        """End the session, and answer the caller in a form it can follow to the login page."""
         unavailable_response = end_session_or_unavailable(request)
         if unavailable_response is not None:
             return unavailable_response
+        return self._signed_out(request)
+
+    def _signed_out(self, request: HttpRequest) -> HttpResponse:
+        """Send a caller without a session to the login page in a form it can follow."""
+        if request.headers.get("HX-Request"):
+            # A 302 would be followed by HTMX and the login page swapped into the target; HX-Redirect navigates.
+            response = HttpResponse(status=200)
+            response["HX-Redirect"] = "/login/"
+            return response
         if wants_json(request):
             return JsonResponse({"error": "Session ended", "redirect": "/login/"}, status=401)
         return self.redirect_to_login(request)
@@ -161,26 +236,25 @@ class PortalAuthenticationMiddleware:
         session_user_id = request.session.get("user_id") or request.session.get("customer_id")
         if not session_user_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
-            return self.redirect_to_login(request)
+            return self._signed_out(request)
 
         # A session from before Platform owned sessions names none: it ends once, at its next request.
         if getattr(settings, "PORTAL_SESSION_ID_REQUIRED", True) and not request.session.get("portal_session_id"):
             logger.info("🔒 [Auth] Session of user %s has no Platform session, ending it", session_user_id)
             return self._end_session(request)
 
-        # Check if session has exceeded its intended lifetime
-        if not self._is_session_age_valid(request):
-            logger.warning(f"⏰ [Auth] Session for user {session_user_id} has exceeded lifetime, forcing logout")
-            unavailable_response = end_session_or_unavailable(request)
-            return unavailable_response if unavailable_response is not None else self.redirect_to_login(request)
+        # ADR-0017 section 5: the session lives as long as Platform says, and the portal keeps no clock.
+        deadlines = session_deadlines.stored(request.session)
+        if deadlines is None and getattr(settings, "PORTAL_SESSION_DEADLINES_REQUIRED", True):
+            # A session from before this release: it ends once, at its next request.
+            logger.info("🔒 [Auth] Session of user %s has no deadlines from Platform, ending it", session_user_id)
+            return self._end_session(request)
 
-        # Tier 2: Sophisticated validation with timing controls
-        validation_result = self.validate_customer_with_timing(request, str(session_user_id))
+        validation_result = self._validate_within_deadlines(request, str(session_user_id), deadlines)
 
         if not validation_result:
             logger.warning(f"⚠️ [Auth] User {session_user_id} validation failed, clearing session")
-            unavailable_response = end_session_or_unavailable(request)
-            return unavailable_response if unavailable_response is not None else self.redirect_to_login(request)
+            return self._end_session(request)
 
         # Attach customer data to request for views
         # Priority: selected_customer_id (company switcher) > active_customer_id > customer_id (fallback)
@@ -258,6 +332,20 @@ class PortalAuthenticationMiddleware:
             login_url = f"{login_url}?{params}"
         return redirect(login_url)
 
+    def _validate_within_deadlines(
+        self, request: HttpRequest, user_id: str, deadlines: session_deadlines.SessionDeadlines | None
+    ) -> bool:
+        """Whether the session may go on, by Platform's deadlines first and the validation timing after."""
+        now = django_timezone.now()
+        if deadlines is not None and now >= deadlines.expires_at:
+            logger.info("🕒 [Auth] Session of user %s reached the end Platform gave it", user_id)
+            return False  # Platform's end never moves: nothing to ask
+        if deadlines is not None and now >= deadlines.idle_deadline:
+            # A lower bound: activity moves Platform's idle deadline without a validation, so ask.
+            return self._perform_validation(request, user_id, now, fail_open=False)
+        # Tier 2: Sophisticated validation with timing controls
+        return self.validate_customer_with_timing(request, user_id)
+
     def validate_customer_with_timing(self, request: HttpRequest, user_id: str) -> bool:
         """
         Sophisticated validation with jitter, single-flight locks, and stale-while-revalidate.
@@ -301,9 +389,9 @@ class PortalAuthenticationMiddleware:
             logger.info(f"⏰ [Auth] User {user_id} past soft TTL, forcing validation")
             return self._perform_validation(request, user_id, now)
 
-        # Past hard deadline - force logout for security
-        logger.warning(f"🚨 [Auth] User {user_id} past hard TTL deadline, forcing logout")
-        return False
+        # Past the hard grace Platform is asked, without failing open: only it can say the session lives.
+        logger.info("⏰ [Auth] User %s past the hard validation grace, asking Platform", user_id)
+        return self._perform_validation(request, user_id, now, fail_open=False)
 
     def _get_session_datetime(self, request: HttpRequest, key: str, default: datetime | None = None) -> datetime | None:
         """Get datetime from session, handling ISO format conversion."""
@@ -362,12 +450,15 @@ class PortalAuthenticationMiddleware:
                 return None
         return lock_key, token
 
-    def _perform_validation(  # noqa: C901, PLR0911, PLR0912 -- session refresh and explicit error policies
-        self, request: HttpRequest, user_id: str, now: datetime
+    def _perform_validation(  # noqa: C901, PLR0911, PLR0912, PLR0915 -- session refresh and explicit error policies
+        self, request: HttpRequest, user_id: str, now: datetime, *, fail_open: bool = True
     ) -> bool:
-        """
+        """Ask Platform whether the session lives, and keep its answer's deadlines.
 
-        Perform actual Platform API validation and update session metadata.
+        Always as background, never the customer's activity: a question at the idle boundary that
+        extended Platform's idle deadline would revive every session that comes back after it.
+        ``fail_open=False`` ends the session on any error instead of the bounded fail-open of
+        ADR-0017 section 3: at the idle boundary and past the hard grace only Platform can say.
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
@@ -383,6 +474,9 @@ class PortalAuthenticationMiddleware:
 
                 if "localisation_preferences" in validation_response:
                     store_localisation_preferences(request, validation_response["localisation_preferences"])
+                # Platform's deadlines, never extended here: an answer without usable ones keeps the stored.
+                if (deadlines := session_deadlines.from_platform(validation_response, now)) is not None:
+                    session_deadlines.store(request.session, deadlines)
                 # Update session with successful validation
                 request.session["validated_at"] = now.isoformat()
                 request.session["next_validate_at"] = self._calculate_next_validation_time(now).isoformat()
@@ -428,6 +522,9 @@ class PortalAuthenticationMiddleware:
             ):
                 logger.warning("🚨 [Auth] Session rejected by Platform for user %s", user_id)
                 return False
+            if not fail_open:
+                logger.warning("🔒 [Auth] Platform could not confirm the session of user %s: %s", user_id, e)
+                return False
             if e.is_rate_limited:
                 logger.warning("⚠️ [Auth] Platform rate limited validation for user %s: %s", user_id, e)
             elif e.status_code in (401, 403):
@@ -464,57 +561,3 @@ class PortalAuthenticationMiddleware:
             logger.error(f"🔥 [Auth] Unexpected validation error for {user_id}: {e}")
             # Fail CLOSED for unexpected errors — ADR-0017: programming bugs must not grant access
             return False
-
-    def _is_session_age_valid(self, request: HttpRequest) -> bool:
-        """
-        Validate that the session hasn't exceeded its intended lifetime based on 'remember_me' setting.
-
-        Returns:
-            bool: True if session is within its intended lifetime, False if expired
-        """
-        authenticated_at_str = request.session.get("authenticated_at")
-        remember_me = request.session.get("remember_me", False)
-
-        if not authenticated_at_str:
-            # Backward compatibility: older sessions/tests may not have this field.
-            # Initialize from known validation timestamps when possible, otherwise "now".
-            fallback_timestamp = (
-                request.session.get("validated_at")
-                or request.session.get("session_created_at")
-                or django_timezone.now().isoformat()
-            )
-            request.session["authenticated_at"] = fallback_timestamp
-            request.session.modified = True
-            authenticated_at_str = fallback_timestamp
-            logger.warning("⚠️ [Auth] Missing authenticated_at; initialized fallback timestamp")
-
-        try:
-            authenticated_at = datetime.fromisoformat(authenticated_at_str.replace("Z", "+00:00"))
-        except (ValueError, AttributeError) as e:
-            logger.error(f"🔥 [Auth] Invalid authenticated_at format in session: {e}")
-            return False
-
-        # Calculate intended session lifetime
-        if remember_me:
-            max_age_seconds = getattr(settings, "SESSION_COOKIE_AGE_REMEMBER_ME", 30 * 24 * 60 * 60)  # 30 days
-            session_type = "extended (30 days)"
-        else:
-            max_age_seconds = getattr(settings, "SESSION_COOKIE_AGE_DEFAULT", 24 * 60 * 60)  # 24 hours
-            session_type = "standard (24 hours)"
-
-        # Check if session has exceeded its intended lifetime
-        now = django_timezone.now()
-        session_age = (now - authenticated_at).total_seconds()
-
-        if session_age > max_age_seconds:
-            customer_id = request.session.get("customer_id", "unknown")
-            logger.warning(
-                f"⏰ [Auth] {session_type} session for customer {customer_id} has exceeded lifetime "
-                f"({session_age:.0f}s > {max_age_seconds:.0f}s)"
-            )
-            return False
-
-        logger.debug(
-            f"✅ [Auth] {session_type} session is within valid lifetime ({session_age:.0f}s / {max_age_seconds:.0f}s)"
-        )
-        return True

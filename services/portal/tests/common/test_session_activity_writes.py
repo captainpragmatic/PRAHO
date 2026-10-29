@@ -2,8 +2,9 @@
 
 Every authenticated request used to stamp `last_activity`, so every one rewrote the whole
 session row. Two concurrent requests of one customer then raced, and the later save could undo
-the earlier one's changes (a cart edit, a company switch). The stamp is now refreshed at most
-once a minute, and a session without one gets one at once (idle timeout depends on it).
+the earlier one's changes (a cart edit, a company switch). The stamp was then limited to once a
+minute; now the portal keeps no idle clock at all (ADR-0017 section 5: idle is Platform's), so a
+request that changes nothing never writes the session, however old an earlier stamp is.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from django.utils import timezone
 from requests import Response
 
 from apps.api_client.services import PlatformAPIClient
-from apps.common.middleware import SessionSecurityMiddleware
 
 MARKER = "Authenticated view reached"
 
@@ -93,11 +93,14 @@ class SessionActivityWriteTests(TestCase):
                 "authenticated_at": now.isoformat(),
                 "validated_at": now.isoformat(),
                 "next_validate_at": (now + timedelta(hours=1)).isoformat(),
-                "security_fingerprint": {
-                    "ip_hash": hashlib.sha256(b"127.0.0.1").hexdigest()[:16],
+                "security_fingerprint": {  # as login stamps it, for the test client's empty user agent
+                    "browser": "other/other",
                     "user_agent_hash": hashlib.sha256(b"").hexdigest()[:16],
                     "created_at": time.time(),
                 },
+                "session_tier": "standard",
+                "session_expires_at": (now + timedelta(hours=20)).isoformat(),
+                "session_idle_deadline": (now + timedelta(minutes=50)).isoformat(),
             }
         )
         if last_activity is not None:
@@ -115,25 +118,26 @@ class SessionActivityWriteTests(TestCase):
         self.assertContains(response, MARKER)
         self.assertEqual(updates, [])
 
-    def test_a_stamp_older_than_a_minute_is_refreshed(self) -> None:
-        client = self._client(last_activity=time.time() - 61)
-        before = time.time()
+    def test_a_stamp_older_than_a_minute_is_not_rewritten(self) -> None:
+        stamp = time.time() - 61
+        client = self._client(last_activity=stamp)
         response, updates = self._get(client)
         self.assertContains(response, MARKER)
-        self.assertEqual(len(updates), 1)
-        self.assertGreaterEqual(client.session["last_activity"], before)
+        self.assertEqual(updates, [])
+        self.assertEqual(client.session["last_activity"], stamp)
 
-    def test_a_session_without_a_stamp_gets_one_at_once(self) -> None:
-        # Idle timeout reads a missing stamp as "now", so it must never stay missing.
+    def test_a_session_without_a_stamp_is_not_given_one(self) -> None:
         client = self._client(last_activity=None)
         response, updates = self._get(client)
         self.assertContains(response, MARKER)
-        self.assertEqual(len(updates), 1)
-        self.assertIn("last_activity", client.session)
+        self.assertEqual(updates, [])
+        self.assertNotIn("last_activity", client.session)
 
-    def test_an_idle_session_still_times_out(self) -> None:
-        client = self._client(last_activity=time.time() - SessionSecurityMiddleware.SESSION_TIMEOUT_SECONDS - 1)
+    def test_a_quiet_session_ends_only_when_platform_says_so(self) -> None:
+        # Two quiet hours used to end it here; Platform's idle deadline is still ahead.
+        client = self._client(last_activity=time.time() - 2 * 3600)
         key = client.session.session_key
-        response, _updates = self._get(client)
-        self.assertRedirects(response, "/login/?timeout=session_expired", fetch_redirect_response=False)
-        self.assertFalse(Session.objects.filter(session_key=key).exists())
+        response, updates = self._get(client)
+        self.assertContains(response, MARKER)
+        self.assertEqual(updates, [])
+        self.assertTrue(Session.objects.filter(session_key=key).exists())

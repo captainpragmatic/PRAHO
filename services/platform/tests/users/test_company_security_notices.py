@@ -26,6 +26,7 @@ from apps.notifications.services import EmailService
 from apps.notifications.tasks import send_email_task
 from apps.users.models import CustomerMembership, User, UserProfile
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
 
 PASSWORD = "Original-secure123!"  # test fixture, not a credential
 
@@ -40,7 +41,7 @@ def deliver(event: str) -> None:
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class CompanySecurityNoticeTests(HMACTestMixin, TestCase):
+class CompanySecurityNoticeTests(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
             name="Notice Co", customer_type="company", status="active", primary_email="office@old.example"
@@ -214,7 +215,7 @@ class StaffTeamNoticeTests(TestCase):
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class ExportNoticeCommitTests(HMACTestMixin, TransactionTestCase):
+class ExportNoticeCommitTests(BoundSessionMixin, HMACTestMixin, TransactionTestCase):
     """Autocommit, as in production: the export job is queued as soon as the export commits."""
 
     def test_an_export_whose_job_cannot_be_queued_is_still_told_once(self) -> None:
@@ -226,7 +227,7 @@ class ExportNoticeCommitTests(HMACTestMixin, TransactionTestCase):
 
 
 @skipUnless(connection.vendor == "postgresql", "an aborted transaction is PostgreSQL's")
-class NoticeWriteIsolationTests(HMACTestMixin, TestCase):
+class NoticeWriteIsolationTests(BoundSessionMixin, HMACTestMixin, TestCase):
     """A notice whose write fails in the database leaves the change's own transaction usable."""
 
     def test_the_tax_update_locks_the_customer_before_its_profile(self) -> None:

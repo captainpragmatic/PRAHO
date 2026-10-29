@@ -28,6 +28,7 @@ from apps.common.legal_documents import (
     legal_document_release,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.users.session_deadlines import LONGEST_SESSION
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +127,9 @@ def _days(seconds: int) -> str:
 
 def _praho_cookies() -> list[tuple[str, str, str]]:
     """What the portal itself stores in the browser: the name, its purpose, and how long it is kept."""
-    session = _("%(default)s, or %(remember)s if you choose to stay signed in") % {
-        "default": _days(settings.SESSION_COOKIE_AGE_DEFAULT),
-        "remember": _days(settings.SESSION_COOKIE_AGE_REMEMBER_ME),
+    # Platform owns the session's lifetimes (ADR-0017 section 5); a remembered one lasts at most its longest tier.
+    session = _("Until you close your browser, or up to %(remember)s if you choose to stay signed in") % {
+        "remember": _days(int(LONGEST_SESSION.total_seconds())),
     }
     year = _days(365 * 24 * 60 * 60)  # The consent banner's cookie and the language cookie
     return [
