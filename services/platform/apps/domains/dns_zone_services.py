@@ -466,6 +466,19 @@ def _crosscheck_current(revision: HostedZoneImportRevision) -> bool:
     )
 
 
+def crosscheck_applicable(zone: HostedZone) -> bool:
+    """The source-inventory check belongs to the import alone.
+
+    Once a zone has applied or activated, the DNS it is checked against serves the managed records rather
+    than the uploaded file, so a legitimate mismatch would park the check and fail a working zone.
+    """
+    return (
+        zone.status in {"pending_import", "failed"}
+        and zone.applied_revision is None
+        and not zone.activation.get("activated_at")
+    )
+
+
 def request_crosscheck(
     zone: HostedZone, expected_revision: int, *, actor: User | None = None
 ) -> Result[HostedZoneOperation, str]:
@@ -474,6 +487,8 @@ def request_crosscheck(
         if locked is None:
             return Err("zone_access_denied")
         zone, _account, _hostname = locked
+        if not crosscheck_applicable(zone):
+            return Err("zone_crosscheck_not_applicable")
         revision = zone.revisions.filter(number=expected_revision, valid=True).first()
         if revision is None or zone.current_revision != expected_revision:
             return Err("stale_import_revision")
@@ -643,6 +658,7 @@ def cached_zone_status(
         "nameservers": zone.assigned_nameservers if ready else [],
         "stale": not current,
         "pending": zone.operations.filter(status__in=LIVE_OPERATIONS).exists(),
+        "crosscheck_available": crosscheck_applicable(zone),
         "error": zone.last_error,
         "errors": revision.errors if revision else [],
         "page": page,

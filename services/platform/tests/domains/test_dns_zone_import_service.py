@@ -8,15 +8,17 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.currency_models import Currency
+from apps.common.types import Err
 from apps.customers.models import Customer
 from apps.domains import dns_zone_services as zones
-from apps.domains.dns_zone_models import HostedZoneImportRevision, HostedZoneOperation
+from apps.domains.dns_zone_models import HostedZone, HostedZoneImportRevision, HostedZoneOperation
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
 from tests.domains.test_dns_zone_import import HEADER
+from tests.helpers.fsm_helpers import force_status
 
 UPLOAD = (
     HEADER
@@ -216,6 +218,30 @@ class ZoneImportServiceTests(TestCase):
         result = zones.request_crosscheck(revision.zone, revision.number, actor=self.actor)
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(HostedZoneOperation.objects.get().kind, "crosscheck")
+
+    def test_a_zone_past_its_import_refuses_the_source_crosscheck_and_keeps_its_state(self):
+        """Live DNS of an applied zone serves the managed records, not the upload: a mismatch would fail it."""
+        revision = self.stage()
+        zone = revision.zone
+        for status, activated in (("active", True), ("awaiting_ns", False), ("failed", False)):
+            with self.subTest(status=status):
+                HostedZone.objects.filter(pk=zone.pk).update(
+                    applied_revision=revision.number,
+                    activation={"activated_at": timezone.now().isoformat()} if activated else {},
+                )
+                zone.refresh_from_db()
+                force_status(zone, status)
+                result = zones.request_crosscheck(zone, revision.number, actor=self.actor)
+                self.assertEqual(result, Err("zone_crosscheck_not_applicable"))
+                zone.refresh_from_db()
+                self.assertEqual(zone.status, status)
+                self.assertFalse(zone.operations.exists())
+                self.assertFalse(zones.cached_zone_status(zone)["crosscheck_available"])
+
+    def test_an_importing_zone_still_offers_and_accepts_the_source_crosscheck(self):
+        revision = self.stage()
+        self.assertTrue(zones.cached_zone_status(revision.zone)["crosscheck_available"])
+        self.assertTrue(zones.request_crosscheck(revision.zone, revision.number, actor=self.actor).is_ok())
 
     def test_status_is_paginated_and_never_copies_private_wire_inventory_into_the_public_payload(self):
         revision = self.stage((HEADER + "".join(f'token{index} TXT "value{index}"\n' for index in range(150))).encode())

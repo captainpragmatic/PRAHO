@@ -125,6 +125,8 @@ def _zone(value: object) -> dict[str, Any]:
     result.update(_pagination(value))
     for key in ("valid", "stale", "pending", "can_switch_registrar"):
         result[key] = _boolean(value.get(key))
+    # The source check belongs to the import; a Platform that predates the flag offered it while importing.
+    result["crosscheck_available"] = _boolean(value.get("crosscheck_available", result["status"] == "pending_import"))
     size = _integer(value.get("page_size"), minimum=1)
     if size > MAX_PAGE_SIZE:
         raise _invalid()

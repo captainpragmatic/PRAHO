@@ -8,11 +8,11 @@
     <p class="text-slate-700 dark:text-slate-200">{{ zone.customer.name }} · {{ zone.status }} · {% trans "Revision" %} {{ zone.current_revision }}</p>
     {% if dns.stale %}<p class="text-amber-800 dark:text-amber-300">{% trans "The hosting binding changed. Earlier nameserver instructions are withheld." %}</p>{% endif %}
     {% if zone.last_error %}<p class="text-red-700 dark:text-red-300">{{ zone.last_error }}</p>{% endif %}
-    <form method="post" action="{% url 'domains:zone_crosscheck' zone.pk %}">
+    {% if dns.crosscheck_available %}<form method="post" action="{% url 'domains:zone_crosscheck' zone.pk %}">
       {% csrf_token %}
       <input type="hidden" name="expected_revision" value="{{ zone.current_revision }}">
       {% trans "Request background inventory check" as check_label %}{% button check_label type="submit" variant="secondary" %}
-    </form>
+    </form>{% endif %}
     {% if retry_available %}<form method="post" action="{% url 'domains:zone_retry' zone.pk %}">
       {% csrf_token %}
       {% trans "Retry paused DNS work" as retry_label %}{% button retry_label type="submit" variant="secondary" %}
