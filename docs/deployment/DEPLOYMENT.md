@@ -555,7 +555,11 @@ pull request → `master` → release candidate → staging → (later) producti
    anyone who can push could post). It deploys from a clean detached checkout of that
    commit, so the playbooks and templates are the reviewed ones (environment/DNS and
    HTTP/HTTPS checks included), refuses any `DEPLOY_METHOD` but git, and only after a
-   successful deploy fast-forwards `staging`. Promote from one machine at a time.
+   successful deploy fast-forwards `staging`. Promote from one machine at a time; a
+   lock in the clone's git directory stops two promotions from the same clone. Run it
+   from a checkout at `master`'s copy of the script, with the ignored `.env.staging`
+   and the other ignored `.env.staging.*` deployment inputs in that checkout's root;
+   a git worktree may link them, and the virtual environment, from the main checkout.
    `scripts/promote_staging.sh --rollback <sha>` deploys an older approved release
    and moves the branch back.
 4. **Accept it on staging,** then record the deployed SHA.

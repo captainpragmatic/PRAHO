@@ -40,13 +40,30 @@ the right to submit it under the project’s license.
   git commit -s -m "feat: add new API"
 
 Before the first push, verify every commit in the PR range has a sign-off matching
-its author. Keep the sign-off when amending or rebasing. Squash merges must also
-include a `Signed-off-by:` trailer; merge only after DCO and all required checks
-pass on the final PR head.
+its author. Keep the sign-off when amending or rebasing. A pull request lands as a
+squash whose message is its title and description, so the description ends with
+your sign-off line too.
+
+Opening a pull request
+----------------------
+- Branch from `master` and open the pull request against `master`, also when it
+  builds on another open pull request.
+- Title: a Conventional Commits subject (`fix(billing): ...`). It becomes the subject
+  of the squash commit on `master`.
+- Description: written as that commit's body. Say what changed and why, add
+  `Closes #N` for each issue it closes (a `#N` in the title closes nothing), and end
+  with `Signed-off-by: Your Name <you@example.com>`. The DCO check refuses a
+  description without it.
+- Keep a pull request under about 400 changed lines of code; split larger work into
+  pull requests that each stand on their own.
+- Add a `CHANGELOG.md` entry for a change users or operators will notice.
+
+Merging is in `docs/development/MERGING.md`.
 
 Pull Request Checklist
 ----------------------
 - [ ] My commits are signed off with DCO (`Signed-off-by:`)
+- [ ] The description ends with my `Signed-off-by:` line
 - [ ] I agree my contribution is GPL-3.0-or-later
 - [ ] I grant maintainers the right to relicense my contribution under
       AGPL-3.0-or-later or another OSI-approved license used by PRAHO
@@ -63,8 +80,9 @@ the repository's `README.md`.
     make test       # platform, portal and cross-service suites
 
 Pull request CI is the full gate, and `master` requires every check to pass: platform, portal,
-integration, browser and strict-CSP, the Virtualmin lab when the change can reach it, and DCO (see
-`docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md`). Locally, run what takes seconds on what you
+integration, browser and strict-CSP, and DCO. The merge queue runs them again on the merge commit,
+with the Virtualmin lab when the change can reach it (see
+`docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md` and `docs/development/MERGING.md`). Locally, run what takes seconds on what you
 touched: the pre-commit hooks, `make lint FILE=<path>`, `make test-file FILE=<label>` for platform
 tests (or `pytest <path>` for portal), and `make check-types FILE=<path>`. There is no need to run
 the full gate before pushing; push at logical checkpoints and let CI run it.
