@@ -6,13 +6,22 @@ was reviewed. See ADR-0036 for why each rule exists.
 
 | File | Target | What it enforces |
 |---|---|---|
-| `master.json` | `master` | Changes arrive by pull request, squash merge only; every required check passes on an up-to-date branch; no force push or deletion. The organization admin may bypass on a pull request, never by a direct push |
+| `master.json` | `master` | Changes arrive by pull request through the merge queue, squash merge only; every required check passes on the pull request and again on the queue's commit; no force push or deletion. The organization admin may bypass on a pull request, never by a direct push |
 | `staging.json` | `staging` | Only the organization admin moves it (`make promote-staging` pushes as the owner); no deletion; a non-fast-forward only by that bypass (`--rollback`) |
 | `release-tags.json` | `v*` tags | Only the organization admin creates, moves or deletes a release tag |
 
 `tests/integration/test_ci_required_checks.py` checks `master.json` against the workflows: every
-required check must be a job that every pull request to `master` starts, and only the GitHub Actions
-app (integration id 15368) may satisfy it.
+required check must be a job that every pull request to `master` and every merge group starts, the
+queue must outwait the slowest required job, and only the GitHub Actions app (integration id 15368) may
+satisfy a check.
+
+The queue takes a squash's message from the repository's merge settings, which the rulesets do not
+hold. Set them with the rulesets: the pull request's title and description. A description therefore
+ends with a `Signed-off-by:` line; the DCO check refuses one without it, and checks the queue's squash.
+
+```bash
+gh api --method PATCH "repos/$repo" -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY
+```
 
 ## Applying
 
@@ -30,7 +39,12 @@ id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$(jq -r .name .
 gh api --method PUT "repos/$repo/rulesets/$id" --input .github/rulesets/master.json
 ```
 
+Apply `master.json` only after the workflows that run on `merge_group` are on `master`: a queue whose
+checks never start waits until it times out.
+
 After applying, prove the rules with a throwaway pull request: a failing check blocks the merge, a
-direct push to `master` is rejected, and a docs-only change still reports every required check.
+direct push to `master` is rejected, a docs-only change still reports every required check, and a pull
+request behind `master` enters the queue, skips the lab on the pull request and runs it in the queue.
+Check that `master` then sits on the commit the queue tested: the release candidate relies on it.
 
 Applied on 2026-10-28 (ids 26026153, 26026156, 26026158).

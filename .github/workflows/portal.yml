@@ -20,6 +20,9 @@ on:
       - '.github/workflows/portal.yml'
   pull_request:
     branches: [master]
+  # The merge queue tests each pull request on top of master and whatever is queued ahead of it.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 env:

@@ -1,13 +1,12 @@
-"""The release candidate vouches only for the tree its pull request's required checks passed on.
+"""The release candidate vouches only for a commit the merge queue tested with every required check.
 
 scripts/verify_release_candidate.py decides from GitHub's run and job data; these tests drive its
-decisions with fixtures shaped like that data, and its tree comparison with a real repository.
+decisions with fixtures shaped like that data, and its lookups with a stand-in for the GitHub API.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,7 @@ from scripts.verify_release_candidate import (
     check_conclusions,
     failed_checks,
     required_contexts,
-    same_tree,
+    verify,
 )
 
 pytestmark = pytest.mark.integration
@@ -95,23 +94,48 @@ def test_the_committed_ruleset_is_read() -> None:
     assert "coverage-gate" in required_contexts(ruleset)
 
 
-def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
+SHA = "a" * 40
+REQUIRED = required_contexts(
+    json.loads((Path(__file__).resolve().parents[2] / ".github/rulesets/master.json").read_text())
+)
 
 
-def test_the_tree_comparison_tells_equal_from_different(tmp_path: Path) -> None:
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "config", "user.email", "ci@example.com")
-    _git(tmp_path, "config", "user.name", "CI")
-    (tmp_path / "a.txt").write_text("one\n")
-    _git(tmp_path, "add", "a.txt")
-    _git(tmp_path, "commit", "--quiet", "-m", "one")
-    first = _git(tmp_path, "rev-parse", "HEAD")
-    _git(tmp_path, "commit", "--quiet", "--allow-empty", "-m", "same tree, new commit")
-    same = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "a.txt").write_text("two\n")
-    _git(tmp_path, "commit", "--quiet", "-am", "two")
-    different = _git(tmp_path, "rev-parse", "HEAD")
+class FakeGitHub:
+    """Answers the two lookups verify() makes, and records them."""
 
-    assert same_tree(tmp_path, first, same)
-    assert not same_tree(tmp_path, first, different)
+    def __init__(self, runs: list[dict[str, Any]]) -> None:
+        self.runs = runs
+        self.paths: list[str] = []
+
+    def __call__(self, path: str) -> Any:
+        self.paths.append(path)
+        if "/jobs?" in path:
+            run_id = int(path.split("/runs/")[1].split("/")[0])
+            return {"jobs": next(run["jobs"] for run in self.runs if run["id"] == run_id)}
+        return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in self.runs]}
+
+
+def all_green() -> list[dict[str, Any]]:
+    jobs = [{"name": context, "conclusion": "success"} for context in REQUIRED]
+    return [{"id": 7, "path": PLATFORM, "conclusion": "success", "jobs": jobs}]
+
+
+def test_a_commit_the_queue_tested_green_is_vouched_for() -> None:
+    github = FakeGitHub(all_green())
+
+    assert SHA in verify(SHA, "owner/repo", github)
+    # The candidate's own merge_group runs decide, not its pull request's.
+    assert github.paths[0] == f"repos/owner/repo/actions/runs?head_sha={SHA}&event=merge_group&per_page=100"
+
+
+def test_a_commit_merged_around_the_queue_is_refused() -> None:
+    with pytest.raises(VerificationError, match="never tested"):
+        verify(SHA, "owner/repo", FakeGitHub([]))
+
+
+def test_a_red_check_in_the_queue_is_refused() -> None:
+    runs = all_green()
+    runs[0]["jobs"][0]["conclusion"] = "failure"
+
+    with pytest.raises(VerificationError, match=f"{runs[0]['jobs'][0]['name']}: failure"):
+        verify(SHA, "owner/repo", FakeGitHub(runs))

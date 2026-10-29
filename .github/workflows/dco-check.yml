@@ -2,7 +2,11 @@ name: DCO Check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # edited: the description becomes the squash commit message, so a changed one is checked again.
+    types: [opened, synchronize, reopened, edited]
+  # The merge queue tests each pull request on top of master and whatever is queued ahead of it.
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   dco:
@@ -15,27 +19,44 @@ jobs:
 
       - name: Fetch base branch
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1 || true
+          git fetch origin ${{ github.base_ref || 'master' }} || true
 
       - name: Verify DCO sign-off on all commits
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          # Passed through the environment, never pasted into the script: the description is free text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          # Ensure both SHAs are available locally
-          git fetch origin ${BASE_SHA} --depth=1 || true
-          git fetch origin ${HEAD_SHA} --depth=1 || true
-          echo "Checking commits from ${BASE_SHA}..${HEAD_SHA}"
+          # A trailer line with a name and an address; a mention of the word in prose is not a sign-off.
+          # [[:space:]]* also takes the carriage return GitHub keeps in a description's line ends.
+          SIGNOFF='^Signed-off-by: [^<]*[^<[:space:]][^<]* <[^<>@[:space:]]+@[^<>[:space:]]+>[[:space:]]*$'
           MISSING=0
-          for c in $(git rev-list --no-merges ${BASE_SHA}..${HEAD_SHA}); do
-            if ! git show -s --format=%B $c | grep -qi "Signed-off-by:"; then
+          if [ "$EVENT" = "pull_request" ]; then
+            # The queue squashes with the pull request's title and description as the commit message,
+            # and a squash must carry a sign-off (CONTRIBUTING.md): say so now, not an hour into the queue.
+            if ! printf '%s\n' "${PR_BODY:-}" | grep -qiE "$SIGNOFF"; then
+              echo "❌ The description has no Signed-off-by line; the queue's squash commit message is the description"
+              MISSING=1
+            fi
+          fi
+          # In a merge group, the range holds the queue's own squash commits: their real messages are checked.
+          # Ensure both SHAs are available locally. Never with --depth: a shallow fetch cuts a
+          # commit's parents, so a merge looks like an ordinary commit and the range is the head alone.
+          git fetch origin "${BASE_SHA}" || true
+          git fetch origin "${HEAD_SHA}" || true
+          echo "Checking commits from ${BASE_SHA}..${HEAD_SHA}"
+          for c in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
+            if ! git show -s --format=%B "$c" | grep -qiE "$SIGNOFF"; then
               echo "❌ Commit $c is missing a Signed-off-by line"
               MISSING=1
             fi
           done
           if [ "$MISSING" -ne 0 ]; then
-            echo "\nPlease sign off your commits: git commit --amend -s; git push -f"
+            printf '\nSign off your commits (git commit --amend -s) and end the description with a Signed-off-by line.\n'
             exit 1
           fi
           echo "✅ All commits have DCO sign-off"
