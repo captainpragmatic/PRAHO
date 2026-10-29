@@ -36,6 +36,12 @@ class _TupleScrubber(EventScrubber):
     and any depth, never stop it before the fields after them are scrubbed.
     """
 
+    def scrub_event(self, event: Any) -> None:
+        # Sentry's own pass skips contexts, tags, the log message's parameters and exception data;
+        # the walk covers the whole event, before serialisation writes any "_meta" annotation.
+        super().scrub_event(event)
+        self._walk(event)
+
     def scrub_dict(self, d: object) -> None:
         self._walk(d)
 

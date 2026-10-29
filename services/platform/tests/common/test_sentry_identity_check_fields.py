@@ -82,6 +82,22 @@ class IdentityCheckFieldsTests(SimpleTestCase):
         self.assertNotIn(CODE.encode(), sent)
         self.assertNotIn(SESSION.encode(), sent)
 
+    def test_sections_sentry_s_own_scrub_skips_are_scrubbed_too(self) -> None:
+        sections = {
+            "contexts": {"identity": {"mfa_code": CODE}},
+            "tags": {"session_id": SESSION},
+            "logentry": {"message": "check %s", "params": ({"cnp": "1800101221144"},)},
+            "exception": {"values": [{"type": "E", "value": "x", "mechanism": {"data": {"mfa_code": CODE}}}]},
+        }
+        for section, content in sections.items():
+            with self.subTest(section=section):
+                sent = _send({"message": "boom", "tags": {"kept": "yes"}, section: content})
+                self.assertIn(b"boom", sent)
+                self.assertNotIn(CODE.encode(), sent)
+                self.assertNotIn(SESSION.encode(), sent)
+                self.assertNotIn(b"1800101221144", sent)
+        self.assertIn(b'"kept":"yes"', _send({"message": "boom", "tags": {"kept": "yes"}}))  # ordinary tags stay
+
     def test_the_scrub_keeps_sentry_s_own_annotations_intact(self) -> None:
         sent = _send({"message": "boom", "request": {"data": {"password": "hunter2", "note": "kept"}}})
         self.assertNotIn(b"hunter2", sent)
