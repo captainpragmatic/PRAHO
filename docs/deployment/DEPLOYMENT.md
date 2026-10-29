@@ -564,6 +564,11 @@ pull request → `master` → release candidate → staging → (later) producti
    and moves the branch back.
 4. **Accept it on staging,** then record the deployed SHA.
 
+A promotion neither stops and drains the writers nor takes a coordinated backup. For a
+release that needs one (a queued-email envelope change, a risky migration), drain the
+writers and back up first; see
+[Queued email across the durable-envelope upgrade](#queued-email-across-the-durable-envelope-upgrade).
+
 A release candidate is not a GitHub Release; a `v*` tag publishes one. For production
 the order will be: release candidate → staging accepted → tag that same commit →
 deploy the tag.
