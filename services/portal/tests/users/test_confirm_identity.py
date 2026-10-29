@@ -85,6 +85,16 @@ class ConfirmIdentityTests(TestCase):
         self.assertNotContains(self.get(two_factor=False), 'name="token"')
         self.assertContains(self.get(two_factor=False), 'name="password"')
 
+    def test_when_two_factor_is_unknown_the_code_is_optional(self) -> None:
+        with patch(PLATFORM) as platform:
+            platform.get_mfa_status.side_effect = PlatformAPIError("down", status_code=503, is_unavailable=True)
+            page = self.client.get(PATH)
+            self.assertContains(page, 'name="token"')
+            platform.confirm_identity.return_value = {"success": True}
+            response = self.client.post(f"{PATH}?next=/billing/", {"password": "secret-1"})
+        self.assertRedirects(response, "/billing/", fetch_redirect_response=False)
+        self.assertEqual(platform.confirm_identity.call_args.args, (42, "secret-1", ""))
+
     def test_it_warns_when_backup_codes_run_low(self) -> None:
         self.assertContains(self.get(two_factor=True), "You have 2 backup codes left.")
 

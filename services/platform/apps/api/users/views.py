@@ -866,6 +866,20 @@ _DEFAULT_PORTAL_THROTTLES = (PortalHMACRateThrottle, PortalHMACBurstThrottle, Cu
 
 
 _REAUTH_FAILED = {"success": False, "code": "reauth_failed"}
+_REAUTH_THROTTLED = {"success": False, "code": "rate_limited"}
+
+
+def _check_identity(locked: User, password: str, code: str, request: HttpRequest) -> str:
+    """The password, then the code when 2FA is on, checked as login checks them: passed, failed or throttled."""
+    if not check_password_locked(locked, password, source="step_up"):
+        return "failed"
+    if not locked.two_factor_enabled:
+        return "passed"
+    second = verify_login_second_factor(locked, code, request, source="step_up")
+    if second.rate_limited:
+        # The code was never checked, so this is no wrong answer; like login, it still counts.
+        return "throttled"
+    return "passed" if second.accepted else "failed"
 
 
 class _SessionGone(Exception):  # noqa: N818  # a control-flow signal, not an error condition
@@ -902,10 +916,10 @@ def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # 
                 return Response(_ACCOUNT_LOCKED, status=400)
             if locked.two_factor_enabled and not code:
                 return Response(_REAUTH_FAILED, status=400)
-            if not check_password_locked(locked, password, source="step_up") or (
-                locked.two_factor_enabled
-                and not verify_login_second_factor(locked, code, request, source="step_up").accepted
-            ):
+            outcome = _check_identity(locked, password, code, request)
+            if outcome == "throttled":
+                return Response(_REAUTH_THROTTLED, status=429)
+            if outcome == "failed":
                 # Returned, not raised, so the failure count and this audit commit.
                 portal_sessions.record_step_up(session, confirmed=False)
                 return Response(_REAUTH_FAILED, status=400)

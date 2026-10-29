@@ -34,3 +34,16 @@ class IdentityCheckFieldsTests(SimpleTestCase):
         self.assertNotIn(CODE, report)
         self.assertNotIn(SESSION, report)
         self.assertEqual(event["request"]["data"]["user_id"], 42)  # an ordinary field is kept
+
+    def test_fields_inside_tuples_are_scrubbed_before_sending(self) -> None:
+        # Sentry's own scrubber walks dicts and lists, not tuples; the before_send callbacks cover them.
+        options = sentry_options("https://key@sentry.example.test/1", release="1.0")
+        for name in ("before_send", "before_send_transaction"):
+            with self.subTest(callback=name):
+                event = {"extra": {"payload": ({"mfa_code": CODE, "session_id": SESSION, "cnp": "1800101221144"},)}}
+                sent = options[name](event, {})
+                self.assertNotIn(CODE, repr(sent))
+                self.assertNotIn(SESSION, repr(sent))
+                self.assertNotIn("1800101221144", repr(sent))
+                self.assertIsInstance(sent["extra"]["payload"], tuple)  # tuples stay tuples
+                self.assertEqual(event["extra"]["payload"][0]["mfa_code"], CODE)  # the input is not changed

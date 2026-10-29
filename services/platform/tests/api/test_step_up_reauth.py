@@ -108,6 +108,16 @@ class ReauthTests(HMACTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(portal_sessions.recently_reauthenticated(self._row(), timezone.now()))
 
+    def test_a_spent_code_budget_is_a_throttle_not_a_wrong_answer(self) -> None:
+        secret = self._enrol()
+        with patch("apps.users.mfa.MFAService._check_rate_limit", return_value=False):
+            response = self._confirm(password=PASSWORD, mfa_code=pyotp.TOTP(secret).now())
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json().get("code"), "rate_limited")
+        self.assertEqual(self._row().reauth_at, self.stale)
+        self.assertEqual(self._failures(), 1)  # the unchecked code still counts, as at login
+        self.assertFalse(AuditEvent.objects.filter(action="step_up_failed").exists())
+
     def test_a_backup_code_opens_the_window_and_is_spent(self) -> None:
         self._enrol()
         code = self.backup_codes[0]

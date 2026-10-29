@@ -999,10 +999,13 @@ class ConfirmIdentityForm(forms.Form):
 
     password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput, strip=False)
 
-    def __init__(self, *args: Any, two_factor: bool, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, two_factor: bool | None, **kwargs: Any) -> None:
+        """two_factor None means unknown: the code is offered but optional, and Platform decides."""
         super().__init__(*args, **kwargs)
-        if two_factor:
-            self.fields["token"] = copy.deepcopy(TwoFactorVerifyForm.base_fields["token"])
+        if two_factor is not False:
+            token = copy.deepcopy(TwoFactorVerifyForm.base_fields["token"])
+            token.required = two_factor is True
+            self.fields["token"] = token
 
     def clean_token(self) -> str:
         token = str(self.cleaned_data.get("token", "")).strip()

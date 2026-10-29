@@ -1483,11 +1483,12 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
     """
     user_id = int(request.session["user_id"])
     next_url = _relative_next(request.GET.get("next") or request.POST.get("next") or "")
+    two_factor: bool | None
     try:
         status = api_client.get_mfa_status(user_id)
+        two_factor = bool(status.get("enabled"))
     except PlatformAPIError:
-        status = {"enabled": True}  # unknown: offer the code field; Platform decides what it needs
-    two_factor = bool(status.get("enabled"))
+        status, two_factor = {}, None  # unknown: the code is offered but optional, and Platform decides
     form = ConfirmIdentityForm(request.POST or None, two_factor=two_factor)
     if request.method == "POST" and form.is_valid():
         try:
@@ -1505,7 +1506,7 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
             mark_auth_success(request)
             return redirect(next_url)
     remaining = int(status.get("backup_codes_remaining") or 0)
-    low = two_factor and remaining <= LOW_BACKUP_CODES
+    low = two_factor is True and remaining <= LOW_BACKUP_CODES
     return render(
         request,
         "users/confirm_identity.html",
