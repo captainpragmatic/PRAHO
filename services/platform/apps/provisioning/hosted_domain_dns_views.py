@@ -61,4 +61,19 @@ def recheck_dns(request: HttpRequest, account_id: str) -> HttpResponse:
 
 def stored_evidence(account: VirtualminAccount) -> str:
     row = HostedDomainDnsStatus.objects.filter(account=account).first()
-    return json.dumps(row.results, ensure_ascii=False, indent=2)[:12000] if row else ""
+    if row is None:
+        return ""
+    results = dict(row.results) if isinstance(row.results, dict) else {"results": row.results}
+    components = results.pop("components", None)
+    # Every component's state and code come first: jsonb returns keys shorter-first and nested evidence
+    # can be long, so the bound below must only ever cut details, never a code staff act on.
+    summary = (
+        {name: {"state": part.get("state"), "code": part.get("code")} for name, part in components.items()}
+        if isinstance(components, dict) and all(isinstance(part, dict) for part in components.values())
+        else {}
+    )
+    ordered: dict[str, object] = {"component_codes": summary} if summary else {}
+    if components is not None:
+        ordered["components"] = components
+    ordered.update((key, value) for key, value in results.items() if key not in ordered)
+    return json.dumps(ordered, ensure_ascii=False, indent=2)[:12000]
