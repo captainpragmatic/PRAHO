@@ -24,7 +24,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
-from apps.common import altcha
+from apps.common import altcha, request_context
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
@@ -334,13 +334,16 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
             try:
                 # Validate credentials via Platform API
                 mfa_token = form.cleaned_data.get("mfa_token", "")
-                auth_response = (
-                    api_client.authenticate_customer(
-                        email, password, mfa_token=mfa_token, client_ip=get_safe_client_ip(request)
-                    )
-                    if mfa_token
-                    else api_client.authenticate_customer(email, password, client_ip=get_safe_client_ip(request))
+                auth_response = api_client.authenticate_customer(
+                    email,
+                    password,
+                    mfa_token=mfa_token,
+                    client_ip=get_safe_client_ip(request),
+                    user_agent=request.META.get("HTTP_USER_AGENT", ""),
                 )
+                if auth_response and auth_response.get("valid") and not auth_response.get("session_id"):
+                    # ADR-0017 section 5: a login Platform opened no session for cannot be used.
+                    raise PlatformAPIError("Login answered without a Platform session", is_unavailable=True)
 
                 if auth_response and auth_response.get("valid"):
                     # Successful authentication - create Django session
@@ -368,6 +371,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["authenticated_at"] = timezone.now().isoformat()
                     request.session["remember_me"] = remember_me
                     request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
+                    portal_session_id = str(auth_response["session_id"])
+                    request.session["portal_session_id"] = portal_session_id
+                    # The membership and profile calls below already belong to this session.
+                    request_context.bind(portal_session_id, user_id)
 
                     # Fetch and cache user's customer memberships for role-based access
 
@@ -478,6 +485,23 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
     return render(request, "users/login.html", context)
 
 
+def _end_platform_session(request: HttpRequest) -> None:
+    """End the Platform session at logout (ADR-0017 section 5); logout never waits on Platform.
+
+    A failure is logged and the browser session still ends: the Platform row then ends at its
+    idle deadline, and nothing can use it without this browser's cookie.
+    """
+    session_id = request.session.get("portal_session_id")
+    user_id = request.session.get("user_id")
+    if not session_id or not user_id:
+        return
+    try:
+        api_client.end_session(int(user_id), str(session_id))
+    except (PlatformAPIError, ValueError, TypeError):
+        logger.warning("⚠️ [Portal Auth] Platform session not ended at logout; it ends at its idle deadline")
+    request_context.forget_rejection()
+
+
 @never_cache
 @require_http_methods(["GET", "POST"])
 def logout_view(request: HttpRequest) -> HttpResponse:
@@ -490,6 +514,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     logger.info(f"✅ [Portal Auth] Customer {customer_id} logged out")
 
     if request.method == "POST":
+        _end_platform_session(request)
         # End authentication and flush as one guarded operation.
         unavailable_response = end_session_or_unavailable(request)
         if unavailable_response is not None:

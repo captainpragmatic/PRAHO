@@ -362,7 +362,7 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-d
 | Workflow | Purpose | Security Relevance |
 |----------|---------|-------------------|
 | `platform.yml` | Platform unit tests + coverage + Ruff | Tests run on every push/PR |
-| `portal.yml` | Portal tests + validates no DB drivers installed | Enforces stateless architecture |
+| `portal.yml` | Portal tests + validates no DB drivers installed | Keeps the portal off any business database |
 | `integration.yml` | Cross-service integration + security isolation tests | Service boundary enforcement |
 | `type-coverage.yml` | MyPy type coverage (1100 error threshold) | Type safety enforcement |
 | `dco-check.yml` | Developer Certificate of Origin | Commit provenance |
@@ -401,7 +401,7 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-d
 **`make test-security` validates:**
 1. Portal cannot import platform modules (3 explicit checks)
 2. Platform uses `DatabaseCache` (not dev settings)
-3. Portal has no database access
+3. Portal has no business database access
 4. Import isolation guard (pytest)
 
 ### 6.4 Security Test Coverage
@@ -444,7 +444,7 @@ retired (ADR-0054).
 
 **Docker security:**
 - Non-root user (`django:django`) in both Dockerfiles
-- Portal Dockerfile has NO `postgresql-client`, NO `libpq-dev` (enforces statelessness)
+- Portal Dockerfile has NO `postgresql-client`, NO `libpq-dev` (no business database driver)
 - Network isolation: portal-network separate from platform-network
 
 ### 7.2 Configuration Drift Detection

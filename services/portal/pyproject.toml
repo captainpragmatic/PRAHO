@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 [project]
 name = "praho-portal-service"
 version = "0.30.0"
-description = "PRAHO Portal Service - Customer-facing API (no database access)"
+description = "PRAHO Portal Service - Customer-facing API (no business data)"
 requires-python = ">=3.13"
 authors = [
     {name = "PRAHO contributors"}

@@ -261,7 +261,7 @@ PRAHO uses **two independent HMAC systems** with separate secrets for different 
 | **Maturity** | Battle-tested (nonce dedup, canonical signing, rate limiting) | Signature-based dedup, format validation |
 | **Why separate** | Multi-endpoint API, untrusted client | Single endpoint, trusted internal service |
 
-**Why not unify:** Portal is stateless (LocMemCache per-process, no DB). Can't do reliable cross-worker nonce dedup. Different threat models. Different trust boundaries. Secret isolation is a feature.
+**Why not unify:** When the systems were designed, Portal had no shared store, so it could not dedup nonces across workers; it now claims webhook signatures in its counter table (ADR-0050). The threat models and trust boundaries still differ, and secret isolation is a feature (ADR-0032).
 
 ### Signature Scheme
 
@@ -280,7 +280,7 @@ signature = HMAC-SHA256(secret, str(int(ts)) + "." + body)
 | **Replay window** | 5 minutes (`_WEBHOOK_REPLAY_WINDOW_SECONDS = 300`) |
 | **Future timestamps** | Rejected — only `0 <= (now - ts) <= window` accepted |
 | **Signature format** | Pre-validated: exactly 64 lowercase hex characters |
-| **Per-process replay dedup** | `cache.add()` with signature prefix as key (LocMemCache) |
+| **Shared replay dedup** | `counters.claim` keyed on the signature in Portal's counter table, atomic across workers (ADR-0050); a store failure answers 503 |
 | **Fail-secure** | Empty/missing secret → all webhooks rejected |
 | **Startup validation** | Both `prod.py` settings raise on missing secret |
 
@@ -291,6 +291,6 @@ POST /order/payment/webhook/
 ```
 
 - CSRF-exempt (HMAC-authenticated inter-service endpoint)
-- Idempotent handler (logs + session hint — safe for per-process dedup)
+- Idempotent handler (logs + session hint), so a redelivery after a failed attempt is harmless
 - Sender: `apps.integrations.webhooks.stripe._notify_portal_payment_success()`
 - Receiver: `apps.orders.views.payment_success_webhook()`

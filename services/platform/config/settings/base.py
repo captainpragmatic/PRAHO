@@ -958,3 +958,12 @@ PORTAL_HMAC_CREDENTIALS: str | None = os.environ.get("PORTAL_HMAC_CREDENTIALS")
 
 # Production and staging require an isolated credential for each Portal.
 PORTAL_HMAC_REQUIRE_ISOLATION = False
+
+# ADR-0017 section 5: every signed request that names a user must name a live portal session.
+# False here, true in prod and staging. Deploy Platform with it false, then Portal, then set it
+# true; set it false again before rolling Portal back.
+PORTAL_SESSION_REQUIRED: bool = os.environ.get("PORTAL_SESSION_REQUIRED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)

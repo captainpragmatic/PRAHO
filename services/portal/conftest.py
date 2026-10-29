@@ -30,6 +30,16 @@ def keep_dev_debug_mode(settings: Any) -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
+def portal_session_id_not_required(settings: Any) -> Generator[None]:
+    """Most view tests build an authenticated session by hand and predate Platform-owned sessions.
+
+    Tests of the rule itself (tests/users/test_platform_owned_sessions.py) turn it back on in setUp.
+    """
+    settings.PORTAL_SESSION_ID_REQUIRED = False
+    yield
+
+
+@pytest.fixture(autouse=True)
 def reset_outbound_http_session() -> Generator[None]:
     """
     Clear the outbound Platform session's cookies between tests.

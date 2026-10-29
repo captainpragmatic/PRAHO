@@ -4,10 +4,42 @@
 # Tests the API communication between platform and portal services
 # Validates that portal can access platform data via API (not direct DB)
 
+import re
+import tomllib
+from pathlib import Path
+from unittest.mock import Mock, patch
+
 import pytest
 import requests
-from unittest.mock import patch, Mock
 from django.conf import settings
+
+# Client libraries for external database servers, by normalised distribution name.
+_DATABASE_DRIVERS = frozenset(
+    {
+        "psycopg", "psycopg-binary", "psycopg2", "psycopg2-binary", "asyncpg",
+        "mysqlclient", "mysql-connector-python", "pymysql",
+        "cx-oracle", "oracledb", "pymssql", "pyodbc",
+    }
+)
+
+
+def _database_drivers(requirements):
+    """The declared requirements that are database drivers (names normalised, extras and pins ignored)."""
+    names = (re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", spec) for spec in requirements if isinstance(spec, str))
+    return sorted(n for n in (re.sub(r"[._]", "-", m.group(1)).lower() for m in names if m) if n in _DATABASE_DRIVERS)
+
+
+def _group_requirements(groups, name, seen=()):
+    """A dependency group's requirements, with its included groups resolved (PEP 735)."""
+    if name in seen:
+        raise AssertionError(f"dependency group {name!r} includes itself")
+    requirements = []
+    for entry in groups[name]:
+        if isinstance(entry, dict) and "include-group" in entry:
+            requirements += _group_requirements(groups, entry["include-group"], (*seen, name))
+        else:
+            requirements.append(entry)
+    return requirements
 
 
 def is_database_cache_configured():
@@ -92,41 +124,30 @@ class TestPlatformPortalIntegration:
 
     @pytest.mark.integration
     def test_portal_cannot_access_platform_database_directly(self):
+        """The portal image installs no external database driver.
+
+        Portal holds no business data (services/portal/PORTAL_STATE.md); without a driver it cannot
+        reach a business database even if handed credentials. This reads the same declarations the
+        portal Dockerfile installs (`uv sync --group portal --group prod`): the root project's
+        dependencies plus those two groups, and the portal package's own dependencies. It used to
+        read a requirements.txt that no longer exists, and so asserted nothing.
         """
-        Security test: Verify portal isolation concept.
+        root = Path(__file__).resolve().parents[2]
+        workspace = tomllib.loads((root / "pyproject.toml").read_text())
+        portal = tomllib.loads((root / "services" / "portal" / "pyproject.toml").read_text())
+        groups = workspace["dependency-groups"]
+        installed = [
+            *workspace["project"]["dependencies"],
+            *_group_requirements(groups, "portal"),
+            *_group_requirements(groups, "prod"),
+            *portal["project"]["dependencies"],
+        ]
+        assert installed, "no portal dependency declarations found; the check would prove nothing"
 
-        Note: This test validates the concept that in production,
-        portal should not have database access. In the test environment,
-        we verify this is documented and architecture enforces it.
-        """
-        # In production, portal is deployed without database credentials
-        # This test validates our architecture documentation is correct
-
-        # Portal architecture should be stateless (see STATELESS_ARCHITECTURE.md)
-        # The actual enforcement happens through:
-        # 1. Portal has no DATABASE_URL in production
-        # 2. Portal requirements.txt has no psycopg driver
-        # 3. Portal settings use in-memory dummy DB
-
-        # Verify portal requirements don't include database drivers
-        import os
-        portal_requirements_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            'services', 'portal', 'requirements.txt'
-        )
-
-        if os.path.exists(portal_requirements_path):
-            with open(portal_requirements_path, 'r') as f:
-                lines = f.readlines()
-                # Check actual package declarations (not comments)
-                for line in lines:
-                    line_stripped = line.strip()
-                    # Skip comments and empty lines
-                    if line_stripped.startswith('#') or not line_stripped:
-                        continue
-                    # Portal should NOT have database driver packages as dependencies
-                    assert 'psycopg' not in line_stripped.lower(), "Portal should not have psycopg"
-                    assert 'mysqlclient' not in line_stripped.lower(), "Portal should not have mysqlclient"
+        # Positive controls: the matcher must find the platform's driver, also through an included group.
+        assert _database_drivers(groups["platform"]), "the driver matcher no longer recognises the platform's driver"
+        assert _database_drivers(_group_requirements({**groups, "probe": [{"include-group": "platform"}]}, "probe"))
+        assert _database_drivers(installed) == []
 
     @pytest.mark.integration
     def test_platform_api_authentication_required(self):

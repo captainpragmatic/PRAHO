@@ -214,6 +214,7 @@ class SessionRevocationTests(TransactionTestCase):
         with patch("apps.users.views.api_client") as platform:
             platform.authenticate_customer.return_value = {
                 "valid": True,
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
                 "user_id": 42,
                 "customer_id": 7,
                 "customer_data": {"id": 42, "email": "user@example.com"},

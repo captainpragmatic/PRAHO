@@ -352,7 +352,7 @@ new registered-domain allowance.
 
 PRAHO requires **two separate FQDNs** — one for Portal (customer-facing) and one for Platform (staff/admin). This is a security requirement, not optional.
 
-**Why two domains?** Portal and Platform have completely different threat models. Portal is public-facing and stateless; Platform has full database access and admin capabilities. Separating them by domain means:
+**Why two domains?** Portal and Platform have completely different threat models. Portal is public-facing and holds no business data; Platform has full database access and admin capabilities. Separating them by domain means:
 - Caddy routes traffic by hostname — no URL-path-based routing mistakes can leak admin endpoints
 - Platform can be IP-whitelisted at the reverse proxy level
 - Cookie scoping is isolated (no cross-service cookie leakage)
