@@ -51,6 +51,22 @@ def _drop_secret_fields(value: Any, path: frozenset[int] = frozenset(), depth: i
     return tuple(items) if isinstance(value, tuple) else items
 
 
+class _TupleScrubber(EventScrubber):
+    """Sentry's scrubber, walking tuples as well as lists.
+
+    It runs before Sentry serialises the event, which turns anything nested past its depth limit
+    into text that no later callback can scrub; a dict inside a tuple must be scrubbed here.
+    """
+
+    def scrub_list(self, lst: object) -> None:
+        if not isinstance(lst, tuple):
+            super().scrub_list(lst)
+            return
+        for value in lst:
+            self.scrub_dict(value)
+            self.scrub_list(value)
+
+
 def _before_send(event: Any, hint: Any) -> Any:
     return _drop_secret_fields(scrub_sentry_event(event, hint))
 
@@ -76,7 +92,7 @@ def sentry_options(dsn: str, *, release: str) -> SentryOptions:
         "traces_sample_rate": 0.1,
         "send_default_pii": False,
         "include_local_variables": False,
-        "event_scrubber": EventScrubber(denylist=[*DEFAULT_DENYLIST, *SECRET_KEYS], recursive=True),
+        "event_scrubber": _TupleScrubber(denylist=[*DEFAULT_DENYLIST, *SECRET_KEYS], recursive=True),
         "environment": "production",
         "release": release,
     }

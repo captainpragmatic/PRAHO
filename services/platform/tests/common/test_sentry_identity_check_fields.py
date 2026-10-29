@@ -7,6 +7,8 @@ raised while handling them would have sent both to the error tracker, nested or 
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.test import SimpleTestCase
 
 from config.settings.sentry import sentry_options
@@ -47,3 +49,25 @@ class IdentityCheckFieldsTests(SimpleTestCase):
                 self.assertNotIn("1800101221144", repr(sent))
                 self.assertIsInstance(sent["extra"]["payload"], tuple)  # tuples stay tuples
                 self.assertEqual(event["extra"]["payload"][0]["mfa_code"], CODE)  # the input is not changed
+
+    def test_nothing_deeply_nested_in_a_tuple_reaches_the_sent_report(self) -> None:
+        # The whole pipeline: Sentry scrubs, then serialises (deep values become text), then calls before_send.
+        from sentry_sdk import Client  # noqa: PLC0415
+        from sentry_sdk.transport import Transport  # noqa: PLC0415
+
+        class Captured(Transport):
+            def __init__(self) -> None:
+                super().__init__()
+                self.envelopes: list[Any] = []
+
+            def capture_envelope(self, envelope: Any) -> None:
+                self.envelopes.append(envelope)
+
+        transport = Captured()
+        client = Client(**sentry_options("https://key@sentry.example.test/1", release="1.0"), transport=transport)
+        nested = {"a": {"b": {"c": {"mfa_code": CODE, "session_id": SESSION}}}}
+        client.capture_event({"message": "boom", "extra": {"payload": (nested,)}})
+        sent = b"".join(item.get_bytes() for envelope in transport.envelopes for item in envelope.items)
+        self.assertIn(b"boom", sent)  # the report itself was sent
+        self.assertNotIn(CODE.encode(), sent)
+        self.assertNotIn(SESSION.encode(), sent)

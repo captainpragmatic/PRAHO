@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
+from unittest.mock import patch
 
 from django.db import transaction
 from django.test import TestCase, override_settings
@@ -183,6 +184,29 @@ class StepUpCoverageTests(HMACTestMixin, TestCase):
                 if expected == 403:
                     self.assertEqual(self.state(), before)
                 transaction.set_rollback(True)
+
+    def test_a_name_changed_meanwhile_is_not_written_back_unchecked(self) -> None:
+        from apps.api.users.serializers import ProfileUpdateSerializer  # noqa: PLC0415
+
+        self.stale()
+        original = User.objects.get(pk=self.owner.pk).first_name
+        validate = ProfileUpdateSerializer.is_valid
+
+        def valid_then_renamed(serializer: Any, *args: Any, **kwargs: Any) -> bool:
+            valid = validate(serializer, *args, **kwargs)
+            User.objects.filter(pk=self.owner.pk).update(first_name="Changed")  # another request saves first
+            return valid
+
+        with patch.object(ProfileUpdateSerializer, "is_valid", valid_then_renamed):
+            response = self.call("users/profile/", {"first_name": original}, method="put")
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(User.objects.get(pk=self.owner.pk).first_name, "Changed")
+
+    def test_a_stored_number_in_another_format_is_no_change(self) -> None:
+        User.objects.filter(pk=self.owner.pk).update(phone="+40 722 123 456")  # stored before normalising
+        self.stale()
+        response = self.call("users/profile/", {"phone": "+40 722 123 456", "preferred_language": "ro"}, method="put")
+        self.assertEqual(response.status_code, 200, response.content)
 
     def test_an_export_request_needs_a_check_and_its_status_does_not(self) -> None:
         self.stale()

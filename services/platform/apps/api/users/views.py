@@ -42,6 +42,7 @@ from apps.api.step_up import step_up_refusal
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.identity_fields import normalize_phone
 from apps.common.legal import TERMS_UNAVAILABLE
 from apps.common.localisation import resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
@@ -868,8 +869,18 @@ _DEFAULT_PORTAL_THROTTLES = (PortalHMACRateThrottle, PortalHMACBurstThrottle, Cu
 
 _REAUTH_FAILED = {"success": False, "code": "reauth_failed"}
 _REAUTH_THROTTLED = {"success": False, "code": "rate_limited"}
-# Compared after the serializer normalises them, so a reformatted equal phone is no change.
+# Compared as normalised values, so a reformatted equal phone, stored or sent, is no change.
 _PROFILE_IDENTITY_FIELDS = ("first_name", "last_name", "phone")
+
+
+def _identity_value(field: str, value: object) -> str:
+    text = str(value or "").strip()
+    if field != "phone" or not text:
+        return text
+    try:
+        return normalize_phone(text)
+    except DjangoValidationError:
+        return text  # a stored number that no longer parses compares as written
 
 
 def _check_identity(locked: User, password: str, code: str, request: HttpRequest) -> str:
@@ -1449,18 +1460,23 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
             serializer = ProfileUpdateSerializer(data=request_data)
             if not serializer.is_valid():
                 return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-            # Who the account says it is needs a recent identity check; preferences do not.
-            renamed = [
-                field
-                for field in _PROFILE_IDENTITY_FIELDS
-                if field in serializer.validated_data
-                and (serializer.validated_data[field] or "") != (getattr(user, field) or "")
-            ]
-            if renamed:
-                refusal = step_up_refusal(request)
-                if refusal is not None:
-                    return refusal
-            serializer.update(user, serializer.validated_data)
+            with transaction.atomic():
+                # Compared with the locked row and saved with it: a change made meanwhile is never
+                # written back without the check.
+                user = User.objects.select_for_update().get(pk=user.pk)
+                # Who the account says it is needs a recent identity check; preferences do not.
+                renamed = [
+                    field
+                    for field in _PROFILE_IDENTITY_FIELDS
+                    if field in serializer.validated_data
+                    and _identity_value(field, serializer.validated_data[field])
+                    != _identity_value(field, getattr(user, field))
+                ]
+                if renamed:
+                    refusal = step_up_refusal(request)
+                    if refusal is not None:
+                        return refusal
+                serializer.update(user, serializer.validated_data)
             logger.info(f"✅ [Profile API] Updated profile for customer: {user.email}")
 
             return Response({"success": True, "message": "Profile updated successfully"})
