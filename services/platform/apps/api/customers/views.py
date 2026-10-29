@@ -1056,6 +1056,24 @@ def _effective(identity: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _comparable(identity: dict[str, Any], country: str | None) -> dict[str, Any]:
+    """A tax identity as this view would store it, so a value stored in another form is no change.
+
+    The CUI is reduced to its digits and the VAT number given its prefix, as an incoming value is;
+    a stored value that no longer validates compares as written.
+    """
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+    comparable = _effective(identity)
+    if comparable["cui"] and (cui := CUIValidator.validate_strict(comparable["cui"])).is_valid:
+        comparable["cui"] = cui.digits
+    if comparable["vat_number"]:
+        vat_number, error = _checked_vat_number(comparable["vat_number"], country)
+        if error is None:
+            comparable["vat_number"] = vat_number
+    return comparable
+
+
 def _contact_details(customer: Customer) -> dict[str, Any]:
     return {field: getattr(customer, field) for field in _CONTACT_FIELDS}
 
@@ -1638,7 +1656,9 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Val
         tax_profile.is_vat_payer = True
         update_fields.append("is_vat_payer")
 
-    if _has_legal_identity(before) and _effective(_tax_identity(tax_profile)) != _effective(before):
+    billing = customer.get_billing_address()
+    country = billing.country if billing else None
+    if _has_legal_identity(before) and _comparable(_tax_identity(tax_profile), country) != _comparable(before, country):
         refusal = step_up_refusal(request)
         if refusal is not None:
             return refusal

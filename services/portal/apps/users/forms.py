@@ -3,7 +3,6 @@ Portal Customer Forms
 Customer-facing forms with dark theme styling and Platform API integration.
 """
 
-import copy
 import logging
 import re
 from typing import Any
@@ -994,24 +993,21 @@ class TOTPSetupForm(forms.Form):
     )
 
 
-class ConfirmIdentityForm(forms.Form):
+class ConfirmIdentityForm(TwoFactorVerifyForm):
     """The password, and the code when two-factor authentication is on, before a sensitive action."""
 
-    password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput, strip=False)
+    password = forms.CharField(
+        label=_("Current password"), widget=forms.PasswordInput(attrs={"autofocus": True}), strip=False
+    )
 
     def __init__(self, *args: Any, two_factor: bool | None, **kwargs: Any) -> None:
         """two_factor None means unknown: the code is offered but optional, and Platform decides."""
         super().__init__(*args, **kwargs)
-        if two_factor is not False:
-            token = copy.deepcopy(TwoFactorVerifyForm.base_fields["token"])
-            token.required = two_factor is True
-            self.fields["token"] = token
-
-    def clean_token(self) -> str:
-        token = str(self.cleaned_data.get("token", "")).strip()
-        if token and not token.isdigit():
-            raise ValidationError(_("The code must contain only digits."))
-        return token
+        if two_factor is False:
+            del self.fields["token"]
+            return
+        self.fields["token"].required = two_factor is True
+        self.fields["token"].widget.attrs.pop("autofocus", None)  # the password comes first
 
 
 class MFAReauthenticationForm(TwoFactorVerifyForm):

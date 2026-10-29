@@ -1488,12 +1488,15 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
     """
     user_id = int(request.session["user_id"])
     next_url = _relative_next(request.GET.get("next") or request.POST.get("next") or "")
-    two_factor: bool | None
-    try:
-        status = api_client.get_mfa_status(user_id)
-        two_factor = bool(status.get("enabled"))
-    except PlatformAPIError:
-        status, two_factor = {}, None  # unknown: the code is offered but optional, and Platform decides
+    # Read on the page only: an answer is checked by Platform, which decides whether a code is needed.
+    status: dict[str, Any] = {}
+    two_factor: bool | None = None
+    if request.method == "GET":
+        try:
+            status = api_client.get_mfa_status(user_id)
+            two_factor = bool(status.get("enabled"))
+        except PlatformAPIError:
+            two_factor = None  # unknown: the code is offered but optional
     form = ConfirmIdentityForm(request.POST or None, two_factor=two_factor)
     if request.method == "POST" and form.is_valid():
         try:

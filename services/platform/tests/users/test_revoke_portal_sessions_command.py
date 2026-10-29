@@ -122,6 +122,23 @@ class ArgumentTests(TestCase):
 
 
 class AuditTests(TestCase):
+    def test_a_run_that_fails_midway_still_names_its_operator(self) -> None:
+        first, second = _session("a@example.ro"), _session("b@example.ro")
+        end = portal_sessions.end
+        calls: list[PortalSession] = []
+
+        def end_then_fail(row: PortalSession, reason: str) -> bool:
+            calls.append(row)
+            if len(calls) == 2:
+                raise RuntimeError("database gone")
+            return end(row, reason)
+
+        with patch("apps.users.portal_sessions.end", side_effect=end_then_fail), self.assertRaises(RuntimeError):
+            _run("--all")
+        (event,) = AuditEvent.objects.filter(action="portal_sessions_revoked")
+        self.assertEqual((event.metadata["sessions"], event.metadata["completed"]), (1, False))
+        self.assertEqual(sum(_ended(row) for row in (first, second)), 1)
+
     def test_one_event_names_the_operator_the_selector_and_the_reason(self) -> None:
         _session("a@example.ro")
         _session("b@example.ro")

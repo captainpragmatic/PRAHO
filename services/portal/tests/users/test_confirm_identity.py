@@ -7,6 +7,7 @@ outage, a throttle or a timeout never does. It goes back only to a page on this 
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from typing import Any
 from unittest.mock import patch
@@ -94,6 +95,20 @@ class ConfirmIdentityTests(TestCase):
             response = self.client.post(f"{PATH}?next=/billing/", {"password": "secret-1"})
         self.assertRedirects(response, "/billing/", fetch_redirect_response=False)
         self.assertEqual(platform.confirm_identity.call_args.args, (42, "secret-1", ""))
+
+    def test_the_cursor_starts_in_the_password(self) -> None:
+        page = self.get(two_factor=True).content.decode()
+        password = re.search(r"<input[^>]*name=\"password\"[^>]*>", page).group(0)
+        token = re.search(r"<input[^>]*name=\"token\"[^>]*>", page).group(0)
+        self.assertIn("autofocus", password)
+        self.assertNotIn("autofocus", token)
+
+    def test_an_answer_costs_one_call_to_platform(self) -> None:
+        with patch(PLATFORM) as platform:
+            platform.confirm_identity.return_value = {"success": True}
+            self.client.post(f"{PATH}?next=/billing/", {"password": "secret-1"})
+        platform.get_mfa_status.assert_not_called()  # Platform decides what the answer needs
+        platform.confirm_identity.assert_called_once()
 
     def test_it_warns_when_backup_codes_run_low(self) -> None:
         self.assertContains(self.get(two_factor=True), "You have 2 backup codes left.")

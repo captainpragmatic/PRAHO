@@ -70,21 +70,29 @@ class Command(BaseCommand):
         if options["dry_run"]:
             self._report("Would end", targets)
             return
-        ended = [row for row in targets if portal_sessions.end(row, portal_sessions.REASON_OPERATOR)]
         from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007: cross-app, deferred
 
-        AuditService.log_simple_event(
-            "portal_sessions_revoked",
-            description="An operator ended portal sessions",
-            actor_type="system",
-            metadata={
-                "operator": operator_name(),
-                "selector": selector,
-                "reason": reason,
-                "sessions": len(ended),
-                "people": len({row.user_id for row in ended}),
-            },
-        )
+        ended: list[PortalSession] = []
+        completed = False
+        try:
+            # extend keeps the rows appended before a failure, which the audit below counts
+            ended.extend(row for row in targets if portal_sessions.end(row, portal_sessions.REASON_OPERATOR))
+            completed = True
+        finally:
+            # Written even when a failure stops the run, so the sessions already ended name who ended them.
+            AuditService.log_simple_event(
+                "portal_sessions_revoked",
+                description="An operator ended portal sessions",
+                actor_type="system",
+                metadata={
+                    "operator": operator_name(),
+                    "selector": selector,
+                    "reason": reason,
+                    "sessions": len(ended),
+                    "people": len({row.user_id for row in ended}),
+                    "completed": completed,
+                },
+            )
         self._report("Ended", ended)
 
     def _selection(self, options: dict[str, Any]) -> tuple[QuerySet[PortalSession], str]:

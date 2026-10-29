@@ -25,31 +25,6 @@ SECRET_KEYS = (
     "session_id",
     "portal_session_id",
 )
-_DENIED = frozenset(name.lower() for name in (*DEFAULT_DENYLIST, *SECRET_KEYS))
-_FILTERED = "[Filtered]"
-_MAX_DEPTH = 32
-
-
-def _drop_secret_fields(value: Any, path: frozenset[int] = frozenset(), depth: int = 0) -> Any:
-    """A copy with every denylisted field filtered at any depth, tuples included.
-
-    Sentry's own scrubber walks dicts and lists but not tuples. A container met again on its own
-    path, or nested past the bound, is replaced rather than recursed into.
-    """
-    if not isinstance(value, (dict, list, tuple)):
-        return value
-    if id(value) in path or depth >= _MAX_DEPTH:
-        return _FILTERED
-    inner = path | {id(value)}
-    if isinstance(value, dict):
-        return {
-            key: _FILTERED
-            if isinstance(key, str) and key.lower() in _DENIED
-            else _drop_secret_fields(item, inner, depth + 1)
-            for key, item in value.items()
-        }
-    items = [_drop_secret_fields(item, inner, depth + 1) for item in value]
-    return tuple(items) if isinstance(value, tuple) else items
 
 
 class _TupleScrubber(EventScrubber):
@@ -84,10 +59,6 @@ class _TupleScrubber(EventScrubber):
                     stack.append(item)
 
 
-def _before_send(event: Any, hint: Any) -> Any:
-    return _drop_secret_fields(scrub_sentry_event(event, hint))
-
-
 class SentryOptions(TypedDict):
     dsn: str
     traces_sample_rate: float
@@ -104,8 +75,8 @@ def sentry_options(dsn: str, *, release: str) -> SentryOptions:
     """The sentry_sdk.init arguments every production deployment uses, integrations aside."""
     return {
         "dsn": dsn,
-        "before_send": _before_send,
-        "before_send_transaction": _before_send,
+        "before_send": scrub_sentry_event,
+        "before_send_transaction": scrub_sentry_event,
         "traces_sample_rate": 0.1,
         "send_default_pii": False,
         "include_local_variables": False,

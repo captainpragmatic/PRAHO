@@ -168,6 +168,15 @@ class StepUpCoverageTests(HMACTestMixin, TestCase):
         response = self.call("customers/tax-profile/", {"cui": "RO14399840"})
         self.assertLess(response.status_code, 300, response.content)
 
+    def test_identifiers_stored_in_another_form_are_no_change(self) -> None:
+        # Another writer (registration) stores what was typed; this view stores it normalised.
+        CustomerTaxProfile.objects.filter(customer=self.customer).update(
+            cui="RO14399840", vat_number="ro14399840", is_vat_payer=True
+        )
+        self.stale()
+        response = self.call("customers/tax-profile/", {"cui": "14399840", "vat_number": "RO14399840"})
+        self.assertLess(response.status_code, 300, response.content)
+
     def test_the_name_or_phone_needs_a_check_and_preferences_do_not(self) -> None:
         self.stale()
         cases = {

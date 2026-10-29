@@ -9,6 +9,8 @@ check that lands after the session ended changes nothing, a backup code included
 
 from __future__ import annotations
 
+import json
+import time
 from datetime import timedelta
 from typing import Any
 from unittest import skipUnless
@@ -24,7 +26,7 @@ from apps.audit.models import AuditEvent
 from apps.users import portal_sessions
 from apps.users.mfa import TOTPService
 from apps.users.models import PortalSession, User
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
 
 PASSWORD = "Original-secure123!"  # test fixture, not a credential
 WRONG = "Not-the-password-1!"  # test fixture, not a credential
@@ -240,3 +242,19 @@ class ReauthLockTests(HMACTestMixin, TestCase):
         session_lock = next(i for i, sql in enumerate(locks) if f'FROM "{PortalSession._meta.db_table}" ' in sql)
         self.assertIn("FOR NO KEY UPDATE", locks[user_lock])
         self.assertLess(user_lock, session_lock)
+
+    def test_the_profile_update_locks_the_user_the_same_way(self) -> None:
+        user = User.objects.create_user(email="profile-lock@example.ro", password=PASSWORD)
+        session = portal_sessions.open_session(user)
+        body = json.dumps({"user_id": user.pk, "session_id": str(session.pk), "timestamp": time.time(), "phone": ""})
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.put(
+                "/api/users/profile/",
+                body,
+                content_type="application/json",
+                **hmac_headers("PUT", "/api/users/profile/", body.encode()),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        locks = [q["sql"] for q in queries.captured_queries if 'FROM "users" ' in q["sql"] and " FOR " in q["sql"]]
+        self.assertTrue(locks)
+        self.assertTrue(all("FOR NO KEY UPDATE" in sql for sql in locks), locks)

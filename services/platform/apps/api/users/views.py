@@ -1467,7 +1467,8 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
             with transaction.atomic():
                 # Compared with the locked row and saved with it: a change made meanwhile is never
                 # written back without the check.
-                user = User.objects.select_for_update().get(pk=user.pk)
+                # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+                user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
                 # Who the account says it is needs a recent identity check; preferences do not.
                 renamed = [
                     field
