@@ -160,6 +160,9 @@ class Ledger:
             # Reclaim pruned history without a second database-sized VACUUM file.
             self.connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
             page_size = self.connection.execute("PRAGMA page_size").fetchone()[0]
+            # SQLite PRAGMA values cannot be bound parameters. Both operands are
+            # local integers; no request, path or metadata text enters this SQL.
+            # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
             self.connection.execute(f"PRAGMA max_page_count={max(32, MAX_DATABASE_BYTES // page_size)}")
             self._initialize_schema()
         except (OSError, sqlite3.Error):
