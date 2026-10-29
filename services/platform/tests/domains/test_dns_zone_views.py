@@ -9,6 +9,7 @@ from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.domains.dns_zone_models import HostedZone, HostedZoneImportRevision, HostedZoneOperation
 from apps.users.models import User
+from tests.helpers.fsm_helpers import force_status
 
 
 class HostedZoneStaffViewsTests(TestCase):
@@ -49,6 +50,15 @@ class HostedZoneStaffViewsTests(TestCase):
         self.assertContains(response, "crosscheck")
         self.assertNotContains(response, "<script>bad()")
         self.assertNotContains(response, "x" * 14000)
+
+    def test_staff_detail_offers_the_source_check_only_during_the_import(self):
+        path = f"/domains/admin/zones/{self.zone.pk}/"
+        action = reverse("domains:zone_crosscheck", args=[self.zone.pk])
+        self.assertContains(self.client.get(path), action)
+        HostedZone.objects.filter(pk=self.zone.pk).update(applied_revision=1)
+        self.zone.refresh_from_db()
+        force_status(self.zone, "active")
+        self.assertNotContains(self.client.get(path), action)
 
     def test_customer_user_cannot_read_staff_operation_evidence(self):
         self.client.force_login(User.objects.create_user(email="zone-viewer@example.net"))

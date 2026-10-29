@@ -1225,14 +1225,17 @@ class CorrectedUploadTests(TransactionTestCase):
     def test_a_corrected_upload_supersedes_a_crosscheck_parked_for_an_uncheckable_owner(self):
         self.assert_superseded(UNCHECKABLE)
 
-    def test_a_zone_applied_before_stays_failed_until_an_apply_restores_it(self):
+    def test_a_zone_applied_before_refuses_the_upload_and_keeps_its_parked_check(self):
         parked = self.parked_crosscheck(return_value=_source_refusal(MISSING))
         HostedZone.objects.filter(pk=self.zone.pk).update(applied_revision=1)
-        self.assertTrue(zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor).is_ok())
+        self.assertEqual(
+            zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor),
+            Err("zone_import_not_applicable"),
+        )
         parked.refresh_from_db()
         self.zone.refresh_from_db()
-        self.assertEqual(parked.last_error, "superseded_by_upload")
-        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", ""))
+        self.assertEqual((parked.status, parked.last_error), ("parked", MISSING))
+        self.assertEqual((self.zone.status, self.zone.current_revision), ("failed", self.revision.number))
 
     def test_a_crosscheck_still_in_progress_refuses_an_upload(self):
         zones.request_crosscheck(self.zone, self.revision.number, actor=self.actor).unwrap()

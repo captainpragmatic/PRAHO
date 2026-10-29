@@ -46,7 +46,7 @@
       {% if can_edit %}<a href="{% url 'dns:record_create' zone.id %}" class="text-primary-400 underline">{% trans "Add DNS record" %}</a>{% endif %}
     </section>
     {% include "dns/partials/pagination.html" with page=zone.page pages=zone.pages %}
-    {% if can_edit and zone.valid and not zone.stale and not zone.pending %}
+    {% if can_edit and zone.valid and not zone.stale and not zone.pending and zone.crosscheck_available %}
       <section class="space-y-4 rounded-lg border border-slate-600 p-5">
         <form method="post" action="{% url 'dns:action' zone.id 'crosscheck' %}" hx-post="{% url 'dns:action' zone.id 'crosscheck' %}" hx-target="#dns-action-result">
           {% csrf_token %}{{ revision_form }}

@@ -75,6 +75,7 @@ def zone_payload(**changes):
         "crosscheck": {"complete": False, "ok": False},
         "dnssec": {},
         "can_switch_registrar": False,
+        "crosscheck_available": True,
         "export_digest": "",
         **changes,
     }
@@ -334,6 +335,11 @@ class DnsZoneViewsTests(SimpleTestCase):
             {"expected_revision": 2, "manifest_digest": DIGEST, "confirmed": field.get("value", "on")},
         )
         self.assertEqual(response.status_code, 303)
+
+    def test_the_source_check_is_offered_only_while_the_zone_imports(self):
+        self.assertContains(self.client.get(self.path), self.path + "crosscheck/")
+        self.read.return_value = zone_payload(status="active", crosscheck_available=False)
+        self.assertNotContains(self.client.get(self.path), self.path + "crosscheck/")
 
     def test_confirmation_waits_for_source_inventory_crosscheck(self):
         self.assertNotContains(self.client.get(self.path), "Confirm this exact import")
