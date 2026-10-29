@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 JOB_TIMEOUT = 120
 LEASE_SECONDS = 180
 RETRY_SECONDS = 300
+# Publishing work queued before the customer was suspended waits, and resumes once it is unsuspended
+# (ADR-0066). Removing records or a zone and checking published state are not held.
+HELD_WHILE_SUSPENDED = frozenset({"apply", "edit", "activate", "switch"})
+SUSPENDED_HOLD_SECONDS = 900
 DISPATCH_BATCH = 20
 TASK = "apps.domains.dns_zone_tasks.advance_zone_operation"
 
@@ -568,12 +572,15 @@ def _final_inventory(identifier: UUID, token: UUID) -> int:
     return _provider_failure(result, identifier, token, code="provider_inventory_unproven")
 
 
-def _step(identifier: UUID, token: UUID) -> int:
+def _step(identifier: UUID, token: UUID) -> int:  # noqa: PLR0911  # One outcome per operation kind, plus the suspension hold
+    from apps.customers.lifecycle import is_suspended  # noqa: PLC0415  # ADR-0007
     from apps.provisioning.virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # ADR-0007
 
     operation = HostedZoneOperation.objects.select_related("zone", "zone__account", "zone__account_hostname").get(
         pk=identifier
     )
+    if operation.kind in HELD_WHILE_SUSPENDED and is_suspended(operation.zone.customer_id):
+        return SUSPENDED_HOLD_SECONDS
     if (
         operation.kind == "activate"
         and operation.zone.account is not None

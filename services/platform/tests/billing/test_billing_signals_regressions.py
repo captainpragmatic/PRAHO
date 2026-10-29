@@ -1130,8 +1130,9 @@ class TestActivatePaymentServices(TestCase):
         payment.invoice = None
         _activate_payment_services(payment)
 
+    @patch("apps.customers.lifecycle.is_suspended", return_value=False)  # the customer is not suspended
     @patch("apps.provisioning.services.ServiceActivationService")
-    def test_activates_pending_services(self, mock_sas):
+    def test_activates_pending_services(self, mock_sas, _not_suspended):
         payment = MagicMock()
         payment.invoice.number = "INV-001"
         service = MagicMock()
@@ -2011,8 +2012,9 @@ class TestUpdateCustomerInvoiceHistory(TestCase):
 
 
 class TestActivatePendingServices(TestCase):
+    @patch("apps.customers.lifecycle.is_suspended", return_value=False)  # the customer is not suspended
     @patch("apps.provisioning.services.ServiceActivationService")
-    def test_activates_pending(self, mock_sas):
+    def test_activates_pending(self, mock_sas, _not_suspended):
         invoice = MagicMock()
         service = MagicMock()
         service.status = "pending"

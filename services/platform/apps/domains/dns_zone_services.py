@@ -131,6 +131,18 @@ def _actor_allowed(customer_id: int | str, actor: User | None, *, readonly: bool
     return membership.exists() if readonly else membership.filter(role__in=("owner", "tech")).exists()
 
 
+def publication_held(customer_id: int | str, actor: User | None) -> bool:
+    """A suspended customer's people may read and export DNS, but publish nothing (ADR-0066).
+
+    Staff and internal callers are not held: they act for us, not for the suspended customer.
+    """
+    if actor is None or actor.is_staff_user:
+        return False
+    from apps.customers.lifecycle import is_suspended  # noqa: PLC0415  # ADR-0007
+
+    return is_suspended(customer_id)
+
+
 def _audit(zone: HostedZone, action: str, *, actor: User | None = None, metadata: dict[str, Any] | None = None) -> None:
     from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
 
@@ -512,7 +524,7 @@ def request_crosscheck(
         return Ok(operation)
 
 
-def confirm_import(
+def confirm_import(  # noqa: PLR0911  # One refusal per precondition, suspension included
     zone: HostedZone, expected_revision: int, manifest_digest: str, *, actor: User | None = None
 ) -> Result[HostedZone, str]:
     with transaction.atomic():
@@ -520,6 +532,8 @@ def confirm_import(
         if locked is None:
             return Err("zone_access_denied")
         zone, account, hostname = locked
+        if publication_held(zone.customer_id, actor):
+            return Err("customer_suspended")
         revision = zone.revisions.select_for_update().filter(number=expected_revision, valid=True).first()
         if (
             revision is None

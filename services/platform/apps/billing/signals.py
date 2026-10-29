@@ -1148,8 +1148,13 @@ def _activate_payment_services(payment: Payment) -> None:
                 ]
         if invoice is None:
             return
+        from apps.customers.lifecycle import hold_for_suspension  # ADR-0007: cross-app, deferred
+
         for service in services:
             with best_effort_atomic(logger=logger, scope="Payment Services", message="Failed to activate service"):
+                if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
+                    logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
+                    continue
                 result = ServiceActivationService.activate_service(
                     service=service, activation_reason=f"Payment received for invoice {invoice.number}"
                 )
@@ -1940,8 +1945,13 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 for item in order.items.filter(service__isnull=False)
                 if item.service and item.service.status == "pending" and _payment_may_activate(order, item.service)
             ]
+        from apps.customers.lifecycle import hold_for_suspension  # ADR-0007: cross-app, deferred
+
         for service in services:
             with best_effort_atomic(logger=logger, scope="Invoice Services", message="Failed to activate service"):
+                if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
+                    logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
+                    continue
                 result = ServiceActivationService.activate_service(service)
                 if not result.is_ok():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")

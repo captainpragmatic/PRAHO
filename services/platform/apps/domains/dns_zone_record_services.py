@@ -164,6 +164,8 @@ def request_record_change(
         current = lock_data_zone(zone, actor)
         if current is None:
             return Err("zone_access_denied")
+        if service.publication_held(current.customer_id, actor):
+            return Err("customer_suspended")
         if current.current_revision != expected_revision:
             return Err("stale_import_revision")
         refusal = _editable(current)

@@ -29,7 +29,7 @@ POLL_SECONDS = 300
 POLL_DEADLINE = timedelta(days=7)
 
 
-def request_nameserver_switch(
+def request_nameserver_switch(  # noqa: PLR0911  # One refusal per precondition, suspension included
     zone: HostedZone, expected_revision: int, *, actor: User | None
 ) -> Result[HostedZoneOperation, str]:
     with transaction.atomic():
@@ -37,6 +37,8 @@ def request_nameserver_switch(
         if locked is None:
             return Err("zone_access_denied")
         current, account, hostname = locked
+        if service.publication_held(current.customer_id, actor):
+            return Err("customer_suspended")
         if current.current_revision != expected_revision or not current.can_offer_nameservers():
             return Err("switch_proof_required")
         if service.validate_zone_binding(current, account, hostname).is_err():

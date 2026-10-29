@@ -610,7 +610,15 @@ class PaymentSuccessService:
 
         if service is not None:
             service_update_fields: set[str] = set()
-            if service.status == "suspended" and service.suspension_reason == "payment_overdue":
+            from apps.customers.lifecycle import hold_for_suspension  # noqa: PLC0415  # ADR-0007
+
+            # Paying the overdue cycle restores the service, unless staff suspended the customer
+            # (ADR-0066): the suspension then owns it, and unsuspending resumes it.
+            if (
+                service.status == "suspended"
+                and service.suspension_reason == "payment_overdue"
+                and not hold_for_suspension(service)
+            ):
                 service.activate()
                 service_update_fields.update({"status", "activated_at", "suspended_at", "suspension_reason"})
             if service.expires_at is None or service.expires_at < cycle.period_end:

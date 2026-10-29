@@ -37,6 +37,7 @@ from apps.settings.services import SettingsService
 
 from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 from .customer_models import Customer
+from .lifecycle import CUSTOMER_SUSPENSION_REASON
 from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
 logger = logging.getLogger(__name__)
@@ -1197,9 +1198,6 @@ class CascadeSuspensionError(Exception):
     """
 
 
-CUSTOMER_SUSPENSION_REASON = "customer_suspended"
-
-
 def _activate_customer_services(customer: Customer) -> None:
     """Activate customer services when customer becomes active"""
     from apps.provisioning.models import Service
@@ -1226,11 +1224,22 @@ def _handle_customer_unsuspension(customer: Customer) -> None:
             logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
 
         transaction.on_commit(lambda inst=customer: _resume_cascade_suspended_services(inst))
+        transaction.on_commit(lambda inst=customer: _dispatch_held_order_lines(inst))
 
 
 # A subscription in any of these states is not paid up. Resuming its service would be
 # giving away hosting: the money side has already decided this one should be off.
 DELINQUENT_SUBSCRIPTION_STATES = ("past_due", "paused", "cancelled", "expired")
+
+
+def _dispatch_held_order_lines(customer: Customer) -> None:
+    """Order lines held while the customer was suspended move again (ADR-0066)."""
+    with swallow_application_errors(logger=logger, scope="customers", message="_dispatch_held_order_lines failed"):
+        from apps.orders.hosting_fulfilment import dispatch_held_lines  # ADR-0007: cross-app, deferred
+
+        queued = dispatch_held_lines(customer.pk)
+        if queued:
+            logger.info(f"🔄 [Customer] Queued {queued} held order line(s) for {customer.get_display_name()}")
 
 
 def _resume_cascade_suspended_services(customer: Customer) -> None:
