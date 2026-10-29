@@ -13,6 +13,7 @@ urlpatterns = [
     path("health/", views.health_check, name="health_check"),
     # Secure session validation (OWASP compliant - no ID enumeration)
     path("session/validate/", views.validate_session_secure, name="validate_session_secure"),
+    path("session/end/", views.portal_session_end_api, name="portal_session_end"),
     # Token authentication endpoints for API access
     path("token/", views.obtain_token, name="obtain_token"),
     path("token/revoke/", views.revoke_token, name="revoke_token"),

@@ -13,17 +13,21 @@ import json
 import os
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 
 from apps.common.middleware import PortalServiceHMACMiddleware
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SECRET = "cross-service-signature-secret-0123456789"
 PORTAL_ID = "portal-signature-check"
+# ADR-0017 section 5: the Platform session a bound portal request names.
+SESSION_ID = "0b6f7e9a-3c1d-4e2f-8a5b-6c7d8e9f0a1b"
 
 CONFIGURATIONS = {
     "https-debug-off": {"DEBUG": False, "BASE_URL": "https://platform.example.test/api", "INSECURE": False},
@@ -62,6 +66,7 @@ CALLS = (
     "stripe-config",
     "data-export-request",
     "data-export-download",
+    "bound-session",
     *(f"invoice-{name}" for name in INVOICE_NUMBERS),
     *(f"document-{name}" for name in DOCUMENT_NUMBERS),
 )
@@ -93,6 +98,7 @@ django.setup()
 from django.test import override_settings
 
 from apps.api_client.services import PlatformAPIClient
+from apps.common import request_context
 
 records = []
 current = {}
@@ -119,6 +125,12 @@ def transport(*, method, url, headers, data=None, params=None, **kwargs):
     return response
 
 
+def bound_call(client):
+    # As inside a portal request: the auth middleware has bound the customer's Platform session.
+    with request_context.bound(SESSION_ID, 1):
+        return client.get_user_customers(1)
+
+
 def calls(client):
     yield "localisation", lambda: client.get_localisation_defaults()
     yield "login", lambda: client.authenticate_customer("customer@example.test", "correct-password")
@@ -138,6 +150,7 @@ def calls(client):
     yield "data-export-download", lambda: client.download_data_export(
         1, "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7", ip_address="203.0.113.9"
     )
+    yield "bound-session", lambda: bound_call(client)
     for name, number in INVOICE_NUMBERS.items():
         yield f"invoice-{name}", lambda number=number: client._make_request(
             "GET", f"/billing/invoices/{number}/", user_id=1
@@ -172,7 +185,7 @@ def _record_portal_requests() -> list[dict[str, Any]]:
     environment["PYTHONPATH"] = ""
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     constants = (
-        f"SECRET = {SECRET!r}\nPORTAL_ID = {PORTAL_ID!r}\n"
+        f"SECRET = {SECRET!r}\nPORTAL_ID = {PORTAL_ID!r}\nSESSION_ID = {SESSION_ID!r}\n"
         f"CONFIGURATIONS = {CONFIGURATIONS!r}\nINVOICE_NUMBERS = {INVOICE_NUMBERS!r}\n"
         f"DOCUMENT_NUMBERS = {DOCUMENT_NUMBERS!r}\n"
     )
@@ -204,6 +217,21 @@ class PortalSignatureVerifiesOnPlatformTests(TestCase):  # nonce claims live in 
     def setUpClass(cls) -> None:
         super().setUpClass()
         cls.records = _record_portal_requests()
+
+    def setUp(self) -> None:
+        from apps.users.models import PortalSession, User  # noqa: PLC0415  # Platform models, after setup
+
+        # The user every recorded call names (user_id=1), and the session the bound call names.
+        user = User.objects.create_user(id=1, email="customer@example.test", password="correct-password")
+        now = timezone.now()
+        self.portal_session = PortalSession.objects.create(
+            id=SESSION_ID,
+            user=user,
+            credential_snapshot=user.get_session_auth_hash(),
+            last_seen_at=now,
+            idle_deadline=now + timedelta(hours=1),
+            expires_at=now + timedelta(hours=8),
+        )
 
     def _replay(self, record: dict[str, Any], signature: str | None = None) -> tuple[HttpResponse, list[str]]:
         reached: list[str] = []
@@ -246,6 +274,30 @@ class PortalSignatureVerifiesOnPlatformTests(TestCase):  # nonce claims live in 
                 response, reached = self._replay(record)
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(len(reached), 1)
+
+    def test_a_bound_request_names_its_platform_session(self) -> None:
+        from apps.users import portal_sessions  # noqa: PLC0415
+
+        bound = [record for record in self.records if record["call"] == "bound-session"]
+        self.assertEqual(len(bound), len(CONFIGURATIONS))
+        held_back, replayed = bound[0], bound[1:]  # each nonce is accepted once
+        for record in replayed:
+            with self.subTest(configuration=record["configuration"]):
+                body = json.loads(base64.b64decode(record["body"]))
+                self.assertEqual(body["session_id"], SESSION_ID)
+                response, reached = self._replay(record)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(len(reached), 1)
+        unbound = next(record for record in self.records if record["call"] == "query-params")
+        with override_settings(PORTAL_SESSION_REQUIRED=True):  # as in production and staging
+            response, reached = self._replay(unbound)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(reached, [])
+        portal_sessions.end(self.portal_session, portal_sessions.REASON_LOGOUT)
+        response, reached = self._replay(held_back)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(json.loads(response.content)["active"], False)
+        self.assertEqual(reached, [])
 
     def test_payment_calls_are_signed_for_api_billing(self) -> None:
         # On Platform's hostname, Caddy admits /api/* to any client; /billing/* only to PLATFORM_ALLOWED_CIDRS.

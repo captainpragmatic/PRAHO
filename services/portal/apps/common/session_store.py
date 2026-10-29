@@ -66,7 +66,17 @@ KEY_GROUPS: tuple[frozenset[str], ...] = (
     frozenset(
         {"validated_at", "next_validate_at", "membership_hash", "user_memberships", "user_memberships_fetched_at"}
     ),
-    frozenset({"user_id", "email", "customer_id", "session_auth_hash", "authenticated_at", "session_created_at"}),
+    frozenset(
+        {
+            "user_id",
+            "email",
+            "customer_id",
+            "session_auth_hash",
+            "portal_session_id",
+            "authenticated_at",
+            "session_created_at",
+        }
+    ),
     frozenset({"account_health_data", "account_health_fetched_at"}),
 )
 

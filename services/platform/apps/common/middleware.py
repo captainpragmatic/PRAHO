@@ -696,6 +696,33 @@ class PortalServiceHMACMiddleware:
         response["Retry-After"] = str(retry_after)
         return response
 
+    @staticmethod
+    def _bind_portal_session(request: HttpRequest, client_ip: str) -> HttpResponse | None:
+        """Bind the portal session the verified body names (ADR-0017 section 5); a response refuses.
+
+        Here rather than in the view decorators, so views that read the signed user_id themselves
+        are bound too. A body the views could read differently from this parse is refused first.
+        """
+        try:
+            signed = portal_hmac.parse_signed_body(request.body, request.content_type or "")
+        except portal_hmac.AmbiguousSignedBody as exc:
+            logger.warning("🔥 [HMAC Auth] Ambiguous signed body refused from %s: %s", client_ip, exc)
+            if isinstance(exc, portal_hmac.MalformedSignedUser):
+                # The answer every view gives an unusable signed user (secure_auth's uniform error).
+                response = HttpResponse(
+                    json.dumps({"success": False, "error": "Authentication required"}),
+                    status=401,
+                    content_type="application/json",
+                )
+                response["Cache-Control"] = "no-store"
+                return response
+            return HttpResponse(
+                json.dumps({"error": "Invalid request format"}), status=400, content_type="application/json"
+            )
+        from apps.users.portal_sessions import bind_request  # noqa: PLC0415  # ADR-0007: cross-app, deferred
+
+        return bind_request(request, signed)
+
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only intercept /api/ paths: every portal-facing endpoint lives there, including the
         # payment endpoints at /api/billing/. Staff pages under /billing/ (invoices, proformas,
@@ -758,10 +785,14 @@ class PortalServiceHMACMiddleware:
             # Who the request is for, parsed once from the body the signature just verified.
             request._portal_principal = portal_hmac.portal_principal(request.body)
 
-            # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
-            if rate_limit_enabled and (
-                refusal := self._rate_limit_refusal(request, request._portal_id, client_ip, request._portal_principal)
-            ):
+            # Post-auth rate limiting: keyed by the verified portal_id (not the raw header). Then the
+            # portal session the body names; both refusals answer before any view runs.
+            refusal = (
+                self._rate_limit_refusal(request, request._portal_id, client_ip, request._portal_principal)
+                if rate_limit_enabled
+                else None
+            ) or self._bind_portal_session(request, client_ip)
+            if refusal is not None:
                 return refusal
 
             logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {client_ip}")

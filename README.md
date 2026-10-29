@@ -59,7 +59,7 @@ services/
 │   ├── config/ # Django settings (base, dev, prod, staging, test)
 │   └── tests/  # Mirrors apps/ structure
 │
-└── portal/     # Customer-facing service (:8701) - SQLite sessions only
+└── portal/     # Customer-facing service (:8701) - no business data; SQLite sessions and counters
     ├── apps/   # 9 Django apps (API proxies, no business models)
     └── tests/  # Enforces no business DB access
 
@@ -73,8 +73,8 @@ assets/
 ```
 
 - **Platform** owns all data (PostgreSQL) and business logic
-- **Portal** uses SQLite for session storage only - NO business data access
-- **Portal** is stateless - communicates with Platform via HMAC-signed requests
+- **Portal** holds no business data: its SQLite file has only sessions and counters, never backed up
+- **Portal** reaches all business data through HMAC-signed requests to Platform
 - **No Redis required** - uses Django's database cache
 
 > **Architecture Diagrams**: See [`docs/architecture/`](docs/architecture/) for Mermaid diagrams showing system overview, data flow, and deployment topology.

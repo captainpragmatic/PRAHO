@@ -234,6 +234,7 @@ class LoginSessionPersistenceTests(TestCase):
         with patch("apps.users.views.api_client") as mock_api:
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -273,6 +274,7 @@ class LoginSessionPersistenceTests(TestCase):
         with patch("apps.users.views.api_client") as mock_api:
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -301,6 +303,7 @@ class LoginSessionPersistenceTests(TestCase):
         with patch("apps.users.views.api_client") as mock_api:
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
                 "user_id": 123,
                 "customer_id": 456,
             }

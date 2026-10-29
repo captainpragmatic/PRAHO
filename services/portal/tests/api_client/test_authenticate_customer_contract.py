@@ -58,6 +58,7 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
             "success": True,
             "user": {"id": 7, "customer_id": 3},
             "session_auth_hash": "credential-hash",
+            "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
         }
 
         with patch("apps.api_client.services.portal_request", return_value=response):
@@ -73,6 +74,7 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
                 "customer_id": 3,
                 "customer_data": {"id": 7, "customer_id": 3},
                 "session_auth_hash": "credential-hash",
+                "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",
             },
 
         )

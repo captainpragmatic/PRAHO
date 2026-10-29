@@ -64,11 +64,13 @@ def on_block() -> dict[str, Any]:
     return WORKFLOW[True] if True in WORKFLOW else WORKFLOW["on"]  # YAML 1.1 reads the key `on` as True
 
 
-def test_pull_requests_run_the_lab_when_a_change_can_break_it() -> None:
+def test_the_queue_runs_the_lab_when_a_change_can_break_it() -> None:
     # `pull-request` is a required check: a workflow skipped by a paths filter never reports, so the
-    # selection lives in a job, and the job it gates reports success when skipped.
+    # selection lives in a job, and the job it gates reports success when skipped. It reports on every
+    # pull request and runs in the merge queue (ADR-0036).
     pr_on = PR_WORKFLOW[True] if True in PR_WORKFLOW else PR_WORKFLOW["on"]
-    assert list(pr_on) == ["pull_request"] and "paths" not in pr_on["pull_request"]
+    assert list(pr_on) == ["pull_request", "merge_group"]
+    assert all("paths" not in (pr_on[event] or {}) for event in pr_on)
     assert "pull_request" not in on_block(), "the nightly workflow must not also hold a job named pull-request"
     jobs = PR_WORKFLOW["jobs"]
     # The base branch's rules decide, renames count as both paths, and an unreadable diff runs the lab.

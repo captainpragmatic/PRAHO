@@ -10,7 +10,7 @@
 
 ## Context
 
-PRAHO uses a two-service architecture: Platform (`:8700`, PostgreSQL, full business logic) and Portal (`:8701`, stateless, no database). These services need to authenticate requests to each other across two distinct communication patterns:
+PRAHO uses a two-service architecture: Platform (`:8700`, PostgreSQL, full business logic) and Portal (`:8701`, no business data; its local SQLite file holds only sessions and counters, ADR-0017 and ADR-0050). These services need to authenticate requests to each other across two distinct communication patterns:
 
 1. **Portal calls Platform** — every customer action on Portal (viewing invoices, managing domains, checking tickets) requires a signed API call to Platform to fetch or mutate data.
 2. **Platform pushes to Portal** — after processing a Stripe payment webhook, Platform notifies Portal that a payment succeeded so the customer's session can reflect the updated order status.
@@ -86,7 +86,7 @@ Platform signs outbound payment notification webhooks to Portal using a simpler 
 JWTs are widely used for service-to-service auth and would eliminate the need for shared secrets by using asymmetric keys (RS256/ES256).
 
 **Rejected because:**
-- Portal is stateless with no database — there is no local store for a JWKS cache or token blacklist
+- When this was decided Portal had no database, so there was no local store for a JWKS cache or token blacklist. Portal now has one for sessions and counters (ADR-0050), so this reason has lapsed; the reasons below still hold
 - JWT revocation requires infrastructure (blacklist store, short expiry + refresh tokens) that adds complexity without clear benefit for a two-service system where both services are under the same operator
 - JWTs are typically larger than HMAC signatures, adding overhead to every Portal-to-Platform request (hundreds per page load)
 - The canonical string scheme provides request-level integrity (method, path, body hash are all signed), which JWT does not inherently offer — a JWT proves identity but not that the request body is untampered
@@ -106,7 +106,7 @@ Each service presents a client certificate; the other verifies it against a trus
 Use one HMAC scheme and one shared secret for both directions.
 
 **Rejected because:**
-- **Different infrastructure constraints** (when this was decided): System 1 runs on Platform with a store shared across workers, enabling reliable cross-worker nonce dedup (today the counter table). System 2 ran on Portal with only LocMemCache (per-process, no cross-worker visibility); Portal has since gained its own counter table (ADR-0050). A unified nonce dedup strategy would either require adding shared cache infrastructure to Portal (violating its stateless design) or downgrading Platform's replay protection.
+- **Different infrastructure constraints** (when this was decided): System 1 runs on Platform with a store shared across workers, enabling reliable cross-worker nonce dedup (today the counter table). System 2 ran on Portal with only LocMemCache (per-process, no cross-worker visibility); Portal has since gained its own counter table (ADR-0050). At the time, a unified nonce dedup strategy would have required adding shared infrastructure to Portal, which then had none, or downgrading Platform's replay protection.
 - **Different threat models**: System 1 faces external-facing risk (Portal is internet-exposed, an attacker who compromises Portal could forge requests to Platform). System 2 is internal-only (Platform calls Portal on a private network). Secret isolation ensures compromise of one direction does not compromise the other.
 - **Different signing needs**: System 1 signs 7 fields (method, path, query, content-type, body hash, portal ID, nonce, timestamp) because Portal makes diverse API calls. System 2 signs only `timestamp.body` because it has a single fixed endpoint with a predictable payload shape.
 - **Operational rotation**: Separate secrets can be rotated independently. Rotating the Platform-to-Portal webhook secret does not require restarting Portal's API client or vice versa.
@@ -199,7 +199,7 @@ The portal mounts the orders app at `order/`, so the endpoint is `POST /order/pa
 ### Positive
 
 - Clear separation of trust boundaries — compromise of one secret does not affect the other direction
-- Portal remains fully stateless — no shared cache or database required for webhook verification
+- Portal holds no business data; webhook verification needs only its counter table for replay claims (ADR-0050)
 - Request-level integrity on System 1 — every field that affects request routing or processing is signed
 - Both systems fail secure — missing secrets, expired timestamps, and invalid formats all result in rejection
 - Independent rotation — each secret can be changed without affecting the other

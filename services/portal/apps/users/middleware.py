@@ -15,7 +15,7 @@ from typing import Any, ClassVar, cast
 from django.conf import settings
 from django.core.cache import cache
 from django.db import Error as DatabaseError
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
@@ -27,9 +27,9 @@ from apps.api_client.services import (
     platform_call_budget_seconds,
     platform_call_timeout_seconds,
 )
-from apps.common import counters
+from apps.common import counters, request_context
 from apps.common.localisation_services import store_localisation_preferences
-from apps.common.store_unavailable import end_session_or_unavailable
+from apps.common.store_unavailable import end_session_or_unavailable, wants_json
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,26 @@ class PortalAuthenticationMiddleware:
     def __init__(self, get_response: Any) -> None:
         self.get_response = get_response
 
-    def __call__(self, request: HttpRequest) -> HttpResponse:  # noqa: C901
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # ADR-0017 section 5: bind the Platform session for the whole request, public routes
+        # included, so every signed call made for this customer names it.
+        with request_context.bound(request.session.get("portal_session_id"), request.session.get("user_id")):
+            response = self._authenticate(request)
+            if request_context.rejected():
+                # Platform ended the session during the view; the view may have caught the error.
+                logger.warning("🚨 [Auth] Platform ended the portal session during %s", request.path)
+                return self._end_session(request)
+        return response
+
+    def _end_session(self, request: HttpRequest) -> HttpResponse:
+        unavailable_response = end_session_or_unavailable(request)
+        if unavailable_response is not None:
+            return unavailable_response
+        if wants_json(request):
+            return JsonResponse({"error": "Session ended", "redirect": "/login/"}, status=401)
+        return self.redirect_to_login(request)
+
+    def _authenticate(self, request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912 -- one branch per session tier
         # Ensure CSRF cookie is available on responses (including redirects).
         get_token(request)
 
@@ -123,6 +142,11 @@ class PortalAuthenticationMiddleware:
         if not session_user_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
             return self.redirect_to_login(request)
+
+        # A session from before Platform owned sessions names none: it ends once, at its next request.
+        if getattr(settings, "PORTAL_SESSION_ID_REQUIRED", True) and not request.session.get("portal_session_id"):
+            logger.info("🔒 [Auth] Session of user %s has no Platform session, ending it", session_user_id)
+            return self._end_session(request)
 
         # Check if session has exceeded its intended lifetime
         if not self._is_session_age_valid(request):
@@ -156,7 +180,8 @@ class PortalAuthenticationMiddleware:
         # Fallback: resolve active customer context for this user (first accessible)
         elif user_id_int:
             try:
-                customers = api_client.get_user_customers(user_id_int)
+                with request_context.background():
+                    customers = api_client.get_user_customers(user_id_int)
                 if customers:
                     active_customer_id = customers[0].get("id")
                     request.session["active_customer_id"] = active_customer_id
@@ -324,9 +349,10 @@ class PortalAuthenticationMiddleware:
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
-            validation_response = api_client.validate_session_secure(
-                user_id, session_auth_hash=request.session.get("session_auth_hash")
-            )
+            with request_context.background():  # revalidation is not the customer's activity
+                validation_response = api_client.validate_session_secure(
+                    user_id, session_auth_hash=request.session.get("session_auth_hash")
+                )
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:

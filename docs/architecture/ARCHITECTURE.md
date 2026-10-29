@@ -70,6 +70,9 @@ See [ADR-0050](../ADRs/ADR-0050-portal-infrastructure-tables.md) and
 Customer credentials are checked by Platform. Portal validates browser form input, forwards credentials to
 `/api/users/login/`, then stores the returned identity, membership and session-authentication information in
 its own server-side session. The Portal session cookie is `portal_session`.
+Platform owns the session itself: login opens a `PortalSession` row and returns its `session_id`, which
+Portal signs into every signed-in request, and Platform refuses a request whose session has ended, gone idle
+or expired. See [ADR-0017](../ADRs/ADR-0017-portal-auth-fail-open-strategy.md).
 
 Portal-to-Platform business API requests carry `X-Portal-Id`, `X-Nonce`, `X-Timestamp`, `X-Body-Hash` and `X-Signature`.
 The HMAC-SHA256 canonical string binds the method, normalized path/query, content type, body hash, portal ID,

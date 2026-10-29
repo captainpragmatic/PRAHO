@@ -50,7 +50,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0014](ADR-0014-no-test-suppression-policy.md) | No Test Suppression Policy | Accepted | 2026-02-11 |
 | [ADR-0015](ADR-0015-configuration-resolution-order.md) | Configuration Resolution Order (CRO) | Accepted | 2026-02-12 |
 | [ADR-0016](ADR-0016-audit-trail-enforcement.md) | Audit Trail Enforcement | Accepted | 2026-02-15 |
-| [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) | Portal Authentication Fail-Open Strategy | Accepted | 2026-02-28 |
+| [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) | Portal Sessions and Authentication Fail-Open | Accepted (revised 2026-10-28) | 2026-02-28 |
 | [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) | VirtualMin Automatic Provisioning System | Accepted | 2025-09-04 |
 | [ADR-0020](ADR-0020-async-task-processing-architecture.md) | Async Task Processing Architecture | Accepted | 2025-09-02 |
 | [ADR-0021](ADR-0021-email-enumeration-prevention.md) | Email Enumeration Prevention | Implemented | 2025-01-08 |
@@ -176,7 +176,7 @@ Billing Ownership
 ### 🔒 Security & Authentication
 - [ADR-0004](ADR-0004-custom-2fa-implementation.md) — Custom TOTP 2FA
 - [ADR-0006](ADR-0006-security-warning-configuration.md) — Security warning config
-- [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) — Portal fail-open auth
+- [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) — Portal sessions: no business data on the portal, credential binding, fail-open, and the NIST/OWASP session policy
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management (superseded by ADR-0033)
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) — Encryption architecture consolidation
 - [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) — Exact row binding and fail-loud encrypted JSON reads

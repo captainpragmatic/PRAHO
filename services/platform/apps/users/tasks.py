@@ -175,6 +175,15 @@ def reconcile_session_index() -> dict[str, int]:
     return {"indexed": indexed, "pruned": pruned}
 
 
+def sweep_portal_sessions() -> dict[str, Any]:
+    """Delete portal session rows a day past their end (ADR-0017 section 5)."""
+    from . import portal_sessions  # noqa: PLC0415  # Keeps the task module's import graph flat
+
+    deleted = portal_sessions.sweep_expired()
+    logger.info("✅ [PortalSessions] Swept %s ended portal sessions", deleted)
+    return {"deleted": deleted}
+
+
 def cleanup_expired_2fa_sessions() -> dict[str, Any]:
     """
     Remove expired 2FA challenge sessions and abandoned authentication attempts.
@@ -656,7 +665,7 @@ def cleanup_expired_password_reset_tokens_async() -> str:
 # ===============================================================================
 
 
-def setup_user_security_scheduled_tasks() -> dict[str, str]:
+def setup_user_security_scheduled_tasks() -> dict[str, str]:  # noqa: PLR0912  # one branch per schedule
     """Set up all user security scheduled tasks."""
     from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         Schedule as ScheduleModel,  # Deferred: django-q task  # Deferred: avoids circular import
@@ -674,6 +683,7 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
                 "user-password-reset-cleanup",
                 "user-api-token-purge",
                 "user-pending-registration-cleanup",
+                "user-portal-session-sweep",
             ]
         ).values_list("name", flat=True)
     )
@@ -758,6 +768,18 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
         tasks_created["pending_registration_cleanup"] = "created"
     else:
         tasks_created["pending_registration_cleanup"] = "already_exists"
+
+    # Ended portal sessions, hourly: liveness is checked on every request, this only trims rows.
+    if "user-portal-session-sweep" not in existing_tasks:
+        schedule(
+            "apps.users.tasks.sweep_portal_sessions",
+            schedule_type=Schedule.HOURLY,
+            name="user-portal-session-sweep",
+            cluster="praho-cluster",
+        )
+        tasks_created["portal_session_sweep"] = "created"
+    else:
+        tasks_created["portal_session_sweep"] = "already_exists"
 
     logger.info(f"✅ [UserSecurity] Scheduled tasks setup: {tasks_created}")
     return tasks_created

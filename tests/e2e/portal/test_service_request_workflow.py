@@ -63,22 +63,37 @@ def monitored_staff_page(
         context.close()
 
 
-def _customer_api_data(
-    page: Page, owner: dict[str, Any], path: str, filters: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Read the real customer API through its HMAC authentication boundary."""
-    assert settings.E2E_FIXTURES_ENABLED, "This workflow must use the isolated E2E stack"
+def _signed_post(page: Page, path: str, payload: dict[str, Any]) -> Any:
     timestamp = str(int(time.time()))
-    body = json.dumps(
-        {"customer_id": owner["id"], "user_id": owner["user_id"], "timestamp": int(timestamp)}
-        | (filters or {})
-    ).encode()
+    body = json.dumps({"timestamp": int(timestamp)} | payload).encode()
     signed = hmac_headers(
         "POST", path, body, portal_id="portal-001", timestamp=timestamp, secret=settings.PLATFORM_API_SECRET
     )
     headers = {key.removeprefix("HTTP_").replace("_", "-"): value for key, value in signed.items()}
     headers["Content-Type"] = "application/json"
-    response = page.request.post(f"{PLATFORM_BASE_URL}{path}", data=body, headers=headers)
+    return page.request.post(f"{PLATFORM_BASE_URL}{path}", data=body, headers=headers)
+
+
+def _platform_session(page: Page, owner: dict[str, Any]) -> str:
+    """The owner's own Platform session, opened as the portal opens one at login (ADR-0017 section 5)."""
+    if "platform_session_id" not in owner:
+        response = _signed_post(page, "/api/users/login/", {"email": owner["email"], "password": owner["password"]})
+        assert response.status == 200, f"Platform login returned {response.status}: {response.text()}"
+        owner["platform_session_id"] = response.json()["session_id"]
+    return str(owner["platform_session_id"])
+
+
+def _customer_api_data(
+    page: Page, owner: dict[str, Any], path: str, filters: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Read the real customer API through its HMAC authentication boundary."""
+    assert settings.E2E_FIXTURES_ENABLED, "This workflow must use the isolated E2E stack"
+    response = _signed_post(
+        page,
+        path,
+        {"customer_id": owner["id"], "user_id": owner["user_id"], "session_id": _platform_session(page, owner)}
+        | (filters or {}),
+    )
     assert response.status == 200, f"Customer ticket API returned {response.status}: {response.text()}"
     payload = response.json()
     assert payload["success"] is True

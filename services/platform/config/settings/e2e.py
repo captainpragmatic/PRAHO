@@ -64,3 +64,7 @@ if "django.middleware.csrf.CsrfViewMiddleware" not in MIDDLEWARE:
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 configure_rate_limiting(globals(), enabled=False)
 REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}
+
+# ADR-0017 section 5: run the browser suite as staging runs, so a portal path that forgets its
+# session id fails here rather than there.
+PORTAL_SESSION_REQUIRED = True

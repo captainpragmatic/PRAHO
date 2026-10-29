@@ -44,7 +44,12 @@ class LoginDropsSignedOutFlowStateTests(TestCase):
 
     def _sign_in(self) -> None:
         with patch("apps.users.views.api_client") as platform:
-            platform.authenticate_customer.return_value = {"valid": True, "user_id": 123, "customer_id": 456}
+            platform.authenticate_customer.return_value = {
+                "valid": True,
+                "user_id": 123,
+                "customer_id": 456,
+                "session_id": str(uuid4()),  # Platform opens the session (ADR-0017 section 5)
+            }
             platform.post.return_value = {"success": True, "results": [{"id": 456, "name": "Acme", "role": "owner"}]}
             platform.get_customer_profile.return_value = {"first_name": "Ana"}
             response = self.client.post(reverse("users:login"), {"email": "ana@example.ro", "password": "pass123"})
