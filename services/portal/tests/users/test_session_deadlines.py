@@ -37,6 +37,8 @@ class FromPlatformTests(SimpleTestCase):
         cases = {
             "an unknown tier": _answer(tier="forever"),
             "no tier": _answer(tier=None),
+            "a list for a tier": _answer(tier=["standard"]),
+            "a dict for a tier": _answer(tier={"standard": True}),
             "a naive time": _answer(expires=(NOW + timedelta(days=1)).replace(tzinfo=None).isoformat()),
             "not a time": _answer(idle="tomorrow"),
             "a number": _answer(expires=1700000000),
@@ -59,3 +61,4 @@ class FromPlatformTests(SimpleTestCase):
         session_deadlines.store(session, deadlines)
         self.assertEqual(session_deadlines.stored(session), deadlines)
         self.assertIsNone(session_deadlines.stored({}))
+        self.assertIsNone(session_deadlines.stored({**session, "session_tier": ["standard"]}))

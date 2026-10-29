@@ -217,12 +217,16 @@ class PlatformDeadlineTests(TestCase):
         self.assertEqual(counters.peek("auth:fail_open:7"), 0)  # the breaker was never consulted
 
     def test_an_answer_without_usable_deadlines_keeps_the_stored_ones(self) -> None:
-        client = self.signed_in(idle_in=-timedelta(seconds=1))
-        stored = client.session["session_idle_deadline"]
-        self.answer = {"active": True, "session_tier": "standard", "session_idle_deadline": "soon"}
-        self.assert_continues(client.get(PATH))
-        self.assertEqual(client.session["session_idle_deadline"], stored)  # never extended on its own
-        self.assertEqual(len(self.validations), 1)
+        unusable = {"a word": "soon", "a list": ["standard"], "a dict": {"tier": "standard"}}
+        for name, value in unusable.items():
+            with self.subTest(value=name):
+                self.validations.clear()
+                client = self.signed_in(idle_in=-timedelta(seconds=1))
+                stored = client.session["session_idle_deadline"]
+                self.answer = {"active": True, "session_tier": value, "session_idle_deadline": value}
+                self.assert_continues(client.get(PATH))  # Platform said the session lives
+                self.assertEqual(client.session["session_idle_deadline"], stored)  # never extended on its own
+                self.assertEqual(len(self.validations), 1)
 
     # ---- the hard grace -----------------------------------------------------------------------
 

@@ -46,12 +46,16 @@ def _aware(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
 
 
+def _known(tier: object) -> bool:
+    return isinstance(tier, str) and tier in KNOWN_TIERS  # a list or dict would not even hash
+
+
 def from_platform(payload: Mapping[str, Any], now: datetime) -> SessionDeadlines | None:
     """The deadlines in a login or validation answer, or None when they cannot be Platform's."""
     tier = payload.get(TIER_KEY)
     expires_at = _aware(payload.get(EXPIRES_KEY))
     idle_deadline = _aware(payload.get(IDLE_KEY))
-    if tier not in KNOWN_TIERS or expires_at is None or idle_deadline is None:
+    if not _known(tier) or expires_at is None or idle_deadline is None:
         return None
     if not now < idle_deadline <= expires_at <= now + LONGEST_SESSION + CLOCK_ALLOWANCE:
         return None
@@ -69,6 +73,6 @@ def stored(session: Any) -> SessionDeadlines | None:
     tier = session.get(TIER_KEY)
     expires_at = _aware(session.get(EXPIRES_KEY))
     idle_deadline = _aware(session.get(IDLE_KEY))
-    if tier not in KNOWN_TIERS or expires_at is None or idle_deadline is None:
+    if not _known(tier) or expires_at is None or idle_deadline is None:
         return None
     return SessionDeadlines(str(tier), expires_at, idle_deadline)

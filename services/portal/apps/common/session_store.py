@@ -284,16 +284,15 @@ class SessionStore(db.SessionStore):
     # ---- expiry --------------------------------------------------------------------------------
 
     def get_expiry_date(self, **kwargs: Any) -> datetime:
-        """A cookie that ends with the browser still has a stored row that ends at Platform's end.
+        """The stored row never outlives Platform's end for the session, whatever expiry it carries.
 
-        Django gives such a row the default cookie age (two weeks), so a credential-bearing row would
-        outlive its session by weeks. A remembered session's expiry is Platform's end already.
+        A cookie that ends with the browser would give the row Django's default cookie age (two
+        weeks), and any other expiry could reach past Platform's end on a later save: a
+        credential-bearing row would then outlive its session.
         """
-        expiry = kwargs["expiry"] if "expiry" in kwargs else self.get("_session_expiry")
-        if not expiry and (end := _aware_time(self.get(PLATFORM_END_KEY))) is not None:
-            return end
         expiry_date: datetime = super().get_expiry_date(**kwargs)
-        return expiry_date
+        end = _aware_time(self.get(PLATFORM_END_KEY))
+        return expiry_date if end is None else min(expiry_date, end)
 
     # ---- writing -------------------------------------------------------------------------------
 

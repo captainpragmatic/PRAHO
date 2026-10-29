@@ -90,3 +90,15 @@ class LoginSessionTierTests(TestCase):
                 later["selected_customer_id"] = 456
                 later.save()
                 self.assertEqual(Session.objects.get(session_key=cookie.value).expire_date, end)
+
+    def test_a_row_never_outlives_platform_s_end_whatever_expiry_the_session_carries(self) -> None:
+        end = timezone.now() + timedelta(hours=1)
+        store = SessionStore()
+        store.update({"user_id": 7, "session_tier": "standard", "session_expires_at": end.isoformat()})
+        store.set_expiry(30 * 24 * 60 * 60)  # what a login before the tiers set: a 30-day cookie age
+        store.save()
+        self.assertEqual(Session.objects.get(session_key=store.session_key).expire_date, end)
+        later = SessionStore(store.session_key)
+        later["selected_customer_id"] = 456
+        later.save()
+        self.assertEqual(Session.objects.get(session_key=store.session_key).expire_date, end)
