@@ -120,17 +120,32 @@ def _page(key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def server(server_id: int, name: str, labels: dict[str, str]) -> dict[str, Any]:
+    """The fields of a GET /v1/servers entry that a label lookup reads."""
+    return {"id": server_id, "name": name, "status": "running", "labels": dict(labels)}
+
+
+def _selectors(server_payload: dict[str, Any]) -> set[str]:
+    return {f"{key}={value}" for key, value in server_payload["labels"].items()}
+
+
 class RecordedHcloudTransport:
-    """Stands in for hcloud's ClientBase.request: answers the two catalogue listings, and server
-    lookups with not_found.
+    """Stands in for hcloud's ClientBase.request: answers the two catalogue listings, server
+    listings by label, and lookups by id with not_found.
 
     Any other request (a lazy BoundLocation reload, or any write) fails the test, so code under
     test can be proven to read only what the listings carry and to write nothing.
     """
 
-    def __init__(self, server_types: list[dict[str, Any]], locations: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        server_types: list[dict[str, Any]],
+        locations: list[dict[str, Any]] | None = None,
+        servers: list[dict[str, Any]] | None = None,
+    ) -> None:
         self._server_types = server_types
         self._locations = ALL_LOCATIONS if locations is None else locations
+        self._servers = servers or []
         self.requests: list[tuple[str, dict[str, Any]]] = []
 
     def __call__(self, url: str, method: str, **kwargs: Any) -> dict[str, Any]:
@@ -143,7 +158,10 @@ class RecordedHcloudTransport:
             )
         if method == "GET" and url == "/locations":
             return _page("locations", self._locations)
+        if method == "GET" and url == "/servers":
+            selector = params.get("label_selector", "")
+            return _page("servers", [sv for sv in self._servers if selector in _selectors(sv)])
         if method == "GET" and url.startswith("/servers/"):
-            # The recorded project holds no servers: a stored server id is stale.
+            # Servers are found only by label: a stored server id is stale.
             raise APIException(code="not_found", message="server not found", details=None)
         raise AssertionError(f"unexpected hcloud request: {method} {url}")

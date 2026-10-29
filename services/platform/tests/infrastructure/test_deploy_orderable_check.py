@@ -13,7 +13,7 @@ from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import CloudProvider, NodeDeployment, PanelType
 from apps.infrastructure.ssh_key_manager import SSHKeyPair
 from tests.helpers.node_catalogue import make_region, make_size
-from tests.helpers.recorded_hcloud import CPX11, CX23, RecordedHcloudTransport
+from tests.helpers.recorded_hcloud import CPX11, CX23, RecordedHcloudTransport, server
 
 CREDENTIALS = {"api_token": "fixture-token"}
 _DNS_OK = Ok(("dns-token", "zone-id"))
@@ -78,9 +78,40 @@ class OrderableCheckTests(TestCase):
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "pending")
         self.service._ssh_manager.generate_deployment_key.assert_not_called()
-        self.assertEqual(self.transport.requests, [("/server_types", {"name": "cpx11"})])
+        label = f"praho-deployment={deployment.correlation_id}"
+        self.assertEqual(
+            [(url, params.get("name") or params.get("label_selector")) for url, params in self.transport.requests],
+            [("/server_types", "cpx11"), ("/servers", label)],
+        )
         self.assertEqual(self.gateway_kwargs, [{"timeout": 10, "max_retries": 1}])
         self.queue_sync.assert_called_once_with()
+
+    def test_withdrawn_size_with_a_server_already_created_goes_on_to_adopt_it(self) -> None:
+        # The worker died after Hetzner created the server and before its id was stored.
+        deployment = self.deployment(self.cpx11)
+        self.transport = RecordedHcloudTransport(
+            [CPX11], servers=[server(77, deployment.hostname, {"praho-deployment": str(deployment.correlation_id)})]
+        )
+        result = self.service.deploy_node(deployment, CREDENTIALS)
+        self.assertEqual(result.unwrap_err(), "dns not needed here")  # Past the check, into the claimed pipeline.
+        self.assertEqual(self.urls(), ["/server_types", "/servers"])
+        self.queue_sync.assert_not_called()
+
+    def test_withdrawn_size_is_refused_when_the_server_lookup_fails(self) -> None:
+        deployment = self.deployment(self.cpx11)
+        recorded = RecordedHcloudTransport([CPX11])
+
+        def lookup_fails(url: str, method: str, **kwargs: Any) -> dict[str, Any]:
+            if url == "/servers":
+                raise ConnectionError("read timed out")
+            return recorded(url, method, **kwargs)
+
+        self.transport = MagicMock(side_effect=lookup_fails)
+        result = self.service.deploy_node(deployment, CREDENTIALS)
+        self.assertIn("cpx11", result.unwrap_err())
+        self.assertIn("read timed out", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "pending")
 
     def test_provider_error_fails_without_a_verdict_or_sync(self) -> None:
         self.transport = MagicMock(side_effect=ConnectionError("read timed out"))
@@ -113,7 +144,8 @@ class OrderableCheckTests(TestCase):
         result = self.service.deploy_node(deployment, CREDENTIALS)
         self.assertTrue(result.is_err())
         self.assertIn("cpx11", result.unwrap_err())
-        self.assertEqual(self.urls(), ["/servers/4242", "/server_types"])  # No key, firewall or server written.
+        # No key, firewall or server written.
+        self.assertEqual(self.urls(), ["/servers/4242", "/server_types", "/servers"])
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "failed")
         self.assertEqual(deployment.external_node_id, "")

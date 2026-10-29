@@ -175,14 +175,29 @@ class NodeDeploymentService:
                 f"Could not confirm that {server_type} can be ordered in {location}; "
                 f"no server was created: {orderable.unwrap_err()}",
             )
-        if orderable.unwrap() is False:
-            self._queue_catalogue_sync(deployment)
+        if orderable.unwrap() is not False:
+            return Ok(True)
+        # A server created before a crash, whose id was never stored, is adopted by create_server
+        # through its deployment label. Refusing here would strand it.
+        existing = gateway.find_deployment_server(str(deployment.correlation_id))
+        if existing.is_err():
             return self._refuse_unorderable(
                 deployment,
-                f"{server_type} can no longer be ordered in {location}; no server was created. "
-                "Choose another size; a provider sync has been queued to refresh the catalogue.",
+                f"{server_type} can no longer be ordered in {location}, and the check for a server already "
+                f"created for this deployment failed; no server was created: {existing.unwrap_err()}",
             )
-        return Ok(True)
+        if existing.unwrap():
+            logger.info(
+                f"✅ [Deployment:{deployment.hostname}] Server {existing.unwrap()} already exists for this "
+                f"deployment; it is adopted although {server_type} is no longer sold in {location}"
+            )
+            return Ok(True)
+        self._queue_catalogue_sync(deployment)
+        return self._refuse_unorderable(
+            deployment,
+            f"{server_type} can no longer be ordered in {location}; no server was created. "
+            "Choose another size; a provider sync has been queued to refresh the catalogue.",
+        )
 
     @staticmethod
     def _refuse_unorderable(deployment: NodeDeployment, message: str) -> Result[bool, str]:

@@ -383,6 +383,14 @@ class HcloudService(CloudProviderGateway):
             return Ok(False)
         return Ok(location in _usable_locations(st))
 
+    def find_deployment_server(self, deployment_label: str) -> Result[str | None, str]:
+        """The id of the server create_server would adopt for this deployment, if one exists."""
+        try:
+            servers = self.client.servers.get_all(label_selector=f"praho-deployment={deployment_label}")
+        except Exception as e:
+            return Err(f"Failed to look up servers for deployment {deployment_label}: {e}")
+        return Ok(str(servers[0].id) if servers else None)
+
     @staticmethod
     def _extract_monthly_price(prices: Any) -> float:
         """Extract EUR monthly price from hcloud prices list. Prefers fsn1 location."""

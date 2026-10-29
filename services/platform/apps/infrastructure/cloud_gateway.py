@@ -185,6 +185,14 @@ class CloudProviderGateway(ABC):
         """
         return Ok(None)
 
+    def find_deployment_server(self, deployment_label: str) -> Result[str | None, str]:
+        """The id of a server labelled ``praho-deployment=<deployment_label>``, or None if there is none.
+
+        Finds a server whose creation succeeded but whose id was never stored. Providers that
+        cannot search by label report None.
+        """
+        return Ok(None)
+
     @abstractmethod
     def create_snapshot(self, server_id: str, name: str) -> Result[str, str]:
         """Create a server snapshot. Returns provider snapshot ID."""
