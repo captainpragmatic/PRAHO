@@ -71,3 +71,27 @@ class IdentityCheckFieldsTests(SimpleTestCase):
         self.assertIn(b"boom", sent)  # the report itself was sent
         self.assertNotIn(CODE.encode(), sent)
         self.assertNotIn(SESSION.encode(), sent)
+
+    def test_a_cycle_through_a_tuple_does_not_stop_the_scrubbing_after_it(self) -> None:
+        from sentry_sdk import Client  # noqa: PLC0415
+        from sentry_sdk.transport import Transport  # noqa: PLC0415
+
+        class Captured(Transport):
+            def __init__(self) -> None:
+                super().__init__()
+                self.envelopes: list[Any] = []
+
+            def capture_envelope(self, envelope: Any) -> None:
+                self.envelopes.append(envelope)
+
+        transport = Captured()
+        client = Client(**sentry_options("https://key@sentry.example.test/1", release="1.0"), transport=transport)
+        holder: dict[str, Any] = {}
+        loop = (holder,)
+        holder["back"] = loop  # tuple -> dict -> the same tuple
+        deep = ({"a": {"b": {"c": {"mfa_code": CODE, "session_id": SESSION}}}},)
+        client.capture_event({"message": "boom", "extra": {"a_cycle": loop, "z_payload": deep}})
+        sent = b"".join(item.get_bytes() for envelope in transport.envelopes for item in envelope.items)
+        self.assertIn(b"boom", sent)
+        self.assertNotIn(CODE.encode(), sent)
+        self.assertNotIn(SESSION.encode(), sent)

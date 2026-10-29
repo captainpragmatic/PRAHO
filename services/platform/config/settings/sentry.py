@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any, TypedDict
 
 from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
+from sentry_sdk.utils import AnnotatedValue
 
 from apps.common.secret_urls import scrub_sentry_event
 
@@ -52,19 +53,35 @@ def _drop_secret_fields(value: Any, path: frozenset[int] = frozenset(), depth: i
 
 
 class _TupleScrubber(EventScrubber):
-    """Sentry's scrubber, walking tuples as well as lists.
+    """Sentry's scrubber, walking tuples as well as dicts and lists, without recursion.
 
     It runs before Sentry serialises the event, which turns anything nested past its depth limit
-    into text that no later callback can scrub; a dict inside a tuple must be scrubbed here.
+    into text that no later callback can scrub, so a dict inside a tuple must be scrubbed here.
+    The walk keeps its own stack and the containers it has seen: a cycle, through a tuple or not,
+    and any depth, never stop it before the fields after them are scrubbed.
     """
 
+    def scrub_dict(self, d: object) -> None:
+        self._walk(d)
+
     def scrub_list(self, lst: object) -> None:
-        if not isinstance(lst, tuple):
-            super().scrub_list(lst)
-            return
-        for value in lst:
-            self.scrub_dict(value)
-            self.scrub_list(value)
+        self._walk(lst)
+
+    def _walk(self, root: object) -> None:
+        stack, seen = [root], set()
+        while stack:
+            value = stack.pop()
+            if not isinstance(value, (dict, list, tuple)) or id(value) in seen:
+                continue
+            seen.add(id(value))
+            if not isinstance(value, dict):
+                stack.extend(value)
+                continue
+            for key, item in value.items():
+                if isinstance(key, str) and key.lower() in self.denylist:
+                    value[key] = AnnotatedValue.substituted_because_contains_sensitive_data()
+                elif self.recursive:
+                    stack.append(item)
 
 
 def _before_send(event: Any, hint: Any) -> Any:
