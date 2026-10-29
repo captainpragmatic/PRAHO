@@ -181,6 +181,18 @@ class ReauthTests(HMACTestMixin, TestCase):
         self.assertEqual(self._failures(), 0)
         self.assertFalse(AuditEvent.objects.filter(action="step_up_failed").exists())
 
+    def test_an_account_deleted_before_the_lock_ends_the_session_not_the_server(self) -> None:
+        lock = User.objects.select_for_update
+
+        def delete_then_lock(*args: Any, **kwargs: Any) -> Any:
+            User.objects.filter(pk=self.user.pk).delete()  # after authentication read it, before this lock
+            return lock(*args, **kwargs)
+
+        with patch.object(User.objects, "select_for_update", side_effect=delete_then_lock):
+            response = self._confirm(password=PASSWORD)
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["active"])
+
     def test_a_window_that_cannot_be_recorded_undoes_the_spent_code(self) -> None:
         self._enrol()
         code = self.backup_codes[0]

@@ -924,7 +924,9 @@ def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # 
         with transaction.atomic():
             # NO KEY UPDATE: a concurrent end() holds the session row while its audit insert takes a
             # key-share lock on this user; a plain FOR UPDATE here would make the two deadlock.
-            locked = User.objects.select_for_update(no_key=True).get(pk=user.pk)
+            locked = User.objects.select_for_update(no_key=True).filter(pk=user.pk).first()
+            if locked is None:  # the account was deleted after authentication read it
+                raise _SessionGone
             session = PortalSession.objects.select_for_update().filter(pk=row.pk).first()
             if session is None or not portal_sessions.still_live(session, locked):
                 raise _SessionGone
