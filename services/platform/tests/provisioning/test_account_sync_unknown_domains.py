@@ -14,7 +14,6 @@ from unittest.mock import patch
 from django.http import HttpResponse
 from django.urls import reverse
 
-from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_models import VirtualminAccount
@@ -90,17 +89,17 @@ class StaleSaveSyncTests(VirtualminViewsFixture):
     def test_a_change_made_during_the_remote_call_survives_the_sync(self) -> None:
         self.payload["data"] = [listing_row(self.account.domain, self.account.virtualmin_username)]
 
-        def usage_call(_gateway: object, _domain: str) -> Ok[dict[str, int]]:
+        def listing_call(method: str, url: str, **kwargs: object):
             # Staff suspend the account while the sync is waiting on Virtualmin.
             VirtualminAccount.objects.filter(pk=self.account.pk).update(status="suspended")
-            return Ok({"disk_usage_mb": 5, "bandwidth_usage_mb": 6})
+            return self.respond(method, url, **kwargs)
 
-        with patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.get_domain_info", usage_call):
+        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=listing_call):
             self.client.post(reverse(SYNC))
 
         self.account.refresh_from_db()
         self.assertEqual(self.account.status, "suspended")
-        self.assertEqual(self.account.current_disk_usage_mb, 5)
+        self.assertEqual(self.account.current_disk_usage_mb, 0)
         self.assertIsNotNone(self.account.last_sync_at)
 
 

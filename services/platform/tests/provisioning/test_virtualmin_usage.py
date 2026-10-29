@@ -112,6 +112,25 @@ class UsagePublicationTests(MigrationTestBase):
         self.usage.publish_snapshot(self.server.pk, payload, self.usage.capture(self.server))
         self.assertIsNone(self.usage.public_usage(self.account.service)["disk_usage_gb"])
 
+    def test_verified_recreation_on_same_node_accepts_new_native_id_once(self):
+        first = self.payload()
+        self.usage.publish_snapshot(self.server.pk, first, self.usage.capture(self.server))
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server, account=self.account, operation="create_domain", status="running"
+        )
+        job.mark_completed({"success": True})
+        self.state.refresh_from_db()
+        self.assertEqual(self.state.domain_id, "")
+        new_payload = self.payload()
+        new_payload["installation"] = first["installation"]
+        new_payload["records"][0]["domain_id"] = "67890"
+        # The node retains the old identity for final source intervals.
+        new_payload["records"].append({**first["records"][0], "present": False})
+        self.assertEqual(self.usage.publish_snapshot(self.server.pk, new_payload, self.usage.capture(self.server)), 1)
+        current_interval = UsageInterval.objects.get(account=self.account, ended_at__isnull=True)
+        job.mark_completed({"success": True})
+        self.assertEqual(UsageInterval.objects.get(account=self.account, ended_at__isnull=True).pk, current_interval.pk)
+
     def bandwidth_payload(self, installation, *, known_owner=True):
         if known_owner:
             self.state.owner_start_known = True
@@ -297,9 +316,14 @@ class UsagePublicationTests(MigrationTestBase):
         UsageInterval.objects.filter(account=self.account).update(started_at=start)
         installation = str(uuid4())
         node.STATE_ROOT = Path(self.spool.name)
-        (node.STATE_ROOT / "bindings.json").write_text(json.dumps({"installation": installation, "accounts": {
-            "12345": {"verified": True, "started_at": start.isoformat()}
-        }}))
+        (node.STATE_ROOT / "bindings.json").write_text(
+            json.dumps(
+                {
+                    "installation": installation,
+                    "accounts": {"12345": {"verified": True, "started_at": start.isoformat()}},
+                }
+            )
+        )
         payload = self.payload()
         row = payload["records"][0]
         row.update(
@@ -313,7 +337,9 @@ class UsagePublicationTests(MigrationTestBase):
             ledger.store("coverage_start", start.isoformat())
             ledger.store("caught_up", "1")
             ledger.store("inventory_epoch", str(node.epoch_us(observed.isoformat())))
-            ledger.connection.execute("INSERT INTO inventory VALUES (?,?)", (row["domain_id"], node.epoch_us(observed.isoformat())))
+            ledger.connection.execute(
+                "INSERT INTO inventory VALUES (?,?)", (row["domain_id"], node.epoch_us(observed.isoformat()))
+            )
             ledger.connection.execute("INSERT INTO gauges VALUES (?,?)", (row["domain_id"], json.dumps(row)))
             ledger.connection.execute(
                 "INSERT INTO traffic VALUES (?,?,?,?)",
@@ -439,6 +465,30 @@ class UsageApiTests(HMACTestMixin, MigrationTestBase):
         response = self.portal_post(self.path, {**self.identity, "customer_id": other.pk})
         self.assertEqual(response.status_code, 403, response.content)
 
+    def test_other_provider_keeps_its_usage_and_warning_when_virtualmin_is_enabled(self):
+        self.plan.disk_space_gb = 1
+        self.plan.save(update_fields=["disk_space_gb"])
+        other = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="External",
+            domain="external.example.net",
+            username="external",
+            price=self.service.price,
+            status="active",
+            disk_usage_mb=871,
+            bandwidth_usage_mb=456,
+        )
+        response = self.portal_post(f"/api/services/{other.pk}/usage/", self.identity)
+        self.assertEqual(response.status_code, 200, response.content)
+        value = response.json()["data"]["usage"]
+        self.assertEqual(value["current_usage"]["disk_usage_gb"], round(871 / 1024, 2))
+        self.assertEqual([item["resource"] for item in value["alerts"]], ["disk"])
+        from apps.api.services.serializers import ServiceListSerializer  # noqa: PLC0415
+
+        self.assertEqual(ServiceListSerializer(other).data["bandwidth_usage_gb"], round(456 / 1024, 2))
+
 
 class UsageEnablementTests(TestCase):
     def test_setting_gates_real_dispatch_without_discarding_existing_readings(self):
@@ -462,8 +512,37 @@ class UsageTransportPolicyTests(SimpleTestCase):
         transport.timeout = 30
         transport._ssh_manager = Mock()
         transport._ssh_manager.get_private_key_file.return_value = Err("Key deliberately unavailable")
-        result = transport.run_playbook(SimpleNamespace(ipv4_address="192.0.2.10"), "virtualmin_usage_read.yml")
+        result = transport.run_playbook(
+            SimpleNamespace(ipv4_address="192.0.2.10", ssh_host_keys="enrolled"), "virtualmin_usage_read.yml"
+        )
         self.assertTrue(result.is_err())
         self.assertIn("enrolled authentication key", result.unwrap_err())
         transport._ssh_manager.get_private_key_file.assert_called_once()
         self.assertNotIn("virtualmin_usage_read.yml", AnsibleService.PANEL_PLAYBOOKS["virtualmin"])
+
+    def test_usage_read_never_bootstraps_trust_or_recovers_a_different_port(self):
+        transport = AnsibleService.__new__(AnsibleService)
+        transport.timeout = 30
+        transport._ssh_manager = Mock()
+        deployment = SimpleNamespace(ipv4_address="192.0.2.10", ssh_host_keys=None, ssh_port=20322)
+        self.assertIn(
+            "enrolled SSH host trust", transport.run_playbook(deployment, "virtualmin_usage_read.yml").unwrap_err()
+        )
+        transport._ssh_manager.get_private_key_file.assert_not_called()
+        deployment.ssh_host_keys = "enrolled"
+        transport._ssh_manager.get_private_key_file.return_value = Ok(Path("/private/tmp/usage-test-key"))
+        transport._wait_for_ssh = Mock(return_value=Err("Node is offline"))
+        transport._scan_host_key = Mock()
+        with (
+            patch(
+                "apps.infrastructure.ansible_service.trusted_node_known_hosts",
+                return_value=Path("/private/tmp/usage-test-trust"),
+            ),
+            patch("apps.infrastructure.ansible_service.recover_connection_port") as recover,
+        ):
+            self.assertEqual(
+                transport.run_playbook(deployment, "virtualmin_usage_read.yml").unwrap_err(), "Node is offline"
+            )
+        recover.assert_not_called()
+        transport._wait_for_ssh.assert_called_once_with(deployment.ipv4_address, port=20322, timeout=10)
+        transport._scan_host_key.assert_not_called()

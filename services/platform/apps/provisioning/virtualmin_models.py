@@ -708,8 +708,11 @@ class VirtualminProvisioningJob(models.Model):
         if terminal and (fields is None or {"status", "completed_at"}.intersection(fields)):
             with transaction.atomic():
                 self._lock_usage_account(self.account_id)
+                previous = type(self).objects.filter(pk=self.pk).values_list("status", flat=True).first()
                 super().save(*args, **kwargs)
-                self._invalidate_usage_gauge(self.account_id, self.operation)
+                self._rebind_usage_on_create(self.account_id, self.operation, previous, self.status)
+                if previous != self.status:
+                    self._invalidate_usage_gauge(self.account_id, self.operation)
         else:
             super().save(*args, **kwargs)
 
@@ -855,6 +858,7 @@ class VirtualminProvisioningJob(models.Model):
             if job is None:
                 return 0
             cls._lock_usage_account(job.account_id)
+            previous = cls.objects.filter(pk=job_id).values_list("status", flat=True).first()
             changed = cls.objects.filter(pk=job_id, execution_token=token).update(
                 status=status,
                 status_message=message,
@@ -864,7 +868,9 @@ class VirtualminProvisioningJob(models.Model):
                 updated_at=timezone.now(),
             )
             if changed:
-                cls._invalidate_usage_gauge(job.account_id, job.operation)
+                cls._rebind_usage_on_create(job.account_id, job.operation, previous, status)
+                if previous != status:
+                    cls._invalidate_usage_gauge(job.account_id, job.operation)
             return changed
 
     @classmethod
@@ -884,6 +890,7 @@ class VirtualminProvisioningJob(models.Model):
                 updated_at=timezone.now(),
             )
             if changed:
+                cls._rebind_usage_on_create(job.account_id, job.operation, "running", status)
                 cls._invalidate_usage_gauge(job.account_id, job.operation)
             return changed
 
@@ -891,6 +898,18 @@ class VirtualminProvisioningJob(models.Model):
     def _lock_usage_account(account_id: Any) -> None:
         if account_id is not None:
             VirtualminAccount.objects.select_for_update(no_key=True).filter(pk=account_id).first()
+
+    @staticmethod
+    def _rebind_usage_on_create(account_id: Any, operation: str, previous: str | None, status: str) -> None:
+        if (
+            account_id is not None
+            and operation == "create_domain"
+            and status == "completed"
+            and previous != "completed"
+        ):
+            from .virtualmin_usage_service import rebind_created_account  # noqa: PLC0415
+
+            rebind_created_account(account_id)
 
     @staticmethod
     def _invalidate_usage_gauge(account_id: Any, operation: str) -> None:

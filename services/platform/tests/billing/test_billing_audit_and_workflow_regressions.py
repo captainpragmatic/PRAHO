@@ -1083,7 +1083,7 @@ class TestRegisterScheduledTasks(TestCase):
             mock_schedule.MINUTES = 1
             mock_schedule.HOURLY = 2
             register_scheduled_tasks()
-        assert mock_schedule.objects.update_or_create.call_count == 5
+        assert mock_schedule.objects.update_or_create.call_count == 4
 
 
 class TestEFacturaAuditPayloadReachesTheAuditService(TestCase):

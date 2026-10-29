@@ -34,6 +34,13 @@ def enabled() -> bool:
     return bool(SettingsService.get_setting("provisioning.usage_sync_enabled", False))
 
 
+def observations_apply(service: Service) -> bool:
+    """Other providers retain their own usage source when this feature is enabled."""
+    return VirtualminAccount.objects.filter(service=service).exists() and (
+        enabled() or AccountUsageState.objects.filter(account__service=service).exists()
+    )
+
+
 def month(as_of: datetime) -> tuple[datetime, datetime]:
     local = as_of.astimezone(ZoneInfo(settings.TIME_ZONE))
     start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -56,7 +63,11 @@ def integer(value: object) -> int:
 
 @transaction.atomic
 def current_state(account: VirtualminAccount) -> AccountUsageState:
-    account = VirtualminAccount.objects.select_for_update(of=("self",)).select_related("service").get(pk=account.pk)
+    account = (
+        VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
+        .select_related("service")
+        .get(pk=account.pk)
+    )
     state, _ = AccountUsageState.objects.get_or_create(
         account=account,
         defaults={
@@ -158,9 +169,18 @@ def move_interval(account_id: UUID, server_id: UUID) -> None:
 
 def invalidate_gauge(account_id: UUID) -> None:
     """The caller holds the business account lock in its terminal transaction."""
-    account = VirtualminAccount.objects.select_related("service").get(pk=account_id)
+    account = VirtualminAccount.objects.select_related("service").filter(pk=account_id).first()
+    if account is None:
+        return
     state = current_state(account)
     AccountUsageState.objects.filter(pk=state.pk).update(gauge_not_before=timezone.now(), disk_reading=None)
+
+
+def rebind_created_account(account_id: UUID) -> None:
+    """A verified recreation can replace the native ID on the same node."""
+    if AccountUsageState.objects.filter(account_id=account_id).exists():
+        account = VirtualminAccount.objects.get(pk=account_id)
+        move_interval(account_id, account.server_id)
 
 
 @dataclass(frozen=True)
@@ -214,7 +234,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
     attempt = token or uuid4()
     # Business writers take the account lock first. Keep that order even for
     # source-node intervals belonging to accounts now hosted elsewhere.
-    list(VirtualminAccount.objects.select_for_update().filter(pk__in=captured).order_by("pk"))
+    list(VirtualminAccount.objects.select_for_update(no_key=True).filter(pk__in=captured).order_by("pk"))
     if token is not None:
         from .virtualmin_usage_tasks import transport_identity  # noqa: PLC0415
 
@@ -228,7 +248,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
     for account_id, expected in captured.items():
         with transaction.atomic():
             account = (
-                VirtualminAccount.objects.select_for_update(of=("self",))
+                VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
                 .select_related("service")
                 .filter(pk=account_id)
                 .first()
@@ -247,6 +267,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
                 if isinstance(row, dict)
                 and row.get("domain") == account.domain
                 and row.get("username") == account.virtualmin_username
+                and row.get("present") is not False
             ]
             if len(matches) != 1:
                 continue
@@ -354,7 +375,7 @@ def publish_segments(  # noqa: PLR0913  # Bound snapshot and captured ownership 
                 interval = UsageInterval.objects.filter(pk=identifier, server_id=server_id).first()
                 if interval is None:
                     continue
-                account = VirtualminAccount.objects.select_for_update().get(pk=interval.account_id)
+                account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=interval.account_id)
                 state = current_state(account)
                 expected = AccountCapture(
                     state.owner_scope, account.service_id, account.service.customer_id, account.chain_epoch

@@ -104,11 +104,10 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
 
 class UsageRepresentationMixin(serializers.ModelSerializer):
     def to_representation(self, instance: Service) -> dict[str, object]:
-        from apps.provisioning.virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
-        from apps.provisioning.virtualmin_usage_service import enabled, public_usage  # noqa: PLC0415
+        from apps.provisioning.virtualmin_usage_service import observations_apply, public_usage  # noqa: PLC0415
 
         result = super().to_representation(instance)
-        if enabled() or AccountUsageState.objects.filter(account__service=instance).exists():
+        if observations_apply(instance):
             result.update(public_usage(instance))
         return result
 

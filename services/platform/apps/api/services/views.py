@@ -191,12 +191,15 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
         # Serialize data
         serializer = ServiceDetailSerializer(service)
 
-        # Add usage trends (last 7 days simulation - in production would come from monitoring)
+        from apps.provisioning.virtualmin_usage_service import observations_apply, usage_history  # noqa: PLC0415
+
         usage_trends: dict[str, object] = {
             "disk_usage_trend": [],  # Would be populated from monitoring data
             "bandwidth_usage_trend": [],  # Would be populated from monitoring data
             "uptime_percentage": None,
         }
+        if observations_apply(service):
+            usage_trends = usage_history(service)
 
         return Response({"success": True, "data": {"service": serializer.data, "usage_trends": usage_trends}})
 
@@ -552,14 +555,13 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
         }
 
         # Add usage alerts
-        from apps.provisioning.virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
-        from apps.provisioning.virtualmin_usage_service import enabled, public_usage, usage_history  # noqa: PLC0415
-
-        measured = (
-            public_usage(service)
-            if enabled() or AccountUsageState.objects.filter(account__service=service).exists()
-            else None
+        from apps.provisioning.virtualmin_usage_service import (  # noqa: PLC0415
+            observations_apply,
+            public_usage,
+            usage_history,
         )
+
+        measured = public_usage(service) if observations_apply(service) else None
         if measured is not None:
             usage_data["current_usage"].update(measured)
             usage_data["last_updated"] = measured["usage_as_of"]

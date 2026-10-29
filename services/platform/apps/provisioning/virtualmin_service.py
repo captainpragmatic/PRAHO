@@ -495,13 +495,7 @@ class VirtualminProvisioningService:
                         # One transaction: recovery reads an active account as "already counted",
                         # so the account must never be active without the server's count raised.
                         with transaction.atomic():
-                            from .virtualmin_usage_service import move_interval  # noqa: PLC0415
-
-                            previous_node = (
-                                VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk).server_id
-                            )
-                            if previous_node != account.server_id:
-                                move_interval(account.pk, account.server_id)
+                            VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
                             # fsm-bypass: CharField status
                             account.status = "active"
                             account.provisioned_at = timezone.now()

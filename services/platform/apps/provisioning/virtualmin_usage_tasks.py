@@ -7,11 +7,13 @@ import hashlib
 import json
 import logging
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from uuid import UUID, uuid4
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
@@ -23,6 +25,10 @@ from .virtualmin_usage_models import AccountUsageState, NodeUsageSyncState, Usag
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_LIMIT = 4 * 1024 * 1024
+RETENTION_BATCH_SIZE = 1000
+INTERVAL_SCAN_BATCH_SIZE = 100
+RETENTION_TIME_BUDGET_SECONDS = 5
+INTERVAL_RETENTION_CURSOR = "provisioning:usage:interval-retention-cursor:v1"
 
 
 def transport_identity(server: VirtualminServer) -> str:
@@ -73,7 +79,10 @@ def dispatch_usage_sync() -> dict[str, int]:
             if state.next_run > now or (state.lease_until and state.lease_until > now):
                 continue
             state.token = uuid4()
-            state.lease_until, state.next_run = now + timedelta(seconds=330), now + timedelta(hours=1)
+            state.lease_until = now + timedelta(seconds=330)
+            # Coalesce dispatches in each UTC hour without carrying :10 jitter
+            # into the following hour's eligibility check.
+            state.next_run = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
             state.input_identity, state.last_attempt_at = transport_identity(server), now
             state.save()
             async_task(
@@ -84,20 +93,78 @@ def dispatch_usage_sync() -> dict[str, int]:
                 sync=False,
             )
             queued += 1
-    old = (
-        UsageReading.objects.filter(taken_at__lt=timezone.now() - timedelta(days=90))
+    _prune_history()
+    return {"queued": queued}
+
+
+def _retained_totals(totals: dict[str, object], cutoff: datetime) -> dict[str, object]:
+    retained = {}
+    for key, value in totals.items():
+        try:
+            expired = isinstance(value, dict) and usage.timestamp(value.get("through")) < cutoff
+        except ValueError:
+            expired = False
+        if not expired:
+            retained[key] = value
+    return retained
+
+
+def _prune_interval_batch(cursor: str | None, cutoff: datetime, deadline: float) -> tuple[str | None, bool]:
+    intervals = UsageInterval.objects.exclude(totals={}).order_by("pk").only("id", "totals")
+    if cursor is not None:
+        intervals = intervals.filter(pk__gt=cursor)
+    batch = list(intervals[:INTERVAL_SCAN_BATCH_SIZE])
+    processed = 0
+    for interval in batch:
+        if monotonic() >= deadline:
+            break
+        if _retained_totals(interval.totals, cutoff) != interval.totals:
+            # Re-read under the row lock so pruning cannot overwrite a newer
+            # monthly total published after the scan.
+            with transaction.atomic():
+                current = UsageInterval.objects.select_for_update().filter(pk=interval.pk).first()
+                if current is not None:
+                    current.totals = _retained_totals(current.totals, cutoff)
+                    current.save(update_fields=["totals", "updated_at"])
+        cursor = str(interval.pk)
+        processed += 1
+    finished = processed == len(batch) and len(batch) < INTERVAL_SCAN_BATCH_SIZE
+    if finished:
+        cache.delete(INTERVAL_RETENTION_CURSOR)
+    elif cursor is not None:
+        # Losing this technical cursor only restarts a safe, idempotent scan.
+        cache.set(INTERVAL_RETENTION_CURSOR, cursor, timeout=86400)
+    return cursor, finished
+
+
+def _prune_history() -> None:
+    """Drain bounded batches rather than falling behind a fleet's hourly writes."""
+    cutoff = timezone.now() - timedelta(days=90)
+    deadline = monotonic() + RETENTION_TIME_BUDGET_SECONDS
+    old_readings = (
+        UsageReading.objects.filter(taken_at__lt=cutoff)
         .exclude(pk__in=AccountUsageState.objects.exclude(disk_reading=None).values("disk_reading_id"))
         .exclude(pk__in=AccountUsageState.objects.exclude(bandwidth_reading=None).values("bandwidth_reading_id"))
+        .order_by("taken_at", "pk")
     )
-    UsageReading.objects.filter(pk__in=list(old.values_list("pk", flat=True)[:1000])).delete()
-    UsageInterval.objects.filter(
-        pk__in=list(
-            UsageInterval.objects.filter(ended_at__lt=timezone.now() - timedelta(days=90)).values_list("pk", flat=True)[
-                :1000
-            ]
-        )
-    ).delete()
-    return {"queued": queued}
+    old_intervals = UsageInterval.objects.filter(ended_at__lt=cutoff).order_by("ended_at", "pk")
+    cursor = cache.get(INTERVAL_RETENTION_CURSOR)
+    totals_finished = False
+    while monotonic() < deadline:
+        reading_ids = list(old_readings.values_list("pk", flat=True)[:RETENTION_BATCH_SIZE])
+        old_readings.filter(pk__in=reading_ids).delete()
+        if monotonic() >= deadline:
+            break
+        interval_ids = list(old_intervals.values_list("pk", flat=True)[:RETENTION_BATCH_SIZE])
+        old_intervals.filter(pk__in=interval_ids).delete()
+        if monotonic() >= deadline:
+            break
+        # Give every kind of retained history a turn even when readings have
+        # a large backlog. The JSON scan resumes after its last examined UUID.
+        if not totals_finished:
+            cursor, totals_finished = _prune_interval_batch(cursor, cutoff, deadline)
+        if not reading_ids and not interval_ids and totals_finished:
+            break
 
 
 def sync_node_usage(server_id: str, token: str) -> dict[str, int | str]:
