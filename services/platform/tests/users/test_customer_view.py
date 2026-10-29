@@ -96,7 +96,7 @@ class IssueTests(CustomerViewFixture):
     def test_who_and_whom_are_checked(self) -> None:
         cases = {
             "billing staff": lambda: User.objects.filter(pk=self.staff.pk).update(staff_role="billing"),
-            "prospect customer": lambda: Customer.objects.filter(pk=self.customer.pk).update(status="prospect"),
+            "deleted customer": lambda: Customer.objects.filter(pk=self.customer.pk).update(deleted_at=timezone.now()),
             "staff target": lambda: User.objects.filter(pk=self.target.pk).update(staff_role="support"),
             "inactive membership": lambda: CustomerMembership.objects.filter(
                 user=self.target, customer=self.customer
@@ -109,9 +109,25 @@ class IssueTests(CustomerViewFixture):
                 response = self.client.post(
                     self.start_url(), {"reason_category": "support_request", "reason": "A reason long enough"}
                 )
-                self.assertEqual(response.status_code, 403, label)
+                # A deleted customer is not found at all; every other refusal explains itself.
+                self.assertIn(response.status_code, (403, 404) if label == "deleted customer" else (403,), label)
                 transaction_rollback(sid)
         self.assertFalse(CustomerViewGrant.objects.exists())
+
+    def test_a_customer_in_any_lifecycle_status_can_be_viewed(self) -> None:
+        # Status describes the customer's lifecycle, not who may see its portal (ADR-0065).
+        for status in ("prospect", "active", "inactive", "suspended"):
+            with self.subTest(status), self.captureOnCommitCallbacks():
+                Customer.objects.filter(pk=self.customer.pk).update(status=status)
+                self.assertEqual(Customer.objects.get(pk=self.customer.pk).status, status)
+                code = self.issue()
+                self.assertEqual(customer_view.consume(code).tier, PortalSession.TIER_CUSTOMER_VIEW)
+
+    def test_the_customer_page_offers_the_view_for_a_prospect_s_member(self) -> None:
+        Customer.objects.filter(pk=self.customer.pk).update(status="prospect")
+        page = self.client.get(reverse("customers:detail", args=[self.customer.pk]))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, f'href="{self.start_url()}"')
 
     def test_a_short_reason_is_refused(self) -> None:
         response = self.client.post(self.start_url(), {"reason_category": "support_request", "reason": "short"})
@@ -279,7 +295,6 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
             "membership ended": lambda: CustomerMembership.objects.filter(customer=self.customer).update(
                 is_active=False
             ),
-            "customer suspended": lambda: Customer.objects.filter(pk=self.customer.pk).update(status="suspended"),
             "customer deleted": lambda: Customer.objects.filter(pk=self.customer.pk).update(deleted_at=timezone.now()),
             "target credential changed": lambda: User.objects.filter(pk=self.target.pk).update(password="changed"),
         }
@@ -294,6 +309,14 @@ class ScopedSessionTests(HMACTestMixin, CustomerViewFixture):
         self.row.refresh_from_db()
         self.assertIsNotNone(self.row.revoked_at)
         self.assertTrue(AuditEvent.objects.filter(action="customer_view_ended").exists())
+
+    def test_a_lifecycle_status_change_does_not_end_the_view(self) -> None:
+        for status in ("prospect", "inactive", "suspended", "active"):
+            with self.subTest(status):
+                Customer.objects.filter(pk=self.customer.pk).update(status=status)
+                self.assertEqual(self.call("/api/users/customers/"), 200, status)
+        self.row.refresh_from_db()
+        self.assertIsNone(self.row.revoked_at)
 
     def test_leaving_ends_only_the_scoped_session(self) -> None:
         own = portal_sessions.open_session(self.target)  # the customer's own browser session

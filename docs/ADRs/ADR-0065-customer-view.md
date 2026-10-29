@@ -25,13 +25,14 @@ by no browser and ends at its own deadline.
 
 **Who and whom.** The staff member must be active, have the `admin` or `support` role, have two-factor
 authentication enrolled, and be in a console session whose login completed the second factor. The
-target must be an active, non-staff member of an `active` customer. PRAHO customers start as
-`prospect`; viewing them is deliberately out of scope until they are active. At most 20 grants per
-staff member per rolling hour.
+target must be an active, non-staff member of a customer that has not been deleted. The customer's
+lifecycle status (prospect, active, inactive, suspended) does not matter: staff see whatever the
+customer's people can see (amended 2026-10-29; see ADR-0066). At most 20 grants per staff member per
+rolling hour.
 
 **While it lasts.** Every request re-reads, without locks, the authority that allowed it: the feature
 switch, the staff member's role, second factor and console session, both people's credentials, the
-membership and the customer's status. Any change ends the view at its next request, with its audit
+membership and the customer's deletion. Any change ends the view at its next request, with its audit
 event. Only `issue` and `consume` lock rows, users in primary-key order, then the customer, the
 membership and the grant, so they cannot deadlock against credential writers.
 
