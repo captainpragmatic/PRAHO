@@ -637,14 +637,9 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only upgrade running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get available sizes for this provider (larger than current)
+    # Sizes the node can be resized to: active and still sold in its region
     available_sizes = (
-        NodeSize.objects.filter(
-            provider=deployment.provider,
-            is_active=True,
-        )
-        .exclude(id=deployment.node_size_id)
-        .order_by("monthly_cost_eur")
+        NodeSize.offered_in(deployment.region).exclude(id=deployment.node_size_id).order_by("monthly_cost_eur")
     )
 
     if request.method == "POST":
@@ -653,7 +648,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, _("Please select a new size."))
         else:
             try:
-                new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
+                new_size = available_sizes.get(id=new_size_id)
 
                 # Validate token exists before queuing (fail fast)
                 token_result = get_provider_token(deployment.provider)

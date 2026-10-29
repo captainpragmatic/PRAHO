@@ -1011,7 +1011,23 @@ class NodeDeploymentService:
             check_orderable=False,
         )
 
-    def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic
+    @staticmethod
+    def _upgrade_refusal(deployment: NodeDeployment, new_size: NodeSize) -> str:
+        """Why the node cannot be resized to this size, or "" when it can.
+
+        The upgrade view, the upgrade task and the manage_node command all resize through here.
+        """
+        if deployment.status != "completed":
+            return f"Can only upgrade completed deployments, current status: {deployment.status}"
+        if deployment.node_size == new_size:
+            return "Node is already using the selected size"
+        if new_size.provider != deployment.provider:
+            return "New size must be from the same provider"
+        if not new_size.is_offered_in(deployment.region):
+            return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
+        return ""
+
+    def upgrade_node_size(  # Complexity: deployment orchestration
         self,
         deployment: NodeDeployment,
         new_size: NodeSize,
@@ -1036,14 +1052,9 @@ class NodeDeploymentService:
 
         logger.info(f"[Upgrade:{deployment.hostname}] Starting node resize to {new_size.name}")
 
-        if deployment.status != "completed":
-            return Err(f"Can only upgrade completed deployments, current status: {deployment.status}")
-
-        if deployment.node_size == new_size:
-            return Err("Node is already using the selected size")
-
-        if new_size.provider != deployment.provider:
-            return Err("New size must be from the same provider")
+        refusal = self._upgrade_refusal(deployment, new_size)
+        if refusal:
+            return Err(refusal)
 
         old_size = deployment.node_size
         audit_ctx = InfrastructureAuditContext(user=user)

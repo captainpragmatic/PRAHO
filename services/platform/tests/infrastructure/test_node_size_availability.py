@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -125,3 +126,51 @@ class DeployNodeCommandSizeRegionTests(TestCase):
 
     def test_size_sold_in_region_is_planned(self) -> None:
         self.assertIn("DRY RUN", self.call("cx23"))
+
+
+class UpgradeSizeRegionTests(TestCase):
+    def setUp(self) -> None:
+        self.client.force_login(User.objects.create_superuser(email="admin@test.com", password="testpass123"))
+        provider = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
+        self.hel1 = make_region(provider, "hel1")
+        current = make_size(provider, "cx23", self.hel1)
+        self.cpx22 = make_size(provider, "cpx22", self.hel1)
+        self.cpx31 = make_size(provider, "cpx31", make_region(provider, "ash"))  # Not sold in hel1.
+        self.ccx13 = make_size(provider, "ccx13", self.hel1, active=False)  # Withdrawn by the last sync.
+        panel = PanelType.objects.create(name="Virtualmin", panel_type="virtualmin", ansible_playbook="v.yml")
+        self.deployment = NodeDeployment.objects.create(
+            environment="stg", node_type="sha", provider=provider, region=self.hel1, node_size=current,
+            panel_type=panel, hostname="stg-sha-het-fi-hel1-001", node_number=1, status="completed",
+            external_node_id="4242",
+        )
+
+    def upgrade(self, size: NodeSize) -> tuple[Any, MagicMock]:
+        from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415  # Test-local
+
+        with patch("apps.infrastructure.deployment_service.get_ansible_service", return_value=MagicMock()):
+            service = NodeDeploymentService()
+        with patch("apps.infrastructure.deployment_service.run_provider_command") as resize:
+            result = service.upgrade_node_size(self.deployment, size, {"api_token": "fixture-token"})
+        return result, resize
+
+    def test_resize_to_a_size_not_sold_in_the_region_is_refused(self) -> None:
+        for size in (self.cpx31, self.ccx13):
+            with self.subTest(size=size.provider_type_id):
+                result, resize = self.upgrade(size)
+                self.assertTrue(result.is_err())
+                self.assertIn("not available in hel1", result.unwrap_err())
+                resize.assert_not_called()
+
+    def test_upgrade_page_lists_and_accepts_only_sizes_sold_in_the_region(self) -> None:
+        url = reverse("infrastructure:deployment_upgrade", args=[self.deployment.pk])
+        listed = self.client.get(url).context["available_sizes"]
+        self.assertEqual([size.provider_type_id for size in listed], ["cpx22"])
+        with (
+            patch("apps.infrastructure.views.get_provider_token", return_value=Ok("fixture-token")),
+            patch("apps.infrastructure.views.queue_upgrade_node", return_value="task-1") as queue,
+        ):
+            self.client.post(url, {"new_size": self.cpx31.pk})
+            self.client.post(url, {"new_size": self.ccx13.pk})
+            queue.assert_not_called()
+            self.client.post(url, {"new_size": self.cpx22.pk})
+            queue.assert_called_once()
