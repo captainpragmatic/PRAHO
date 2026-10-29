@@ -40,8 +40,12 @@ Use **Merge when ready** on the pull request, or:
 gh pr merge <number>
 ```
 
+Queue a pull request once its checks are green: the repository does not allow auto-merge, so
+`gh pr merge` refuses one whose checks are still running.
+
 A queued pull request needs nothing more from you. Up to five are built at once; each lands only when its
-own commit is green, and `master` moves in queue order.
+own commit is green, and `master` moves in queue order. A queued branch accepts no pushes: to change it,
+remove it from the queue first, then push and queue it again.
 
 ## When the queue removes a pull request
 
@@ -65,10 +69,12 @@ gh workflow run virtualmin-lab.yml --ref <branch> -f suite=full
 
 ## Pull requests that build on each other
 
-Open each one against `master`, not against the other's branch. Queue the first; queue the second once the
-first is queued. The second's commits include the first's, and the queue applies the second on top of the
-first. If the queue reports a conflict, merge `master` into the second branch with a sign-off
-(`git merge --signoff origin/master`), push, and queue it again.
+Open each one against `master`, not against the other's branch. Queue the second only after the first has
+landed. The queue builds squashes: where the second changes code the first adds, its change meets the
+first's squash as a conflict, and the queue removes it. Once the first is on `master`, merge `master` into
+the second branch with a sign-off (`git merge --signoff origin/master`). Where both sides changed the same
+lines, keep the second's version, which already contains the first's; take `master`'s version everywhere
+else. Then push and queue it.
 
 ## Merging around the queue
 
