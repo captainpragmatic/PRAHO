@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% load i18n ui_components %}
+{% block title %}{% trans 'Confirm it is you' %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-2xl text-white mb-2">{% trans 'Confirm it is you' %}</h1>
+  <p class="text-slate-300 mb-4">{% trans 'This action needs your password again. You will go back to where you were.' %}</p>
+  {% if backup_codes_warning %}
+    {% alert backup_codes_warning variant="warning" css_class="mb-4" %}
+  {% endif %}
+  <form method="post" action="?next={{ next|urlencode }}" class="space-y-4">
+    {% csrf_token %}
+    {% form_error_summary form %}
+    {% form_field form.password icon_left="lock" autocomplete="current-password" %}
+    {% if form.token %}
+      {% form_field form.token icon_left="lock" autocomplete="one-time-code" %}
+    {% endif %}
+    {% trans 'Confirm' as confirm_label %}{% button confirm_label type="submit" variant="primary" %}
+  </form>
+</div>
+{% endblock %}

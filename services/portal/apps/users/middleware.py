@@ -11,6 +11,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, cast
+from urllib.parse import quote, urlsplit
 
 from django.conf import settings
 from django.core.cache import cache
@@ -18,8 +19,9 @@ from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
+from django.urls import reverse
 from django.utils import timezone as django_timezone
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 
 from apps.api_client.services import (
     PlatformAPIError,
@@ -37,6 +39,49 @@ logger = logging.getLogger(__name__)
 # Circuit breaker: max consecutive fail-open validations before forced logout (#130/M1)
 _MAX_FAIL_OPEN_COUNT = 5
 _VALIDATION_LOCK = threading.Lock()
+
+
+def _message_state(request: HttpRequest) -> tuple[list[Any], bool, bool] | None:
+    """The message storage's queue and read state before the view runs."""
+    storage = getattr(request, "_messages", None)
+    if storage is None:
+        return None
+    return list(storage._queued_messages), storage.used, storage.added_new
+
+
+def _restore_messages(request: HttpRequest, state: tuple[list[Any], bool, bool] | None) -> None:
+    """Undo what a view that needs confirmation did to the messages.
+
+    Its own messages are dropped, and the ones waiting before it stay unread: rendering a page
+    marks every message read, even when that page is then thrown away for the confirm redirect.
+    """
+    storage = getattr(request, "_messages", None)
+    if storage is not None and state is not None:
+        storage._queued_messages, storage.used, storage.added_new = list(state[0]), state[1], state[2]
+
+
+def _same_site_path(request: HttpRequest, url: str) -> str:
+    """The path and query of a URL on this site, or "" for any other."""
+    if not url or not url_has_allowed_host_and_scheme(
+        url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return ""
+    parts = urlsplit(url)
+    if not parts.path.startswith("/"):
+        return ""
+    return parts.path + (f"?{parts.query}" if parts.query else "")
+
+
+def _step_up_return_path(request: HttpRequest) -> str:
+    """Where the browser goes back to after confirming: the page the action was made from."""
+    if request.headers.get("HX-Request"):
+        source = request.headers.get("HX-Current-URL", "")
+    elif request.method == "GET" and not request_context.step_up_from_download():
+        return request.get_full_path()
+    else:
+        # A form post or a download link: back to the page that holds them, never the action itself.
+        source = request.META.get("HTTP_REFERER", "")
+    return _same_site_path(request, source) or "/dashboard/"
 
 
 class PortalAuthenticationMiddleware:
@@ -102,15 +147,33 @@ class PortalAuthenticationMiddleware:
         # ADR-0017 section 5: bind the Platform session for the whole request, public routes
         # included, so every signed call made for this customer names it.
         with request_context.bound(request.session.get("portal_session_id"), request.session.get("user_id")):
+            messages_before = _message_state(request)
             response = self._authenticate(request)
             if request_context.rejected():
                 # Platform ended the session during the view; the view may have caught the error.
                 logger.warning("🚨 [Auth] Platform ended the portal session during %s", request.path)
                 return self._end_session(request)
+            if request_context.step_up_required():
+                # Platform wants the password again before this action (ADR-0017 section 6).
+                _restore_messages(request, messages_before)
+                return self._ask_to_confirm(request)
         if request.session.get("customer_view"):
             # A customer view's pages are never kept by the browser or a shared cache (ADR-0065).
             response["Cache-Control"] = "no-store"
         return response
+
+    def _ask_to_confirm(self, request: HttpRequest) -> HttpResponse:
+        """Send the browser to confirm its identity, and from there back to where the action began."""
+        target = f"{reverse('users:confirm_identity')}?next={quote(_step_up_return_path(request), safe='')}"
+        logger.info("🔐 [Auth] Platform asked for a fresh identity check during %s", request.path)
+        if request.headers.get("HX-Request"):
+            # A 302 would be followed by HTMX and swapped into the page; HX-Redirect navigates.
+            response = HttpResponse(status=200)
+            response["HX-Redirect"] = target
+            return response
+        if wants_json(request):
+            return JsonResponse({"error": "reauth_required", "redirect": target}, status=403)
+        return redirect(target)
 
     def _end_session(self, request: HttpRequest) -> HttpResponse:
         unavailable_response = end_session_or_unavailable(request)

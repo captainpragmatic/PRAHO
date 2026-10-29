@@ -94,6 +94,7 @@ class AuthenticationRateLimitMiddleware:
         "/password-reset/",
         "/switch-customer/",
         "/mfa/",
+        "/confirm-identity/",
     ]
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
@@ -228,7 +229,7 @@ class AuthenticationRateLimitMiddleware:
     def _check_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
         """Check the separate MFA, volume or login budgets, failing closed on cache errors."""
         try:
-            if request.path.startswith("/mfa/"):
+            if request.path.startswith(("/mfa/", "/confirm-identity/")):
                 return self._check_reauth_budget(request)
             if self._is_volume_endpoint(request):
                 return self._check_volume_budget(request)
@@ -339,6 +340,10 @@ class AuthenticationRateLimitMiddleware:
                 {"form": form, "validlink": bool(request.session.get(PASSWORD_RESET_SESSION_KEY))},
                 status=status_code,
             )
+        elif request.path.startswith("/confirm-identity/"):
+            # Signed in: stay on the confirm page, with where it goes back to, rather than at login.
+            messages.error(request, error_msg)
+            return redirect(request.get_full_path())
         else:
             messages.error(request, error_msg)
             return redirect("users:login")

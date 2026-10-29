@@ -6987,9 +6987,6 @@ msgstr "Mergeți la pagina următoare"
 #~ msgid "Close"
 #~ msgstr "Închideți"
 
-#~ msgid "Confirm"
-#~ msgstr "Confirmă"
-
 #, python-format
 #~ msgid ""
 #~ "\n"
@@ -7628,3 +7625,30 @@ msgstr "Mergeți la pagina următoare"
 
 #~ msgid "Default date format on customer web pages. Portal changes appear within one minute."
 #~ msgstr "Formatul implicit al datelor în interfața clienților. Modificările apar în portal în cel mult un minut."
+
+#: templates/users/confirm_identity.html
+msgid "Confirm it is you"
+msgstr "Confirmați că sunteți dumneavoastră"
+
+#: templates/users/confirm_identity.html
+msgid "This action needs your password again. You will go back to where you were."
+msgstr "Această acțiune necesită din nou parola dumneavoastră. Veți reveni apoi unde erați."
+
+#: templates/users/confirm_identity.html
+msgid "Confirm"
+msgstr "Confirmați"
+
+#: apps/users/views.py
+msgid "The password or code is not right."
+msgstr "Parola sau codul nu sunt corecte."
+
+#: apps/users/views.py
+msgid "We could not check that right now. Please try again in a moment."
+msgstr "Nu am putut verifica acum. Vă rugăm să încercați din nou în câteva momente."
+
+#: apps/users/views.py
+msgid "You have %(count)s backup code left."
+msgid_plural "You have %(count)s backup codes left."
+msgstr[0] "Vă mai rămâne %(count)s cod de rezervă."
+msgstr[1] "Vă mai rămân %(count)s coduri de rezervă."
+msgstr[2] "Vă mai rămân %(count)s de coduri de rezervă."

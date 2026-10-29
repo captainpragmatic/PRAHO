@@ -18,9 +18,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy
+from django.utils.translation import gettext_lazy, ngettext
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
@@ -57,6 +58,7 @@ from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
     CompanyProfileForm,
+    ConfirmIdentityForm,
     CustomerLoginForm,
     CustomerProfileForm,
     CustomerRegistrationForm,
@@ -1455,6 +1457,68 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
         request,
         "users/mfa_backup_codes.html",
         {"backup_codes": [], "remaining": profile.get("backup_codes_count", 0), "form": form},
+    )
+
+
+# Warn on the confirm page when this few backup codes are left.
+LOW_BACKUP_CODES = 3
+
+
+def _relative_next(raw: str) -> str:
+    """A page on this site to go back to after confirming; any other target goes to the dashboard."""
+    if raw.startswith("/") and not raw.startswith("//") and url_has_allowed_host_and_scheme(raw, allowed_hosts=set()):
+        return raw
+    return "/dashboard/"
+
+
+@never_cache
+@sensitive_post_parameters("password", "token")
+@require_http_methods(["GET", "POST"])
+def confirm_identity_view(request: HttpRequest) -> HttpResponse:
+    """Ask for the password, and the code when 2FA is on, before a sensitive action (ADR-0017 section 6).
+
+    Platform sends the browser here when an action needs an identity check from the last 300
+    seconds; every signed-in role reaches it. Whether to ask for a code is read from Platform each
+    time. Only a wrong answer spends the person's re-auth budget.
+    """
+    user_id = int(request.session["user_id"])
+    next_url = _relative_next(request.GET.get("next") or request.POST.get("next") or "")
+    try:
+        status = api_client.get_mfa_status(user_id)
+    except PlatformAPIError:
+        status = {"enabled": True}  # unknown: offer the code field; Platform decides what it needs
+    two_factor = bool(status.get("enabled"))
+    form = ConfirmIdentityForm(request.POST or None, two_factor=two_factor)
+    if request.method == "POST" and form.is_valid():
+        try:
+            api_client.confirm_identity(user_id, form.cleaned_data["password"], form.cleaned_data.get("token", ""))
+        except PlatformAPIError as exc:
+            code = (exc.response_data or {}).get("code")
+            if code == "reauth_failed":
+                mark_auth_failure(request, bucket="reauth")
+                form.add_error(None, _("The password or code is not right."))
+            elif code == ACCOUNT_LOCKED or exc.is_rate_limited:
+                form.add_error(None, LOCKED_MESSAGE)
+            else:
+                form.add_error(None, _("We could not check that right now. Please try again in a moment."))
+        else:
+            mark_auth_success(request)
+            return redirect(next_url)
+    remaining = int(status.get("backup_codes_remaining") or 0)
+    low = two_factor and remaining <= LOW_BACKUP_CODES
+    return render(
+        request,
+        "users/confirm_identity.html",
+        {
+            "form": form,
+            "next": next_url,
+            "backup_codes_warning": (
+                ngettext("You have %(count)s backup code left.", "You have %(count)s backup codes left.", remaining)
+                % {"count": remaining}
+                if low
+                else ""
+            ),
+        },
     )
 
 

@@ -3,6 +3,7 @@ Portal Customer Forms
 Customer-facing forms with dark theme styling and Platform API integration.
 """
 
+import copy
 import logging
 import re
 from typing import Any
@@ -991,6 +992,23 @@ class TOTPSetupForm(forms.Form):
         strip=False,
         widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
     )
+
+
+class ConfirmIdentityForm(forms.Form):
+    """The password, and the code when two-factor authentication is on, before a sensitive action."""
+
+    password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput, strip=False)
+
+    def __init__(self, *args: Any, two_factor: bool, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if two_factor:
+            self.fields["token"] = copy.deepcopy(TwoFactorVerifyForm.base_fields["token"])
+
+    def clean_token(self) -> str:
+        token = str(self.cleaned_data.get("token", "")).strip()
+        if token and not token.isdigit():
+            raise ValidationError(_("The code must contain only digits."))
+        return token
 
 
 class MFAReauthenticationForm(TwoFactorVerifyForm):
