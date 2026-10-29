@@ -200,7 +200,18 @@ compensating control.
   request still wins. The confirm page reads the 2FA state from Platform each time, and only a wrong
   answer spends the per-person re-auth budget.
 - **Deploying.** After section 6 is deployed everywhere: Portal first (it handles a refusal it does
-  not yet receive), then Platform. Roll back in the reverse order, and before rolling back section 6.
+  not yet receive), then Platform. Every portal session open at the deploy ends once: none carries
+  the browser stamp or Platform's deadlines yet.
+- **Rolling back**, this section and the tiers of section 5 together, before rolling back section 6.
+  An old Platform enforces neither the re-check nor the tiers, so no session the new one opened may
+  outlive it:
+  1. on the new Platform, run `manage.py revoke_portal_sessions --all --reason rollback` (the
+     operator is recorded from the login name);
+  2. roll Platform back;
+  3. end any remembered row opened between steps 1 and 2, which the old code would honour for its
+     30 days: `PortalSession.objects.filter(tier="remember", revoked_at__isnull=True)
+     .update(revoked_at=now(), revoke_reason="operator")`;
+  4. roll the Portal back. The users migration only widens the tier choices, so it stays.
 
 Accepted: a compromised *running* portal sees passwords as customers type them, at login and on the
 confirm page, so it can pass the re-check at will. Protecting against that needs a confirmation

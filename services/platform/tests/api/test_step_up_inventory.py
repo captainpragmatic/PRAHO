@@ -8,6 +8,7 @@ does.
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterator
 
 from django.test import SimpleTestCase
@@ -145,6 +146,23 @@ EXEMPT: dict[str, str] = {
 }
 
 
+# The test that proves each guarded route refuses a stale session and acts for a fresh one.
+EVERY_ACTION = "tests.api.test_step_up_guarded_actions.StepUpCoverageTests.test_each_action_is_refused_when_stale_and_done_when_fresh"
+_DNS = "tests.api.test_dns_zone_api.DnsZoneApiTests.test_publishing_needs_a_recent_identity_check_and_a_crosscheck_does_not"
+PROVEN_BY: dict[str, str] = {
+    "api/users/profile/": "tests.api.test_step_up_guarded_actions.StepUpCoverageTests.test_the_name_or_phone_needs_a_check_and_preferences_do_not",
+    "api/gdpr/data-export/": "tests.api.test_step_up_guarded_actions.StepUpCoverageTests.test_an_export_request_needs_a_check_and_its_status_does_not",
+    "api/gdpr/data-export/<uuid:export_id>/download/": "tests.api.test_step_up_guarded_actions.ExportDownloadStepUpTests.test_a_download_needs_a_check",
+    "api/billing/gift-cards/reveal/": "tests.api.test_gift_purchase_api.GiftPurchaseAPITests.test_a_stale_session_confirms_before_the_code_is_revealed",
+    "api/billing/recurring-payments/authorize/begin/": "tests.api.test_recurring_payments_api.RecurringPaymentsAPITestCase.test_begin_needs_a_recent_identity_check",
+    "api/dns/zones/<uuid:zone_id>/confirm/": _DNS,
+    "api/dns/zones/<uuid:zone_id>/switch/": _DNS,
+    "api/dns/zones/<uuid:zone_id>/delete/": _DNS,
+    "api/dns/zones/<uuid:zone_id>/records/": _DNS,
+    "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": _DNS,
+    "api/services/<int:service_id>/actions/": "tests.api.test_service_action_requests.ServiceActionRequestTests.test_a_request_needs_a_recent_identity_check",
+}
+
 def _routes() -> Iterator[tuple[str, object]]:
     def walk(patterns: list[object], prefix: str) -> Iterator[tuple[str, object]]:
         for pattern in patterns:
@@ -179,19 +197,12 @@ class StepUpInventoryTests(SimpleTestCase):
     def test_every_guarded_route_has_a_behavioural_test(self) -> None:
         from tests.api.test_step_up_guarded_actions import ACTIONS  # noqa: PLC0415
 
-        tested = {"api/" + action.path for action in ACTIONS} | {
-            "api/users/profile/",  # test_the_name_or_phone_needs_a_check_and_preferences_do_not
-            "api/gdpr/data-export/",  # test_an_export_request_needs_a_check_and_its_status_does_not
-            "api/gdpr/data-export/<uuid:export_id>/download/",  # ExportDownloadStepUpTests
-            "api/billing/gift-cards/reveal/",  # test_gift_purchase_api: stale and unbound reveals
-            "api/billing/recurring-payments/authorize/begin/",  # test_recurring_payments_api
-            "api/dns/zones/<uuid:zone_id>/confirm/",  # test_dns_zone_api: publishing needs a check
-            "api/dns/zones/<uuid:zone_id>/switch/",
-            "api/dns/zones/<uuid:zone_id>/delete/",
-            "api/dns/zones/<uuid:zone_id>/records/",
-            "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/",
-            "api/services/<int:service_id>/actions/",  # test_service_action_requests
-        }
-        self.assertEqual(sorted(set(GUARDED) - tested), [])
-        self.assertEqual(sorted(tested - set(GUARDED)), [])
+        tested = {"api/" + action.path: EVERY_ACTION for action in ACTIONS} | PROVEN_BY
+        self.assertEqual(sorted(set(GUARDED) - set(tested)), [])
+        self.assertEqual(sorted(set(tested) - set(GUARDED)), [])
         self.assertEqual(len(GUARDED), 24)
+        for route, test in tested.items():
+            with self.subTest(route=route):
+                # The named test must exist: renaming or deleting it fails here, not silently.
+                module, case, method = test.rsplit(".", 2)
+                self.assertTrue(callable(getattr(getattr(importlib.import_module(module), case), method, None)), test)
