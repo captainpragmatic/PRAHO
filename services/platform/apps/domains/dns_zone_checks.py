@@ -40,8 +40,8 @@ class _Channel:
         except self.error_type as error:
             raise ZoneCheckError("dns_observation_unknown") from error
 
-    def query(self, name: str, kind: str, *, parent: bool = False) -> Any:
-        return self._call(lambda: self.transport.query(name, kind, parent=parent))
+    def query(self, name: str, kind: str, *, parent: bool = False, wildcard_owner: bool = False) -> Any:
+        return self._call(lambda: self.transport.query(name, kind, parent=parent, wildcard_owner=wildcard_owner))
 
     def assigned(self, name: str, kind: str, nameservers: tuple[str, ...], zone: str) -> Any:
         if not nameservers or len(nameservers) > MAX_NAMESERVERS:
@@ -187,7 +187,7 @@ def probe_import_batch(
     for index in range(cursor, min(len(queries), cursor + min(MAX_BATCH_QUERIES, max(1, batch_size)))):
         owner, kind = queries[index]
         try:
-            answer = selected.query(owner, kind)
+            answer = selected.query(owner, kind, wildcard_owner=True)
             actual_kind, values = _entries(answer)
         except (ZoneCheckError, dns.exception.DNSException, ValueError, OSError):
             return {**result, "ok": False, "error": "dns_observation_unknown"}

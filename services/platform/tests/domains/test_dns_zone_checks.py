@@ -40,7 +40,7 @@ class Channel:
             ttl=300,
         )
 
-    def query(self, name, kind, *, parent=False):
+    def query(self, name, kind, *, parent=False, wildcard_owner=False):
         return self.observation(name, kind)
 
     def assigned(self, name, kind, nameservers, zone):
@@ -124,12 +124,12 @@ def test_alias_answer_is_compared_as_a_cname_rather_than_disappearing():
     channel = Channel()
     original = channel.query
 
-    def alias(name, kind, *, parent=False):
+    def alias(name, kind, *, parent=False, wildcard_owner=False):
         if name == "www." + ZONE:
             return SimpleNamespace(
                 name=name, record_type=kind, values=(), alias="other.example.org", negative="", ttl=300
             )
-        return original(name, kind, parent=parent)
+        return original(name, kind, parent=parent, wildcard_owner=wildcard_owner)
 
     channel.query = alias
     correct = check_all(inventory("www CNAME other.example.org.\n"), channel)
@@ -138,16 +138,16 @@ def test_alias_answer_is_compared_as_a_cname_rather_than_disappearing():
     assert missing["error"] == "source_record_missing_from_inventory"
 
 
+def _parent_referral(question):
+    response = dns.message.make_response(dns.message.make_query(question.name, question.record_type))
+    response.flags &= ~dns.flags.AA
+    response.authority.append(dns.rrset.from_text(DOMAIN + ".", 86400, "IN", "NS", "ns.cloudflare.example."))
+    return response
+
+
 def test_real_wire_parent_referral_does_not_require_child_aa_and_preserves_the_delegation_ttl():
     wire = Wire()
-
-    def referral(question):
-        response = dns.message.make_response(dns.message.make_query(question.name, question.record_type))
-        response.flags &= ~dns.flags.AA
-        response.authority.append(dns.rrset.from_text(DOMAIN + ".", 86400, "IN", "NS", "ns.cloudflare.example."))
-        return response
-
-    wire.overrides[(DOMAIN, "NS")] = referral
+    wire.overrides[(DOMAIN, "NS")] = _parent_referral
     transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
     with patch("apps.infrastructure.dns_probes.DnsProbeTransport", return_value=transport):
         proof = handover_snapshot(DOMAIN, channel=_Channel())
@@ -171,3 +171,31 @@ def test_assigned_authority_resolution_never_sends_a_packet_to_a_private_address
         )
     assert proof["ok"] is False
     assert all(question.server != "10.0.0.1" for question in wire.calls)
+
+
+def test_an_imported_wildcard_owner_is_cross_checked_by_its_own_name_over_the_real_transport():
+    """A query naming `*.shop` matches the wildcard RRset itself (RFC 4592), so the import can finish."""
+    owner = f"*.shop.{ZONE}"
+    wire = Wire()
+    wire.records = {(owner, "A"): ("95.217.0.11",), (owner, "TXT"): ('"wildcard-proof"',)}
+    wire.overrides[(DOMAIN, "NS")] = _parent_referral
+    records = inventory('*.shop A 95.217.0.11\n*.shop TXT "wildcard-proof"\n')
+    transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
+    observations = {}
+    cursor = 0
+    with patch("apps.infrastructure.dns_probes.DnsProbeTransport", return_value=transport):
+        channel = _Channel()
+        for _ in range(100):
+            result = probe_import_batch(ZONE, records, cursor, channel=channel)
+            observations.update(result["observations"])
+            if not result["ok"] or result["complete"]:
+                break
+            cursor = result["cursor"]
+    assert result["ok"] is True, result
+    assert result["complete"] is True
+    assert len(observations[f"{owner}|A"]["digests"]) == 1
+    assert len(observations[f"{owner}|TXT"]["digests"]) == 1
+    # Only the zone's authorities are asked the literal owner; discovery climbs from its parent.
+    asked = [question for question in wire.calls if question.name == owner]
+    assert asked
+    assert not any(question.recursive for question in asked)
