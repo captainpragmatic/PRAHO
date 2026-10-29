@@ -79,7 +79,9 @@ class LowerTests(TtlCase):
         self.assertIsNotNone(self.hostname.ttl_lowered_at)
         for record_type in ("A", "AAAA"):
             with self.subTest(record_type=record_type):
-                self.assertEqual(self.hostname.records[record_type]["applied_ttl"], hostname_config.account_cutover_ttl_seconds())
+                self.assertEqual(
+                    self.hostname.records[record_type]["applied_ttl"], hostname_config.account_cutover_ttl_seconds()
+                )
                 self.assertEqual(self._provider_ttls()[record_type], hostname_config.account_cutover_ttl_seconds())
 
     def test_the_configured_cutover_ttl_is_what_gets_published(self) -> None:
@@ -175,8 +177,9 @@ class CacheExpiryTests(TtlCase):
         self.assertEqual(self.hostname.ttl_confirmed_at, started)
 
         for elapsed, expected in ((1799, "waiting"), (1800, "converged"), (1801, "converged")):
-            with self.subTest(elapsed=elapsed), patch.object(
-                service.timezone, "now", return_value=started + timedelta(seconds=elapsed)
+            with (
+                self.subTest(elapsed=elapsed),
+                patch.object(service.timezone, "now", return_value=started + timedelta(seconds=elapsed)),
             ):
                 self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok(expected))
 
@@ -210,7 +213,9 @@ class CacheExpiryTests(TtlCase):
 
         with patch.object(service.timezone, "now", return_value=started):
             self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("waiting"))
-        with patch.object(service.timezone, "now", return_value=started + service.TTL_LOWER_DEADLINE + timedelta(seconds=1)):
+        with patch.object(
+            service.timezone, "now", return_value=started + service.TTL_LOWER_DEADLINE + timedelta(seconds=1)
+        ):
             self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("waiting"))
         with patch.object(service.timezone, "now", return_value=started + timedelta(seconds=3600)):
             self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("converged"))
@@ -244,7 +249,10 @@ class RoutineSyncTests(TtlCase):
 
         self.assertEqual(service.sync_account_hostname(self.hostname), Ok("published"))
 
-        self.assertEqual(self._provider_ttls(), {"A": hostname_config.account_cutover_ttl_seconds(), "AAAA": hostname_config.account_cutover_ttl_seconds()})
+        self.assertEqual(
+            self._provider_ttls(),
+            {"A": hostname_config.account_cutover_ttl_seconds(), "AAAA": hostname_config.account_cutover_ttl_seconds()},
+        )
 
 
 class RestoreTests(TtlCase):
@@ -339,8 +347,8 @@ class RestoreTests(TtlCase):
         self.assertEqual(service.lower_account_hostname_ttl(self.hostname), Ok("waiting"))
         original = service._apply_ttl
 
-        def restore_then_race(hostname, ttl):
-            result = original(hostname, ttl)
+        def restore_then_race(hostname, ttl, **kwargs):
+            result = original(hostname, ttl, **kwargs)
             service.sync_account_hostname(hostname)  # a routine sweep lowers it again, legitimately
             return result
 

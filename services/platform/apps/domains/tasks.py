@@ -133,4 +133,17 @@ def setup_domain_scheduled_tasks() -> dict[str, str]:
         )
         results["reconcile_pending"] = "created"
 
+    name = "domains-dns-zones"
+    if Schedule.objects.filter(name=name).exists():
+        results["dns_zones"] = "already_exists"
+    else:
+        schedule(
+            "apps.domains.dns_zone_tasks.dispatch_zone_operations",
+            schedule_type=Schedule.MINUTES,
+            minutes=1,
+            name=name,
+            cluster="praho-cluster",
+        )
+        results["dns_zones"] = "created"
+
     return results

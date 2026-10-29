@@ -14,14 +14,106 @@ Security guidelines:
 # ===============================================================================
 
 import logging
+import re
 from typing import Any, cast
 from uuid import UUID
 
 from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.timezone import is_aware
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
+
+_DNS_COMPONENTS = frozenset({"apex", "www", "caa", "dnssec", "mx"})
+_DNS_STATES = frozenset({"healthy", "broken", "unknown", "not_applicable"})
+_DNS_PUBLIC_STATES = _DNS_STATES | {"unavailable", "maintenance"}
+_DNS_FIELDS = frozenset(
+    {"version", "state", "dns_path", "pending", "stale", "checked_at", "account_name", "instructions", "components"}
+)
+_MAX_DNS_INSTRUCTIONS = 8
+
+
+def _dns_checked_at(value: object) -> bool:
+    if value is None:
+        return False
+    try:
+        parsed = parse_datetime(value) if isinstance(value, str) else None
+    except ValueError as error:
+        raise PlatformAPIError("DNS status is unavailable") from error
+    if parsed is None or not is_aware(parsed):
+        raise PlatformAPIError("DNS status is unavailable")
+    return True
+
+
+def _dns_receipt_components(status: dict[str, Any]) -> set[str]:
+    components = status["components"]
+    if not isinstance(components, dict) or not set(components) <= _DNS_COMPONENTS:
+        raise PlatformAPIError("DNS status is unavailable")
+    states = set()
+    for component in components.values():
+        if (
+            not isinstance(component, dict)
+            or not isinstance(component.get("state"), str)
+            or component["state"] not in _DNS_STATES
+            or not isinstance(component.get("code"), str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,79}", component["code"]) is None
+        ):
+            raise PlatformAPIError("DNS status is unavailable")
+        states.add(component["state"])
+    return states
+
+
+def _dns_receipt_instructions(status: dict[str, Any]) -> None:
+    account_name = status["account_name"]
+    if account_name is not None and (not isinstance(account_name, str) or not account_name.strip()):
+        raise PlatformAPIError("DNS status is unavailable")
+    instructions = status["instructions"]
+    if not isinstance(instructions, list) or len(instructions) > _MAX_DNS_INSTRUCTIONS:
+        raise PlatformAPIError("DNS status is unavailable")
+    for record in instructions:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("type"), str)
+            or record["type"] not in {"CNAME", "ALIAS"}
+            or not isinstance(record.get("name"), str)
+            or not record["name"].strip()
+            or not isinstance(record.get("value"), str)
+            or record["value"] != account_name
+        ):
+            raise PlatformAPIError("DNS status is unavailable")
+
+
+def _dns_status_receipt(response: object) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise PlatformAPIError("DNS status is unavailable")
+    data = response.get("data")
+    status = data.get("dns_status") if isinstance(data, dict) else None
+    if (
+        response.get("success") is not True
+        or not isinstance(status, dict)
+        or not status.keys() >= _DNS_FIELDS
+        or type(status.get("version")) is not int
+        or status.get("version") != 1
+        or not isinstance(status.get("state"), str)
+        or status.get("state") not in _DNS_PUBLIC_STATES
+        or not isinstance(status["dns_path"], str)
+        or re.fullmatch(r"[a-z][a-z0-9_]{0,79}", status["dns_path"]) is None
+        or type(status["pending"]) is not bool
+        or type(status["stale"]) is not bool
+        or ("queued" in status and type(status["queued"]) is not bool)
+    ):
+        raise PlatformAPIError("DNS status is unavailable")
+    dated = _dns_checked_at(status["checked_at"])
+    states = _dns_receipt_components(status)
+    _dns_receipt_instructions(status)
+    if status["state"] in {"healthy", "broken"} and (not dated or set(status["components"]) != _DNS_COMPONENTS):
+        raise PlatformAPIError("DNS status is unavailable")
+    if status["state"] == "healthy" and (
+        not status["account_name"] or "healthy" not in states or not states <= {"healthy", "not_applicable"}
+    ):
+        raise PlatformAPIError("DNS status is unavailable")
+    return status
 
 
 def _service_request_receipt(response: dict[str, Any]) -> dict[str, Any]:
@@ -210,6 +302,28 @@ class ServicesAPIClient(PlatformAPIClient):
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services for customer {customer_id}: {e}")
             raise
+
+    def get_service_dns_status(self, customer_id: int, user_id: int, service_id: int) -> dict[str, Any]:
+        """Read the cached tenant-scoped result; DNS runs only in Platform workers."""
+        response = self._make_request(
+            "POST",
+            f"/services/{service_id}/dns-status/",
+            user_id=user_id,
+            data={"customer_id": customer_id, "user_id": user_id},
+            idempotent=True,
+        )
+        return _dns_status_receipt(response)
+
+    def recheck_service_dns(self, customer_id: int, user_id: int, service_id: int) -> dict[str, Any]:
+        """Request a deduplicated background check under Platform's current membership role."""
+        response = self._make_request(
+            "POST",
+            f"/services/{service_id}/dns-status/recheck/",
+            user_id=user_id,
+            data={"customer_id": customer_id, "user_id": user_id},
+            idempotent=True,
+        )
+        return _dns_status_receipt(response)
 
     def get_service_detail(self, customer_id: int, user_id: int, service_id: int) -> dict[str, Any]:
         """

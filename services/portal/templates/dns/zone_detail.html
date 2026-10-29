@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{{ zone.name }} · {% trans "DNS" %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+  <main id="dns-zone" class="mx-auto max-w-6xl space-y-6 px-4 py-8"
+    {% if poll_again %}hx-get="{% url 'dns:detail' zone.id %}?page={{ zone.page }}&amp;poll={{ poll }}" hx-trigger="load delay:10s" hx-select="#dns-zone" hx-target="this" hx-swap="outerHTML"{% endif %}>
+    <a href="{% url 'dns:list' %}" class="text-primary-400 underline">{% trans "DNS zones" %}</a>
+    <h1 class="text-2xl font-semibold text-white">{{ zone.name }}</h1>
+    <p class="text-slate-400">{% trans "Revision" %} {{ zone.revision }} · {{ status_label }}</p>
+    <p class="text-sm text-slate-300">{% trans "External mail routing is preserved. Hosting mail has not been enabled by this import." %}</p>
+    {% if zone.stale %}{% trans "Hosting configuration changed. Review a fresh import before changing nameservers." as notice %}{% alert notice variant="warning" %}{% endif %}
+    {% if zone.has_error or not zone.valid %}{% trans "This import needs attention. Review the inventory and try a corrected zone file or contact support." as notice %}{% alert notice variant="warning" %}{% endif %}
+    {% for error in import_errors %}<p class="text-slate-300">{% if error.line %}{% trans "Line" %} {{ error.line }}: {% endif %}{{ error.message }}</p>{% endfor %}
+    {% if zone.pending %}<p class="text-slate-300">{% trans "DNS work is queued or running. Status updates stop automatically after a short wait; refresh this page to continue." %}</p>{% endif %}
+    {% if zone.nameservers and not zone.stale %}
+      <section class="space-y-3 rounded-lg border border-slate-600 p-5">
+        <h2 class="text-xl font-semibold text-white">{% trans "Change your registrar's nameservers" %}</h2>
+        <p class="text-slate-300">{% trans "The current import was published and verified. Replace the nameservers at your registrar with the complete list below. Keep any previous DNS service available while caches expire." %}</p>
+        <ul class="font-mono text-slate-200">{% for nameserver in zone.nameservers %}<li>{{ nameserver }}</li>{% endfor %}</ul>
+        {% if can_edit and zone.can_switch_registrar %}<form method="post" action="{% url 'dns:action' zone.id 'switch' %}" hx-post="{% url 'dns:action' zone.id 'switch' %}" hx-target="#dns-action-result" class="space-y-4">
+          {% csrf_token %}{% for field in switch_form.hidden_fields %}{{ field }}{% endfor %}
+          {% form_checkbox switch_form.confirmed %}
+          {% trans "Update nameservers through registrar" as switch_label %}{% button switch_label type="submit" variant="secondary" %}
+        </form>{% endif %}
+      </section>
+    {% else %}<p class="text-slate-300">{% trans "Keep your current nameservers. New nameserver instructions appear only after the confirmed import is verified." %}</p>{% endif %}
+    <div id="dns-action-result" aria-live="polite"></div>
+    <section class="space-y-3"><h2 class="text-xl font-semibold text-white">{% trans "Original inventory" %} ({{ zone.inventory_total }})</h2>{% include "dns/partials/records.html" with rows=zone.inventory %}</section>
+    <p class="text-sm text-slate-300">{% trans "The original SOA and apex NS records are shown in the inventory. The new provider replaces these infrastructure records; they are excluded from the proposed imported records below." %}</p>
+    <section class="space-y-3"><h2 class="text-xl font-semibold text-white">{% trans "Proposed provider records" %} ({{ zone.manifest_total }})</h2>{% include "dns/partials/records.html" with rows=zone.manifest %}</section>
+    <section class="space-y-4">
+      <h2 class="text-xl font-semibold text-white">{% trans "Changes and normalizations" %} ({{ zone.normalizations_total }})</h2>
+      {% for change in normalizations %}
+        <div class="space-y-2 rounded border border-slate-700 p-4">
+          <p class="font-medium text-white">{{ change.label }}</p>
+          {% if change.before_total or change.after_total %}
+            <p class="text-slate-400">{% trans "Before" %} ({{ change.before_total }})</p>{% include "dns/partials/records.html" with rows=change.before %}
+            <p class="text-slate-400">{% trans "After" %} ({{ change.after_total }})</p>{% include "dns/partials/records.html" with rows=change.after %}
+          {% else %}<p class="text-slate-300">{{ change.name }} {{ change.record_type }} {{ change.rdata }}</p>{% endif %}
+        </div>
+      {% empty %}<p class="text-slate-400">{% trans "No normalizations on this page." %}</p>{% endfor %}
+    </section>
+    <section class="space-y-3">
+      <h2 class="text-xl font-semibold text-white">{% trans "Current records" %} ({{ zone.records_total }})</h2>
+      {% include "dns/partials/records.html" with rows=zone.records editable=True %}
+      {% if can_edit %}<a href="{% url 'dns:record_create' zone.id %}" class="text-primary-400 underline">{% trans "Add DNS record" %}</a>{% endif %}
+    </section>
+    {% include "dns/partials/pagination.html" with page=zone.page pages=zone.pages %}
+    {% if can_edit and zone.valid and not zone.stale and not zone.pending and zone.crosscheck_available %}
+      <section class="space-y-4 rounded-lg border border-slate-600 p-5">
+        <form method="post" action="{% url 'dns:action' zone.id 'crosscheck' %}" hx-post="{% url 'dns:action' zone.id 'crosscheck' %}" hx-target="#dns-action-result">
+          {% csrf_token %}{{ revision_form }}
+          {% trans "Check import against current DNS" as check_label %}{% button check_label type="submit" variant="secondary" %}
+        </form>
+        {% if zone.status == 'pending_import' and zone.crosscheck.complete and zone.crosscheck.ok %}
+          <form method="post" action="{% url 'dns:action' zone.id 'confirm' %}" hx-post="{% url 'dns:action' zone.id 'confirm' %}" hx-target="#dns-action-result" class="space-y-4">
+            {% csrf_token %}{% for field in confirm_form.hidden_fields %}{{ field }}{% endfor %}
+            {% form_checkbox confirm_form.confirmed %}
+            {% trans "Confirm this exact import" as confirm_label %}{% button confirm_label type="submit" variant="primary" %}
+          </form>
+        {% elif zone.status == 'pending_import' %}
+          <p class="text-sm text-slate-300">{% trans "Run the import check against current DNS before confirming this revision. If it disagrees, correct the zone file and review a new import." %}</p>
+        {% endif %}
+      </section>
+    {% endif %}
+    {% if zone.dnssec.ds %}<section class="space-y-2"><h2 class="text-xl font-semibold text-white">{% trans "DNSSEC delegation" %}</h2><p class="text-slate-300">{% trans "Registrar DS record" %}</p><p class="break-all font-mono text-slate-200">{{ zone.dnssec.ds }}</p></section>{% endif %}
+    {% if can_edit %}
+      <div class="flex flex-wrap items-center gap-4">
+        <form method="post" action="{% url 'dns:export' zone.id %}">{% csrf_token %}{% trans "Export zone file" as export_label %}{% button export_label type="submit" variant="secondary" %}</form>
+        <a href="{% url 'dns:delete' zone.id %}" class="text-primary-400 underline">{% trans "Move away and delete zone" %}</a>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

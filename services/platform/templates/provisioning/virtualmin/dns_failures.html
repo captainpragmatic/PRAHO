@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block content %}
+  <div class="space-y-6">
+    <h1 class="text-2xl font-bold text-white">{{ page_title }}</h1>
+    <p class="text-sm text-slate-400">{% trans "These are the last recorded results. Open an account to check whether they still describe its current hosting configuration." %}</p>
+    <form method="get" class="max-w-sm space-y-3">
+      {% trans "Recorded result" as result_label %}
+      {% input_field "state" input_type="select" options=dns_state_options value=selected_state label=result_label %}
+      {% trans "Filter" as filter_label %}{% button filter_label type="submit" variant="secondary" %}
+    </form>
+    <div class="overflow-x-auto rounded-lg border border-slate-700">
+      <table class="min-w-full divide-y divide-slate-700">
+        <thead><tr class="text-left text-sm text-slate-300"><th scope="col" class="px-4 py-3">{% trans "Account" %}</th><th scope="col" class="px-4 py-3">{% trans "Customer" %}</th><th scope="col" class="px-4 py-3">{% trans "Last checked" %}</th><th scope="col" class="px-4 py-3">{% trans "Recorded result" %}</th></tr></thead>
+        <tbody class="divide-y divide-slate-700 text-sm text-slate-300">
+          {% for row in dns_page %}
+            <tr><td class="px-4 py-3"><a class="text-primary-400 hover:underline" href="{% url 'provisioning:virtualmin_account_detail' row.account_id %}">{{ row.account.domain }}</a></td><td class="px-4 py-3">{{ row.account.service.customer.name }}</td><td class="px-4 py-3">{{ row.checked_at|date:"DATETIME_FORMAT"|default:"—" }}</td><td class="px-4 py-3">{% if row.healthy is None %}{% trans "Not confirmed" %}{% elif row.healthy %}{% trans "Passed" %}{% else %}{% trans "Needs attention" %}{% endif %}</td></tr>
+          {% empty %}<tr><td class="px-4 py-6" colspan="4">{% trans "No recorded results match this filter." %}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if dns_page.has_previous %}<a class="text-primary-400" href="?state={{ selected_state }}&amp;page={{ dns_page.previous_page_number }}">{% trans "Previous" %}</a>{% endif %}
+    {% if dns_page.has_next %}<a class="text-primary-400" href="?state={{ selected_state }}&amp;page={{ dns_page.next_page_number }}">{% trans "Next" %}</a>{% endif %}
+  </div>
+{% endblock %}

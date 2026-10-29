@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "DNS checks" %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+  <div class="mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <a href="{% url 'services:detail' service_id %}" class="text-primary-400 hover:underline">{% trans "Back to service" %}</a>
+    {% if dns_hosting %}{% include "services/partials/dns_instructions.html" with hosting=dns_hosting only %}{% endif %}
+    {% include "services/partials/dns_status_card.html" %}
+  </div>
+{% endblock %}

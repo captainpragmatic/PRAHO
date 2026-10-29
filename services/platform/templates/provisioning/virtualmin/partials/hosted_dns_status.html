@@ -1,0 +1,23 @@
+{% load i18n ui_components %}
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-6" aria-labelledby="hosted-dns-heading">
+  <h2 id="hosted-dns-heading" class="text-lg font-semibold text-white">{% trans "DNS checks" %}</h2>
+  <p class="text-sm text-slate-300">{{ hosted_dns_status.state }}{% if hosted_dns_status.checked_at %} · {{ hosted_dns_status.checked_at }}{% endif %}</p>
+  {% if hosted_dns_status.stale %}<p class="text-sm text-slate-400">{% trans "Earlier observations are stale for the current hosting configuration." %}</p>{% endif %}
+  {% if hosted_dns_status.pending %}<p class="text-sm text-slate-400">{% trans "A background check is waiting or running." %}</p>{% endif %}
+  <dl class="mt-4 space-y-2">
+    {% for name, observation in hosted_dns_status.components.items %}
+      <div><dt class="font-medium text-slate-200">{{ name }}</dt><dd class="text-sm text-slate-400">{{ observation.state }} · {{ observation.code }}</dd></div>
+    {% endfor %}
+  </dl>
+  {% if hosted_dns_evidence %}
+    <details class="mt-4"><summary class="cursor-pointer text-sm text-slate-300">{% trans "Last recorded diagnostic evidence" %}</summary><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-400">{{ hosted_dns_evidence }}</pre></details>
+  {% endif %}
+  <div class="mt-4 flex flex-wrap gap-3">
+    <form method="post" action="{% url 'provisioning:virtualmin_dns_recheck' account.pk %}">
+      {% csrf_token %}
+      {% trans "Request DNS check" as recheck_label %}{% button recheck_label type="submit" variant="secondary" %}
+    </form>
+    {% url 'provisioning:virtualmin_dns_failures' as problems_url %}
+    {% trans "Recorded DNS issues" as problems_label %}{% button problems_label href=problems_url variant="secondary" %}
+  </div>
+</section>

@@ -10,8 +10,10 @@ from apps.audit.models import AuditEvent
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.dns_agreement import Agreement
 from apps.infrastructure.panel_cert_probes import AuthoritativeAnswer
+from apps.provisioning import managed_dns_service as managed
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.account_hostname_service import EnsureOutcome
+from apps.provisioning.migration_barrier import BarrierRecord, BarrierStep
 from apps.provisioning.migration_bridge_service import BridgePreparation
 from apps.provisioning.virtualmin_gateway import listing_attribute
 from apps.provisioning.virtualmin_migration_models import MigrationBridge, VirtualminMigration
@@ -20,10 +22,37 @@ from apps.provisioning.virtualmin_migration_service import (
     VirtualminMigrationService,
     resolve_migration,
 )
-from tests.provisioning.test_virtualmin_migration_barrier_wiring import BarrierCase
+from apps.provisioning.virtualmin_models import VirtualminServer
+from tests.provisioning.test_virtualmin_migration_barrier_wiring import RECORD, TOKEN, BarrierCase
+
+KILLED_AT = 1_700_000_000
 
 
 class CutoverCommitTests(BarrierCase):
+    def test_authoritative_generation_still_matches_when_completion_commits(self):
+        migration, token = self.committed_bridge()
+        bridge = MigrationBridge.objects.get(migration=migration)
+        bridge.activate()
+        bridge.save()
+        VirtualminMigration.objects.filter(pk=migration.pk).update(status="repointing")
+        migration.refresh_from_db()
+        original = managed.observe_routing
+
+        def observe_then_readdress(hostname):
+            result = original(hostname)
+            self.assertTrue(result.unwrap()["agreed"])
+            VirtualminServer.objects.filter(pk=migration.target_server_id).update(ipv4_address="95.217.0.30")
+            return result
+
+        with (
+            patch("apps.provisioning.account_hostname_service.sync_account_hostname", return_value=Ok("published")),
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch.object(managed, "observe_routing", side_effect=observe_then_readdress),
+            patch("apps.provisioning.migration_bridge_cleanup.schedule_bridge_cleanup"),
+            self.assertRaises(MigrationDeferredError),
+        ):
+            VirtualminMigrationService()._converge_cutover(migration, token)
+
     def test_source_neutral_policy_precedes_ttl_lowering_even_for_an_unpublished_name(self):
         migration, token = self._held("lowering_ttl", contract="cutover")
         AccountHostname.objects.create(
@@ -79,8 +108,12 @@ class CutoverCommitTests(BarrierCase):
     def restored(self):
         self.target.ipv4_address = "95.217.0.20"
         self.target.save(update_fields=["ipv4_address"])
+        # Quiesce persisted the record, token and kill time before the backup; a cutover always has them here.
         migration, token = self._held(
-            "verifying", contract="cutover", restore_issued=True, barrier_state={"held_restore_complete": True}
+            "verifying",
+            contract="cutover",
+            restore_issued=True,
+            barrier_state={"held_restore_complete": True, "record": RECORD, "token": TOKEN, "killed_at": KILLED_AT},
         )
         self.source_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         target = self.target_gateway.seed_domain(
@@ -115,6 +148,204 @@ class CutoverCommitTests(BarrierCase):
         self.assertIn(self.account.domain, bridge.evidence["dns_names"])
         self.assertIn(name.fqdn, bridge.evidence["frontend_dns_before"])
         self.assertNotIn("enable-domain", self._programs("target"))
+
+    def barrier_calls(self, verify):
+        """Barrier runs, recorded in the event timeline; `verify` answers the source's re-verification."""
+        calls = []
+
+        def run(server, variables):
+            action = variables["barrier_action"]
+            calls.append((server.pk, action, variables))
+            self.events.append(("node", f"barrier:{action}", variables, None))
+            if action == "verify":
+                held = VirtualminMigration.objects.get(account=self.account)
+                self.assertIsNone(held.cutover_committed_at, "the fence is re-verified before the commit")
+                self.assertFalse(MigrationBridge.objects.filter(migration=held).exists())
+                return verify
+            return Ok(BarrierStep("ok", "released" if action == "release" else "idle"))
+
+        return calls, run
+
+    def assert_precommit_abort(self, verify, reason):
+        migration, token, name = self.restored()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        calls, run = self.barrier_calls(verify)
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", return_value=Ok("removed")) as remove,
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+        ):
+            VirtualminMigrationService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.account.refresh_from_db()
+        name.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+        self.assertEqual(self.account.server_id, self.server.pk)
+        self.assertEqual(name.target_server_id, self.server.pk)
+        self.assertFalse(MigrationBridge.objects.filter(migration=migration).exists())
+        self.assertEqual(migration.status, "rolled_back")
+        self.assertIn(reason, migration.error_detail)
+        # Compensation: the target copy and prepared bridge go, then the recorded fence is released.
+        self.assertEqual([action for server, action, _ in calls if server == self.server.pk], ["verify", "release"])
+        self.assertIsNone(self.target_gateway.domain_state_of(self.account.domain))
+        remove.assert_called_once()
+        self.assertNotIn("enable-domain", self._programs("target"))
+
+    def test_a_fence_broken_after_the_backup_aborts_before_the_ownership_commit(self):
+        self.assert_precommit_abort(
+            Ok(BarrierStep("failed", "lock_state_differs:customer@localhost")), "lock_state_differs"
+        )
+
+    def test_an_unusable_reverification_aborts_before_the_ownership_commit(self):
+        self.assert_precommit_abort(
+            Err("Barrier playbook failed or timed out (rc=2)", retriability=Retriability.UNKNOWN), "rc=2"
+        )
+
+    def test_a_cutover_without_its_barrier_record_is_refused_before_the_ownership_commit(self):
+        migration, token, name = self.restored()
+        state = {key: value for key, value in migration.barrier_state.items() if key != "record"}
+        VirtualminMigration.objects.filter(pk=migration.pk).update(barrier_state=state)
+        migration.refresh_from_db()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        calls, run = self.barrier_calls(Ok(BarrierStep("ok", "holds")))
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", return_value=Ok("removed")),
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+            self.assertRaisesRegex(ValueError, "barrier record"),
+        ):
+            VirtualminMigrationService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.account.refresh_from_db()
+        name.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+        self.assertEqual(self.account.server_id, self.server.pk)
+        self.assertEqual(name.target_server_id, self.server.pk)
+        self.assertEqual(calls, [])
+
+    def test_a_busy_source_defers_the_commit_without_compensating(self):
+        migration, token, name = self.restored()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        calls, run = self.barrier_calls(Ok(BarrierStep("busy", "lock_busy")))
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+            patch("apps.provisioning.virtualmin_tasks.schedule_migration_wake") as wake,
+        ):
+            VirtualminMigrationService().execute(migration, token)
+        migration.refresh_from_db()
+        self.account.refresh_from_db()
+        name.refresh_from_db()
+        self.assertIsNone(migration.cutover_committed_at)
+        self.assertEqual((migration.status, migration.parked_phase), ("verifying", ""))
+        self.assertIsNotNone(migration.resume_after)
+        wake.assert_called_once()
+        self.assertEqual(self.account.server_id, self.server.pk)
+        self.assertEqual(name.target_server_id, self.server.pk)
+        self.assertEqual([action for _, action, _ in calls], ["verify"])
+        self.assertIsNotNone(self.target_gateway.domain_state_of(self.account.domain))
+
+    def test_a_holding_fence_is_reverified_with_the_recorded_barrier_and_then_commits(self):
+        migration, token, _name = self.restored()
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        calls, run = self.barrier_calls(Ok(BarrierStep("ok", "holds")))
+        with (
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+        ):
+            VirtualminMigrationService()._verify(migration, token)
+        migration.refresh_from_db()
+        self.assertIsNotNone(migration.cutover_committed_at)
+        self.assertEqual(migration.status, "activating")
+        self.assertEqual([(server, action) for server, action, _ in calls], [(self.server.pk, "verify")])
+        variables = calls[0][2]
+        record = BarrierRecord.from_state(RECORD).unwrap()
+        self.assertNotEqual(variables["barrier_token"], TOKEN, "a fresh token binds the result to this run")
+        self.assertEqual(variables["barrier_saved_token"], TOKEN)
+        self.assertEqual(variables["barrier_previous_token"], "")
+        self.assertEqual(variables["barrier_killed_at"], str(KILLED_AT))
+        self.assertEqual(variables["barrier_accounts"], record.accounts_lines())
+        self.assertEqual(variables["barrier_enabled"], record.enabled_lines())
+        self.assertEqual(
+            variables["barrier_domain_id"],
+            listing_attribute(migration.pre_migration_snapshot["remote"]["attributes"], "ID"),
+        )
+
+    def test_the_fence_is_reverified_after_the_transfer_and_before_the_ownership_commit(self):
+        self.target.ipv4_address = "95.217.0.20"
+        self.target.save(update_fields=["ipv4_address"])
+        migration, token = self._held(
+            "backing_up",
+            contract="cutover",
+            barrier_state={"record": RECORD, "token": TOKEN, "killed_at": KILLED_AT},
+        )
+        self.source_gateway.domain_state_of(self.account.domain).enabled = False
+        AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        features = str(listing_attribute(migration.pre_migration_snapshot["remote"]["attributes"], "Features"))
+
+        def restore(service, held, held_token, _archives):
+            target = self.target_gateway.seed_domain(
+                self.account.domain, username=self.account.virtualmin_username, enabled=False
+            )
+            target.features = features.split()
+            service._store_barrier_state(held, held_token, {**held.barrier_state, "held_restore_complete": True})
+            service._move(held, held_token, "verifying", restore_issued=True)
+
+        transport = self.ansible.return_value.run_playbook.side_effect
+
+        def playbook(deployment, name, *args, **kwargs):
+            self.events.append(("node", name, {}, None))
+            return transport(deployment, name, *args, **kwargs)
+
+        transition = VirtualminMigration.transition
+
+        def record_commit(instance, held_token, before, after, **fields):
+            changed = transition(instance, held_token, before, after, **fields)
+            if changed and fields.get("cutover_committed_at") is not None:
+                self.events.append(("db", "commit", {}, None))
+            return changed
+
+        self.ansible.return_value.run_playbook.side_effect = playbook
+        ready = EnsureOutcome(created=True, enabled=False, linked=False, certificate_installed=True, neutral=True)
+        _calls, run = self.barrier_calls(Ok(BarrierStep("ok", "holds")))
+        service = VirtualminMigrationService()
+        with (
+            patch("apps.provisioning.migration_target_hold.restore_held_target", side_effect=restore),
+            patch("apps.provisioning.virtualmin_migration_service.ensure_on_recreated_node", return_value=Ok(ready)),
+            patch("apps.provisioning.migration_bridge_service.prepare_bridge", return_value=self.preparation()),
+            patch("apps.provisioning.virtualmin_migration_service.run_barrier", side_effect=run),
+            patch("apps.provisioning.virtualmin_tasks.schedule_migration_wake"),
+            patch.object(VirtualminMigration, "transition", new=record_commit),
+        ):
+            for _checkpoint in range(6):
+                service.execute(migration, token)
+                migration.refresh_from_db()
+                if migration.cutover_committed_at is not None or migration.parked_phase:
+                    break
+        self.assertEqual(migration.status, "activating")
+        milestones = {
+            "backup-domain",
+            "virtualmin_migrate_fetch.yml",
+            "virtualmin_migrate_push.yml",
+            "barrier:verify",
+            "commit",
+        }
+        self.assertEqual(
+            [program for _, program, _, _ in self.events if program in milestones],
+            [
+                "backup-domain",
+                "virtualmin_migrate_fetch.yml",
+                "virtualmin_migrate_push.yml",
+                "barrier:verify",
+                "commit",
+            ],
+        )
 
     def test_cancellation_arriving_during_bridge_preparation_aborts_before_the_ownership_commit(self):
         migration, token, name = self.restored()

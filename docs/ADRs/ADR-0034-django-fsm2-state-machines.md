@@ -42,7 +42,7 @@ Adopt **django-fsm-2** v4.x with `FSMField(protected=True)` on all 10 models, co
 - `FSMField(protected=True)` makes `model.status = "xxx"` raise `AttributeError` at runtime
 - `@transition` decorators declare valid source/target states declaratively
 - `ConcurrentTransitionMixin` provides optimistic locking for race-sensitive models
-- `post_transition` signal replaces fragile `post_save` status-diff patterns
+- Transition signals can expose an explicit source/target pair; auditing must describe the change that persists.
 - `TransitionNotAllowed` exception integrates with Result pattern: catch and return `Err(...)`
 - At the DB level, `FSMField` is just a `CharField` — trivially reversible
 
@@ -57,7 +57,8 @@ Adopt **django-fsm-2** v4.x with `FSMField(protected=True)` on all 10 models, co
 1. **Runtime**: `FSMField(protected=True)` blocks direct assignment
 2. **Lint**: Pre-commit `lint_fsm_guardrails.py` catches `.status =`, `.update(status=)`, `bulk_update` with status
 3. **Database**: `CHECK` constraints validate status values at DB level
-4. **Audit**: `post_transition` signal logs every state change via `log_security_event()`
+4. **Audit**: Every business state change has the audit coverage required by ADR-0016. A transition signal,
+   an audited orchestration service, or a save receiver that compares persisted state may provide it.
 5. **Test**: `force_status()` helper is the ONLY allowed bypass (in test code only)
 
 ## Consequences
@@ -65,7 +66,7 @@ Adopt **django-fsm-2** v4.x with `FSMField(protected=True)` on all 10 models, co
 ### Positive
 - Illegal state transitions fail loudly at runtime
 - Transition rules are declarative and discoverable on the model class
-- Audit trail is automatic via `post_transition` signal
+- Business state changes retain an explicit audit trail.
 - Race conditions handled by `ConcurrentTransitionMixin` on Order, Service, Payment, Domain, Invoice, Refund, and Subscription
 
 ### Negative
@@ -87,7 +88,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
     @transition(field=status, source="draft", target="awaiting_payment",
                 conditions=[lambda self: self.items.exists()])
     def submit(self) -> None:
-        pass  # Side effects go in post_transition signal
+        pass  # The service persists the transition and schedules external work after commit.
 
 # Service: orchestrates and returns Result
 def update_order_status(self, order, new_status):
@@ -125,6 +126,23 @@ force_status(order, "paid")
 order.start_provisioning()
 self.assertEqual(order.status, "provisioning")
 ```
+
+## Implementation clarification (2026-10-27)
+
+The ten-model inventory above records the original adoption scope. It is not a current model count.
+Later business lifecycles, including migration bridges and hosted DNS zones, also use protected FSM fields
+and optimistic concurrency where competing transitions are possible.
+
+`post_transition` fires when the Python transition runs, before its save and transaction commit. It does
+not by itself prove that the transition persisted. Current implementations also use audited services and
+`pre_save`/`post_save` receivers; those receivers must honor `update_fields` and record the value actually
+written. External calls continue to follow ADR-0045's committed side-effect boundary. This clarification
+corrects the original claim that all models already used one universal transition audit receiver.
+
+Worker leases, dispatch checkpoints and provider-operation outcomes are operational coordination, rather
+than customer business lifecycles. Their bounded compare-and-swap writes can use ordinary fields, with a
+specific `fsm-bypass` explanation where the guard requires one and an audited aggregate outcome. This
+does not permit direct writes to a protected business FSM field or a blanket application-wide bypass.
 
 ## Related
 - Issue #96: Direct status assignment bypass

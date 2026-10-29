@@ -1,122 +1,51 @@
-%% PRAHO Platform - App Dependency Graph
-%% Generated: 2026-02-21
-%% Shows inter-app dependencies for all 17 platform apps
-%% Arrow direction: A --> B means "A depends on B" (A imports from B)
-%% (*) Cross-cutting apps imported by nearly all others — shown with dashed links
-
-graph TD
-    %% =========================================================================
-    %% CROSS-CUTTING TIER (*) - Imported by nearly all apps
-    %% =========================================================================
-    subgraph "Cross-Cutting (*)"
-        COMMON["common *<br/>Validators, types, security"]
-        AUDIT["audit *<br/>Immutable audit trails"]
-        SETTINGS["settings *<br/>Configuration management"]
+%% Source snapshot: 2026-10-27. All 17 installed local Platform apps.
+%% Selected source dependency edges, including deferred imports; not a strict layer DAG.
+%% A --> B means A imports/uses B. Cross-cutting edges are abbreviated.
+flowchart TD
+    subgraph CrossCutting["Cross-cutting services"]
+        COMMON["common: validation, types, credentials and transport policy"]
+        AUDIT["audit: events and compliance"]
+        SETTINGS["settings: guarded configuration"]
+    end
+    subgraph Foundation["Identity and commercial models"]
+        USERS["users: authentication and memberships"]
+        CUSTOMERS["customers: customer data ownership"]
+        BILLING["billing: invoices, payments and subscriptions"]
+        PRODUCTS["products: catalog and prices"]
+    end
+    subgraph Business["Business workflows"]
+        ORDERS["orders: checkout and fulfillment"]
+        PROVISIONING["provisioning: hosting, names, moves and DNS observations"]
+        DOMAINS["domains: registration and independent customer DNS zones"]
+        NOTIFICATIONS["notifications: email templates and delivery"]
+        INTEGRATIONS["integrations: webhooks"]
+        TICKETS["tickets: support and SLA"]
+        PROMOTIONS["promotions: discounts and credits"]
+    end
+    subgraph Boundaries["Presentation and external adapters"]
+        API["api: signed service endpoints and API-token endpoints"]
+        UI["ui: staff presentation components"]
+        INFRASTRUCTURE["infrastructure: nodes, typed gateways and bounded DNS probes"]
     end
 
-    %% =========================================================================
-    %% FOUNDATION TIER - Depended on by most business apps
-    %% =========================================================================
-    subgraph "Foundation Tier"
-        USERS[users<br/>Email auth, 2FA, staff roles]
-        CUSTOMERS[customers<br/>Business entities, profiles]
-        BILLING[billing<br/>Invoicing, subscriptions, VAT]
-        PRODUCTS[products<br/>Catalog, pricing]
-    end
-
-    %% =========================================================================
-    %% CORE BUSINESS TIER - Primary business operations
-    %% =========================================================================
-    subgraph "Core Business Tier"
-        ORDERS[orders<br/>Order lifecycle]
-        PROVISIONING[provisioning<br/>Service management, Virtualmin]
-        DOMAINS[domains<br/>Domain registration, TLDs]
-    end
-
-    %% =========================================================================
-    %% SPECIALIZED TIER - Supporting capabilities
-    %% =========================================================================
-    subgraph "Specialized Tier"
-        NOTIFICATIONS[notifications<br/>Bilingual email templates]
-        INTEGRATIONS[integrations<br/>Webhook processing]
-        TICKETS[tickets<br/>Support, SLA tracking]
-        PROMOTIONS[promotions<br/>Discount codes]
-    end
-
-    %% =========================================================================
-    %% LEAF TIER - Consumers, no reverse business deps
-    %% =========================================================================
-    subgraph "Leaf Tier"
-        API[api<br/>REST endpoints]
-        UI[ui<br/>Dashboard views]
-        INFRASTRUCTURE[infrastructure<br/>Server monitoring]
-    end
-
-    %% =========================================================================
-    %% CROSS-CUTTING DEPENDENCIES (dashed — implicit for all apps)
-    %% =========================================================================
-    USERS -.-> COMMON
-    CUSTOMERS -.-> COMMON
-    BILLING -.-> COMMON
-    BILLING -.-> AUDIT
-    ORDERS -.-> COMMON
-    ORDERS -.-> AUDIT
-    PROVISIONING -.-> COMMON
-    PROVISIONING -.-> SETTINGS
-    DOMAINS -.-> COMMON
-    TICKETS -.-> SETTINGS
-    API -.-> COMMON
-
-    %% =========================================================================
-    %% BUSINESS DEPENDENCY ARROWS (solid — explicit domain coupling)
-    %% =========================================================================
-
-    %% Core Business depends on Foundation
-    ORDERS --> BILLING
-    ORDERS --> CUSTOMERS
-    ORDERS --> PRODUCTS
-    ORDERS --> PROVISIONING
+    USERS --> CUSTOMERS
     BILLING --> CUSTOMERS
     BILLING --> USERS
-    PROVISIONING --> CUSTOMERS
-    PROVISIONING --> USERS
-    DOMAINS --> BILLING
-    DOMAINS --> CUSTOMERS
-    DOMAINS --> ORDERS
-
-    %% Specialized depends on Foundation + Core
-    TICKETS --> USERS
-    TICKETS --> CUSTOMERS
+    ORDERS --> BILLING
+    ORDERS --> PRODUCTS
+    ORDERS --> PROVISIONING
     TICKETS --> PROVISIONING
-    NOTIFICATIONS --> BILLING
-    NOTIFICATIONS --> ORDERS
-    NOTIFICATIONS --> PROVISIONING
-    INTEGRATIONS --> BILLING
     PROMOTIONS --> PRODUCTS
-
-    %% Leaf depends on multiple tiers
-    API --> ORDERS
-    API --> BILLING
-    API --> CUSTOMERS
+    INTEGRATIONS --> BILLING
+    PROVISIONING --> NOTIFICATIONS
     API --> USERS
-    API --> PRODUCTS
+    API --> CUSTOMERS
+    API --> DOMAINS
     API --> PROVISIONING
-
-    %% Cross-tier Foundation dependencies
-    USERS --> CUSTOMERS
-    PRODUCTS --> PROVISIONING
-
-    %% =========================================================================
-    %% STYLING
-    %% =========================================================================
-    classDef crosscutting fill:#fee2e2,stroke:#991b1b,stroke-width:2px,color:#7f1d1d,stroke-dasharray: 5 5
-    classDef foundation fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a5f
-    classDef core fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
-    classDef specialized fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b
-    classDef leaf fill:#f3e8ff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
-
-    class COMMON,AUDIT,SETTINGS crosscutting
-    class USERS,CUSTOMERS,BILLING,PRODUCTS foundation
-    class ORDERS,PROVISIONING,DOMAINS core
-    class NOTIFICATIONS,INTEGRATIONS,TICKETS,PROMOTIONS specialized
-    class API,UI,INFRASTRUCTURE leaf
+    PROVISIONING -->|"Managed customer records"| DOMAINS
+    DOMAINS -->|"Enrollment and publication lock"| PROVISIONING
+    PROVISIONING -->|"Owned-name gateway and DNS probes"| INFRASTRUCTURE
+    DOMAINS -->|"Customer-zone gateway"| INFRASTRUCTURE
+    PROVISIONING -.-> COMMON
+    PROVISIONING -.-> SETTINGS
+    DOMAINS -.-> AUDIT

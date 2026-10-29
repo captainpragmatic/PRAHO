@@ -1,0 +1,45 @@
+{% load i18n ui_components %}
+<section id="service-dns-status" class="rounded-lg border border-slate-600 bg-slate-800 p-6" aria-labelledby="dns-status-heading" aria-live="polite"
+  {% if dns_poll_again %}hx-get="{% url 'services:dns' service_id %}?poll={{ dns_poll }}" hx-trigger="load delay:10s" hx-swap="outerHTML"{% endif %}>
+  <h3 id="dns-status-heading" class="text-lg font-semibold text-white">{% trans "DNS checks" %}</h3>
+  {% if dns_pending %}
+    <p class="text-sm text-slate-300">{% trans "A DNS check is queued or running." %}</p>
+  {% endif %}
+  {% if dns_state == "maintenance" %}
+    <p class="text-sm text-slate-300">{% trans "Hosting maintenance is in progress. DNS checks will resume afterwards." %}</p>
+  {% elif dns_stale %}
+    <p class="text-sm text-slate-300">{% trans "Waiting for a current check. Earlier results no longer describe this hosting configuration." %}</p>
+  {% elif dns_state == "unavailable" %}
+    <p class="text-sm text-slate-300">{% trans "DNS checks are temporarily unavailable. Try again later." %}</p>
+  {% elif dns_state == "healthy" %}
+    <p class="text-sm text-slate-300">{% trans "The DNS checks passed." %}</p>
+  {% elif dns_state == "broken" %}
+    <p class="text-sm text-slate-300">{% trans "Some DNS records need attention." %}</p>
+  {% elif dns_state == "not_applicable" %}
+    <p class="text-sm text-slate-300">{% trans "DNS monitoring is not available for this service." %}</p>
+  {% else %}
+    <p class="text-sm text-slate-300">{% trans "DNS has not been confirmed yet." %}</p>
+  {% endif %}
+  {% if dns_account_name %}
+    <p class="mt-3 text-sm text-slate-300">{% trans "Hosting name:" %} <span class="font-mono break-all">{{ dns_account_name }}</span></p>
+  {% endif %}
+  {% if dns_components %}
+    <dl class="mt-4 space-y-3">
+      {% for component in dns_components %}
+        <div><dt class="font-medium text-white">{{ component.name }}</dt><dd class="text-sm text-slate-300">{{ component.message }}</dd></div>
+      {% endfor %}
+    </dl>
+  {% endif %}
+  {% if dns_checked_at %}<p class="mt-3 text-xs text-slate-400">{% trans "Last checked:" %} {{ dns_checked_at|date:"DATETIME_FORMAT" }}</p>{% endif %}
+  {% if dns_pending and not dns_poll_again %}
+    {% url 'services:dns' service_id as refresh_status_url %}
+    {% trans "Refresh status" as refresh_status_label %}{% button refresh_status_label href=refresh_status_url variant="secondary" %}
+  {% endif %}
+  {% if can_recheck_dns %}
+    <form class="mt-4" method="post" action="{% url 'services:dns' service_id %}" hx-post="{% url 'services:dns' service_id %}" hx-target="#service-dns-status" hx-swap="outerHTML">
+      {% csrf_token %}
+      {% trans "Check DNS again" as recheck_label %}
+      {% button recheck_label type="submit" variant="secondary" %}
+    </form>
+  {% endif %}
+</section>

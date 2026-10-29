@@ -243,6 +243,15 @@
     "cluster": null
   },
   {
+    "name": "domains-dns-zones",
+    "func": "apps.domains.dns_zone_tasks.dispatch_zone_operations",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
     "name": "domains-reconcile-pending",
     "func": "apps.domains.tasks.reconcile_pending_domain_operations",
     "schedule_type": "H",
@@ -385,6 +394,15 @@
     "cron": "*/10 * * * *",
     "repeats": -1,
     "cluster": null
+  },
+  {
+    "name": "hosted-domain-dns-dispatch",
+    "func": "apps.provisioning.hosted_domain_dns_tasks.dispatch_due_dns_checks",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
   },
   {
     "name": "infra_bulk_validate_nodes",

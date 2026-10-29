@@ -654,7 +654,7 @@ class DomainReconciliationTests(TestCase):
         from apps.domains.tasks import setup_domain_scheduled_tasks  # noqa: PLC0415
 
         Schedule.objects.filter(
-            name__in=("domains-renewal-notices", "domains-reconcile-pending")
+            name__in=("domains-renewal-notices", "domains-reconcile-pending", "domains-dns-zones")
         ).delete()
 
         first = setup_domain_scheduled_tasks()
@@ -665,6 +665,7 @@ class DomainReconciliationTests(TestCase):
             {
                 "renewal_notices": "created",
                 "reconcile_pending": "created",
+                "dns_zones": "created",
             },
         )
         self.assertEqual(
@@ -672,6 +673,7 @@ class DomainReconciliationTests(TestCase):
             {
                 "renewal_notices": "already_exists",
                 "reconcile_pending": "already_exists",
+                "dns_zones": "already_exists",
             },
         )
         renewal_schedule = Schedule.objects.get(name="domains-renewal-notices")

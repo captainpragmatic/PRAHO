@@ -21,6 +21,8 @@
             </p>
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
+            {% url 'provisioning:virtualmin_dns_failures' as dns_problems_url %}
+            {% trans "DNS issues" as dns_problems_label %}{% button dns_problems_label href=dns_problems_url variant="secondary" %}
             {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
             <button class="ui-btn inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 bg-slate-600 text-white hover:bg-slate-700 focus:ring-slate-300 border border-slate-600 px-4 py-2 text-sm"
                     hx-post="{% url 'provisioning:virtualmin_accounts_sync' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-swap="innerHTML" hx-target="#accounts-container" hx-indicator="#sync-indicator" hx-confirm="{% trans 'Sync accounts from all active Virtualmin servers? This may take a few moments.' %}">

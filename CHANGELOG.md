@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Customer DNS zones can be imported, reviewed and managed in the Portal.** A complete zone-file preview preserves external mail and verification records, shows managed website changes, and withholds nameserver instructions until the confirmed inventory is published and checked. Owners and technical contacts can edit supported records and export the zone file; other active members can read it. Hosting moves carry managed web records with their TTL evidence, while unrelated DNS survives hosting termination. Whole-zone deletion requires the requesting member's own current export and an independently verified move to another DNS provider. A deletion whose parent-delegation proof stays stale is parked for staff review instead of retrying forever.
+
+- **Hosting DNS checks appear in the customer Portal and staff account pages.** Background checks record website routing, IPv6, CAA policy, mail routing and DS/DNSKEY consistency. Customers see the last check and can request a recheck as an owner or technical contact. A confirmed healthy-to-broken change queues one notification per incident; unknown results and planned bridge maintenance do not create outage emails. The DNSSEC check compares delegation keys and does not claim signature validation.
+
 - **Hosting moves carry their account name and traffic.** Managed cutovers keep restored targets held until ownership commits, converge DNS forward, and retain a verified encrypted web bridge until customer DNS caches have expired. Staff can retry cleanup and recover a fenced unavailable node from retained backups while preserving suspension and current quotas.
 
 - **Every hosting account can get a provider hostname that follows it** (ADR-0061). Automation is enabled by default through `dns.account_hostnames_enabled` and takes effect only after the Hosting DNS zone, zone ID and API token are configured.

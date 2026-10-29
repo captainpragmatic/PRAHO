@@ -21,6 +21,8 @@
             </p>
         </div>
         <div class="mt-4 sm:mt-0 flex gap-3">
+            {% url 'domains:zone_list' as zones_url %}
+            {% trans "Hosted DNS zones" as zones_label %}{% button zones_label variant="secondary" href=zones_url %}
             {% url 'domains:tld_list' as tld_list_url %}
             {% url 'domains:registrar_list' as registrar_list_url %}
             {% trans "TLDs" as bt1 %}{% button bt1 variant="secondary" href=tld_list_url %}

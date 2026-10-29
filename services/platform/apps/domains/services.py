@@ -735,57 +735,30 @@ class DomainLifecycleService:
         return Err(cast(str, _("Registrar rejected the transfer: {error}")).format(error=error.code.value))
 
     @staticmethod
+    def prepare_nameserver_update(
+        domain: Domain, nameservers: list[str], *, operation_id: UUID, retry_of: UUID | None = None
+    ) -> Result[DomainOperation, str]:
+        """Persist a stable immutable intent without contacting the registrar."""
+        from .nameserver_changes import prepare  # noqa: PLC0415
+
+        return prepare(domain, nameservers, operation_id=operation_id, retry_of=retry_of)
+
+    @staticmethod
+    def resume_nameserver_update(operation: DomainOperation) -> Result[DomainOperation, str]:
+        """Resume exactly this intent; a submitted request belongs to reconciliation."""
+        from .nameserver_changes import resume  # noqa: PLC0415
+
+        return resume(operation)
+
+    @staticmethod
     def update_nameservers(domain: Domain, nameservers: list[str]) -> Result[DomainOperation, str]:
-        """Update nameservers at the registrar (two-phase)."""
-        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
-        from .operation_services import DomainOperationService  # noqa: PLC0415
+        """Prepare and submit one nameserver intent for legacy synchronous callers."""
+        from uuid import uuid4  # noqa: PLC0415
 
-        try:
-            gateway = RegistrarGatewayFactory.create_gateway(domain.registrar)
-        except ValueError:
-            return Err(f"No gateway for registrar {domain.registrar.name}")
-
-        op = DomainOperation.objects.create(
-            domain=domain,
-            registrar=domain.registrar,
-            operation_type="nameserver_update",
-            parameters={"nameservers": nameservers},
-        )
-
-        if not DomainOperationService.dispatch(op):
-            return Err("Operation already submitted; awaiting confirmation.")
-        result = gateway.update_nameservers(domain.name, nameservers)
-        if result.is_ok():
-            update = result.unwrap()
-            if update.pending:
-                # Accepted, not completed (#257): leave domain.nameservers untouched
-                # until the reconciler confirms the registrar applied the change.
-                op.registrar_operation_id = update.operation_handle
-                op.accepted_at = timezone.now()
-                op.save(
-                    update_fields=[
-                        "state",
-                        "registrar_operation_id",
-                        "submitted_at",
-                        "accepted_at",
-                        "updated_at",
-                    ]
-                )
-                return Ok(op)
-
-            domain.nameservers = nameservers
-            domain.save(update_fields=["nameservers", "updated_at"])
-            op.mark_completed()
-            op.save(update_fields=["state", "completed_at", "updated_at"])
-            return Ok(op)
-
-        error = result.unwrap_err()
-        if retriability_of(result) != Retriability.UNKNOWN:
-            op.mark_failed(error.code.value)
-        else:
-            op.error_message = error.code.value
-        op.save(update_fields=["state", "error_message", "updated_at"])
-        return Err(cast(str, _("Nameserver update failed: {error}")).format(error=error.code.value))
+        prepared = DomainLifecycleService.prepare_nameserver_update(domain, nameservers, operation_id=uuid4())
+        if prepared.is_err():
+            return prepared
+        return DomainLifecycleService.resume_nameserver_update(prepared.unwrap())
 
     @staticmethod
     def set_domain_lock(domain: Domain, locked: bool) -> Result[DomainOperation, str]:
@@ -1026,7 +999,7 @@ class DomainReconciliationService:
         with transaction.atomic():
             domain = Domain.objects.select_for_update().get(pk=candidate.domain_id)
             operation = DomainOperation.objects.select_for_update().get(pk=operation_id)
-            if operation.state != "submitted":
+            if operation.state != "submitted" or not cls._operation_binding_current(operation, domain):
                 return False
 
             parameters = operation.parameters
@@ -1075,6 +1048,14 @@ class DomainReconciliationService:
                 return True
 
         return False
+
+    @staticmethod
+    def _operation_binding_current(operation: DomainOperation, domain: Domain) -> bool:
+        if operation.operation_type != "nameserver_update" or "binding" not in operation.parameters:
+            return True
+        from .nameserver_changes import binding_matches  # noqa: PLC0415
+
+        return binding_matches(domain, operation.parameters)
 
     @staticmethod
     def _schedule_next_check(operation_id: UUID) -> None:

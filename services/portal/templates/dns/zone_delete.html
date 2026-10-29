@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Move away from DNS hosting" %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+  <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <a href="{% url 'dns:detail' zone.id %}" class="text-primary-400 underline">{{ zone.name }}</a>
+    <h1 class="text-2xl font-semibold text-white">{% trans "Move away and delete DNS zone" %}</h1>
+    <p class="text-slate-300">{% trans "Export the current zone, import it at your next provider, and change the registrar's nameservers. Remove or replace any DS records as your new provider instructs. Deletion waits for independent nameserver, DNSSEC and cache-expiry checks." %}</p>
+    <form method="post" action="{% url 'dns:export' zone.id %}">{% csrf_token %}{% trans "Export current zone" as export_label %}{% button export_label type="submit" variant="secondary" %}</form>
+    <p class="text-sm text-slate-400">{% trans "After downloading an export, reload this page to continue. Any record change requires a new export." %}</p>
+    {% if zone.export_digest %}
+      <form method="post" class="space-y-5">
+        {% csrf_token %}{% for field in form.hidden_fields %}{{ field }}{% endfor %}
+        {% for error in form.non_field_errors %}{% alert error variant="danger" %}{% endfor %}
+        {% for field in form.visible_fields %}{% form_checkbox field %}{% endfor %}
+        {% trans "Request zone deletion" as delete_label %}{% button delete_label type="submit" variant="danger" %}
+      </form>
+    {% else %}<p class="text-slate-300">{% trans "A current export is required before requesting deletion." %}</p>{% endif %}
+  </main>
+{% endblock %}

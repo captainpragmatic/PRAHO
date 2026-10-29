@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""List the platform test modules that hold plain pytest-style ``Test*`` classes.
+"""List the platform test modules that hold plain pytest-style tests the Django runner skips.
 
 The Django test runner only collects ``unittest.TestCase`` subclasses, so a ``class TestX:`` with
-``test_*`` methods and pytest fixtures never runs under ``manage.py test``. CI feeds this list to
-pytest so a new plain class is picked up without anyone editing a workflow.
+``test_*`` methods and pytest fixtures, or a module-level ``def test_x()`` (sync or async), never
+runs under ``manage.py test``. CI feeds this list to pytest so a new plain class or test function is
+picked up without anyone editing a workflow.
 
 Prints one repo-relative path per line (relative to services/platform), sorted. Stdlib only.
 """
@@ -61,8 +62,20 @@ def plain_test_classes(source: str, table: dict[str, list[str]] | None = None) -
     ]
 
 
+def plain_test_functions(source: str) -> list[str]:
+    """Module-level ``test_*`` functions, sync or async: pytest collects them (``python_functions``)."""
+    return [
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith("test_")
+    ]
+
+
 def plain_class_modules(tests_dir: Path = TESTS) -> dict[str, list[str]]:
-    """Path (relative to services/platform) -> plain Test* class names, for every test module holding any."""
+    """Path (relative to services/platform) -> plain Test* class and top-level test_* function names.
+
+    Every test module holding any is listed. A TestCase method is never here: the Django runner runs it.
+    """
     sources = {path: path.read_text(encoding="utf-8") for path in sorted(tests_dir.rglob("*.py"))}
     table: dict[str, list[str]] = {}
     for source in sources.values():
@@ -72,7 +85,7 @@ def plain_class_modules(tests_dir: Path = TESTS) -> dict[str, list[str]]:
     for path, source in sources.items():
         if not path.name.startswith("test"):
             continue
-        names = plain_test_classes(source, table)
+        names = plain_test_classes(source, table) + plain_test_functions(source)
         if names:
             found[path.relative_to(tests_dir.parent).as_posix()] = names
     return found
@@ -81,7 +94,7 @@ def plain_class_modules(tests_dir: Path = TESTS) -> dict[str, list[str]]:
 def main() -> int:
     modules = plain_class_modules()
     if not modules:
-        print("no plain Test* classes found: the scan is broken", file=sys.stderr)
+        print("no plain Test* classes or test functions found: the scan is broken", file=sys.stderr)
         return 1
     print("\n".join(modules))
     return 0
