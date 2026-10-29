@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-580 actions, in 9 categories.
+581 actions, in 9 categories.
 
 ## Account management
 
@@ -48,6 +48,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `logout_security_event` | low | no | yes | audit |
 | `logout_session_expired` | low | no | yes | audit |
 | `password_reset_completed` | medium | no | yes | api |
+| `portal_sessions_revoked` | low | yes | no | users |
 | `session_rotated_2fa_change` | low | no | no | users |
 | `session_rotated_password_change` | low | no | no | users |
 | `session_rotation` | medium | no | yes | audit |

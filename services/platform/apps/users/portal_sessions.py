@@ -48,6 +48,7 @@ SWEEP_BATCH = 500
 
 REASON_LOGOUT = "logout"
 REASON_CREDENTIALS = "credentials_changed"
+REASON_OPERATOR = "operator"
 
 
 @dataclass(frozen=True)

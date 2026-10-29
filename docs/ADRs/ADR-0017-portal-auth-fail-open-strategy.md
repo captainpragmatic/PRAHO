@@ -158,6 +158,13 @@ The 300 s re-check, which the longer lifetimes depend on, is in place (section 7
 - **Portal.** The session id is bound for the whole request, public routes included. A Platform
   refusal during a view ends the browser session even when the view caught the error. A browser
   session without a Platform session id (one from before this release) ends at its next request.
+- **Operator revocation.** `manage.py revoke_portal_sessions` ends one person's sessions (`--user`),
+  every session (`--all`), or every session live during a window (`--active-between`, by overlap, so
+  quiet sessions are included), with one audit event naming the operator, the selector and the reason.
+  The selection is taken when the command starts, so for an incident disable the account or reset its
+  password first. A revoked session is refused at its next call to Platform or periodic validation: at
+  most about 12 minutes while Platform is reachable; during an outage, the bounded fail-open of
+  section 3 applies.
 - **Deploying.** Deploy Platform with `PORTAL_SESSION_REQUIRED=false`, then Portal, then set it true
   (the default in production and staging). Roll back in the reverse order: set it false, roll Portal
   back, then Platform. A new Portal against an old Platform ends every login at once.
