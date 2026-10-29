@@ -7,8 +7,7 @@ snapshot still matches the user's session hash. Every password or second-factor 
 hash, so it ends every other session of the user at their next request. The few portal endpoints
 where customers change their own credentials re-stamp only the calling session (``restamp``).
 
-Lifetimes are today's (idle 1 h, absolute 8 h); the longer tiers of section 5 wait for the 300 s
-re-check that makes them acceptable.
+Each tier's lifetimes come from ``session_policy``; a row whose tier the policy does not know ends.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from django.utils.crypto import constant_time_compare
 
 from apps.audit.session_digest import session_key_digest
 
+from . import session_policy
 from .models import PortalSession, User
 
 if TYPE_CHECKING:
@@ -36,8 +36,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-IDLE_TIMEOUT = timedelta(hours=1)
-ABSOLUTE_TIMEOUT = timedelta(hours=8)
 # Interactive activity extends the idle deadline at most this often, so a busy page costs one
 # write a minute, not one per request.
 TOUCH_INTERVAL = timedelta(seconds=60)
@@ -49,6 +47,7 @@ SWEEP_BATCH = 500
 REASON_LOGOUT = "logout"
 REASON_CREDENTIALS = "credentials_changed"
 REASON_OPERATOR = "operator"
+REASON_POLICY = "policy"  # the tier is unknown, or no longer allowed for this person
 
 
 @dataclass(frozen=True)
@@ -90,16 +89,19 @@ def deadlines(row: PortalSession) -> SessionDeadlines:
     return SessionDeadlines(str(row.pk), row.tier, row.idle_deadline, row.expires_at)
 
 
-def open_session(user: User, *, ip: str = "", user_agent: str = "") -> PortalSession:
-    """Open a standard session for a login that has just passed every check, and audit it."""
+def open_session(user: User, *, remember_me: bool = False, ip: str = "", user_agent: str = "") -> PortalSession:
+    """Open a session for a login that has just passed every check, in the tier it may have, and audit it."""
     now = timezone.now()
+    tier = session_policy.tier_for(user, remember_me=remember_me)
+    life = session_policy.TIERS[tier]
     with transaction.atomic():
         row = PortalSession.objects.create(
             user=user,
+            tier=tier,
             credential_snapshot=user.get_session_auth_hash(),
             last_seen_at=now,
-            idle_deadline=now + IDLE_TIMEOUT,
-            expires_at=now + ABSOLUTE_TIMEOUT,
+            idle_deadline=now + life.idle,
+            expires_at=now + life.absolute,
             reauth_at=now,
             ip_digest=_digest(ip),
             ua_digest=_digest(user_agent),
@@ -160,6 +162,11 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
     if match is False:
         end(row, REASON_CREDENTIALS)
         return None
+    life = session_policy.lifetimes(row.tier)
+    if life is None or (row.tier == PortalSession.TIER_REMEMBER and row.user.is_staff_user):
+        # Ended, never raised: a 500 here is an outage the portal would fail open on.
+        end(row, REASON_POLICY)
+        return None
     scoped = row.tier == PortalSession.TIER_CUSTOMER_VIEW
     if scoped:
         from .customer_view import nonlive_reason  # noqa: PLC0415  # customer_view imports this module
@@ -175,7 +182,7 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         )
         row.credential_snapshot = current
     if interactive and now - row.last_seen_at >= TOUCH_INTERVAL:
-        idle = min(now + _idle_timeout(row), row.expires_at)
+        idle = min(now + life.idle, row.expires_at)
         # In SQL, so it holds against concurrent touches: at most one a minute, never backwards.
         touched = PortalSession.objects.filter(_live(now), pk=row.pk, last_seen_at__lte=now - TOUCH_INTERVAL).update(
             last_seen_at=now, idle_deadline=idle
@@ -183,14 +190,6 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         if touched:
             row.last_seen_at, row.idle_deadline = now, idle
     return row
-
-
-def _idle_timeout(row: PortalSession) -> timedelta:
-    if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
-        from .customer_view import IDLE_TIMEOUT as CUSTOMER_VIEW_IDLE  # noqa: PLC0415  # import cycle
-
-        return CUSTOMER_VIEW_IDLE
-    return IDLE_TIMEOUT
 
 
 def end(row: PortalSession, reason: str) -> bool:

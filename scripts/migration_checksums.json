@@ -129,6 +129,7 @@
     "services/platform/apps/users/migrations/0010_persistent_secret_contexts.py": "4abf8d0c5de24f8c42db0ca31cdd843bdcefc39bd032c44f817a3bcbdf8ba485",
     "services/platform/apps/users/migrations/0011_portal_session.py": "574cb6e9a44894d02eeba15a951d95973e56ef346b699fa4913f067fced20ccb",
     "services/platform/apps/users/migrations/0012_customer_view.py": "d6ff8558751e9c06b865d80b79af53509e6d4d69a8317b39c3082857cb663f9d",
+    "services/platform/apps/users/migrations/0013_portal_session_remember_tier.py": "1f29b517017f58655aa54ab7c74d3045e63cae1efc7019ae6cc4d162f8760538",
     "services/portal/apps/common/migrations/0001_initial.py": "65b7089126ce34c4a247d2f06c45c6cad4deed56468e4c707c0ae0a9eeccfeca"
   },
   "version": 1
