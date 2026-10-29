@@ -132,8 +132,9 @@ acceptable only together with the 300 s re-check:
 - the portal still checks its own idle and absolute limits beside Platform's, instead of following
   the deadlines Platform returns;
 - sessions are still bound to the IP address;
-- the cookie of a standard session persists for 24 h;
-- there is no 300 s re-check on sensitive actions.
+- the cookie of a standard session persists for 24 h.
+
+The 300 s re-check, which the longer lifetimes depend on, is in place (section 7).
 
 ### 6. Platform-owned sessions (implemented 2026-10-28)
 
@@ -158,6 +159,38 @@ acceptable only together with the 300 s re-check:
   (the default in production and staging). Roll back in the reverse order: set it false, roll Portal
   back, then Platform. A new Portal against an old Platform ends every login at once.
 
+### 7. Fresh proof for sensitive actions (implemented 2026-10-29)
+
+- **The window.** Each Platform session records when its identity was last checked (`reauth_at`).
+  Login sets it, and an action counts the check as fresh from 0 to 300 s after it, both included; a
+  missing or future time never counts.
+- **The refusal.** A guarded view calls `apps.api.step_up.step_up_refusal` after its own owner and
+  role checks and before it writes. Outside the window it answers `403 {"code": "reauth_required"}`,
+  `no-store`, with no `active` key, so the portal never reads it as an ended session. A request
+  with no bound session is refused as an ended one, whatever `PORTAL_SESSION_REQUIRED` says.
+- **The check.** `POST /api/users/session/reauth/` takes the password and, when 2FA is on, the
+  code. It locks the user, then the session, re-checks the session there, and checks both factors as
+  login does: each failure counts toward the lockout and answers `reauth_failed`, a locked account
+  is told so first, a 2FA account with no code is refused before its password is checked, and a
+  spent second-factor budget answers 429. A window that cannot be recorded rolls the check back, so
+  a backup code used for it stays unspent.
+- **What is guarded.** Members and roles, the company's contact details and addresses, a change to
+  an existing legal or tax identity (a first fill is free), the person's name or phone, a GDPR export
+  request and its download, and revealing a gift-card code.
+  `tests/api/test_step_up_inventory.py` lists every portal-facing route as guarded or exempt with
+  a reason, and fails on a new one nobody has classified.
+- **Portal.** The API client raises `StepUpRequiredError` and records it; once the view returns, the
+  auth middleware sends the browser to `/confirm-identity/` with the page to come back to (HTMX gets
+  `HX-Redirect`), and drops the messages the refused view queued. A session refusal in the same
+  request still wins. The confirm page reads the 2FA state from Platform each time, and only a wrong
+  answer spends the per-person re-auth budget.
+- **Deploying.** After section 6 is deployed everywhere: Portal first (it handles a refusal it does
+  not yet receive), then Platform. Roll back in the reverse order, and before rolling back section 6.
+
+Accepted: a compromised *running* portal sees passwords as customers type them, at login and on the
+confirm page, so it can pass the re-check at will. Protecting against that needs a confirmation
+outside the portal.
+
 ### Accepted risk
 
 If a customer account is disabled on Platform while Platform is unreachable from the portal, the
@@ -176,7 +209,7 @@ between a disable and an outage that starts right after it.
 ### Negative
 - During a real outage customers are logged out after a few requests.
 - A session row is a credential; the portal's SQLite file must be protected accordingly.
-- Until the 300 s re-check lands, the longer "remember me" lifetimes of section 5 stay off.
+- Sensitive actions ask for the password again after 5 minutes, also within a long session.
 
 ### Neutral
 - Fail-open events are logged: the Platform error at ERROR, each fail-open decision at INFO with the
@@ -205,3 +238,4 @@ between a disable and an outage that starts right after it.
   data", and the session policy of section 5 recorded.
 - **2026-10-28.** Platform-owned sessions implemented (section 6). Lifetimes unchanged until the
   300 s re-check lands.
+- **2026-10-29.** The 300 s re-check implemented (section 7).
