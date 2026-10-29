@@ -308,8 +308,12 @@ def _supersedable(operation: HostedZoneOperation) -> bool:
     )
 
 
-def _supersede(operation: HostedZoneOperation, revision: int) -> str:
-    """End the parked check under the zone and operation locks; returns the code it was parked with."""
+def _supersede(operation: HostedZoneOperation, zone: HostedZone, revision: int) -> tuple[str, bool]:
+    """End the parked check under the zone and operation locks: its park code, and whether the zone reopened.
+
+    A zone never applied was failed by this check alone, so it is importing again. A zone applied before
+    stays failed until its next completed apply restores it, as any failed zone does. The caller saves the zone.
+    """
     code = operation.last_error
     operation.status = "failed"  # fsm-bypass: CharField operation status; replaced under its row lock.
     operation.last_error = "superseded_by_upload"
@@ -317,7 +321,13 @@ def _supersede(operation: HostedZoneOperation, revision: int) -> str:
     operation.lease_token = None
     operation.lease_until = None
     operation.save(update_fields=["status", "last_error", "evidence", "lease_token", "lease_until", "updated_at"])
-    return code
+    if zone.last_error != code:
+        return code, False
+    zone.last_error = ""
+    if zone.status != "failed" or zone.applied_revision is not None or zone.activation.get("activated_at"):
+        return code, False
+    zone.retry()
+    return code, True
 
 
 def preview_zone_import(
@@ -393,16 +403,21 @@ def preview_zone_import(
             errors=errors,
         )
         metadata: dict[str, Any] = {"revision": number, "valid": revision.valid, "digest": revision.inventory_digest}
+        reopened = False
         if live is not None:
-            code = _supersede(live, number)
+            code, reopened = _supersede(live, zone, number)
             metadata.update(superseded_operation=str(live.pk), superseded_code=code)
-            # The zone stays failed until the next completed apply restores it, as any failed zone does.
-            if zone.last_error == code:
-                zone.last_error = ""
         zone.current_revision = number
         zone.readiness = {}
-        zone.save(update_fields=["current_revision", "readiness", "last_error", "updated_at"])
+        zone.save(update_fields=["current_revision", "readiness", "last_error", "status", "updated_at"])
         _audit(zone, "dns_zone_import_staged", actor=actor, metadata=metadata)
+        if reopened:
+            _audit(
+                zone,
+                "dns_zone_state_changed",
+                actor=actor,
+                metadata={"status": zone.status, "revision": number, "reason": "superseded_by_upload"},
+            )
         return Ok(revision)
 
 

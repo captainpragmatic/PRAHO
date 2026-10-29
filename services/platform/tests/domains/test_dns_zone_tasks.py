@@ -267,6 +267,8 @@ class ZoneWorkerTests(TransactionTestCase):
         self.assertTrue(corrected.is_ok(), corrected)
         self.operation.refresh_from_db()
         self.assertEqual((self.operation.status, self.operation.last_error), ("failed", "superseded_by_upload"))
+        self.zone.refresh_from_db()
+        self.assertEqual((self.zone.status, self.zone.last_error), ("pending_import", ""))
         self.assertEqual(self.provider.calls, [])
 
     def test_an_apply_parked_after_provider_writes_keeps_refusing_a_corrected_upload(self):
@@ -1196,17 +1198,41 @@ class CorrectedUploadTests(TransactionTestCase):
         self.assertEqual(staged.kwargs["metadata"]["superseded_operation"], str(parked.pk))
         self.assertEqual(staged.kwargs["metadata"]["superseded_code"], code)
         self.zone.refresh_from_db()
-        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", ""))
-        # The customer can go on: the corrected revision gets a crosscheck of its own.
+        # Never applied, so the check alone failed it: importing again, where the Portal offers confirmation.
+        self.assertEqual((self.zone.status, self.zone.last_error), ("pending_import", ""))
+        self.audit.assert_any_call(
+            self.zone,
+            "dns_zone_state_changed",
+            actor=self.actor,
+            metadata={"status": "pending_import", "revision": number, "reason": "superseded_by_upload"},
+        )
         fresh = zones.request_crosscheck(self.zone, number, actor=self.actor).unwrap()
         self.assertNotEqual(fresh.pk, parked.pk)
-        self.assertEqual(fresh.revision.number, number)
+        passed = {**_source_refusal(""), "ok": True, "complete": True, "cursor": 20, "observations": {}, "ds_ttl": 0}
+        with patch("apps.domains.dns_zone_checks.probe_import_batch", return_value={**passed, "error": None}):
+            tasks.advance_zone_operation(str(fresh.pk))
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, "completed")
+        status = zones.cached_zone_status(self.zone)
+        self.assertEqual((status["status"], status["revision"], status["pending"]), ("pending_import", number, False))
+        confirmed = zones.confirm_import(self.zone, number, corrected.unwrap().manifest_digest, actor=self.actor)
+        self.assertTrue(confirmed.is_ok(), confirmed)
+        self.assertTrue(HostedZoneOperation.objects.filter(zone=self.zone, kind="apply", status="pending").exists())
 
     def test_a_corrected_upload_supersedes_a_crosscheck_parked_for_a_missing_record(self):
         self.assert_superseded(MISSING)
 
     def test_a_corrected_upload_supersedes_a_crosscheck_parked_for_an_uncheckable_owner(self):
         self.assert_superseded(UNCHECKABLE)
+
+    def test_a_zone_applied_before_stays_failed_until_an_apply_restores_it(self):
+        parked = self.parked_crosscheck(return_value=_source_refusal(MISSING))
+        HostedZone.objects.filter(pk=self.zone.pk).update(applied_revision=1)
+        self.assertTrue(zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor).is_ok())
+        parked.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual(parked.last_error, "superseded_by_upload")
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", ""))
 
     def test_a_crosscheck_still_in_progress_refuses_an_upload(self):
         zones.request_crosscheck(self.zone, self.revision.number, actor=self.actor).unwrap()
