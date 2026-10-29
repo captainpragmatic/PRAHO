@@ -51,6 +51,22 @@ _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
 NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
+def _fail_before_first_phase(deployment: Any, error: str) -> dict[str, Any]:
+    """A deployment that never reached its first phase fails with the reason; it is never left pending.
+
+    Returning (not raising) lets the completion hook log the error and acknowledges the task, so the
+    queue does not silently run it again hours later. Only a row still pending is ours to fail: a row
+    already past pending belongs to the worker running it.
+    """
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+
+    with transaction.atomic():
+        locked = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+        if locked.status == "pending":
+            locked.transition_to("failed", f"Deployment did not start: {error}")
+    return {"success": False, "deployment_id": deployment.pk, "hostname": deployment.hostname, "error": error}
+
+
 def deploy_node_task(
     deployment_id: int,
     provider_id: int,
@@ -96,12 +112,12 @@ def deploy_node_task(
         provider = CloudProvider.objects.get(id=provider_id)
     except CloudProvider.DoesNotExist:
         logger.error(f"[Task:deploy_node] Provider {provider_id} not found")
-        return {"success": False, "error": f"Provider {provider_id} not found"}
+        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found")
 
     token_result = get_provider_token(provider)
     if token_result.is_err():
         logger.error(f"[Task:deploy_node] Failed to get token for provider {provider.name}")
-        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+        return _fail_before_first_phase(deployment, f"Failed to get provider token: {token_result.unwrap_err()}")
 
     credentials: dict[str, str] = {"api_token": token_result.unwrap()}
 
@@ -114,7 +130,11 @@ def deploy_node_task(
         with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
 
-    service = get_deployment_service()
+    try:
+        service = get_deployment_service()
+    except Exception as error:  # A worker that cannot build the service (no ansible-playbook, say) must say why.
+        logger.error(f"[Task:deploy_node] Deployment service unavailable: {error}")
+        return _fail_before_first_phase(deployment, str(error))
     result = service.deploy_node(
         deployment=deployment,
         credentials=credentials,
