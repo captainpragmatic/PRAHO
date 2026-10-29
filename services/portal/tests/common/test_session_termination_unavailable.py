@@ -199,8 +199,13 @@ class SessionTerminationUnavailableTests(TestCase):
                 # Recovery uses the same real backend and preserves each site's redirect.
                 recovered_client, recovered_key = self.seed(site)
                 recovered = self.request_site(recovered_client, site, accept)
-                self.assertEqual(recovered.status_code, 302)
-                self.assertIn("/login/", recovered["Location"])
+                if accept == "application/json" and site in ("age", "validation", "timeout"):
+                    # A script is told where to go; it cannot follow a redirect to an HTML page.
+                    self.assertEqual(recovered.status_code, 401)
+                    self.assertEqual(json.loads(recovered.content)["redirect"], "/login/")
+                else:
+                    self.assertEqual(recovered.status_code, 302)
+                    self.assertIn("/login/", recovered["Location"])
                 self.assertFalse(Session.objects.filter(session_key=recovered_key).exists())
                 self.assertTrue(recovered.wsgi_request.session.is_empty())
 

@@ -112,10 +112,10 @@
         body: JSON.stringify(payload)
       });
       const data = await response.json();
-      const confirmAt = typeof data.redirect === 'string' ? data.redirect : '';
-      if (data.error === 'reauth_required' && confirmAt.startsWith('/') && !confirmAt.startsWith('//')) {
-        // Platform wants the password again: confirm it, then come back to this page.
-        window.location.assign(confirmAt);
+      const goTo = typeof data.redirect === 'string' ? data.redirect : '';
+      if (!response.ok && goTo.startsWith('/') && !goTo.startsWith('//')) {
+        // The password is needed again, or the session ended: go where the portal says.
+        window.location.assign(goTo);
         return new Promise(() => {});
       }
       if (!response.ok || !data.success) throw new Error(data.error || requestFailed);

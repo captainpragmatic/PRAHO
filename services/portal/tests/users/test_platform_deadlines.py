@@ -259,6 +259,30 @@ class PlatformDeadlineTests(TestCase):
         self.assert_continues(client.get(PATH))
         self.assertEqual(counters.peek("auth:fail_open:7"), 1)
 
+    # ---- how an ended session answers each caller ----------------------------------------------
+
+    def test_an_ended_session_answers_each_caller_in_a_form_it_can_follow(self) -> None:
+        endings = {
+            "Platform's end": {"expires_in": -timedelta(seconds=1), "idle_in": -timedelta(seconds=1)},
+            "a refusal at the idle deadline": {"idle_in": -timedelta(seconds=1)},
+        }
+        for ending, clocks in endings.items():
+            self.refused = ending.startswith("a refusal")
+            with self.subTest(ending=ending, caller="htmx"):
+                client = self.signed_in(**clocks)
+                response = client.post(PATH, HTTP_HX_REQUEST="true", HTTP_HX_CURRENT_URL="http://testserver/billing/")
+                self.assertEqual(response.status_code, 200)  # HTMX follows HX-Redirect, not a 302 it would swap in
+                self.assertTrue(response["HX-Redirect"].startswith("/login/"))
+                self.assertNotIn("user_id", client.session)
+            with self.subTest(ending=ending, caller="fetch"):
+                client = self.signed_in(**clocks)
+                response = client.post(PATH, HTTP_ACCEPT="application/json")
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(json.loads(response.content), {"error": "Session ended", "redirect": "/login/"})
+            with self.subTest(ending=ending, caller="page"):
+                client = self.signed_in(**clocks)
+                self.assert_ended(client.get(PATH), client)
+
     # ---- sessions without Platform's deadlines --------------------------------------------------
 
     def test_a_session_without_platform_s_deadlines_ends_once(self) -> None:

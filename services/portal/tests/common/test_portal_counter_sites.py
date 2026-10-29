@@ -143,5 +143,6 @@ class PortalCounterSiteTests(TestCase):
             patch("apps.common.counters.increment", side_effect=OperationalError("store unavailable")),
         ):
             response = PortalAuthenticationMiddleware(lambda request: HttpResponse("allowed"))(request)
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["HX-Redirect"], "/login/")  # the request is HTMX's
+        self.assertNotIn(b"allowed", response.content)
         self.assertNotIn("user_id", request.session)

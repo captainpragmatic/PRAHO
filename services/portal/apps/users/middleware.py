@@ -176,9 +176,19 @@ class PortalAuthenticationMiddleware:
         return redirect(target)
 
     def _end_session(self, request: HttpRequest) -> HttpResponse:
+        """End the session, and answer the caller in a form it can follow to the login page."""
         unavailable_response = end_session_or_unavailable(request)
         if unavailable_response is not None:
             return unavailable_response
+        return self._signed_out(request)
+
+    def _signed_out(self, request: HttpRequest) -> HttpResponse:
+        """Send a caller without a session to the login page in a form it can follow."""
+        if request.headers.get("HX-Request"):
+            # A 302 would be followed by HTMX and the login page swapped into the target; HX-Redirect navigates.
+            response = HttpResponse(status=200)
+            response["HX-Redirect"] = "/login/"
+            return response
         if wants_json(request):
             return JsonResponse({"error": "Session ended", "redirect": "/login/"}, status=401)
         return self.redirect_to_login(request)
@@ -224,7 +234,7 @@ class PortalAuthenticationMiddleware:
         session_user_id = request.session.get("user_id") or request.session.get("customer_id")
         if not session_user_id:
             logger.debug("🔒 [Auth] No customer_id in session, redirecting to login")
-            return self.redirect_to_login(request)
+            return self._signed_out(request)
 
         # A session from before Platform owned sessions names none: it ends once, at its next request.
         if getattr(settings, "PORTAL_SESSION_ID_REQUIRED", True) and not request.session.get("portal_session_id"):
@@ -242,8 +252,7 @@ class PortalAuthenticationMiddleware:
 
         if not validation_result:
             logger.warning(f"⚠️ [Auth] User {session_user_id} validation failed, clearing session")
-            unavailable_response = end_session_or_unavailable(request)
-            return unavailable_response if unavailable_response is not None else self.redirect_to_login(request)
+            return self._end_session(request)
 
         # Attach customer data to request for views
         # Priority: selected_customer_id (company switcher) > active_customer_id > customer_id (fallback)

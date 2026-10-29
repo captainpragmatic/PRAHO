@@ -53,8 +53,8 @@ class RecurringPaymentsViewsTestCase(TestCase):
         overview.return_value = {"success": True, "terms_version": "v", "payment_methods": [], "subscriptions": []}
         page = self.client.get(reverse("billing:recurring_payments")).content.decode()
         self.assertIn("'Accept': 'application/json'", page)
-        self.assertIn("data.error === 'reauth_required'", page)
-        self.assertIn("window.location.assign(confirmAt)", page)
+        self.assertIn("if (!response.ok && goTo.startsWith('/') && !goTo.startsWith('//'))", page)
+        self.assertIn("window.location.assign(goTo)", page)
 
     @patch("apps.billing.views.RecurringPaymentsService.overview")
     def test_malformed_platform_identifiers_are_ignored_instead_of_crashing_page(self, overview) -> None:
