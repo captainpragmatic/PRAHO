@@ -8,10 +8,61 @@ from collections.abc import Callable
 from typing import Any, TypedDict
 
 from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
+from sentry_sdk.utils import AnnotatedValue
 
 from apps.common.secret_urls import scrub_sentry_event
 
-SECRET_KEYS = ("cnp", "cnp_fiscal_code", "epp_code", "auth_code", "authorization_key", "transfer_code")
+# Sentry's own denylist covers passwords and tokens; these are PRAHO's other secrets: registrant
+# identity and domain transfer codes, the identity check's code and the portal session's id.
+SECRET_KEYS = (
+    "cnp",
+    "cnp_fiscal_code",
+    "epp_code",
+    "auth_code",
+    "authorization_key",
+    "transfer_code",
+    "mfa_code",
+    "session_id",
+    "portal_session_id",
+)
+
+
+class _TupleScrubber(EventScrubber):
+    """Sentry's scrubber, walking tuples as well as dicts and lists, without recursion.
+
+    It runs before Sentry serialises the event, which turns anything nested past its depth limit
+    into text that no later callback can scrub, so a dict inside a tuple must be scrubbed here.
+    The walk keeps its own stack and the containers it has seen: a cycle, through a tuple or not,
+    and any depth, never stop it before the fields after them are scrubbed.
+    """
+
+    def scrub_event(self, event: Any) -> None:
+        # Sentry's own pass skips contexts, tags, the log message's parameters and exception data;
+        # the walk covers the whole event, before serialisation writes any "_meta" annotation.
+        super().scrub_event(event)
+        self._walk(event)
+
+    def scrub_dict(self, d: object) -> None:
+        self._walk(d)
+
+    def scrub_list(self, lst: object) -> None:
+        self._walk(lst)
+
+    def _walk(self, root: object) -> None:
+        stack, seen = [root], set()
+        while stack:
+            value = stack.pop()
+            if not isinstance(value, (dict, list, tuple)) or id(value) in seen:
+                continue
+            seen.add(id(value))
+            if not isinstance(value, dict):
+                stack.extend(value)
+                continue
+            for key, item in value.items():
+                if isinstance(key, str) and key.lower() in self.denylist:
+                    value[key] = AnnotatedValue.substituted_because_contains_sensitive_data()
+                elif self.recursive:
+                    stack.append(item)
 
 
 class SentryOptions(TypedDict):
@@ -35,7 +86,7 @@ def sentry_options(dsn: str, *, release: str) -> SentryOptions:
         "traces_sample_rate": 0.1,
         "send_default_pii": False,
         "include_local_variables": False,
-        "event_scrubber": EventScrubber(denylist=[*DEFAULT_DENYLIST, *SECRET_KEYS], recursive=True),
+        "event_scrubber": _TupleScrubber(denylist=[*DEFAULT_DENYLIST, *SECRET_KEYS], recursive=True),
         "environment": "production",
         "release": release,
     }

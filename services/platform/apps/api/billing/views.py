@@ -22,6 +22,7 @@ from apps.api.secure_auth import (
     require_customer_authentication,
     require_customer_role_in,
 )
+from apps.api.step_up import step_up_refusal
 from apps.billing.models import Currency, Invoice
 from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.billing.proforma_models import ProformaInvoice
@@ -289,7 +290,7 @@ def recurring_payments_overview_api(request: HttpRequest, customer: Customer) ->
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def begin_recurring_authorization_api(request: HttpRequest, customer: Customer) -> Response:
+def begin_recurring_authorization_api(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911  # one per refusal
     actor, auth_error = _billing_actor(request, customer)
     if auth_error is not None:
         return auth_error
@@ -300,6 +301,10 @@ def begin_recurring_authorization_api(request: HttpRequest, customer: Customer) 
     method = _active_card_methods(customer).filter(id=method_id).first()
     if method is None:
         return _error("Saved payment method not found", status.HTTP_404_NOT_FOUND)
+    # The authorization lets the card be charged later without the cardholder (ADR-0017 section 7).
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
     try:
         publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key", default="")
     except Exception:

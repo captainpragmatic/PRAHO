@@ -993,6 +993,23 @@ class TOTPSetupForm(forms.Form):
     )
 
 
+class ConfirmIdentityForm(TwoFactorVerifyForm):
+    """The password, and the code when two-factor authentication is on, before a sensitive action."""
+
+    password = forms.CharField(
+        label=_("Current password"), widget=forms.PasswordInput(attrs={"autofocus": True}), strip=False
+    )
+
+    def __init__(self, *args: Any, two_factor: bool | None, **kwargs: Any) -> None:
+        """two_factor None means unknown: the code is offered but optional, and Platform decides."""
+        super().__init__(*args, **kwargs)
+        if two_factor is False:
+            del self.fields["token"]
+            return
+        self.fields["token"].required = two_factor is True
+        self.fields["token"].widget.attrs.pop("autofocus", None)  # the password comes first
+
+
 class MFAReauthenticationForm(TwoFactorVerifyForm):
     """Step-up credentials for MFA removal and recovery-code regeneration."""
 

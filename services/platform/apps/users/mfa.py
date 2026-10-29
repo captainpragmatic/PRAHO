@@ -688,8 +688,9 @@ class MFAService:
         if action not in {"enable", "disable", "recover", "rotate"}:
             raise ValueError("Unsupported MFA state change")
         with transaction.atomic():
-            # Serialize first-row creation and coordinate with enrollment API locks.
-            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            # Serialize first-row creation and coordinate with enrollment API locks. NO KEY UPDATE, as
+            # they take it: a stronger lock here would undo theirs within the same transaction.
+            locked_user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
             if action == "enable" and locked_user.two_factor_enabled:
                 raise ValueError("TOTP/2FA is already enabled for this user")
             credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
@@ -1161,7 +1162,9 @@ class SecondFactorResult:
     rate_limited: bool
 
 
-def verify_login_second_factor(locked_user: "User", code: str, request: HttpRequest | None) -> SecondFactorResult:
+def verify_login_second_factor(
+    locked_user: "User", code: str, request: HttpRequest | None, *, source: str = "login"
+) -> SecondFactorResult:
     """Check a TOTP or backup code at login; a failure counts toward the account lockout.
 
     Shared by portal_login_api, obtain_token and the staff web mfa_verify, so every login
@@ -1180,7 +1183,7 @@ def verify_login_second_factor(locked_user: "User", code: str, request: HttpRequ
         rate_limited = bool(outcome["rate_limited"])
     else:
         rate_limited = False
-    locked_user.increment_failed_login_attempts()
+    locked_user.increment_failed_login_attempts(source=source)
     return SecondFactorResult(accepted=False, method=None, rate_limited=rate_limited)
 
 

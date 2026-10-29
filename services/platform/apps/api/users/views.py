@@ -38,9 +38,11 @@ from apps.api.secure_auth import (
     require_portal_service_authentication,
     require_user_authentication,
 )
+from apps.api.step_up import step_up_refusal
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.services import AuthenticationAuditService, LoginFailureEventData
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.identity_fields import normalize_phone
 from apps.common.legal import TERMS_UNAVAILABLE
 from apps.common.localisation import resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
@@ -217,7 +219,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 session_auth_hash = user.get_session_auth_hash()
                 # ADR-0017 section 5: Platform owns the session; the portal sends its id with every call.
                 portal_session = portal_sessions.open_session(
-                    user, ip=forwarded_ip or client_ip or "", user_agent=str(data.get("client_user_agent", ""))[:500]
+                    user,
+                    remember_me=data.get("remember_me") is True,  # a signed boolean; anything else is no
+                    ip=forwarded_ip or client_ip or "",
+                    user_agent=str(data.get("client_user_agent", ""))[:500],
                 )
 
         if refusal is not None:
@@ -244,6 +249,8 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 "user": user_data,
                 "session_auth_hash": session_auth_hash,
                 **portal_sessions.deadlines(portal_session).as_payload(),
+                # Login counts as an identity check; the portal echoes this window to act in it.
+                "step_up_at": portal_sessions.step_up_stamp(portal_session),
                 "message": "Authentication successful",
             }
         )
@@ -865,6 +872,93 @@ _MAX_USER_AGENT_LENGTH = 512
 _DEFAULT_PORTAL_THROTTLES = (PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle)
 
 
+_REAUTH_FAILED = {"success": False, "code": "reauth_failed"}
+_REAUTH_THROTTLED = {"success": False, "code": "rate_limited"}
+# Compared as normalised values, so a reformatted equal phone, stored or sent, is no change.
+_PROFILE_IDENTITY_FIELDS = ("first_name", "last_name", "phone")
+
+
+def _identity_value(field: str, value: object) -> str:
+    text = str(value or "").strip()
+    if field != "phone" or not text:
+        return text
+    try:
+        return normalize_phone(text)
+    except DjangoValidationError:
+        return text  # a stored number that no longer parses compares as written
+
+
+def _check_identity(locked: User, password: str, code: str, request: HttpRequest) -> str:
+    """The password, then the code when 2FA is on, checked as login checks them: passed, failed or throttled."""
+    if not check_password_locked(locked, password, source="step_up"):
+        return "failed"
+    if not locked.two_factor_enabled:
+        return "passed"
+    second = verify_login_second_factor(locked, code, request, source="step_up")
+    if second.rate_limited:
+        # The code was never checked, so this is no wrong answer; like login, it still counts.
+        return "throttled"
+    return "passed" if second.accepted else "failed"
+
+
+class _SessionGone(Exception):  # noqa: N818  # a control-flow signal, not an error condition
+    """The calling session ended before its check could open the window: undo the whole check."""
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
+@require_user_authentication
+def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # noqa: PLR0911  # one per refusal
+    """Confirm the person's identity, which opens the session's 300 s window for sensitive actions.
+
+    The password, and the second factor when it is on, are checked as login checks them and count
+    toward the same lockout; every failure gets one answer, so it never says which factor was wrong.
+    A 2FA account that sends no code is refused before its password is checked. A session that ends
+    before the window is recorded opens nothing, and a backup code used for it stays unspent.
+    """
+    row = getattr(request, "portal_session", None)
+    if row is None:
+        return portal_sessions.session_refused()
+    password, code = request.data.get("password"), request.data.get("mfa_code", "")
+    if not isinstance(password, str) or not isinstance(code, str):
+        return Response(_REAUTH_FAILED, status=400)
+    try:
+        with transaction.atomic():
+            # NO KEY UPDATE: a concurrent end() holds the session row while its audit insert takes a
+            # key-share lock on this user; a plain FOR UPDATE here would make the two deadlock.
+            locked = User.objects.select_for_update(no_key=True).filter(pk=user.pk).first()
+            if locked is None:  # the account was deleted after authentication read it
+                raise _SessionGone
+            session = PortalSession.objects.select_for_update().filter(pk=row.pk).first()
+            if session is None or not portal_sessions.still_live(session, locked):
+                raise _SessionGone
+            if locked.is_account_locked():
+                return Response(_ACCOUNT_LOCKED, status=400)
+            if locked.two_factor_enabled and not code:
+                return Response(_REAUTH_FAILED, status=400)
+            outcome = _check_identity(locked, password, code, request)
+            if outcome == "throttled":
+                return Response(_REAUTH_THROTTLED, status=429)
+            if outcome == "failed":
+                # Returned, not raised, so the failure count and this audit commit.
+                portal_sessions.record_step_up(session, confirmed=False)
+                return Response(_REAUTH_FAILED, status=400)
+            proof_passed(locked)
+            if not portal_sessions.mark_reauth(session):
+                raise _SessionGone
+            portal_sessions.record_step_up(session, confirmed=True)
+    except _SessionGone:
+        return portal_sessions.session_refused()
+    except DatabaseFailure:
+        logger.exception("🔥 [Auth] Identity check could not be recorded")
+        return store_unavailable_response()
+    # The window just opened: the portal stores it under the browser's new session key and echoes it.
+    return Response({"success": True, "step_up_at": portal_sessions.step_up_stamp(session)})
+
+
 def _browser_origin(request: HttpRequest) -> BrowserOrigin:
     """The customer's browser, as the Portal signed it; only a body the HMAC middleware verified counts."""
     user_agent: str | None = None
@@ -945,7 +1039,8 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
 def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     """Require current password and a second factor before removing MFA."""
     with transaction.atomic():
-        user = User.objects.select_for_update().get(pk=user.pk)
+        # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+        user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
         before = user.get_session_auth_hash()  # the session's hash before the credential changes
         if staff_cannot_disable_mfa(user):
             # The code lets the Portal tell this refusal from wrong credentials.
@@ -1376,7 +1471,24 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
             serializer = ProfileUpdateSerializer(data=request_data)
             if not serializer.is_valid():
                 return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-            serializer.update(user, serializer.validated_data)
+            with transaction.atomic():
+                # Compared with the locked row and saved with it: a change made meanwhile is never
+                # written back without the check.
+                # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+                user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
+                # Who the account says it is needs a recent identity check; preferences do not.
+                renamed = [
+                    field
+                    for field in _PROFILE_IDENTITY_FIELDS
+                    if field in serializer.validated_data
+                    and _identity_value(field, serializer.validated_data[field])
+                    != _identity_value(field, getattr(user, field))
+                ]
+                if renamed:
+                    refusal = step_up_refusal(request)
+                    if refusal is not None:
+                        return refusal
+                serializer.update(user, serializer.validated_data)
             logger.info(f"✅ [Profile API] Updated profile for customer: {user.email}")
 
             return Response({"success": True, "message": "Profile updated successfully"})
@@ -1483,7 +1595,8 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
     if not isinstance(current, str) or not isinstance(new_password, str):
         return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
     with transaction.atomic():
-        user = User.objects.select_for_update().get(pk=user.pk)
+        # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+        user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
         before = user.get_session_auth_hash()  # the session's hash before the credential changes
         if user.is_account_locked():
             return Response(_ACCOUNT_LOCKED, status=400)

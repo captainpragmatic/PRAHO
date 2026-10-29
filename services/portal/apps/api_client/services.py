@@ -216,10 +216,25 @@ def _resolve_portal_signing_secret() -> str:
     return resolve_signing_secret()
 
 
-def _note_session_refusal(status_code: int, error_data: dict[str, Any]) -> None:
-    """Platform ended the bound session: the auth middleware ends the browser session (ADR-0017)."""
+def _is_step_up(status_code: int, error_data: dict[str, Any]) -> bool:
+    """Platform wants a fresh identity check before this action; never an ended session."""
+    return (
+        status_code == HTTPStatus.FORBIDDEN
+        and error_data.get("code") == "reauth_required"
+        and "active" not in error_data
+    )
+
+
+def _note_session_refusal(status_code: int, error_data: dict[str, Any], *, download: bool = False) -> None:
+    """Platform ended the bound session, or wants the password again (ADR-0017 sections 5 and 6).
+
+    The auth middleware acts once the view returns: it ends the browser session, or sends the
+    browser to the confirm page.
+    """
     if status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN) and error_data.get("active") is False:
         request_context.mark_rejected()
+    elif _is_step_up(status_code, error_data):
+        request_context.mark_step_up_required(download=download)
 
 
 class PlatformAPIError(Exception):
@@ -288,6 +303,14 @@ class PlatformAPIError(Exception):
         "temporarily unavailable" notice; only a marked 503 gets told it is planned.
         """
         return self.is_rate_limited or self.is_unavailable
+
+
+class StepUpRequiredError(PlatformAPIError):
+    """Platform wants the person to confirm their identity before this action (ADR-0017 section 6).
+
+    Never an ended session: once the view returns, the auth middleware sends the browser to the
+    confirm page and, from there, back.
+    """
 
 
 class PlatformAPIClient:
@@ -387,8 +410,13 @@ class PlatformAPIClient:
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
         # ADR-0017 section 5: every call made inside a signed-in request names its Platform session.
-        for key, value in request_context.signed_fields().items():
+        bound = request_context.signed_fields()
+        for key, value in bound.items():
             payload.setdefault(key, value)
+        # Section 7: the window is the bound browser's alone, never a value a caller passed.
+        payload.pop("step_up_at", None)
+        if "step_up_at" in bound:
+            payload["step_up_at"] = bound["step_up_at"]
         if "timestamp" not in payload:
             payload["timestamp"] = int(time.time())
 
@@ -570,8 +598,9 @@ class PlatformAPIClient:
 
         error_message = self._extract_error_message(error_data)
         retry_after = self._get_retry_after_seconds(response)
+        error_class = StepUpRequiredError if _is_step_up(response.status_code, error_data) else PlatformAPIError
 
-        raise PlatformAPIError(
+        raise error_class(
             message=f"API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
@@ -694,11 +723,12 @@ class PlatformAPIClient:
             error_data = {"error": "Invalid response format"}
         if not isinstance(error_data, dict):
             error_data = {"error": str(error_data)}
-        _note_session_refusal(response.status_code, error_data)
+        _note_session_refusal(response.status_code, error_data, download=True)
 
         error_message = self._extract_error_message(error_data)
+        error_class = StepUpRequiredError if _is_step_up(response.status_code, error_data) else PlatformAPIError
 
-        raise PlatformAPIError(
+        raise error_class(
             message=f"Binary API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
@@ -800,8 +830,15 @@ class PlatformAPIClient:
         """A published legal document: {"kind", "language"} for the one in force, or {"id"}; 404 if none."""
         return self._make_request("POST", "/legal/document/", data=request)
 
-    def authenticate_customer(
-        self, email: str, password: str, mfa_token: str = "", client_ip: str = "", user_agent: str = ""
+    def authenticate_customer(  # noqa: PLR0913  # the login form's fields and the browser's
+        self,
+        email: str,
+        password: str,
+        mfa_token: str = "",
+        client_ip: str = "",
+        user_agent: str = "",
+        *,
+        remember_me: bool = False,
     ) -> dict[str, Any] | None:
         """Authenticate a customer, propagating throttles and service failures to the caller."""
         start_time = time.perf_counter()
@@ -813,6 +850,7 @@ class PlatformAPIClient:
                 "password": password,
                 **({"mfa_token": mfa_token} if mfa_token else {}),
                 **_browser_payload(client_ip, user_agent),
+                "remember_me": remember_me is True,  # Platform picks the tier; staff never get remember
             }
             data = self._make_request(
                 "POST",
@@ -833,8 +871,13 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                     "session_auth_hash": data.get("session_auth_hash"),
-                    # ADR-0017 section 5: the Platform session every later call names.
+                    # ADR-0017 section 5: the Platform session every later call names, and its deadlines.
                     "session_id": data.get("session_id"),
+                    "session_tier": data.get("session_tier"),
+                    "session_expires_at": data.get("session_expires_at"),
+                    "session_idle_deadline": data.get("session_idle_deadline"),
+                    # The 300 s window login opened, echoed by every later call (section 7).
+                    "step_up_at": data.get("step_up_at"),
                 }
             return None
 
@@ -984,6 +1027,19 @@ class PlatformAPIClient:
         """End this portal session on Platform (logout). Raises PlatformAPIError like every call."""
         self._make_request(
             "POST", "/users/session/end/", user_id=user_id, data={"user_id": user_id, "session_id": session_id}
+        )
+
+    def confirm_identity(self, user_id: int, password: str, mfa_code: str = "") -> dict[str, Any]:
+        """Confirm the person's identity, which opens this session's 300 s window (ADR-0017 section 6).
+
+        The bound session goes in the signed body like every call's; Platform answers
+        ``reauth_failed`` for any wrong factor and ``account_locked`` for a locked account.
+        """
+        return self._make_request(
+            "POST",
+            "/users/session/reauth/",
+            user_id=user_id,
+            data={"user_id": user_id, "password": password, "mfa_code": mfa_code},
         )
 
     # ===============================================================================

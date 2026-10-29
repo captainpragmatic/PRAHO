@@ -35,6 +35,7 @@ urlpatterns = [
     path("mfa/setup/totp/", views.mfa_setup_totp_view, name="mfa_setup_totp"),
     path("mfa/backup-codes/", views.mfa_backup_codes_view, name="mfa_backup_codes"),
     path("mfa/disable/", views.mfa_disable_view, name="mfa_disable"),
+    path("confirm-identity/", views.confirm_identity_view, name="confirm_identity"),
     path("privacy/", views.privacy_dashboard_view, name="privacy_dashboard"),
     path("data-export/", views.data_export_view, name="data_export"),
     path("data-export/<uuid:export_id>/download/", views.data_export_download_view, name="data_export_download"),

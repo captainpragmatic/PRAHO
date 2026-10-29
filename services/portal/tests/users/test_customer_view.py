@@ -20,15 +20,22 @@ from apps.users.middleware import PortalAuthenticationMiddleware
 PLATFORM = "https://platform.example.test"
 CODE = "A" * 43
 SESSION_ID = "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00"
-REDEEMED = {
-    "session_id": SESSION_ID,
-    "session_tier": "customer_view",
-    "session_idle_deadline": "2026-10-28T12:10:00+00:00",
-    "session_expires_at": "2026-10-28T12:30:00+00:00",
-    "user": {"id": 42, "email": "owner@example.test"},
-    "customer": {"id": 7, "name": "Acme", "role": "owner"},
-    "staff_label": "Ana Support",
-}
+
+
+def _redeemed(**changes: object) -> dict[str, object]:
+    """Platform's answer to a redemption: a customer view with its own deadlines."""
+    now = timezone.now()
+    return {
+        "session_id": SESSION_ID,
+        "session_tier": "customer_view",
+        "session_idle_deadline": (now + timedelta(minutes=10)).isoformat(),
+        "session_expires_at": (now + timedelta(minutes=30)).isoformat(),
+        "user": {"id": 42, "email": "owner@example.test"},
+        "customer": {"id": 7, "name": "Acme", "role": "owner"},
+        "staff_label": "Ana Support",
+        **changes,
+    }
+
 SETTINGS = {
     "PLATFORM_PUBLIC_ORIGIN": PLATFORM,
     "CUSTOMER_VIEW_ENABLED": True,
@@ -52,7 +59,7 @@ class RedeemTests(TestCase):
         session.save()
         old_key = session.session_key
         with (
-            patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=REDEEMED),
+            patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=_redeemed()),
             patch("apps.users.customer_view_views.api_client.end_session") as end,
         ):
             response = self.redeem()
@@ -67,6 +74,42 @@ class RedeemTests(TestCase):
         cookie = response.cookies[self.client.cookies.keys().__iter__().__next__()]
         self.assertFalse(cookie["max-age"])  # ends with the browser
 
+    def test_the_view_keeps_the_deadlines_platform_gave_it(self) -> None:
+        answer = _redeemed()
+        with patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=answer):
+            self.assertEqual(self.redeem().status_code, 303)
+        session = self.client.session
+        for key in ("session_tier", "session_idle_deadline", "session_expires_at"):
+            self.assertEqual(session[key], answer[key])
+
+    def test_an_answer_without_a_customer_view_s_deadlines_opens_nothing(self) -> None:
+        now = timezone.now()
+        answers = {
+            "no deadlines": _redeemed(session_idle_deadline=None, session_expires_at=None),
+            "another tier": _redeemed(session_tier="remember"),
+            "already over": _redeemed(session_expires_at=(now - timedelta(seconds=1)).isoformat()),
+        }
+        for name, answer in answers.items():
+            with self.subTest(answer=name):
+                self.client = self.client_class()
+                with patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=answer):
+                    response = self.redeem()
+                self.assertEqual(response.status_code, 503)
+                self.assertNotIn("customer_view", self.client.session)
+
+    def test_the_view_is_bound_to_the_browser_that_redeemed_it(self) -> None:
+        # Otherwise the browser binding (PORTAL_BROWSER_FINGERPRINT_REQUIRED) ends it at its first page.
+        chrome = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/130.0.0.0 Safari/537.36"
+        )
+        with patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=_redeemed()):
+            response = self.client.post(
+                reverse("users:customer_view_redeem"), {"code": CODE}, HTTP_ORIGIN=PLATFORM, HTTP_USER_AGENT=chrome
+            )
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(self.client.session["security_fingerprint"]["browser"], "chrome/macos")
+
     def test_the_code_is_exchanged_outside_the_session_this_browser_held(self) -> None:
         from apps.common import request_context  # noqa: PLC0415
 
@@ -74,7 +117,7 @@ class RedeemTests(TestCase):
 
         def redeem(code: str, client_ip: str) -> dict[str, object]:
             seen.update(request_context.signed_fields())
-            return REDEEMED
+            return _redeemed()
 
         with (
             request_context.bound(SESSION_ID, 99),  # as inside the middleware for a signed-in browser
@@ -99,7 +142,7 @@ class RedeemTests(TestCase):
     def test_an_answer_carrying_a_credential_is_refused(self) -> None:
         with patch(
             "apps.users.customer_view_views.api_client.redeem_customer_view",
-            return_value={**REDEEMED, "session_auth_hash": "x"},
+            return_value=_redeemed(session_auth_hash="x"),
         ):
             self.assertEqual(self.redeem().status_code, 503)
         self.assertNotIn("customer_view", self.client.session)

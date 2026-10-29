@@ -112,21 +112,25 @@ class SessionTerminationUnavailableTests(TestCase):
                 "validated_at": now.isoformat(),
                 "next_validate_at": (now + timedelta(hours=1)).isoformat(),
                 "last_activity": time.time(),
-                "security_fingerprint": {
-                    "ip_hash": hashlib.sha256(b"127.0.0.1").hexdigest()[:16],
+                "security_fingerprint": {  # as login stamps it, for the test client's empty user agent
+                    "browser": "other/other",
                     "user_agent_hash": hashlib.sha256(b"").hexdigest()[:16],
                     "created_at": time.time(),
                 },
+                # The deadlines Platform gave the session (ADR-0017 section 5).
+                "session_tier": "standard",
+                "session_expires_at": (now + timedelta(hours=20)).isoformat(),
+                "session_idle_deadline": (now + timedelta(minutes=50)).isoformat(),
             }
         )
-        if site == "age":
-            session["authenticated_at"] = (now - timedelta(days=31)).isoformat()
+        if site == "age":  # Platform's end has passed
+            session["session_expires_at"] = session["session_idle_deadline"] = (now - timedelta(seconds=1)).isoformat()
         elif site == "validation":
             session["next_validate_at"] = (now - timedelta(minutes=10)).isoformat()
         elif site == "integrity":
-            session["security_fingerprint"]["ip_hash"] = "changed"
-        elif site == "timeout":
-            session["last_activity"] = time.time() - 3601
+            session["security_fingerprint"]["browser"] = "firefox/windows"  # signed in elsewhere
+        elif site == "timeout":  # the stored idle deadline has passed, and Platform says the session is over
+            session["session_idle_deadline"] = (now - timedelta(seconds=1)).isoformat()
         elif site == "reset":
             session[PASSWORD_RESET_SESSION_KEY] = {"uid": "Nw", "token": "reset-token"}
         session.save()
@@ -149,7 +153,7 @@ class SessionTerminationUnavailableTests(TestCase):
         for site in SITES:
             with self.subTest(site=site, accept=accept):
                 client, key = self.seed(site)
-                self.rejected = site == "validation"
+                self.rejected = site in ("validation", "timeout")
                 self.deletes.clear()
 
                 def reject_delete(
@@ -195,8 +199,13 @@ class SessionTerminationUnavailableTests(TestCase):
                 # Recovery uses the same real backend and preserves each site's redirect.
                 recovered_client, recovered_key = self.seed(site)
                 recovered = self.request_site(recovered_client, site, accept)
-                self.assertEqual(recovered.status_code, 302)
-                self.assertIn("/login/", recovered["Location"])
+                if accept == "application/json" and site in ("age", "validation", "timeout"):
+                    # A script is told where to go; it cannot follow a redirect to an HTML page.
+                    self.assertEqual(recovered.status_code, 401)
+                    self.assertEqual(json.loads(recovered.content)["redirect"], "/login/")
+                else:
+                    self.assertEqual(recovered.status_code, 302)
+                    self.assertIn("/login/", recovered["Location"])
                 self.assertFalse(Session.objects.filter(session_key=recovered_key).exists())
                 self.assertTrue(recovered.wsgi_request.session.is_empty())
 

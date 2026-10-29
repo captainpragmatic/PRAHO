@@ -16,6 +16,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.api.secure_auth import TECH_ROLES, require_customer_authentication, require_customer_role_in
+from apps.api.step_up import step_up_refusal
 from apps.domains import dns_zone_services as zones
 from apps.domains.dns_zone_models import HostedZone
 from apps.provisioning.virtualmin_models import VirtualminAccount
@@ -138,6 +139,10 @@ def zone_action_api(request: Request, customer: Customer, zone_id: UUID, action:
     if actor is None:
         return _error("zone_access_denied", status=HTTPStatus.FORBIDDEN)
     zone = _zone(customer, zone_id)
+    if action != "crosscheck":  # a crosscheck only compares; the rest change what the domain publishes
+        refusal = step_up_refusal(request)
+        if refusal is not None:
+            return refusal
     try:
         revision = positive_integer(request.data.get("expected_revision"))
         if action == "confirm":
@@ -188,6 +193,9 @@ def zone_record_api(request: Request, customer: Customer, zone_id: UUID, record_
         row = get_object_or_404(zone.records, pk=record_id, desired_deleted=False)
         if row.managed_by == "praho":
             return _error("managed_record")
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
     try:
         revision = positive_integer(request.data.get("expected_revision"))
         delete = request.data.get("delete", False)

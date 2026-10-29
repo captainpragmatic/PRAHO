@@ -34,6 +34,7 @@ from django.utils.translation import gettext as _
 
 from apps.audit.session_digest import session_key_digest
 
+from . import session_policy
 from .models import CustomerMembership, CustomerViewGrant, PortalSession, User
 
 if TYPE_CHECKING:
@@ -50,8 +51,6 @@ REASON_CATEGORIES = frozenset(value for value, _label in CustomerViewGrant.REASO
 MIN_REASON, MAX_REASON, MAX_TICKET_REFERENCE = 10, 500, 100
 HOURLY_LIMIT = 20
 GRANT_TTL = timedelta(seconds=60)
-ABSOLUTE_TIMEOUT = timedelta(minutes=30)
-IDLE_TIMEOUT = timedelta(minutes=10)
 CODE_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
 # Set on the staff console session when its login completed the second factor.
 MFA_LOGIN_MARKER = "mfa_verified_at"
@@ -283,8 +282,8 @@ def consume(code: object) -> PortalSession:
             customer_view_customer=customer,
             customer_view_grant=grant,
             last_seen_at=now,
-            idle_deadline=now + IDLE_TIMEOUT,
-            expires_at=now + ABSOLUTE_TIMEOUT,
+            idle_deadline=now + session_policy.TIERS[PortalSession.TIER_CUSTOMER_VIEW].idle,
+            expires_at=now + session_policy.TIERS[PortalSession.TIER_CUSTOMER_VIEW].absolute,
         )
         _audit(
             "customer_view_started",

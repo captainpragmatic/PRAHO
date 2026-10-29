@@ -8,6 +8,7 @@ from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.billing.models import Currency, FXRate
 from apps.customers.models import Customer
 from apps.notifications.models import EmailLog
@@ -18,8 +19,10 @@ from apps.promotions.gift_refunds import reserve_funding_refund
 from apps.promotions.models import GiftCardFundingAttempt, GiftCardPurchase
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
-from apps.users.models import CustomerMembership, User
+from apps.users import portal_sessions
+from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import bound_fields
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -34,6 +37,7 @@ class GiftPurchaseAPITests(HMACTestMixin, TestCase):
         self.customer = Customer.objects.create(name="Voucher buyer", primary_email="account@example.test", status="active")
         self.actor = User.objects.create_user(email="buyer@example.test")
         self.membership = CustomerMembership.objects.create(customer=self.customer, user=self.actor, role="owner")
+        self.session = portal_sessions.open_session(self.actor)  # every call carries it, as the portal's do
         for key, value, kind in (
             ("promotions.gift_card_sales_enabled", True, "boolean"),
             ("promotions.gift_card_denominations", {"RON": [5000], "EUR": [1000]}, "json"),
@@ -56,7 +60,8 @@ class GiftPurchaseAPITests(HMACTestMixin, TestCase):
 
     def post(self, action: str, payload: dict | None = None):
         return self.portal_post(f"/api/billing/gift-cards/{action}/", {
-            "customer_id": self.customer.pk, "user_id": self.actor.pk, **(payload or {}),
+            "customer_id": self.customer.pk, "user_id": self.actor.pk, **bound_fields(self.session),
+            **(payload or {}),
         })
 
     def create(self):
@@ -239,6 +244,29 @@ class GiftPurchaseAPITests(HMACTestMixin, TestCase):
         self.assertFalse(data["payment_closed"])
         self.assertFalse(data["can_pay"])
         self.assertFalse(data["can_refresh"])
+
+    def test_a_stale_session_confirms_before_the_code_is_revealed(self) -> None:
+        staff = User.objects.create_user(email="reveal-step-up@example.test", staff_role="billing")
+        purchase = record_bank_funding(self.create().pk, reference="QA-bank", actor=staff)
+        PortalSession.objects.filter(pk=self.session.pk).update(reauth_at=timezone.now() - timedelta(seconds=301))
+        refused = self.post("reveal", {"purchase_id": str(purchase.pk)})
+        self.assertEqual(refused.status_code, 403, refused.content)
+        self.assertEqual(refused.json(), {"success": False, "code": "reauth_required"})
+        self.assertNotIn(purchase.gift_card.code, refused.content.decode())
+        self.assertFalse(AuditEvent.objects.filter(action="gift_card_code_revealed").exists())
+        self.assertFalse(EmailLog.objects.filter(template_key="security_notice:gift_card_revealed").exists())
+        PortalSession.objects.filter(pk=self.session.pk).update(reauth_at=timezone.now())
+        revealed = self.post("reveal", {"purchase_id": str(purchase.pk)})
+        self.assertEqual(revealed.json()["code"], purchase.gift_card.code)
+
+    def test_a_reveal_without_a_session_is_refused_as_an_ended_one(self) -> None:
+        staff = User.objects.create_user(email="reveal-unbound@example.test", staff_role="billing")
+        purchase = record_bank_funding(self.create().pk, reference="QA-bank", actor=staff)
+        response = self.portal_post("/api/billing/gift-cards/reveal/", {
+            "customer_id": self.customer.pk, "user_id": self.actor.pk, "purchase_id": str(purchase.pk),
+        })
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertNotIn(purchase.gift_card.code, response.content.decode())
 
     def test_a_revealed_code_is_told_to_the_person_by_its_last_four_characters(self) -> None:
         staff = User.objects.create_user(email="reveal-notice@example.test", staff_role="billing")

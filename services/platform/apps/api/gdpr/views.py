@@ -24,6 +24,7 @@ from apps.api.secure_auth import (
     _uniform_error_response,
     require_portal_service_authentication,
 )
+from apps.api.step_up import step_up_refusal
 from apps.audit.export_files import read_export_file
 from apps.audit.models import DataExport
 from apps.audit.services import AuditService, ComplianceEventRequest, GDPRConsentService, GDPRExportService
@@ -125,7 +126,7 @@ EXPORT_API_MAX_BYTES = 20 * 1024 * 1024
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @throttle_classes([CustomerRateThrottle, BurstRateThrottle])  # #277: IP-limit unsigned traffic; None for signed
 @require_portal_service_authentication
-def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
+def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:  # noqa: PLR0911
     """
     GDPR data export (Article 15 - Right of access, Article 20 - Right to data portability).
 
@@ -145,6 +146,8 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
         return _uniform_error_response("Authentication required", 401)
 
     action = request_data.get("action", "request")
+    if action not in ("status", "request"):
+        return _uniform_error_response("Unknown action", 400)
 
     if action == "status":
         exports = GDPRExportService.get_user_exports(user)
@@ -154,6 +157,10 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
             entry["downloadable"] = entry["downloadable"] and not entry["too_large"]
         return Response({"success": True, "exports": exports})
 
+    # A new export of everything held about the person needs a recent identity check; status never does.
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
     ip_address = request_data.get("ip_address")
     # A repeat request returns the export already pending; only the request that created it queues
     # it, so repeated clicks do not each queue a job (process_pending_data_exports covers a lost one).
@@ -185,7 +192,7 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
 @throttle_classes([CustomerRateThrottle, BurstRateThrottle])  # #277: IP-limit unsigned traffic; None for signed
 @require_portal_service_authentication
-def data_export_download_api(request: Request, request_data: dict[str, Any], export_id: uuid.UUID) -> Response:
+def data_export_download_api(request: Request, request_data: dict[str, Any], export_id: uuid.UUID) -> Response:  # noqa: PLR0911
     """The decrypted file of the signed-in person's own GDPR export, for the portal to relay.
 
     Only an export the person requested, still inside its download window and with its file, is
@@ -206,6 +213,9 @@ def data_export_download_api(request: Request, request_data: dict[str, Any], exp
         return _uniform_error_response("Export not available", 404)
     if (export.file_size or 0) > EXPORT_API_MAX_BYTES:
         return _uniform_error_response("Export too large to download here; contact support", 413)
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     try:
         content = read_export_file(export).encode("utf-8")

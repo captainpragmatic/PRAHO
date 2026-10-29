@@ -19,6 +19,7 @@ from apps.tickets.services import TicketStatusService
 from apps.tickets.tasks import auto_close_inactive_tickets
 from apps.users.models import CustomerMembership, User, UserProfile
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
 
 
 @override_settings(
@@ -26,7 +27,7 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
     MIDDLEWARE=HMAC_TEST_MIDDLEWARE,
     HMAC_ALLOW_LEGACY_SECRET=True,
 )
-class ServiceRequestTests(HMACTestMixin, TestCase):
+class ServiceRequestTests(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
         self.customer = Customer.objects.create(name="Requests SRL", status="active")

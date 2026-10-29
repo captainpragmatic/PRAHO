@@ -19,13 +19,13 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import Resolver404, resolve
 from django.utils import timezone
-from rest_framework.test import APIRequestFactory
 
 from apps.api.gdpr.views import EXPORT_API_MAX_BYTES, data_export_api, data_export_download_api
 from apps.audit.models import ComplianceLog, DataExport
 from apps.audit.services import GDPRExportService
 from apps.audit.tasks import process_data_export_task, process_pending_data_exports
 from tests.factories.core_factories import UserCreationRequest, create_user
+from tests.helpers.portal_session import BoundAPIRequestFactory
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=True)
@@ -37,7 +37,7 @@ class ExportDeliveryTestCase(TestCase):
         settings_override.enable()
         self.addCleanup(settings_override.disable)
         self.media = Path(media)
-        self.factory = APIRequestFactory()
+        self.factory = BoundAPIRequestFactory()
         self.user = create_user(UserCreationRequest(username="exporter", email="exporter@example.test"))
 
     def signed(self, path: str, data: dict[str, object]) -> object:
