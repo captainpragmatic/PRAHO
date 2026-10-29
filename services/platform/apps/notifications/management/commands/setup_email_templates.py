@@ -1313,6 +1313,58 @@ class Command(BaseCommand):
                 },
             },
             {
+                "key": "hosting_dns_broken",
+                "locale": "ro",
+                "category": "provisioning",
+                "subject": "Verificați DNS pentru {{domain}} - {{brand_name}}",
+                "body_html": """
+                <h2>DNS-ul domeniului necesită atenție</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>O verificare care funcționa anterior pentru <strong>{{domain}}</strong> a detectat o problemă.
+                Verificări afectate: {{dns_problems}}. Prima detectare: {{detected_at}}.</p>
+                <p>Numele găzduirii este <strong>{{account_name}}</strong>. Verificați configurația la furnizorul DNS:</p>
+                <ul><li><code>{{www_record}}</code></li><li><code>{{apex_record}}</code></li></ul>
+                <p>Găsiți detaliile și puteți solicita o nouă verificare din zona client.</p>
+                <p>Echipa {{brand_name}}</p>
+                """,
+                "description": "O singură notificare pentru o problemă DNS după o verificare anterioară reușită",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "domain": "Domeniul găzduirii",
+                    "account_name": "Numele găzduirii",
+                    "dns_problems": "Verificările DNS afectate",
+                    "detected_at": "Data primei detectări",
+                    "www_record": "Înregistrarea pentru www",
+                    "apex_record": "Înregistrarea pentru domeniul fără www",
+                },
+            },
+            {
+                "key": "hosting_dns_broken",
+                "locale": "en",
+                "category": "provisioning",
+                "subject": "Check DNS for {{domain}} - {{brand_name}}",
+                "body_html": """
+                <h2>Your domain DNS needs attention</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>A previously working check for <strong>{{domain}}</strong> has detected a problem.
+                Affected checks: {{dns_problems}}. First detected: {{detected_at}}.</p>
+                <p>Your hosting name is <strong>{{account_name}}</strong>. Check these records at your DNS provider:</p>
+                <ul><li><code>{{www_record}}</code></li><li><code>{{apex_record}}</code></li></ul>
+                <p>You can view the details and request another check in the client area.</p>
+                <p>The {{brand_name}} Team</p>
+                """,
+                "description": "One notification per DNS incident following a previously successful check",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "domain": "Hosting domain",
+                    "account_name": "Hosting name",
+                    "dns_problems": "Affected DNS checks",
+                    "detected_at": "First detection time",
+                    "www_record": "The www record",
+                    "apex_record": "The bare-domain record",
+                },
+            },
+            {
                 "key": "provisioning_failed",
                 "locale": "ro",
                 "category": "provisioning",

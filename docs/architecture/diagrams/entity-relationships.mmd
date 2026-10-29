@@ -1,297 +1,315 @@
-%% PRAHO Platform - Database Entity Relationship Diagram
-%% Updated: 2026-03-11
-%% Entities use db_table values (matches SQL \dt output) — see ADR-0023 for full catalog
-%% For db_table naming convention see: docs/ADRs/ADR-0023-database-structure.md
-%% Monetary values stored as INTEGER in cents (subtotal_cents, tax_cents, total_cents)
-%% PKs: UUID for all business-facing models; auto-increment for log/junction tables
-
+%% Source snapshot: 2026-10-27. Selected entities/fields, not the full schema.
+%% PK/FK types and relationship optionality come from installed Django model metadata.
+%% Auto-created join tables, generic relations and unselected links are omitted.
+%% Monetary *_cents fields are integer minor units; other fields retain their model types.
+%% Full concrete local-model table snapshot: database-tables.mmd.
 erDiagram
-    %% =========================================================================
-    %% AUTHENTICATION & IDENTITY
-    %% =========================================================================
-
     users {
-        uuid id PK
-        string email UK "Email-based auth (no username)"
-        string staff_role "admin|support|billing|manager"
-        bool two_factor_enabled
-        datetime created_at
+        bigint id PK
+        string email UK
+        string staff_role
+        boolean two_factor_enabled
     }
 
     user_profiles {
-        uuid id PK
-        uuid user_id FK
-        string preferred_language "ro|en"
-        string timezone "Europe/Bucharest"
+        bigint id PK
+        bigint user_id FK
+        string preferred_language
     }
 
     user_customer_memberships {
-        uuid id PK
-        uuid user_id FK
-        uuid customer_id FK
-        string role "owner|billing|tech|viewer"
-        bool is_primary
+        bigint id PK
+        bigint user_id FK
+        bigint customer_id FK
+        string role
+        boolean is_active
     }
 
-    %% =========================================================================
-    %% BUSINESS ENTITIES
-    %% =========================================================================
-
     customers {
-        uuid id PK
+        bigint id PK
         string name
-        string customer_type "individual|company|pfa|ngo"
-        string status "active|inactive|suspended|prospect"
-        string company_name
-        string primary_email
-        datetime deleted_at "Soft delete"
+        string status
+        datetime deleted_at
     }
 
     customer_tax_profiles {
-        uuid id PK
-        uuid customer_id FK
+        bigint id PK
+        bigint customer_id FK
         string vat_number
-        bool is_vat_payer
-        bool reverse_charge_eligible
+        boolean is_vat_payer
     }
 
     customer_billing_profiles {
-        uuid id PK
-        uuid customer_id FK
-        string default_currency
-        string payment_terms
+        bigint id PK
+        bigint customer_id FK
+        string preferred_currency
+        int payment_terms
     }
-
-    %% =========================================================================
-    %% PRODUCT CATALOG
-    %% =========================================================================
 
     products {
         uuid id PK
-        string slug UK
         string name
-        string product_type "shared_hosting|vps|domain|ssl|..."
-        bool is_active
-        uuid default_service_plan_id FK
+        string product_type
+        bigint default_service_plan_id FK
     }
 
     product_prices {
         uuid id PK
         uuid product_id FK
-        int currency_id FK
+        string currency_id FK
         bigint monthly_price_cents
-        bigint setup_cents
-        decimal semiannual_discount_percent
-        decimal annual_discount_percent
     }
-
-    %% =========================================================================
-    %% ORDERS
-    %% =========================================================================
 
     orders {
         uuid id PK
-        string order_number UK
-        uuid customer_id FK
-        string status "draft|pending|confirmed|processing|completed|..."
-        int currency_id FK
-        bigint subtotal_cents
-        bigint tax_cents
+        bigint customer_id FK
+        string status
         bigint total_cents
-        datetime created_at
     }
 
     order_items {
         uuid id PK
         uuid order_id FK
         uuid product_id FK
-        int quantity
+        bigint service_id FK
         bigint unit_price_cents
-        bigint tax_cents
-        bigint line_total_cents
-        string provisioning_status
-        uuid service_id FK "Optional - after provisioning"
     }
 
-    %% =========================================================================
-    %% BILLING & INVOICING
-    %% =========================================================================
-
     billing_invoices {
-        uuid id PK
-        uuid customer_id FK
-        string number UK "INV-000001 sequential"
-        string status "draft|issued|paid|overdue|void|refunded"
-        bigint subtotal_cents
-        bigint tax_cents
+        bigint id PK
+        bigint customer_id FK
+        string status
         bigint total_cents
-        uuid converted_from_proforma_id FK "Optional"
-        datetime locked_at "Immutable once issued"
+        bigint converted_from_proforma_id FK
     }
 
     billing_invoice_lines {
-        uuid id PK
-        uuid invoice_id FK
-        string description
-        bigint amount_cents
-        bigint tax_cents
+        bigint id PK
+        bigint invoice_id FK
+        bigint unit_price_cents
+        bigint line_total_cents
     }
 
     billing_proforma_invoices {
-        uuid id PK
-        uuid customer_id FK
-        string number UK "PRO-000001"
+        bigint id PK
+        bigint customer_id FK
         string status
         bigint total_cents
     }
 
     billing_subscriptions {
         uuid id PK
-        uuid customer_id FK
+        bigint customer_id FK
         uuid product_id FK
-        string subscription_number UK
-        string status "trialing|active|past_due|cancelled|..."
-        string billing_cycle "monthly|quarterly|yearly"
-        bigint amount_cents
+        bigint service_id FK
+        string status
     }
 
-    %% =========================================================================
-    %% HOSTING & PROVISIONING
-    %% =========================================================================
-
     provisioning_service_plans {
-        uuid id PK
+        bigint id PK
         string name
-        string plan_type "shared_hosting|vps|dedicated|..."
-        decimal price_monthly
-        int disk_space_gb
-        int bandwidth_gb
+        string plan_type
     }
 
     provisioning_servers {
-        uuid id PK
+        bigint id PK
         string hostname UK
-        string server_type "shared|vps_host|dedicated|cloud"
-        string status "active|maintenance|offline"
-        string primary_ip
+        string status
     }
 
     provisioning_services {
-        uuid id PK
-        uuid customer_id FK
-        uuid service_plan_id FK
-        uuid server_id FK
-        string service_name
-        string username UK
-        string status "pending|provisioning|active|suspended|terminated"
-        string billing_cycle
+        bigint id PK
+        bigint customer_id FK
+        bigint service_plan_id FK
+        bigint server_id FK
+        string status
     }
 
-    %% =========================================================================
-    %% DOMAINS
-    %% =========================================================================
+    provisioning_virtualmin_servers {
+        uuid id PK
+        string hostname UK
+        string ipv4_address
+        string ipv6_address
+        string status
+    }
+
+    provisioning_virtualmin_accounts {
+        uuid id PK
+        bigint service_id FK
+        uuid server_id FK
+        string domain UK
+        string status
+    }
+
+    provisioning_account_hostnames {
+        uuid id PK
+        uuid account_id FK
+        uuid target_server_id FK
+        string label UK
+        int previous_ttl
+    }
+
+    provisioning_account_name_certificates {
+        uuid id PK
+        uuid hostname_id FK
+        datetime current_not_after
+    }
+
+    provisioning_virtualmin_migrations {
+        uuid id PK
+        uuid account_id FK
+        uuid source_server_id FK
+        uuid target_server_id FK
+        string status
+    }
+
+    provisioning_migration_bridges {
+        uuid id PK
+        uuid migration_id FK
+        uuid source_server_id FK
+        uuid target_server_id FK
+        string status
+    }
+
+    provisioning_hosted_domain_dns_status {
+        uuid id PK
+        uuid account_id FK
+        datetime checked_at
+        string expected_generation
+    }
 
     domains {
         uuid id PK
-        string name UK "example.com"
-        uuid customer_id FK
-        int tld_id FK
-        int registrar_id FK
-        string status "pending|active|expired|transfer_in|..."
-        datetime expires_at
-        bool auto_renew
+        bigint customer_id FK
+        bigint tld_id FK
+        bigint registrar_id FK
+        string status
     }
 
     domain_tlds {
-        int id PK
-        string extension UK "com|ro|eu|..."
-        bigint registration_price_cents
-        bigint renewal_price_cents
+        bigint id PK
+        string extension UK
     }
 
     domain_registrars {
-        int id PK
+        bigint id PK
         string name UK
-        string status "active|suspended|disabled"
-        string api_endpoint
+        string status
     }
 
-    %% =========================================================================
-    %% SUPPORT
-    %% =========================================================================
+    domain_hosted_zones {
+        uuid id PK
+        bigint customer_id FK
+        bigint service_id FK
+        uuid account_id FK
+        uuid account_hostname_id FK
+        uuid domain_id FK
+        string status
+    }
+
+    domain_hosted_zone_import_revisions {
+        uuid id PK
+        uuid zone_id FK
+        int number
+        string manifest_digest
+        datetime confirmed_at
+    }
+
+    domain_hosted_zone_records {
+        uuid id PK
+        uuid zone_id FK
+        string name
+        string record_type
+        int ttl
+        string managed_by
+    }
+
+    domain_hosted_zone_operations {
+        uuid id PK
+        uuid zone_id FK
+        uuid revision_id FK
+        string kind
+        string phase
+        datetime lease_until
+    }
 
     tickets {
-        uuid id PK
-        string ticket_number UK "TK2026-XXXXXXXX"
-        uuid customer_id FK
-        string status "open|in_progress|waiting_on_customer|closed"
-        string priority "low|normal|high|urgent|critical"
-        uuid assigned_to_id FK
+        bigint id PK
+        bigint customer_id FK
+        string status
+        string priority
     }
 
     ticket_comments {
-        uuid id PK
-        uuid ticket_id FK
-        uuid author_id FK
-        string comment_type "customer|support|internal|system"
-        text content
+        bigint id PK
+        bigint ticket_id FK
+        bigint author_id FK
+        string comment_type
     }
 
     ticket_attachments {
-        uuid id PK
-        uuid ticket_id FK
-        uuid comment_id FK
+        bigint id PK
+        bigint ticket_id FK
+        bigint comment_id FK
         string filename
-        int file_size
     }
-
-    %% =========================================================================
-    %% AUDIT (cross-cutting)
-    %% =========================================================================
 
     audit_events {
         uuid id PK
-        string category "authentication|security_event|..."
-        string severity "low|medium|high|critical"
-        int content_type_id FK "GenericFK to any model"
+        bigint user_id FK
+        string category
         string object_id
-        datetime created_at "Append-only immutable"
+        datetime timestamp
     }
 
-    %% =========================================================================
-    %% RELATIONSHIPS
-    %% =========================================================================
-
-    users ||--o| user_profiles : "has"
-    users ||--o{ user_customer_memberships : "holds"
-    customers ||--o{ user_customer_memberships : "grants"
-    customers ||--|| customer_tax_profiles : "has"
-    customers ||--|| customer_billing_profiles : "has"
-
-    customers ||--o{ orders : "places"
-    customers ||--o{ billing_invoices : "receives"
-    customers ||--o{ billing_proforma_invoices : "receives"
-    customers ||--o{ billing_subscriptions : "subscribes"
-    customers ||--o{ provisioning_services : "owns"
-    customers ||--o{ domains : "registers"
-    customers ||--o{ tickets : "opens"
-
-    orders ||--o{ order_items : "contains"
-    order_items }o--|| products : "references"
-    order_items }o--o| provisioning_services : "provisions"
-
-    products ||--o{ product_prices : "priced as"
-    products }o--o| provisioning_service_plans : "maps to"
-    billing_subscriptions }o--|| products : "subscribes to"
-
-    billing_invoices ||--o{ billing_invoice_lines : "itemized as"
-    billing_proforma_invoices ||--o{ billing_invoices : "converts to"
-
-    domains }o--|| domain_tlds : "under"
-    domains }o--|| domain_registrars : "managed by"
-
-    provisioning_services }o--|| provisioning_service_plans : "based on"
-    provisioning_services }o--o| provisioning_servers : "hosted on"
-
-    tickets ||--o{ ticket_comments : "has"
-    ticket_comments ||--o{ ticket_attachments : "attaches"
+    users ||--o| user_profiles : "user"
+    users ||--o{ user_customer_memberships : "user"
+    customers ||--o{ user_customer_memberships : "customer"
+    customers ||--o| customer_tax_profiles : "customer"
+    customers ||--o| customer_billing_profiles : "customer"
+    provisioning_service_plans |o--o{ products : "default_service_plan"
+    products ||--o{ product_prices : "product"
+    customers ||--o{ orders : "customer"
+    orders ||--o{ order_items : "order"
+    products ||--o{ order_items : "product"
+    provisioning_services |o--o{ order_items : "service"
+    customers ||--o{ billing_invoices : "customer"
+    billing_proforma_invoices |o--o{ billing_invoices : "converted_from_proforma"
+    billing_invoices ||--o{ billing_invoice_lines : "invoice"
+    customers ||--o{ billing_proforma_invoices : "customer"
+    customers ||--o{ billing_subscriptions : "customer"
+    products ||--o{ billing_subscriptions : "product"
+    provisioning_services |o--o| billing_subscriptions : "service"
+    customers ||--o{ provisioning_services : "customer"
+    provisioning_service_plans ||--o{ provisioning_services : "service_plan"
+    provisioning_servers |o--o{ provisioning_services : "server"
+    provisioning_services ||--o| provisioning_virtualmin_accounts : "service"
+    provisioning_virtualmin_servers ||--o{ provisioning_virtualmin_accounts : "server"
+    provisioning_virtualmin_accounts |o--o| provisioning_account_hostnames : "account"
+    provisioning_virtualmin_servers |o--o{ provisioning_account_hostnames : "target_server"
+    provisioning_account_hostnames ||--o| provisioning_account_name_certificates : "hostname"
+    provisioning_virtualmin_accounts ||--o{ provisioning_virtualmin_migrations : "account"
+    provisioning_virtualmin_servers ||--o{ provisioning_virtualmin_migrations : "source_server"
+    provisioning_virtualmin_servers ||--o{ provisioning_virtualmin_migrations : "target_server"
+    provisioning_virtualmin_migrations ||--o| provisioning_migration_bridges : "migration"
+    provisioning_virtualmin_servers ||--o{ provisioning_migration_bridges : "source_server"
+    provisioning_virtualmin_servers ||--o{ provisioning_migration_bridges : "target_server"
+    provisioning_virtualmin_accounts ||--o| provisioning_hosted_domain_dns_status : "account"
+    customers ||--o{ domains : "customer"
+    domain_tlds ||--o{ domains : "tld"
+    domain_registrars ||--o{ domains : "registrar"
+    customers ||--o{ domain_hosted_zones : "customer"
+    provisioning_services |o--o{ domain_hosted_zones : "service"
+    provisioning_virtualmin_accounts |o--o{ domain_hosted_zones : "account"
+    provisioning_account_hostnames |o--o{ domain_hosted_zones : "account_hostname"
+    domains |o--o{ domain_hosted_zones : "domain"
+    domain_hosted_zones ||--o{ domain_hosted_zone_import_revisions : "zone"
+    domain_hosted_zones ||--o{ domain_hosted_zone_records : "zone"
+    domain_hosted_zones ||--o{ domain_hosted_zone_operations : "zone"
+    domain_hosted_zone_import_revisions ||--o{ domain_hosted_zone_operations : "revision"
+    customers ||--o{ tickets : "customer"
+    tickets ||--o{ ticket_comments : "ticket"
+    users |o--o{ ticket_comments : "author"
+    tickets ||--o{ ticket_attachments : "ticket"
+    ticket_comments |o--o{ ticket_attachments : "comment"
+    users |o--o{ audit_events : "user"

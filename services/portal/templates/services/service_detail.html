@@ -238,6 +238,10 @@
 
                 {% if service.hosting %}
                   {% include "services/partials/dns_instructions.html" with hosting=service.hosting only %}
+                  {% include "dns/partials/service_link.html" %}
+                  <div id="service-dns-status" hx-get="{% url 'services:dns' service_id %}" hx-trigger="load" hx-swap="outerHTML" aria-live="polite">
+                    <p class="text-sm text-slate-400">{% trans "Loading DNS checks…" %}</p>
+                  </div>
                 {% endif %}
 
                 <!-- Contact Information -->

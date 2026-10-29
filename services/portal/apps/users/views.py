@@ -51,6 +51,7 @@ from apps.users.constants import (
     REGISTRATION_CONFIRM_SESSION_KEY,
     REGISTRATION_INTENT_SESSION_KEY,
     REGISTRATION_PREFILL_SESSION_KEY,
+    SIGNED_OUT_FLOW_SESSION_KEYS,
 )
 from apps.users.forms import (
     ChangePasswordForm,
@@ -205,6 +206,13 @@ def _store_returned_session_auth_hash(request: HttpRequest, result: Mapping[str,
         request.session["session_auth_hash"] = returned
 
 
+# Platform answers these before checking the password, so neither is a failed attempt: no reauth
+# charge. A locked account reads like the rate limit it is, and lasts minutes, not one request.
+ACCOUNT_LOCKED = "account_locked"
+MFA_NOT_ENABLED = "mfa_not_enabled"
+LOCKED_MESSAGE = gettext_lazy("Too many attempts. Please wait and try again.")
+
+
 def _setup_refusal(request: HttpRequest, exc: PlatformAPIError, form: TOTPSetupForm) -> HttpResponse | None:
     """Explain a refused confirmation on the form; only a wrong password or code is a failed attempt.
 
@@ -221,6 +229,8 @@ def _setup_refusal(request: HttpRequest, exc: PlatformAPIError, form: TOTPSetupF
         return redirect("users:mfa_management")
     elif code == "mfa_setup_expired":
         form.add_error(None, _("This setup expired. Scan the new code and try again."))
+    elif code == ACCOUNT_LOCKED:
+        form.add_error(None, LOCKED_MESSAGE)
     else:
         mark_auth_failure(request, bucket="reauth")
         form.add_error(None, _("The password or the code is incorrect."))
@@ -344,6 +354,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
 
                     # ✅ CRITICAL: Prevent session fixation attacks
                     request.session.cycle_key()
+                    for key in SIGNED_OUT_FLOW_SESSION_KEYS:
+                        request.session.pop(key, None)
 
                     # Store in Django session (secure, handled by framework)
                     # Store correct user_id (platform user.id) and primary customer_id separately
@@ -1156,6 +1168,8 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
                     _("Too many attempts. Please try again in %(seconds)s seconds.")
                     % {"seconds": exc.retry_after or 30},
                 )
+            elif (exc.response_data or {}).get("code") == ACCOUNT_LOCKED:
+                form.add_error(None, LOCKED_MESSAGE)
             else:
                 form.add_error(None, _("Password change failed. Please try again."))
     return render(request, "users/change_password.html", {"form": form, "customer_email": request.session.get("email")})
@@ -1425,11 +1439,15 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session.cycle_key()
             return _render_new_backup_codes(request, list(result["backup_codes"]))
         except PlatformAPIError as exc:
-            if exc.is_rate_limited:
-                form.add_error(None, _("Too many attempts. Please wait and try again."))
+            code = (exc.response_data or {}).get("code")
+            if exc.is_rate_limited or code == ACCOUNT_LOCKED:
+                form.add_error(None, LOCKED_MESSAGE)
             elif exc.is_unavailable:
                 # Nothing was verified, so this is not a wrong credential and spends no attempt.
                 form.add_error(None, get_degraded_message(exc))
+            elif code == MFA_NOT_ENABLED:
+                messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))
+                return redirect("users:mfa_management")
             else:
                 mark_auth_failure(request, bucket="reauth")
                 form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
@@ -1464,12 +1482,15 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
             mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
         except PlatformAPIError as exc:
-            if exc.is_rate_limited:
-                form.add_error(None, _("Too many attempts. Please wait and try again."))
+            code = (exc.response_data or {}).get("code")
+            if exc.is_rate_limited or code == ACCOUNT_LOCKED:
+                form.add_error(None, LOCKED_MESSAGE)
             elif exc.is_unavailable:
                 # Nothing was verified, so this is not a wrong credential and spends no attempt.
                 form.add_error(None, get_degraded_message(exc))
-            elif (exc.response_data or {}).get("code") == "staff_mfa_required":
+            elif code == MFA_NOT_ENABLED:
+                return redirect("users:mfa_management")  # already off: that page says so
+            elif code == "staff_mfa_required":
                 # Platform's staff 2FA policy, not a wrong credential: say so and charge nothing.
                 form.add_error(
                     None, _("Two-factor authentication is required for staff accounts, so it cannot be disabled.")

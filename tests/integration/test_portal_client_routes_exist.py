@@ -102,11 +102,27 @@ METHOD_ROUTES = {
     "TicketsAPIClient.get_tickets_summary": "api:tickets:customer_tickets_summary",
     "ServicesAPIClient.get_customer_services": "api:services:customer_services_list",
     "ServicesAPIClient.get_service_detail": "api:services:customer_service_detail",
+    "ServicesAPIClient.get_service_dns_status": "api:services:service_dns_status",
+    "ServicesAPIClient.recheck_service_dns": "api:services:service_dns_recheck",
     "ServicesAPIClient.get_service_usage": "api:services:service_usage_stats",
     "ServicesAPIClient.get_services_summary": "api:services:customer_services_summary",
     "ServicesAPIClient.get_service_domains": "api:services:customer_service_domains",
     "ServicesAPIClient.request_service_action": "api:services:request_service_action",
     "ServicesAPIClient.get_available_plans": "api:services:available_service_plans",
+    "DnsAPIClient.zone_list": "api:dns:zone_list",
+    "DnsAPIClient.zone_detail": "api:dns:zone_detail",
+    "DnsAPIClient.import_zone": "api:dns:zone_import",
+    "DnsAPIClient.zone_action": "api:dns:zone_crosscheck",
+    "DnsAPIClient.record_detail": "api:dns:record_detail",
+    "DnsAPIClient.change_record": "api:dns:record_create",
+    "DnsAPIClient.export_zone": "api:dns:zone_export",
+}
+
+METHOD_ROUTE_CASES = {
+    "DnsAPIClient.zone_action:confirm": "api:dns:zone_confirm",
+    "DnsAPIClient.zone_action:switch": "api:dns:zone_switch",
+    "DnsAPIClient.zone_action:delete": "api:dns:zone_delete",
+    "DnsAPIClient.change_record:update": "api:dns:record_update",
 }
 
 GIFT_CARD_ACTIONS = ("catalog", "purchases", "create", "detail", "funding", "refresh", "reveal", "resend")
@@ -160,6 +176,7 @@ import inspect
 import json
 import sys
 from unittest.mock import patch
+from uuid import UUID
 
 import django
 import requests
@@ -178,10 +195,11 @@ settings.configure(
 django.setup()
 
 from apps.api_client.services import PlatformAPIClient
+from apps.dns.services import DnsAPIClient
 from apps.services.services import ServicesAPIClient
 from apps.tickets.services import TicketCreateRequest, TicketsAPIClient
 
-CLASSES = (PlatformAPIClient, TicketsAPIClient, ServicesAPIClient)
+CLASSES = (PlatformAPIClient, TicketsAPIClient, ServicesAPIClient, DnsAPIClient)
 records = []
 current = {}
 
@@ -197,6 +215,7 @@ def transport(*, method, url, headers, data=None, params=None, **kwargs):
 
 
 base, tickets, services = PlatformAPIClient(), TicketsAPIClient(), ServicesAPIClient()
+dns = DnsAPIClient()
 methods = {
     "PlatformAPIClient.get_localisation_defaults": lambda: base.get_localisation_defaults(),
     "PlatformAPIClient.authenticate_customer": lambda: base.authenticate_customer("c@example.test", "pw"),
@@ -263,6 +282,8 @@ methods = {
     "TicketsAPIClient.get_tickets_summary": lambda: tickets.get_tickets_summary(1, 1),
     "ServicesAPIClient.get_customer_services": lambda: services.get_customer_services(1, 1),
     "ServicesAPIClient.get_service_detail": lambda: services.get_service_detail(1, 1, 5),
+    "ServicesAPIClient.get_service_dns_status": lambda: services.get_service_dns_status(1, 1, 5),
+    "ServicesAPIClient.recheck_service_dns": lambda: services.recheck_service_dns(1, 1, 5),
     "ServicesAPIClient.get_service_usage": lambda: services.get_service_usage(1, 1, 5),
     "ServicesAPIClient.get_services_summary": lambda: services.get_services_summary(1, 1),
     "ServicesAPIClient.get_service_domains": lambda: services.get_service_domains(1, 1, 5),
@@ -270,6 +291,24 @@ methods = {
         1, 1, 5, "upgrade_request", submission_id=SUBMISSION_ID
     ),
     "ServicesAPIClient.get_available_plans": lambda: services.get_available_plans(1, "shared"),
+    "DnsAPIClient.zone_list": lambda: dns.zone_list(1, 1),
+    "DnsAPIClient.zone_detail": lambda: dns.zone_detail(1, 1, UUID(EXPORT_ID)),
+    "DnsAPIClient.import_zone": lambda: dns.import_zone(1, 1, 5, b"zone-file"),
+    "DnsAPIClient.zone_action": lambda: dns.zone_action(1, 1, UUID(EXPORT_ID), "crosscheck", {"expected_revision": 1}),
+    "DnsAPIClient.record_detail": lambda: dns.record_detail(1, 1, UUID(EXPORT_ID), UUID(SUBMISSION_ID)),
+    "DnsAPIClient.change_record": lambda: dns.change_record(1, 1, UUID(EXPORT_ID), None, {"expected_revision": 1}),
+    "DnsAPIClient.export_zone": lambda: dns.export_zone(1, 1, UUID(EXPORT_ID)),
+}
+method_cases = {
+    **{
+        f"DnsAPIClient.zone_action:{action}": lambda action=action: dns.zone_action(
+            1, 1, UUID(EXPORT_ID), action, {"expected_revision": 1}
+        )
+        for action in ("confirm", "switch", "delete")
+    },
+    "DnsAPIClient.change_record:update": lambda: dns.change_record(
+        1, 1, UUID(EXPORT_ID), UUID(SUBMISSION_ID), {"expected_revision": 1}
+    ),
 }
 call_sites = {
     "post customers/create/": lambda: base.post("customers/create/", data={}, user_id=1),
@@ -336,7 +375,7 @@ discovered = sorted(
 )
 
 with patch("apps.api_client.services.portal_request", side_effect=transport):
-    for entry, invoke in {**methods, **call_sites}.items():
+    for entry, invoke in {**methods, **method_cases, **call_sites}.items():
         current.clear()
         current["entry"] = entry
         try:
@@ -436,11 +475,11 @@ class PortalClientRoutesExistTests(SimpleTestCase):
 
     def test_each_entry_made_exactly_one_request(self) -> None:
         made = sorted(record["entry"] for record in self.records)
-        expected = sorted({**METHOD_ROUTES, **CALL_SITE_ROUTES})
+        expected = sorted({**METHOD_ROUTES, **METHOD_ROUTE_CASES, **CALL_SITE_ROUTES})
         self.assertEqual(made, expected, f"Recorder stderr:\n{self.recorder_stderr}")
 
     def test_every_recorded_request_reaches_its_platform_view(self) -> None:
-        expected_views = {**METHOD_ROUTES, **CALL_SITE_ROUTES}
+        expected_views = {**METHOD_ROUTES, **METHOD_ROUTE_CASES, **CALL_SITE_ROUTES}
         violations = []
         for record in self.records:
             method, path_url, entry = record["method"], record["path_url"], record["entry"]

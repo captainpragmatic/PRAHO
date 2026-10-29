@@ -238,6 +238,26 @@ class TerminationTests(LifecycleCase):
         self.assertIsNotNone(hostname.retired_at)
         self.assertIsNone(hostname.account_id)
 
+    def test_a_retirement_the_queue_dropped_is_queued_again_while_names_are_off(self) -> None:
+        account, hostname = self._named_account()
+        with (
+            patch("django_q.tasks.async_task", side_effect=OSError("broker offline")) as dropped,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            account.status = "terminated"
+            account.save(update_fields=["status", "updated_at"])
+        dropped.assert_called_once()
+        _configure(enabled=False)
+        with patch("django_q.tasks.async_task") as enqueue:
+            counts = lifecycle.reconcile_account_names()
+        enqueue.assert_called_once_with(
+            lifecycle.RETIRE_TASK, str(hostname.pk), timeout=lifecycle.ACCOUNT_NAME_TASK_TIMEOUT_SECONDS, sync=False
+        )
+        self.assertEqual(counts, {"disabled": 1, "enqueued": 1})
+        self.assertEqual(lifecycle.retire_account_name(str(hostname.pk)), {"outcome": "retired"})
+        hostname.refresh_from_db()
+        self.assertIsNotNone(hostname.retired_at)
+
     def test_suspension_does_not_retire_the_name(self) -> None:
         account, hostname = self._named_account()
         with self.captureOnCommitCallbacks(execute=True):
@@ -291,7 +311,7 @@ class SweepTests(LifecycleCase):
     def test_the_sweep_does_nothing_while_off(self) -> None:
         _configure(enabled=False)
         self._named()
-        self.assertEqual(lifecycle.reconcile_account_names(), {"disabled": 1})
+        self.assertEqual(lifecycle.reconcile_account_names(), {"disabled": 1, "enqueued": 0})
         self.assertEqual((self.synced, self.node_calls), ([], []))
 
     def test_a_name_never_reconciled_is_handed_to_its_own_task_not_run_inline(self) -> None:

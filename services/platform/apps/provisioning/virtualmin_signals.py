@@ -24,6 +24,7 @@ from apps.audit.services import (
 from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
+from .hosted_zone_ownership import save_field_intent
 from .virtualmin_migration_models import MigrationBridge
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 
@@ -130,7 +131,7 @@ def audit_virtualmin_account_changes(
 
         else:
             # Log account updates
-            update_fields = kwargs.get("update_fields")
+            update_fields = save_field_intent(instance, kwargs.get("update_fields"))
 
             if update_fields:
                 if "status" in update_fields:

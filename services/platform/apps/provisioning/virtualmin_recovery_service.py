@@ -120,10 +120,10 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             ):
                 raise ValueError("Recovery needs one full archive or an exact base/differential pair")
             with transaction.atomic():
-                locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+                locked = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
                 servers = {
                     server.pk: server
-                    for server in VirtualminServer.objects.select_for_update()
+                    for server in VirtualminServer.objects.select_for_update(no_key=True)
                     .filter(pk__in=(locked.server_id, target.pk))
                     .order_by("pk")
                 }
@@ -136,6 +136,9 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     raise ValueError("Recovery requires the account's existing live name on its original node")
                 if account_has_active_operation(locked) or locked.restore_hold:
                     raise ValueError("Resolve the account's existing operation or restore hold before recovery")
+                from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
+
+                assert_move_ready(locked)
                 if MigrationBridge.objects.filter(migration__account=locked).exclude(status="torn_down").exists():
                     raise ValueError("Resolve the account's retained bridge before recovery")
                 if target.status != "active" or getattr(target, "node_deployment", None) is None:
@@ -280,7 +283,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         if ready is None or ready.enabled or not ready.certificate_installed or not ready.neutral:
             raise ValueError("The recovered account name and certificate are not ready")
         with transaction.atomic():
-            account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
+            account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             name_id = (
                 AccountHostname.objects.filter(account=account, retired_at__isnull=True)
                 .values_list("pk", flat=True)
@@ -298,6 +301,9 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             account.save(update_fields=["server", "updated_at"])
             name.target_server = migration.target_server
             name.save(update_fields=["target_server", "updated_at"])
+            from .managed_dns_service import advance_target_locked  # noqa: PLC0415  # Customer-zone ownership commit
+
+            advance_target_locked(name)
             VirtualminServer.objects.filter(pk=migration.target_server_id).update(
                 current_domains=F("current_domains") + 1
             )

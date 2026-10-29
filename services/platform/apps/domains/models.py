@@ -18,6 +18,18 @@ from apps.domains.domain_names import canonicalize_domain_name
 from .currency_models import (
     DomainCurrencyTransition as DomainCurrencyTransition,  # noqa: PLC0414  # Explicit typed export.
 )
+from .dns_zone_models import (
+    HostedZone as HostedZone,  # noqa: PLC0414  # Explicit typed model export.
+)
+from .dns_zone_models import (
+    HostedZoneImportRevision as HostedZoneImportRevision,  # noqa: PLC0414  # Explicit typed model export.
+)
+from .dns_zone_models import (
+    HostedZoneOperation as HostedZoneOperation,  # noqa: PLC0414  # Explicit typed model export.
+)
+from .dns_zone_models import (
+    HostedZoneRecord as HostedZoneRecord,  # noqa: PLC0414  # Explicit typed model export.
+)
 from .domain_names import longest_matching_tld_suffix
 
 # ===============================================================================

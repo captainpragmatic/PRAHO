@@ -4,12 +4,14 @@
 
 from django.urls import path
 
-from . import virtualmin_drain_views, virtualmin_views
+from . import hosted_domain_dns_views, virtualmin_drain_views, virtualmin_views
 
 # Note: We don't set app_name here since these URLs are included
 # in the main provisioning URLs with the "provisioning" namespace
 
 urlpatterns = [
+    path("dns-checks/", hosted_domain_dns_views.dns_failures, name="virtualmin_dns_failures"),
+    path("accounts/<uuid:account_id>/dns/recheck/", hosted_domain_dns_views.recheck_dns, name="virtualmin_dns_recheck"),
     path("servers/<uuid:server_id>/drain/", virtualmin_drain_views.node_drain, name="node_drain"),
     # Virtualmin server management
     path("servers/", virtualmin_views.virtualmin_servers_list, name="virtualmin_servers"),

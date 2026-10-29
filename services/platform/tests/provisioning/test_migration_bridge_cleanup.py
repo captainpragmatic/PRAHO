@@ -10,6 +10,7 @@ from apps.infrastructure.dns_agreement import Agreement
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.migration_barrier import BarrierStep
 from apps.provisioning.migration_bridge_cleanup import cleanup_bridge, reclaim_bridges
+from apps.provisioning.virtualmin_gateway import listing_attribute
 from apps.provisioning.virtualmin_migration_models import (
     MigrationBridge,
     VirtualminMigration,
@@ -209,6 +210,87 @@ class BridgeCleanupTests(BridgeCase):
         self.assertEqual(result["action"], "failed")
         self.assertEqual(bridge.status, "failed")
         self.assertNotIn("delete-domain", self._programs("source"))
+
+    def recorded_id(self, migration):
+        # The mock derives a stable ID from the name, so a re-seeded domain keeps the snapshot's ID
+        # unless a test gives it another one.
+        recorded = listing_attribute(migration.pre_migration_snapshot["remote"]["attributes"], "ID")
+        self.assertTrue(recorded.isdigit(), recorded)
+        return recorded
+
+    def recreate_source(self, migration):
+        replacement = str(int(self.recorded_id(migration)) + 1)
+        self.source_gateway.seed_domain(
+            self.account.domain, username=self.account.virtualmin_username, enabled=False, domain_id=replacement
+        )
+
+    def assert_source_parked(self, bridge, result, remove):
+        self.assertNotIn("delete-domain", self._programs("source"))
+        self.assertIsNotNone(self.source_gateway.domain_state_of(self.account.domain))
+        self.assertEqual(result["action"], "failed")
+        bridge.refresh_from_db()
+        self.assertEqual(bridge.status, "failed")
+        self.assertIn("ID", bridge.evidence["last_error"])
+        remove.assert_not_called()
+
+    def test_a_recreated_source_with_the_same_name_and_owner_is_never_deleted(self):
+        bridge, migration = self.due()
+        self.recreate_source(migration)
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge") as remove,
+        ):
+            result = cleanup_bridge(str(migration.pk))
+        self.assert_source_parked(bridge, result, remove)
+        self.assertFalse(bridge.evidence.get("delete_issued"))
+
+    def test_a_replayed_delete_never_deletes_a_recreated_source(self):
+        bridge, migration = self.due()
+        bridge.evidence["delete_issued"] = True
+        bridge.save(update_fields=["evidence", "updated_at"])
+        self.recreate_source(migration)
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge") as remove,
+        ):
+            result = cleanup_bridge(str(migration.pk))
+        self.assert_source_parked(bridge, result, remove)
+
+    def test_a_source_without_a_recorded_id_is_never_deleted(self):
+        bridge, migration = self.due()
+        snapshot = migration.pre_migration_snapshot
+        attributes = {key: value for key, value in snapshot["remote"]["attributes"].items() if key.lower() != "id"}
+        VirtualminMigration.objects.filter(pk=migration.pk).update(
+            pre_migration_snapshot={**snapshot, "remote": {**snapshot["remote"], "attributes": attributes}}
+        )
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge") as remove,
+        ):
+            result = cleanup_bridge(str(migration.pk))
+        self.assert_source_parked(bridge, result, remove)
+
+    def test_the_recorded_source_id_is_still_deleted(self):
+        bridge, migration = self.due()
+        self.source_gateway.seed_domain(
+            self.account.domain,
+            username=self.account.virtualmin_username,
+            enabled=False,
+            domain_id=self.recorded_id(migration),
+        )
+        with (
+            patch("apps.infrastructure.dns_agreement.authoritative_agreement", return_value=Agreement(True)),
+            patch("apps.provisioning.migration_bridge_service.verify_bridge", return_value=Ok("verified")),
+            patch("apps.provisioning.migration_bridge_service.remove_bridge", return_value=Ok("removed")),
+        ):
+            self.assertEqual(cleanup_bridge(str(migration.pk))["action"], "torn_down")
+        self.assertEqual(self._programs("source").count("delete-domain"), 1)
+        self.assertIsNone(self.source_gateway.domain_state_of(self.account.domain))
+        bridge.refresh_from_db()
+        self.assertEqual(bridge.status, "torn_down")
 
     def test_window_and_dns_disagreement_keep_the_source_copy(self):
         bridge, migration = self.due()

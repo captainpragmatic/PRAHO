@@ -21,6 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Security notices are no longer lost, and more changes send one.**
+  - **Delivery:** a notice is now a queued email written in the same transaction as the change, so the email queue delivers it and retries it. A notice whose queueing failed, or whose send failed, used to be lost.
+  - **New notices:**
+    - Team changes (member added, role changed, member removed) go to every owner of the company. A role change or a removal also goes to the member.
+    - A change to the company's contact details goes to every owner, and also to the old contact address when the contact email changed.
+    - A change to the company's legal or tax details goes to every owner.
+    - A personal data export request goes to the person who asked.
+    - A revealed gift-card code goes to the person who revealed it.
+  - **What they say:** notices name the fields that changed, never their values, and are written in each recipient's language.
+  - **Who still gets them:** a person who unsubscribed from marketing still gets security notices; a bounce, a complaint or a manual block still stops them.
+- **A marketing unsubscribe is never lost to a delivery block.** The suppression list kept one reason per address, and each new one replaced the last. An unsubscribe replaced by a temporary block (soft bounces, a timed manual block) ended with that block, and marketing resumed with no new consent. The opt-out is now kept apart from delivery blocks: neither replaces the other, a block that expires leaves the opt-out, and lifting a block keeps it.
+- **Signing in to the portal drops what the signed-out flows left in the session.** A password-reset link or a registration confirmation link opened before signing in stayed in the signed-in session, usable by anyone who later held that session. Login now drops both, with the registration form's prefill and intent, which only the signed-out registration page reads. The visit's attribution, which every order carries, stays.
+- **Every password check a signed-in session can reach counts toward the account lockout.**
+  - **What was wrong:**
+    - Enabling 2FA, disabling it and creating new backup codes (through the Portal and the API) checked the password without the lockout. So did backup codes and the password change on the staff pages.
+    - So a stolen session could keep guessing the password at the per-person rate limit, with no lockout.
+    - Disabling 2FA on an account without it also answered differently once the password was right.
+  - **What these checks do now:** they refuse a locked account and count a wrong password. Once the password and any code have both passed, they clear the count, as login does.
+  - **A related fix:** a right password followed by a wrong code no longer upgrades an outdated password hash. That upgrade moved the session hash and signed the person out. Outdated hashes are upgraded at the next login.
 - **SSH is reachable only from the addresses you list.** The SSH role always had a source allowlist, but nothing fed it, so every native deploy opened the SSH port to the whole Internet. Deploys now read `PRAHO_SSH_ALLOWED_CIDRS` (space-separated CIDRs), admit SSH from those sources only, and delete the rule that opened the port to everyone, after the new access is verified.
   - **Operator action.** Add `PRAHO_SSH_ALLOWED_CIDRS` to `.env.staging` and `.env.prod` before the next deploy or `make ssh-harden`. A deploy refuses to run without it, refuses `0.0.0.0/0` and `::/0`, and refuses a controller that is not inside the list. The list covers IPv4 and IPv6 separately: list an IPv6 range too if you reach SSH over IPv6.
 - **The SES webhook only trusts the SNS topics you name.** `/webhooks/email/ses/` is public, and it accepted a message signed by any certificate hosted under `amazonaws.com`, such as one in an attacker's S3 bucket. A forged bounce or complaint could then suppress a customer's address for every email sent through the notification service. The webhook now checks the message shape first and returns 400 for anything malformed. It requires the `TopicArn` in the signed body to be on the `AWS_SES_SNS_TOPIC_ARNS` allowlist before any network call. It fetches the signing certificate only from `https://sns.<region>.amazonaws.com/*.pem`, verifies signature versions 1 and 2, and caches the certificate for an hour. A certificate that cannot be fetched for now gets a 503 so SNS retries, and a bad certificate or signature gets a 403. The subscription confirmation URL must be on an SNS host, is fetched without following redirects, and must answer 2xx before it counts as confirmed. `safe_urlopen` no longer follows redirects, so a node check that is redirected reports the listener as up instead of following the redirect.
@@ -63,6 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI** checks a PR's migrations with the base branch's validators as well as its own.
 
 ### Added
+
+- **Customer DNS zones can be imported, reviewed and managed in the Portal.** A complete zone-file preview preserves external mail and verification records, shows managed website changes, and withholds nameserver instructions until the confirmed inventory is published and checked. Owners and technical contacts can edit supported records and export the zone file; other active members can read it. Hosting moves carry managed web records with their TTL evidence, while unrelated DNS survives hosting termination. Whole-zone deletion requires the requesting member's own current export and an independently verified move to another DNS provider. A deletion whose parent-delegation proof stays stale is parked for staff review instead of retrying forever.
+
+- **Hosting DNS checks appear in the customer Portal and staff account pages.** Background checks record website routing, IPv6, CAA policy, mail routing and DS/DNSKEY consistency. Customers see the last check and can request a recheck as an owner or technical contact. A confirmed healthy-to-broken change queues one notification per incident; unknown results and planned bridge maintenance do not create outage emails. The DNSSEC check compares delegation keys and does not claim signature validation.
 
 - **Hosting moves carry their account name and traffic.** Managed cutovers keep restored targets held until ownership commits, converge DNS forward, and retain a verified encrypted web bridge until customer DNS caches have expired. Staff can retry cleanup and recover a fenced unavailable node from retained backups while preserving suspension and current quotas.
 

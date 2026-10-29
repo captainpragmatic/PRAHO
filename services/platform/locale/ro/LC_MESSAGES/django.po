@@ -7538,6 +7538,18 @@ msgstr "Adresă de e-mail nevalidă"
 msgid "Reason for suppression"
 msgstr "Motiv pentru supresie"
 
+#: apps/notifications/models.py
+msgid "Why delivery is blocked; empty when the address only opted out of marketing"
+msgstr "De ce este blocată livrarea; gol când adresa doar s-a dezabonat de la marketing"
+
+#: apps/notifications/models.py
+msgid "When the address opted out of marketing; lifting a delivery block never clears it"
+msgstr "Când s-a dezabonat adresa de la marketing; ridicarea blocării livrării nu șterge această dată"
+
+#: apps/notifications/models.py
+msgid "Marketing opt-out"
+msgstr "Dezabonare de la marketing"
+
 #: apps/notifications/models.py:692
 msgid "When suppression expires (null = permanent)"
 msgstr "Când expiră supresia (null = permanent)"
@@ -24554,6 +24566,59 @@ msgstr "Pagini utilizator"
 #: tests/common/pagination_assertions.py:21
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#, python-format
+msgid "A team member was added to %(company)s"
+msgstr "Un membru a fost adăugat în echipa %(company)s"
+
+#, python-format
+msgid "A team role changed in %(company)s"
+msgstr "Un rol din echipa %(company)s a fost schimbat"
+
+#, python-format
+msgid "A team member was removed from %(company)s"
+msgstr "Un membru a fost eliminat din echipa %(company)s"
+
+#, python-format
+msgid "The contact details of %(company)s were changed"
+msgstr "Datele de contact pentru %(company)s au fost modificate"
+
+#, python-format
+msgid "The legal or tax details of %(company)s were changed"
+msgstr "Datele juridice sau fiscale pentru %(company)s au fost modificate"
+
+msgid "A copy of your personal data was requested"
+msgstr "A fost solicitată o copie a datelor dumneavoastră personale"
+
+msgid "A gift card code was shown"
+msgstr "Codul unui card cadou a fost afișat"
+
+#, python-format
+msgid "%(actor_email)s added %(member_email)s to %(company)s as %(role)s."
+msgstr "%(actor_email)s l-a adăugat pe %(member_email)s în %(company)s cu rolul %(role)s."
+
+#, python-format
+msgid "The role of %(member_email)s in %(company)s was changed from %(old_role)s to %(new_role)s."
+msgstr "Rolul lui %(member_email)s în %(company)s a fost schimbat din %(old_role)s în %(new_role)s."
+
+#, python-format
+msgid "%(member_email)s was removed from %(company)s."
+msgstr "%(member_email)s a fost eliminat din %(company)s."
+
+#, python-format
+msgid "The contact details of %(company)s were changed: %(fields)s."
+msgstr "Datele de contact pentru %(company)s au fost modificate: %(fields)s."
+
+#, python-format
+msgid "The legal or tax details of %(company)s were changed: %(fields)s."
+msgstr "Datele juridice sau fiscale pentru %(company)s au fost modificate: %(fields)s."
+
+msgid "A copy of your personal data was requested from your account. It will be ready to download there."
+msgstr "A fost solicitată din contul dumneavoastră o copie a datelor dumneavoastră personale. O veți putea descărca de acolo."
+
+#, python-format
+msgid "The code of gift card %(last4)s was shown in your account."
+msgstr "Codul cardului cadou %(last4)s a fost afișat în contul dumneavoastră."
 
 #~ msgid "Permitted upload file extensions, including the dot (e.g. .pdf)."
 #~ msgstr "Extensii de fișiere de încărcare permise, inclusiv punctul (ex. .pdf)."

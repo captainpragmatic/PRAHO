@@ -19,6 +19,7 @@ from apps.common.types import Err, Ok, Result
 
 from .account_hostname_config import bridge_window_hours
 from .account_hostname_models import AccountHostname
+from .virtualmin_gateway import listing_attribute
 from .virtualmin_migration_models import MigrationBridge
 from .virtualmin_models import VirtualminAccount
 
@@ -197,6 +198,10 @@ def _remove_content(bridge: MigrationBridge, token: str, service: VirtualminMigr
             raise BridgeOwnershipError("The retained source domain has a different owner")
         if source["enabled"] is not False:
             raise BridgeOwnershipError("The retained source domain is no longer fenced")
+        # A same-name, same-owner domain recreated during the window is not the copy this move retained.
+        recorded = str(listing_attribute(migration.pre_migration_snapshot["remote"]["attributes"], "ID"))
+        if not recorded.isdigit() or str(listing_attribute(source["attributes"], "ID")) != recorded:
+            raise BridgeOwnershipError("The retained source domain ID differs from the one this migration moved")
         _guard(bridge.pk, token)
         _progress(bridge.pk, token, {"delete_issued": True})
         try:

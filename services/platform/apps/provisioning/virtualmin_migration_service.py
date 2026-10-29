@@ -41,6 +41,7 @@ from .virtualmin_gateway import (
 from .virtualmin_gateway import explicit_rejection as _explicit_rejection
 from .virtualmin_migration_models import (
     _TERMINAL_STATUSES,
+    ACCOUNT_BUSY_REFUSAL,
     PRE_COMMIT_STATUSES,
     MigrationBridge,
     NodeDrain,
@@ -122,6 +123,10 @@ class MigrationLeaseLostError(RuntimeError):
 
 class MigrationCancelledBeforeCommitError(ValueError):
     """A cancellation won the row lock before the ownership commit."""
+
+
+class MigrationBarrierBrokenBeforeCommitError(ValueError):
+    """The source's write barrier does not provably hold at the ownership commit."""
 
 
 def source_is_fenced(migration: VirtualminMigration) -> bool:
@@ -392,10 +397,13 @@ class VirtualminMigrationService:
                 transaction.on_commit(lambda: _wake_drain(drain_id), robust=True)
 
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
+        from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
+
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
         if account_has_active_operation(account):
-            raise ValueError("Account already has an active migration or backup/restore operation")
+            raise ValueError(ACCOUNT_BUSY_REFUSAL)
+        assert_move_ready(account)
         if (
             MigrationBridge.objects.filter(migration__account_id=account.pk)
             .exclude(status=MigrationBridge.Status.TORN_DOWN)
@@ -1034,18 +1042,43 @@ class VirtualminMigrationService:
     def _commit_cutover(self, migration: VirtualminMigration, token: UUID) -> None:
         try:
             self._commit_cutover_transaction(migration, token)
-        except MigrationCancelledBeforeCommitError as error:
+        except (MigrationCancelledBeforeCommitError, MigrationBarrierBrokenBeforeCommitError) as error:
             self._abort(migration, token, error)
+
+    def _reverify_barrier(self, migration: VirtualminMigration) -> None:
+        """The whole fence must still hold now: a write after the backup would be lost by the commit."""
+        state = migration.barrier_state or {}
+        record = BarrierRecord.from_state(state.get("record"))
+        if record.is_err():
+            raise ValueError(f"The original barrier record is unusable: {record.unwrap_err()}")
+        result = self._barrier(
+            migration,
+            "verify",
+            token=str(uuid4()),
+            saved_token=str(state.get("token") or migration.pk),
+            record=record.unwrap(),
+            killed_at=int(state.get("killed_at") or 0),
+        )
+        self._defer_if_node_busy(result)
+        if result.is_err():
+            raise MigrationBarrierBrokenBeforeCommitError(
+                f"The write barrier could not be verified before the ownership commit: {result.unwrap_err()}"
+            )
+        if not result.unwrap().ok:
+            raise MigrationBarrierBrokenBeforeCommitError(
+                f"The write barrier no longer holds before the ownership commit: {result.unwrap().reason}"
+            )
 
     def _commit_cutover_transaction(self, migration: VirtualminMigration, token: UUID) -> None:
         """The sole point of no return, before target activation or any routing publication."""
         if self._domain(migration.source_server, migration.account.domain)["enabled"] is not False:
             raise ValueError("The source is not fenced before the ownership commit")
+        self._reverify_barrier(migration)
         with transaction.atomic():
             locked = VirtualminMigration.objects.select_for_update().get(pk=migration.pk)
             if locked.cancel_requested:
                 raise MigrationCancelledBeforeCommitError("Migration cancelled before the ownership commit")
-            account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
+            account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             hostname_id = (
                 AccountHostname.objects.filter(account=account, retired_at__isnull=True)
                 .values_list("pk", flat=True)
@@ -1064,6 +1097,9 @@ class VirtualminMigrationService:
             account.save(update_fields=["server", "updated_at"])
             hostname.target_server = migration.target_server
             hostname.save(update_fields=["target_server", "updated_at"])
+            from .managed_dns_service import advance_target_locked  # noqa: PLC0415  # Customer-zone ownership commit
+
+            advance_target_locked(hostname)
             MigrationBridge.objects.create(
                 migration=migration,
                 source_server=migration.source_server,
@@ -1215,6 +1251,23 @@ class VirtualminMigrationService:
             raise MigrationDeferredError(
                 timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), agreement.detail or "Waiting for DNS convergence"
             )
+        from .managed_dns_service import observe_routing  # noqa: PLC0415  # Worker-only managed frontend checks
+
+        managed = observe_routing(hostname)
+        if managed.is_err():
+            raise MigrationDeferredError(timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), managed.unwrap_err())
+        managed_records = managed.unwrap()
+        if managed_records["ipv4"] != str(ipv4) or managed_records["ipv6"] != (
+            str(target.ipv6_address) if target.ipv6_address else None
+        ):
+            raise MigrationDeferredError(
+                timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "The target changed during DNS convergence"
+            )
+        self._store_barrier_state(migration, token, {**migration.barrier_state, "managed_dns": managed_records})
+        if not managed_records["agreed"]:
+            raise MigrationDeferredError(
+                timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "Waiting for managed customer DNS convergence"
+            )
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             from .migration_routing import observe_frontends  # noqa: PLC0415
 
@@ -1226,7 +1279,28 @@ class VirtualminMigrationService:
                 bridge.evidence = {**bridge.evidence, "routing": routing}
                 bridge.save(update_fields=["evidence", "updated_at"])
         self._prepare_completion(migration, token)
+        self._complete_cutover(migration, token, hostname, managed_records)
+
+    def _complete_cutover(
+        self, migration: VirtualminMigration, token: UUID, hostname: AccountHostname, managed_records: dict[str, Any]
+    ) -> None:
+        """Complete only while the recorded routing generation remains fenced."""
         with transaction.atomic():
+            # Admission and ownership changes take Account -> Server -> Name.
+            # Hold the target row too: a staff IP edit must not commit between
+            # this last generation check and the completed migration transition.
+            VirtualminMigration.objects.select_for_update().get(pk=migration.pk)
+            VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
+            # A publisher can hold the Name while its deferred target FK check
+            # commits. Exclude address changes without blocking that KEY SHARE.
+            VirtualminServer.objects.select_for_update(no_key=True).get(pk=migration.target_server_id)
+            current_name = account_hostname_service.lock_for_publication(hostname.pk)
+            from .managed_dns_service import routing_is_current_locked  # noqa: PLC0415  # Last durable completion fence
+
+            if current_name is None or not routing_is_current_locked(current_name, managed_records):
+                raise MigrationDeferredError(
+                    timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), "DNS ownership changed before completion"
+                )
             self._move(migration, token, "repointing", dns_converged_at=timezone.now())
             self._finish(migration, token, "completed")
             from .migration_bridge_cleanup import schedule_bridge_cleanup  # noqa: PLC0415
@@ -1269,6 +1343,9 @@ class VirtualminMigrationService:
             if hostname is not None:
                 hostname.target_server = migration.target_server
                 hostname.save(update_fields=["target_server", "updated_at"])
+                from .managed_dns_service import advance_target_locked  # noqa: PLC0415  # Legacy ownership commit
+
+                advance_target_locked(hostname)
             # The restored domain occupies target capacity now; the reservation
             # row dies with this completion, so account for it immediately. Any
             # double count against the 6-hourly stats snapshot over-counts (the
