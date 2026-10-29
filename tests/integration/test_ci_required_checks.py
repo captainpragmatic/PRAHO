@@ -194,12 +194,38 @@ def test_the_lab_runs_in_the_queue_only_and_fails_open_there(tmp_path: Path) -> 
     assert _lab_decision(tmp_path, "merge_group", base) == "lab=true"
 
 
-def test_the_dco_check_passes_a_merge_group_without_reading_pull_request_shas() -> None:
+def _dco(repo: Path, event: str, base: str, head: str, body: str = "") -> int:
+    """Run the DCO job's own sign-off step in ``repo`` and return its exit status."""
     (job,) = [job for name, (_, job) in pull_request_jobs().items() if name == "dco"]
-    script = next(step["run"] for step in job["steps"] if "Signed-off-by" in step.get("run", ""))
-    queue_branch = script.index('"merge_group" ]; then')
-    assert queue_branch < script.index("github.event.pull_request.base.sha")
-    assert "exit 0" in script[queue_branch : script.index("github.event.pull_request.base.sha")]
+    (step,) = [step for step in job["steps"] if "Signed-off-by" in step.get("run", "")]
+    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "HEAD_SHA": head, "PR_BODY": body}
+    return subprocess.run(["bash", "-c", step["run"]], cwd=repo, env=env, capture_output=True, check=False).returncode  # noqa: S603, S607
+
+
+def _commit(repo: Path, message: str) -> str:
+    _git(repo, "commit", "--quiet", "--allow-empty", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_the_dco_check_reads_the_queues_real_squash_and_the_description(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "config", "user.email", "ci@example.com")
+    _git(tmp_path, "config", "user.name", "CI")
+    base = _commit(tmp_path, "base")
+    signed = _commit(tmp_path, "feat: a change (#1)\n\nSigned-off-by: A <a@example.com>")
+    unsigned = _commit(tmp_path, "feat: another change (#2)\n\nNo trailer here.")
+
+    # In the queue, the range is the queue's own squash commits, whose message is the description.
+    assert _dco(tmp_path, "merge_group", base, signed) == 0
+    assert _dco(tmp_path, "merge_group", base, unsigned) != 0
+    # On the pull request, signed commits are not enough: the description becomes the squash message.
+    assert _dco(tmp_path, "pull_request", base, signed, body="Summary.\n\nSigned-off-by: A <a@example.com>") == 0
+    assert _dco(tmp_path, "pull_request", base, signed, body="Summary only.") != 0
+
+
+def test_a_changed_description_is_checked_again() -> None:
+    triggers = load_workflow(WORKFLOWS / "dco-check.yml")["on"]
+    assert "edited" in triggers["pull_request"]["types"]
 
 
 def test_no_other_job_can_stand_in_for_a_required_check() -> None:

@@ -16,7 +16,8 @@ queue must outwait the slowest required job, and only the GitHub Actions app (in
 satisfy a check.
 
 The queue takes a squash's message from the repository's merge settings, which the rulesets do not
-hold. Set them with the rulesets: the pull request's title and description.
+hold. Set them with the rulesets: the pull request's title and description. A description therefore
+ends with a `Signed-off-by:` line; the DCO check refuses one without it, and checks the queue's squash.
 
 ```bash
 gh api --method PATCH "repos/$repo" -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY

@@ -2,7 +2,8 @@ name: DCO Check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # edited: the description becomes the squash commit message, so a changed one is checked again.
+    types: [opened, synchronize, reopened, edited]
   # The merge queue tests each pull request on top of master and whatever is queued ahead of it.
   merge_group:
     types: [checks_requested]
@@ -22,30 +23,37 @@ jobs:
 
       - name: Verify DCO sign-off on all commits
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          # Passed through the environment, never pasted into the script: the description is free text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "merge_group" ]; then
-            # A pull request enters the queue only after this check passed on every one of its commits.
-            # The queue's own commits are GitHub's squashes of those pull requests, not contributions.
-            echo "✅ Each queued pull request's commits were checked before it entered the queue"
-            exit 0
+          MISSING=0
+          if [ "$EVENT" = "pull_request" ]; then
+            # The queue squashes with the pull request's title and description as the commit message,
+            # and a squash must carry a sign-off (CONTRIBUTING.md): say so now, not an hour into the queue.
+            if ! printf '%s\n' "${PR_BODY:-}" | grep -qi "Signed-off-by:"; then
+              echo "❌ The description has no Signed-off-by line; the queue's squash commit message is the description"
+              MISSING=1
+            fi
           fi
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          # In a merge group, the range holds the queue's own squash commits: their real messages are checked.
           # Ensure both SHAs are available locally. Never with --depth: a shallow fetch cuts a
           # commit's parents, so a merge looks like an ordinary commit and the range is the head alone.
-          git fetch origin ${BASE_SHA} || true
-          git fetch origin ${HEAD_SHA} || true
+          git fetch origin "${BASE_SHA}" || true
+          git fetch origin "${HEAD_SHA}" || true
           echo "Checking commits from ${BASE_SHA}..${HEAD_SHA}"
-          MISSING=0
-          for c in $(git rev-list --no-merges ${BASE_SHA}..${HEAD_SHA}); do
-            if ! git show -s --format=%B $c | grep -qi "Signed-off-by:"; then
+          for c in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
+            if ! git show -s --format=%B "$c" | grep -qi "Signed-off-by:"; then
               echo "❌ Commit $c is missing a Signed-off-by line"
               MISSING=1
             fi
           done
           if [ "$MISSING" -ne 0 ]; then
-            echo "\nPlease sign off your commits: git commit --amend -s; git push -f"
+            printf '\nSign off your commits (git commit --amend -s) and end the description with a Signed-off-by line.\n'
             exit 1
           fi
           echo "✅ All commits have DCO sign-off"

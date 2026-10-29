@@ -44,7 +44,7 @@ Every pull request to `master` runs, with no paths filter on any required workfl
 | `integration.yml` | `lint-and-quality`, `integration-test` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking), cross-service, cache, isolation and deploy tests on PostgreSQL |
 | `browser.yml` | `browser-e2e`, `browser-csp` | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
 | `virtualmin-lab-pr.yml` | `pull-request` | in the merge queue only: the lab suites on the pinned Virtualmin unless every changed path is known not to reach them (`scripts/ci_lab_needed.py`, the base branch's copy; it fails open). On a pull request it reports success without running |
-| `dco-check.yml` | `dco` | sign-off on every commit (on the pull request; the queue's commits are GitHub's squashes) |
+| `dco-check.yml` | `dco` | sign-off on every commit of the pull request and on its description, which becomes the squash message; in the queue, on the queue's own squash commits |
 
 Every required workflow also runs on `merge_group`, and the queue lands a pull request only when the same checks pass on the queue's commit. `.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), merges through the queue (squash, every entry's own group green, 150 minutes for checks to report), and allows squash merges only. A branch need not be up to date: the queue tests it on the current `master`. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
 
@@ -107,7 +107,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 ### Neutral
 - Portal tests are always SQLite (no change — Portal has no business database)
 - The checks other than the lab run twice per merge, on the pull request and in the queue; runners are free for a public repository (October 2026 amendment), so only wall-clock time counts
-- A queued squash takes the pull request's title and description as its commit message (repository setting), so the description is written as the commit message
+- A queued squash takes the pull request's title and description as its commit message (repository setting), so the description is written as the commit message and ends with a `Signed-off-by:` line
 
 ## Reference Commits
 
