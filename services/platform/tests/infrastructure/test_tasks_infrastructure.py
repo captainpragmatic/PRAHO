@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from django.utils import timezone
 
@@ -359,6 +360,84 @@ class TestTaskTokenFetchFailure(TestCase):
         result = deploy_node_task(deployment.id, deployment.provider_id)
         self.assertFalse(result["success"])
         self.assertIn("provider token", result["error"])
+
+
+class TestDeployTaskFailsVisiblyBeforeItsFirstPhase(TestCase):
+    """A deployment that never reaches its first phase is failed with the reason, never left pending."""
+
+    def _run(self, deployment: NodeDeployment, provider_id: int) -> dict[str, object]:
+        try:
+            return deploy_node_task(deployment.id, provider_id)
+        except RuntimeError as error:
+            return {"raised": str(error)}
+
+    def _run_any(self, deployment: NodeDeployment, provider_id: int) -> dict[str, object]:
+        try:
+            return deploy_node_task(deployment.id, provider_id)
+        except Exception as error:
+            return {"raised": f"{type(error).__name__}: {error}"}
+
+    def _end_state(self, deployment: NodeDeployment, result: dict[str, object]) -> tuple[object, ...]:
+        deployment.refresh_from_db()
+        return deployment.status, result.get("success"), result.get("deployment_id")
+
+    @patch(
+        "apps.infrastructure.tasks.get_deployment_service",
+        side_effect=RuntimeError("ansible-playbook not found. Please install Ansible."),
+    )
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    def test_a_service_that_cannot_start_fails_the_deployment_with_its_reason(
+        self, mock_get_token: MagicMock, _service: MagicMock
+    ) -> None:
+        deployment = _create_test_deployment("pending")
+        mock_get_token.return_value = MagicMock(is_err=lambda: False, unwrap=lambda: "test-token")
+        result = self._run(deployment, deployment.provider_id)
+        self.assertEqual(self._end_state(deployment, result), ("failed", False, deployment.id))
+        self.assertIn("ansible-playbook not found", deployment.status_message)
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    def test_a_token_failure_fails_the_deployment(self, mock_get_token: MagicMock) -> None:
+        deployment = _create_test_deployment("pending")
+        mock_get_token.return_value = MagicMock(is_err=lambda: True, unwrap_err=lambda: "vault error")
+        result = self._run(deployment, deployment.provider_id)
+        self.assertEqual(self._end_state(deployment, result), ("failed", False, deployment.id))
+        self.assertIn("provider token", deployment.status_message)
+
+    @patch("apps.infrastructure.provider_config.get_provider_token", side_effect=ImproperlyConfigured("vault key"))
+    def test_a_credential_read_that_raises_fails_the_deployment(self, _token: MagicMock) -> None:
+        deployment = _create_test_deployment("pending")
+        result = self._run_any(deployment, deployment.provider_id)
+        self.assertEqual(self._end_state(deployment, result), ("failed", False, deployment.id))
+        self.assertIn("ImproperlyConfigured", deployment.status_message)
+        self.assertNotIn("vault key", deployment.status_message)
+
+    @patch("apps.infrastructure.tasks.get_deployment_service")
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    def test_a_service_refusal_before_the_row_is_claimed_fails_the_deployment(
+        self, mock_get_token: MagicMock, mock_get_service: MagicMock
+    ) -> None:
+        deployment = _create_test_deployment("pending")
+        mock_get_token.return_value = MagicMock(is_err=lambda: False, unwrap=lambda: "test-token")
+        mock_get_service.return_value.deploy_node.return_value = Err("Node deployment is disabled")
+        result = self._run_any(deployment, deployment.provider_id)
+        self.assertEqual(self._end_state(deployment, result), ("failed", False, deployment.id))
+        self.assertIn("Node deployment is disabled", deployment.status_message)
+
+    def test_a_missing_provider_fails_the_deployment(self) -> None:
+        deployment = _create_test_deployment("pending")
+        result = self._run(deployment, 99999)
+        self.assertEqual(self._end_state(deployment, result), ("failed", False, deployment.id))
+        self.assertIn("not found", deployment.status_message)
+
+    @patch("apps.infrastructure.tasks.get_deployment_service", side_effect=RuntimeError("boom"))
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    def test_a_deployment_already_past_pending_is_never_overwritten(
+        self, mock_get_token: MagicMock, _service: MagicMock
+    ) -> None:
+        deployment = _create_test_deployment("provisioning_node")
+        mock_get_token.return_value = MagicMock(is_err=lambda: False, unwrap=lambda: "test-token")
+        result = self._run(deployment, deployment.provider_id)
+        self.assertEqual(self._end_state(deployment, result), ("provisioning_node", False, deployment.id))
 
 
 class TestCleanupFailedDeploymentsTeardown(TestCase):

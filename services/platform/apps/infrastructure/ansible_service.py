@@ -17,6 +17,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 # Path to ansible files
 ANSIBLE_BASE_PATH = Path(__file__).parent.parent.parent / "infrastructure" / "ansible"
 PLAYBOOKS_PATH = ANSIBLE_BASE_PATH / "playbooks"
+_SYSTEM_ANSIBLE_PATHS = ("/usr/local/bin/ansible-playbook", "/usr/bin/ansible-playbook")
 
 
 def node_admin_allowed_cidrs() -> list[str]:
@@ -71,6 +73,22 @@ def node_admin_allowed_cidrs() -> list[str]:
         if network.with_prefixlen not in networks:
             networks.append(network.with_prefixlen)
     return networks
+
+
+def find_ansible_playbook() -> str | None:
+    """The ansible-playbook to run, or None.
+
+    The one installed next to this interpreter comes first: it is the pinned ansible-core from the
+    project's lock, and a systemd unit that starts the venv's python by absolute path leaves the venv
+    off PATH. PATH and the usual system locations are the fallbacks.
+    """
+    pinned = Path(sys.executable).parent / "ansible-playbook"
+    if pinned.is_file() and os.access(pinned, os.X_OK):
+        return str(pinned)
+    found = shutil.which("ansible-playbook")
+    if found:
+        return found
+    return next((path for path in _SYSTEM_ANSIBLE_PATHS if os.path.exists(path)), None)
 
 
 @dataclass
@@ -157,11 +175,8 @@ class AnsibleService:
 
     def _find_ansible(self) -> str:
         """Find ansible-playbook binary"""
-        ansible_path = shutil.which("ansible-playbook")
+        ansible_path = find_ansible_playbook()
         if not ansible_path:
-            for path in ["/usr/local/bin/ansible-playbook", "/usr/bin/ansible-playbook"]:
-                if os.path.exists(path):
-                    return path
             raise RuntimeError("ansible-playbook not found. Please install Ansible.")
         return ansible_path
 

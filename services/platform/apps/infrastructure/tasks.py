@@ -51,7 +51,23 @@ _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
 NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
-def deploy_node_task(
+def _fail_before_first_phase(deployment: Any, error: str) -> dict[str, Any]:
+    """A deployment that never reached its first phase fails with the reason; it is never left pending.
+
+    Returning (not raising) lets the completion hook log the error and acknowledges the task, so the
+    queue does not silently run it again hours later. Only a row still pending is ours to fail: a row
+    already past pending belongs to the worker running it.
+    """
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+
+    with transaction.atomic():
+        locked = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+        if locked.status == "pending":
+            locked.transition_to("failed", f"Deployment did not start: {error}")
+    return {"success": False, "deployment_id": deployment.pk, "hostname": deployment.hostname, "error": error}
+
+
+def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure, each failing the row.
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
@@ -96,17 +112,20 @@ def deploy_node_task(
         provider = CloudProvider.objects.get(id=provider_id)
     except CloudProvider.DoesNotExist:
         logger.error(f"[Task:deploy_node] Provider {provider_id} not found")
-        return {"success": False, "error": f"Provider {provider_id} not found"}
+        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found")
 
-    token_result = get_provider_token(provider)
+    try:
+        token_result = get_provider_token(provider)
+        # Fetch Cloudflare token at execution time (never serialized to queue)
+        _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
+    except Exception as error:  # A vault or settings fault; its text may describe secrets, so only its type is kept.
+        logger.error(f"[Task:deploy_node] Could not read deployment credentials: {type(error).__name__}")
+        return _fail_before_first_phase(deployment, f"Could not read deployment credentials ({type(error).__name__})")
     if token_result.is_err():
         logger.error(f"[Task:deploy_node] Failed to get token for provider {provider.name}")
-        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+        return _fail_before_first_phase(deployment, f"Failed to get provider token: {token_result.unwrap_err()}")
 
     credentials: dict[str, str] = {"api_token": token_result.unwrap()}
-
-    # Fetch Cloudflare token at execution time (never serialized to queue)
-    _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
     cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
 
     user = None
@@ -114,7 +133,11 @@ def deploy_node_task(
         with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
 
-    service = get_deployment_service()
+    try:
+        service = get_deployment_service()
+    except Exception as error:  # A worker that cannot build the service (no ansible-playbook, say) must say why.
+        logger.error(f"[Task:deploy_node] Deployment service unavailable: {error}")
+        return _fail_before_first_phase(deployment, str(error))
     result = service.deploy_node(
         deployment=deployment,
         credentials=credentials,
@@ -123,12 +146,8 @@ def deploy_node_task(
     )
 
     if result.is_err():
-        return {
-            "success": False,
-            "deployment_id": deployment_id,
-            "hostname": deployment.hostname,
-            "error": result.unwrap_err(),
-        }
+        # A refusal before the row was claimed (deployment disabled, say) leaves it pending; fail it there.
+        return _fail_before_first_phase(deployment, result.unwrap_err())
 
     deploy_result = result.unwrap()
     return {

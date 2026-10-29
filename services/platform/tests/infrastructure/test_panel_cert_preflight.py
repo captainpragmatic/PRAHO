@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import dns.exception
@@ -68,6 +70,10 @@ class PreflightTests(SimpleTestCase):
         self.settings = SETTINGS.copy()
         self.stack.enter_context(patch(f"{SERVICE}.SettingsService.get_setting", side_effect=self.settings.get))
         self.tools = self.stack.enter_context(patch(f"{SERVICE}.shutil.which", return_value="/usr/bin/tool"))
+        # The controller's own interpreter directory holds no ansible-playbook unless a test plants one.
+        self.interpreter = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.stack.enter_context(patch("sys.executable", str(self.interpreter / "python")))
+        self.stack.enter_context(patch("apps.infrastructure.ansible_service._SYSTEM_ANSIBLE_PATHS", ()))
         self.vault = self.stack.enter_context(patch("apps.common.credential_vault.get_credential_vault")).return_value
         self.vault.get_credential.return_value = Ok(("", CLOUD_SECRET, {}))
         self.cloud = MagicMock(spec=CloudProviderGateway)
@@ -104,6 +110,15 @@ class PreflightTests(SimpleTestCase):
 
     def status(self, report, check_id):
         return next(check.status for check in report.checks if check.check_id == check_id)
+
+    def test_the_controllers_pinned_ansible_passes_without_being_on_path(self):
+        self.tools.return_value = None
+        tool = self.interpreter / "ansible-playbook"
+        tool.write_text("#!/bin/sh\n")
+        tool.chmod(0o755)
+        report = self.run_report(node=True)
+        self.assertEqual(self.status(report, "controller.ansible-playbook"), "pass")
+        self.assertEqual(self.status(report, "controller.ssh-keyscan"), "fail")
 
     def test_provider_mode_only_checks_configuration_and_authenticated_reads(self):
         report = self.run_report()
