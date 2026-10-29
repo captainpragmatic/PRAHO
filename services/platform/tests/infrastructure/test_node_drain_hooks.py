@@ -251,6 +251,8 @@ class NodeDrainHookTests(MigrationTestBase):
         self.client.force_login(self.staff)
         self.settings_values["node_deployment.dns_default_zone"] = "example.com"
         self.assertFalse(NodeDeploymentForm().fields["source_node"].required)
+        # The form deploys only a size offered in the region.
+        self.deployment.node_size.available_regions.add(self.deployment.region)
         base = {
             "environment": self.deployment.environment,
             "node_type": self.deployment.node_type,

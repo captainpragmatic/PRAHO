@@ -204,6 +204,12 @@ class Command(BaseCommand):
                 f"Size '{options['size']}' not found for {provider.name}. "
                 f"Available: {', '.join(available) or 'none (run sync_providers first)'}"
             )
+        if not size.is_offered_in(region):
+            offered = list(NodeSize.offered_in(region).values_list("provider_type_id", flat=True))
+            raise CommandError(
+                f"Size '{options['size']}' is not available in {region.provider_region_id}. "
+                f"Available there: {', '.join(offered) or 'none (run sync_providers first)'}"
+            )
 
         # --- Resolve panel type ---
         panel = PanelType.objects.filter(panel_type=options["panel"], is_active=True).first()

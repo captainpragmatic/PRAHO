@@ -113,8 +113,11 @@
                         </label>
                     </template>
                 </div>
-                <p x-show="filteredSizes.length === 0" class="text-slate-400 text-center py-8">
-                    {% trans "Select a provider to see available sizes" %}
+                <p x-show="showSizeHint" class="text-slate-400 text-center py-8">
+                    {% trans "Select a provider and region to see available sizes" %}
+                </p>
+                <p x-show="showNoSizesInRegion" class="text-slate-400 text-center py-8">
+                    {% trans "No size is available in this region. Choose another region, or sync providers." %}
                 </p>
             </div>
 

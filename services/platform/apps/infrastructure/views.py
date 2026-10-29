@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, models, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -389,21 +389,24 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         .select_related("provider")
         .values("id", "name", "provider_id", "country_code", "normalized_code", "city")
     )
-    sizes = list(
-        NodeSize.objects.filter(is_active=True)
-        .select_related("provider")
-        .values(
-            "id",
-            "name",
-            "display_name",
-            "provider_id",
-            "vcpus",
-            "memory_gb",
-            "disk_gb",
-            "monthly_cost_eur",
-            "max_domains",
+    # One entry per size, with the active regions it is offered in (a .values() join would repeat sizes)
+    sizes = [
+        {
+            "id": size.id,
+            "name": size.name,
+            "display_name": size.display_name,
+            "provider_id": size.provider_id,
+            "vcpus": size.vcpus,
+            "memory_gb": size.memory_gb,
+            "disk_gb": size.disk_gb,
+            "monthly_cost_eur": size.monthly_cost_eur,
+            "max_domains": size.max_domains,
+            "region_ids": [region.id for region in size.available_regions.all()],
+        }
+        for size in NodeSize.objects.filter(is_active=True).prefetch_related(
+            Prefetch("available_regions", queryset=NodeRegion.objects.filter(is_active=True))
         )
-    )
+    ]
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
