@@ -18,9 +18,10 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.users import portal_sessions
+from apps.users import customer_view, portal_sessions
 from apps.users.models import PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.users.test_customer_view import CustomerViewFixture
 
 
 def _run(*args: str) -> str:
@@ -100,6 +101,22 @@ class SelectorTests(TestCase):
         _session("twice@example.ro")
         _run("--all")
         self.assertIn("Ended 0 sessions for 0 people", _run("--all"))
+
+
+@override_settings(PORTAL_PUBLIC_ORIGIN="https://portal.example.test", CUSTOMER_VIEW_ENABLED=True)
+class CustomerViewRevocationTests(CustomerViewFixture):
+    def test_a_staff_member_s_customer_views_end_with_their_sessions(self) -> None:
+        view = customer_view.consume(self.issue())
+        self.assertEqual((view.user_id, view.viewed_as_customer_by_id), (self.target.pk, self.staff.pk))
+        out = _run("--user", self.staff.email)
+        self.assertTrue(_ended(view))
+        self.assertIn(self.staff.email, out)  # the session is the staff member's, whoever it shows
+
+    def test_control_revoking_staff_leaves_the_viewed_customer_s_own_sessions(self) -> None:
+        own = _session(self.target.email)
+        customer_view.consume(self.issue())
+        _run("--user", self.staff.email)
+        self.assertFalse(_ended(own))
 
 
 class ArgumentTests(TestCase):

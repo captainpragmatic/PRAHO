@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from apps.users import portal_sessions
@@ -44,6 +44,11 @@ def _moment(value: str) -> datetime:
     return moment
 
 
+def _holder(row: PortalSession) -> User:
+    """Whose session it is: the staff member behind a customer view, else the signed-in person."""
+    return row.viewed_as_customer_by or row.user
+
+
 def _count(sessions: int, people: int) -> str:
     return f"{sessions} session{'' if sessions == 1 else 's'} for {people} {'person' if people == 1 else 'people'}"
 
@@ -66,7 +71,7 @@ class Command(BaseCommand):
         if not reason:
             raise CommandError("Give a reason; it is recorded in the audit trail.")
         rows, selector = self._selection(options)
-        targets = list(rows.select_related("user").order_by("created_at"))  # the snapshot
+        targets = list(rows.select_related("user", "viewed_as_customer_by").order_by("created_at"))  # the snapshot
         if options["dry_run"]:
             self._report("Would end", targets)
             return
@@ -89,7 +94,7 @@ class Command(BaseCommand):
                     "selector": selector,
                     "reason": reason,
                     "sessions": len(ended),
-                    "people": len({row.user_id for row in ended}),
+                    "people": len({_holder(row).pk for row in ended}),
                     "completed": completed,
                 },
             )
@@ -100,7 +105,8 @@ class Command(BaseCommand):
         live = PortalSession.objects.filter(revoked_at__isnull=True, expires_at__gt=now, idle_deadline__gt=now)
         if options["user"]:
             user = _person(str(options["user"]))
-            return live.filter(user=user), f"user:{user.pk}"
+            # A staff member's customer views are their sessions too, shown as the viewed customer.
+            return live.filter(Q(user=user) | Q(viewed_as_customer_by=user)), f"user:{user.pk}"
         if options["all"]:
             return live, "all"
         start, end = (_moment(value) for value in options["active_between"])
@@ -110,7 +116,7 @@ class Command(BaseCommand):
         return overlap, f"active-between:{start.isoformat()}/{end.isoformat()}"
 
     def _report(self, verb: str, rows: list[PortalSession]) -> None:
-        people = sorted({row.user.email for row in rows})
+        people = sorted({_holder(row).email for row in rows})
         self.stdout.write(f"{verb} {_count(len(rows), len(people))}.")
         for email in people:
             self.stdout.write(f"  {email}")
