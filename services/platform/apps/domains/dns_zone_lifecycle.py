@@ -71,6 +71,7 @@ def request_nameserver_switch(  # noqa: PLR0911  # One refusal per precondition,
             operation.kind = "switch"
             operation.phase = "switch_inventory"
         operation.next_attempt_at = timezone.now()
+        operation.evidence = {**operation.evidence, **service.staff_evidence(actor)}
         operation.save()
         service._audit(
             current,

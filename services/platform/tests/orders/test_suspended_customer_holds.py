@@ -84,11 +84,7 @@ class SuspendedCustomerHoldTests(HostingWorkflowCase):
 
         from apps.customers.signals import _handle_customer_unsuspension  # noqa: PLC0415
 
-        order = self._order_with_service()
-        force_status(order, "provisioning")
-        line = order.items.get()
-        line.start_provisioning()
-        line.save(update_fields=["provisioning_status", "updated_at"])
+        line, service = self._started_line()
         self._suspend_customer()
         self.assertEqual(fulfil_hosting_line(line.pk).unwrap(), "held")
 
@@ -97,8 +93,67 @@ class SuspendedCustomerHoldTests(HostingWorkflowCase):
             _handle_customer_unsuspension(Customer.objects.get(pk=self.customer.pk))
         dispatched = [call.args[1] for call in enqueue.call_args_list if call.args[0] == "apps.orders.tasks.provision_order_item"]
         self.assertEqual(dispatched, [str(line.pk)])
-        # And the dispatched work now moves it.
-        self.assertNotEqual(fulfil_hosting_line(line.pk).unwrap(), "held")
+        # And the dispatched work turns the hosting on.
+        fulfil_hosting_line(line.pk)
+        service.refresh_from_db()
+        self.assertEqual(service.status, "active")
+
+    def _started_line(self, domain: str = "held-shop.ro"):
+        """A paid line fulfilment started: the line in progress, its Service waiting to be activated."""
+        order = self.create_order(
+            items=[
+                {
+                    "product_id": self.product.pk,
+                    "quantity": 1,
+                    "unit_price_cents": 10000,
+                    "setup_cents": 0,
+                    "billing_period": "monthly",
+                    "description": self.product.name,
+                    "domain_name": domain,
+                }
+            ]
+        )
+        force_status(order, "provisioning")
+        line = order.items.get()
+        line.start_provisioning()
+        line.save(update_fields=["provisioning_status", "updated_at"])
+        service = Service.objects.get(pk=line.service_id)
+        force_status(service, "provisioning")
+        self.assertEqual((line.provisioning_status, service.status), ("in_progress", "provisioning"))
+        return line, service
+
+    def test_recovery_moves_a_started_line_held_past_its_unsuspension(self) -> None:
+        # If queueing failed when the customer was unsuspended, recovery must still find the line.
+        from datetime import timedelta  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.orders.hosting_fulfilment import DISPATCH_LOST_AFTER, recover_hosting_lines  # noqa: PLC0415
+        from apps.orders.models import OrderItem  # noqa: PLC0415
+
+        line, service = self._started_line()
+        OrderItem.objects.filter(pk=line.pk).update(updated_at=timezone.now() - DISPATCH_LOST_AFTER - timedelta(minutes=1))
+        recover_hosting_lines()
+        service.refresh_from_db()
+        self.assertEqual(service.status, "active")
+
+    def test_one_failed_dispatch_does_not_stop_the_others(self) -> None:
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from apps.orders.hosting_fulfilment import dispatch_held_lines  # noqa: PLC0415
+
+        first, _ = self._started_line("first-held.ro")
+        second, _ = self._started_line("second-held.ro")
+        queued: list[str] = []
+
+        def enqueue(_func: str, item_id: str, **_kwargs: object) -> None:
+            if item_id == str(first.pk):
+                raise RuntimeError("queue unavailable")
+            queued.append(item_id)
+
+        with patch("django_q.tasks.async_task", side_effect=enqueue):
+            dispatch_held_lines(self.customer.pk)
+        self.assertEqual(queued, [str(second.pk)])
 
     def test_a_paid_invoice_does_not_start_a_suspended_customer_s_pending_service(self) -> None:
         order = self._order_with_service()

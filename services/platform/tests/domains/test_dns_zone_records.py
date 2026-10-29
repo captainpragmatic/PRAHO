@@ -115,9 +115,19 @@ class ZoneRecordIntentTests(TestCase):
         self.assertTrue(zones.export_zone_file(self.zone, actor=self.actor).is_ok())
 
     def test_staff_may_still_publish_for_a_suspended_customer(self):
+        # Staff act for us, for example to remove an abusive record, so their change runs now.
+        from apps.domains import dns_zone_tasks  # noqa: PLC0415
+
         self._suspend_customer()
         staff = User.objects.create_user(email="dns-staff@example.test", password="x", staff_role="admin")
         self.assertTrue(self._record_change(staff).is_ok())
+        operation = HostedZoneOperation.objects.get(status="pending", kind="edit")
+
+        class ReachedError(Exception):
+            pass
+
+        with patch.object(dns_zone_tasks, "_apply_step", side_effect=ReachedError), self.assertRaises(ReachedError):
+            dns_zone_tasks._step(operation.pk, operation.pk)
 
     def test_publishing_queued_before_the_suspension_waits_for_its_end(self):
         from apps.domains import dns_zone_tasks  # noqa: PLC0415

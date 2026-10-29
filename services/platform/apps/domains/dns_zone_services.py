@@ -131,6 +131,15 @@ def _actor_allowed(customer_id: int | str, actor: User | None, *, readonly: bool
     return membership.exists() if readonly else membership.filter(role__in=("owner", "tech")).exists()
 
 
+# Set on an operation staff requested: the worker runs it even while its customer is suspended.
+STAFF_REQUESTED = "staff_requested"
+
+
+def staff_evidence(actor: User | None) -> dict[str, bool]:
+    """The evidence a new operation carries for who asked for it."""
+    return {STAFF_REQUESTED: True} if actor is not None and actor.is_staff_user else {}
+
+
 def publication_held(customer_id: int | str, actor: User | None) -> bool:
     """A suspended customer's people may read and export DNS, but publish nothing (ADR-0066).
 
@@ -571,7 +580,7 @@ def confirm_import(  # noqa: PLR0911  # One refusal per precondition, suspension
         zone.confirmed_revision = expected_revision
         zone.enrollment_binding = revision.binding
         zone.save(update_fields=["confirmed_revision", "enrollment_binding", "updated_at"])
-        HostedZoneOperation.objects.create(zone=zone, revision=revision, kind="apply")
+        HostedZoneOperation.objects.create(zone=zone, revision=revision, kind="apply", evidence=staff_evidence(actor))
         _audit(
             zone,
             "dns_zone_import_confirmed",

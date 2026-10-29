@@ -1155,8 +1155,12 @@ def _activate_payment_services(payment: Payment) -> None:
                 if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
                     logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
                     continue
+                # Re-read under its lock, after the customer's: the instance above may be stale.
+                fresh = Service.objects.select_for_update(of=("self",)).get(pk=service.pk)
+                if fresh.status not in ("pending", "suspended"):
+                    continue
                 result = ServiceActivationService.activate_service(
-                    service=service, activation_reason=f"Payment received for invoice {invoice.number}"
+                    service=fresh, activation_reason=f"Payment received for invoice {invoice.number}"
                 )
                 if result.is_err():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
@@ -1952,7 +1956,11 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
                     logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
                     continue
-                result = ServiceActivationService.activate_service(service)
+                # Re-read under its lock, after the customer's: the instance above may be stale.
+                fresh = Service.objects.select_for_update(of=("self",)).get(pk=service.pk)
+                if fresh.status != "pending":
+                    continue
+                result = ServiceActivationService.activate_service(fresh)
                 if not result.is_ok():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
                 logger.info(f"⚡ [Service] Activated {service.id} after payment")

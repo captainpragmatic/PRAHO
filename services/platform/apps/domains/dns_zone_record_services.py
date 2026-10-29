@@ -236,7 +236,10 @@ def request_record_change(
         current.readiness = {}
         current.save(update_fields=["current_revision", "confirmed_revision", "readiness", "updated_at"])
         operation = HostedZoneOperation.objects.create(
-            zone=current, revision=revision, kind="edit", evidence={"prior_manifest": before}
+            zone=current,
+            revision=revision,
+            kind="edit",
+            evidence={"prior_manifest": before, **service.staff_evidence(actor)},
         )
         service._audit(
             current,

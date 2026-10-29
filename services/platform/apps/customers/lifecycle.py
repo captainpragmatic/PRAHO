@@ -32,19 +32,27 @@ def hold_for_suspension(service: Any) -> bool:
 
     A service already off for non-payment is now held by the suspension instead: its reason becomes
     the cascade's, so unsuspending the customer resumes it (after the cascade's own paid-up check),
-    rather than leaving a paid service off for good. The caller holds, or may take, the service lock.
+    rather than leaving a paid service off for good.
+
+    Call it inside the transaction that restores the service: it locks the customer row, customer
+    before Service as billing locks them, so a suspension committing at the same time is either seen
+    here or runs its cascade after the restore. The caller then re-reads the Service under its lock.
     """
-    if not is_suspended(service.customer_id):
-        return False
     from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007
 
-    locked = (
+    from .models import Customer  # noqa: PLC0415  # Deferred: models import signals
+
+    customer = Customer.all_objects.select_for_update(of=("self",)).filter(pk=service.customer_id).first()
+    if customer is None or customer.status != SUSPENDED:
+        return False
+
+    overdue = (
         Service.objects.select_for_update(of=("self",))
         .filter(pk=service.pk, status="suspended", suspension_reason=PAYMENT_OVERDUE_REASON)
         .first()
     )
-    if locked is not None:
-        locked.suspension_reason = CUSTOMER_SUSPENSION_REASON
-        locked.save(update_fields=["suspension_reason", "updated_at"])
+    if overdue is not None:
+        overdue.suspension_reason = CUSTOMER_SUSPENSION_REASON
+        overdue.save(update_fields=["suspension_reason", "updated_at"])
         service.suspension_reason = CUSTOMER_SUSPENSION_REASON
     return True

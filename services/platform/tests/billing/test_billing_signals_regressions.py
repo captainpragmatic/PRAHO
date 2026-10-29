@@ -1124,19 +1124,39 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         self.assertIn("Failed to load invoice orders", logs.output[0])
 
 
+def _real_pending_service():
+    """A real Service row: payment activation re-reads it under its lock, so a mock cannot stand in."""
+    from apps.billing.models import Currency  # noqa: PLC0415
+    from apps.customers.models import Customer  # noqa: PLC0415
+    from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
+
+    customer = Customer.objects.create(name="Paying SRL", customer_type="company", status="active")
+    currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+    plan = ServicePlan.objects.create(name="Paid Hosting", plan_type="shared_hosting", price_monthly=Decimal("10"))
+    return Service.objects.create(
+        customer=customer,
+        service_plan=plan,
+        currency=currency,
+        service_name="paid.example.com",
+        domain="paid.example.com",
+        username="paid",
+        billing_cycle="monthly",
+        price=Decimal("10.00"),
+        status="pending",
+    )
+
+
 class TestActivatePaymentServices(TestCase):
     def test_no_invoice(self):
         payment = MagicMock()
         payment.invoice = None
         _activate_payment_services(payment)
 
-    @patch("apps.customers.lifecycle.is_suspended", return_value=False)  # the customer is not suspended
     @patch("apps.provisioning.services.ServiceActivationService")
-    def test_activates_pending_services(self, mock_sas, _not_suspended):
+    def test_activates_pending_services(self, mock_sas):
         payment = MagicMock()
         payment.invoice.number = "INV-001"
-        service = MagicMock()
-        service.status = "pending"
+        service = _real_pending_service()
         item = MagicMock()
         item.service = service
         order = MagicMock()
@@ -1148,7 +1168,10 @@ class TestActivatePaymentServices(TestCase):
         mock_sas.activate_service.return_value = mock_result
 
         _activate_payment_services(payment)
-        mock_sas.activate_service.assert_called_once()
+        activated = mock_sas.activate_service.call_args.kwargs["service"]
+        # The row re-read under its lock, not the instance the loop loaded.
+        self.assertEqual(activated.pk, service.pk)
+        self.assertIsNot(activated, service)
 
     def test_exception_handling(self):
         payment = MagicMock()
@@ -2012,12 +2035,10 @@ class TestUpdateCustomerInvoiceHistory(TestCase):
 
 
 class TestActivatePendingServices(TestCase):
-    @patch("apps.customers.lifecycle.is_suspended", return_value=False)  # the customer is not suspended
     @patch("apps.provisioning.services.ServiceActivationService")
-    def test_activates_pending(self, mock_sas, _not_suspended):
+    def test_activates_pending(self, mock_sas):
         invoice = MagicMock()
-        service = MagicMock()
-        service.status = "pending"
+        service = _real_pending_service()
         item = MagicMock()
         item.service = service
         order = MagicMock()
@@ -2025,7 +2046,9 @@ class TestActivatePendingServices(TestCase):
         order.items.filter.return_value = [item]
         invoice.orders.all.return_value = [order]
         _activate_pending_services(invoice)
-        mock_sas.activate_service.assert_called_once()
+        (activated,) = mock_sas.activate_service.call_args.args
+        self.assertEqual(activated.pk, service.pk)
+        self.assertIsNot(activated, service)
 
     @patch("apps.provisioning.services.ServiceActivationService")
     def test_skips_active_services(self, mock_sas):

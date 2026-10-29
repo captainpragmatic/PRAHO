@@ -579,7 +579,11 @@ def _step(identifier: UUID, token: UUID) -> int:  # noqa: PLR0911  # One outcome
     operation = HostedZoneOperation.objects.select_related("zone", "zone__account", "zone__account_hostname").get(
         pk=identifier
     )
-    if operation.kind in HELD_WHILE_SUSPENDED and is_suspended(operation.zone.customer_id):
+    if (
+        operation.kind in HELD_WHILE_SUSPENDED
+        and not (operation.evidence or {}).get(service.STAFF_REQUESTED)
+        and is_suspended(operation.zone.customer_id)
+    ):
         return SUSPENDED_HOLD_SECONDS
     if (
         operation.kind == "activate"
