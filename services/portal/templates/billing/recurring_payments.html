@@ -108,10 +108,16 @@
     const requestJson = async (url, payload) => {
       const response = await fetch(url, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
         body: JSON.stringify(payload)
       });
       const data = await response.json();
+      const confirmAt = typeof data.redirect === 'string' ? data.redirect : '';
+      if (data.error === 'reauth_required' && confirmAt.startsWith('/') && !confirmAt.startsWith('//')) {
+        // Platform wants the password again: confirm it, then come back to this page.
+        window.location.assign(confirmAt);
+        return new Promise(() => {});
+      }
       if (!response.ok || !data.success) throw new Error(data.error || requestFailed);
       return data;
     };

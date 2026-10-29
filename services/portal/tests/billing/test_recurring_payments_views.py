@@ -48,6 +48,15 @@ class RecurringPaymentsViewsTestCase(TestCase):
         self.assertContains(response, "Managed Hosting")
 
     @patch("apps.billing.views.RecurringPaymentsService.overview")
+    def test_the_page_asks_for_json_and_follows_a_request_to_confirm(self, overview) -> None:
+        # A fetch that only reads JSON would follow a redirect to an HTML page and fail to parse it.
+        overview.return_value = {"success": True, "terms_version": "v", "payment_methods": [], "subscriptions": []}
+        page = self.client.get(reverse("billing:recurring_payments")).content.decode()
+        self.assertIn("'Accept': 'application/json'", page)
+        self.assertIn("data.error === 'reauth_required'", page)
+        self.assertIn("window.location.assign(confirmAt)", page)
+
+    @patch("apps.billing.views.RecurringPaymentsService.overview")
     def test_malformed_platform_identifiers_are_ignored_instead_of_crashing_page(self, overview) -> None:
         overview.return_value = {
             "success": True,

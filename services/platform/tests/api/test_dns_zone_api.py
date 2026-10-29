@@ -1,22 +1,27 @@
 """Customer-zone intents cross the real signed, tenant-scoped Portal boundary."""
 
 import base64
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.billing.currency_models import Currency
+from apps.common.types import Ok
 from apps.customers.models import Customer
+from apps.domains import dns_zone_services as zones
 from apps.domains.dns_zone_import import MAX_UPLOAD_BYTES, make_record_data
 from apps.domains.dns_zone_models import HostedZone, HostedZoneRecord
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
-from apps.users.models import CustomerMembership, User
+from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin, fresh_session
 
 CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "zone-api-tests"}}
 UPLOAD = b'$ORIGIN customer.example.\n$TTL 900\n@ IN A 95.217.0.10\nselector-q._domainkey IN TXT "must-survive"\n'
@@ -25,7 +30,7 @@ EXPORTABLE = UPLOAD.replace(b"$TTL 900\n", b"$TTL 900\n" + APEX)
 
 
 @override_settings(CACHES=CACHE, PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class DnsZoneApiTests(HMACTestMixin, TestCase):
+class DnsZoneApiTests(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
         self.customer = Customer.objects.create(
@@ -248,6 +253,45 @@ class DnsZoneApiTests(HMACTestMixin, TestCase):
         staged = response.json()["data"]["zone"]
         self.assertFalse(staged["valid"])
         self.assertEqual([error["code"] for error in staged["errors"]], ["invalid_zone_file"])
+
+    def test_publishing_needs_a_recent_identity_check_and_a_crosscheck_does_not(self):
+        zone = self.stage()
+        record = HostedZoneRecord.objects.create(
+            zone=zone,
+            name="www." + zone.name,
+            record_type="A",
+            rdata=make_record_data("A", "95.217.0.10"),
+            rdata_digest="e" * 64,
+            ttl=300,
+        )
+        session = fresh_session(self.user)
+        cases = {
+            "confirm": ("confirm_import", "confirm/", {"manifest_digest": "a" * 64}),
+            "switch": ("request_nameserver_switch", "switch/", {}),
+            "delete": ("request_zone_delete", "delete/", {"export_digest": "b" * 64}),
+            "add a record": (
+                "request_record_change",
+                "records/",
+                {"name": "mail." + zone.name, "record_type": "A", "rdata": "95.217.0.11"},
+            ),
+            "change a record": ("request_record_change", f"records/{record.pk}/", {"delete": True}),
+            "crosscheck": ("request_crosscheck", "crosscheck/", {}),
+        }
+        for name, (service, suffix, data) in cases.items():
+            for checked, seconds_ago in (("stale", 301), ("fresh", 0)):
+                PortalSession.objects.filter(pk=session.pk).update(
+                    reauth_at=timezone.now() - timedelta(seconds=seconds_ago)
+                )
+                body = self.identity(session_id=str(session.pk), expected_revision=zone.current_revision, **data)
+                with self.subTest(action=name, session=checked), patch.object(zones, service, return_value=Ok(None)) as call:
+                    response = self.portal_post(f"{self.path}{zone.pk}/{suffix}", body)
+                    if checked == "stale" and name != "crosscheck":
+                        self.assertEqual(response.status_code, 403, response.content)
+                        self.assertEqual(response.json(), {"success": False, "code": "reauth_required"})
+                        call.assert_not_called()  # refused before anything is asked of the provider
+                    else:
+                        self.assertEqual(response.status_code, 202, response.content)
+                        call.assert_called_once()
 
     def test_record_reads_are_tenant_scoped_and_managed_updates_are_refused(self):
         zone = self.stage()

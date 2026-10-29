@@ -186,12 +186,17 @@ The 300 s re-check, which the longer lifetimes depend on, is in place (section 7
   a backup code used for it stays unspent.
 - **What is guarded.** Members and roles, the company's contact details and addresses, a change to
   an existing legal or tax identity (a first fill is free), the person's name or phone, a GDPR export
-  request and its download, and revealing a gift-card code.
-  `tests/api/test_step_up_inventory.py` lists every portal-facing route as guarded or exempt with
-  a reason, and fails on a new one nobody has classified.
+  request and its download, revealing a gift-card code, every change to what a hosted DNS zone
+  publishes (confirming an import, switching name servers, deleting the zone, adding, changing or
+  deleting a record), a request to upgrade, downgrade, suspend or cancel a service, and authorizing
+  a saved card for automatic charges. Payments the portal can start all need the cardholder present;
+  only that authorization lets a card be charged without them.
+  `tests/api/test_step_up_inventory.py` lists every route under `api/` as guarded or exempt with a
+  reason, and fails on a new one nobody has classified.
 - **Portal.** The API client raises `StepUpRequiredError` and records it; once the view returns, the
   auth middleware sends the browser to `/confirm-identity/` with the page to come back to (HTMX gets
-  `HX-Redirect`), and drops the messages the refused view queued. A session refusal in the same
+  `HX-Redirect`; a fetch that asks for JSON gets `403 {"error": "reauth_required", "redirect": …}`
+  and goes there), and drops the messages the refused view queued. A session refusal in the same
   request still wins. The confirm page reads the 2FA state from Platform each time, and only a wrong
   answer spends the per-person re-auth budget.
 - **Deploying.** After section 6 is deployed everywhere: Portal first (it handles a refusal it does

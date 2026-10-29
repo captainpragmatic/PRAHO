@@ -1,7 +1,7 @@
 """Every portal-facing route says whether it needs a recent identity check, and why not if it does not.
 
-A new route under these prefixes fails here until someone decides: guarded (and covered by a
-behavioural test) or exempt with a reason. A listed route that no longer exists fails too, so the
+A new route under ``api/`` fails here until someone decides: guarded (and covered by a behavioural
+test) or exempt with a reason. A listed route that no longer exists fails too, so the
 table cannot drift from the code. PRAHO signs reads as POSTs, so the method says nothing; the table
 does.
 """
@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from django.test import SimpleTestCase
 from django.urls import URLPattern, URLResolver, get_resolver
 
-PREFIXES = ("api/customers/", "api/users/", "api/gdpr/", "api/billing/gift-cards/")
+PREFIXES = ("api/",)
 SAFE_METHODS = {"get", "head", "options"}
 
 GUARDED: dict[str, str] = {
@@ -34,6 +34,13 @@ GUARDED: dict[str, str] = {
     "api/gdpr/data-export/": "asks for an export of everything held (status is free)",
     "api/gdpr/data-export/<uuid:export_id>/download/": "hands over that export",
     "api/billing/gift-cards/reveal/": "shows a paid gift-card code",
+    "api/billing/recurring-payments/authorize/begin/": "lets a saved card be charged without the cardholder present",
+    "api/dns/zones/<uuid:zone_id>/confirm/": "publishes an imported zone",
+    "api/dns/zones/<uuid:zone_id>/switch/": "moves the domain to other name servers",
+    "api/dns/zones/<uuid:zone_id>/delete/": "deletes the zone at the provider",
+    "api/dns/zones/<uuid:zone_id>/records/": "adds a record, which can send the domain's mail or web traffic elsewhere",
+    "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": "changes or deletes a record",
+    "api/services/<int:service_id>/actions/": "asks staff to upgrade, downgrade, suspend or cancel the service",
 }
 
 EXEMPT: dict[str, str] = {
@@ -78,6 +85,63 @@ EXEMPT: dict[str, str] = {
     "api/billing/gift-cards/resend/": "goes only to the recipient fixed at purchase",
     "api/gdpr/cookie-consent/": "a consent choice, which the person can change at any time",
     "api/gdpr/consent-history/": "a read",
+    "api/billing/currencies/": "a read",
+    "api/billing/documents/": "a read",
+    "api/billing/invoices/": "a read",
+    "api/billing/invoices/<str:invoice_number>/": "a read",
+    "api/billing/invoices/<str:invoice_number>/pdf/": "a read",
+    "api/billing/proformas/": "a read",
+    "api/billing/proformas/<str:proforma_number>/": "a read",
+    "api/billing/proformas/<str:proforma_number>/pdf/": "a read",
+    "api/billing/summary/": "a read",
+    "api/billing/stripe-config/": "a read of the public key",
+    "api/billing/create-payment-intent/": "starts a card payment the cardholder completes in Stripe's form",
+    "api/billing/confirm-payment/": "records a payment the cardholder made in Stripe's form",
+    "api/billing/gift-card-payment/": "spends a gift card whose code the caller types in, on the company's own bill",
+    "api/billing/recurring-payments/": "a read",
+    "api/billing/recurring-payments/authorize/complete/": (
+        "finishes the authorization begin checked; the bank's card check can outlast 300 seconds"
+    ),
+    "api/billing/recurring-payments/authorize/withdraw/": "stops future automatic charges, and charges nothing",
+    "api/billing/recurring-payments/subscriptions/auto-payment/": (
+        "picks which subscriptions a card already authorized through begin pays"
+    ),
+    "api/dns/zones/": "a read",
+    "api/dns/zones/import/": "stages a preview; nothing is published until confirm",
+    "api/dns/zones/<uuid:zone_id>/": "a read",
+    "api/dns/zones/<uuid:zone_id>/crosscheck/": "compares the provider's records with the stored ones, changes none",
+    "api/dns/zones/<uuid:zone_id>/export/": "a read of the records the zone publishes",
+    "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/detail/": "a read",
+    "api/legal/document/": "a read",
+    "api/localisation/": "a read of the default language and time zone",
+    "api/orders/": "a read",
+    "api/orders/<uuid:order_id>/": "a read",
+    "api/orders/calculate/": "a read: prices a cart",
+    "api/orders/preflight/": "a read: checks a cart",
+    "api/orders/domains/availability/": "a read",
+    "api/orders/products/": "a read of the public catalogue",
+    "api/orders/products/<slug:slug>/": "a read of the public catalogue",
+    "api/orders/create/": "places an order, paid separately with the cardholder present",
+    "api/orders/<uuid:order_id>/confirm/": "confirms an order once its payment succeeded",
+    "api/orders/<uuid:order_id>/items/<uuid:item_id>/transfer-code/": (
+        "takes the code of a domain being moved in, and never shows one"
+    ),
+    "api/services/": "a read",
+    "api/services/summary/": "a read",
+    "api/services/plans/": "a read",
+    "api/services/<int:service_id>/": "a read",
+    "api/services/<int:service_id>/domains/": "a read",
+    "api/services/<int:service_id>/usage/": "a read",
+    "api/services/<int:service_id>/dns-status/": "a read",
+    "api/services/<int:service_id>/dns-status/recheck/": "runs the DNS check again, changes nothing",
+    "api/services/<int:service_id>/auto-renew/": "no portal page calls it",
+    "api/tickets/": "a read",
+    "api/tickets/summary/": "a read",
+    "api/tickets/categories/": "a read",
+    "api/tickets/<int:ticket_id>/": "a read",
+    "api/tickets/<int:ticket_id>/attachments/<int:attachment_id>/download/": "a read of a file on the company's own ticket",
+    "api/tickets/create/": "a message to support, which changes nothing by itself",
+    "api/tickets/<int:ticket_id>/reply/": "a message to support, which changes nothing by itself",
 }
 
 
@@ -120,7 +184,14 @@ class StepUpInventoryTests(SimpleTestCase):
             "api/gdpr/data-export/",  # test_an_export_request_needs_a_check_and_its_status_does_not
             "api/gdpr/data-export/<uuid:export_id>/download/",  # ExportDownloadStepUpTests
             "api/billing/gift-cards/reveal/",  # test_gift_purchase_api: stale and unbound reveals
+            "api/billing/recurring-payments/authorize/begin/",  # test_recurring_payments_api
+            "api/dns/zones/<uuid:zone_id>/confirm/",  # test_dns_zone_api: publishing needs a check
+            "api/dns/zones/<uuid:zone_id>/switch/",
+            "api/dns/zones/<uuid:zone_id>/delete/",
+            "api/dns/zones/<uuid:zone_id>/records/",
+            "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/",
+            "api/services/<int:service_id>/actions/",  # test_service_action_requests
         }
         self.assertEqual(sorted(set(GUARDED) - tested), [])
         self.assertEqual(sorted(tested - set(GUARDED)), [])
-        self.assertEqual(len(GUARDED), 17)
+        self.assertEqual(len(GUARDED), 24)

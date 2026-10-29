@@ -10,6 +10,7 @@ were waiting before it stay for the next page.
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Callable
 from datetime import timedelta
 from unittest.mock import MagicMock
@@ -162,6 +163,20 @@ class MiddlewareTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response["HX-Redirect"], "/confirm-identity/?next=" + quote("/billing/gift-cards/abc/", safe="")
+        )
+
+    def test_a_fetch_that_reads_json_is_told_where_to_confirm(self) -> None:
+        request = self.request(
+            "/billing/automatic-payments/authorize/begin/",
+            method="post",
+            HTTP_ACCEPT="application/json",
+            HTTP_REFERER="http://testserver/billing/automatic-payments/",
+        )
+        response = self.run_through(request, _asks_for_confirmation)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            json.loads(response.content),
+            {"error": "reauth_required", "redirect": "/confirm-identity/?next=" + quote("/billing/automatic-payments/", safe="")},
         )
 
     def test_a_download_goes_back_to_the_page_with_the_link(self) -> None:
