@@ -11,10 +11,12 @@ import uuid
 from collections.abc import Callable
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
+from apps.common.browser_identity import browser_identity
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import end_session_or_unavailable
 
@@ -74,8 +76,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
     🔒 Enhanced session security middleware to prevent session attacks.
 
     Features:
-    - Session IP binding validation
-    - User agent binding validation
+    - Browser binding (family and operating system, stamped at login; never the IP address)
     - Session timeout enforcement
     - Automatic session rotation
     - Session hijacking detection
@@ -85,7 +86,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
     SESSION_TIMEOUT_SECONDS = 3600  # 1 hour default
     ACTIVITY_STAMP_INTERVAL_SECONDS = 60  # Refresh last_activity at most this often
     MAX_SESSION_AGE_SECONDS = 8 * 3600  # 8 hours absolute max
-    IP_CHANGE_TOLERANCE = False  # Strict IP binding by default
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
@@ -140,49 +140,42 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         path = request.path
         return any(path.startswith(skip_path) for skip_path in skip_paths)
 
+    @staticmethod
+    def stamp_fingerprint(session: SessionBase, user_agent: str) -> None:
+        """Bind a new session to the browser that signed in (login calls this, ADR-0017 section 5)."""
+        session["security_fingerprint"] = {
+            "browser": browser_identity(user_agent),
+            "user_agent_hash": hashlib.sha256(user_agent.encode()).hexdigest()[:16],
+            "created_at": time.time(),
+        }
+
     def _validate_session_integrity(self, request: HttpRequest) -> bool:
-        """🔒 Validate session hasn't been hijacked or tampered with"""
+        """The session is still in the browser that signed in: same family and operating system.
 
-        # Get current session data
+        A browser update keeps it (the stored user agent is re-stamped); a new network does too. A
+        session login did not stamp ends, unless PORTAL_BROWSER_FINGERPRINT_REQUIRED is off (tests
+        that build a session by hand), in which case it is bound now.
+        """
         session = request.session
-        client_ip = self._get_client_ip(request)
         user_agent = request.META.get("HTTP_USER_AGENT", "")
-        user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:16]
-
-        # Check for first-time session setup
-        if "security_fingerprint" not in session:
-            # Initialize security fingerprint
-            session["security_fingerprint"] = {
-                "ip_hash": hashlib.sha256(client_ip.encode()).hexdigest()[:16],
-                "user_agent_hash": user_agent_hash,
-                "created_at": time.time(),
-            }
-            session.modified = True
-            logger.info(f"🔒 [Session] Security fingerprint created for {(session.session_key or 'unknown')[:8]}...")
+        fingerprint = session.get("security_fingerprint")
+        if not isinstance(fingerprint, dict) or "browser" not in fingerprint:
+            if getattr(settings, "PORTAL_BROWSER_FINGERPRINT_REQUIRED", True):
+                logger.warning(f"🔒 [Session] No browser binding for {(session.session_key or 'unknown')[:8]}...")
+                return False
+            self.stamp_fingerprint(session, user_agent)
             return True
 
-        fingerprint = session["security_fingerprint"]
-
-        # 🔒 SECURITY: Validate IP address hasn't changed
-        expected_ip_hash = fingerprint.get("ip_hash", "")
-        current_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
-
-        if not self.IP_CHANGE_TOLERANCE and expected_ip_hash != current_ip_hash:
+        if fingerprint["browser"] != browser_identity(user_agent):
             logger.warning(
-                f"🔒 [Session] IP address changed for session {(session.session_key or 'unknown')[:8]}... "
-                f"(expected: {expected_ip_hash}, got: {current_ip_hash})"
+                f"🔒 [Session] Browser changed for session {(session.session_key or 'unknown')[:8]}... "
+                f"(expected: {fingerprint['browser']}, got: {browser_identity(user_agent)})"
             )
             return False
 
-        # 🔒 SECURITY: Validate user agent hasn't changed significantly
-        expected_ua_hash = fingerprint.get("user_agent_hash", "")
-        if expected_ua_hash != user_agent_hash:
-            logger.warning(
-                f"🔒 [Session] User agent changed for session {(session.session_key or 'unknown')[:8]}... "
-                f"(expected: {expected_ua_hash}, got: {user_agent_hash})"
-            )
-            return False
-
+        user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:16]
+        if fingerprint.get("user_agent_hash") != user_agent_hash:
+            session["security_fingerprint"] = {**fingerprint, "user_agent_hash": user_agent_hash}  # an update
         return True
 
     def _is_session_expired(self, request: HttpRequest) -> bool:

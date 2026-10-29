@@ -160,7 +160,8 @@ class SessionSecurityMiddlewareTests(TestCase):
 
         fp = request.session.get("security_fingerprint")
         self.assertIsNotNone(fp)
-        self.assertIn("ip_hash", fp)
+        self.assertEqual(fp["browser"], "other/other")  # bound to the browser, not the address
+        self.assertNotIn("ip_hash", fp)
         self.assertIn("user_agent_hash", fp)
         self.assertIn("created_at", fp)
 

@@ -93,8 +93,8 @@ class SessionActivityWriteTests(TestCase):
                 "authenticated_at": now.isoformat(),
                 "validated_at": now.isoformat(),
                 "next_validate_at": (now + timedelta(hours=1)).isoformat(),
-                "security_fingerprint": {
-                    "ip_hash": hashlib.sha256(b"127.0.0.1").hexdigest()[:16],
+                "security_fingerprint": {  # as login stamps it, for the test client's empty user agent
+                    "browser": "other/other",
                     "user_agent_hash": hashlib.sha256(b"").hexdigest()[:16],
                     "created_at": time.time(),
                 },

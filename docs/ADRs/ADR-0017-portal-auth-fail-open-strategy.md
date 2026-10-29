@@ -78,7 +78,10 @@ request and fails closed on any error:
 
 - idle timeout 1 h (`SESSION_TIMEOUT_SECONDS`), with the activity stamp written at most every 60 s;
 - absolute limit 8 h (`MAX_SESSION_AGE_SECONDS`), counted from the first request after login;
-- binding to the IP address and the user agent seen on that first request (`IP_CHANGE_TOLERANCE = False`);
+- binding to the browser that signed in: its family and operating system, without versions, stamped
+  at login. A browser update keeps the session (the stored user agent is re-stamped); another browser
+  or operating system ends it, and so does a session login did not stamp
+  (`PORTAL_BROWSER_FINGERPRINT_REQUIRED`). A new network address never does;
 - it decides whether a session is authenticated from `user_id` in the session, never from
   `session_key` (History).
 
@@ -110,7 +113,8 @@ Rules that apply to both tiers:
   when authentication need not persist across browser sessions. Platform still enforces every limit,
   because browsers that restore sessions can keep such cookies.
 - **Sessions are bound to the browser, not the IP address.** A network change (mobile data to Wi-Fi,
-  home to office) keeps the session; a different user agent ends it.
+  home to office) keeps the session, and so does a browser update; a different browser family or
+  operating system ends it.
 - **A credential change keeps the session that made it and ends every other one.**
 - **Platform owns the policy and enforces it server-side.** OWASP requires server-side enforcement of
   timeouts; the portal follows the deadlines Platform returns and computes none of its own.
@@ -131,7 +135,6 @@ acceptable only together with the 300 s re-check:
   enforces the same idle 1 h and absolute 8 h;
 - the portal still checks its own idle and absolute limits beside Platform's, instead of following
   the deadlines Platform returns;
-- sessions are still bound to the IP address;
 - the cookie of a standard session persists for 24 h.
 
 The 300 s re-check, which the longer lifetimes depend on, is in place (section 7).

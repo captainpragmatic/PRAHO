@@ -112,8 +112,8 @@ class SessionTerminationUnavailableTests(TestCase):
                 "validated_at": now.isoformat(),
                 "next_validate_at": (now + timedelta(hours=1)).isoformat(),
                 "last_activity": time.time(),
-                "security_fingerprint": {
-                    "ip_hash": hashlib.sha256(b"127.0.0.1").hexdigest()[:16],
+                "security_fingerprint": {  # as login stamps it, for the test client's empty user agent
+                    "browser": "other/other",
                     "user_agent_hash": hashlib.sha256(b"").hexdigest()[:16],
                     "created_at": time.time(),
                 },
@@ -124,7 +124,7 @@ class SessionTerminationUnavailableTests(TestCase):
         elif site == "validation":
             session["next_validate_at"] = (now - timedelta(minutes=10)).isoformat()
         elif site == "integrity":
-            session["security_fingerprint"]["ip_hash"] = "changed"
+            session["security_fingerprint"]["browser"] = "firefox/windows"  # signed in elsewhere
         elif site == "timeout":
             session["last_activity"] = time.time() - 3601
         elif site == "reset":

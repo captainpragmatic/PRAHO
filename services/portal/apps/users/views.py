@@ -35,6 +35,7 @@ from apps.common.decorators import (
 from apps.common.http import mark_download
 from apps.common.localisation_middleware import sync_language_selection
 from apps.common.localisation_services import company_lookup_available, store_localisation_preferences
+from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
     get_degraded_message,
@@ -357,6 +358,10 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session.cycle_key()
                     for key in SIGNED_OUT_FLOW_SESSION_KEYS:
                         request.session.pop(key, None)
+                    # Bound to the browser that signed in, before any later request can claim it.
+                    SessionSecurityMiddleware.stamp_fingerprint(
+                        request.session, request.META.get("HTTP_USER_AGENT", "")
+                    )
 
                     # Store in Django session (secure, handled by framework)
                     # Store correct user_id (platform user.id) and primary customer_id separately

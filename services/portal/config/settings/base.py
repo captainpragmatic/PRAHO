@@ -132,6 +132,8 @@ PLATFORM_PUBLIC_ORIGIN = os.environ.get("PLATFORM_PUBLIC_ORIGIN", "").strip() or
     if (_platform_domain := os.environ.get("PLATFORM_DOMAIN", "").strip())
     else "http://localhost:8700"
 )
+# A signed-in session must carry the browser binding login stamps (ADR-0017 section 5).
+PORTAL_BROWSER_FINGERPRINT_REQUIRED = True
 
 # Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
 # Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.

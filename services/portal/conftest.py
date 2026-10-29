@@ -40,6 +40,16 @@ def portal_session_id_not_required(settings: Any) -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
+def browser_fingerprint_not_required(settings: Any) -> Generator[None]:
+    """Sessions built by hand carry no login stamp; the middleware binds them on first use instead.
+
+    Tests of the rule itself (tests/common/test_browser_binding.py) turn it back on.
+    """
+    settings.PORTAL_BROWSER_FINGERPRINT_REQUIRED = False
+    yield
+
+
+@pytest.fixture(autouse=True)
 def reset_outbound_http_session() -> Generator[None]:
     """
     Clear the outbound Platform session's cookies between tests.
