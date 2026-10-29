@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-571 actions, in 9 categories.
+572 actions, in 9 categories.
 
 ## Account management
 
@@ -130,6 +130,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `dns_zone_crosscheck_requested` | low | no | no | domains |
 | `dns_zone_import_confirmed` | low | no | no | domains |
 | `dns_zone_import_staged` | low | no | no | domains |
+| `dns_zone_state_changed` | low | no | no | domains |
 | `domain_availability_unconfirmed` | low | no | no | domains |
 | `domain_deleted` | low | no | no | domains |
 | `domain_expired_webhook` | low | no | no | domains |
