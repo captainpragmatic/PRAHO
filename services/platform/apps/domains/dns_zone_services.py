@@ -311,8 +311,8 @@ def _supersedable(operation: HostedZoneOperation) -> bool:
 def _supersede(operation: HostedZoneOperation, zone: HostedZone, revision: int) -> tuple[str, bool]:
     """End the parked check under the zone and operation locks: its park code, and whether the zone reopened.
 
-    A zone never applied was failed by this check alone, so it is importing again. A zone applied before
-    stays failed until its next completed apply restores it, as any failed zone does. The caller saves the zone.
+    A zone never applied was failed by this check alone, so it is importing again; the guards below repeat the
+    upload's import rule. The caller saves the zone.
     """
     code = operation.last_error
     operation.status = "failed"  # fsm-bypass: CharField operation status; replaced under its row lock.
@@ -367,6 +367,8 @@ def preview_zone_import(
         live = zone.operations.select_for_update().filter(status__in=LIVE_OPERATIONS).first()
         if zone.status in {"deleting", "deleted"} or (live is not None and not _supersedable(live)):
             return Err("zone_operation_busy")
+        if not importing(zone):
+            return Err("zone_import_not_applicable")
         errors: list[dict[str, Any]] = []
         inventory: list[dict[str, Any]] = []
         manifest: list[dict[str, Any]] = []
@@ -466,11 +468,12 @@ def _crosscheck_current(revision: HostedZoneImportRevision) -> bool:
     )
 
 
-def crosscheck_applicable(zone: HostedZone) -> bool:
-    """The source-inventory check belongs to the import alone.
+def importing(zone: HostedZone) -> bool:
+    """Uploads and the source-inventory check belong to the import alone.
 
     Once a zone has applied or activated, the DNS it is checked against serves the managed records rather
-    than the uploaded file, so a legitimate mismatch would park the check and fail a working zone.
+    than the uploaded file, so a legitimate mismatch would park the check and fail a working zone, and a new
+    upload would move its revision with no check left to confirm it. Established zones change records instead.
     """
     return (
         zone.status in {"pending_import", "failed"}
@@ -487,7 +490,7 @@ def request_crosscheck(
         if locked is None:
             return Err("zone_access_denied")
         zone, _account, _hostname = locked
-        if not crosscheck_applicable(zone):
+        if not importing(zone):
             return Err("zone_crosscheck_not_applicable")
         revision = zone.revisions.filter(number=expected_revision, valid=True).first()
         if revision is None or zone.current_revision != expected_revision:
@@ -658,7 +661,7 @@ def cached_zone_status(
         "nameservers": zone.assigned_nameservers if ready else [],
         "stale": not current,
         "pending": zone.operations.filter(status__in=LIVE_OPERATIONS).exists(),
-        "crosscheck_available": crosscheck_applicable(zone),
+        "crosscheck_available": importing(zone),
         "error": zone.last_error,
         "errors": revision.errors if revision else [],
         "page": page,

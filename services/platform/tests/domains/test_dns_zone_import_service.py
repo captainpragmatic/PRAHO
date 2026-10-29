@@ -238,6 +238,23 @@ class ZoneImportServiceTests(TestCase):
                 self.assertFalse(zone.operations.exists())
                 self.assertFalse(zones.cached_zone_status(zone)["crosscheck_available"])
 
+    def test_a_zone_past_its_import_refuses_a_new_upload_and_keeps_its_revision(self):
+        """A new upload would move the revision and clear readiness, with no check left to confirm it."""
+        revision = self.stage()
+        zone = revision.zone
+        HostedZone.objects.filter(pk=zone.pk).update(
+            applied_revision=revision.number, readiness={"revision": revision.number, "complete": True}
+        )
+        zone.refresh_from_db()
+        force_status(zone, "active")
+        result = zones.preview_zone_import(self.account, UPLOAD.replace(b"preserve-me", b"new-value"), actor=self.actor)
+        self.assertEqual(result, Err("zone_import_not_applicable"))
+        zone.refresh_from_db()
+        self.assertEqual(
+            (zone.status, zone.current_revision, zone.readiness["revision"]), ("active", revision.number, 1)
+        )
+        self.assertEqual(zone.revisions.count(), 1)
+
     def test_an_importing_zone_still_offers_and_accepts_the_source_crosscheck(self):
         revision = self.stage()
         self.assertTrue(zones.cached_zone_status(revision.zone)["crosscheck_available"])
