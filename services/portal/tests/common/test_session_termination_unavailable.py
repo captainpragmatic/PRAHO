@@ -117,16 +117,20 @@ class SessionTerminationUnavailableTests(TestCase):
                     "user_agent_hash": hashlib.sha256(b"").hexdigest()[:16],
                     "created_at": time.time(),
                 },
+                # The deadlines Platform gave the session (ADR-0017 section 5).
+                "session_tier": "standard",
+                "session_expires_at": (now + timedelta(hours=20)).isoformat(),
+                "session_idle_deadline": (now + timedelta(minutes=50)).isoformat(),
             }
         )
-        if site == "age":
-            session["authenticated_at"] = (now - timedelta(days=31)).isoformat()
+        if site == "age":  # Platform's end has passed
+            session["session_expires_at"] = session["session_idle_deadline"] = (now - timedelta(seconds=1)).isoformat()
         elif site == "validation":
             session["next_validate_at"] = (now - timedelta(minutes=10)).isoformat()
         elif site == "integrity":
             session["security_fingerprint"]["browser"] = "firefox/windows"  # signed in elsewhere
-        elif site == "timeout":
-            session["last_activity"] = time.time() - 3601
+        elif site == "timeout":  # the stored idle deadline has passed, and Platform says the session is over
+            session["session_idle_deadline"] = (now - timedelta(seconds=1)).isoformat()
         elif site == "reset":
             session[PASSWORD_RESET_SESSION_KEY] = {"uid": "Nw", "token": "reset-token"}
         session.save()
@@ -149,7 +153,7 @@ class SessionTerminationUnavailableTests(TestCase):
         for site in SITES:
             with self.subTest(site=site, accept=accept):
                 client, key = self.seed(site)
-                self.rejected = site == "validation"
+                self.rejected = site in ("validation", "timeout")
                 self.deletes.clear()
 
                 def reject_delete(

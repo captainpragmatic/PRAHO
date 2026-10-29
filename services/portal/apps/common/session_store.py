@@ -34,6 +34,7 @@ import json
 import logging
 import random
 import time
+from datetime import datetime
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -109,12 +110,25 @@ RECORD_MAPS = frozenset(
     {"order_checkout_attempts", "gift_purchase_forms", "service_request_submissions", "gift_payment_requests"}
 )
 
+# Platform's end for this session (ADR-0017 section 5), stored at login by apps.users.session_deadlines.
+PLATFORM_END_KEY = "session_expires_at"
+
 MAX_MERGE_ATTEMPTS = 25
 # Between attempts, a short random wait growing with the attempt, so requests that collided do not
 # collide again in lockstep. The worst case is well under a second.
 MERGE_BACKOFF_SECONDS = 0.002
 
 _MISSING = object()
+
+
+def _aware_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.utcoffset() is not None else None
 
 
 class SessionSaveContended(Exception):  # noqa: N818  # reads as what happened, like UpdateError
@@ -266,6 +280,20 @@ class SessionStore(db.SessionStore):
     def _publish(self, data: dict[str, Any], text: str) -> None:
         """Only an acknowledged write becomes the new baseline."""
         self._baseline, self._baseline_text = copy.deepcopy(data), text
+
+    # ---- expiry --------------------------------------------------------------------------------
+
+    def get_expiry_date(self, **kwargs: Any) -> datetime:
+        """A cookie that ends with the browser still has a stored row that ends at Platform's end.
+
+        Django gives such a row the default cookie age (two weeks), so a credential-bearing row would
+        outlive its session by weeks. A remembered session's expiry is Platform's end already.
+        """
+        expiry = kwargs["expiry"] if "expiry" in kwargs else self.get("_session_expiry")
+        if not expiry and (end := _aware_time(self.get(PLATFORM_END_KEY))) is not None:
+            return end
+        expiry_date: datetime = super().get_expiry_date(**kwargs)
+        return expiry_date
 
     # ---- writing -------------------------------------------------------------------------------
 

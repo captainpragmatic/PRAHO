@@ -10,7 +10,6 @@ from http import HTTPStatus
 from typing import Any
 from uuid import UUID
 
-from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render, resolve_url
@@ -380,7 +379,6 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["customer_id"] = customer_id  # Legacy field, prefer active_customer_id
                     request.session["email"] = email
                     request.session["authenticated_at"] = timezone.now().isoformat()
-                    request.session["remember_me"] = remember_me
                     request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
                     portal_session_id = str(auth_response["session_id"])
                     request.session["portal_session_id"] = portal_session_id
@@ -411,15 +409,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     except Exception:
                         logger.debug("Could not fetch memberships on login")
 
-                    # Set session expiry based on remember me checkbox
-                    if remember_me:
-                        session_age = settings.SESSION_COOKIE_AGE_REMEMBER_ME  # 30 days
-                        logger.info(f"✅ [Portal Session] Extended session set for {email} (30 days)")
-                    else:
-                        session_age = settings.SESSION_COOKIE_AGE_DEFAULT  # 24 hours
-                        logger.info(f"✅ [Portal Session] Standard session set for {email} (24 hours)")
-
-                    request.session.set_expiry(session_age)
+                    # The cookie lives as Platform's session does (ADR-0017 section 5): a remembered one
+                    # until its end, any other until the browser closes (the stored row still ends at
+                    # Platform's end; see apps.common.session_store).
+                    if deadlines is not None:  # always, past the check above
+                        request.session.set_expiry(deadlines.expires_at if deadlines.tier == "remember" else 0)
 
                     # Get customer name for personalized message
                     try:

@@ -77,15 +77,11 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
     Features:
     - Browser binding (family and operating system, stamped at login; never the IP address)
-    - Session timeout enforcement
     - Automatic session rotation
     - Session hijacking detection
     """
 
-    # Security constants
-    SESSION_TIMEOUT_SECONDS = 3600  # 1 hour default
-    ACTIVITY_STAMP_INTERVAL_SECONDS = 60  # Refresh last_activity at most this often
-    MAX_SESSION_AGE_SECONDS = 8 * 3600  # 8 hours absolute max
+    # A session's lifetimes are Platform's; PortalAuthenticationMiddleware follows its deadlines.
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
@@ -111,14 +107,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
                     f"🔒 [Session] Session integrity failed for {(request.session.session_key or 'unknown')[:8]}..."
                 )
                 return self._handle_security_violation(request, "session_integrity_failed")
-
-            # 🔒 SECURITY: Check session timeout
-            if self._is_session_expired(request):
-                logger.info(f"🔒 [Session] Session expired for {(request.session.session_key or 'unknown')[:8]}...")
-                return self._handle_session_timeout(request)
-
-            # 🔒 SECURITY: Update last activity
-            self._update_session_activity(request)
 
             return None
 
@@ -178,35 +166,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
             session["security_fingerprint"] = {**fingerprint, "user_agent_hash": user_agent_hash}  # an update
         return True
 
-    def _is_session_expired(self, request: HttpRequest) -> bool:
-        """🔒 Check if session has exceeded timeout limits"""
-
-        session = request.session
-        current_time = time.time()
-
-        # Check last activity timeout
-        last_activity = session.get("last_activity", current_time)
-        if current_time - last_activity > self.SESSION_TIMEOUT_SECONDS:
-            return True
-
-        # Check absolute session age
-        fingerprint = session.get("security_fingerprint", {})
-        created_at = fingerprint.get("created_at", current_time)
-        return bool(current_time - created_at > self.MAX_SESSION_AGE_SECONDS)
-
-    def _update_session_activity(self, request: HttpRequest) -> None:
-        """Refresh the session's last-activity stamp, at most once a minute.
-
-        Every write saves the whole session row, so stamping every request made two concurrent
-        requests of one customer race, and the later save could undo the earlier one's changes.
-        A missing stamp is written at once: `_is_session_expired` reads it as "now", so it must
-        not stay missing. Idle expiry can therefore fire up to a minute early, never late.
-        """
-        now = time.time()
-        last_activity = request.session.get("last_activity")
-        if last_activity is None or now - last_activity >= self.ACTIVITY_STAMP_INTERVAL_SECONDS:
-            request.session["last_activity"] = now
-
     def _handle_security_violation(self, request: HttpRequest, violation_type: str) -> HttpResponse:
         """🔒 Handle detected security violations"""
 
@@ -226,21 +185,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
         # Redirect to login with security message
         return redirect("/login/?security=session_security_violation")
-
-    def _handle_session_timeout(self, request: HttpRequest) -> HttpResponse:
-        """Handle expired sessions gracefully"""
-
-        # Log timeout
-        session_key = (getattr(request.session, "session_key", None) or "unknown")[:8]
-        logger.info(f"🕒 [Session] Session timeout for {session_key}...")
-
-        # Clear expired session
-        unavailable_response = end_session_or_unavailable(request)
-        if unavailable_response is not None:
-            return unavailable_response
-
-        # Redirect to login with timeout message
-        return redirect("/login/?timeout=session_expired")
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""

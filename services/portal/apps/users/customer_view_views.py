@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 
 from django.conf import settings
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import rotate_token
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
@@ -26,6 +26,7 @@ from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.rate_limiting import _client_ip_is_distinguishable
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import wants_json
+from apps.users import session_deadlines
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,9 @@ def redeem(request: HttpRequest) -> HttpResponse:
         if "session_auth_hash" in data:
             raise ValueError("a customer view never carries a credential of the customer")
         session_id = str(data["session_id"])
-        expires_at = datetime.fromisoformat(str(data["session_expires_at"]))
+        deadlines = session_deadlines.from_platform(data, timezone.now())
+        if deadlines is None or deadlines.tier != "customer_view":
+            raise ValueError("a customer view answered without deadlines Platform could give it")
         user, customer = data["user"], data["customer"]
     except PlatformAPIError as exc:
         return _refused(request) if exc.status_code in (400, 403) else _unavailable(request)
@@ -133,9 +136,10 @@ def redeem(request: HttpRequest) -> HttpResponse:
             "customer_view_customer_id": customer["id"],
             "customer_view_customer_name": customer["name"],
             "customer_view_staff_label": data.get("staff_label", ""),
-            "customer_view_expires_at": expires_at.isoformat(),
+            "customer_view_expires_at": deadlines.expires_at.isoformat(),
         }
     )
+    session_deadlines.store(request.session, deadlines)
     # Bound to the browser that redeemed the code, as a login binds its session (ADR-0017 section 4).
     SessionSecurityMiddleware.stamp_fingerprint(request.session, request.META.get("HTTP_USER_AGENT", ""))
     # The cookie ends with the browser: closing it never reopens the customer's portal.

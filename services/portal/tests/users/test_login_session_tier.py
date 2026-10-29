@@ -7,19 +7,22 @@ them as Platform gave them (ADR-0017 section 5).
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.conf import settings
+from django.contrib.sessions.models import Session
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.common.session_store import SessionStore
 from tests.helpers.platform_login import session_fields
 
 
-@override_settings(RATE_LIMITING_ENABLED=False)
+@override_settings(RATE_LIMITING_ENABLED=False, SESSION_ENGINE="apps.common.session_store")
 class LoginSessionTierTests(TestCase):
     def sign_in(self, answer: dict[str, Any], **form: str) -> tuple[Any, Any]:
         with patch("apps.users.views.api_client") as platform:
@@ -67,3 +70,23 @@ class LoginSessionTierTests(TestCase):
                 self.assertNotEqual(response.status_code, 302)
                 self.assertNotIn("user_id", self.client.session)
                 self.assertNotIn("portal_session_id", self.client.session)
+
+    def test_the_cookie_lives_as_platform_s_session_and_its_row_ends_at_platform_s_end(self) -> None:
+        for tier in ("standard", "remember"):
+            with self.subTest(tier=tier):
+                self.client = self.client_class()
+                answer = session_fields(tier)
+                response, _platform = self.sign_in(answer, **({"remember_me": "on"} if tier == "remember" else {}))
+                cookie = response.cookies[settings.SESSION_COOKIE_NAME]
+                end = datetime.fromisoformat(answer["session_expires_at"])
+                if tier == "remember":
+                    self.assertAlmostEqual(int(cookie["max-age"]), (end - timezone.now()).total_seconds(), delta=5)
+                else:
+                    self.assertEqual(cookie["max-age"], "")  # ends with the browser
+                row = Session.objects.get(session_key=cookie.value)
+                self.assertEqual(row.expire_date, end)
+                # A later save, by any request of this session, keeps that end.
+                later = SessionStore(cookie.value)
+                later["selected_customer_id"] = 456
+                later.save()
+                self.assertEqual(Session.objects.get(session_key=cookie.value).expire_date, end)

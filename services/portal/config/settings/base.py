@@ -134,6 +134,8 @@ PLATFORM_PUBLIC_ORIGIN = os.environ.get("PLATFORM_PUBLIC_ORIGIN", "").strip() or
 )
 # A signed-in session must carry the browser binding login stamps (ADR-0017 section 5).
 PORTAL_BROWSER_FINGERPRINT_REQUIRED = True
+# A signed-in session must carry the deadlines Platform gave it; one from before this release ends.
+PORTAL_SESSION_DEADLINES_REQUIRED = True
 
 # Portal uses LocMemCache for disposable cached data and per-worker coordination (ADR-0050).
 # Rate limits and payment/checkout idempotency use apps.common.counters in the shared session database.
