@@ -315,12 +315,9 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]  # Production and staging set it from
 # SESSION CONFIGURATION 🔐
 # ===============================================================================
 
-# Session duration settings
-SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60  # 24 hours (86400 seconds)
-SESSION_COOKIE_AGE_REMEMBER_ME = 30 * 24 * 60 * 60  # 30 days (2592000 seconds)
-
-# Session behavior
-SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Use custom age settings
+# Session lifetimes are Platform's (ADR-0017 section 5): login sets the cookie from the deadlines it
+# answers, and apps.common.session_store keeps the stored row's expiry at Platform's end.
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # login decides, per session
 SESSION_SAVE_EVERY_REQUEST = False  # Only save when modified
 SESSION_COOKIE_NAME = "portal_session"  # Custom session name
 

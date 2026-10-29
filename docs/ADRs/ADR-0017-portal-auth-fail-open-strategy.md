@@ -60,14 +60,15 @@ cannot reach Platform to re-check?
 |------|-----------|
 | Schedule | Every 600 s plus 0-120 s of jitter (`REVALIDATE_EVERY`, `JITTER_MAX`). A session with no validation record or no binding validates on its next request; login records none, so the first request after login validates. |
 | Soft grace | Up to 300 s past due (`SOFT_TTL_GRACE`), one request per session validates under a single-flight lease (the longest Platform call plus 5 s) while the session's other requests continue. |
-| Hard deadline | 6 h after the scheduled validation (`HARD_TTL_GRACE`, counted from `next_validate_at`), the session ends without calling Platform. |
+| Hard grace | 6 h after the scheduled validation (`HARD_TTL_GRACE`, counted from `next_validate_at`), the portal asks Platform before the request goes on, without failing open: a live session continues, any error ends it. |
+| Platform's deadlines | The portal keeps the tier, the end and the idle deadline Platform answers at login and at every validation. At the end, which never moves, the session ends without calling Platform. Once the stored idle deadline passes (a lower bound: the customer's activity moves Platform's without a validation), the portal asks Platform as at the hard grace, as a background call that never extends the idle deadline. |
 | Authoritative denial | A 401 or 403 whose body says `"active": false` ends the session at once. |
 | Fail-open | Any other `PlatformAPIError` (a transport error, a 5xx, a 429, a 401 or 403 without `"active": false` such as an HMAC fault) lets the request through. Nothing is recorded, so the next request tries again. |
 | Breaker | Each fail-open increments `auth:fail_open:{user_id}` in the counter table, with a one-hour window; the fifth ends the session (`_MAX_FAIL_OPEN_COUNT = 5`). If the counter store itself fails, access is denied. A successful validation resets the breaker. |
 | Programming errors | Any other exception fails closed. |
 
 In plain terms: during a Platform outage an authenticated customer gets about four more requests in
-the hour before being logged out. Pages need Platform for their data anyway, so fail-open smooths
+the hour before being logged out, and never runs past the idle deadline Platform last gave. Pages need Platform for their data anyway, so fail-open smooths
 over brief faults (a restart, a slow call); it does not keep customers working through a long outage.
 New logins fail whenever Platform is unreachable.
 
@@ -76,8 +77,6 @@ New logins fail whenever Platform is unreachable.
 `SessionSecurityMiddleware` (`services/portal/apps/common/middleware.py`) runs on every authenticated
 request and fails closed on any error:
 
-- idle timeout 1 h (`SESSION_TIMEOUT_SECONDS`), with the activity stamp written at most every 60 s;
-- absolute limit 8 h (`MAX_SESSION_AGE_SECONDS`), counted from the first request after login;
 - binding to the browser that signed in: its family and operating system, without versions, stamped
   at login. A browser update keeps the session (the stored user agent is re-stamped); another browser
   or operating system ends it, and so does a session login did not stamp
@@ -85,9 +84,7 @@ request and fails closed on any error:
 - it decides whether a session is authenticated from `user_id` in the session, never from
   `session_key` (History).
 
-The authentication middleware separately ends a session 24 h after login, or 30 days with
-"remember me" (`SESSION_COOKIE_AGE_DEFAULT`, `SESSION_COOKIE_AGE_REMEMBER_ME`); the 8 h limit above
-ends every session first.
+It keeps no lifetime of its own: the session's deadlines are Platform's (sections 3 and 5).
 
 ### 5. Session policy (decided 2026-10-28)
 
@@ -98,7 +95,7 @@ both.
 | Tier | Who | Absolute | Idle | Browser cookie | NIST SP 800-63B-4 |
 |------|-----|----------|------|----------------|-------------------|
 | `standard` | "Remember me" unticked, and every staff account | 24 h | 1 h | Ends with the browser | AAL2: overall <= 24 h, inactivity <= 1 h |
-| `remember` | "Remember me" ticked, customers only | 30 days | 7 days | Kept 30 days | AAL1: overall <= 30 days, inactivity optional |
+| `remember` | "Remember me" ticked, customers only | 30 days | 7 days | Kept until the session's end | AAL1: overall <= 30 days, inactivity optional |
 
 Rules that apply to both tiers:
 
@@ -126,18 +123,21 @@ sensitive action. OWASP's cheat sheet suggests stricter values for high-value ap
 2-5 min, absolute 4-8 h); NIST's current revision is followed instead, with the re-check as the
 compensating control.
 
-**Gap until the implementation lands.** Platform-owned sessions (section 6) closed the last item
-of the original list: Platform ends a single session, logout reaches it, and only the customer's own
-activity extends Platform's idle limit. What remains, deliberately, because the longer lifetimes are
-acceptable only together with the 300 s re-check:
+**Implemented (2026-10-29).**
 
-- every session ends after 8 h (section 4), so "remember me" does not last longer, and Platform
-  enforces the same idle 1 h and absolute 8 h;
-- the portal still checks its own idle and absolute limits beside Platform's, instead of following
-  the deadlines Platform returns;
-- the cookie of a standard session persists for 24 h.
-
-The 300 s re-check, which the longer lifetimes depend on, is in place (section 7).
+- `apps/users/session_policy.py` on Platform is the only owner of each tier's lifetimes, a staff
+  member's view as a customer (ADR-0065, 30 min with 10 min idle) included. A row whose tier it does
+  not know ends, and a remembered row ends once its person becomes staff.
+- The login sends "remember me" as a signed boolean (anything else is no); Platform opens the
+  remembered tier only for a customer who asked.
+- The portal signs in only with deadlines that can be Platform's (a known tier, aware times in the
+  future, the idle deadline no later than the end, the end at most 30 days plus the clock difference
+  Platform accepts away), keeps them, and follows them as section 3 describes. A browser session
+  without them (one from before this release) ends once (`PORTAL_SESSION_DEADLINES_REQUIRED`).
+- A standard session's cookie ends with the browser; a remembered one's lasts until Platform's end.
+  Either way the portal's stored row expires at Platform's end.
+- A page that makes no call to Platform does not extend the idle deadline; almost every portal page
+  makes one.
 
 ### 6. Platform-owned sessions (implemented 2026-10-28)
 
