@@ -7636,7 +7636,7 @@ msgstr "Această acțiune necesită din nou parola dumneavoastră. Veți reveni 
 
 #: templates/users/confirm_identity.html
 msgid "Confirm"
-msgstr "Confirmați"
+msgstr "Confirmă"
 
 #: apps/users/views.py
 msgid "The password or code is not right."
