@@ -1246,7 +1246,8 @@ class NodeDeploymentService:
             # workloads provisioned afterwards, and an in-flight migration
             # touching this server (as source OR incoming target) has no local
             # account row yet — check the migration table directly.
-            occupied = server.accounts.filter(status__in=("active", "suspended")).exists()
+            # Any account not terminated still lives on the node, including one still provisioning.
+            occupied = server.accounts.exclude(status="terminated").exists()
             migrating = server_has_active_migration(server)
             if (occupied or migrating) and not force:
                 error_msg = (

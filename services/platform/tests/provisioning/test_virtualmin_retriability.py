@@ -125,11 +125,15 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
 
         with (
             patch("apps.provisioning.virtualmin_service.transaction.atomic"),
+            patch("apps.provisioning.virtualmin_service.VirtualminServer") as server_cls,
             patch("apps.provisioning.virtualmin_service.VirtualminAccount") as account_cls,
             patch("apps.provisioning.virtualmin_service.VirtualminProvisioningJob") as job_cls,
             patch.object(service, "_execute_domain_creation", return_value=inner),
         ):
             account_cls.objects.filter.return_value.first.return_value = None
+            server_cls.objects.select_for_update.return_value.get.return_value = MagicMock(
+                status="active", is_draining=False
+            )
             account_cls.return_value = account
             job_cls.return_value = job
 
