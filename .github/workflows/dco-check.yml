@@ -3,6 +3,9 @@ name: DCO Check
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # The merge queue tests each pull request on top of master and whatever is queued ahead of it.
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   dco:
@@ -15,17 +18,24 @@ jobs:
 
       - name: Fetch base branch
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1 || true
+          git fetch origin ${{ github.base_ref || 'master' }} || true
 
       - name: Verify DCO sign-off on all commits
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            # A pull request enters the queue only after this check passed on every one of its commits.
+            # The queue's own commits are GitHub's squashes of those pull requests, not contributions.
+            echo "✅ Each queued pull request's commits were checked before it entered the queue"
+            exit 0
+          fi
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          # Ensure both SHAs are available locally
-          git fetch origin ${BASE_SHA} --depth=1 || true
-          git fetch origin ${HEAD_SHA} --depth=1 || true
+          # Ensure both SHAs are available locally. Never with --depth: a shallow fetch cuts a
+          # commit's parents, so a merge looks like an ordinary commit and the range is the head alone.
+          git fetch origin ${BASE_SHA} || true
+          git fetch origin ${HEAD_SHA} || true
           echo "Checking commits from ${BASE_SHA}..${HEAD_SHA}"
           MISSING=0
           for c in $(git rev-list --no-merges ${BASE_SHA}..${HEAD_SHA}); do

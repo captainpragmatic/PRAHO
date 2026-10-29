@@ -81,10 +81,10 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "### Release candidate \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
 
-      # The PR that produced the candidate must have passed every check master requires, on exactly
-      # the candidate's tree, read per workflow from its pull_request runs (scripts/verify_release_candidate.py
-      # says why each rule exists; tests/integration/test_verify_release_candidate.py pins them).
-      - name: The candidate's pull request passed every required check on the same tree
+      # The merge queue must have passed every check master requires on the candidate itself, read per
+      # workflow from its merge_group runs (scripts/verify_release_candidate.py says why each rule exists;
+      # tests/integration/test_verify_release_candidate.py pins them).
+      - name: The merge queue passed every required check on the candidate
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.resolve.outputs.sha }}

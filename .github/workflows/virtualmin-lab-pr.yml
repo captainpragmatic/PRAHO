@@ -1,20 +1,27 @@
 # ===============================================================================
-# VIRTUALMIN LAB ON PULL REQUESTS — the lab suites when a change can reach them
+# VIRTUALMIN LAB IN THE MERGE QUEUE — the lab suites when a change can reach them
 # ===============================================================================
-# `changes` runs the base branch's scripts/ci_lab_needed.py on the diff. When the lab can be affected, or
-# the diff or the rules cannot be read, `pull-request` runs the round trip, the contract suite, the workflow
-# suite and the lab checks (make test-virtualmin-lab) on the PINNED Virtualmin. The nightly, drift and
-# release-candidate runs live in virtualmin-lab.yml.
+# The lab is the slowest check (about an hour), so it runs once per merge, in the merge queue, on the
+# pull request applied to master and to whatever is queued ahead of it. A push to a pull request does not
+# run it: `changes` answers `false` there, and `pull-request` reports success without running (ADR-0036).
+#
+# In the queue, `changes` runs the base branch's scripts/ci_lab_needed.py on the group's diff. When the lab
+# can be affected, or the diff or the rules cannot be read, `pull-request` runs the round trip, the contract
+# suite, the workflow suite and the lab checks (make test-virtualmin-lab) on the PINNED Virtualmin. The
+# nightly, drift and release-candidate runs live in virtualmin-lab.yml; a dispatch of that workflow on a
+# branch runs the lab before queueing, when a change needs the answer early.
 #
 # `pull-request` is a required check on master. A job skipped by its `if:` reports success, so the selection
-# fails open, the workflow never carries a paths filter, and it runs on nothing but pull requests: a job of
-# the same name skipped by a schedule or a dispatch must never be able to stand in for it.
+# fails open, the workflow never carries a paths filter, and it runs on nothing but pull requests and merge
+# groups: a job of the same name skipped by a schedule or a dispatch must never be able to stand in for it.
 
 name: Virtualmin Lab (pull request)
 
 on:
   pull_request:
     branches: [master]
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -28,7 +35,8 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Pull requests: does this change reach the lab? Fails open (see scripts/ci_lab_needed.py).
+  # Merge groups: does this change reach the lab? Fails open (see scripts/ci_lab_needed.py).
+  # Pull requests: never; the queue runs it.
   # ---------------------------------------------------------------------------
   changes:
     runs-on: ubuntu-latest
@@ -43,9 +51,16 @@ jobs:
       - name: Decide whether the lab runs
         id: decide
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -uo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "Lab needed: false (a pull request; the merge queue runs the lab)"
+            echo "lab=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Any other event is a merge group. An empty base fails open below: no diff, so the lab runs.
           # A diff that cannot be computed feeds the script nothing, and nothing means "run the lab".
           # --no-renames lists a moved file's old path too, so moving code out of a lab path still counts.
           changed="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" 2>/dev/null)" || changed=""
@@ -60,7 +75,7 @@ jobs:
           echo "lab=$lab" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # Pull requests: the lab suites on the pinned Virtualmin.
+  # Merge groups: the lab suites on the pinned Virtualmin.
   # ---------------------------------------------------------------------------
   pull-request:
     needs: changes

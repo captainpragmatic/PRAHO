@@ -1,7 +1,7 @@
 # ADR-0036: Tiered CI Testing Strategy
 
 ## Status
-**Active** - March 2026, amended October 2026 (PR CI as the merge gate, release-candidate promotion)
+**Active** - March 2026, amended October 2026 (PR CI as the merge gate, release-candidate promotion; then the merge queue)
 
 ## Context
 
@@ -22,6 +22,15 @@ Three facts changed the decision:
 2. **CI was not binding.** `master` had no branch protection, Integration CI was path-filtered and optional, and the security scans could not fail (Bandit and Semgrep were never installed; `continue-on-error` hid it). Contributors and AI agents compensated by re-running the full gate locally (15–20 minutes per push).
 3. **The tiers drifted from this record.** The whole platform suite never ran on PostgreSQL in any workflow, browser tests ran only nightly, the strict-CSP gates ran nowhere, and the `/full-test` comment trigger ran a pull request's code with write permissions when a trusted person commented.
 
+### Merge queue (late October 2026)
+
+The "up to date" rule made every merge restart the checks of every other open pull request, and the lab
+(about an hour) dominated each restart: on 2026-10-29 three ready pull requests each paid it again every
+time `master` moved. `master` now merges through a GitHub merge queue instead. The queue builds each
+pull request on top of `master` and of what is queued ahead of it, runs the required checks on that
+commit, and moves `master` to exactly the commit it tested. The lab runs there, once per merge, and no
+longer on a push to a pull request.
+
 ## Decision
 
 ### Tier 1 — every pull request is the full merge gate
@@ -34,10 +43,10 @@ Every pull request to `master` runs, with no paths filter on any required workfl
 | `portal.yml` | `portal-test`, `portal-server` | portal unit tests and coverage floor, mypy, prod-settings server acceptance |
 | `integration.yml` | `lint-and-quality`, `integration-test` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking), cross-service, cache, isolation and deploy tests on PostgreSQL |
 | `browser.yml` | `browser-e2e`, `browser-csp` | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
-| `virtualmin-lab-pr.yml` | `pull-request` | the lab suites on the pinned Virtualmin unless every changed path is known not to reach them (`scripts/ci_lab_needed.py`, the base branch's copy; it fails open) |
-| `dco-check.yml` | `dco` | sign-off on every commit |
+| `virtualmin-lab-pr.yml` | `pull-request` | in the merge queue only: the lab suites on the pinned Virtualmin unless every changed path is known not to reach them (`scripts/ci_lab_needed.py`, the base branch's copy; it fails open). On a pull request it reports success without running |
+| `dco-check.yml` | `dco` | sign-off on every commit (on the pull request; the queue's commits are GitHub's squashes) |
 
-`.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), requires the branch to be up to date, and allows squash merges only. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
+Every required workflow also runs on `merge_group`, and the queue lands a pull request only when the same checks pass on the queue's commit. `.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), merges through the queue (squash, every entry's own group green, 150 minutes for checks to report), and allows squash merges only. A branch need not be up to date: the queue tests it on the current `master`. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
 
 A new push to a pull request cancels the run on its previous head (`concurrency` with `cancel-in-progress` on `pull_request` only).
 
@@ -49,7 +58,7 @@ Locally, contributors and agents run only what takes seconds on what they touche
 
 `nightly.yml` runs at 02:30 UTC when there was activity: the whole platform suite on PostgreSQL (`make test-platform-postgres-full`), the full suite with coverage, integration, cache and security suites on PostgreSQL, types, Semgrep against the staging release, and the browser suite with server-side coverage. `virtualmin-lab.yml` runs the full lab nightly and a drift run against the latest Virtualmin.
 
-`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the commit's pull request passed every required check on exactly the commit's tree, then the workflow runs only what pull requests cannot afford, on that SHA: the whole platform suite on PostgreSQL and the full Virtualmin lab. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
+`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused), then the workflow runs only what pull requests cannot afford, on that SHA: the whole platform suite on PostgreSQL and the full Virtualmin lab. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
 
 ### Promotion to staging
 
@@ -89,14 +98,16 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 - No test is permanently skipped — the full suite always runs somewhere
 
 ### Negative
-- Pull request feedback takes about 30 minutes (Integration and the lab are the long jobs)
+- Pull request feedback takes about 30 minutes (Integration and the browser suites are the long jobs); a lab failure surfaces only in the queue, about an hour after queueing, and ejects the pull request. Dispatch `virtualmin-lab.yml` on the branch to learn it earlier
+- A flaky required check now also ejects a queued pull request and rebuilds the groups behind it
 - A required browser test that flakes blocks merges; flakes must be fixed, never retried away (ADR-0014)
 - A PostgreSQL-only bug outside the gated modules surfaces at the nightly or release-candidate run, not on the pull request
 - Semgrep blocks only new findings; the debt from before it ran in CI remains to be worked down
 
 ### Neutral
 - Portal tests are always SQLite (no change — Portal has no business database)
-- Merge queue is not used: "up to date" requirement gives the same guarantee for a solo maintainer. Adopting it needs `merge_group` triggers on every required workflow and a DCO range rework
+- The checks other than the lab run twice per merge, on the pull request and in the queue; runners are free for a public repository (October 2026 amendment), so only wall-clock time counts
+- A queued squash takes the pull request's title and description as its commit message (repository setting), so the description is written as the commit message
 
 ## Reference Commits
 

@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Prove a master commit is the tree its pull request's required checks passed on.
+"""Prove the merge queue tested a master commit with every required check.
 
 release-candidate.yml runs this before the expensive release checks:
 
     python3 scripts/verify_release_candidate.py <candidate-sha>
 
-It exits non-zero, saying why, unless all of these hold:
-- the candidate came from a pull request merged into master;
-- the candidate's tree equals the tree of that PR's final head (an owner bypass can merge a PR whose
-  branch was behind master, and the squash then holds code the checks never saw);
-- every check master's ruleset requires concluded `success` in that head's latest pull_request run,
-  read per workflow, so a same-named job from a dispatched or scheduled run can never stand in for
-  it. The one check allowed to be `skipped` is the lab's, and only when its own `changes` job
-  succeeded in the same run and that run completed successfully (a cancelled run also skips it).
+The merge queue builds each commit it lands on master and runs the required checks on that exact
+commit (event `merge_group`) before master moves to it. So the candidate is vouched for by its own runs,
+not by its pull request's: a pull request's runs saw its branch, which may have been behind master.
 
-Needs `gh` (authenticated) and `git` with the PR head fetchable from origin.
+It exits non-zero, saying why, unless every check master's ruleset requires concluded `success` in the
+candidate's latest merge_group run, read per workflow, so a same-named job from a dispatched or
+scheduled run can never stand in for it. The one check allowed to be `skipped` is the lab's, and only
+when its own `changes` job succeeded in the same run and that run completed successfully (a cancelled
+run also skips it). A commit with no merge_group run was merged around the queue (an owner bypass), and
+is refused.
+
+Needs `gh` (authenticated).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -86,45 +88,31 @@ def failed_checks(contexts: Iterable[str], jobs: Mapping[str, list[tuple[str, st
     return problems
 
 
-def same_tree(repo: Path, first: str, second: str) -> bool:
-    def tree(revision: str) -> str:
-        return _run(["git", "rev-parse", f"{revision}^{{tree}}"], cwd=repo)
-
-    return tree(first) == tree(second)
-
-
-def _run(command: list[str], cwd: Path | None = None) -> str:
-    return subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+def _run(command: list[str]) -> str:
+    return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _gh(path: str) -> Any:
     return json.loads(_run(["gh", "api", path]))
 
 
-def verify(sha: str, repo: str, checkout: Path) -> str:
-    pulls = _gh(f"repos/{repo}/commits/{sha}/pulls")
-    merged = [pull for pull in pulls if pull.get("merged_at") and pull["base"]["ref"] == "master"]
-    if not merged:
-        raise VerificationError(f"{sha} did not come from a pull request merged into master")
-    number = merged[0]["number"]
-    head = _gh(f"repos/{repo}/pulls/{number}")["head"]["sha"]
-    _run(["git", "fetch", "--quiet", "origin", f"pull/{number}/head"], cwd=checkout)
-    if not same_tree(checkout, sha, head):
+def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
+    runs = gh(f"repos/{repo}/actions/runs?head_sha={sha}&event=merge_group&per_page=100")["workflow_runs"]
+    if not runs:
         raise VerificationError(
-            f"PR #{number}'s final head {head} does not have the candidate's tree: it was merged while behind "
-            "master. Land a pull request whose checks ran on the current tree, then release that."
+            f"The merge queue never tested {sha}: it was merged around the queue. "
+            "Land a pull request through the queue, then release that."
         )
-    runs = _gh(f"repos/{repo}/actions/runs?head_sha={head}&event=pull_request&per_page=100")["workflow_runs"]
     for run in runs:
-        run["jobs"] = _gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+        run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
     problems = failed_checks(
         required_contexts(json.loads(RULESET.read_text(encoding="utf-8"))), check_conclusions(runs)
     )
     if problems:
         raise VerificationError(
-            f"PR #{number} did not pass every required check on {head}:\n  " + "\n  ".join(problems)
+            f"The merge queue did not pass every required check on {sha}:\n  " + "\n  ".join(problems)
         )
-    return f"PR #{number} passed every required check on the candidate's tree ({head})"
+    return f"The merge queue passed every required check on the candidate itself ({sha})"
 
 
 def main(argv: list[str]) -> int:
@@ -132,7 +120,7 @@ def main(argv: list[str]) -> int:
         print(f"usage: {argv[0]} <candidate-sha>", file=sys.stderr)
         return 2
     try:
-        print(verify(argv[1], os.environ["GITHUB_REPOSITORY"], Path.cwd()))
+        print(verify(argv[1], os.environ["GITHUB_REPOSITORY"]))
     except (VerificationError, subprocess.CalledProcessError, KeyError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1

@@ -4,16 +4,21 @@
 below is read from source:
 
 - every required context is a job of a workflow that every pull request to master starts (a workflow
-  skipped by a paths filter never reports, and a required check that never reports blocks forever);
+  skipped by a paths filter never reports, and a required check that never reports blocks forever),
+  and that every merge group starts too: the merge queue waits for the same checks on its own commit;
+- the merge queue waits longer than the slowest required job may run;
 - no required job tolerates its own failure (`continue-on-error`), which would let a red job pass;
-- the one job allowed to skip itself, the Virtualmin lab, fails open;
+- the one job allowed to skip itself, the Virtualmin lab, skips on a pull request and, in the queue,
+  fails open;
 - the release-candidate workflow tests exactly the commit it vouches for, and only it may vouch.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +74,12 @@ def pull_request_jobs() -> dict[str, tuple[str, dict[str, Any]]]:
     return jobs
 
 
+def ruleset_rule(rule_type: str) -> dict[str, Any]:
+    ruleset = json.loads((RULESETS / "master.json").read_text(encoding="utf-8"))
+    (rule,) = [rule for rule in ruleset["rules"] if rule["type"] == rule_type]
+    return rule
+
+
 def test_the_ruleset_requires_the_core_checks() -> None:
     contexts = {check["context"] for check in required_checks()}
 
@@ -106,6 +117,89 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
             assert condition is None or condition in STEP_CONDITIONS_ALWAYS_OK, (
                 f"{workflow}:{context} step {step.get('name')} runs only `if: {condition}`: the check can pass without it"
             )
+
+
+@pytest.mark.parametrize("workflow", sorted({workflow for workflow, _ in pull_request_jobs().values()}))
+def test_every_required_workflow_runs_in_the_merge_queue(workflow: str) -> None:
+    required = {check["context"] for check in required_checks()}
+    if not required & {name for name, (path, _) in pull_request_jobs().items() if path == workflow}:
+        return
+    triggers = load_workflow(WORKFLOWS / workflow)["on"]
+    assert isinstance(triggers, dict) and "merge_group" in triggers, (
+        f"{workflow} has a required check but does not run on merge_group: every queued pull request would "
+        "wait for it until the queue times out"
+    )
+    types = (triggers["merge_group"] or {}).get("types")
+    assert types is None or "checks_requested" in types, workflow
+
+
+def test_the_merge_queue_squashes_and_outwaits_the_slowest_job() -> None:
+    queue = ruleset_rule("merge_queue")["parameters"]
+    assert queue["merge_method"] == "SQUASH"
+    assert queue["grouping_strategy"] == "ALLGREEN", "HEADGREEN lands an entry whose own group never passed"
+    # A required job still running when the queue stops waiting fails the group. The lab is the slowest and
+    # declares the longest limit; the queue must outwait every limit a required job declares.
+    required = {check["context"] for check in required_checks()}
+    declared = [
+        int(job["timeout-minutes"])
+        for name, (_, job) in pull_request_jobs().items()
+        if name in required and "timeout-minutes" in job
+    ]
+    assert declared, "no required job declares a time limit: this comparison would check nothing"
+    assert queue["check_response_timeout_minutes"] > max(declared)
+
+
+def _lab_decision(repo: Path, event: str, base: str) -> str:
+    """Run the lab workflow's own decision step in ``repo`` and return what it wrote to its output."""
+    (step,) = [
+        step
+        for step in load_workflow(WORKFLOWS / "virtualmin-lab-pr.yml")["jobs"]["changes"]["steps"]
+        if step.get("id") == "decide"
+    ]
+    output = repo / "github_output"
+    output.write_text("")
+    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
+    subprocess.run(["bash", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
+    return output.read_text().strip()
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
+
+
+def test_the_lab_runs_in_the_queue_only_and_fails_open_there(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "config", "user.email", "ci@example.com")
+    _git(tmp_path, "config", "user.name", "CI")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ci_lab_needed.py").write_text((REPO / "scripts" / "ci_lab_needed.py").read_text())
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "note.md").write_text("prose\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "docs only")
+
+    # A push to a pull request never runs the lab, whatever it changes.
+    assert _lab_decision(tmp_path, "pull_request", "") == "lab=false"
+    # In the queue the base branch's rules decide: prose cannot reach the lab.
+    assert _lab_decision(tmp_path, "merge_group", base) == "lab=false"
+    # A base the step cannot read gives no diff, and no diff runs the lab.
+    assert _lab_decision(tmp_path, "merge_group", "") == "lab=true"
+    (tmp_path / "services" / "platform").mkdir(parents=True)
+    (tmp_path / "services" / "platform" / "x.py").write_text("x = 1\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "platform code")
+    assert _lab_decision(tmp_path, "merge_group", base) == "lab=true"
+
+
+def test_the_dco_check_passes_a_merge_group_without_reading_pull_request_shas() -> None:
+    (job,) = [job for name, (_, job) in pull_request_jobs().items() if name == "dco"]
+    script = next(step["run"] for step in job["steps"] if "Signed-off-by" in step.get("run", ""))
+    queue_branch = script.index('"merge_group" ]; then')
+    assert queue_branch < script.index("github.event.pull_request.base.sha")
+    assert "exit 0" in script[queue_branch : script.index("github.event.pull_request.base.sha")]
 
 
 def test_no_other_job_can_stand_in_for_a_required_check() -> None:
