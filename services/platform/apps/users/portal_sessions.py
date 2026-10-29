@@ -237,6 +237,27 @@ def recently_reauthenticated(row: PortalSession, now: datetime) -> bool:
     return timedelta(0) <= now - row.reauth_at <= STEP_UP_WINDOW
 
 
+def still_live(row: PortalSession, user: User) -> bool:
+    """Whether a session read under its row lock is live for this user's current credentials."""
+    now = timezone.now()
+    return (
+        row.user_id == user.pk
+        and user.is_active
+        and row.revoked_at is None
+        and row.expires_at > now
+        and row.idle_deadline > now
+        and _snapshot_matches(row, user) is not False
+    )
+
+
+def record_step_up(row: PortalSession, *, confirmed: bool) -> None:
+    """Audit an identity check made in this session, which the audit names by its digest only."""
+    if confirmed:
+        _audit("step_up_confirmed", row, description="Identity confirmed for sensitive actions")
+    else:
+        _audit("step_up_failed", row, description="Identity check for sensitive actions failed")
+
+
 def mark_reauth(row: PortalSession) -> bool:
     """Record a passed identity check on a live session; an ended one is never marked."""
     now = timezone.now()

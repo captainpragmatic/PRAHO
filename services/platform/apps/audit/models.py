@@ -251,6 +251,8 @@ class AuditEvent(models.Model):
         ("account_unlocked", "Account Unlocked"),
         ("session_rotation", "Session Rotation"),
         ("session_terminated", "Session Terminated"),
+        ("step_up_confirmed", "Identity Confirmed for Sensitive Actions"),
+        ("step_up_failed", "Identity Check for Sensitive Actions Failed"),
         # ======================================================================
         # PASSWORD MANAGEMENT (NIST SP 800-63B)
         # ======================================================================

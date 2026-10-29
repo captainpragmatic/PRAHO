@@ -15,6 +15,7 @@ urlpatterns = [
     path("session/validate/", views.validate_session_secure, name="validate_session_secure"),
     path("session/end/", views.portal_session_end_api, name="portal_session_end"),
     path("customer-view/redeem/", views.customer_view_redeem_api, name="customer_view_redeem"),
+    path("session/reauth/", views.portal_session_reauth_api, name="portal_session_reauth"),
     # Token authentication endpoints for API access
     path("token/", views.obtain_token, name="obtain_token"),
     path("token/revoke/", views.revoke_token, name="revoke_token"),

@@ -78,7 +78,7 @@ def _pattern_category(action: str) -> str:
     # Use a mapping approach to reduce branching complexity
     category_mappings = {
         # api_token_ must precede the integration api_ prefix — token lifecycle is authentication
-        "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_", "api_token_"],
+        "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_", "api_token_", "step_up_"],
         "account_management": ["profile_updated", "email_changed", "phone_updated", "name_changed"],
         "privacy": ["privacy_", "gdpr_", "marketing_consent_", "cookie_consent_"],
         "authorization": [
@@ -186,6 +186,8 @@ def _pattern_severity(action: str) -> str:
     medium_actions = [
         "login_success",
         "login_failed",
+        "step_up_confirmed",
+        "step_up_failed",
         "logout_manual",
         "account_locked",
         "session_rotation",

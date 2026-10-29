@@ -865,6 +865,62 @@ _MAX_USER_AGENT_LENGTH = 512
 _DEFAULT_PORTAL_THROTTLES = (PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle)
 
 
+_REAUTH_FAILED = {"success": False, "code": "reauth_failed"}
+
+
+class _SessionGone(Exception):  # noqa: N818  # a control-flow signal, not an error condition
+    """The calling session ended before its check could open the window: undo the whole check."""
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+# Above @require_user_authentication: its wrapper hides this view's throttles otherwise.
+@throttle_classes([*_DEFAULT_PORTAL_THROTTLES, MFACredentialThrottle])
+@require_user_authentication
+def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # noqa: PLR0911  # one per refusal
+    """Confirm the person's identity, which opens the session's 300 s window for sensitive actions.
+
+    The password, and the second factor when it is on, are checked as login checks them and count
+    toward the same lockout; every failure gets one answer, so it never says which factor was wrong.
+    A 2FA account that sends no code is refused before its password is checked. A session that ends
+    before the window is recorded opens nothing, and a backup code used for it stays unspent.
+    """
+    row = getattr(request, "portal_session", None)
+    if row is None:
+        return portal_sessions.session_refused()
+    password, code = request.data.get("password"), request.data.get("mfa_code", "")
+    if not isinstance(password, str) or not isinstance(code, str):
+        return Response(_REAUTH_FAILED, status=400)
+    try:
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(pk=user.pk)
+            session = PortalSession.objects.select_for_update().filter(pk=row.pk).first()
+            if session is None or not portal_sessions.still_live(session, locked):
+                raise _SessionGone
+            if locked.is_account_locked():
+                return Response(_ACCOUNT_LOCKED, status=400)
+            if locked.two_factor_enabled and not code:
+                return Response(_REAUTH_FAILED, status=400)
+            if not check_password_locked(locked, password, source="step_up") or (
+                locked.two_factor_enabled
+                and not verify_login_second_factor(locked, code, request, source="step_up").accepted
+            ):
+                # Returned, not raised, so the failure count and this audit commit.
+                portal_sessions.record_step_up(session, confirmed=False)
+                return Response(_REAUTH_FAILED, status=400)
+            proof_passed(locked)
+            if not portal_sessions.mark_reauth(session):
+                raise _SessionGone
+            portal_sessions.record_step_up(session, confirmed=True)
+    except _SessionGone:
+        return portal_sessions.session_refused()
+    except DatabaseFailure:
+        logger.exception("🔥 [Auth] Identity check could not be recorded")
+        return store_unavailable_response()
+    return Response({"success": True})
+
+
 def _browser_origin(request: HttpRequest) -> BrowserOrigin:
     """The customer's browser, as the Portal signed it; only a body the HMAC middleware verified counts."""
     user_agent: str | None = None

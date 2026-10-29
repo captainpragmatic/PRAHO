@@ -1161,7 +1161,9 @@ class SecondFactorResult:
     rate_limited: bool
 
 
-def verify_login_second_factor(locked_user: "User", code: str, request: HttpRequest | None) -> SecondFactorResult:
+def verify_login_second_factor(
+    locked_user: "User", code: str, request: HttpRequest | None, *, source: str = "login"
+) -> SecondFactorResult:
     """Check a TOTP or backup code at login; a failure counts toward the account lockout.
 
     Shared by portal_login_api, obtain_token and the staff web mfa_verify, so every login
@@ -1180,7 +1182,7 @@ def verify_login_second_factor(locked_user: "User", code: str, request: HttpRequ
         rate_limited = bool(outcome["rate_limited"])
     else:
         rate_limited = False
-    locked_user.increment_failed_login_attempts()
+    locked_user.increment_failed_login_attempts(source=source)
     return SecondFactorResult(accepted=False, method=None, rate_limited=rate_limited)
 
 

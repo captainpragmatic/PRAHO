@@ -448,6 +448,7 @@ class PortalServiceHMACMiddleware:
             "/api/users/register/confirm",
             "/api/users/register/pending",
             "/api/customers/register",
+            "/api/users/session/reauth",
         }
         principal_key = f"hmac_rl:{portal_id}:principal:{principal}"
         if auth:

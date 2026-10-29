@@ -34,6 +34,7 @@ CREDENTIAL_ENDPOINTS = {
     "mfa/disable/": {"token": "000000", "password": "wrong"},
     "mfa/regenerate-backup-codes/": {"token": "000000", "password": "wrong"},
     "change-password/": {"current_password": "wrong", "new_password": "Another-secure123!"},
+    "session/reauth/": {"password": "wrong"},
 }
 
 
