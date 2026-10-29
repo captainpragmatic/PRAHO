@@ -20,7 +20,7 @@ from tests.helpers.node_catalogue import make_region, make_size
 User = get_user_model()
 
 
-class SizeCreateTests(TestCase):
+class SizeFormTests(TestCase):
     def setUp(self) -> None:
         self.client.force_login(User.objects.create_superuser(email="admin@test.com", password="testpass123"))
         self.hetzner = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
@@ -43,6 +43,67 @@ class SizeCreateTests(TestCase):
         self.assertEqual(response.status_code, 302)
         size = NodeSize.objects.get(provider_type_id="cx23")
         self.assertEqual(set(size.available_regions.all()), {hel1, fsn1})
+
+    def edit(self, size: NodeSize, **changes: object) -> None:
+        data = {
+            "provider": size.provider_id, "name": size.name, "display_name": size.display_name,
+            "provider_type_id": size.provider_type_id, "vcpus": size.vcpus, "memory_gb": size.memory_gb,
+            "disk_gb": size.disk_gb, "hourly_cost_eur": size.hourly_cost_eur, "monthly_cost_eur": size.monthly_cost_eur,
+            "max_domains": size.max_domains, "max_bandwidth_gb": size.max_bandwidth_gb, "is_active": size.is_active,
+            "sort_order": size.sort_order,
+        }
+        data.update(changes)
+        response = self.client.post(reverse("infrastructure:size_edit", args=[size.pk]), data)
+        self.assertEqual(response.status_code, 302)
+
+    def test_changing_the_provider_type_offers_the_size_where_the_new_type_may_be_sold(self) -> None:
+        hel1 = make_region(self.hetzner, "hel1")
+        ash = make_region(self.hetzner, "ash")
+        size = make_size(self.hetzner, "cx23", hel1)
+        self.edit(size, provider_type_id="cpx11")
+        self.assertEqual(set(size.available_regions.all()), {hel1, ash})
+
+    def test_changing_the_provider_moves_the_offer_to_the_new_provider(self) -> None:
+        hel1 = make_region(self.hetzner, "hel1")
+        ewr = make_region(self.other, "ewr")
+        size = make_size(self.hetzner, "cx23", hel1)
+        self.edit(size, provider=self.other.pk)
+        self.assertEqual(set(size.available_regions.all()), {ewr})
+
+    def test_editing_other_fields_keeps_the_synced_offer(self) -> None:
+        hel1 = make_region(self.hetzner, "hel1")
+        make_region(self.hetzner, "ash")
+        size = make_size(self.hetzner, "cx23", hel1)
+        self.edit(size, display_name="2 vCPU / 4 GB")
+        self.assertEqual(set(size.available_regions.all()), {hel1})
+
+
+class RegionToggleTests(TestCase):
+    def setUp(self) -> None:
+        self.client.force_login(User.objects.create_superuser(email="admin@test.com", password="testpass123"))
+        self.hetzner = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
+
+    def toggle(self, region: NodeRegion) -> None:
+        self.client.post(reverse("infrastructure:region_toggle", args=[region.pk]))
+        region.refresh_from_db()
+
+    def test_enabling_a_region_nothing_is_offered_in_offers_the_active_sizes(self) -> None:
+        hel1 = make_region(self.hetzner, "hel1")
+        sin = make_region(self.hetzner, "sin", active=False)  # Disabled before the catalogue recorded regions.
+        cx23 = make_size(self.hetzner, "cx23", hel1)
+        make_size(self.hetzner, "cx11", hel1, active=False)
+        other = CloudProvider.objects.create(name="Vultr", provider_type="vultr", code="vul")
+        make_size(other, "vc2", make_region(other, "ewr"))
+        self.toggle(sin)
+        self.assertTrue(sin.is_active)
+        self.assertEqual(set(sin.available_sizes.all()), {cx23})
+
+    def test_enabling_a_region_keeps_its_synced_offer(self) -> None:
+        hel1 = make_region(self.hetzner, "hel1", active=False)
+        cx23 = make_size(self.hetzner, "cx23", hel1)
+        make_size(self.hetzner, "cpx11", make_region(self.hetzner, "ash"))
+        self.toggle(hel1)
+        self.assertEqual(set(hel1.available_sizes.all()), {cx23})
 
 
 def _setting(key: str, default: object = None) -> object:

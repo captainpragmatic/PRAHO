@@ -1177,6 +1177,12 @@ def size_list(request: HttpRequest) -> HttpResponse:
     return render(request, "infrastructure/size_list.html", context)
 
 
+def _offer_in_every_active_region(size: NodeSize) -> None:
+    """A size staff created or re-identified by hand is offered wherever its provider has an active
+    region; the next provider sync narrows it to the locations that sell it."""
+    size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
+
+
 @login_required
 @require_size_management
 def size_create(request: HttpRequest) -> HttpResponse:
@@ -1187,9 +1193,7 @@ def size_create(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             with transaction.atomic():
                 size = form.save()
-                # A hand-made size is offered wherever its provider has an active region; the next
-                # provider sync narrows it to the locations that sell it.
-                size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
+                _offer_in_every_active_region(size)
             messages.success(request, f"Size '{size.name}' created successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1223,7 +1227,11 @@ def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST, instance=size)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                # Another provider or type: the regions recorded for the old identity no longer apply.
+                if {"provider", "provider_type_id"} & set(form.changed_data):
+                    _offer_in_every_active_region(size)
             messages.success(request, f"Size '{size.name}' updated successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1285,8 +1293,13 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)
-    region.is_active = not region.is_active
-    region.save()
+    with transaction.atomic():
+        region.is_active = not region.is_active
+        region.save()
+        # A region no size was ever recorded in (disabled before the catalogue tracked regions)
+        # offers its provider's active sizes; the next provider sync narrows them.
+        if region.is_active and not region.available_sizes.exists():
+            region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
 
     # Audit: region toggled
     try:
