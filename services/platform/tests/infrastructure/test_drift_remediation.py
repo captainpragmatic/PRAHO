@@ -1782,7 +1782,7 @@ class PR341HardeningTests(DriftRemediationTestBase):
             "apps.infrastructure.provider_config.get_provider_token",
             side_effect=RuntimeError("credential decrypt failed"),
         ):
-            result = _teardown_cloud_deployment(self.deployment)
+            result = _teardown_cloud_deployment(self.deployment, timezone.now() + timedelta(minutes=1))
 
         self.assertTrue(result.is_err())
         self.assertIn("raised", result.unwrap_err().lower())
@@ -1799,9 +1799,9 @@ class PR341HardeningTests(DriftRemediationTestBase):
         with (
             patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
             patch("apps.infrastructure.cloud_gateway.get_cloud_gateway", return_value=mock_gw),
-            patch.object(NodeDeployment, "save", side_effect=RuntimeError("db down")),
+            patch("apps.infrastructure.tasks.owned_update", side_effect=RuntimeError("db down")),
         ):
-            result = _teardown_cloud_deployment(self.deployment)
+            result = _teardown_cloud_deployment(self.deployment, timezone.now() + timedelta(minutes=1))
 
         self.assertTrue(result.is_err())
 

@@ -729,13 +729,20 @@ class NodeDeployment(models.Model):
         return new_status in valid_next_states
 
     def transition_to(self, new_status: str, message: str = "") -> None:
-        """Transition to a new status with validation"""
+        """Transition to a new status with validation.
+
+        Compare-and-set on the status this instance last read: a stale instance (another worker moved the
+        row meanwhile) raises instead of overwriting the newer status.
+        """
         if not self.is_valid_transition(new_status):
             raise ValidationError(_(f"Cannot transition from '{self.status}' to '{new_status}'"))
-        self.status = new_status
+        values: dict[str, Any] = {"status": new_status, "updated_at": timezone.now()}
         if message:
-            self.status_message = message
-        self.save(update_fields=["status", "status_message", "updated_at"])
+            values["status_message"] = message
+        if type(self).objects.filter(pk=self.pk, status=self.status).update(**values) != 1:
+            raise ValidationError(_(f"Cannot transition from '{self.status}': the deployment changed concurrently"))
+        for name, value in values.items():
+            setattr(self, name, value)
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running"""

@@ -7,15 +7,18 @@ invoking DNS deletion, and end-to-end fail-closed compensation.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.cloud_gateway import ServerCreateResult
+from apps.infrastructure.deployment_lifecycle import OperationLease, claim_operation
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import DnsRecordResult, ReconcileOutcome
-from apps.infrastructure.models import NodeDeploymentLog
+from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 
 _DNS_GW = "apps.infrastructure.deployment_service.get_dns_gateway"
@@ -24,6 +27,11 @@ _GET_SETTING = "apps.infrastructure.deployment_service.SettingsService.get_setti
 
 def _noop_log(level: str, message: str) -> None:
     pass
+
+
+def _lease(dep: NodeDeployment) -> OperationLease:
+    """Own the row in its current status, as the pipeline does before configuring DNS."""
+    return claim_operation(dep.pk, from_states=(dep.status,), to_status=dep.status, kind="deploy").unwrap()
 
 
 def _a_result(zone: str = "z1", content: str = "1.2.3.4") -> DnsRecordResult:
@@ -61,7 +69,7 @@ class ConfigureDnsTests(TestCase):
         dep = self._dep()
         gw = self._gw(reconcile=ReconcileOutcome(applied=[_a_result()], error=None))
         with patch(_DNS_GW, return_value=gw):
-            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log)
+            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
         self.assertTrue(res.is_ok(), res)
         dep.refresh_from_db()
         self.assertEqual(len(dep.dns_record_ids), 1)
@@ -73,7 +81,7 @@ class ConfigureDnsTests(TestCase):
         dep = self._dep()
         gw = self._gw(reconcile=ReconcileOutcome(applied=[_a_result()], error="AAAA failed"))
         with patch(_DNS_GW, return_value=gw):
-            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log)
+            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
         self.assertTrue(res.is_err())
         dep.refresh_from_db()
         self.assertEqual(len(dep.dns_record_ids), 1)
@@ -85,7 +93,7 @@ class ConfigureDnsTests(TestCase):
         dep = self._dep()
         gw = self._gw(reconcile=ReconcileOutcome(applied=[], error="connection dropped after POST"))
         with patch(_DNS_GW, return_value=gw):
-            res = _make_service()._configure_dns(dep, "tok", "zone-xyz", _noop_log)
+            res = _make_service()._configure_dns(dep, "tok", "zone-xyz", _noop_log, _lease(dep))
         self.assertTrue(res.is_err())
         dep.refresh_from_db()
         self.assertTrue(dep.dns_record_ids, "cleanup provenance must survive a failed reconcile")
@@ -95,7 +103,7 @@ class ConfigureDnsTests(TestCase):
         dep = self._dep()
         gw = self._gw(zone="someone-elses-zone.com")
         with patch(_DNS_GW, return_value=gw):
-            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log)
+            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
         self.assertTrue(res.is_err())
         gw.reconcile_records.assert_not_called()
 
@@ -104,7 +112,7 @@ class ConfigureDnsTests(TestCase):
         gw = MagicMock()
         gw.get_zone_name.return_value = Err("401 unauthorized")
         with patch(_DNS_GW, return_value=gw):
-            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log)
+            res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
         self.assertTrue(res.is_err())
         gw.reconcile_records.assert_not_called()
 
@@ -174,22 +182,24 @@ class TeardownPathsInvokeDnsDeletion(TestCase):
         svc = _make_service()
         with patch.object(NodeDeploymentService, "_delete_owned_dns") as spy:
             svc._cleanup_resources(MagicMock(), [], dep)
-        spy.assert_called_once_with(dep)
+        spy.assert_called_once_with(dep, None)
 
     def test_destroy_node_invokes_dns_deletion(self) -> None:
         dep = _create_deployment("completed")  # no virtualmin_server, no external_node_id
         svc = _make_service()
         with patch.object(NodeDeploymentService, "_delete_owned_dns") as spy:
             svc.destroy_node(dep, credentials={"api_token": "x"})
-        spy.assert_called_once_with(dep)
+        spy.assert_called_once()
+        self.assertEqual(spy.call_args.args[0], dep)
 
     def test_scheduled_teardown_invokes_dns_deletion(self) -> None:
         from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
 
         dep = _create_deployment("failed")
         with patch.object(NodeDeploymentService, "_delete_owned_dns") as spy:
-            _teardown_cloud_deployment(dep)
-        spy.assert_called_once_with(dep)
+            _teardown_cloud_deployment(dep, timezone.now() + timedelta(minutes=1))
+        spy.assert_called_once()
+        self.assertEqual(spy.call_args.args[0], dep)
 
 
 class DeployFailClosedOnDnsError(TestCase):

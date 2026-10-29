@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -34,6 +35,14 @@ from apps.infrastructure.cloud_gateway import (
     ServerCreateResult,
     get_cloud_gateway,
     node_firewall_rules,
+)
+from apps.infrastructure.deployment_lifecycle import (
+    OperationLease,
+    OperationOwnershipLostError,
+    claim_operation,
+    owned_transition,
+    owned_update,
+    still_owns,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, get_dns_gateway
@@ -143,13 +152,37 @@ class NodeDeploymentService:
                 )
             )
 
-    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    @staticmethod
+    def _claim_deploy(
+        deployment: NodeDeployment, expected_token: uuid.UUID | None
+    ) -> Result[tuple[OperationLease, str], str]:
+        """Claim a pending row for the pipeline together with its provider, under both row locks."""
+        from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Claim the current provider too.
+
+        with transaction.atomic():
+            claim = claim_operation(
+                deployment.pk,
+                from_states=("pending",),
+                to_status="provisioning_node",
+                kind="retry" if expected_token else "deploy",
+                expected_token=expected_token,
+            )
+            if claim.is_err():
+                return Err(claim.unwrap_err())
+            claimed_provider = CloudProvider.objects.select_for_update().get(pk=deployment.provider_id)
+            if claimed_provider.provider_type != "hetzner":
+                transaction.set_rollback(True)
+                return Err(gettext("Provider image support changed before deployment claim; no VM was created."))
+        return Ok((claim.unwrap(), claimed_provider.provider_type))
+
+    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
         progress_callback: Callable[..., None] | None = None,
+        expected_token: uuid.UUID | None = None,
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -160,6 +193,7 @@ class NodeDeploymentService:
             cloudflare_api_token: Cloudflare API token (optional)
             user: User performing the deployment
             progress_callback: Optional callback for progress updates
+            expected_token: The retry's operation token; only its holder may start the pipeline
 
         Returns:
             Result with DeploymentResult or error
@@ -179,6 +213,9 @@ class NodeDeploymentService:
         created_resources: list[tuple[str, str]] = []
         # gateway is captured here so the except block can access it for cleanup
         gateway: CloudProviderGateway | None = None
+        # Created before the try so every failure path can audit with the caller's context.
+        audit_ctx = InfrastructureAuditContext(user=user)
+        lease: OperationLease | None = None
 
         def report_progress(stage: str) -> None:
             if progress_callback and stage in self.STAGES:
@@ -207,34 +244,16 @@ class NodeDeploymentService:
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
 
-            # Atomic lock to prevent concurrent deployments of the same node
-            with transaction.atomic():
-                from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-                    NodeDeployment as NDModel,  # Circular: cross-app  # Deferred: avoids circular import
-                )
+            # One locked claim: only a pending row starts, and a retry only with the token it reserved.
+            claim = self._claim_deploy(deployment, expected_token)
+            if claim.is_err():
+                return Err(claim.unwrap_err())
+            lease, claimed_provider_type = claim.unwrap()
 
-                locked = NDModel.objects.select_for_update().filter(pk=deployment.pk).first()
-                if not locked or locked.status not in ("pending", "failed"):
-                    return Err(f"Cannot deploy node in status '{locked.status if locked else 'unknown'}'")
-
-                from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Claim the current provider too.
-
-                claimed_provider = CloudProvider.objects.select_for_update().get(pk=locked.provider_id)
-                if claimed_provider.provider_type != "hetzner":
-                    return Err(gettext("Provider image support changed before deployment claim; no VM was created."))
-                claimed_provider_type = claimed_provider.provider_type
-
-                # Transition to provisioning (transition_to saves internally)
-                try:
-                    locked.transition_to("provisioning_node")
-                except ValidationError:
-                    return Err(f"Cannot transition from '{locked.status}' to 'provisioning_node'")
-
-            # Refresh local instance after atomic block
+            # Refresh local instance after the claim
             deployment.refresh_from_db()
 
             # Audit: deployment started
-            audit_ctx = InfrastructureAuditContext(user=user)
             try:
                 InfrastructureAuditService.log_deployment_started(deployment, audit_ctx)
             except Exception:
@@ -247,7 +266,11 @@ class NodeDeploymentService:
             dns_config_result = self._resolve_dns_config(deployment, cloudflare_api_token)
             if dns_config_result.is_err():
                 self._mark_failed(
-                    deployment, dns_config_result.unwrap_err(), stage="provisioning_node", audit_ctx=audit_ctx
+                    deployment,
+                    dns_config_result.unwrap_err(),
+                    stage="provisioning_node",
+                    audit_ctx=audit_ctx,
+                    lease=lease,
                 )
                 return Err(dns_config_result.unwrap_err())
             dns_token, dns_zone_id = dns_config_result.unwrap()
@@ -267,12 +290,12 @@ class NodeDeploymentService:
             if key_result.is_err():
                 if deployment.external_node_id:
                     message = "Existing VM authentication key is unavailable; refusing to generate or replace it"
-                    self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx)
+                    self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx, lease=lease)
                     return Err(message)
                 # Do not create a paid VM without a persisted authentication key.
                 # An ambiguous key-generation mutation also retains UNKNOWN (#253/#254).
                 message = "SSH key generation failed; no VM was created"
-                self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx)
+                self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx, lease=lease)
                 return Err(message, retriability=retriability_of(key_result))
             else:
                 ssh_public_key = key_result.unwrap().public_key
@@ -286,7 +309,9 @@ class NodeDeploymentService:
             # Get API token from credentials
             api_token = credentials.get("api_token", "")
             if not api_token:
-                self._mark_failed(deployment, "No API token provided", stage="provision_server", audit_ctx=audit_ctx)
+                self._mark_failed(
+                    deployment, "No API token provided", stage="provision_server", audit_ctx=audit_ctx, lease=lease
+                )
                 return Err("No API token provided")
 
             # Retain the supported adapter selected under the claim, never a refreshed relation's type.
@@ -305,6 +330,7 @@ class NodeDeploymentService:
                         f"Cannot verify existing server: {server_info_result.unwrap_err()}",
                         stage="provision_server",
                         audit_ctx=audit_ctx,
+                        lease=lease,
                     )
                     return Err(
                         f"Cannot verify existing server: {server_info_result.unwrap_err()}",
@@ -320,8 +346,7 @@ class NodeDeploymentService:
                     )
                 else:
                     log_deployment("warning", "Previously created server not found, creating new one")
-                    deployment.external_node_id = ""
-                    deployment.save(update_fields=["external_node_id", "updated_at"])
+                    owned_update(lease, deployment, external_node_id="")
 
             if not deployment.external_node_id:
                 log_deployment("info", f"Creating server via {provider_type} API")
@@ -331,11 +356,12 @@ class NodeDeploymentService:
                 key_upload_result = gateway.upload_ssh_key(ssh_key_name, ssh_public_key)
                 if key_upload_result.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment)
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
                         deployment,
                         f"SSH key upload failed: {key_upload_result.unwrap_err()}",
                         stage="provision_server",
+                        lease=lease,
                     )
                     return Err(
                         f"SSH key upload failed: {key_upload_result.unwrap_err()}",
@@ -359,11 +385,12 @@ class NodeDeploymentService:
                 )
                 if firewall_result.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment)
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
                         deployment,
                         f"Firewall creation failed: {firewall_result.unwrap_err()}",
                         stage="provision_server",
+                        lease=lease,
                     )
                     return Err(
                         f"Firewall creation failed: {firewall_result.unwrap_err()}",
@@ -404,11 +431,12 @@ class NodeDeploymentService:
 
                 if server_result.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment)
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
                         deployment,
                         f"Server creation failed: {server_result.unwrap_err()}",
                         stage="provision_server",
+                        lease=lease,
                     )
                     return Err(
                         f"Server creation failed: {server_result.unwrap_err()}",
@@ -425,29 +453,26 @@ class NodeDeploymentService:
 
             if not server_create_result or not server_create_result.ipv4_address:
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment)
-                self._mark_failed(deployment, "Server creation did not return an IP address", stage="update_deployment")
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                self._mark_failed(
+                    deployment, "Server creation did not return an IP address", stage="update_deployment", lease=lease
+                )
                 return Err("Server creation did not return an IP address")
 
-            with transaction.atomic():
-                deployment.external_node_id = server_create_result.server_id
-                deployment.ipv4_address = server_create_result.ipv4_address
-                deployment.ipv6_address = server_create_result.ipv6_address or ""
-                identity_fields = []
-                if any(kind == "server" for kind, _identifier in created_resources):
-                    deployment.ssh_port = 22  # Fresh provider images retain their bootstrap listener.
-                    deployment.ssh_host_keys = None  # Explicit first-enrollment marker, never set by a retry.
-                    identity_fields = ["ssh_port", "ssh_host_keys"]
-                deployment.save(
-                    update_fields=[
-                        "external_node_id",
-                        "ipv4_address",
-                        "ipv6_address",
-                        "updated_at",
-                        *identity_fields,
-                    ]
-                )
-                deployment.transition_to("configuring_dns")
+            identity: dict[str, Any] = {}
+            if any(kind == "server" for kind, _identifier in created_resources):
+                # Fresh provider images retain their bootstrap listener; None is the explicit
+                # first-enrollment marker, never set by a retry.
+                identity = {"ssh_port": 22, "ssh_host_keys": None}
+            owned_transition(
+                lease,
+                deployment,
+                "configuring_dns",
+                external_node_id=server_create_result.server_id,
+                ipv4_address=server_create_result.ipv4_address,
+                ipv6_address=server_create_result.ipv6_address or "",
+                **identity,
+            )
 
             stages_completed.append("update_deployment")
             log_deployment("info", f"Server provisioned with IP: {deployment.ipv4_address}")
@@ -456,16 +481,18 @@ class NodeDeploymentService:
             # a leaked record on a released IP is a subdomain-takeover risk (#347 GAP 3). The
             # HTTP call runs OUTSIDE the atomic block above (no row lock held across the network).
             report_progress("configuring_dns")
-            dns_result = self._configure_dns(deployment, dns_token, dns_zone_id, log_deployment)
+            dns_result = self._configure_dns(deployment, dns_token, dns_zone_id, log_deployment, lease)
             if dns_result.is_err():
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment)
-                self._mark_failed(deployment, dns_result.unwrap_err(), stage="configuring_dns", audit_ctx=audit_ctx)
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                self._mark_failed(
+                    deployment, dns_result.unwrap_err(), stage="configuring_dns", audit_ctx=audit_ctx, lease=lease
+                )
                 return Err(dns_result.unwrap_err())
             stages_completed.append("configuring_dns")
 
             # Transition to panel installation phase
-            deployment.transition_to("installing_panel")
+            owned_transition(lease, deployment, "installing_panel")
 
             # Stage 7-10: Run Ansible playbooks (panel-aware)
             panel_type = "virtualmin"
@@ -542,9 +569,12 @@ class NodeDeploymentService:
 
                 if playbook_result.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment)
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
-                        deployment, f"Ansible {playbook} failed: {playbook_result.unwrap_err()}", stage=stage_name
+                        deployment,
+                        f"Ansible {playbook} failed: {playbook_result.unwrap_err()}",
+                        stage=stage_name,
+                        lease=lease,
                     )
                     return Err(
                         f"Ansible {playbook} failed: {playbook_result.unwrap_err()}",
@@ -556,8 +586,10 @@ class NodeDeploymentService:
 
                 if not result.success:
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment)
-                    self._mark_failed(deployment, f"Ansible {playbook} failed: {result.stderr[:500]}", stage=stage_name)
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                    self._mark_failed(
+                        deployment, f"Ansible {playbook} failed: {result.stderr[:500]}", stage=stage_name, lease=lease
+                    )
                     return Err(f"Ansible {playbook} failed: {result.stderr[:500]}")
 
                 stages_completed.append(stage_name)
@@ -565,28 +597,31 @@ class NodeDeploymentService:
                 # Heartbeat: the four playbooks can legally run up to ~2h with no
                 # status transition; touch updated_at after each so
                 # recover_stuck_deployments_task never reaps a live deployment
-                # mid-stage.
-                deployment.save(update_fields=["updated_at"])
+                # mid-stage. Owned: a worker that recovery reclaimed stops here.
+                owned_update(lease, deployment)
 
             # The FSM requires installing_panel -> configuring_backups -> validating;
             # the backup configuration is part of the ansible_backup playbook above,
             # so record the state transition once here before validating (without it
             # transition_to('validating') raises and every deployment fails at the
             # very end after all paid provisioning work).
-            deployment.transition_to("configuring_backups")
+            owned_transition(lease, deployment, "configuring_backups")
 
             # Stage 11: Validation
             report_progress("validation")
-            deployment.transition_to("validating")
+            owned_transition(lease, deployment, "validating")
             log_deployment("info", "Validating node health")
 
             validation_result = self._validation.validate_node(deployment)
 
             if validation_result.is_err():
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment)
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                 self._mark_failed(
-                    deployment, f"Validation failed: {validation_result.unwrap_err()}", stage="validation"
+                    deployment,
+                    f"Validation failed: {validation_result.unwrap_err()}",
+                    stage="validation",
+                    lease=lease,
                 )
                 return Err(
                     f"Validation failed: {validation_result.unwrap_err()}",
@@ -605,7 +640,7 @@ class NodeDeploymentService:
 
             # Stage 12: Registration
             report_progress("registration")
-            deployment.transition_to("registering")
+            owned_transition(lease, deployment, "registering")
             log_deployment("info", "Registering node as VirtualminServer")
 
             registration_result = self._registration.register_node(
@@ -647,9 +682,7 @@ class NodeDeploymentService:
 
             # Stage 13: Complete
             report_progress("complete")
-            deployment.completed_at = timezone.now()
-            deployment.save(update_fields=["completed_at", "updated_at"])
-            deployment.transition_to("completed")
+            owned_transition(lease, deployment, "completed", release=True, completed_at=timezone.now())
 
             stages_completed.append("complete")
 
@@ -680,17 +713,21 @@ class NodeDeploymentService:
                 )
             )
 
+        except OperationOwnershipLostError as lost:
+            # Another owner (recovery, or a newer claim) holds the row: write nothing, delete nothing.
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Stopped without writing: {lost}")
+            return Err(f"Deployment stopped: {lost}")
         except Exception as e:
             logger.exception(f"Deployment failed for {deployment.hostname}: {e}")
             # Best-effort cleanup of any cloud resources created before the failure
             if gateway is not None and created_resources:
-                self._cleanup_resources(gateway, created_resources, deployment)
-            self._mark_failed(deployment, str(e), audit_ctx=audit_ctx)
+                self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+            self._mark_failed(deployment, str(e), audit_ctx=audit_ctx, lease=lease)
 
             duration = (timezone.now() - start_time).total_seconds()
             return Err(f"Deployment failed: {e}")
 
-    def destroy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def destroy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -717,17 +754,15 @@ class NodeDeploymentService:
 
         audit_ctx = InfrastructureAuditContext(user=user)
 
+        lease: OperationLease | None = None
         try:
-            # Atomic check-and-transition to prevent TOCTOU race
-            with transaction.atomic():
-                from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-                    NodeDeployment as NDModel,  # Circular: cross-app  # Deferred: avoids circular import
-                )
-
-                locked = NDModel.objects.select_for_update().get(pk=deployment.pk)
-                if locked.status not in ("completed", "failed", "stopped"):
-                    return Err(f"Cannot destroy node in status '{locked.status}'")
-                locked.transition_to("destroying")
+            # One locked claim: check-and-transition with a fresh operation token.
+            claim = claim_operation(
+                deployment.pk, from_states=("completed", "failed", "stopped"), to_status="destroying", kind="destroy"
+            )
+            if claim.is_err():
+                return Err(claim.unwrap_err())
+            lease = claim.unwrap()
 
             # Refresh local instance after atomic block
             deployment.refresh_from_db()
@@ -758,7 +793,7 @@ class NodeDeploymentService:
             # Delete DNS first (records point at an IP about to be released) — owner-scoped,
             # best-effort, independent of external_node_id and before the server-delete
             # early-return so a server-delete failure never skips DNS cleanup (#347 GAP 3).
-            self._delete_owned_dns(deployment)
+            self._delete_owned_dns(deployment, lease)
 
             # Delete server via cloud provider gateway
             if deployment.external_node_id:
@@ -776,6 +811,7 @@ class NodeDeploymentService:
                         f"Server deletion failed: {delete_result.unwrap_err()}",
                         stage="destroying",
                         audit_ctx=audit_ctx,
+                        lease=lease,
                     )
                     return Err(
                         f"Server deletion failed: {delete_result.unwrap_err()}",
@@ -785,8 +821,7 @@ class NodeDeploymentService:
                 # Cloud VM is gone. Clear external_node_id NOW so that if a later
                 # step (vault-key revocation) fails and the destroy is retried, the
                 # retry does not re-invoke delete_server against an already-deleted VM.
-                deployment.external_node_id = ""
-                deployment.save(update_fields=["external_node_id", "updated_at"])
+                owned_update(lease, deployment, external_node_id="")
 
                 # Clean up SSH key from provider
                 ssh_key_name = f"praho-{deployment.hostname}"
@@ -838,13 +873,11 @@ class NodeDeploymentService:
             key_delete_result = self._ssh_manager.delete_deployment_key(deployment, user=user)
             if key_delete_result.is_err():
                 error_msg = f"SSH key revocation failed: {key_delete_result.unwrap_err()}"
-                self._mark_failed(deployment, error_msg, stage="destroying", audit_ctx=audit_ctx)
+                self._mark_failed(deployment, error_msg, stage="destroying", audit_ctx=audit_ctx, lease=lease)
                 return Err(error_msg)
 
             # Mark as destroyed
-            deployment.destroyed_at = timezone.now()
-            deployment.save(update_fields=["destroyed_at", "updated_at"])
-            deployment.transition_to("destroyed")
+            owned_transition(lease, deployment, "destroyed", release=True, destroyed_at=timezone.now())
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -862,9 +895,12 @@ class NodeDeploymentService:
             logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
             return Ok(True)
 
+        except OperationOwnershipLostError as lost:
+            logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Stopped without writing: {lost}")
+            return Err(f"Destruction stopped: {lost}")
         except Exception as e:
             logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
-            self._mark_failed(deployment, str(e), stage="destroying", audit_ctx=audit_ctx)
+            self._mark_failed(deployment, str(e), stage="destroying", audit_ctx=audit_ctx, lease=lease)
 
             # Audit: destroy failed
             try:
@@ -903,12 +939,15 @@ class NodeDeploymentService:
         if fqdn_result.is_err():
             return Err(fqdn_result.unwrap_err())
 
-        # Increment retry count
-        deployment.retry_count += 1
-        deployment.save(update_fields=["retry_count", "updated_at"])
-
-        # Reset to pending via state machine (failed -> pending is a valid transition)
-        deployment.transition_to("pending")
+        # One locked claim: failed -> pending, the attempt counted in the same statement. A second retry
+        # of the same row finds it no longer failed and runs nothing.
+        claim = claim_operation(
+            deployment.pk, from_states=("failed",), to_status="pending", kind="retry", increment_retry=True
+        )
+        if claim.is_err():
+            return Err(claim.unwrap_err())
+        lease = claim.unwrap()
+        deployment.refresh_from_db()
 
         logger.info(f"[Retry:{deployment.hostname}] Retrying deployment (attempt {deployment.retry_count})")
 
@@ -926,6 +965,7 @@ class NodeDeploymentService:
             credentials=credentials,
             cloudflare_api_token=cloudflare_api_token,
             user=user,
+            expected_token=lease.token,
         )
 
     def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic
@@ -1020,9 +1060,9 @@ class NodeDeploymentService:
                     logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
-            # Update deployment with new size
+            # Write only the size: a full save would write back a lifecycle state read before the resize.
             deployment.node_size = new_size
-            deployment.save()
+            deployment.save(update_fields=["node_size", "updated_at"])
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -1522,6 +1562,7 @@ class NodeDeploymentService:
         token: str,
         zone_id: str,
         log: Callable[[str, str], None],
+        lease: OperationLease,
     ) -> Result[None, str]:
         """Create/reconcile the node's A (+AAAA) records; persist ids immediately.
 
@@ -1558,29 +1599,26 @@ class NodeDeploymentService:
         # safe_request's DNS fallback, so a POST may reach Cloudflare even when the call ends in
         # an error with no returned id. This intent marker gives owner-tag teardown a zone to
         # sweep even when reconcile returns no applied records (codex P1).
-        deployment.dns_record_ids = [
-            {
-                "provider": "cloudflare",
-                "zone_id": zone_id,
-                "record_id": "",
-                "type": "intent",
-                "name": fqdn,
-                "owner_tag": owner_tag,
-            }
-        ]
-        deployment.save(update_fields=["dns_record_ids", "updated_at"])
+        intent = {
+            "provider": "cloudflare",
+            "zone_id": zone_id,
+            "record_id": "",
+            "type": "intent",
+            "name": fqdn,
+            "owner_tag": owner_tag,
+        }
+        owned_update(lease, deployment, dns_record_ids=[intent])
 
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag)
         if outcome.applied:
-            deployment.dns_record_ids = [r.as_provenance() for r in outcome.applied]
-            deployment.save(update_fields=["dns_record_ids", "updated_at"])
+            owned_update(lease, deployment, dns_record_ids=[r.as_provenance() for r in outcome.applied])
             log("info", f"DNS configured: {', '.join(r.record_type for r in outcome.applied)} for {fqdn}")
         if outcome.error:
             return Err(f"DNS configuration failed: {outcome.error}")
         return Ok(None)
 
     @staticmethod
-    def _delete_owned_dns(deployment: NodeDeployment) -> None:
+    def _delete_owned_dns(deployment: NodeDeployment, lease: OperationLease | None = None) -> None:
         """Owner-scoped, best-effort DNS teardown; safe to call from every compensation path.
 
         Deletes by owner tag (authoritative — reclaims replay orphans) in each record's own
@@ -1634,14 +1672,25 @@ class NodeDeploymentService:
                 message=f"DNS teardown incomplete; {len(remaining)} orphaned record(s) need reconciliation",
                 phase="destroy",
             )
-        deployment.dns_record_ids = remaining
-        deployment.save(update_fields=["dns_record_ids", "updated_at"])
+        NodeDeploymentService._write_dns_record_ids(deployment, remaining, lease)
+
+    @staticmethod
+    def _write_dns_record_ids(
+        deployment: NodeDeployment, entries: list[dict[str, Any]], lease: OperationLease | None
+    ) -> None:
+        """Record the DNS entries still unresolved; owned when the caller holds a lease."""
+        if lease is not None:
+            owned_update(lease, deployment, dns_record_ids=entries)
+        else:
+            deployment.dns_record_ids = entries
+            deployment.save(update_fields=["dns_record_ids", "updated_at"])
 
     def _cleanup_resources(
         self,
         gateway: CloudProviderGateway,
         resources: list[tuple[str, str]],
         deployment: NodeDeployment,
+        lease: OperationLease | None = None,
     ) -> None:
         """
         Best-effort cleanup of cloud resources created during a failed deployment.
@@ -1655,43 +1704,15 @@ class NodeDeploymentService:
             deployment: The NodeDeployment instance (used for logging only)
         """
         hostname = deployment.hostname
+        if lease is not None and not still_owns(lease):
+            # The row belongs to another owner now; its resources are no longer ours to delete.
+            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup skipped: this operation no longer owns the deployment")
+            return
         logger.info(f"[Deployment:{hostname}] Starting best-effort cleanup of {len(resources)} resource(s)")
 
         for resource_type, resource_id in reversed(resources):
             try:
-                if resource_type == "server":
-                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting server id={resource_id}")
-                    result = gateway.delete_server(resource_id)
-                    if result.is_err():
-                        logger.warning(
-                            f"[Deployment:{hostname}] Cleanup: server deletion failed: {result.unwrap_err()}"
-                        )
-                    else:
-                        logger.info(f"[Deployment:{hostname}] Cleanup: server id={resource_id} deleted ✅")
-
-                elif resource_type == "firewall":
-                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting firewall id={resource_id}")
-                    result = gateway.delete_firewall(resource_id)
-                    if result.is_err():
-                        logger.warning(
-                            f"[Deployment:{hostname}] Cleanup: firewall deletion failed: {result.unwrap_err()}"
-                        )
-                    else:
-                        logger.info(f"[Deployment:{hostname}] Cleanup: firewall id={resource_id} deleted ✅")
-
-                elif resource_type == "ssh_key":
-                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting SSH key name={resource_id}")
-                    result = gateway.delete_ssh_key(resource_id)
-                    if result.is_err():
-                        logger.warning(
-                            f"[Deployment:{hostname}] Cleanup: SSH key deletion failed: {result.unwrap_err()}"
-                        )
-                    else:
-                        logger.info(f"[Deployment:{hostname}] Cleanup: SSH key name={resource_id} deleted ✅")
-
-                else:
-                    logger.warning(f"[Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
-
+                self._delete_created_resource(gateway, resource_type, resource_id, hostname)
             except Exception as exc:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
@@ -1700,9 +1721,33 @@ class NodeDeploymentService:
         # DNS records are created after the VM, so a post-DNS failure reaches this compensator.
         # Remove any records this deployment owns so we never leave an A record pointing at a
         # released IP (subdomain-takeover risk) — the third teardown path (#347 GAP 3).
-        self._delete_owned_dns(deployment)
+        try:
+            self._delete_owned_dns(deployment, lease)
+        except OperationOwnershipLostError as lost:
+            logger.warning(f"⚠️ [Deployment:{hostname}] DNS cleanup not recorded: {lost}")
 
         logger.info(f"[Deployment:{hostname}] Cleanup complete")
+
+    @staticmethod
+    def _delete_created_resource(
+        gateway: CloudProviderGateway, resource_type: str, resource_id: str, hostname: str
+    ) -> None:
+        """Delete one resource this deployment created; logs the outcome, raises only what the SDK raises."""
+        deleters = {
+            "server": ("server id", gateway.delete_server),
+            "firewall": ("firewall id", gateway.delete_firewall),
+            "ssh_key": ("SSH key name", gateway.delete_ssh_key),
+        }
+        if resource_type not in deleters:
+            logger.warning(f"[Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
+            return
+        label, delete = deleters[resource_type]
+        logger.info(f"[Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
+        result = delete(resource_id)
+        if result.is_err():
+            logger.warning(f"[Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
+        else:
+            logger.info(f"[Deployment:{hostname}] Cleanup: {label}={resource_id} deleted ✅")
 
     def _mark_failed(
         self,
@@ -1710,8 +1755,13 @@ class NodeDeploymentService:
         error_message: str,
         stage: str = "",
         audit_ctx: InfrastructureAuditContext | None = None,
+        lease: OperationLease | None = None,
     ) -> None:
-        """Mark deployment as failed with error message"""
+        """Mark deployment as failed with error message.
+
+        With a lease, the failure settles the operation and is written only while the lease still owns
+        the row; a worker that lost ownership writes no status, log or audit.
+        """
         from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
         )
@@ -1719,12 +1769,14 @@ class NodeDeploymentService:
         # Capture the current stage before transitioning to failed
         failed_stage = stage or deployment.status
 
-        try:
-            deployment.transition_to("failed")
-        except ValidationError:
-            # Force-set if transition is somehow invalid (e.g., from destroyed)
-            deployment.status = "failed"
-            deployment.save(update_fields=["status", "updated_at"])
+        if lease is not None:
+            try:
+                owned_transition(lease, deployment, "failed", error_message, release=True)
+            except OperationOwnershipLostError as lost:
+                logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failure not recorded: {lost}")
+                return
+        else:
+            self._force_failed(deployment)
 
         NodeDeploymentLog.objects.create(
             deployment=deployment,
@@ -1745,6 +1797,16 @@ class NodeDeploymentService:
             logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment failed")
 
         logger.error(f"[Deployment:{deployment.hostname}] Failed at stage '{failed_stage}': {error_message}")
+
+    @staticmethod
+    def _force_failed(deployment: NodeDeployment) -> None:
+        """Unowned failure write, kept for callers that hold no lease."""
+        try:
+            deployment.transition_to("failed")
+        except ValidationError:
+            # Force-set if transition is somehow invalid (e.g., from destroyed)
+            deployment.status = "failed"
+            deployment.save(update_fields=["status", "updated_at"])
 
 
 # Module-level singleton
