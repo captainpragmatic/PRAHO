@@ -14,6 +14,8 @@ import dns.name
 import dns.rcode
 import dns.rdatatype
 
+from apps.infrastructure.dns_probes import probeable
+
 from .dns_zone_import import make_record_data
 
 MAX_BATCH_QUERIES = 4
@@ -40,8 +42,8 @@ class _Channel:
         except self.error_type as error:
             raise ZoneCheckError("dns_observation_unknown") from error
 
-    def query(self, name: str, kind: str, *, parent: bool = False) -> Any:
-        return self._call(lambda: self.transport.query(name, kind, parent=parent))
+    def query(self, name: str, kind: str, *, parent: bool = False, wildcard_owner: bool = False) -> Any:
+        return self._call(lambda: self.transport.query(name, kind, parent=parent, wildcard_owner=wildcard_owner))
 
     def assigned(self, name: str, kind: str, nameservers: tuple[str, ...], zone: str) -> Any:
         if not nameservers or len(nameservers) > MAX_NAMESERVERS:
@@ -178,6 +180,9 @@ def probe_import_batch(
         "observations": {},
         "checked_at": datetime.now(UTC).isoformat(),
     }
+    # A name the probe refuses is refused whatever the network does: report it before any packet.
+    if not all(probeable(owner, wildcard_owner=True) for owner, _kind in queries):
+        return {**result, "ok": False, "error": "source_owner_uncheckable"}
     if cursor == 0:
         handover = handover_snapshot(name, channel=selected)
         if handover["state"] != "verified":
@@ -187,7 +192,7 @@ def probe_import_batch(
     for index in range(cursor, min(len(queries), cursor + min(MAX_BATCH_QUERIES, max(1, batch_size)))):
         owner, kind = queries[index]
         try:
-            answer = selected.query(owner, kind)
+            answer = selected.query(owner, kind, wildcard_owner=True)
             actual_kind, values = _entries(answer)
         except (ZoneCheckError, dns.exception.DNSException, ValueError, OSError):
             return {**result, "ok": False, "error": "dns_observation_unknown"}

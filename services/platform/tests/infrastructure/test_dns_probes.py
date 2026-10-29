@@ -537,3 +537,29 @@ class DnsTreeClimbStopsBelowTheRootTests(SimpleTestCase):
                     outcome = type(error).__name__
                 self.assertEqual(outcome, "dns_zone_unknown")
                 self.assertNotIn(".", asked)
+
+
+def test_a_wildcard_owner_is_refused_everywhere_but_the_import_cross_check_opt_in():
+    wire = Wire()
+    transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
+    owner = f"*.shop.{DOMAIN}"
+    for refused in (
+        lambda: transport.query(owner, "A"),
+        lambda: transport.query(owner, "CAA", parent=True),
+        lambda: transport.zone(owner),
+    ):
+        with pytest.raises(ProbeError) as error:
+            refused()
+        assert error.value.code == "invalid_dns_name"
+    # The opt-in admits exactly one whole leftmost `*` label, nothing else holding one.
+    for name in (f"a.*.{DOMAIN}", f"*.*.{DOMAIN}", f"**.{DOMAIN}", f"*foo.{DOMAIN}", f"a*b.{DOMAIN}"):
+        with pytest.raises(ProbeError) as error:
+            transport.query(name, "A", wildcard_owner=True)
+        assert error.value.code == "invalid_dns_name", name
+    assert wire.calls == []
+
+
+def test_the_monitor_still_refuses_a_wildcard_hosting_domain_before_any_packet():
+    result, wire = report(target=replace(TARGET, domain=f"*.{DOMAIN}"))
+    assert {component["code"] for component in result["components"].values()} == {"invalid_probe_target"}
+    assert wire.calls == []

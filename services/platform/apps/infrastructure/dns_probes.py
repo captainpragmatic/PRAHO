@@ -147,11 +147,33 @@ class Records:
         }
 
 
-def _name(value: str) -> str:
+def _name(value: str, *, wildcard_owner: bool = False) -> str:
+    """The canonical name; no label may hold `*`.
+
+    `wildcard_owner` admits one leftmost `*` label, for the import cross-check only: a query naming
+    a wildcard's own owner matches that RRset itself (RFC 4592).
+    """
     parsed = dns.name.from_text(value).canonicalize()
-    if len(parsed.labels) < MIN_DNS_LABELS or len(parsed.labels) > MAX_DISCOVERY_LABELS or b"*" in parsed.labels:
+    checked = parsed.labels[1:] if wildcard_owner and parsed.is_wild() else parsed.labels
+    if (
+        len(parsed.labels) < MIN_DNS_LABELS
+        or len(parsed.labels) > MAX_DISCOVERY_LABELS
+        or any(b"*" in label for label in checked)
+    ):
         raise ProbeError("invalid_dns_name")
     return parsed.to_text(omit_final_dot=True)
+
+
+def probeable(value: str, *, wildcard_owner: bool = False) -> bool:
+    """Whether `DnsProbeTransport.query` would ask about this name at all.
+
+    False is a property of the name, decided before any packet: retrying cannot change it.
+    """
+    try:
+        _name(value, wildcard_owner=wildcard_owner)
+    except (ProbeError, dns.exception.DNSException):
+        return False
+    return True
 
 
 def _parent(value: str) -> str:
@@ -284,13 +306,14 @@ class DnsProbeTransport:
                 raise ProbeError("dns_authority_address_unsafe") from error
         return self._addresses[server]
 
-    def query(self, name: str, kind: str, *, parent: bool = False) -> Records:
+    def query(self, name: str, kind: str, *, parent: bool = False, wildcard_owner: bool = False) -> Records:
         self.budget.check()
-        name = _name(name)
+        name = _name(name, wildcard_owner=wildcard_owner)
         key = (name, kind, parent)
         if key in self._cache:
             return self._cache[key]
-        zone = self.zone(_parent(name) if parent else name)
+        # A wildcard owner lives in its parent's zone; discovery never asks for the `*` name.
+        zone = self.zone(_parent(name) if parent or dns.name.from_text(name).is_wild() else name)
         answers = [
             self._parse(self._ask(name, kind, self._address(server), recursive=False, zone=zone), name, kind, zone)
             for server in self._servers(zone)
