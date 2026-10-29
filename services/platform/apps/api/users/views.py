@@ -1033,7 +1033,8 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
 def mfa_disable_api(request: HttpRequest, user: User) -> Response:
     """Require current password and a second factor before removing MFA."""
     with transaction.atomic():
-        user = User.objects.select_for_update().get(pk=user.pk)
+        # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+        user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
         before = user.get_session_auth_hash()  # the session's hash before the credential changes
         if staff_cannot_disable_mfa(user):
             # The code lets the Portal tell this refusal from wrong credentials.
@@ -1582,7 +1583,8 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
     if not isinstance(current, str) or not isinstance(new_password, str):
         return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
     with transaction.atomic():
-        user = User.objects.select_for_update().get(pk=user.pk)
+        # NO KEY UPDATE, as the identity check: a concurrent end() takes a key-share lock here.
+        user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
         before = user.get_session_auth_hash()  # the session's hash before the credential changes
         if user.is_account_locked():
             return Response(_ACCOUNT_LOCKED, status=400)

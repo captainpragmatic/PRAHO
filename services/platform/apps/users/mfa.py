@@ -688,8 +688,9 @@ class MFAService:
         if action not in {"enable", "disable", "recover", "rotate"}:
             raise ValueError("Unsupported MFA state change")
         with transaction.atomic():
-            # Serialize first-row creation and coordinate with enrollment API locks.
-            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            # Serialize first-row creation and coordinate with enrollment API locks. NO KEY UPDATE, as
+            # they take it: a stronger lock here would undo theirs within the same transaction.
+            locked_user = User.objects.select_for_update(no_key=True).get(pk=user.pk)
             if action == "enable" and locked_user.two_factor_enabled:
                 raise ValueError("TOTP/2FA is already enabled for this user")
             credential_version, _created = UserCredentialVersion.objects.select_for_update().get_or_create(
