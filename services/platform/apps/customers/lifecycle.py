@@ -56,3 +56,31 @@ def hold_for_suspension(service: Any) -> bool:
         overdue.save(update_fields=["suspension_reason", "updated_at"])
         service.suspension_reason = CUSTOMER_SUSPENSION_REASON
     return True
+
+
+# Who may take which transition. Suspend also suspends all the customer's hosting.
+STATUS_ACTIONS: Final = ("activate", "deactivate", "reactivate", "suspend", "unsuspend")
+_EVERY_ACTION: Final = frozenset(STATUS_ACTIONS)
+_ACTIONS_BY_ROLE: Final = {
+    "admin": _EVERY_ACTION,
+    "manager": _EVERY_ACTION,
+    "support": frozenset({"suspend", "unsuspend"}),
+}
+
+
+def role_status_actions(user: Any) -> frozenset[str]:
+    """The transitions this staff member's role allows, whatever the customer's status."""
+    from apps.common.decorators import is_administrator  # noqa: PLC0415  # Deferred: decorators import views
+
+    if not getattr(user, "is_authenticated", False) or not getattr(user, "is_active", False):
+        return frozenset()
+    if is_administrator(user):
+        return _EVERY_ACTION
+    return _ACTIONS_BY_ROLE.get(getattr(user, "staff_role", "") or "", frozenset())
+
+
+def status_actions(user: Any, customer: Any) -> list[str]:
+    """The transitions this staff member may take on this customer now, in the order staff read them."""
+    allowed = role_status_actions(user)
+    available = {transition.name for transition in customer.get_available_status_transitions()}
+    return [action for action in STATUS_ACTIONS if action in allowed and action in available]
