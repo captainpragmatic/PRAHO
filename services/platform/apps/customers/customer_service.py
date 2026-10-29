@@ -143,3 +143,30 @@ class CustomerService:
             "address_count": customer.addresses.count(),
             "note_count": customer.notes.count(),
         }
+
+
+def activate_customer_after_payment(customer_id: int, invoice_id: int) -> None:
+    """Move a prospect to active, or an inactive customer back to active, after a paid invoice (ADR-0066).
+
+    Runs after the payment commits, in its own transaction, and never raises: a failure here must not
+    touch the payment, and only costs the label and its email, which staff can set from the customer
+    page. A suspended or already active customer is left as it is. Running twice changes nothing.
+    """
+    from django.db import transaction  # noqa: PLC0415
+
+    from .customer_models import Customer  # noqa: PLC0415
+
+    try:
+        with transaction.atomic():
+            customer = Customer.objects.select_for_update(of=("self",)).filter(pk=customer_id).first()
+            if customer is None or customer.status not in ("prospect", "inactive"):
+                return
+            old_status = customer.status
+            if old_status == "prospect":
+                customer.activate()
+            else:
+                customer.reactivate()
+            customer.save(update_fields=["status", "updated_at"])
+        logger.info(f"✅ [Customer] {customer_id} {old_status} → active after invoice {invoice_id} was paid")
+    except Exception:
+        logger.exception(f"🔥 [Customer] Could not activate customer {customer_id} after invoice {invoice_id}")

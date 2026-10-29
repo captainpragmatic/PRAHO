@@ -15,6 +15,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -1484,6 +1485,11 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
             # Defence behind the transition guard, and it covers more than the receipt:
             # this handler also credits payment history and activates pending services.
             return
+        # First, so no later optional step can keep it from being scheduled. It runs after the
+        # payment commits, in its own transaction, and never raises (ADR-0066).
+        from apps.customers.customer_service import activate_customer_after_payment  # ADR-0007: cross-app, deferred
+
+        transaction.on_commit(partial(activate_customer_after_payment, invoice.customer_id, invoice.pk))
         if not invoice.paid_at:
             # Required invoice data: database failures must reach the caller.
             Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
