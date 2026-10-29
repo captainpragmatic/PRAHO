@@ -223,6 +223,29 @@ def test_the_dco_check_reads_the_queues_real_squash_and_the_description(tmp_path
     assert _dco(tmp_path, "pull_request", base, signed, body="Summary only.") != 0
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        (REPO / ".github" / "pull_request_template.md").read_text(encoding="utf-8"),  # unchanged template
+        "We use Signed-off-by: trailers on every commit.",  # the word in prose
+        "Summary.\n\nSigned-off-by:",  # a trailer with nobody in it
+        "Summary.\n\nSigned-off-by: A",  # no address
+    ],
+)
+def test_only_a_real_trailer_signs_a_description_or_a_squash(tmp_path: Path, body: str) -> None:
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "config", "user.email", "ci@example.com")
+    _git(tmp_path, "config", "user.name", "CI")
+    base = _commit(tmp_path, "base")
+    squash = _commit(tmp_path, f"feat: a change (#1)\n\n{body}")
+    signed = _commit(tmp_path, "feat: a change (#1)\n\nSigned-off-by: A <a@example.com>")
+
+    assert _dco(tmp_path, "pull_request", signed, signed, body=body) != 0
+    assert _dco(tmp_path, "merge_group", base, squash) != 0
+    # GitHub keeps the carriage returns of a description typed in the browser.
+    assert _dco(tmp_path, "pull_request", signed, signed, body="Summary.\r\n\r\nSigned-off-by: A <a@example.com>\r\n") == 0
+
+
 def test_a_changed_description_is_checked_again() -> None:
     triggers = load_workflow(WORKFLOWS / "dco-check.yml")["on"]
     assert "edited" in triggers["pull_request"]["types"]
