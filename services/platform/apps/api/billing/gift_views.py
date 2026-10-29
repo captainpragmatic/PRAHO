@@ -12,6 +12,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.api.secure_auth import BILLING_ROLES, require_customer_role_in
+from apps.api.step_up import step_up_refusal
 from apps.audit.services import AuditService
 from apps.billing.bank_transfer import bank_transfer_instructions
 from apps.billing.currency_policy import SellingCurrencyChangedError, get_selling_currency_policy
@@ -288,6 +289,9 @@ def reveal(request: HttpRequest, customer: Customer) -> Response:
         return _error(_("Gift-card purchase not found."), status.HTTP_404_NOT_FOUND)
     if not purchase.can_reveal_code:
         return _error(_("The code is available after verified payment while the card has usable value."))
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
     AuditService.log_simple_event(
         "gift_card_code_revealed",
         content_object=purchase.gift_card,

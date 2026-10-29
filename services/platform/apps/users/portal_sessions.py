@@ -42,6 +42,8 @@ ABSOLUTE_TIMEOUT = timedelta(hours=8)
 # write a minute, not one per request.
 TOUCH_INTERVAL = timedelta(seconds=60)
 SWEEP_RETENTION = timedelta(days=1)
+# A sensitive action needs a password (and second factor) check this recent; login counts as one.
+STEP_UP_WINDOW = timedelta(seconds=300)
 SWEEP_BATCH = 500
 
 REASON_LOGOUT = "logout"
@@ -226,6 +228,22 @@ def restamp(row: PortalSession | None, *, old_hash: str, new_hash: str) -> bool:
             credential_snapshot=new_hash
         )
     )
+
+
+def recently_reauthenticated(row: PortalSession, now: datetime) -> bool:
+    """True when the session's last identity check is at most STEP_UP_WINDOW old, and not in the future."""
+    if row.reauth_at is None:
+        return False
+    return timedelta(0) <= now - row.reauth_at <= STEP_UP_WINDOW
+
+
+def mark_reauth(row: PortalSession) -> bool:
+    """Record a passed identity check on a live session; an ended one is never marked."""
+    now = timezone.now()
+    marked = PortalSession.objects.filter(_live(now), pk=row.pk).update(reauth_at=now)
+    if marked:
+        row.reauth_at = now
+    return bool(marked)
 
 
 def sweep_expired(*, now: datetime | None = None) -> int:
