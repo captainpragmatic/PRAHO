@@ -11,7 +11,19 @@ from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
 from apps.common.secret_urls import scrub_sentry_event
 
-SECRET_KEYS = ("cnp", "cnp_fiscal_code", "epp_code", "auth_code", "authorization_key", "transfer_code")
+# Sentry's own denylist covers passwords and tokens; these are PRAHO's other secrets: registrant
+# identity and domain transfer codes, the identity check's code and the portal session's id.
+SECRET_KEYS = (
+    "cnp",
+    "cnp_fiscal_code",
+    "epp_code",
+    "auth_code",
+    "authorization_key",
+    "transfer_code",
+    "mfa_code",
+    "session_id",
+    "portal_session_id",
+)
 
 
 class SentryOptions(TypedDict):
