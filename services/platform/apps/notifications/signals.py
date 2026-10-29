@@ -212,6 +212,7 @@ def handle_suppression_change(sender: Any, instance: Any, created: bool, **kwarg
         {
             "suppression_id": str(instance.id),
             "reason": instance.reason,
+            "marketing_opt_out": instance.marketing_opt_out_at is not None,
             "email_hash": instance.email_hash[:8] if instance.email_hash else None,
         },
     )
@@ -228,6 +229,7 @@ def handle_suppression_removed(sender: Any, instance: Any, **kwargs: Any) -> Non
         {
             "suppression_id": str(instance.id),
             "reason": instance.reason,
+            "marketing_opt_out": instance.marketing_opt_out_at is not None,
         },
     )
 

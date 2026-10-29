@@ -20,6 +20,7 @@ from apps.promotions.gift_cards import GiftRecipient, create_public_purchase, st
 from apps.promotions.gift_purchase_policy import gift_purchase_options
 from apps.promotions.models import GiftCardPurchase
 from apps.users.models import User
+from apps.users.security_notices import notify_gift_card_revealed
 
 
 class RecipientSerializer(serializers.Serializer):
@@ -294,6 +295,9 @@ def reveal(request: HttpRequest, customer: Customer) -> Response:
         description="Buyer revealed the purchased gift-card code",
         metadata={"purchase_id": str(purchase.pk)},
     )
+    revealer = cast(User | None, getattr(request, "_customer_user", None))
+    if revealer is not None:
+        notify_gift_card_revealed(revealer, purchase.gift_card.code)
     return _response({"success": True, "code": purchase.gift_card.code})
 
 
