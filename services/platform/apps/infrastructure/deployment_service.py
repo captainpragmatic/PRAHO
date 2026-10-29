@@ -52,6 +52,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The orderable check runs on a queue worker before the claim: fail fast instead of the SDK's
+# default of no timeout and five retries.
+ORDERABLE_CHECK_TIMEOUT_SECONDS = 10
+ORDERABLE_CHECK_MAX_RETRIES = 1
+
 
 @dataclass
 class DeploymentProgress:
@@ -143,13 +148,69 @@ class NodeDeploymentService:
                 )
             )
 
-    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def _check_orderable(self, deployment: NodeDeployment, credentials: dict[str, str]) -> Result[bool, str]:
+        """Ask the provider, before the first write for a new server, whether its size is still sold in its region.
+
+        The synced catalogue can be a day old, and Hetzner retires server types per location. A
+        refusal queues a provider sync, which corrects the catalogue; this check never edits it.
+        """
+        api_token = credentials.get("api_token", "")
+        if not api_token:
+            return Ok(True)  # deploy_node fails on the missing token itself, before any provider call.
+        server_type = deployment.node_size.provider_type_id
+        location = deployment.region.provider_region_id
+        try:
+            gateway = get_cloud_gateway(
+                deployment.provider.provider_type,
+                api_token,
+                timeout=ORDERABLE_CHECK_TIMEOUT_SECONDS,
+                max_retries=ORDERABLE_CHECK_MAX_RETRIES,
+            )
+            orderable = gateway.server_type_orderable(server_type, location)
+        except Exception as error:  # Runs before the claim: an unexpected fault refuses, it never escapes.
+            orderable = Err(str(error))
+        if orderable.is_err():
+            return self._refuse_unorderable(
+                deployment,
+                f"Could not confirm that {server_type} can be ordered in {location}; "
+                f"no server was created: {orderable.unwrap_err()}",
+            )
+        if orderable.unwrap() is False:
+            self._queue_catalogue_sync(deployment)
+            return self._refuse_unorderable(
+                deployment,
+                f"{server_type} can no longer be ordered in {location}; no server was created. "
+                "Choose another size; a provider sync has been queued to refresh the catalogue.",
+            )
+        return Ok(True)
+
+    @staticmethod
+    def _refuse_unorderable(deployment: NodeDeployment, message: str) -> Result[bool, str]:
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+        logger.warning(f"⚠️ [Deployment:{deployment.hostname}] {message}")
+        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=message, phase="init")
+        return Err(message)
+
+    @staticmethod
+    def _queue_catalogue_sync(deployment: NodeDeployment) -> None:
+        from apps.infrastructure.tasks import (  # noqa: PLC0415  # Deferred: tasks imports this module
+            queue_sync_providers,
+        )
+
+        try:
+            queue_sync_providers()
+        except Exception as error:  # The refusal stands without a sync; the daily sync corrects the catalogue.
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Could not queue a provider sync: {error}")
+
+    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Complexity: multi-step business logic; retry passes check_orderable
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
         progress_callback: Callable[..., None] | None = None,
+        check_orderable: bool = True,
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -160,6 +221,7 @@ class NodeDeploymentService:
             cloudflare_api_token: Cloudflare API token (optional)
             user: User performing the deployment
             progress_callback: Optional callback for progress updates
+            check_orderable: False when the caller (retry_deployment) already ran the orderable check
 
         Returns:
             Result with DeploymentResult or error
@@ -206,6 +268,14 @@ class NodeDeploymentService:
             # Check if deployment is enabled
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
+
+            # A new server will be created: confirm its size is still sold in its region before the
+            # claim and before any vault or provider write. An existing VM is reused unchecked, and a
+            # row the claim will refuse anyway is not checked.
+            if check_orderable and not deployment.external_node_id and deployment.status in ("pending", "failed"):
+                orderable_result = self._check_orderable(deployment, credentials)
+                if orderable_result.is_err():
+                    return Err(orderable_result.unwrap_err())
 
             # Atomic lock to prevent concurrent deployments of the same node
             with transaction.atomic():
@@ -322,6 +392,13 @@ class NodeDeploymentService:
                     log_deployment("warning", "Previously created server not found, creating new one")
                     deployment.external_node_id = ""
                     deployment.save(update_fields=["external_node_id", "updated_at"])
+                    # The pre-claim check was skipped for the stored server; a replacement is new.
+                    orderable_result = self._check_orderable(deployment, credentials)
+                    if orderable_result.is_err():
+                        self._mark_failed(
+                            deployment, orderable_result.unwrap_err(), stage="provision_server", audit_ctx=audit_ctx
+                        )
+                        return Err(orderable_result.unwrap_err())
 
             if not deployment.external_node_id:
                 log_deployment("info", f"Creating server via {provider_type} API")
@@ -902,6 +979,11 @@ class NodeDeploymentService:
         fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
         if fqdn_result.is_err():
             return Err(fqdn_result.unwrap_err())
+        # A refused size is not an attempt: check before counting it, and only once.
+        if not deployment.external_node_id:
+            orderable_result = self._check_orderable(deployment, credentials)
+            if orderable_result.is_err():
+                return Err(orderable_result.unwrap_err())
 
         # Increment retry count
         deployment.retry_count += 1
@@ -926,6 +1008,7 @@ class NodeDeploymentService:
             credentials=credentials,
             cloudflare_api_token=cloudflare_api_token,
             user=user,
+            check_orderable=False,
         )
 
     def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic

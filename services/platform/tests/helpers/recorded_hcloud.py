@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from hcloud import APIException
+
 _LOCATION_IDS = {"fsn1": 1, "nbg1": 2, "hel1": 3, "ash": 4, "hil": 5, "sin": 6}
 
 _RETIRED = {
@@ -119,10 +121,11 @@ def _page(key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class RecordedHcloudTransport:
-    """Stands in for hcloud's ClientBase.request and answers only the two catalogue listings.
+    """Stands in for hcloud's ClientBase.request: answers the two catalogue listings, and server
+    lookups with not_found.
 
-    Any other request (a lazy BoundLocation reload, say) fails the test, so code under test
-    can be proven to read only what the listings already carry.
+    Any other request (a lazy BoundLocation reload, or any write) fails the test, so code under
+    test can be proven to read only what the listings carry and to write nothing.
     """
 
     def __init__(self, server_types: list[dict[str, Any]], locations: list[dict[str, Any]] | None = None) -> None:
@@ -140,4 +143,7 @@ class RecordedHcloudTransport:
             )
         if method == "GET" and url == "/locations":
             return _page("locations", self._locations)
+        if method == "GET" and url.startswith("/servers/"):
+            # The recorded project holds no servers: a stored server id is stale.
+            raise APIException(code="not_found", message="server not found", details=None)
         raise AssertionError(f"unexpected hcloud request: {method} {url}")
