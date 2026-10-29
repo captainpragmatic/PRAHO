@@ -71,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Customers created by staff can use the Portal and become active.** Staff-created customers start as prospects, and nothing ever moved them on, while Platform refused every customer-scoped call for a customer that was not active: their people could sign in but not price a cart, pay or open a ticket. Inactive and suspended customers could not pay either. A customer's status now describes its lifecycle and decides no access (ADR-0066):
+  - A first paid invoice makes a prospect active, and a new one makes an inactive customer active again.
+  - Staff change the status from the customer page: admins and managers every transition, support suspend and unsuspend.
+  - A suspended customer's people still read, pay and open tickets, but the customer gets no new or restored hosting and its people publish no DNS changes until staff unsuspend it.
+  - "Sign in as customer" works for a customer in any status.
+  - The customer status emails greeted "Hello ," and now use the customer's name; activating a customer no longer switches on its unpaid services.
+
 - Native Platform recovery runs its safety backup with the deployed service environment, verifies fresh completion evidence before replacing data, and streams private media to the unprivileged extractor. Native and Docker restore entrypoints are now named `restore-platform.sh`; Make commands and rollback callers use the explicit name. Interactive Docker restore preserves backup paths containing spaces.
 - Health evidence follows edits to existing settings, backup completion preserves concurrently registered runner configuration, and non-Virtualmin panels retain their local backups under the Platform-managed default.
 - Existing health schedules adopt the ten-minute cadence immediately instead of retaining a daily or hourly next-run deadline.

@@ -7,7 +7,7 @@
 ## Decision
 
 An administrator or support staff member may open a **customer view**: the customer portal as one
-active member of one active customer, read-only, for at most 30 minutes and 10 idle minutes. It is a
+active member of one customer, in any lifecycle status (ADR-0066), read-only, for at most 30 minutes and 10 idle minutes. It is a
 Platform-owned portal session of its own tier (ADR-0017 section 6), never a second login, and it holds
 no credential of the customer.
 
