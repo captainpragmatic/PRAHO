@@ -154,6 +154,26 @@ class NodeDeploymentService:
             )
 
     @staticmethod
+    def _provenance_refusal(deployment: NodeDeployment, api_token: str) -> str:
+        """Why this token may not act on the row's provider resources, or "" when it may."""
+        may_hold_resources = bool(deployment.external_node_id) or deployment.server_create_state in (
+            "intent",
+            "unknown",
+            "created",
+        )
+        if not may_hold_resources or deployment.provider_token_fingerprint == provider_token_fingerprint(api_token):
+            return ""
+        if not deployment.provider_token_fingerprint:
+            return gettext(
+                "The provider token that created this deployment's resources was never recorded; "
+                "reconcile its provider resources before retrying."
+            )
+        return gettext(
+            "This deployment's provider resources were created with a different provider token; "
+            "reconcile them before retrying."
+        )
+
+    @staticmethod
     def _claim_deploy(
         deployment: NodeDeployment, expected_token: uuid.UUID | None
     ) -> Result[tuple[OperationLease, str], str]:
@@ -276,20 +296,20 @@ class NodeDeploymentService:
                 return Err(dns_config_result.unwrap_err())
             dns_token, dns_zone_id = dns_config_result.unwrap()
 
-            # Existing VMs still authorize their original deployment identity.
+            # Existing VMs still authorize their original deployment identity, and so does a stored vault
+            # key: a server adopted by label after a lost create answer only accepts the first key.
             report_progress("ssh_key")
-            log_deployment(
-                "info", "Reusing deployment SSH key" if deployment.external_node_id else "Generating deployment SSH key"
-            )
+            reuse_key = bool(deployment.external_node_id or deployment.ssh_key_credential_id)
+            log_deployment("info", "Reusing deployment SSH key" if reuse_key else "Generating deployment SSH key")
 
             key_result = (
                 self._ssh_manager.get_deployment_key(deployment, user=user)
-                if deployment.external_node_id
+                if reuse_key
                 else self._ssh_manager.generate_deployment_key(deployment, user=user)
             )
 
             if key_result.is_err():
-                if deployment.external_node_id:
+                if reuse_key:
                     message = "Existing VM authentication key is unavailable; refusing to generate or replace it"
                     self._mark_failed(deployment, message, stage="ssh_key", audit_ctx=audit_ctx, lease=lease)
                     return Err(message)
@@ -318,6 +338,14 @@ class NodeDeploymentService:
             # Retain the supported adapter selected under the claim, never a refreshed relation's type.
             provider_type = claimed_provider_type
             gateway = get_cloud_gateway(provider_type, api_token)
+
+            # Only the token that created this row's resources can see them: under any other token a
+            # "not found" proves nothing, and creating again could bill a second server elsewhere.
+            provenance = self._provenance_refusal(deployment, api_token)
+            if provenance:
+                owned_update(lease, deployment, needs_reconciliation=True, reconciliation_reason=provenance)
+                self._mark_failed(deployment, provenance, stage="provision_server", audit_ctx=audit_ctx, lease=lease)
+                return Err(provenance)
 
             # Idempotent: skip server creation if external_node_id already set (retry scenario)
             server_create_result: ServerCreateResult | None = None

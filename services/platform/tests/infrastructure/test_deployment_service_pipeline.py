@@ -26,6 +26,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.forms import NodeDeploymentForm
@@ -500,8 +501,15 @@ class TestTransientErrorPreservesExternalId(TestCase):
         self.assertEqual(deployment.external_node_id, "srv-123")
 
     def test_confirmed_not_found_clears_external_node_id(self) -> None:
-        """When get_server returns Ok(None), it's safe to clear external_node_id."""
+        """When get_server returns Ok(None), it's safe to clear external_node_id.
+
+        Only under the token that created the server: another token's "not found" proves nothing.
+        """
         deployment = _create_deployment("pending", external_node_id="srv-456")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            provider_token_fingerprint=provider_token_fingerprint("test-token")
+        )
+        deployment.refresh_from_db()
         service = _make_service()
 
         service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
