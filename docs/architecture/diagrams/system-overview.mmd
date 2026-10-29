@@ -1,59 +1,41 @@
-%% PRAHO Platform Architecture - System Overview
-%% Generated: 2026-02-21
-%% Maintainer: Architecture Team
+%% Source snapshot: 2026-10-27, including ADR-0061 Phase 3/4 branches.
+%% Repository responsibilities, not a deployment claim.
+flowchart TB
+    Browser["Customer or staff browser"] --> Caddy["Caddy edge<br/>HTTPS and hostname routing"]
 
-graph TB
-    subgraph "Client Layer"
-        WebBrowser[Web Browser]
-        MobileApp[Mobile App]
+    subgraph PortalService["Portal: customer pages, port 8701"]
+        Portal["Django views and signed API clients"]
+        PortalSQLite[("SQLite<br/>Sessions, counters and expiring claims")]
+        PortalCache[("LocMemCache<br/>Disposable per-process data")]
+        Portal --> PortalSQLite
+        Portal --> PortalCache
     end
 
-    subgraph "Reverse Proxy Layer"
-        Caddy[Caddy Edge<br/>:80/:443, automatic HTTPS]
+    subgraph PlatformService["Platform: business code and storage"]
+        Platform["Staff UI and service API<br/>port 8700"]
+        Worker["Django-Q2 qcluster<br/>Bounded jobs and scheduled dispatchers"]
+        PostgreSQL[("PostgreSQL<br/>Business models, ORM queue, sessions and DB cache")]
+        Platform -->|"Saved state and durable intents"| PostgreSQL
+        Worker <-->|"Claims, checkpoints and results"| PostgreSQL
     end
 
-    subgraph "Portal Service (Customer-Facing)"
-        PortalApp[Portal Django App<br/>:8701]
-        PortalSession[(SQLite<br/>Session Storage Only)]
-        PortalApp -.->|Sessions Only| PortalSession
+    Caddy -->|"Portal hostname"| Portal
+    Caddy -->|"Platform hostname<br/>Staff paths require allowed CIDRs"| Platform
+    Portal -->|"HMAC-signed HTTP<br/>Customer and user context in JSON"| Platform
+
+    subgraph Integrations["External integrations"]
+        Virtualmin["Virtualmin nodes<br/>Panel API and SSH/Ansible"]
+        Cloudflare["Cloudflare API<br/>Owned-name and customer-zone gateways"]
+        DNS["Public DNS authorities<br/>Bounded DNS-only probes"]
+        Registrars["Registrar APIs"]
+        Payments["Payment providers"]
+        Tax["e-Factura providers"]
     end
-
-    subgraph "Platform Service (Business Logic)"
-        PlatformApp[Platform Django App<br/>:8700]
-        PlatformDB[(PostgreSQL<br/>Business Data)]
-        CacheTable[(DB Cache Table<br/>No Redis)]
-        PlatformApp -->|Read/Write| PlatformDB
-        PlatformApp -->|Cache Ops| CacheTable
-        CacheTable -.->|Stored In| PlatformDB
-    end
-
-    subgraph "External Integrations"
-        Virtualmin[Virtualmin API<br/>Provisioning]
-        ROTLD[ROTLD API<br/>.ro Domains]
-        Stripe[Stripe API<br/>Payments]
-        ANAF[ANAF e-Factura<br/>Romanian Tax]
-    end
-
-    WebBrowser --> Caddy
-    MobileApp --> Caddy
-    Caddy -->|portal domain| PortalApp
-    Caddy -->|platform domain<br/>staff UI: staff CIDRs only<br/>public: /api, webhooks, unsubscribe| PlatformApp
-
-    PortalApp -->|HMAC-Signed<br/>HTTP Requests| PlatformApp
-
-    PlatformApp -.->|Provision| Virtualmin
-    PlatformApp -.->|Register| ROTLD
-    PlatformApp -.->|Charge| Stripe
-    PlatformApp -.->|Submit Invoice| ANAF
-
-    classDef portal fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef platform fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef client fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-
-    class PortalApp,PortalSession portal
-    class PlatformApp,CacheTable platform
-    class PlatformDB db
-    class Virtualmin,ROTLD,Stripe,ANAF external
-    class WebBrowser,MobileApp,Caddy client
+    Worker --> Virtualmin
+    Worker --> Cloudflare
+    Worker --> DNS
+    Worker --> Registrars
+    Platform --> Payments
+    Platform --> Tax
+    Worker --> Payments
+    Worker --> Tax

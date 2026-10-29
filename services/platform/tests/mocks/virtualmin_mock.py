@@ -57,6 +57,7 @@ class MockDomain:
     bandwidth_usage_mb: int = 0
     bandwidth_quota_mb: int = 10000
     features: list[str] = field(default_factory=lambda: ["web", "dns", "mail", "mysql"])
+    domain_id: str = ""  # Empty: the listing derives a stable ID from the name
 
     def __post_init__(self) -> None:
         if not self.username:
@@ -120,6 +121,7 @@ class MockVirtualminGateway:
         disk_quota_mb: int = 1000,
         bandwidth_usage_mb: int = 100,
         bandwidth_quota_mb: int = 10000,
+        domain_id: str = "",
     ) -> MockDomain:
         """Pre-populate a domain in mock state. Returns the MockDomain."""
         d = MockDomain(
@@ -130,6 +132,7 @@ class MockVirtualminGateway:
             disk_quota_mb=disk_quota_mb,
             bandwidth_usage_mb=bandwidth_usage_mb,
             bandwidth_quota_mb=bandwidth_quota_mb,
+            domain_id=domain_id,
         )
         self._domains[domain] = d
         return d
@@ -490,6 +493,7 @@ class MockVirtualminGateway:
                 "bandwidth_quota": f"{d.bandwidth_quota_mb} MB",
                 "enabled": d.enabled,
                 "features": " ".join(d.features),
+                "domain_id": d.domain_id,
             }
             for d in self._domains.values()
         ]

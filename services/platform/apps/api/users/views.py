@@ -61,6 +61,7 @@ from apps.common.transactions import best_effort_atomic
 from apps.common.types import Err
 from apps.common.validators import log_security_event
 from apps.customers.models import Customer
+from apps.users.credentials import check_password_locked, proof_passed
 from apps.users.mfa import (
     BrowserOrigin,
     MFAService,
@@ -767,10 +768,26 @@ def _browser_origin(request: HttpRequest) -> BrowserOrigin:
 
 
 # Lazy: module-level gettext would freeze the messages to the import-time language.
+# Answered before the password is checked, so neither says anything about it; the person holding
+# the session sees these states anyway. The portal shows its own message for each code.
+_ACCOUNT_LOCKED = {"success": False, "code": "account_locked", "error": "Account temporarily locked"}
+_MFA_NOT_ENABLED = {"success": False, "code": "mfa_not_enabled", "error": "Two-factor authentication is not enabled"}
+
+
+def _second_factor_change_refusal(user: User) -> Response | None:
+    """Disable and regenerate on an account without 2FA, or a locked one: refused before any check."""
+    if not user.two_factor_enabled:
+        return Response(_MFA_NOT_ENABLED, status=status.HTTP_400_BAD_REQUEST)
+    if user.is_account_locked():
+        return Response(_ACCOUNT_LOCKED, status=status.HTTP_400_BAD_REQUEST)
+    return None
+
+
 _ENROLMENT_REFUSALS: dict[str, tuple[str, Any]] = {
     "already_enabled": ("mfa_already_enabled", gettext_lazy("Two-factor authentication is already enabled.")),
     "expired": ("mfa_setup_expired", gettext_lazy("This setup expired. Scan the new code and try again.")),
     "incorrect": ("mfa_incorrect", gettext_lazy("The password or the code is incorrect.")),
+    "locked": ("account_locked", "Account temporarily locked"),
 }
 
 
@@ -830,6 +847,8 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
+        if refusal := _second_factor_change_refusal(user):
+            return refusal
         serializer = MFADisableSerializer(
             data=request.data, context={"request": request, "user": user, "origin": _browser_origin(request)}
         )
@@ -1339,8 +1358,9 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
         return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
-        if user.is_account_locked() or not user.check_password(current):
-            user.increment_failed_login_attempts()
+        if user.is_account_locked():
+            return Response(_ACCOUNT_LOCKED, status=400)
+        if not check_password_locked(user, current, source="password_change"):
             return Response({"success": False, "error": "Current password is incorrect"}, status=400)
         try:
             validate_password(new_password, user=user)
@@ -1351,6 +1371,7 @@ def password_change_api(request: HttpRequest, user: User) -> Response:
             and not MFAService.verify_mfa_code(user, str(request.data.get("token", "")), request)["success"]
         ):
             return Response({"success": False, "error": "Invalid authentication code"}, status=400)
+        proof_passed(user)
         user.set_password(new_password)
         user.save(update_fields=["password"])
         discard_pending_totp(user.pk)  # A secret shown before the change must not be confirmable after it.
@@ -1370,8 +1391,12 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
     """Replace recovery codes only after password and second-factor verification."""
     with transaction.atomic():
         user = User.objects.select_for_update().get(pk=user.pk)
+        if refusal := _second_factor_change_refusal(user):
+            return refusal
         # Reuse the credential validation, without executing the disable operation.
-        serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
+        serializer = MFADisableSerializer(
+            data=request.data, context={"request": request, "user": user, "check": "backup_codes"}
+        )
         if serializer.is_valid():
             codes = MFAService.generate_backup_codes(user, request, origin=_browser_origin(request))
             return Response({"success": True, "backup_codes": codes})

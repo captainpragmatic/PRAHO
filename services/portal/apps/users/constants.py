@@ -8,3 +8,11 @@ REGISTRATION_INTENT_SESSION_KEY = "registration_intent"
 ATTRIBUTION_SESSION_KEY = "first_touch_attribution"
 # The details a staff-minted registration link fills in (Platform's apps.users.registration_prefill).
 REGISTRATION_PREFILL_SESSION_KEY = "registration_prefill"
+
+# What only the signed-out flows read: login drops it, so no reset or confirmation link outlives the sign-in.
+SIGNED_OUT_FLOW_SESSION_KEYS = (
+    PASSWORD_RESET_SESSION_KEY,
+    REGISTRATION_CONFIRM_SESSION_KEY,
+    REGISTRATION_PREFILL_SESSION_KEY,
+    REGISTRATION_INTENT_SESSION_KEY,
+)

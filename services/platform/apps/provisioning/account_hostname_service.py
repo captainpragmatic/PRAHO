@@ -341,7 +341,7 @@ def _ensure_held(
         placed = _place_name(gateway, hostname, account, server, enabled=enabled, rows=preflight.unwrap())
     else:
         with transaction.atomic():
-            locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            locked = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
             refusal = _admission_refusal(locked)
             if refusal is not None:
                 return refusal
@@ -564,7 +564,8 @@ def lock_for_publication(pk: UUID, *, skip_locked: bool = False) -> AccountHostn
     waited re-reads only the locked row, so a join in it would pair the new `target_server_id` with
     the server row seen before the wait, which reads as no target at all.
     """
-    # Publishers retain FK key-share access while admission waits on this row.
+    # Non-key updates are still serialized; FK KEY SHARE checks may complete
+    # while another account writer waits for this publication transaction.
     locked = AccountHostname.objects.select_for_update(no_key=True, skip_locked=skip_locked).filter(pk=pk)
     if not list(locked.values_list("pk", flat=True)):
         return None
@@ -572,6 +573,19 @@ def lock_for_publication(pk: UUID, *, skip_locked: bool = False) -> AccountHostn
 
 
 def sync_account_hostname(hostname: AccountHostname, *, skip_locked: bool = False) -> Result[str, str]:
+    from .managed_dns_service import publication_intents  # noqa: PLC0415  # Commit customer creation intents before RPC
+
+    if not config.account_hostnames_enabled():
+        return Ok("disabled")
+    with publication_intents(hostname.pk, skip_locked=skip_locked) as prepared:
+        if prepared.is_err():
+            return Err(prepared.unwrap_err(), retriability=retriability_of(prepared))
+        return _sync_account_hostname(hostname, skip_locked=skip_locked, create_permits=prepared.unwrap())
+
+
+def _sync_account_hostname(
+    hostname: AccountHostname, *, skip_locked: bool, create_permits: dict[str, str]
+) -> Result[str, str]:
     """Converge the name's A and AAAA records to its target server. Ok(reason) says what was done.
 
     Only the row's id is used: everything is decided again under the name's lock. `skip_locked`
@@ -589,7 +603,7 @@ def sync_account_hostname(hostname: AccountHostname, *, skip_locked: bool = Fals
     proven = _prove_zone(gateway, zone_id, hostname.zone)  # A read: outside the lock, to keep it short
     if proven.is_err():
         return Err(proven.unwrap_err(), retriability=retriability_of(proven))
-    return _publish(hostname.pk, gateway, zone_id)
+    return _publish(hostname.pk, gateway, zone_id, create_permits=create_permits)
 
 
 def _publication_step(pk: UUID, *, skip_locked: bool) -> Result[str, str] | None:
@@ -673,7 +687,14 @@ def _store_intent(hostname: AccountHostname, specs: list[DnsRecordSpec]) -> dict
     return merged
 
 
-def _publish(pk: UUID, gateway: Any, zone_id: str, *, ttl: int | Mapping[str, int] | None = None) -> Result[str, str]:
+def _publish(
+    pk: UUID,
+    gateway: Any,
+    zone_id: str,
+    *,
+    ttl: int | Mapping[str, int] | None = None,
+    create_permits: dict[str, str] | None = None,
+) -> Result[str, str]:
     """The provider call, under the lock, for what the row says now: a commit since may have moved it."""
     with transaction.atomic():
         hostname = lock_for_publication(pk)
@@ -691,7 +712,14 @@ def _publish(pk: UUID, gateway: Any, zone_id: str, *, ttl: int | Mapping[str, in
         intended = _store_intent(hostname, specs)
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag(hostname))
         # An Err from here commits what was stored, on purpose: a partial apply is still what exists.
-        return _record_outcome(gateway, zone_id, hostname, intended, outcome)
+        published = _record_outcome(gateway, zone_id, hostname, intended, outcome)
+        if published.is_err():
+            return published
+        from .managed_dns_service import TtlMode, sync_managed_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+        mode: TtlMode = "restore" if isinstance(ttl, Mapping) else "lower" if ttl is not None else "current"
+        managed = sync_managed_locked(hostname, mode=mode, create_permits=create_permits)
+        return published if managed.is_ok() else Err(managed.unwrap_err(), retriability=retriability_of(managed))
 
 
 def _withdraw(hostname: AccountHostname) -> Result[str, str]:
@@ -699,10 +727,17 @@ def _withdraw(hostname: AccountHostname) -> Result[str, str]:
 
     Publishing means only a name with an unexpired certificate installed on its node is in DNS; a name
     that lost it would send customers to a node that cannot serve it. Called under the name's lock.
+    PRAHO's own records go whatever a customer zone's state; each customer zone is handled on its own
+    (`withdraw_managed_locked`), and one still to retry keeps the name's records so the sweep returns.
     """
+    from .managed_dns_service import withdraw_managed_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+    managed = withdraw_managed_locked(hostname)
     deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(hostname))
     if deleted.is_err():
         return Err(f"Record withdrawal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+    if managed.is_err():
+        return Err(managed.unwrap_err(), retriability=retriability_of(managed))
     AccountHostname.objects.filter(pk=hostname.pk, retired_at__isnull=True).update(
         records={}, last_reconciled_at=None, updated_at=timezone.now()
     )
@@ -718,7 +753,9 @@ def withdraw_drained_node(server: VirtualminServer) -> Result[None, str]:
     for hostname_id, account_id in list(names):
         with transaction.atomic():
             account = (
-                VirtualminAccount.objects.select_for_update().filter(pk=account_id).first() if account_id else None
+                VirtualminAccount.objects.select_for_update(no_key=True).filter(pk=account_id).first()
+                if account_id
+                else None
             )
             hostname = lock_for_publication(hostname_id)
             if hostname is None or hostname.target_server_id != server.pk:
@@ -793,7 +830,11 @@ def ttl_is(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> bool:
 def ttl_is_lowered(hostname: AccountHostname, *, ttl: int | None = None) -> bool:
     """Every owned record the provider reports carries the lower TTL; one holdout is not converged."""
     threshold = config.account_cutover_ttl_seconds() if ttl is None else ttl
-    return ttl_is(hostname, threshold)
+    from .managed_dns_service import ttls_confirmed_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+    with transaction.atomic():
+        locked = lock_for_publication(hostname.pk)
+        return bool(locked and ttl_is(locked, threshold) and ttls_confirmed_locked(locked))
 
 
 def _previous_ttls(hostname: AccountHostname) -> dict[str, int]:
@@ -805,13 +846,18 @@ def _previous_ttls(hostname: AccountHostname) -> dict[str, int]:
     }
 
 
-def _begin_lowering(hostname: AccountHostname) -> bool:
+def _begin_lowering(hostname: AccountHostname, create_permits: dict[str, str]) -> Result[bool, str]:
     """Record the TTL each record had, once, under the name's lock. False when nothing is published."""
     now = timezone.now()
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
         if locked is None or locked.retired_at is not None or not locked.records:
-            return False
+            return Ok(False)
+        from .managed_dns_service import begin_lowering_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+        managed = begin_lowering_locked(locked, epoch=locked.ttl_lowered_at or now, create_permits=create_permits)
+        if managed.is_err():
+            return Err(managed.unwrap_err(), retriability=retriability_of(managed))
         records = locked.records
         for entry in records.values():
             if "previous_ttl" not in entry:
@@ -822,22 +868,25 @@ def _begin_lowering(hostname: AccountHostname) -> bool:
         # Keep the longest original TTL even if a record type is removed during the move.
         fields["previous_ttl"] = max(
             locked.previous_ttl or 0,
+            managed.unwrap(),
             *(int(entry["previous_ttl"]) for entry in records.values()),
         )
         if locked.ttl_lowered_at is None:
             fields["ttl_lowered_at"] = now
         AccountHostname.objects.filter(pk=locked.pk).update(updated_at=now, **fields)
-        return True
+        return Ok(True)
 
 
-def _apply_ttl(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> Result[str, str]:
+def _apply_ttl(
+    hostname: AccountHostname, ttl: int | Mapping[str, int], *, create_permits: dict[str, str]
+) -> Result[str, str]:
     """Publish the name's records with `ttl`, proving the zone first; says whether that landed."""
     zone_id = config.account_zone_id()
     gateway = _dns_gateway()
     proven = _prove_zone(gateway, zone_id, hostname.zone)
     if proven.is_err():
         return Err(proven.unwrap_err(), retriability=retriability_of(proven))
-    published = _publish(hostname.pk, gateway, zone_id, ttl=ttl)
+    published = _publish(hostname.pk, gateway, zone_id, ttl=ttl, create_permits=create_permits)
     if published.is_err():
         return published
     state = published.unwrap()
@@ -847,6 +896,17 @@ def _apply_ttl(hostname: AccountHostname, ttl: int | Mapping[str, int]) -> Resul
 
 
 def lower_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
+    from .managed_dns_service import publication_intents  # noqa: PLC0415  # Commit customer creation intents before RPC
+
+    if not config.account_hostnames_enabled():
+        return Ok("disabled")
+    with publication_intents(hostname.pk, mode="lower") as prepared:
+        if prepared.is_err():
+            return Err(prepared.unwrap_err(), retriability=retriability_of(prepared))
+        return _lower_account_hostname_ttl(hostname, prepared.unwrap())
+
+
+def _lower_account_hostname_ttl(hostname: AccountHostname, create_permits: dict[str, str]) -> Result[str, str]:
     """Lower every owned record's TTL, then wait one maximum previous TTL after confirmation.
 
     `waiting` covers provider propagation and the old answers still held by caches. The provider
@@ -854,9 +914,12 @@ def lower_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
     """
     if not config.account_hostnames_enabled():
         return Ok("disabled")
-    if not _begin_lowering(hostname):
+    begun = _begin_lowering(hostname, create_permits)
+    if begun.is_err():
+        return Err(begun.unwrap_err(), retriability=retriability_of(begun))
+    if not begun.unwrap():
         return Ok("skipped:not_published")
-    applied = _apply_ttl(hostname, config.account_cutover_ttl_seconds())
+    applied = _apply_ttl(hostname, config.account_cutover_ttl_seconds(), create_permits=create_permits)
     if applied.is_err():
         return applied
     outcome = _lowering_progress(hostname)
@@ -891,6 +954,17 @@ def _lowering_progress(hostname: AccountHostname) -> Result[str, str]:
 
 
 def restore_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
+    from .managed_dns_service import publication_intents  # noqa: PLC0415  # Commit customer creation intents before RPC
+
+    if not config.account_hostnames_enabled():
+        return _restore_account_hostname_ttl(hostname, {})
+    with publication_intents(hostname.pk, mode="restore") as prepared:
+        if prepared.is_err():
+            return Err(prepared.unwrap_err(), retriability=retriability_of(prepared))
+        return _restore_account_hostname_ttl(hostname, prepared.unwrap())
+
+
+def _restore_account_hostname_ttl(hostname: AccountHostname, create_permits: dict[str, str]) -> Result[str, str]:
     """Restore and clear evidence under the publication lock, including empty and stale callers."""
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
@@ -899,6 +973,10 @@ def restore_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
         if locked.previous_ttl is None:
             return Ok("noop")
         if not locked.records:
+            from .managed_dns_service import clear_restored_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+            if not clear_restored_locked(locked):
+                return Ok("waiting")
             AccountHostname.objects.filter(pk=locked.pk).update(
                 previous_ttl=None, ttl_lowered_at=None, ttl_confirmed_at=None, updated_at=timezone.now()
             )
@@ -906,10 +984,8 @@ def restore_account_hostname_ttl(hostname: AccountHostname) -> Result[str, str]:
         if not config.account_hostnames_enabled():
             return Ok("disabled")
         recorded_ttls = _previous_ttls(locked)
-        applied = _apply_ttl(locked, recorded_ttls)
-        if applied.is_err():
-            return applied
-        return _confirm_restored(hostname, recorded_ttls)
+        applied = _apply_ttl(locked, recorded_ttls, create_permits=create_permits)
+        return applied if applied.is_err() else _confirm_restored(hostname, recorded_ttls)
 
 
 def _confirm_restored(hostname: AccountHostname, recorded_ttls: Mapping[str, int]) -> Result[str, str]:
@@ -921,6 +997,10 @@ def _confirm_restored(hostname: AccountHostname, recorded_ttls: Mapping[str, int
         if not ttl_is(locked, recorded_ttls):
             # The provider still reports the lowered value, or a sync raced in: keep the evidence so a
             # retry can finish rather than falsely reporting the restore done.
+            return Ok("waiting")
+        from .managed_dns_service import clear_restored_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+        if not clear_restored_locked(locked):
             return Ok("waiting")
         records = locked.records or {}
         for entry in records.values():
@@ -937,13 +1017,16 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
 
     Withdrawal is durable even when private cleanup fails. The target and unretired row keep that
     cleanup reachable by the sweep; DNS retirement never deletes a native child or customer parent.
+    The name's own records go whatever a customer zone's state; a customer zone still to retry keeps
+    the name unretired, so the sweep comes back to it.
     """
-    if hostname.retired_at is not None:
-        return Ok(None)
     with transaction.atomic():
         locked = lock_for_publication(hostname.pk)
         if locked is None or locked.retired_at is not None:
             return Ok(None)
+        from .managed_dns_service import withdraw_managed_locked  # noqa: PLC0415  # Deferred customer-zone seam
+
+        managed = withdraw_managed_locked(locked)
         account = locked.account
         server = locked.target_server or (account.server if account else None)
         metadata_only = _never_placed(locked)
@@ -954,6 +1037,8 @@ def retire_account_hostname(hostname: AccountHostname) -> Result[None, str]:
             deleted = _dns_gateway().delete_owned_records(config.account_zone_id(), owner_tag(locked))
             if deleted.is_err():
                 return Err(f"Record removal failed: {deleted.unwrap_err()}", retriability=retriability_of(deleted))
+        if managed.is_err():
+            return Err(managed.unwrap_err(), retriability=retriability_of(managed))
         locked.records = {}
         locked.last_reconciled_at = None
         locked.save(update_fields=["records", "last_reconciled_at", "updated_at"])

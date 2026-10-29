@@ -3,7 +3,8 @@
 {% get_current_language as email_language %}
 <html lang="{{ email_language }}">
   <body>
-    <p>{% blocktrans with name=user.first_name|default:user.email %}Hello {{ name }},{% endblocktrans %}</p>
+    {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+    <p>{% blocktrans %}Hello {{ name }},{% endblocktrans %}</p>
     <p>
       {% if event == "2fa_enabled" %}
         {% trans "Two-factor authentication was turned on for your account." %}
@@ -20,6 +21,26 @@
         {% trans "New backup codes were created for your account. Your previous backup codes no longer work." %}
       {% elif event == "password_changed" %}
         {% trans "The password for your account was changed." %}
+      {% elif event == "team_member_added" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}{{ actor_email }} added {{ member_email }} to {{ company }} as {{ role }}.{% endblocktrans %}
+      {% elif event == "team_role_changed" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}The role of {{ member_email }} in {{ company }} was changed from {{ old_role }} to {{ new_role }}.{% endblocktrans %}
+      {% elif event == "team_member_removed" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}{{ member_email }} was removed from {{ company }}.{% endblocktrans %}
+      {% elif event == "company_contact_changed" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}The contact details of {{ company }} were changed: {{ fields }}.{% endblocktrans %}
+      {% elif event == "company_tax_changed" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}The legal or tax details of {{ company }} were changed: {{ fields }}.{% endblocktrans %}
+      {% elif event == "data_export_requested" %}
+        {% trans "A copy of your personal data was requested from your account. It will be ready to download there." %}
+      {% elif event == "gift_card_revealed" %}
+        {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+        {% blocktrans %}The code of gift card {{ last4 }} was shown in your account.{% endblocktrans %}
       {% endif %}
     </p>
     <p>{% trans "If this was not you, reset your password and contact support straight away." %}</p>

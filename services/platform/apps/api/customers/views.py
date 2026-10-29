@@ -8,7 +8,7 @@ from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Field, Model, Q, QuerySet
 from django.http import HttpRequest
 from django.utils import translation
 from django.utils.translation import gettext as _
@@ -52,6 +52,7 @@ from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.mfa import staff_must_enrol
 from apps.users.models import CustomerMembership, User
+from apps.users.security_notices import notify_company_changed, notify_team_change
 from apps.users.services import SecureCustomerUserService
 
 from .serializers import (
@@ -880,6 +881,9 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
 
     try:
         with transaction.atomic():
+            # Locked and re-read: the owners are told what this write changes (and the old email).
+            customer = _lock_customer(customer)
+            contact_before = _contact_details(customer)
             # F02 fix: Build update_fields dynamically — only save fields actually provided.
             # Unconditionally saving all 4 fields triggered unnecessary audit signals and
             # could overwrite values with stale data from a prior serializer state.
@@ -900,6 +904,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
             if customer_update_fields:
                 # Include updated_at so the auto_now field is written to DB even with update_fields.
                 customer.save(update_fields=[*customer_update_fields, "updated_at"])
+                _tell_contact_changes(customer, contact_before)
 
             # F03 fix: Use ContactService.create_address() for atomic versioning.
             # The previous get_or_create + setattr loop bypassed version history and
@@ -960,6 +965,8 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 tax_fields["registration_number"] = validated_data["registration_number"]
 
             if tax_fields:
+                existing = CustomerTaxProfile.objects.select_for_update().filter(customer=customer).first()
+                tax_before = _tax_identity(existing) if existing is not None else None
                 # A new profile with only a CUI is not a VAT payer; the model default (True) would say so.
                 tax_profile, created = CustomerTaxProfile.objects.get_or_create(
                     customer=customer, defaults={"is_vat_payer": bool(tax_fields.get("vat_number")), **tax_fields}
@@ -969,6 +976,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                     for field, value in tax_fields.items():
                         setattr(tax_profile, field, value)
                     tax_profile.save(update_fields=[*tax_fields.keys(), "updated_at"])
+                _tell_tax_changes(customer, tax_profile, tax_before)
 
         logger.info(f"✅ [Billing Address API] Successfully updated billing address for customer {customer.id}")
 
@@ -1017,6 +1025,64 @@ def _check_self_action(user_id: int | str | None, target_user_id: int | str | No
             status=status.HTTP_400_BAD_REQUEST,
         )
     return None
+
+
+_CONTACT_FIELDS = ("name", "company_name", "primary_email", "primary_phone", "website", "industry")
+_TAX_IDENTITY_FIELDS = ("is_vat_payer", "cui", "vat_number", "registration_number", "cnp")
+
+
+def _lock_customer(customer: Customer) -> Customer:
+    """The customer row, locked and re-read; always before its tax profile, so two writers never deadlock.
+
+    NO KEY UPDATE: the notices written with the change reference this row, and their foreign-key
+    checks take a key-share lock that a plain FOR UPDATE would make wait.
+    """
+    return Customer.objects.select_for_update(no_key=True).get(pk=customer.pk)
+
+
+def _contact_details(customer: Customer) -> dict[str, Any]:
+    return {field: getattr(customer, field) for field in _CONTACT_FIELDS}
+
+
+def _tax_identity(profile: CustomerTaxProfile) -> dict[str, Any]:
+    return {field: getattr(profile, field) for field in _TAX_IDENTITY_FIELDS}
+
+
+def _tell_contact_changes(customer: Customer, before: dict[str, Any]) -> None:
+    """Tell the owners which contact details this write changed, and the old address a new email replaced."""
+    changed = [field for field in _CONTACT_FIELDS if getattr(customer, field) != before[field]]
+    if changed:
+        notify_company_changed(
+            customer,
+            "company_contact_changed",
+            fields=[_field_label(Customer, field) for field in changed],
+            old_email=before["primary_email"] if "primary_email" in changed else "",
+        )
+
+
+def _tell_tax_changes(customer: Customer, profile: CustomerTaxProfile, before: dict[str, Any] | None) -> None:
+    """Tell the owners which legal or tax details this write changed (all it filled in, for a new profile)."""
+    if before is None:
+        changed = [field for field in _TAX_IDENTITY_FIELDS if getattr(profile, field)]
+    else:
+        changed = [field for field in _TAX_IDENTITY_FIELDS if getattr(profile, field) != before[field]]
+    if changed:
+        notify_company_changed(
+            customer,
+            "company_tax_changed",
+            fields=[_field_label(CustomerTaxProfile, field) for field in changed],
+        )
+
+
+def _field_label(model: type[Model], name: str) -> Any:
+    """A changed field's label, translated when the notice is written; the name for anything else."""
+    field = model._meta.get_field(name)
+    return field.verbose_name if isinstance(field, Field) else name
+
+
+def _actor_email(user_id: int) -> str:
+    """The signed-in person who made a team change, for the notice that names them."""
+    return User.objects.filter(pk=user_id).values_list("email", flat=True).first() or ""
 
 
 def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
@@ -1098,6 +1164,9 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             CustomerMembership.objects.create(customer=customer, user=target_user, role=role)
+            notify_team_change(
+                customer, "team_member_added", actor_email=_actor_email(user_id), member=target_user, new_role=role
+            )
     except IntegrityError:
         return Response(
             {"success": False, "error": "User is already a member of this customer."},
@@ -1189,6 +1258,9 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             # They must complete account setup via the password-reset link sent separately.
             new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
             CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
+            notify_team_change(
+                customer, "team_member_added", actor_email=_actor_email(user_id), member=new_user, new_role=role
+            )
     except IntegrityError:
         # Race: a concurrent request created the same email between the SELECT and the INSERT.
         # Mirror the cross-tenant generic message; do not disclose where the row landed.
@@ -1249,23 +1321,35 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:  
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    try:
-        membership = CustomerMembership.objects.get(customer=customer, user_id=target_user_id, is_active=True)
-    except CustomerMembership.DoesNotExist:
-        return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    # Prevent demoting the last owner
-    if membership.role == "owner" and new_role != "owner":
-        owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
-        if owner_count <= 1:
-            return Response(
-                {"success": False, "error": "Cannot remove the last owner. Assign another owner first."},
-                status=status.HTTP_400_BAD_REQUEST,
+    with transaction.atomic():
+        # Locked and re-read: the role told is the one this write replaces, with its notice in one commit.
+        try:
+            membership = CustomerMembership.objects.select_for_update().get(
+                customer=customer, user_id=target_user_id, is_active=True
             )
+        except CustomerMembership.DoesNotExist:
+            return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    old_role = membership.role
-    membership.role = new_role
-    membership.save(update_fields=["role", "updated_at"])
+        # Prevent demoting the last owner
+        if membership.role == "owner" and new_role != "owner":
+            owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
+            if owner_count <= 1:
+                return Response(
+                    {"success": False, "error": "Cannot remove the last owner. Assign another owner first."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        old_role = membership.role
+        membership.role = new_role
+        membership.save(update_fields=["role", "updated_at"])
+        notify_team_change(
+            customer,
+            "team_role_changed",
+            actor_email=_actor_email(user_id),
+            member=membership.user,
+            old_role=old_role,
+            new_role=new_role,
+        )
     logger.info(
         f"✅ [User Management API] Role changed for user {target_user_id} on customer {customer.id}: {old_role} → {new_role}"
     )
@@ -1296,29 +1380,34 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
     if self_error:
         return self_error
 
-    try:
-        membership = CustomerMembership.objects.get(customer=customer, user_id=target_user_id, is_active=True)
-    except CustomerMembership.DoesNotExist:
-        return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
+    with transaction.atomic():
+        # Locked and re-read, the removal and its notice in one commit.
+        try:
+            membership = CustomerMembership.objects.select_for_update().get(
+                customer=customer, user_id=target_user_id, is_active=True
+            )
+        except CustomerMembership.DoesNotExist:
+            return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Prevent removing the last owner
-    if membership.role == "owner":
-        owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
-        if owner_count <= 1:
+        # Prevent removing the last owner
+        if membership.role == "owner":
+            owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
+            if owner_count <= 1:
+                return Response(
+                    {"success": False, "error": "Cannot remove the last owner."}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Prevent removing the last user
+        total_members = CustomerMembership.objects.filter(customer=customer, is_active=True).count()
+        if total_members <= 1:
             return Response(
-                {"success": False, "error": "Cannot remove the last owner."}, status=status.HTTP_400_BAD_REQUEST
+                {"success": False, "error": "Cannot remove the last member of a customer."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-    # Prevent removing the last user
-    total_members = CustomerMembership.objects.filter(customer=customer, is_active=True).count()
-    if total_members <= 1:
-        return Response(
-            {"success": False, "error": "Cannot remove the last member of a customer."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    membership.is_active = False
-    membership.save(update_fields=["is_active", "updated_at"])
+        membership.is_active = False
+        membership.save(update_fields=["is_active", "updated_at"])
+        notify_team_change(customer, "team_member_removed", actor_email=_actor_email(user_id), member=membership.user)
     logger.info(f"✅ [User Management API] User {target_user_id} removed from customer {customer.id}")
     return Response({"success": True, "message": "User removed from customer."})
 
@@ -1353,15 +1442,25 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
         return Response({"success": False, "error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     # Toggle membership-scoped active status (does not affect global user account)
-    try:
-        membership = CustomerMembership.objects.get(customer=customer, user=target_user)
-    except CustomerMembership.DoesNotExist:
-        return Response(
-            {"success": False, "error": "User is not a member of this customer."}, status=status.HTTP_404_NOT_FOUND
-        )
+    with transaction.atomic():
+        # Locked and re-read, the change and its notice in one commit.
+        try:
+            membership = CustomerMembership.objects.select_for_update().get(customer=customer, user=target_user)
+        except CustomerMembership.DoesNotExist:
+            return Response(
+                {"success": False, "error": "User is not a member of this customer."}, status=status.HTTP_404_NOT_FOUND
+            )
 
-    membership.is_active = not membership.is_active
-    membership.save(update_fields=["is_active", "updated_at"])
+        membership.is_active = not membership.is_active
+        membership.save(update_fields=["is_active", "updated_at"])
+        # Suspending a member takes them off the team, reactivating puts them back: told as either.
+        notify_team_change(
+            customer,
+            "team_member_added" if membership.is_active else "team_member_removed",
+            actor_email=_actor_email(user_id),
+            member=target_user,
+            new_role=membership.role,
+        )
     new_status = "activated" if membership.is_active else "suspended"
     logger.info(f"✅ [User Management API] Membership for {target_user.email} {new_status} for customer {customer.id}")
     return Response({"success": True, "is_active": membership.is_active, "message": f"User {new_status}."})
@@ -1389,28 +1488,33 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     if not membership or membership.role not in ("owner", "billing"):
         return _uniform_error_response()
 
-    updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
     update_fields = []
-    for field in updatable_fields:
-        if field in data:
-            value = data[field]
-            if not isinstance(value, str):
-                return Response(
-                    {"success": False, "error": f"Field '{field}' must be a string."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if field == "primary_phone" and value.strip():
-                address = customer.get_billing_address()
-                try:
-                    value = normalize_phone(value, address.country if address else "")
-                except ValidationError as error:
-                    return Response({"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
-            setattr(customer, field, value.strip())
-            update_fields.append(field)
-
-    if update_fields:
-        with transaction.atomic():
+    with transaction.atomic():
+        # Locked and re-read: the change the owners are told about is the one this write makes.
+        customer = _lock_customer(customer)
+        before = _contact_details(customer)
+        for field in _CONTACT_FIELDS:
+            if field in data:
+                value = data[field]
+                if not isinstance(value, str):
+                    return Response(
+                        {"success": False, "error": f"Field '{field}' must be a string."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if field == "primary_phone" and value.strip():
+                    address = customer.get_billing_address()
+                    try:
+                        value = normalize_phone(value, address.country if address else "")
+                    except ValidationError as error:
+                        return Response(
+                            {"success": False, "error": error.messages[0]}, status=status.HTTP_400_BAD_REQUEST
+                        )
+                setattr(customer, field, value.strip())
+                update_fields.append(field)
+        if update_fields:
             customer.save(update_fields=[*update_fields, "updated_at"])
+            _tell_contact_changes(customer, before)
+    if update_fields:
         logger.info(f"✅ [Customer API] Updated fields {update_fields} for customer {customer.id}")
 
     return Response({"success": True, "message": "Customer updated."})
@@ -1421,7 +1525,7 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 @permission_classes([AllowAny])
 @require_customer_authentication
 @transaction.atomic
-def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate each permitted field before saving the profile
+def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Validate each permitted field, save, and tell the owners
     request: HttpRequest, customer: Customer
 ) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
@@ -1449,9 +1553,13 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate eac
         logger.info("✅ [Customer API] Ignored derived reverse-charge flag for customer %s", customer.id)
 
     # A new profile is a VAT payer only when given a VAT number; the model default (True) would say so.
+    customer = _lock_customer(customer)  # the customer before its tax profile, as billing-address does
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(
         customer=customer, defaults={"is_vat_payer": bool(str(data.get("vat_number") or "").strip())}
     )
+    # Locked and re-read (the view runs in one transaction): owners are told what this write changes.
+    tax_profile = CustomerTaxProfile.objects.select_for_update().get(pk=tax_profile.pk)
+    before = _tax_identity(tax_profile)
     update_fields = []
     for field in tax_bool_fields | tax_string_fields:
         if field in data:
@@ -1499,6 +1607,7 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912  # Validate eac
     if update_fields:
         with transaction.atomic():
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
+            _tell_tax_changes(customer, tax_profile, before)
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
     if cnp is not None:

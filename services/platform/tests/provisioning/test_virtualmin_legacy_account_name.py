@@ -5,6 +5,8 @@ from unittest.mock import patch
 from django.utils import timezone
 
 from apps.common.types import Ok
+from apps.domains.dns_zone_models import HostedZone
+from apps.domains.dns_zone_services import capture_enrollment_binding
 from apps.provisioning import account_hostname_service as names
 from apps.provisioning.account_hostname_models import AccountHostname
 from apps.provisioning.virtualmin_migration_models import VirtualminMigration
@@ -68,6 +70,49 @@ class LegacyAccountNameTests(BarrierCase):
         VirtualminMigrationService()._repoint(migration, token)
         self.name.refresh_from_db()
         self.assertEqual(self.name.target_server_id, self.target.pk)
+
+    def _managed_zone(self, *, name=None):
+        return HostedZone.objects.create(
+            customer=self.account.service.customer,
+            service=self.account.service,
+            account=self.account,
+            account_hostname=self.name,
+            name=name or self.account.domain,
+            enrollment_binding=capture_enrollment_binding(self.account, self.name),
+            readiness={"agreed": True},
+        )
+
+    def test_legacy_completion_advances_customer_zone_binding_and_invalidates_old_readiness(self):
+        zone = self._managed_zone()
+        self.assertEqual(zone.enrollment_binding["target_id"], str(self.server.pk))
+        migration, token = self._held("repointing")
+        self.source_gateway._domains[self.account.domain].enabled = False
+        VirtualminMigrationService()._repoint(migration, token)
+        zone.refresh_from_db()
+        self.account.refresh_from_db()
+        self.name.refresh_from_db()
+        migration.refresh_from_db()
+        self.assertEqual(migration.status, "completed")
+        self.assertEqual(self.account.server_id, self.target.pk)
+        self.assertEqual(self.name.target_server_id, self.target.pk)
+        self.assertEqual(zone.enrollment_binding["target_id"], str(self.target.pk))
+        self.assertEqual(zone.enrollment_binding["ipv4"], self.target.ipv4_address)
+        self.assertEqual(zone.readiness, {})
+        self.assertEqual(FakeDnsGateway.calls, [])
+
+    def test_legacy_customer_zone_binding_refusal_rolls_back_both_owners(self):
+        self._managed_zone(name="changed.example.net")
+        migration, token = self._held("repointing")
+        self.source_gateway._domains[self.account.domain].enabled = False
+        with self.assertRaisesMessage(ValueError, "Customer-zone ownership changed"):
+            VirtualminMigrationService()._repoint(migration, token)
+        self.account.refresh_from_db()
+        self.name.refresh_from_db()
+        migration.refresh_from_db()
+        self.assertEqual(self.account.server_id, self.server.pk)
+        self.assertEqual(self.name.target_server_id, self.server.pk)
+        self.assertEqual(migration.status, "repointing")
+        self.assertEqual(FakeDnsGateway.calls, [])
 
     def test_active_legacy_excludes_publication_before_recording_intent_or_provider_io(self):
         migration = self._start()

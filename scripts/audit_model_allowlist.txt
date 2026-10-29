@@ -31,6 +31,10 @@ audit.CookieConsent             # consent record (IS the compliance trail)
 audit.DataExport                # GDPR export record
 
 # ── 2. Append-only history/log models (these ARE the audit trail) ─────────────
+domains.HostedZone              # aggregate changes use audited import, confirmation, export, record, switch, deletion and state workflows
+domains.HostedZoneRecord        # child of the zone revision; its exact manifest digest is audited, and managed runtime changes belong to audited account cutovers
+domains.HostedZoneImportRevision # immutable uploaded inventory and desired manifest, identified by digest in each audited import/confirmation
+domains.HostedZoneOperation     # provider lease and progress evidence; durable intents, parked outcomes and state changes are audited by the zone workflow
 billing.RefundNote              # append-only notes on refunds
 billing.RefundStatusHistory     # refund status change log
 integrations.WebhookDelivery    # append-only delivery attempt records
@@ -82,6 +86,7 @@ provisioning.NodeDrain                  # lifecycle audited explicitly by NodeDr
 provisioning.SpoolReservation           # transient capacity accounting rows; no business lifecycle
 provisioning.SpoolRoot                  # singleton serialization lock row; no business lifecycle
 provisioning.VirtualminDriftRecord      # internal drift detection
+provisioning.HostedDomainDnsStatus      # derived DNS observations and work leases; meaningful health transitions and rechecks audited explicitly by hosted_domain_dns_service
 provisioning.VirtualminMigration        # internal lease/reservation state; lifecycle audited by the migration orchestration
 provisioning.VirtualminServer           # mirrors Server model
 

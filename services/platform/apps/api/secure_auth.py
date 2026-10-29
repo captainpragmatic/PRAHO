@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 BILLING_ROLES: frozenset[str] = frozenset({"owner", "billing"})
 SUPPORT_ROLES: frozenset[str] = frozenset({"owner", "billing", "tech"})
+TECH_ROLES: frozenset[str] = frozenset({"owner", "tech"})
 
 
 def _uniform_error_response(

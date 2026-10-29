@@ -143,7 +143,7 @@ GROUPS: tuple[GroupDef, ...] = (
         ZONE_INTEGRATIONS,
         _("Hosting DNS"),
         _("Account names: the zone they live in, its API token, record TTL and certificates"),
-        section_order=("Account names", "Certificates"),
+        section_order=("Account names", "Certificates", "Monitoring"),
     ),
     GroupDef("platform", ZONE_PLATFORM, _("Maintenance & Availability"), _("Platform-wide availability controls")),
     GroupDef(
@@ -1997,6 +1997,46 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"choices": ["platform", "local", "s3"]},
     ),
     SettingDef(
+        key="dns.hosted_checks_enabled",
+        data_type="boolean",
+        default=True,
+        group="hosting-dns",
+        section=_("Monitoring"),
+        label=_("Hosted domain DNS checks enabled"),
+        help_text=_("Check customer DNS in background jobs and show the saved result in the client area."),
+        input_kind="toggle",
+    ),
+    SettingDef(
+        key="dns.hosted_checks_interval_seconds",
+        data_type="integer",
+        default=3600,
+        group="hosting-dns",
+        section=_("Monitoring"),
+        label=_("DNS check interval (seconds)"),
+        help_text=_("How often each published hosting account is checked."),
+        validation={"min": 300, "max": 86400},
+    ),
+    SettingDef(
+        key="dns.hosted_checks_batch_size",
+        data_type="integer",
+        default=50,
+        group="hosting-dns",
+        section=_("Monitoring"),
+        label=_("DNS accounts per dispatch"),
+        help_text=_("Maximum number of account checks queued by each five-minute dispatch."),
+        validation={"min": 1, "max": 200},
+    ),
+    SettingDef(
+        key="dns.hosted_recheck_cooldown_seconds",
+        data_type="integer",
+        default=60,
+        group="hosting-dns",
+        section=_("Monitoring"),
+        label=_("DNS recheck cooldown (seconds)"),
+        help_text=_("Minimum time between manual recheck requests for one hosting account."),
+        validation={"min": 30, "max": 3600},
+    ),
+    SettingDef(
         key="dns.account_hostnames_enabled",
         data_type="boolean",
         default=True,
@@ -2042,6 +2082,31 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_(
             "A Cloudflare token with Zone:Read and DNS:Edit on the account zone only, never the node token. "
             "It can be replaced at any time; nothing is published until it can read and edit the zone."
+        ),
+        input_kind="secret",
+        sensitive=True,
+    ),
+    SettingDef(
+        key="dns.cloudflare_account_id",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Customer zones"),
+        label=_("Customer-zone Cloudflare account id"),
+        help_text=_(
+            "The Cloudflare account for hosted customer zones (32 hexadecimal characters). Existing zones retain their account binding."
+        ),
+        validation={"pattern": r"|[0-9a-f]{32}"},
+    ),
+    SettingDef(
+        key="dns.cloudflare_account_api_token",
+        data_type="string",
+        default="",
+        group="hosting-dns",
+        section=_("Customer zones"),
+        label=_("Customer-zone Cloudflare API token"),
+        help_text=_(
+            "An account-scoped token for full-zone create/read/delete, activation, DNS read/write and DNSSEC status. Separate from node and account-name tokens; retained only on Platform."
         ),
         input_kind="secret",
         sensitive=True,

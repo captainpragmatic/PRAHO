@@ -32,6 +32,7 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
         "Disallow: /billing/",
         "Disallow: /tickets/",
         "Disallow: /services/",
+        "Disallow: /dns/",
         "Disallow: /order/",
         "Disallow: /api/",
         "Allow: /login/",
@@ -61,6 +62,7 @@ urlpatterns = [
     path("tickets/", include("apps.tickets.urls")),
     # Hosting services - customer service management
     path("services/", include("apps.services.urls")),
+    path("dns/", include("apps.dns.urls")),
     # Customer management - team, tax profile, addresses
     path("company/", include("apps.customers.urls")),
     # Order flow - product catalog and cart management

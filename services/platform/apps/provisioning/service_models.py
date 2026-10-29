@@ -6,7 +6,7 @@ Service plans, servers, services, and provisioning tasks.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -24,6 +24,8 @@ from apps.common.model_secrets import (
     encrypt_model_secret,
 )
 from apps.common.utils import operator_local_date
+
+from .hosted_zone_ownership import ServiceOwnershipQuerySet, remember_ownership, save_with_ownership
 
 
 class ServicePlan(models.Model):
@@ -423,6 +425,8 @@ class Service(ConcurrentTransitionMixin, models.Model):
 
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ServiceOwnershipQuerySet.as_manager()
+
     class Meta:
         db_table = "provisioning_services"
         verbose_name = _("Service")
@@ -452,6 +456,15 @@ class Service(ConcurrentTransitionMixin, models.Model):
 
     def __str__(self) -> str:
         return f"{self.service_name} - {self.customer.get_display_name()}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        save_with_ownership(self, "service", super().save, args, kwargs)
+
+    @classmethod
+    def from_db(cls, db: str | None, field_names: Collection[str], values: Collection[Any]) -> Service:
+        instance = super().from_db(db, field_names, values)
+        remember_ownership(instance, "service")
+        return instance
 
     def get_next_billing_date(self) -> Any | None:
         """Calculate next billing date based on cycle"""
@@ -505,6 +518,8 @@ class Service(ConcurrentTransitionMixin, models.Model):
         saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
         try:
             super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+            if fields is None or {"customer", "customer_id"}.intersection(fields):
+                remember_ownership(self, "service")
         except Exception:
             self.__dict__.update(saved)
             raise

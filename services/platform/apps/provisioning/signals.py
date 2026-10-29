@@ -33,6 +33,7 @@ from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic
 from apps.settings.services import SettingsService
 
+from .hosted_zone_ownership import save_field_intent
 from .models import (
     ProvisioningTask,
     Server,
@@ -304,8 +305,8 @@ def audit_service_lifecycle_events(sender: type[Service], instance: Service, cre
             _handle_new_service_creation(instance)
 
         else:
-            # Handle service updates
-            update_fields = kwargs.get("update_fields")
+            # Handle service updates. The caller's fields, not the ownership fence's SQL subset.
+            update_fields = save_field_intent(instance, kwargs.get("update_fields"))
 
             if update_fields and "status" in update_fields:
                 # Log status change
@@ -359,7 +360,7 @@ def handle_service_virtualmin_reconciliation(
     if kwargs.get("raw"):
         return  # loaddata fixtures must never trigger real provisioning
 
-    update_fields = kwargs.get("update_fields")
+    update_fields = save_field_intent(instance, kwargs.get("update_fields"))
     # A bare save() (update_fields=None) cannot prove status did NOT change —
     # reconciliation is idempotent and on_commit, so err on running it.
     status_changed = created or update_fields is None or "status" in update_fields

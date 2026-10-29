@@ -7,13 +7,13 @@
 
 ## Implementation clarifications (2026-10-27)
 
-This ADR remains Proposed. Phase 2 is delivered by PR #749, and Phases 3 to 5 follow in one
-later PR; implementation and lab proofs do not mean it is deployed. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md)
-records the current behavior, outstanding gates and later customer-DNS/mail phases.
-Account-name website previews remain disabled even after PSL inclusion. Apache supplies
-the temporary web bridge, with root-owned neutral account-name sites and independently
-observed source/target bindings. Mail-enabled moves remain refused until the later
-native Postfix/Dovecot lifecycle and all-mailbox safety gates pass.
+This ADR remains Proposed. Phase 2 is delivered by PR #749. Phases 3 and 4 are delivered together in one follow-up PR, with local phase branches used as verification checkpoints. That does not mean the feature is deployed or every phase is complete. The [execution plan](../architecture/account-hostnames-dns-mail-plan.md) is the single implementation and verification record.
+
+The agreed first release imports a complete customer-uploaded zone file and keeps account-name previews disabled. Temporary forwarding stays on the account's source node using Apache; HAProxy is not a prerequisite. The detailed cutover below distinguishes the ownership commit from later bridge retention and cleanup.
+
+Account-name sites remain root-owned and neutral even after PSL inclusion, with independently observed source/target bindings.
+
+**Phase 5 is withdrawn (2026-10-28).** Mail on the web nodes (section 7) will not be built. Customer mail moves to a dedicated mail node (#790, #791); its ADR comes with #790. Mailboxes already on the nodes stay where they are, and mail-enabled moves and recoveries remain refused.
 
 ## Context at proposal (2026-10-14)
 
@@ -33,41 +33,44 @@ Customers may keep DNS anywhere: our nameservers, Cloudflare, their registrar. A
 
 - **Name.** `<id>.<zone>`, where `<id>` is a short opaque random label (for example `h7k3p2q9`), unique and never reused. It is stable through renames and embeds no customer identity. Account names are public connection identifiers.
 - **Zone.** A setting (`dns.account_hostname_zone`), never hard-coded. It must be a separate registered domain from the brand and Portal domains. Customer sites under the brand's registrable domain could set cookies for it and attack Portal sessions. The zone is submitted to the Public Suffix List, as `github.io` and `netlify.app` are. Submission alone protects nothing: until the entry is accepted and shipped in current browsers, a customer site on `<id>.<zone>` could set a cookie for the whole zone and have it sent to other customers' account names. The agreed first release keeps previews off even after inclusion: account names and their descendants receive a node-controlled neutral HTTP response. The factual PSL-shipped setting does not enable customer content.
-- **Records.** PRAHO owns them: `A`, and `AAAA` when the node has IPv6, pointing at the node that currently hosts the account. They are never a CNAME, because MX and SRV targets must not be aliases (RFC 2181 §10.3) and mail uses this name. The records live in our Cloudflare zone through the existing DNS gateway, with an owner tag `praho:account:<id>` and a 300 s TTL.
-- **Lifecycle.** Created when the account is provisioned; moved by migration, drain and recovery (section 4); deleted at termination. A reconcile sweep compares the records with `VirtualminAccount.server` and repairs drift.
+- **Records.** PRAHO owns them: `A`, and `AAAA` when the node has IPv6, pointing at the node that currently hosts the account. They are never a CNAME, because MX and SRV targets must not be aliases (RFC 2181 §10.3) and mail uses this name. The records live in our Cloudflare zone through the existing DNS gateway, with an owner tag `praho:account:<id>`. The ordinary TTL is configurable (`dns.account_record_ttl_seconds`, default 300 s); a move records and later restores each record's actual original TTL.
+- **Lifecycle.** Created when the account is provisioned; moved by migration, drain and recovery (section 4). Termination withdraws DNS records and permanently retires the name; its label remains reserved. A reconcile sweep compares the records with `VirtualminAccount.server` and repairs drift.
 
 ### 2. How a customer's domain reaches the account
 
-PRAHO never tells a customer to point at a raw node IP. Every supported path follows the account name.
+External DNS instructions use the account name. Managed customer zones necessarily contain the node's actual A/AAAA values; PRAHO owns those copies and updates them on a move.
 
 1. **Our nameservers (preferred).** The customer's zone lives in our Cloudflare account through the API (section 5). PRAHO writes the apex and `www` (and later MX) as copies of the account name's addresses, and updates them on every move.
 2. **External DNS with ALIAS or CNAME flattening.** Cloudflare, DNSimple and similar providers can point the apex at the account name; `www` is a CNAME to it.
 3. **External DNS without ALIAS.** `www` is a CNAME to the account name, and the apex is an HTTP redirect to `www` at the registrar ("URL forwarding"). The Portal warns that many registrar forwarders have no certificate, so `https://example.com` may fail before the redirect; `http://` and `www` work.
 
-A raw node IP is not offered, so no customer ever holds an address that a move makes stale.
+Customers following the supported external DNS instructions do not need to maintain a node IP manually.
 
 ### 3. Certificates
 
 - **Account names and previews.** Each account name remains a Virtualmin sub-server with its own certificate (historical lab contract: `docs/domain/virtualmin-account-subserver-contract.md`). The first release never links its web root to customer content. Root-owned neutral Apache vhosts load before Virtualmin's tenant vhosts and serve fixed content independently of tenant files, `.htaccess`, suspension pages and parent enablement. A per-name neutral vhost uses a local private copy of that name's certificate; a zone fallback covers names not yet created and uses the existing neutral site's certificate. All private copies stay on the node outside Native deletion paths, and are removed only after the Native child is absent. No wildcard account certificate is introduced. The per-name certificate is issued by DNS-01 through our Cloudflare zone on Platform; per-name issuance remains bounded by Let's Encrypt's weekly limit per registered domain, which the issuer budgets.
-- **The customer's own domain.** Virtualmin requests it by HTTP-01 once the domain points at the account. No certificate is issued before the switch, so HTTPS starts a few minutes after cutover. That trade-off was accepted.
-- **Moves.** Nothing is reissued (the Let's Encrypt duplicate-certificate limit is 5 per week). The customer domain's certificate travels with the account in the backup. The account name's sub-server is kept out of that backup, so its certificate and key are fetched from their vault references and installed on the new node.
+- **Initial setup of the customer's own domain.** Virtualmin requests its certificate by HTTP-01 once the domain points at the account. This first-issuance path can delay HTTPS until validation succeeds; it is separate from a move carrying an existing certificate.
+- **Moves.** Reuse the existing certificate and complete served chain instead of issuing a replacement. The customer domain's certificate travels with the account in the backup. The account name's sub-server is kept out of that backup, so its certificate and key are fetched from their vault references and installed on the new node.
 - **CAA.** The DNS check (section 6) flags a customer CAA record that excludes Let's Encrypt.
 
 ### 4. Moving an account between nodes
 
-Migration gains a **cutover** phase after restore and verification on the new node:
-1. **Before a planned move,** lower the account records' TTL to 60 s at least one old TTL ahead.
-2. **Bridge first.** Node A starts serving the domain as a reverse proxy to B for web traffic, and relays the domain's mail to B, and the bridge is verified before any record changes. Resolvers that still hold the old address then reach B through A, never a write-barriered or stale copy. There are never two live copies accepting writes.
-3. **Repoint** the account name, and the apex and `www` copies for customers on our nameservers, to node B. Verify through the zone's authoritative servers. The bridge stays until its window ends, because some resolvers hold old answers past their TTL.
-4. **Then** the retained copy on A is removed (the existing migration step), and the TTL returns to 300 s.
+Migration gains a **cutover** contract with one point of no return:
+1. **Before a planned move,** record every owned-name and managed customer-web record's actual original TTL, lower it to the configured cutover TTL (default 60 s), confirm provider readback, and wait the maximum original TTL. Routine sync preserves the lowered values.
+2. **Freeze and restore held.** Fence and verify source write paths before backup. Restore the target behind maintenance with credentials, cron and writes still held; verify archive lineage, account identity, certificates and current quotas. Prepare and verify the encrypted bridge prerequisites before committing ownership.
+3. **Commit ownership once.** Move `VirtualminAccount.server` and the account name's `target_server` together under the live operation lease and publication lock. Before this commit, compensation releases exactly the source state recorded by this operation. After it, recovery proceeds toward the committed target and never reopens the source for writes.
+4. **Activate, bridge and repoint.** Release the verified target through its activation protocol, verify source-to-target forwarding, and publish the owned name and managed apex/`www` records toward B. Confirm authoritative agreement against the still-current routing generation. Web forwarding uses Apache and verified TLS between nodes. Mail-enabled moves remain refused; mailboxes already on the nodes stay where they are.
+5. **Finish and retain.** Complete the account move after activation, bridge verification and DNS convergence, allowing normal account reconciliation and backups to resume. A separate durable cleanup operation retains the source bridge for its DNS/cache window and certificate lifetime, removes the retained source only after its gates pass, and confirms each original TTL is restored. Failed cleanup retains routing and blocks a subsequent move.
 
 - Drain uses the same cutover, so its manual "routing and DNS confirmed" box goes away for accounts on these paths.
-- **Recovery after a lost node:** restore the account from its latest backup onto a new node, then run the cutover. Data loss is bounded by the backup schedule.
+- **Recovery after a lost node:** require explicit source fencing, select a verified full backup or full/differential lineage, restore held, and commit target ownership before activation and authoritative repointing. No source bridge is assumed when the source is unavailable. Missing or ambiguous restore evidence requires review; native archives cannot be assumed to contain every original Unix credential policy. Data loss is bounded by the usable backup schedule and contents.
 
 ### 5. Our nameservers: Cloudflare zones through the API
 
-- A customer zone is created in our Cloudflare account. Before the customer switches nameservers, PRAHO imports their existing records (read from their current authoritative servers) so mail and verification TXT records survive the switch.
+- A customer zone is created in our Cloudflare account after an owner or technical contact confirms a complete zone-file inventory and the exact proposed changes. DNS lookups cross-check that inventory; they cannot discover arbitrary verification names, DKIM selectors or service records and therefore are not a complete import. Unsupported records refuse the whole import rather than disappearing.
+- Before offering nameserver instructions, publish and read back the entire confirmed inventory, check the assigned authoritative servers and parent delegation/DS handover, and refresh stale evidence. Registrar changes use the existing durable registrar-operation service. Unknown provider creation or registrar submission outcomes remain fenced for reconciliation.
 - The Portal gets a record editor for A, AAAA, CNAME, MX, TXT, SRV and CAA. Records PRAHO manages (apex, `www`, mail, DKIM) are labelled and locked.
+- The zone belongs to the customer independently of its hosting service. Hosting termination withdraws managed web records only; unrelated DNS remains. Whole-zone deletion is a separate request requiring the requester's own current export (a technical-role action) and verified move-away/cache-age proof. Provider ownership is recorded per zone and record.
 - The DNS provider sits behind an interface, so the zones can move to self-hosted servers later.
 
 ### 6. Watching customer DNS
@@ -78,9 +81,11 @@ A scheduled check per hosted domain records:
 - stray `AAAA` records pointing elsewhere;
 - CAA, and DNSSEC breakage after a nameserver switch.
 
-The Portal shows the result with the exact records to set. The customer is notified when something that worked breaks.
+The Portal shows cached results and the exact records to set. Requests do not run DNS probes or provider calls inline; leased background jobs store bounded observations. A verified healthy-to-broken change creates one notification per incident. Unknown observations and planned maintenance do not produce outage alerts. The DNSSEC observation compares DS/DNSKEY consistency; it does not claim cryptographic signature validation.
 
 ### 7. Mail on the nodes
+
+Withdrawn on 2026-10-28 (see the implementation clarifications); kept as proposed.
 
 - Nodes gain Postfix and Dovecot. A domain's MX and the mail client settings point at the account name, so mail follows every move.
 - **Each node sends outgoing mail from its own IP,** with a PTR record matching the node name. PRAHO keeps one SPF record, `_spf.<zone>`, listing every node's addresses, and customers include it. Moves and new nodes then never break SPF.
@@ -90,7 +95,7 @@ The Portal shows the result with the exact records to set. The customer is notif
 ## Consequences
 
 - Moves stop needing customer action, and failover becomes "restore and repoint". PRAHO owns more DNS state, which needs reconciliation and monitoring.
-- About 9% of resolvers keep answers past their TTL. The bridge on the old node covers that tail, which costs an extra window of time before the retained copy can be removed.
+- Some caches and long-lived connections outlast DNS TTLs. The configured source bridge window and cleanup evidence determine when the retained copy can be removed.
 - Customers whose DNS host offers no ALIAS get a redirect-only apex, with the https caveat.
 - Mail adds deliverability work: PTR records, blocklists and abuse handling per node.
 - Found while mapping the code: node panels request their Let's Encrypt certificate for the short inventory hostname instead of the node's FQDN, so the panel certificate likely never issues. This is fixed in the first phase.

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Import DNS" %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+  <main class="mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <a href="{% url 'services:detail' service_id %}" class="text-primary-400 underline">{% trans "Back to service" %}</a>
+    <h1 class="text-2xl font-semibold text-white">{% trans "Import DNS for" %} {{ service.domain }}</h1>
+    <p class="text-slate-300">{% trans "Upload the complete zone file exported by your current DNS provider. Review the full inventory and every proposed change before confirming. Keep your current nameservers until the new zone has been verified." %}</p>
+    <p class="text-slate-300">{% trans "External mail records are preserved. Existing SOA and apex NS records are replaced by the new provider's infrastructure and shown for review. Unsupported records or DNSSEC handover requirements stop the import." %}</p>
+    <form method="post" enctype="multipart/form-data" class="space-y-5">
+      {% csrf_token %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      {% for error in form.non_field_errors %}{% alert error variant="danger" %}{% endfor %}
+      {% form_field form.zone_file %}
+      {% trans "Preview import" as import_label %}{% button import_label type="submit" variant="primary" %}
+    </form>
+  </main>
+{% endblock %}
