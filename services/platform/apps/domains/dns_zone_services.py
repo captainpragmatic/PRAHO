@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 
 CROSSCHECK_MAX_AGE = timedelta(hours=1)
 LIVE_OPERATIONS = ("pending", "running", "waiting", "parked")
+# A source check that failed on the uploaded inventory itself: no retry of that inventory can pass.
+SUPERSEDABLE_SOURCE_CODES = frozenset({"source_record_missing_from_inventory", "source_owner_uncheckable"})
+# Evidence an apply operation records on reaching the provider (create, read-back, record write).
+_PROVIDER_STAGE_EVIDENCE = frozenset({"provider_account_id", "inventory", "mutation"})
 MAX_RRSET_CONTENT_LENGTH = 8192
 MAX_PUBLIC_PAGE_SIZE = 100
 
@@ -280,6 +284,52 @@ def _preview_binding(
         return Err(str(error))
 
 
+def _supersedable(operation: HostedZoneOperation) -> bool:
+    """A parked source check that provably never reached the provider, so a corrected upload may replace it.
+
+    A crosscheck operation only observes DNS. An apply operation qualifies only if it never left
+    `queued`: its source refresh began at preflight and it holds no provider-stage evidence.
+    Every other parked or live operation keeps the zone busy.
+    """
+    if (
+        operation.status != "parked"
+        or operation.last_error not in SUPERSEDABLE_SOURCE_CODES
+        or operation.registrar_operation_id is not None
+        or (operation.lease_until is not None and operation.lease_until > timezone.now())
+    ):
+        return False
+    if operation.kind == "crosscheck":
+        return True
+    return (
+        operation.kind == "apply"
+        and operation.phase == "refresh_source"
+        and operation.evidence.get("source_resume") == "queued"
+        and not _PROVIDER_STAGE_EVIDENCE & operation.evidence.keys()
+    )
+
+
+def _supersede(operation: HostedZoneOperation, zone: HostedZone, revision: int) -> tuple[str, bool]:
+    """End the parked check under the zone and operation locks: its park code, and whether the zone reopened.
+
+    A zone never applied was failed by this check alone, so it is importing again. A zone applied before
+    stays failed until its next completed apply restores it, as any failed zone does. The caller saves the zone.
+    """
+    code = operation.last_error
+    operation.status = "failed"  # fsm-bypass: CharField operation status; replaced under its row lock.
+    operation.last_error = "superseded_by_upload"
+    operation.evidence = {**operation.evidence, "superseded": {"code": code, "by_revision": revision}}
+    operation.lease_token = None
+    operation.lease_until = None
+    operation.save(update_fields=["status", "last_error", "evidence", "lease_token", "lease_until", "updated_at"])
+    if zone.last_error != code:
+        return code, False
+    zone.last_error = ""
+    if zone.status != "failed" or zone.applied_revision is not None or zone.activation.get("activated_at"):
+        return code, False
+    zone.retry()
+    return code, True
+
+
 def preview_zone_import(
     account: VirtualminAccount, raw: bytes, *, actor: User | None = None
 ) -> Result[HostedZoneImportRevision, str]:
@@ -313,7 +363,9 @@ def preview_zone_import(
             )
         if validate_zone_binding(zone, account, hostname, require_target=False).is_err():
             return Err("stale_enrollment_binding")
-        if zone.operations.filter(status__in=LIVE_OPERATIONS).exists() or zone.status in {"deleting", "deleted"}:
+        # Account, zone, then operation: the order the zone worker locks in, so a park and this upload serialize.
+        live = zone.operations.select_for_update().filter(status__in=LIVE_OPERATIONS).first()
+        if zone.status in {"deleting", "deleted"} or (live is not None and not _supersedable(live)):
             return Err("zone_operation_busy")
         errors: list[dict[str, Any]] = []
         inventory: list[dict[str, Any]] = []
@@ -350,15 +402,22 @@ def preview_zone_import(
             valid=not errors,
             errors=errors,
         )
+        metadata: dict[str, Any] = {"revision": number, "valid": revision.valid, "digest": revision.inventory_digest}
+        reopened = False
+        if live is not None:
+            code, reopened = _supersede(live, zone, number)
+            metadata.update(superseded_operation=str(live.pk), superseded_code=code)
         zone.current_revision = number
         zone.readiness = {}
-        zone.save(update_fields=["current_revision", "readiness", "updated_at"])
-        _audit(
-            zone,
-            "dns_zone_import_staged",
-            actor=actor,
-            metadata={"revision": number, "valid": revision.valid, "digest": revision.inventory_digest},
-        )
+        zone.save(update_fields=["current_revision", "readiness", "last_error", "status", "updated_at"])
+        _audit(zone, "dns_zone_import_staged", actor=actor, metadata=metadata)
+        if reopened:
+            _audit(
+                zone,
+                "dns_zone_state_changed",
+                actor=actor,
+                metadata={"status": zone.status, "revision": number, "reason": "superseded_by_upload"},
+            )
         return Ok(revision)
 
 
