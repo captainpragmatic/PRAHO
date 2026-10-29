@@ -1513,6 +1513,8 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, _("We could not check that right now. Please try again in a moment."))
         else:
             mark_auth_success(request)
+            # A new key, as at login: a copy of the old cookie must not share the window just opened.
+            request.session.cycle_key()
             return redirect(next_url)
     remaining = int(status.get("backup_codes_remaining") or 0)
     low = two_factor is True and remaining <= LOW_BACKUP_CODES

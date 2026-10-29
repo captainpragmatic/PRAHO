@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from http.cookies import SimpleCookie
 from typing import Any
 from unittest.mock import patch
 
@@ -95,6 +96,17 @@ class ConfirmIdentityTests(TestCase):
             response = self.client.post(f"{PATH}?next=/billing/", {"password": "secret-1"})
         self.assertRedirects(response, "/billing/", fetch_redirect_response=False)
         self.assertEqual(platform.confirm_identity.call_args.args, (42, "secret-1", ""))
+
+    def test_a_copy_of_the_cookie_does_not_share_the_window_the_person_opened(self) -> None:
+        # Someone holding a copy of this browser's cookie must not ride the check its owner passes.
+        copy = self.client_class()
+        copy.cookies = SimpleCookie({name: morsel.value for name, morsel in self.client.cookies.items()})
+        before = self.client.session.session_key
+        response = self.post({"password": "secret-1"})
+        self.assertRedirects(response, "/billing/", fetch_redirect_response=False)
+        self.assertNotEqual(self.client.session.session_key, before)  # the person's browser has a new key
+        self.assertEqual(self.client.session["portal_session_id"], SESSION_ID)  # the same Platform session
+        self.assertNotIn("user_id", copy.session)  # the copied key no longer signs anyone in
 
     def test_the_cursor_starts_in_the_password(self) -> None:
         page = self.get(two_factor=True).content.decode()
