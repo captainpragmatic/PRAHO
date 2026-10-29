@@ -102,7 +102,18 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
         ]
 
 
-class ServiceListSerializer(serializers.ModelSerializer):
+class UsageRepresentationMixin(serializers.ModelSerializer):
+    def to_representation(self, instance: Service) -> dict[str, object]:
+        from apps.provisioning.virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
+        from apps.provisioning.virtualmin_usage_service import enabled, public_usage  # noqa: PLC0415
+
+        result = super().to_representation(instance)
+        if enabled() or AccountUsageState.objects.filter(account__service=instance).exists():
+            result.update(public_usage(instance))
+        return result
+
+
+class ServiceListSerializer(UsageRepresentationMixin):
     """Service list serializer for customer hosting services listing"""
 
     # Related fields
@@ -203,7 +214,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
         return next_date.isoformat() if next_date else None
 
 
-class ServiceDetailSerializer(serializers.ModelSerializer):
+class ServiceDetailSerializer(UsageRepresentationMixin):
     """Service detail serializer for complete service information"""
 
     # Related objects with full detail

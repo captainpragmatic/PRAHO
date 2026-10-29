@@ -165,7 +165,7 @@ Everything a node needs at runtime is already in the image. `python3` and `cron`
 | `test_backup_restore.py` | full and config-only backup and restore as queued jobs; a restore of a backup that does not exist |
 | `test_differential_chain.py` | base, differential and pair restore with the flag on (ADR-0059), and the end of the chain |
 | `test_migration_drain.py` | migration and drain from vm-a to vm-b, data verified on vm-b; the drain moves the round-trip account too, and the test puts it back |
-| `test_sync.py` | the usage sync command (it runs cleanly and stamps the account; the lab reports no usage values), the health and statistics tasks, and the divergence backstop |
+| `test_sync.py` | real allocated file/database growth and HTTP(S) response bytes through the private collector and hourly publisher; health/statistics and the divergence backstop |
 | `test_disaster_recovery.py` | the integrity report, the dry-run plan and the refusal of a real rebuild, and recovery from a backup onto another node |
 
 Workflow domains are `wf*.example.com`: the provisioning pipeline refuses a domain with a `test` label, so `*.praho.test` cannot go through it. The bench moves placement to vm-a by server weight, and puts weights, settings and domain counts back at the end.

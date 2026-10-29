@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Measured hosting usage (#782): hourly owner-scoped file/database and web response-byte observations, source times, independent stale/unknown states, disk breakdown and history in the portal. Usage remains observational and disabled until collectors are installed and `provisioning.usage_sync_enabled` is enabled. Legacy usage writers and the Virtualmin billing collector are retired; see ADR-0068 for rollout and period semantics.
+
 - **Customer view (ADR-0065).** Administrators and support staff can open the customer portal as one member of an active customer, read-only, for at most 30 minutes, from "Sign in as customer" on the member card. Staff give a reason first; every view, page read and refusal is in the audit trail. The customer sees nothing. Turn it off with `CUSTOMER_VIEW_ENABLED=false` on both services.
 - **Platform owns customer portal sessions (ADR-0017).** Every portal call names its Platform session, logout ends it on Platform, and a password or second-factor change ends every other session at its next request. Every signed-in customer logs in again once after this release; see ADR-0017 for the deploy order and `PORTAL_SESSION_REQUIRED`.
 

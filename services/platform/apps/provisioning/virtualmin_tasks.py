@@ -2141,6 +2141,16 @@ def delete_virtualmin_account_async(account_id: str) -> str:
 def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     """Set up all Virtualmin scheduled tasks."""
     tasks_created = {}
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-usage-sync",
+        defaults={
+            "func": "apps.provisioning.virtualmin_usage_tasks.dispatch_usage_sync",
+            "schedule_type": "C",
+            "cron": "10 * * * *",
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["usage"] = "created" if created else "updated"
 
     _, created = ScheduleModel.objects.update_or_create(
         name="hosted-domain-dns-dispatch",

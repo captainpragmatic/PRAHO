@@ -10,6 +10,17 @@ boundaries. The [Makefile](../../Makefile) and current settings take precedence 
 
 ## Development and Schedule Setup
 
+`virtualmin-usage-sync` is registered under Virtualmin maintenance at `10 * * * *`
+on `praho-cluster`. It dispatches at most one claimed node poll per hour; each job
+has a 300-second deadline and a 330-second durable lease. It reads cached usage
+over enrolled root SSH, never raw credential-bearing domain listings. Publication
+checks ownership, canonical node intervals, mutation watermarks and SSH identity.
+Retention removes old readings in bounded batches after 90 days, preserving last-good
+pointers. Disable `provisioning.usage_sync_enabled` to stop new polls. The former
+`Collect Virtualmin Usage` billing schedule is removed only by its exact owned
+name/function; messages already queued are no-ops. Generic service metering excludes
+Virtualmin-backed services. No observation creates a billable usage event.
+
 From the repository root:
 
 ```bash

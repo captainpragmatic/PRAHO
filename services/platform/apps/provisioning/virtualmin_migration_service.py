@@ -372,7 +372,14 @@ class VirtualminMigrationService:
         actor: User | None = None,
     ) -> None:
         with transaction.atomic():
+            # Publication locks the account before accepting a cached gauge.
+            # Activation/compensation may mutate the target after cutover.
+            VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             self._move(migration, token, status, error_detail=error)
+            if status in _TERMINAL_STATUSES:
+                from .virtualmin_usage_service import invalidate_gauge  # noqa: PLC0415
+
+                invalidate_gauge(migration.account_id)
             self._audit(migration, status, compensation_failure=compensation_failure, actor=actor)
             if status in _TERMINAL_STATUSES and migration.contract != VirtualminMigration.Contract.RECOVERY:
                 from .migration_artifact_cleanup import schedule_artifact_cleanup  # noqa: PLC0415
@@ -1094,6 +1101,9 @@ class VirtualminMigrationService:
                 raise ValueError("Account or hostname ownership changed before the commit")
             self._move(migration, token, "activating", cutover_committed_at=timezone.now())
             account.server = migration.target_server
+            from .virtualmin_usage_service import move_interval  # noqa: PLC0415
+
+            move_interval(account.pk, migration.target_server_id)
             account.save(update_fields=["server", "updated_at"])
             hostname.target_server = migration.target_server
             hostname.save(update_fields=["target_server", "updated_at"])
@@ -1339,6 +1349,9 @@ class VirtualminMigrationService:
             VirtualminServer.objects.select_for_update(no_key=True).get(pk=migration.target_server_id)
             hostname = self._legacy_name(migration, account)
             account.server = migration.target_server
+            from .virtualmin_usage_service import move_interval  # noqa: PLC0415
+
+            move_interval(account.pk, migration.target_server_id)
             account.save(update_fields=["server", "updated_at"])
             if hostname is not None:
                 hostname.target_server = migration.target_server

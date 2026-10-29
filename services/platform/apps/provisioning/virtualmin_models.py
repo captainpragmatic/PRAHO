@@ -702,6 +702,17 @@ class VirtualminProvisioningJob(models.Model):
     def __str__(self) -> str:
         return f"{self.get_operation_display()} on {self.server.name} ({self.get_status_display()})"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        fields = kwargs.get("update_fields")
+        terminal = self.status in {"completed", "failed", "attention"} and self.completed_at is not None
+        if terminal and (fields is None or {"status", "completed_at"}.intersection(fields)):
+            with transaction.atomic():
+                self._lock_usage_account(self.account_id)
+                super().save(*args, **kwargs)
+                self._invalidate_usage_gauge(self.account_id, self.operation)
+        else:
+            super().save(*args, **kwargs)
+
     @classmethod
     def claim_for_retry(cls, job_id: Any, now: Any) -> bool:
         """Leased claim: failed -> pending, consuming one attempt atomically."""
@@ -765,7 +776,9 @@ class VirtualminProvisioningJob(models.Model):
                 if job.status == "running" and job.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
                     # A dead delete worker may have deleted the domain: replaying it blind, and
                     # releasing the account's exclusion, is not safe. An operator resolves it.
-                    recovered += fenced.update(
+                    recovered += cls._recover_usage_fenced(
+                        job,
+                        fenced,
                         status="attention",
                         status_message="Worker interrupted; execution deadline exceeded",
                         next_retry_at=None,
@@ -773,10 +786,21 @@ class VirtualminProvisioningJob(models.Model):
                         updated_at=recovery_time,
                     )
                 else:
-                    recovered += fenced.update(
-                        status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time
+                    recovered += cls._recover_usage_fenced(
+                        job, fenced, status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=recovery_time
                     )
         return recovered
+
+    @classmethod
+    def _recover_usage_fenced(
+        cls, job: VirtualminProvisioningJob, fenced: models.QuerySet[VirtualminProvisioningJob], **values: Any
+    ) -> int:
+        with transaction.atomic():
+            cls._lock_usage_account(job.account_id)
+            changed = fenced.update(**values)
+            if changed:
+                cls._invalidate_usage_gauge(job.account_id, job.operation)
+            return changed
 
     @classmethod
     def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
@@ -826,26 +850,54 @@ class VirtualminProvisioningJob(models.Model):
     ) -> int:
         """Token-fenced terminal write; a rotated token makes this a no-op."""
         payload = without_secrets(dict(result or {}))
-        return cls.objects.filter(pk=job_id, execution_token=token).update(
-            status=status,
-            status_message=message,
-            completed_at=timezone.now(),
-            result=payload,
-            next_retry_at=None,
-            updated_at=timezone.now(),
-        )
+        with transaction.atomic():
+            job = cls.objects.filter(pk=job_id, execution_token=token).first()
+            if job is None:
+                return 0
+            cls._lock_usage_account(job.account_id)
+            changed = cls.objects.filter(pk=job_id, execution_token=token).update(
+                status=status,
+                status_message=message,
+                completed_at=timezone.now(),
+                result=payload,
+                next_retry_at=None,
+                updated_at=timezone.now(),
+            )
+            if changed:
+                cls._invalidate_usage_gauge(job.account_id, job.operation)
+            return changed
 
     @classmethod
     def take_over_execution(cls, job_id: Any, status: str, message: str) -> int:
         """Janitor takeover: rotate the token in the same CAS that writes the status."""
-        return cls.objects.filter(pk=job_id, status="running").update(
-            status=status,
-            status_message=message,
-            execution_token=uuid.uuid4(),
-            completed_at=timezone.now(),
-            next_retry_at=None,
-            updated_at=timezone.now(),
-        )
+        with transaction.atomic():
+            job = cls.objects.filter(pk=job_id, status="running").first()
+            if job is None:
+                return 0
+            cls._lock_usage_account(job.account_id)
+            changed = cls.objects.filter(pk=job_id, status="running").update(
+                status=status,
+                status_message=message,
+                execution_token=uuid.uuid4(),
+                completed_at=timezone.now(),
+                next_retry_at=None,
+                updated_at=timezone.now(),
+            )
+            if changed:
+                cls._invalidate_usage_gauge(job.account_id, job.operation)
+            return changed
+
+    @staticmethod
+    def _lock_usage_account(account_id: Any) -> None:
+        if account_id is not None:
+            VirtualminAccount.objects.select_for_update(no_key=True).filter(pk=account_id).first()
+
+    @staticmethod
+    def _invalidate_usage_gauge(account_id: Any, operation: str) -> None:
+        if account_id is not None and operation in {"restore_domain", "create_domain", "delete_domain"}:
+            from .virtualmin_usage_service import invalidate_gauge  # noqa: PLC0415
+
+            invalidate_gauge(account_id)
 
     @property
     def can_retry(self) -> bool:

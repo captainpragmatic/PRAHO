@@ -139,6 +139,13 @@ def fence_service_ownership(expected: dict[Any, int], *, using: str) -> Iterator
         if current != expected or locked != accounts or fresh_accounts != accounts:
             raise _stale()
         yield
+        from .virtualmin_usage_service import reset_owner_scope  # noqa: PLC0415
+
+        changed = set(_services(using).filter(pk__in=expected).values_list("pk", "customer_id"))
+        changed_services = {key for key, owner in changed if owner != expected[key]}
+        for identifier, service_id in accounts.items():
+            if service_id in changed_services:
+                reset_owner_scope(identifier)
 
 
 @contextmanager
@@ -151,6 +158,11 @@ def fence_account_ownership(expected: dict[Any, int], desired: Iterable[int], *,
         if locked != expected or owners != current_owners or set(current_owners) != service_ids:
             raise _stale()
         yield
+        from .virtualmin_usage_service import reset_owner_scope  # noqa: PLC0415
+
+        for identifier, service_id in _accounts(using).filter(pk__in=expected).values_list("pk", "service_id"):
+            if service_id != expected[identifier]:
+                reset_owner_scope(identifier)
 
 
 def _fence(kind: OwnershipKind, expected: dict[Any, int], desired: Iterable[int], using: str) -> Any:

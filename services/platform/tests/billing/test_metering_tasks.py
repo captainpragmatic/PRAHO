@@ -523,13 +523,12 @@ class VirtualminUsageCollectionTestCase(TestCase):
             status="active",
         )
 
-    def test_collect_virtualmin_usage_no_meters(self):
-        """Test collection when meters aren't configured."""
-        # No meters exist, so should fail
+    def test_retired_virtualmin_collector_is_harmless_without_meters(self):
+        """Already queued jobs must not meter observational hosting usage."""
         result = collect_virtualmin_usage()
 
-        self.assertFalse(result["success"])
-        self.assertIn("Meters not configured", result["error"])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["accounts_processed"], 0)
 
     @patch("apps.audit.services.AuditService")
     @patch("apps.provisioning.models.VirtualminAccount")
@@ -647,7 +646,7 @@ class ScheduledTaskRegistrationTestCase(TestCase):
         register_scheduled_tasks()
 
         # Only PRAHO-local usage tasks are registered.
-        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 5)
+        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 4)
 
         # Check that specific tasks are registered
         calls = mock_schedule.objects.update_or_create.call_args_list
@@ -656,7 +655,8 @@ class ScheduledTaskRegistrationTestCase(TestCase):
         self.assertIn("Process Pending Usage Events", task_names)
         self.assertIn("Run Billing Cycle Workflow", task_names)
         self.assertIn("Check All Usage Thresholds", task_names)
-        self.assertIn("Collect Virtualmin Usage", task_names)
+        self.assertNotIn("Collect Virtualmin Usage", task_names)
+        mock_schedule.objects.filter.assert_called_with(name="Collect Virtualmin Usage", func="apps.billing.metering_tasks.collect_virtualmin_usage")
         self.assertIn("Collect Service Usage", task_names)
 
 

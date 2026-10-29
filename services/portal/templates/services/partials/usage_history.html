@@ -1,0 +1,15 @@
+{% load i18n localisation_tags %}
+<div class="bg-slate-700/30 rounded-lg p-6">
+  <h4 class="text-lg font-medium text-white mb-4">{% trans "Disk Usage History" %}</h4>
+  {% if usage.historical_usage.disk_sparkline %}
+    <svg class="w-full h-24 text-current" viewBox="0 0 300 80" role="img" aria-label="{% trans 'Disk usage over time' %}">
+      <polyline fill="none" stroke="currentColor" stroke-width="2" points="{{ usage.historical_usage.disk_sparkline }}" />
+    </svg>
+    <p class="text-xs text-slate-400">{% trans "Measured disk usage over the selected period." %}</p>
+  {% else %}
+    <p class="text-sm text-slate-400">{% trans "No disk usage history is available yet." %}</p>
+  {% endif %}
+  {% if usage.last_updated %}
+    <p class="mt-3 text-xs text-slate-400">{% trans "Last Updated:" %} <time datetime="{{ usage.last_updated }}">{% localised_date usage.last_updated "datetime" %}</time></p>
+  {% endif %}
+</div>

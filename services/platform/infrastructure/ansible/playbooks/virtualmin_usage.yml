@@ -1,0 +1,7 @@
+---
+- name: Install private hosting usage collection on an existing node
+  hosts: all
+  become: true
+  tasks:
+    - name: Configure node usage
+      ansible.builtin.import_tasks: virtualmin_usage_tasks.yml

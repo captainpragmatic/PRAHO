@@ -1,0 +1,70 @@
+{% load i18n ui_components %}
+<div class="grid grid-cols-1 {{ usage_grid|default:'sm:grid-cols-2 lg:grid-cols-4' }} gap-4">
+  <section class="{% if compact %}text-center{% else %}bg-slate-700/30 rounded-lg p-4{% endif %}" data-usage-resource="disk">
+    <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{% trans "Disk Usage" %}</h4>
+    {% if current.disk_usage_gb is not None %}
+      <div class="text-2xl font-bold text-blue-400 mb-1">{{ current.disk_usage_gb|floatformat:1 }} GB</div> {# tmpl-allow TMPL005: nullable resource metric value #}
+      {% if disk_limit %}<div class="text-xs text-slate-400">{% trans "of" %} {{ disk_limit }} GB {% trans "used" %}</div>{% endif %}
+      {% if disk_limit and current.disk_usage_percentage is not None %}
+        <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
+          <div class="bg-blue-500 h-2 rounded-full" style="width: {{ current.disk_usage_percentage|floatformat:'-1u' }}%"></div> {# tmpl-allow TMPL005: nullable usage progress bar #}
+        </div>
+      {% endif %}
+      {% if current.disk_files_gb is not None or current.disk_db_gb is not None %}
+        <p class="mt-2 text-xs text-slate-400">
+          {% if current.disk_files_gb is not None %}<span>{% trans "Files:" %} {{ current.disk_files_gb|floatformat:2 }} GB</span>{% endif %}
+          {% if current.disk_db_gb is not None %}<span>{% trans "Databases:" %} {{ current.disk_db_gb|floatformat:2 }} GB</span>{% endif %}
+        </p>
+      {% endif %}
+    {% else %}
+      <p class="text-sm text-slate-400">{% trans "Not available" %}</p>
+    {% endif %}
+    {% include "services/partials/usage_timestamp.html" with as_of=current.usage_as_of state=current.usage_state age_hours=current.usage_age_hours %}
+  </section>
+
+  <section class="{% if compact %}text-center{% else %}bg-slate-700/30 rounded-lg p-4{% endif %}" data-usage-resource="bandwidth">
+    <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{% trans "Bandwidth" %}</h4>
+    {% if current.bandwidth_usage_gb is not None and current.bandwidth_state != 'partial' %}
+      <div class="text-2xl font-bold text-green-400 mb-1">{{ current.bandwidth_usage_gb|floatformat:1 }} GB</div> {# tmpl-allow TMPL005: nullable resource metric value #}
+      {% if bandwidth_limit %}<div class="text-xs text-slate-400">{% trans "of" %} {{ bandwidth_limit }} GB {% trans "used" %}</div>{% endif %}
+      {% if bandwidth_limit and current.bandwidth_usage_percentage is not None %}
+        <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
+          <div class="bg-green-500 h-2 rounded-full" style="width: {{ current.bandwidth_usage_percentage|floatformat:'-1u' }}%"></div> {# tmpl-allow TMPL005: nullable usage progress bar #}
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="text-sm text-slate-400">{% trans "Not available" %}</p>
+    {% endif %}
+    {% include "services/partials/usage_timestamp.html" with as_of=current.bandwidth_as_of state=current.bandwidth_state age_hours=current.bandwidth_age_hours %}
+  </section>
+
+  <section class="{% if compact %}text-center{% else %}bg-slate-700/30 rounded-lg p-4{% endif %}" data-usage-resource="email">
+    <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{% trans "Email Accounts" %}</h4>
+    {% if current.email_accounts_used is not None %}
+      <div class="text-2xl font-bold text-purple-400 mb-1">{{ current.email_accounts_used }}</div> {# tmpl-allow TMPL005: nullable resource metric value #}
+      {% if email_limit %}
+        <div class="text-xs text-slate-400">{% trans "of" %} {{ email_limit }} {% trans "emails" %}</div>
+        <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
+          <div class="bg-purple-500 h-2 rounded-full" style="width: {% widthratio current.email_accounts_used email_limit 100 %}%"></div> {# tmpl-allow TMPL005: nullable usage progress bar #}
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="text-sm text-slate-400">{% trans "Not available" %}</p>
+    {% endif %}
+  </section>
+
+  <section class="{% if compact %}text-center{% else %}bg-slate-700/30 rounded-lg p-4{% endif %}" data-usage-resource="databases">
+    <h4 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{% trans "Databases" %}</h4>
+    {% if current.databases_used is not None %}
+      <div class="text-2xl font-bold text-yellow-400 mb-1">{{ current.databases_used }}</div> {# tmpl-allow TMPL005: nullable resource metric value #}
+      {% if databases_limit %}
+        <div class="text-xs text-slate-400">{% trans "of" %} {{ databases_limit }} {% trans "databases" %}</div>
+        <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
+          <div class="bg-yellow-500 h-2 rounded-full" style="width: {% widthratio current.databases_used databases_limit 100 %}%"></div> {# tmpl-allow TMPL005: nullable usage progress bar #}
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="text-sm text-slate-400">{% trans "Not available" %}</p>
+    {% endif %}
+  </section>
+</div>

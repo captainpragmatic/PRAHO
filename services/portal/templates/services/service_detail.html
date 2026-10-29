@@ -185,7 +185,7 @@
                       <span class="text-white">{{ service.status_display|default:"Active" }}</span>
                     </div>
                     <div class="flex justify-between">
-                      <span class="text-slate-400">{% trans "Uptime" %}</span>
+                      <span class="text-slate-400">{% trans "Service Age" %}</span>
                       <span class="text-white">
                         {% if service.service_age_days != None %}
                           {% with days=service.service_age_days %}
@@ -276,47 +276,7 @@
               {% if service.status == 'active' %}
               <div class="bg-slate-700/30 rounded-lg p-6 border border-slate-600/50">
                 <h3 class="text-lg font-semibold text-white mb-4">{% trans "Resource Usage Summary" %}</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {% if service.service_plan.disk_space_gb %}
-                  <div class="text-center">
-                    <div class="text-2xl font-bold text-blue-400">{{ service.disk_usage_gb|default:0|floatformat:1 }}GB</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
-                    <div class="text-sm text-slate-400">{% trans "of" %} {{ service.service_plan.disk_space_gb }}GB {% trans "used" %}</div>
-                    <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
-                      <div class="bg-blue-500 h-2 rounded-full" style="width: {{ service.disk_usage_percentage|default:0 }}%"></div> {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                    </div>
-                  </div>
-                  {% endif %}
-
-                  {% if service.service_plan.bandwidth_gb %}
-                  <div class="text-center">
-                    <div class="text-2xl font-bold text-green-400">{{ service.bandwidth_usage_gb|default:0|floatformat:1 }}GB</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
-                    <div class="text-sm text-slate-400">{% trans "of" %} {{ service.service_plan.bandwidth_gb }}GB {% trans "used" %}</div>
-                    <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
-                      <div class="bg-green-500 h-2 rounded-full" style="width: {{ service.bandwidth_usage_percentage|default:0 }}%"></div> {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                    </div>
-                  </div>
-                  {% endif %}
-
-                  {% if service.service_plan.email_accounts %}
-                  <div class="text-center">
-                    <div class="text-2xl font-bold text-purple-400">{{ service.email_accounts_used|default:0 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
-                    <div class="text-sm text-slate-400">{% trans "of" %} {{ service.service_plan.email_accounts }} {% trans "emails" %}</div>
-                    <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
-                      <div class="bg-purple-500 h-2 rounded-full" style="width: {% widthratio service.email_accounts_used|default:0 service.service_plan.email_accounts 100 %}%"></div> {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                    </div>
-                  </div>
-                  {% endif %}
-
-                  {% if service.service_plan.databases %}
-                  <div class="text-center">
-                    <div class="text-2xl font-bold text-yellow-400">{{ service.databases_used|default:0 }}</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
-                    <div class="text-sm text-slate-400">{% trans "of" %} {{ service.service_plan.databases }} {% trans "databases" %}</div>
-                    <div class="w-full bg-slate-600 rounded-full h-2 mt-2">
-                      <div class="bg-yellow-500 h-2 rounded-full" style="width: {% widthratio service.databases_used|default:0 service.service_plan.databases 100 %}%"></div> {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                    </div>
-                  </div>
-                  {% endif %}
-                </div>
+                {% include "services/partials/usage_resources.html" with current=service disk_limit=service.service_plan.disk_space_gb bandwidth_limit=service.service_plan.bandwidth_gb email_limit=service.service_plan.email_accounts databases_limit=service.service_plan.databases usage_grid="sm:grid-cols-2 lg:grid-cols-4" compact=True %}
               </div>
               {% endif %}
 
@@ -447,83 +407,8 @@
           <div x-show="isTab('usage')" x-cloak x-transition>
             <div class="space-y-6">
               <h3 class="text-lg font-semibold text-white">{% trans "Current Usage" %}</h3>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Disk Usage -->
-                {% if service.service_plan.disk_space_gb %}
-                <div class="bg-slate-700/30 rounded-lg p-6">
-                  <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-sm font-medium text-slate-300">{% trans "Disk Space" %}</h4>
-                    <span class="text-sm text-slate-400">{{ service.disk_usage_gb|floatformat:1 }} GB / {{ service.service_plan.disk_space_gb }} GB</span>
-                  </div>
-                  <div class="w-full bg-slate-600 rounded-full h-2.5">
-                    <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                         style="width: {{ service.disk_usage_percentage|default:0 }}%"></div>
-                  </div>
-                  <div class="text-xs text-slate-400 mt-1">{{ service.disk_usage_percentage|default:0|floatformat:1 }}% {% trans "used" %}</div>
-                </div>
-                {% endif %}
-
-                <!-- Bandwidth Usage -->
-                {% if service.service_plan.bandwidth_gb %}
-                <div class="bg-slate-700/30 rounded-lg p-6">
-                  <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-sm font-medium text-slate-300">{% trans "Bandwidth" %}</h4>
-                    <span class="text-sm text-slate-400">{{ service.bandwidth_usage_gb|floatformat:1 }} GB / {{ service.service_plan.bandwidth_gb }} GB</span>
-                  </div>
-                  <div class="w-full bg-slate-600 rounded-full h-2.5">
-                    <div class="bg-green-500 h-2.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                         style="width: {{ service.bandwidth_usage_percentage|default:0 }}%"></div>
-                  </div>
-                  <div class="text-xs text-slate-400 mt-1">{{ service.bandwidth_usage_percentage|default:0|floatformat:1 }}% {% trans "used" %}</div>
-                </div>
-                {% endif %}
-
-                <!-- Email Accounts -->
-                {% if service.service_plan.email_accounts %}
-                <div class="bg-slate-700/30 rounded-lg p-6">
-                  <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-sm font-medium text-slate-300">{% trans "Email Accounts" %}</h4>
-                    <span class="text-sm text-slate-400">{{ service.email_accounts_used|default:0 }} / {{ service.service_plan.email_accounts }}</span>
-                  </div>
-                  <div class="w-full bg-slate-600 rounded-full h-2.5">
-                    <div class="bg-purple-500 h-2.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                         style="width: {% widthratio service.email_accounts_used|default:0 service.service_plan.email_accounts 100 %}%"></div>
-                  </div>
-                </div>
-                {% endif %}
-
-                <!-- Databases -->
-                {% if service.service_plan.databases %}
-                <div class="bg-slate-700/30 rounded-lg p-6">
-                  <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-sm font-medium text-slate-300">{% trans "Databases" %}</h4>
-                    <span class="text-sm text-slate-400">{{ service.databases_used|default:0 }} / {{ service.service_plan.databases }}</span>
-                  </div>
-                  <div class="w-full bg-slate-600 rounded-full h-2.5">
-                    <div class="bg-yellow-500 h-2.5 rounded-full transition-all duration-500" {# tmpl-allow TMPL005: needs stat_tile progress_value #}
-                         style="width: {% widthratio service.databases_used|default:0 service.service_plan.databases 100 %}%"></div>
-                  </div>
-                </div>
-                {% endif %}
-              </div>
-
-              <!-- Usage History -->
-              <div class="bg-slate-700/30 rounded-lg p-6">
-                <div class="flex items-center justify-between mb-4">
-                  <h4 class="text-lg font-medium text-white">{% trans "Usage History" %}</h4>
-                  {% trans "Usage history period" as usage_history_period_label %}
-                  {% with period_classes="text-sm rounded-lg px-3 py-1" %}
-                    {% input_field "usage-history-period" input_type="select" options=usage_history_period_options value="7d" aria_label=usage_history_period_label css_class=period_classes %}
-                  {% endwith %}
-                </div>
-                <div class="h-64 flex items-center justify-center text-slate-400">
-                  <div class="text-center">
-                    {% icon "chart" size="2xl" css_class="mx-auto mb-2 opacity-50" %}
-                    <p>{% trans "Usage charts will be available soon" %}</p>
-                  </div>
-                </div>
-              </div>
+              {% include "services/partials/usage_resources.html" with current=service disk_limit=service.service_plan.disk_space_gb bandwidth_limit=service.service_plan.bandwidth_gb email_limit=service.service_plan.email_accounts databases_limit=service.service_plan.databases usage_grid="md:grid-cols-2" compact=False %}
+              {% include "services/partials/usage_history.html" %}
             </div>
           </div>
           {% endif %}

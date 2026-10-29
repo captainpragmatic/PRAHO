@@ -192,10 +192,10 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
         serializer = ServiceDetailSerializer(service)
 
         # Add usage trends (last 7 days simulation - in production would come from monitoring)
-        usage_trends = {
+        usage_trends: dict[str, object] = {
             "disk_usage_trend": [],  # Would be populated from monitoring data
             "bandwidth_usage_trend": [],  # Would be populated from monitoring data
-            "uptime_percentage": 99.9,  # Would be calculated from monitoring data
+            "uptime_percentage": None,
         }
 
         return Response({"success": True, "data": {"service": serializer.data, "usage_trends": usage_trends}})
@@ -295,8 +295,13 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         single_cost = monthly_costs[0] if len(monthly_costs) == 1 else {}
 
         # Calculate usage statistics
-        total_disk_usage_gb = sum(service.disk_usage_mb / 1024 for service in services)
-        total_bandwidth_usage_gb = sum(service.bandwidth_usage_mb / 1024 for service in services)
+        values = ServiceListSerializer(services, many=True).data
+        disk_values = [item["disk_usage_gb"] for item in values]
+        bandwidth_values = [item["bandwidth_usage_gb"] for item in values]
+        total_disk_usage_gb = round(sum(disk_values), 2) if all(value is not None for value in disk_values) else None
+        total_bandwidth_usage_gb = (
+            round(sum(bandwidth_values), 2) if all(value is not None for value in bandwidth_values) else None
+        )
 
         # Service type breakdown
         service_types: dict[str, int] = {}
@@ -320,8 +325,8 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             "total_monthly_cost": single_cost.get("total_monthly_cost"),
             "total_monthly_cost_with_vat": single_cost.get("total_monthly_cost_with_vat"),
             "monthly_costs_by_currency": monthly_costs,
-            "total_disk_usage_gb": round(total_disk_usage_gb, 2),
-            "total_bandwidth_usage_gb": round(total_bandwidth_usage_gb, 2),
+            "total_disk_usage_gb": total_disk_usage_gb,
+            "total_bandwidth_usage_gb": total_bandwidth_usage_gb,
             "service_types": service_types,
             "recent_services": recent_services_serializer.data,
         }
@@ -541,21 +546,39 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
                 "period": period,
                 "disk_usage_trend": [],  # Would be populated from monitoring
                 "bandwidth_usage_trend": [],  # Would be populated from monitoring
-                "uptime_percentage": 99.9,  # Would be calculated from monitoring
+                "uptime_percentage": None,
             },
             "alerts": [],  # Would include usage warnings, limits exceeded, etc.
         }
 
         # Add usage alerts
-        if service.service_plan.disk_space_gb and (service.disk_usage_mb / 1024) > (
-            service.service_plan.disk_space_gb * 0.8
+        from apps.provisioning.virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
+        from apps.provisioning.virtualmin_usage_service import enabled, public_usage, usage_history  # noqa: PLC0415
+
+        measured = (
+            public_usage(service)
+            if enabled() or AccountUsageState.objects.filter(account__service=service).exists()
+            else None
+        )
+        if measured is not None:
+            usage_data["current_usage"].update(measured)
+            usage_data["last_updated"] = measured["usage_as_of"]
+            usage_data["historical_usage"].update(
+                usage_history(service, {"7d": 7, "30d": 30, "90d": 90}.get(period, 30))
+            )
+        if (
+            (measured is None or measured["usage_state"] == "fresh")
+            and service.service_plan.disk_space_gb
+            and (service.disk_usage_mb / 1024) > (service.service_plan.disk_space_gb * 0.8)
         ):
             usage_data["alerts"].append(
                 {"type": "warning", "message": "Disk usage is above 80% of limit", "resource": "disk"}
             )
 
-        if service.service_plan.bandwidth_gb and (service.bandwidth_usage_mb / 1024) > (
-            service.service_plan.bandwidth_gb * 0.8
+        if (
+            (measured is None or measured["bandwidth_state"] == "fresh")
+            and service.service_plan.bandwidth_gb
+            and (service.bandwidth_usage_mb / 1024) > (service.service_plan.bandwidth_gb * 0.8)
         ):
             usage_data["alerts"].append(
                 {"type": "warning", "message": "Bandwidth usage is above 80% of limit", "resource": "bandwidth"}

@@ -139,6 +139,7 @@ class AnsibleService:
             "virtualmin.yml",
             "virtualmin_harden.yml",
             "virtualmin_backup.yml",
+            "virtualmin_usage_read.yml",
             "blesta.yml",
             "virtualmin_migrate_fetch.yml",
             "virtualmin_migrate_push.yml",

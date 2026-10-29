@@ -297,6 +297,9 @@ exclude = [
     "tests",
 ]
 
+[tool.ruff.per-file-target-version]
+"services/platform/infrastructure/ansible/playbooks/files/praho_usage.py" = "py310"
+
 [tool.ruff.lint]
 # ===============================================================================
 # STRATEGIC RULE SELECTION - Business Impact Focus 🚀

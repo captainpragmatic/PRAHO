@@ -1,24 +1,27 @@
 """Workflow: PRAHO's views of a node converge on the node's truth, and the Service's truth converges on the node.
 
-- `sync_virtualmin_usage` reads usage from the node into the account row.
+- The private collector measures files/DB independently and publishes through the hourly node task.
 - The server health and statistics tasks stamp the server from what the node answers.
 - The divergence backstop finds a Service and an account that disagree (a lost reconcile enqueue) and the
   reconciler it queues repairs the node. The backstop looks at PRAHO's rows only: a domain someone changes on
   the node behind PRAHO's back is not a signature it detects, and this file does not pretend otherwise.
 
-The lab nodes have no filesystem quotas and print no usage fields (README, Limits), so the usage sync can only be
-shown to run cleanly against a node and stamp the account; the usage values it reads are always 0 here and are
-not asserted.
+The lab has no filesystem quotas. Allocated bytes and Apache response bytes do not depend on quotas.
 """
 
 from __future__ import annotations
 
-import io
+import json
+import subprocess
 from collections.abc import Iterator
+from datetime import timedelta
+from pathlib import Path
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
-from django.core.management import call_command
 from django.utils import timezone
 
 from apps.provisioning.models import Service
@@ -29,6 +32,9 @@ from apps.provisioning.virtualmin_tasks import (
     reconcile_divergent_services_task,
     update_virtualmin_server_statistics,
 )
+from apps.provisioning.virtualmin_usage_models import NodeUsageSyncState, UsageReading
+from apps.provisioning.virtualmin_usage_service import public_usage
+from apps.provisioning.virtualmin_usage_tasks import sync_node_usage, transport_identity
 from tests.virtualmin_lab.workflows.harness import Bench, DomainData
 
 DOMAIN = "wfsync.example.com"
@@ -40,22 +46,60 @@ def account(bench: Bench) -> Iterator[VirtualminAccount]:
         yield hosted
 
 
-def test_usage_sync_runs_against_the_node_and_stamps_the_account(bench: Bench, account: VirtualminAccount) -> None:
-    DomainData(bench.lab_of(account), account).write("big.bin", "x" * 4096)
-    VirtualminAccount.objects.filter(pk=account.pk).update(last_sync_at=None)
-    out = io.StringIO()
+def test_usage_measures_independent_file_database_growth_and_real_http(bench: Bench, account: VirtualminAccount) -> None:
+    lab = bench.lab_of(account)
+    data = DomainData(lab, account)
+    assets = Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files"
+    lab.exec("install", "-d", "-m", "0700", "/var/lib/praho/usage", "/var/log/praho")
+    lab.exec("install", "-d", "-m", "0755", "/usr/local/libexec")
+    for name in ("praho_usage.py", "praho-usage-metadata.pl", "praho-usage-hook"):
+        target = f"{lab.node.container}:/usr/local/libexec/{name}"
+        subprocess.run(["docker", "cp", str(assets / name), target], check=True, capture_output=True, timeout=60)  # noqa: S603, S607  # Fixed lab container and repository asset.
+        lab.exec("chmod", "0700", f"/usr/local/libexec/{name}")
+    lab.exec("/usr/bin/python3", "/usr/local/libexec/praho_usage.py", "init")
+    lab.exec("perl", "/usr/local/libexec/praho-usage-metadata.pl", "reconcile")
 
-    call_command("sync_virtualmin_usage", "--server", account.server.name, stdout=out)
+    def collect():
+        lab.exec("/usr/bin/python3", "/usr/local/libexec/praho_usage.py", "refresh")
+        token = uuid4()
+        NodeUsageSyncState.objects.update_or_create(server=account.server, defaults={"token": token,
+            "lease_until": timezone.now() + timedelta(seconds=330), "input_identity": transport_identity(account.server)})
+        result = sync_node_usage(str(account.server_id), str(token))
+        assert result["state"] in {"ok", "unassigned_accounts"}, result
+        return UsageReading.objects.filter(account=account, disk_total_bytes__isnull=False).latest("taken_at")
 
-    assert "0 errors" in out.getvalue(), out.getvalue()
-    account.refresh_from_db()
-    assert account.last_sync_at is not None
-    assert (timezone.now() - account.last_sync_at).total_seconds() < 600
-    assert account.current_disk_usage_mb >= 0 and account.current_bandwidth_usage_mb >= 0
-    other = VirtualminAccount.objects.exclude(server=account.server).first()
-    assert other is None or other.last_sync_at is None or other.last_sync_at < account.last_sync_at, (
-        "--server limits the sync to that node's accounts"
-    )
+    with patch("apps.provisioning.virtualmin_usage_service.enabled", return_value=True):
+        first = collect()
+        data.add_blob(50)
+        second = collect()
+        assert second.disk_files_bytes - first.disk_files_bytes >= 50 * 1024**2
+        assert second.disk_db_bytes == first.disk_db_bytes
+        data.sql("CREATE TABLE usage_growth (body LONGBLOB) ENGINE=MyISAM")
+        try:
+            data.sql("INSERT INTO usage_growth VALUES (REPEAT('u', 1048576))")
+            third = collect()
+            assert third.disk_db_bytes > second.disk_db_bytes + 1000000
+            assert abs(third.disk_files_bytes - second.disk_files_bytes) < 1024**2
+            account.refresh_from_db()
+            account.service.refresh_from_db()
+            assert account.current_disk_usage_mb == account.service.disk_usage_mb == third.disk_total_bytes // 1024**2
+            assert public_usage(account.service)["disk_usage_gb"] > 0
+
+            data.write("usage.txt", "usage body\n")
+            for scheme, port in (("http", 80), ("https", 443)):
+                code = lab.exec("curl", "-sk", "--resolve", f"{account.domain}:{port}:127.0.0.1", "-o", "/dev/null", "-w", "%{http_code}", f"{scheme}://{account.domain}/usage.txt")
+                assert code == "200", (scheme, code)
+            collect()
+            exported = json.loads(lab.exec("sh", "-c", 'printf %s "{}" | /usr/bin/python3 /usr/local/libexec/praho_usage.py export'))
+            row = next(row for row in exported["records"] if row["domain"] == account.domain)
+            log = lab.exec("cat", "/var/log/praho/usage.log")
+            own = [line.split() for line in log.splitlines() if line.split()[2] == row["domain_id"]]
+            assert sum(int(line[4]) for line in own) >= len("usage body\n") * 2
+            assert "password_for_mysql" not in json.dumps(exported)
+            assert set(row) <= {"domain", "domain_id", "username", "scan_started_at", "scan_finished_at", "mailboxes", "databases", "disk_files_bytes", "disk_db_bytes", "disk_total_bytes", "segments", "binding_verified", "binding_started_at", "present"}
+        finally:
+            data.sql("DROP TABLE usage_growth")
+            data.remove("blob.bin")
 
 
 def test_health_and_statistics_tasks_stamp_the_servers_from_the_nodes(bench: Bench, account: VirtualminAccount) -> None:
