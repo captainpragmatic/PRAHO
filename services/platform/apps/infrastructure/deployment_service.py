@@ -46,7 +46,7 @@ from apps.infrastructure.deployment_lifecycle import (
     still_owns,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
-from apps.infrastructure.dns_gateway import DnsRecordSpec, get_dns_gateway
+from apps.infrastructure.dns_gateway import DnsRecordSpec, ExpectedDnsRecord, get_dns_gateway
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
 from apps.infrastructure.provider_config import (
     run_provider_command,
@@ -1561,8 +1561,20 @@ class NodeDeploymentService:
 
     @staticmethod
     def _dns_owner_tag(deployment: NodeDeployment) -> str:
-        """Ownership marker stamped on every DNS record this deployment creates."""
-        return f"praho:node-deploy:{deployment.id}"
+        """Ownership marker stamped on every DNS record this deployment creates.
+
+        The tag its records already carry, never a recomputed one, so records written under the
+        legacy integer tag stay reconcilable; otherwise one derived from correlation_id, which is
+        unique across PRAHO databases sharing a zone.
+        """
+        for entry in deployment.dns_record_ids or []:
+            if isinstance(entry, dict) and entry.get("owner_tag"):
+                return str(entry["owner_tag"])
+        return NodeDeploymentService._unique_dns_owner_tag(deployment)
+
+    @staticmethod
+    def _unique_dns_owner_tag(deployment: NodeDeployment) -> str:
+        return f"praho:node-deploy:{deployment.correlation_id}"
 
     def _resolve_dns_config(
         self, deployment: NodeDeployment, token_override: str | None
@@ -1637,7 +1649,10 @@ class NodeDeploymentService:
             "name": fqdn,
             "owner_tag": owner_tag,
         }
-        owned_update(lease, deployment, dns_record_ids=[intent])
+        # Records already stored keep their ids: a legacy-tag record without its id could only be
+        # withdrawn by a zone-wide tag sweep, which another database sharing the tag would feel.
+        stored = [e for e in deployment.dns_record_ids or [] if isinstance(e, dict) and e.get("record_id")]
+        owned_update(lease, deployment, dns_record_ids=[*stored, intent])
 
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag)
         if outcome.applied:
@@ -1648,72 +1663,122 @@ class NodeDeploymentService:
         return Ok(None)
 
     @staticmethod
-    def _delete_owned_dns(deployment: NodeDeployment, lease: OperationLease | None = None) -> None:
-        """Owner-scoped, best-effort DNS teardown; safe to call from every compensation path.
+    def _delete_owned_dns(deployment: NodeDeployment, lease: OperationLease | None = None) -> Result[None, str]:
+        """Withdraw this deployment's DNS records and clear only what is proven gone.
 
-        Deletes by owner tag (authoritative — reclaims replay orphans) in each record's own
-        stored zone, never the current setting. On any unconfirmed deletion, writes a durable
-        orphan marker so a future reconciler can find it; never raises (#347 GAP 3; codex
-        C1/C6/M10). No-op when the deployment created no records. Static so the scheduled
-        teardown task can call it without building the whole service.
+        Records under the deployment's own correlation tag are deleted by tag and confirmed by listing
+        the tag again. Records under any other stored tag (the legacy integer tag, which two databases
+        sharing a zone can both use) are deleted only by their stored id, after the record still
+        matches its stored name, type and address. An entry with no record id under such a tag is
+        ambiguous: it is kept and the deployment is flagged for reconciliation, never swept by tag.
+        Everything unresolved stays in dns_record_ids with a durable orphan marker. Static so the
+        scheduled teardown task can call it without building the whole service.
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
-
-        entries = deployment.dns_record_ids or []
+        entries = [e for e in deployment.dns_record_ids or [] if isinstance(e, dict)]
         if not entries:
-            return
-        owner_tag = NodeDeploymentService._dns_owner_tag(deployment)
+            return Ok(None)
         token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token") or "").strip()
-        zone_ids = {str(e.get("zone_id", "")) for e in entries if isinstance(e, dict) and e.get("zone_id")}
-
-        if not token or not zone_ids:
-            NodeDeploymentLog.objects.create(
-                deployment=deployment,
-                level="WARNING",
-                message=f"DNS teardown skipped (no token/zone); {len(entries)} record(s) may be orphaned",
-                phase="destroy",
-            )
-            return
-
+        if not token:
+            return NodeDeploymentService._dns_unresolved(deployment, entries, "no Cloudflare token")
         try:
             gateway = get_dns_gateway("cloudflare", token)
         except ValueError as exc:
-            NodeDeploymentLog.objects.create(
-                deployment=deployment,
-                level="WARNING",
-                message=f"DNS teardown skipped (provider unavailable: {exc}); {len(entries)} record(s) may be orphaned",
-                phase="destroy",
-            )
-            return
+            return NodeDeploymentService._dns_unresolved(deployment, entries, f"provider unavailable: {exc}")
 
+        unique_tag = NodeDeploymentService._unique_dns_owner_tag(deployment)
         remaining: list[dict[str, Any]] = []
-        for zone_id in zone_ids:
-            result = gateway.delete_owned_records(zone_id, owner_tag)
-            if result.is_err():
-                logger.warning(
-                    f"[Deployment:{deployment.hostname}] DNS teardown failed for zone {zone_id}: {result.unwrap_err()}"
-                )
-                remaining.extend(e for e in entries if isinstance(e, dict) and e.get("zone_id") == zone_id)
-
-        if remaining:
-            NodeDeploymentLog.objects.create(
-                deployment=deployment,
-                level="WARNING",
-                message=f"DNS teardown incomplete; {len(remaining)} orphaned record(s) need reconciliation",
-                phase="destroy",
+        ambiguous: list[dict[str, Any]] = []
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for entry in entries:
+            groups.setdefault((str(entry.get("zone_id") or ""), str(entry.get("owner_tag") or "")), []).append(entry)
+        for (zone_id, tag), group in groups.items():
+            if not zone_id or not tag:
+                ambiguous.extend(group)
+            elif tag == unique_tag:
+                if NodeDeploymentService._withdraw_by_unique_tag(gateway, zone_id, tag).is_err():
+                    remaining.extend(group)
+            else:
+                concrete, unclear = NodeDeploymentService._legacy_expectations(deployment, group)
+                ambiguous.extend(unclear)
+                if concrete and gateway.delete_validated_records(zone_id, list(concrete.values())).is_err():
+                    remaining.extend(e for e in group if str(e.get("record_id")) in concrete)
+        if remaining or ambiguous:
+            return NodeDeploymentService._dns_unresolved(
+                deployment, [*remaining, *ambiguous], "withdrawal incomplete", lease, ambiguous=bool(ambiguous)
             )
-        NodeDeploymentService._write_dns_record_ids(deployment, remaining, lease)
+        NodeDeploymentService._write_dns_record_ids(deployment, [], lease)
+        return Ok(None)
+
+    @staticmethod
+    def _withdraw_by_unique_tag(gateway: Any, zone_id: str, tag: str) -> Result[None, str]:
+        deleted = gateway.delete_owned_records(zone_id, tag)
+        if deleted.is_err():
+            return Err(deleted.unwrap_err())
+        confirmed = gateway.confirm_no_owned_records(zone_id, tag)
+        if confirmed.is_err() or not confirmed.unwrap():
+            return Err(f"records tagged {tag} still present in zone {zone_id}")
+        return Ok(None)
+
+    @staticmethod
+    def _legacy_expectations(
+        deployment: NodeDeployment, group: list[dict[str, Any]]
+    ) -> tuple[dict[str, ExpectedDnsRecord], list[dict[str, Any]]]:
+        """Split legacy-tag entries into ones provable by id/name/type/address and ambiguous ones."""
+        addresses = {"A": deployment.ipv4_address or "", "AAAA": deployment.ipv6_address or ""}
+        concrete: dict[str, ExpectedDnsRecord] = {}
+        unclear: list[dict[str, Any]] = []
+        for entry in group:
+            record_type = str(entry.get("type") or "")
+            content = str(entry.get("content") or addresses.get(record_type, ""))
+            if not entry.get("record_id") or record_type not in addresses or not content or not entry.get("name"):
+                unclear.append(entry)
+                continue
+            concrete[str(entry["record_id"])] = ExpectedDnsRecord(
+                record_id=str(entry["record_id"]),
+                name=str(entry["name"]),
+                record_type=record_type,
+                content=content,
+                owner_tag=str(entry["owner_tag"]),
+            )
+        return concrete, unclear
+
+    @staticmethod
+    def _dns_unresolved(
+        deployment: NodeDeployment,
+        entries: list[dict[str, Any]],
+        reason: str,
+        lease: OperationLease | None = None,
+        *,
+        ambiguous: bool = False,
+    ) -> Result[None, str]:
+        """Keep the unresolved entries, leave a durable orphan marker, and say why."""
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+
+        message = f"DNS teardown {reason}; {len(entries)} orphaned record(s) need reconciliation"
+        logger.warning(f"⚠️ [Deployment:{deployment.hostname}] {message}")
+        NodeDeploymentLog.objects.create(deployment=deployment, level="WARNING", message=message, phase="destroy")
+        reconcile = message if ambiguous else ""
+        NodeDeploymentService._write_dns_record_ids(deployment, entries, lease, reconcile_reason=reconcile)
+        return Err(message)
 
     @staticmethod
     def _write_dns_record_ids(
-        deployment: NodeDeployment, entries: list[dict[str, Any]], lease: OperationLease | None
+        deployment: NodeDeployment,
+        entries: list[dict[str, Any]],
+        lease: OperationLease | None,
+        *,
+        reconcile_reason: str = "",
     ) -> None:
         """Record the DNS entries still unresolved; owned when the caller holds a lease."""
+        fields: dict[str, Any] = {"dns_record_ids": entries}
+        if reconcile_reason:
+            fields.update(needs_reconciliation=True, reconciliation_reason=reconcile_reason)
         if lease is not None:
-            owned_update(lease, deployment, dns_record_ids=entries)
+            owned_update(lease, deployment, **fields)
         else:
-            deployment.dns_record_ids = entries
-            deployment.save(update_fields=["dns_record_ids", "updated_at"])
+            for name, value in fields.items():
+                setattr(deployment, name, value)
+            deployment.save(update_fields=[*fields, "updated_at"])
 
     def _cleanup_resources(
         self,

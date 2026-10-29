@@ -120,15 +120,19 @@ class ConfigureDnsTests(TestCase):
 class DeleteOwnedDnsTests(TestCase):
     """_delete_owned_dns: owner-scoped delete, clear-on-success, orphan marker on failure."""
 
-    def test_deletes_by_tag_and_clears(self) -> None:
+    def test_deletes_stored_records_by_validated_id_and_clears(self) -> None:
+        # A stored tag that is not this deployment's correlation tag may be shared with another
+        # database, so its records go by stored id and address, never by a zone-wide tag sweep.
         dep = _create_deployment("completed")
         dep.dns_record_ids = [_entry()]
         dep.save()
         gw = MagicMock()
-        gw.delete_owned_records.return_value = Ok(["rA"])
+        gw.delete_validated_records.return_value = Ok(["rA"])
         with patch(_DNS_GW, return_value=gw), patch(_GET_SETTING, return_value="tok"):
             NodeDeploymentService._delete_owned_dns(dep)
-        gw.delete_owned_records.assert_called_once_with("z1", NodeDeploymentService._dns_owner_tag(dep))
+        gw.delete_owned_records.assert_not_called()
+        [sent] = gw.delete_validated_records.call_args.args[1]
+        self.assertEqual((sent.record_id, sent.owner_tag, sent.content), ("rA", "t", "1.2.3.4"))
         dep.refresh_from_db()
         self.assertEqual(dep.dns_record_ids, [])
 
@@ -137,7 +141,7 @@ class DeleteOwnedDnsTests(TestCase):
         dep.dns_record_ids = [_entry()]
         dep.save()
         gw = MagicMock()
-        gw.delete_owned_records.return_value = Err("cloudflare down")
+        gw.delete_validated_records.return_value = Err("cloudflare down")
         with patch(_DNS_GW, return_value=gw), patch(_GET_SETTING, return_value="tok"):
             NodeDeploymentService._delete_owned_dns(dep)
         dep.refresh_from_db()

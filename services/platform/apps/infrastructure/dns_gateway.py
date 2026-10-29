@@ -39,7 +39,7 @@ from typing import Any, Literal
 import requests
 
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +127,20 @@ class DnsRecordResult:
             "record_id": self.record_id,
             "type": self.record_type,
             "name": self.name,
+            "content": self.content,
             "owner_tag": self.owner_tag,
         }
+
+
+@dataclass(frozen=True)
+class ExpectedDnsRecord:
+    """A stored record that may be deleted only while it still says exactly this."""
+
+    record_id: str
+    name: str
+    record_type: str
+    content: str
+    owner_tag: str
 
 
 @dataclass
@@ -193,6 +205,14 @@ class DnsProviderGateway(ABC):
     @abstractmethod
     def delete_owned_records(self, zone_id: str, owner_tag: str) -> Result[list[str], str]:
         """Delete every record in ``zone_id`` bearing ``owner_tag``; return deleted ids."""
+
+    def delete_validated_records(self, zone_id: str, expected: list[ExpectedDnsRecord]) -> Result[list[str], str]:
+        """Delete each record by its stored id, only while it still matches; confirm each is gone."""
+        return Err(f"{type(self).__name__} cannot delete validated records")
+
+    def confirm_no_owned_records(self, zone_id: str, owner_tag: str) -> Result[bool, str]:
+        """Whether no record in ``zone_id`` still bears ``owner_tag``."""
+        return Err(f"{type(self).__name__} cannot list records by owner")
 
     @abstractmethod
     def reconcile_txt_values(
@@ -540,6 +560,71 @@ class CloudflareDnsGateway(DnsProviderGateway):
         if listed.is_err():
             return Err(listed.unwrap_err())
         return self._delete_records(zone_id, listed.unwrap())
+
+    def confirm_no_owned_records(self, zone_id: str, owner_tag: str) -> Result[bool, str]:
+        try:
+            listed = self._list_records(zone_id, {"comment.exact": owner_tag})
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
+        except (requests.RequestException, OutboundSecurityError) as exc:
+            return Err(f"cloudflare transport error: {exc}")
+        if listed.is_err():
+            return Err(listed.unwrap_err())
+        return Ok(not listed.unwrap())
+
+    def _get_record(self, zone_id: str, record_id: str) -> Result[dict[str, Any] | None, str]:
+        """One record by id; None when it no longer exists."""
+        resp = self._request("GET", f"/zones/{zone_id}/dns_records/{record_id}")
+        if resp.status_code == _HTTP_NOT_FOUND:
+            return Ok(None)
+        found = self._envelope(resp)
+        if found.is_err():
+            return Err(found.unwrap_err())
+        rec = found.unwrap()
+        return Ok(rec) if isinstance(rec, dict) else Err("cloudflare: unexpected record body")
+
+    @classmethod
+    def _still_matches(cls, rec: dict[str, Any], exp: ExpectedDnsRecord) -> bool:
+        return (
+            str(rec.get("name", "")).lower().rstrip(".") == exp.name.lower().rstrip(".")
+            and rec.get("type") == exp.record_type
+            and cls._same_content(rec.get("content"), exp.content)
+            and rec.get("comment") == exp.owner_tag
+        )
+
+    def _delete_validated(self, zone_id: str, exp: ExpectedDnsRecord) -> Result[str, str]:
+        current = self._get_record(zone_id, exp.record_id)
+        if current.is_err():
+            return Err(current.unwrap_err())
+        rec = current.unwrap()
+        if rec is None:
+            return Ok(exp.record_id)  # already gone
+        if not self._still_matches(rec, exp):
+            return Err(
+                f"record {exp.record_id} no longer matches {exp.record_type} {exp.name} -> {exp.content}; "
+                "refusing to delete it",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        if self._delete_ids(zone_id, [exp.record_id]):
+            return Err(f"record {exp.record_id}: deletion failed")
+        confirm = self._get_record(zone_id, exp.record_id)
+        if confirm.is_err() or confirm.unwrap() is not None:
+            return Err(f"record {exp.record_id}: deletion unconfirmed", retriability=Retriability.UNKNOWN)
+        return Ok(exp.record_id)
+
+    def delete_validated_records(self, zone_id: str, expected: list[ExpectedDnsRecord]) -> Result[list[str], str]:
+        deleted: list[str] = []
+        for exp in expected:
+            try:
+                outcome = self._delete_validated(zone_id, exp)
+            except DnsTransientError as exc:
+                return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
+            except (requests.RequestException, OutboundSecurityError) as exc:
+                return Err(f"cloudflare transport error: {exc}")
+            if outcome.is_err():
+                return Err(outcome.unwrap_err(), retriability=retriability_of(outcome))
+            deleted.append(outcome.unwrap())
+        return Ok(deleted)
 
     def _delete_records(self, zone_id: str, records: list[dict[str, Any]]) -> Result[list[str], str]:
         deleted: list[str] = []
