@@ -11,6 +11,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from apps.infrastructure.ansible_service import find_ansible_playbook
 from apps.infrastructure.cloud_gateway import CloudProviderGateway, get_cloud_gateway
 from apps.infrastructure.deployment_preflight import validate_deployment_dns_zone, validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import get_dns_gateway
@@ -77,7 +78,8 @@ class PanelCertPreflightService:
             mode="deployment" if deployment else "provider", target_id=deployment.pk if deployment else provider.pk
         )
         for tool in ("ansible-playbook", "ssh", "ssh-keygen", "ssh-keyscan"):
-            available = shutil.which(tool) is not None
+            # The deploy runs the pinned ansible next to this interpreter, which need not be on PATH.
+            available = (find_ansible_playbook() if tool == "ansible-playbook" else shutil.which(tool)) is not None
             report.add(
                 f"controller.{tool}",
                 "pass" if available else "fail",
