@@ -67,6 +67,19 @@ class RedeemTests(TestCase):
         cookie = response.cookies[self.client.cookies.keys().__iter__().__next__()]
         self.assertFalse(cookie["max-age"])  # ends with the browser
 
+    def test_the_view_is_bound_to_the_browser_that_redeemed_it(self) -> None:
+        # Otherwise the browser binding (PORTAL_BROWSER_FINGERPRINT_REQUIRED) ends it at its first page.
+        chrome = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/130.0.0.0 Safari/537.36"
+        )
+        with patch("apps.users.customer_view_views.api_client.redeem_customer_view", return_value=REDEEMED):
+            response = self.client.post(
+                reverse("users:customer_view_redeem"), {"code": CODE}, HTTP_ORIGIN=PLATFORM, HTTP_USER_AGENT=chrome
+            )
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(self.client.session["security_fingerprint"]["browser"], "chrome/macos")
+
     def test_the_code_is_exchanged_outside_the_session_this_browser_held(self) -> None:
         from apps.common import request_context  # noqa: PLC0415
 

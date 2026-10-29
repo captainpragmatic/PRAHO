@@ -41,6 +41,7 @@ EXEMPT: dict[str, str] = {
     "api/users/session/validate/": "session machinery, writes nothing",
     "api/users/session/end/": "logout only ends the session",
     "api/users/session/reauth/": "it is the identity check",
+    "api/users/customer-view/redeem/": "exchanges a single-use staff code for a read-only view, changes nothing",
     "api/users/token/": "staff API tokens, not portal sessions",
     "api/users/token/me/": "a read, staff API tokens",
     "api/users/token/revoke/": "staff API tokens, and revoking only removes access",

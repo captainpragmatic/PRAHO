@@ -22,6 +22,7 @@ from django.views.decorators.http import require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.common import counters, request_context
+from apps.common.middleware import SessionSecurityMiddleware
 from apps.common.rate_limiting import _client_ip_is_distinguishable
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import wants_json
@@ -135,6 +136,8 @@ def redeem(request: HttpRequest) -> HttpResponse:
             "customer_view_expires_at": expires_at.isoformat(),
         }
     )
+    # Bound to the browser that redeemed the code, as a login binds its session (ADR-0017 section 4).
+    SessionSecurityMiddleware.stamp_fingerprint(request.session, request.META.get("HTTP_USER_AGENT", ""))
     # The cookie ends with the browser: closing it never reopens the customer's portal.
     request.session.set_expiry(0)
     logger.info("✅ [CustomerView] Customer view opened")
