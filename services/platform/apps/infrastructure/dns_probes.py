@@ -37,6 +37,8 @@ from apps.infrastructure.panel_cert_probes import public_address
 from .dns_caa import parse_caa_issue
 
 MAX_NAMESERVERS = 8
+# A proper ancestor of the checked zone (a TLD or registry zone): .com alone has 13 authorities.
+MAX_PARENT_NAMESERVERS = 16
 MAX_CNAME_HOPS = 8
 MAX_DISCOVERY_LABELS = 32
 MIN_DNS_LABELS = 2
@@ -211,7 +213,7 @@ class DnsProbeTransport:
             else tuple(str(ns) for ns in dns.resolver.Resolver().nameservers)
         )
         self._recursive_servers = tuple(str(ipaddress.ip_address(server)) for server in configured[:2])
-        self._cache: dict[tuple[str, str, bool], Records] = {}
+        self._cache: dict[tuple[str, str, bool, bool], Records] = {}
         self._zones: dict[str, str] = {}
         self._authorities: dict[str, tuple[str, ...]] = {}
         self._addresses: dict[str, str] = {}
@@ -269,7 +271,8 @@ class DnsProbeTransport:
             current = _parent(current)
         raise ProbeError("dns_zone_unknown")
 
-    def _servers(self, zone: str) -> tuple[str, ...]:
+    def _servers(self, zone: str, *, ancestor: bool = False) -> tuple[str, ...]:
+        """The zone's authorities: at most eight, or sixteen when the caller asks a proper ancestor."""
         if zone not in self._authorities:
             response = self._recursive(zone, "NS")
             servers = {
@@ -278,9 +281,11 @@ class DnsProbeTransport:
                 if rrset.name == dns.name.from_text(zone) and rrset.rdtype == dns.rdatatype.NS
                 for record in rrset
             }
-            if not servers or len(servers) > MAX_NAMESERVERS:
+            if not servers or len(servers) > MAX_PARENT_NAMESERVERS:
                 raise ProbeError("dns_authorities_unproven")
             self._authorities[zone] = tuple(sorted(servers))
+        if len(self._authorities[zone]) > (MAX_PARENT_NAMESERVERS if ancestor else MAX_NAMESERVERS):
+            raise ProbeError("dns_authorities_unproven")
         return self._authorities[zone]
 
     def _address(self, server: str) -> str:
@@ -306,17 +311,21 @@ class DnsProbeTransport:
                 raise ProbeError("dns_authority_address_unsafe") from error
         return self._addresses[server]
 
-    def query(self, name: str, kind: str, *, parent: bool = False, wildcard_owner: bool = False) -> Records:
+    def query(
+        self, name: str, kind: str, *, parent: bool = False, wildcard_owner: bool = False, ancestor: bool = False
+    ) -> Records:
+        """`ancestor`: the zone answering is a proper ancestor of the checked one; `parent` always is."""
         self.budget.check()
         name = _name(name, wildcard_owner=wildcard_owner)
-        key = (name, kind, parent)
+        ancestor = ancestor or parent
+        key = (name, kind, parent, ancestor)
         if key in self._cache:
             return self._cache[key]
         # A wildcard owner lives in its parent's zone; discovery never asks for the `*` name.
         zone = self.zone(_parent(name) if parent or dns.name.from_text(name).is_wild() else name)
         answers = [
             self._parse(self._ask(name, kind, self._address(server), recursive=False, zone=zone), name, kind, zone)
-            for server in self._servers(zone)
+            for server in self._servers(zone, ancestor=ancestor)
         ]
         canonical = {
             (tuple(sorted(value.to_digestable() for value in answer.values)), answer.alias, answer.negative)
@@ -401,14 +410,15 @@ def _component(  # noqa: PLR0913  # Stable identity, outcome and private typed o
     }
 
 
-def _follow(transport: DnsProbeTransport, name: str, kind: str) -> tuple[Records, list[str]]:
+def _follow(transport: DnsProbeTransport, name: str, kind: str, *, ancestor: bool = False) -> tuple[Records, list[str]]:
+    """`ancestor` applies to `name` only: an alias target is checked as its own zone."""
     visited: list[str] = []
     current = name
     for _hop in range(MAX_CNAME_HOPS + 1):
         if current in visited:
             raise ProbeError("cname_cycle", state="broken")
         visited.append(current)
-        answer = transport.query(current, kind)
+        answer = transport.query(current, kind, ancestor=ancestor and current == name)
         if not answer.alias:
             return answer, visited
         current = answer.alias
@@ -443,9 +453,12 @@ def _routing(transport: DnsProbeTransport, name: str, target: ProbeTarget) -> Co
 
 def _caa_records(transport: DnsProbeTransport, name: str) -> Records | None:
     # RFC 8659: chase aliases for CAA(X), then climb Parent(X), not Parent(alias).
+    # Above the zone holding `name` the climb asks its parent and registry zones, up to the TLD.
+    zone = dns.name.from_text(transport.zone(name))
     current = name
     while current:
-        answer, _aliases = _follow(transport, current, "CAA")
+        above = dns.name.from_text(current)
+        answer, _aliases = _follow(transport, current, "CAA", ancestor=zone != above and zone.is_subdomain(above))
         if answer.values:
             return answer
         current = _parent(current)
@@ -629,9 +642,10 @@ def probe_hosted_domain_dns(
         "dnssec": lambda: _dnssec(channel, target),
         "mx": lambda: _mail(channel, target),
     }
-    outcomes: dict[str, ComponentObservation] = {}
-    for key, probe in probes.items():
-        outcomes[key] = _safe_component(probe, names[key])
+    # CAA and DNSSEC end in the parent zones (13 servers at .com), so they run last on the shared
+    # budget: a wide parent can make them unknown, never the account's own routing or mail.
+    ran = {key: _safe_component(probes[key], names[key]) for key in ("apex", "www", "mx", "caa", "dnssec")}
+    outcomes = {key: ran[key] for key in probes}
     www = outcomes["www"]
     aliases = www["evidence"].get("aliases", [])
     path = (

@@ -15,7 +15,7 @@ from apps.domains.dns_zone_checks import _Channel, handover_snapshot, probe_impo
 from apps.domains.dns_zone_import import parse_zone_file
 from apps.infrastructure.dns_probes import DnsProbeTransport
 from tests.domains.test_dns_zone_import import HEADER, ZONE
-from tests.infrastructure.test_dns_probes import DOMAIN, Wire
+from tests.infrastructure.test_dns_probes import DOMAIN, Wire, wide_authority
 
 
 class Channel:
@@ -226,3 +226,16 @@ def test_an_uncheckable_owner_is_reported_before_any_packet_even_when_dns_is_fai
         result = probe_import_batch(ZONE, inventory('a*b TXT "proof"\n'), 0, channel=_Channel())
     assert (result["ok"], result.get("error")) == (False, "source_owner_uncheckable")
     assert wire.calls == []
+
+
+def test_handover_reads_a_parent_zone_with_thirteen_authorities():
+    """Every .com import asks the 13 registry servers for the delegation and DS before anything else."""
+    wire = Wire()
+    wide_authority(wire, "example.net", 13)  # The parent zone of DOMAIN in this fixture.
+    wire.overrides[(DOMAIN, "NS")] = _parent_referral
+    transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
+    with patch("apps.infrastructure.dns_probes.DnsProbeTransport", return_value=transport):
+        proof = handover_snapshot(DOMAIN, channel=_Channel())
+    assert proof["state"] == "verified", proof
+    assert proof["nameservers"] == ["ns.cloudflare.example"]
+    assert len({question.server for question in wire.calls if question.record_type == "DS"}) == 13

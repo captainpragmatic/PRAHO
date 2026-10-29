@@ -60,7 +60,7 @@ class _Channel:
     def parent_nameservers(self, name: str) -> tuple[str, ...]:
         parent = dns.name.from_text(name).parent().to_text(omit_final_dot=True)
         zone = self._call(lambda: self.transport.zone(parent))
-        servers = self._call(lambda: self.transport._servers(zone))
+        servers = self._call(lambda: self.transport._servers(zone, ancestor=True))  # The delegating parent
         answers = []
         for server in servers:
             # Delegation referrals legitimately lack AA. The destinations are the

@@ -563,3 +563,58 @@ def test_the_monitor_still_refuses_a_wildcard_hosting_domain_before_any_packet()
     result, wire = report(target=replace(TARGET, domain=f"*.{DOMAIN}"))
     assert {component["code"] for component in result["components"].values()} == {"invalid_probe_target"}
     assert wire.calls == []
+
+
+def wide_authority(wire, zone, count, *, prefix="a", octet=98):
+    """`zone` answers its NS question with `count` public servers, as .com does with 13."""
+    names = [f"{prefix}{index}.wide-servers.net." for index in range(count)]
+    for index, server in enumerate(names):
+        wire.records[(server.rstrip("."), "A")] = (f"95.217.{octet}.{index + 1}",)
+
+    def answer(question):
+        response = dns.message.make_response(dns.message.make_query(question.name, question.record_type))
+        response.flags |= dns.flags.RA
+        response.answer.append(dns.rrset.from_text(f"{zone}.", 300, "IN", "NS", *names))
+        return response
+
+    wire.overrides[(zone, "NS")] = answer
+
+
+def test_a_parent_zone_with_thirteen_authorities_is_asked_like_com():
+    """The CAA climb ends at the TLD and DS lives there, so its 13 servers must not make the domain unknown."""
+    wire = Wire()
+    wide_authority(wire, "net", 13)
+    result, _ = report(wire)
+    assert (result["components"]["caa"]["state"], result["components"]["caa"]["code"]) == (
+        "healthy",
+        "caa_unrestricted",
+    )
+    assert result["components"]["dnssec"]["code"] == "dnssec_unsigned"
+    asked = {question.server for question in wire.calls if question.zone == "net" and not question.recursive}
+    assert len(asked) == 13
+    assert len(wire.calls) <= ProbeBudget().max_queries
+
+
+def test_the_customer_zone_keeps_eight_authorities_and_a_parent_sixteen():
+    customer = Wire()
+    wide_authority(customer, "example.net", 9)
+    result, _ = report(customer)
+    assert result["components"]["apex"]["code"] == "dns_authorities_unproven"
+    assert result["components"]["caa"]["code"] == "dns_authorities_unproven"
+    parent = Wire()
+    wide_authority(parent, "net", 17)
+    result, _ = report(parent)
+    assert result["components"]["apex"]["state"] == "healthy"
+    assert result["components"]["caa"]["code"] == "dns_authorities_unproven"
+    assert result["components"]["dnssec"]["code"] == "dns_authorities_unproven"
+
+
+def test_a_wide_parent_cannot_starve_the_checks_of_the_accounts_own_zone():
+    """CAA and DNSSEC end in the parent zones, so they run last and take only the budget that is left."""
+    wire = Wire()
+    wide_authority(wire, "net", 13)
+    wide_authority(wire, "example.net", 6, prefix="c", octet=96)
+    result, _ = report(wire)
+    assert list(result["components"]) == ["apex", "www", "caa", "dnssec", "mx"]
+    assert result["components"]["mx"]["code"] == "implicit_external_mail"
+    assert {result["components"][key]["state"] for key in ("apex", "www")} == {"healthy"}
