@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from apps.common.types import Result
+from apps.common.types import Ok, Result
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,8 @@ class ServerTypeInfo:
     disk_gb: int = 0
     price_monthly: float = 0.0
     available: bool = True
+    # Provider location names a new server of this type can be created in; None = not reported.
+    locations: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -175,6 +177,13 @@ class CloudProviderGateway(ABC):
     @abstractmethod
     def get_server_types(self) -> Result[Sequence[ServerTypeInfo], str]:
         """Get all available server types/plans."""
+
+    def server_type_orderable(self, server_type: str, location: str) -> Result[bool | None, str]:
+        """Whether a new server of this type can be created in this location right now.
+
+        None means the provider does not report per-location availability.
+        """
+        return Ok(None)
 
     @abstractmethod
     def create_snapshot(self, server_id: str, name: str) -> Result[str, str]:
