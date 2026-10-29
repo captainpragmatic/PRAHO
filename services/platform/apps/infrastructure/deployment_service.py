@@ -999,7 +999,12 @@ class NodeDeploymentService:
         # One locked claim: failed -> pending, the attempt counted in the same statement. A second retry
         # of the same row finds it no longer failed and runs nothing.
         claim = claim_operation(
-            deployment.pk, from_states=("failed",), to_status="pending", kind="retry", increment_retry=True
+            deployment.pk,
+            from_states=("failed",),
+            to_status="pending",
+            kind="retry",
+            increment_retry=True,
+            require_reconciled=True,
         )
         if claim.is_err():
             return Err(claim.unwrap_err())

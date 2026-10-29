@@ -244,3 +244,22 @@ class UpgradeDoesNotWriteStaleLifecycleTests(TestCase):
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "destroying")
         self.assertEqual(deployment.node_size_id, new_size.pk)
+
+
+class ReconciliationBlocksRetryTests(TestCase):
+    def test_a_row_flagged_for_reconciliation_is_not_retried(self) -> None:
+        deployment = _create_deployment("failed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            needs_reconciliation=True, reconciliation_reason="legacy destroy failure"
+        )
+        deployment.refresh_from_db()
+        service = _make_service()
+
+        with patch.object(service, "deploy_node", return_value=Ok(MagicMock())) as pipeline:
+            result = service.retry_deployment(deployment, credentials={"api_token": "t"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("reconcil", result.unwrap_err())
+        pipeline.assert_not_called()
+        deployment.refresh_from_db()
+        self.assertEqual((deployment.status, deployment.retry_count), ("failed", 0))

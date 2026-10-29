@@ -47,7 +47,7 @@ def provider_token_fingerprint(api_token: str) -> str:
     return hashlib.sha256(api_token.encode()).hexdigest()[:32]
 
 
-def claim_operation(  # noqa: PLR0913  # Every argument is one claim condition.
+def claim_operation(  # noqa: PLR0911, PLR0913  # Every argument is one claim condition.
     deployment_id: int,
     *,
     from_states: Iterable[str],
@@ -57,13 +57,14 @@ def claim_operation(  # noqa: PLR0913  # Every argument is one claim condition.
     increment_retry: bool = False,
     stale_before: datetime | None = None,
     message: str = "",
+    require_reconciled: bool = False,
 ) -> Result[OperationLease, str]:
     """Take ownership of a deployment under its row lock and move it to ``to_status``.
 
     The claim rotates ``operation_token``, so any earlier owner loses its writes. ``expected_token``
     restricts the claim to the holder of an earlier reservation, ``stale_before`` to a row that has not
     been written since (sweeps re-check age under the lock), and ``increment_retry`` counts the attempt
-    in the same statement.
+    in the same statement. ``require_reconciled`` refuses a row flagged for reconciliation.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
 
@@ -77,6 +78,8 @@ def claim_operation(  # noqa: PLR0913  # Every argument is one claim condition.
             return Err(f"Cannot {kind} node in status '{row.status}'")
         if expected_token is not None and row.operation_token != expected_token:
             return Err(f"Cannot {kind} node: another operation owns it")
+        if require_reconciled and row.needs_reconciliation:
+            return Err(f"Cannot {kind} node: reconcile it first ({row.reconciliation_reason})")
         if stale_before is not None and row.updated_at >= stale_before:
             return Err(f"Cannot {kind} node: it was updated recently")
         if row.status != to_status and not row.is_valid_transition(to_status):
