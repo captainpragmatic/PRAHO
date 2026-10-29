@@ -111,6 +111,15 @@ class Provider:
         return Ok(None)
 
 
+MISSING = "source_record_missing_from_inventory"
+UNCHECKABLE = "source_owner_uncheckable"
+CORRECTION = b'_dmarc TXT "v=DMARC1; p=none"\n'
+
+
+def _source_refusal(code):
+    return {"ok": False, "complete": False, "cursor": 1, "checked_at": timezone.now().isoformat(), "error": code}
+
+
 @override_settings(
     DISABLE_AUDIT_SIGNALS=True,
     AUDIT_CHAIN_ENABLED=False,
@@ -243,6 +252,41 @@ class ZoneWorkerTests(TransactionTestCase):
         self.assertEqual((self.operation.status, self.operation.last_error), ("parked", "source_owner_uncheckable"))
         self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "source_owner_uncheckable"))
         self.assertEqual(self.provider.calls, [])
+
+    def test_a_corrected_upload_supersedes_an_apply_parked_before_any_provider_call(self):
+        self.revision.crosscheck["checked_at"] = (timezone.now() - timedelta(hours=2)).isoformat()
+        self.revision.save(update_fields=["crosscheck"])
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual((self.operation.phase, self.operation.evidence["source_resume"]), ("refresh_source", "queued"))
+        with patch("apps.domains.dns_zone_checks.probe_import_batch", return_value=_source_refusal(MISSING)):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.status, "parked")
+        corrected = zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor)
+        self.assertTrue(corrected.is_ok(), corrected)
+        self.operation.refresh_from_db()
+        self.assertEqual((self.operation.status, self.operation.last_error), ("failed", "superseded_by_upload"))
+        self.assertEqual(self.provider.calls, [])
+
+    def test_an_apply_parked_after_provider_writes_keeps_refusing_a_corrected_upload(self):
+        for _ in range(100):
+            self.tick()
+            self.operation.refresh_from_db()
+            if self.operation.phase == "handover":
+                break
+        self.revision.crosscheck["checked_at"] = (timezone.now() - timedelta(hours=2)).isoformat()
+        self.revision.save(update_fields=["crosscheck"])
+        self.tick()
+        with patch("apps.domains.dns_zone_checks.probe_import_batch", return_value=_source_refusal(MISSING)):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual((self.operation.status, self.operation.last_error), ("parked", MISSING))
+        self.assertIn("create_zone", self.provider.calls)
+        refused = zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor)
+        self.assertEqual(refused, Err("zone_operation_busy"))
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.status, "parked")
 
     def test_source_drift_discovered_after_provider_publish_parks_without_nameserver_instructions(self):
         for _ in range(100):
@@ -1111,3 +1155,79 @@ class ZoneWorkerTests(TransactionTestCase):
         self.finish_apply()
         self.assertEqual(self.operation.status, "parked")
         self.assertFalse(any(isinstance(call, tuple) for call in self.provider.calls[len(before) :]))
+
+
+@override_settings(
+    DISABLE_AUDIT_SIGNALS=True,
+    AUDIT_CHAIN_ENABLED=False,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class CorrectedUploadTests(TransactionTestCase):
+    """A source check that failed on the uploaded inventory itself is replaced by a corrected upload."""
+
+    def setUp(self):
+        self.account, self.hostname, self.actor = hosting_fixture()
+        self.audit = patch.object(zones, "_audit").start()
+        patch.object(tasks, "_enqueue").start()
+        self.addCleanup(patch.stopall)
+        self.revision = zones.preview_zone_import(self.account, UPLOAD, actor=self.actor).unwrap()
+        self.zone = self.revision.zone
+
+    def parked_crosscheck(self, **outcome):
+        operation = zones.request_crosscheck(self.zone, self.revision.number, actor=self.actor).unwrap()
+        with patch("apps.domains.dns_zone_checks.probe_import_batch", **outcome):
+            tasks.advance_zone_operation(str(operation.pk))
+        operation.refresh_from_db()
+        self.assertEqual(operation.status, "parked")
+        return operation
+
+    def assert_superseded(self, code):
+        parked = self.parked_crosscheck(return_value=_source_refusal(code))
+        self.zone.refresh_from_db()
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", code))
+        corrected = zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor)
+        self.assertTrue(corrected.is_ok(), corrected)
+        number = corrected.unwrap().number
+        parked.refresh_from_db()
+        self.assertEqual((parked.status, parked.last_error), ("failed", "superseded_by_upload"))
+        self.assertEqual(parked.evidence["superseded"], {"code": code, "by_revision": number})
+        self.assertEqual((parked.lease_token, parked.lease_until), (None, None))
+        staged = [call for call in self.audit.call_args_list if call.args[1] == "dns_zone_import_staged"][-1]
+        self.assertEqual(staged.kwargs["metadata"]["superseded_operation"], str(parked.pk))
+        self.assertEqual(staged.kwargs["metadata"]["superseded_code"], code)
+        self.zone.refresh_from_db()
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", ""))
+        # The customer can go on: the corrected revision gets a crosscheck of its own.
+        fresh = zones.request_crosscheck(self.zone, number, actor=self.actor).unwrap()
+        self.assertNotEqual(fresh.pk, parked.pk)
+        self.assertEqual(fresh.revision.number, number)
+
+    def test_a_corrected_upload_supersedes_a_crosscheck_parked_for_a_missing_record(self):
+        self.assert_superseded(MISSING)
+
+    def test_a_corrected_upload_supersedes_a_crosscheck_parked_for_an_uncheckable_owner(self):
+        self.assert_superseded(UNCHECKABLE)
+
+    def test_a_crosscheck_still_in_progress_refuses_an_upload(self):
+        zones.request_crosscheck(self.zone, self.revision.number, actor=self.actor).unwrap()
+        self.assertEqual(
+            zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor), Err("zone_operation_busy")
+        )
+
+    def test_a_crosscheck_parked_for_another_reason_refuses_an_upload(self):
+        parked = self.parked_crosscheck(side_effect=ValueError("stale_import_target"))
+        self.assertEqual(parked.last_error, "stale_import_target")
+        self.assertEqual(
+            zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor), Err("zone_operation_busy")
+        )
+
+    def test_a_parked_crosscheck_a_worker_still_holds_refuses_an_upload(self):
+        parked = self.parked_crosscheck(return_value=_source_refusal(MISSING))
+        HostedZoneOperation.objects.filter(pk=parked.pk).update(
+            lease_token=uuid4(), lease_until=timezone.now() + timedelta(minutes=5)
+        )
+        self.assertEqual(
+            zones.preview_zone_import(self.account, UPLOAD + CORRECTION, actor=self.actor), Err("zone_operation_busy")
+        )
+        parked.refresh_from_db()
+        self.assertEqual(parked.status, "parked")
