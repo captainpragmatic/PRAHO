@@ -215,3 +215,14 @@ def test_an_owner_the_cross_check_cannot_ask_is_a_terminal_refusal_not_an_unknow
     assert result["ok"] is False
     assert result["error"] == "source_owner_uncheckable", result
     assert not any("*" in question.name for question in wire.calls)
+
+
+def test_an_uncheckable_owner_is_reported_before_any_packet_even_when_dns_is_failing():
+    """Network trouble must not hide a refusal no retry can clear: every owner is checked first."""
+    wire = Wire()
+    wire.overrides[(DOMAIN, "NS")] = OSError("parent unreachable")
+    transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
+    with patch("apps.infrastructure.dns_probes.DnsProbeTransport", return_value=transport):
+        result = probe_import_batch(ZONE, inventory('a*b TXT "proof"\n'), 0, channel=_Channel())
+    assert (result["ok"], result.get("error")) == (False, "source_owner_uncheckable")
+    assert wire.calls == []

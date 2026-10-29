@@ -180,6 +180,9 @@ def probe_import_batch(
         "observations": {},
         "checked_at": datetime.now(UTC).isoformat(),
     }
+    # A name the probe refuses is refused whatever the network does: report it before any packet.
+    if not all(probeable(owner, wildcard_owner=True) for owner, _kind in queries):
+        return {**result, "ok": False, "error": "source_owner_uncheckable"}
     if cursor == 0:
         handover = handover_snapshot(name, channel=selected)
         if handover["state"] != "verified":
@@ -188,8 +191,6 @@ def probe_import_batch(
         result["ds_ttl"] = handover["ds_ttl"]
     for index in range(cursor, min(len(queries), cursor + min(MAX_BATCH_QUERIES, max(1, batch_size)))):
         owner, kind = queries[index]
-        if not probeable(owner, wildcard_owner=True):
-            return {**result, "ok": False, "error": "source_owner_uncheckable"}
         try:
             answer = selected.query(owner, kind, wildcard_owner=True)
             actual_kind, values = _entries(answer)
