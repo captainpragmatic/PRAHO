@@ -11,7 +11,6 @@ from typing import cast
 from apps.billing.payment_models import Payment
 from apps.billing.signals import _activate_payment_services, _activate_pending_services
 from apps.customers.models import Customer
-from apps.customers.signals import _resume_cascade_suspended_services
 from apps.orders.hosting_fulfilment import fulfil_hosting_line
 from apps.orders.models import Order
 from apps.provisioning.models import Service
@@ -124,7 +123,10 @@ class SuspendedCustomerHoldTests(HostingWorkflowCase):
 
         service.refresh_from_db()
         self.assertEqual((service.status, service.suspension_reason), ("suspended", "customer_suspended"))
-        _resume_cascade_suspended_services(Customer.objects.get(pk=self.customer.pk))
+        customer = Customer.objects.get(pk=self.customer.pk)
+        with self.captureOnCommitCallbacks(execute=True):  # the real unsuspension, and its cascade
+            customer.unsuspend()
+            customer.save()
         service.refresh_from_db()
         self.assertEqual(service.status, "active")
 

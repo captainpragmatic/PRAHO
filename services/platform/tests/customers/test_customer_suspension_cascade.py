@@ -29,7 +29,9 @@ from apps.provisioning.services import ServiceManagementService
 from tests.helpers.fsm_helpers import force_status
 
 
-class CustomerSuspensionCascadeTests(TestCase):
+class CustomerCascadeFixture(TestCase):
+    """A customer with services, and the real FSM transitions to move it."""
+
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
             customer_type="company",
@@ -71,6 +73,8 @@ class CustomerSuspensionCascadeTests(TestCase):
             self.customer.suspend()
             self.customer.save()
 
+
+class CustomerSuspensionCascadeTests(CustomerCascadeFixture):
     def test_suspending_a_customer_suspends_their_active_service(self) -> None:
         service = self._service(domain="cascade-active.example.com")
 

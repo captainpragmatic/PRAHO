@@ -916,7 +916,6 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
     def test_late_renewal_payment_leaves_a_suspended_customer_s_service_to_its_unsuspension(self) -> None:
         """Paying while staff hold the customer pays the cycle, but hosting waits for the unsuspension (ADR-0066)."""
         from apps.customers.models import Customer  # noqa: PLC0415
-        from apps.customers.signals import _resume_cascade_suspended_services  # noqa: PLC0415
 
         self.subscription.mark_payment_failed()
         self.subscription.grace_period_ends_at = timezone.now() - timedelta(minutes=1)
@@ -939,7 +938,9 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual((self.service.status, self.service.suspension_reason), ("suspended", "customer_suspended"))
         # Unsuspending resumes it: the suspension now owns the hold, and the cycle is paid.
         customer = Customer.objects.get(pk=self.service.customer_id)
-        _resume_cascade_suspended_services(customer)
+        with self.captureOnCommitCallbacks(execute=True):  # the real unsuspension, and its cascade
+            customer.unsuspend()
+            customer.save()
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, "active")
 
