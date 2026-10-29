@@ -72,5 +72,8 @@ def stored_evidence(account: VirtualminAccount) -> str:
         if isinstance(components, dict) and all(isinstance(part, dict) for part in components.values())
         else {}
     )
-    ordered = {"summary": summary, "components": components, **results}
+    ordered: dict[str, object] = {"component_codes": summary} if summary else {}
+    if components is not None:
+        ordered["components"] = components
+    ordered.update((key, value) for key, value in results.items() if key not in ordered)
     return json.dumps(ordered, ensure_ascii=False, indent=2)[:12000]
