@@ -24,6 +24,7 @@ from django.test import Client, TestCase, override_settings
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from tests.helpers.portal_session import fresh_session
 
 HMAC_MIDDLEWARE_STACK = [
     "django.middleware.security.SecurityMiddleware",
@@ -82,6 +83,7 @@ def _post_billing_address(client: Client, user: User, customer: Customer, payloa
     body_dict = {
         "timestamp": int(ts),
         "user_id": user.id,
+        "session_id": str(fresh_session(user).pk),
         "customer_id": customer.id,
         **payload,
     }

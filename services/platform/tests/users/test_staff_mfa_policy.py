@@ -36,6 +36,7 @@ from apps.users.models import APIToken, CustomerMembership, User
 from apps.users.services import APITokenService
 from config.settings import base as base_settings
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
 
 KEY = "users.mfa_required_for_staff"
 PASSWORD = "correct-horse-battery-staple"  # test fixture, not a credential
@@ -242,7 +243,7 @@ class StaffMFATokenIssuanceTests(PolicyTestBase):
     HMAC_ALLOW_LEGACY_SECRET=True,
     CACHES=LOCMEM,
 )
-class StaffMFAPortalTests(HMACTestMixin, PolicyTestBase):
+class StaffMFAPortalTests(BoundSessionMixin, HMACTestMixin, PolicyTestBase):
     def setUp(self) -> None:
         super().setUp()
         from apps.customers.models import Customer  # noqa: PLC0415
