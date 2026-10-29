@@ -61,6 +61,7 @@
     "services/platform/apps/infrastructure/migrations/0001_initial.py": "9fec21fd9462935db58c176d4b2742152d98dd443929ddd742b3adf947cc458a",
     "services/platform/apps/infrastructure/migrations/0002_initial.py": "c478751138fa45fc826b2329cba888a2435f0bbf0201c7478a9beb24e3b6b9d9",
     "services/platform/apps/infrastructure/migrations/0003_ssh_transport_state.py": "8eed9e4c62494b9562df9d33958a4a948e693ba93d9c77fd4e00fff14b962365",
+    "services/platform/apps/infrastructure/migrations/0004_deployment_lifecycle_metadata.py": "b35ce580cac2a5ae701920c9ec5d666a3b0a5f6a836e9c6e093673fda788e247",
     "services/platform/apps/integrations/migrations/0001_initial.py": "625b72a702f05ea78aa22848b0bcad3328e869a4661eadc0aa6d8ba61d96d62b",
     "services/platform/apps/integrations/migrations/0002_postgres_event_storage_indexes.py": "f58a36908b14381a29c6ce59988c54f1d0713d5be15e9c3f9c36e4613b86aa63",
     "services/platform/apps/integrations/migrations/0003_webhookevent_staff_alerted_at.py": "0d8832e3647affaf172171d4d7b038d5db16260b38dd6aca6ac6ac8e373ceaa5",

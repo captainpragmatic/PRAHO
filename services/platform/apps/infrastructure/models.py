@@ -291,6 +291,28 @@ class NodeDeployment(models.Model):
         ("destroyed", _("Destroyed")),
     ]
 
+    OPERATION_KIND_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("deploy", _("Deploy")),
+        ("retry", _("Retry")),
+        ("destroy", _("Destroy")),
+        ("teardown", _("Teardown")),
+        ("registration", _("Registration resume")),
+    ]
+
+    SERVER_CREATE_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("none", _("Never requested")),
+        ("intent", _("Requested")),
+        ("created", _("Created")),
+        ("unknown", _("Outcome unknown")),
+    ]
+
+    REGISTRATION_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("none", _("Not registered")),
+        ("started", _("Started")),
+        ("registered", _("Registered")),
+        ("activated", _("Activated")),
+    ]
+
     ENVIRONMENT_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("prd", _("Production")),
         ("stg", _("Staging")),
@@ -516,6 +538,26 @@ class NodeDeployment(models.Model):
         default=uuid.uuid4,
         verbose_name=_("Correlation ID"),
     )
+
+    # Operation ownership. correlation_id names the deployment's cloud resources and never changes;
+    # operation_token names the one worker allowed to write lifecycle state right now. Every claim
+    # rotates it, so a worker resumed after recovery finds its token gone and writes nothing.
+    operation_token = models.UUIDField(null=True, blank=True, editable=False)
+    operation_kind = models.CharField(max_length=20, choices=OPERATION_KIND_CHOICES, blank=True, editable=False)
+
+    # What the provider was last asked to do with this deployment's server. "unknown" means a create
+    # call may have reached the provider without a confirmed answer, so the row may be billed.
+    server_create_state = models.CharField(
+        max_length=10, choices=SERVER_CREATE_STATE_CHOICES, default="none", editable=False
+    )
+    registration_state = models.CharField(
+        max_length=12, choices=REGISTRATION_STATE_CHOICES, default="none", editable=False
+    )
+    # One-way fingerprint of the provider token that created this deployment's resources. Blank
+    # means unknown provenance: a "not found" answer from the provider then proves nothing.
+    provider_token_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
+    needs_reconciliation = models.BooleanField(default=False)
+    reconciliation_reason = models.TextField(blank=True)
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
