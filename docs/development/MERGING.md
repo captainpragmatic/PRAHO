@@ -71,10 +71,14 @@ gh workflow run virtualmin-lab.yml --ref <branch> -f suite=full
 
 Open each one against `master`, not against the other's branch. Queue the second only after the first has
 landed. The queue builds squashes: where the second changes code the first adds, its change meets the
-first's squash as a conflict, and the queue removes it. Once the first is on `master`, merge `master` into
-the second branch with a sign-off (`git merge --signoff origin/master`). Where both sides changed the same
-lines, keep the second's version, which already contains the first's; take `master`'s version everywhere
-else. Then push and queue it.
+first's squash as a conflict, and the queue removes it. Keep the second branch current with the first while
+both are open (merge the first's branch into it), so it carries the first's later fixes.
+
+Once the first is on `master`, merge `master` into the second branch with a sign-off
+(`git merge --signoff origin/master`). Resolve each conflicting hunk on its own: keep the second's rework of
+the first's code and every fix that reached `master` after the second branched, and keep git's automatic
+results elsewhere. Before pushing, review the merge against both parents and run the tests both pull
+requests touch. Then push and queue it.
 
 ## Merging around the queue
 
