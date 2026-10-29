@@ -112,7 +112,7 @@ class StepUpInventoryTests(SimpleTestCase):
         self.assertTrue(all(reason.strip() for reason in [*GUARDED.values(), *EXEMPT.values()]))
 
     def test_every_guarded_route_has_a_behavioural_test(self) -> None:
-        from tests.api.test_step_up_coverage import ACTIONS  # noqa: PLC0415
+        from tests.api.test_step_up_guarded_actions import ACTIONS  # noqa: PLC0415
 
         tested = {"api/" + action.path for action in ACTIONS} | {
             "api/users/profile/",  # test_the_name_or_phone_needs_a_check_and_preferences_do_not
