@@ -20,9 +20,11 @@ from typing import TYPE_CHECKING, Any
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from apps.infrastructure.aws_service import AWSService
+    from apps.infrastructure.cloud_gateway import LocationInfo, ServerTypeInfo
     from apps.infrastructure.digitalocean_service import DigitalOceanService
-    from apps.infrastructure.hcloud_service import HcloudService
     from apps.infrastructure.models import CloudProvider
     from apps.infrastructure.vultr_service import VultrService
 
@@ -78,8 +80,12 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
     Sync Hetzner Cloud catalog data into the database.
 
     Fetches locations and server types from the Hetzner API and upserts
-    them into NodeRegion and NodeSize. Deactivates entries that no longer
-    exist in the API (soft delete).
+    them into NodeRegion and NodeSize, recording for each size the regions
+    where a new server of that type can still be created. Deactivates
+    entries that no longer exist or are no longer sold anywhere (soft delete).
+
+    Everything is fetched and validated first, then applied in one
+    transaction: an error never leaves a partial write.
 
     Args:
         token: Hetzner Cloud API token
@@ -88,6 +94,8 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
     Returns:
         Result with SyncResult or error
     """
+    from django.db import transaction  # noqa: PLC0415  # Deferred: matches this module's lazy Django imports
+
     from apps.infrastructure.hcloud_service import (  # noqa: PLC0415  # Deferred: avoids circular import
         get_hcloud_service,  # Circular: cross-app  # Deferred: avoids circular import
     )
@@ -98,33 +106,48 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
     result = SyncResult(provider_type="hetzner")
 
     try:
-        # 1. Ensure CloudProvider record exists
-        provider, created = CloudProvider.objects.get_or_create(
-            provider_type="hetzner",
-            defaults={
-                "name": "Hetzner Cloud",
-                "code": "het",
-                "is_active": True,
-                "credential_identifier": "hcloud_token",
-            },
-        )
-        if created:
-            logger.info("✅ [ProviderSync] Created Hetzner Cloud provider record")
-
         hcloud_svc = get_hcloud_service(token)
 
-        # 2. Sync locations → NodeRegion
-        sync_err = _sync_locations(hcloud_svc, provider, result, dry_run)
-        if sync_err is not None:
-            return Err(sync_err)
+        # 1. Fetch the whole catalogue before writing anything
+        locations_result = hcloud_svc.get_locations()
+        if locations_result.is_err():
+            return Err(f"Failed to fetch locations: {locations_result.unwrap_err()}")
+        types_result = hcloud_svc.get_server_types()
+        if types_result.is_err():
+            return Err(f"Failed to fetch server types: {types_result.unwrap_err()}")
+        locations = locations_result.unwrap()
 
-        # 3. Sync server_types → NodeSize
-        sync_err = _sync_server_types(hcloud_svc, provider, result, dry_run)
-        if sync_err is not None:
-            return Err(sync_err)
+        # 2. Where each type can be ordered, limited to the locations just fetched. A type that
+        #    reports no locations is sold nowhere; it never means "everywhere".
+        known = {str(loc.name) for loc in locations}
+        offered = {
+            str(st.name): (st, tuple(name for name in st.locations or () if name in known))
+            for st in types_result.unwrap()
+        }
+        offered = {name: entry for name, entry in offered.items() if entry[1]}
+        if not offered:
+            return Err(
+                "Hetzner reported no server type that can be ordered in any of its locations; "
+                "the catalogue was left unchanged"
+            )
 
-        # 4. Ensure PanelType records (PRAHO-owned data, not from API)
-        result.panels_ensured = _ensure_panel_types(dry_run=dry_run)
+        # 3. Apply in one transaction
+        with transaction.atomic():
+            provider, created = CloudProvider.objects.get_or_create(
+                provider_type="hetzner",
+                defaults={
+                    "name": "Hetzner Cloud",
+                    "code": "het",
+                    "is_active": True,
+                    "credential_identifier": "hcloud_token",
+                },
+            )
+            if created:
+                logger.info("✅ [ProviderSync] Created Hetzner Cloud provider record")
+            _sync_locations(locations, provider, result, dry_run)
+            _sync_server_types(offered, provider, result, dry_run)
+            # 4. Ensure PanelType records (PRAHO-owned data, not from API)
+            result.panels_ensured = _ensure_panel_types(dry_run=dry_run)
 
         logger.info(f"✅ [ProviderSync] Hetzner sync complete: {result.summary}")
         return Ok(result)
@@ -136,21 +159,16 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
 
 
 def _sync_locations(
-    hcloud_svc: HcloudService,
+    locations: Sequence[LocationInfo],
     provider: CloudProvider,
     result: SyncResult,
     dry_run: bool,
-) -> str | None:
-    """Sync Hetzner locations into NodeRegion records. Returns error string or None."""
+) -> None:
+    """Upsert fetched Hetzner locations into NodeRegion records."""
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    locations_result = hcloud_svc.get_locations()
-    if locations_result.is_err():
-        return f"Failed to fetch locations: {locations_result.unwrap_err()}"
-
-    locations = locations_result.unwrap()
     seen_region_ids: set[str] = set()
 
     for loc in locations:
@@ -196,35 +214,29 @@ def _sync_locations(
         )
         result.regions_deactivated = deactivated
 
-    return None
-
 
 def _sync_server_types(
-    hcloud_svc: HcloudService,
+    offered: dict[str, tuple[ServerTypeInfo, tuple[str, ...]]],
     provider: CloudProvider,
     result: SyncResult,
     dry_run: bool,
-) -> str | None:
-    """Sync Hetzner server types into NodeSize records. Returns error string or None."""
+) -> None:
+    """Upsert orderable Hetzner server types into NodeSize records, each with the regions it is sold in.
+
+    ``offered`` maps each type name to its info and the fetched locations where it can be ordered.
+    Regions are matched on the Hetzner location name (``provider_region_id``), never on the
+    hostname code, which differs for some locations (ash -> ash1).
+    """
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
         NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    types_result = hcloud_svc.get_server_types()
-    if types_result.is_err():
-        return f"Failed to fetch server types: {types_result.unwrap_err()}"
+    regions = {
+        region.provider_region_id: region for region in NodeRegion.objects.filter(provider=provider, is_active=True)
+    }
 
-    server_types = types_result.unwrap()
-    seen_type_ids: set[str] = set()
-
-    for st in server_types:
-        # Skip deprecated types (not available = deprecated)
-        if not st.available:
-            continue
-
-        st_name = str(st.name)
-        seen_type_ids.add(st_name)
-
+    for st_name, (st, locations) in offered.items():
         # Extract EUR pricing from price_monthly (float from ServerTypeInfo)
         monthly_eur = Decimal(str(st.price_monthly)) if st.price_monthly else Decimal("0")
         hourly_eur = (monthly_eur / 730).quantize(Decimal("0.0001")) if monthly_eur else Decimal("0")
@@ -236,11 +248,14 @@ def _sync_server_types(
         display_name = f"{st.vcpus} vCPU / {memory_gb}GB RAM / {st.disk_gb}GB"
 
         if dry_run:
-            logger.info(f"  [DRY-RUN] Would upsert size: {st_name} ({display_name}, {monthly_eur} EUR/mo)")
+            logger.info(
+                f"  [DRY-RUN] Would upsert size: {st_name} ({display_name}, {monthly_eur} EUR/mo) "
+                f"in {', '.join(locations)}"
+            )
             result.sizes_created += 1
             continue
 
-        _, created = NodeSize.objects.update_or_create(
+        size, created = NodeSize.objects.update_or_create(
             provider=provider,
             provider_type_id=st_name,
             defaults={
@@ -256,26 +271,29 @@ def _sync_server_types(
                 "sort_order": st.vcpus or 0,
             },
         )
+        size.available_regions.set([regions[name] for name in locations if name in regions])
         if created:
             result.sizes_created += 1
         else:
             result.sizes_updated += 1
 
-    # Deactivate sizes no longer in API
+    # Withdraw sizes that are gone from the API or no longer sold in any known location
     if not dry_run:
-        deactivated = (
-            NodeSize.objects.filter(
-                provider=provider,
-                is_active=True,
-            )
-            .exclude(
-                provider_type_id__in=seen_type_ids,
-            )
-            .update(is_active=False)
-        )
-        result.sizes_deactivated = deactivated
+        withdrawn = NodeSize.objects.filter(provider=provider).exclude(provider_type_id__in=offered)
+        NodeSize.available_regions.through.objects.filter(nodesize__in=withdrawn).delete()
+        result.sizes_deactivated = withdrawn.filter(is_active=True).update(is_active=False)
 
-    return None
+
+def _offer_sizes_in_every_active_region(provider: CloudProvider) -> None:
+    """For a provider that reports no per-location availability, offer each size in every active region."""
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
+        NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    regions = list(NodeRegion.objects.filter(provider=provider, is_active=True))
+    for size in NodeSize.objects.filter(provider=provider, is_active=True):
+        size.available_regions.set(regions)
 
 
 def _extract_pricing(prices: list[dict[str, object]] | None) -> tuple[Decimal, Decimal]:
@@ -377,6 +395,9 @@ def sync_digitalocean_provider(token: str, dry_run: bool = False) -> Result[Sync
         sync_err = _sync_do_sizes(do_svc, provider, result, dry_run)
         if sync_err is not None:
             return Err(sync_err)
+
+        if not dry_run:
+            _offer_sizes_in_every_active_region(provider)
 
         result.panels_ensured = _ensure_panel_types(dry_run=dry_run)
 
@@ -588,6 +609,9 @@ def sync_vultr_provider(token: str, dry_run: bool = False) -> Result[SyncResult,
         sync_err = _sync_vultr_plans(vultr_svc, provider, result, dry_run)
         if sync_err is not None:
             return Err(sync_err)
+
+        if not dry_run:
+            _offer_sizes_in_every_active_region(provider)
 
         result.panels_ensured = _ensure_panel_types(dry_run=dry_run)
 
@@ -862,6 +886,9 @@ def sync_aws_provider(token: str, dry_run: bool = False) -> Result[SyncResult, s
         sync_err = _sync_aws_instance_types(aws_svc, provider, result, dry_run)
         if sync_err is not None:
             return Err(sync_err)
+
+        if not dry_run:
+            _offer_sizes_in_every_active_region(provider)
 
         result.panels_ensured = _ensure_panel_types(dry_run=dry_run)
 

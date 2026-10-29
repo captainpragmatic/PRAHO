@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from apps.common.credential_vault import EncryptedCredential
 from apps.common.types import Err, Ok
+from apps.infrastructure.cloud_gateway import LocationInfo, ServerTypeInfo
 from apps.infrastructure.models import CloudProvider
 from apps.infrastructure.provider_config import get_provider_token, store_provider_token
 from apps.infrastructure.provider_sync import (
@@ -27,10 +28,14 @@ class ProviderCredentialPreservationTests(TestCase):
     )
 
     @staticmethod
-    def _service() -> mock.Mock:
+    def _service(kind: str = "") -> mock.Mock:
         service = mock.Mock()
         service.get_locations.return_value = Ok([])
         service.get_server_types.return_value = Ok([])
+        if kind == "hetzner":
+            # A Hetzner catalogue with nothing orderable is refused, so offer one type in one location.
+            service.get_locations.return_value = Ok([LocationInfo(name="fsn1")])
+            service.get_server_types.return_value = Ok([ServerTypeInfo(name="cx23", locations=("fsn1",))])
         service.client.sizes.list.return_value = {"sizes": []}
         service._request.return_value.json.return_value = {"plans": []}
         return service
@@ -50,7 +55,7 @@ class ProviderCredentialPreservationTests(TestCase):
                 credential = EncryptedCredential.objects.get(service_identifier=provider.credential_identifier)
                 encrypted_before = bytes(credential.encrypted_password)
                 self.assertTrue(encrypted_before.startswith(b"vault:v2:"))
-                with mock.patch(factory, return_value=self._service()):
+                with mock.patch(factory, return_value=self._service(kind)):
                     self.assertTrue(synchronize(token=fixture_token).is_ok())
                     self.assertTrue(synchronize(token=fixture_token).is_ok())
                 provider.refresh_from_db()
@@ -75,7 +80,7 @@ class ProviderCredentialPreservationTests(TestCase):
                 fixture_token = f"fixture-{kind}-token"
                 provider.credential_identifier = store_provider_token(provider, fixture_token).unwrap()
                 provider.save(update_fields=["credential_identifier"])
-                service = self._service()
+                service = self._service(kind)
                 service.get_locations.return_value = Err("catalog unavailable")
                 with mock.patch(factory, return_value=service):
                     result = synchronize(token=fixture_token)
@@ -90,7 +95,7 @@ class ProviderCredentialPreservationTests(TestCase):
         for kind, code, synchronize, factory in self.providers:
             with self.subTest(provider=kind):
                 provider = CloudProvider.objects.create(provider_type=kind, code=code, name=f"Operator {kind}")
-                with mock.patch(factory, return_value=self._service()):
+                with mock.patch(factory, return_value=self._service(kind)):
                     self.assertTrue(synchronize(token="fixture-bootstrap-token").is_ok())
                 provider.refresh_from_db()
                 self.assertEqual(provider.credential_identifier, "")

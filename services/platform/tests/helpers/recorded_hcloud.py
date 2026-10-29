@@ -74,33 +74,70 @@ CPX22 = server_type("cpx22", sold=("fsn1", "nbg1", "hel1", "sin"), specs=(2, 4.0
 CX11 = server_type("cx11", retired=("fsn1", "nbg1", "hel1"), specs=(1, 2.0, 20), type_id=1)
 
 
+_LOCATION_DETAILS = {
+    "fsn1": ("Falkenstein DC Park 1", "DE", "Falkenstein"),
+    "nbg1": ("Nuremberg DC Park 1", "DE", "Nuremberg"),
+    "hel1": ("Helsinki DC Park 1", "FI", "Helsinki"),
+    "ash": ("Ashburn, VA", "US", "Ashburn, VA"),
+    "hil": ("Hillsboro, OR", "US", "Hillsboro, OR"),
+    "sin": ("Singapore", "SG", "Singapore"),
+}
+
+
+def location(name: str) -> dict[str, Any]:
+    """One location as GET /v1/locations returns it."""
+    description, country, city = _LOCATION_DETAILS[name]
+    return {
+        "id": _LOCATION_IDS[name],
+        "name": name,
+        "description": description,
+        "country": country,
+        "city": city,
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "network_zone": "us-east" if country == "US" else "eu-central",
+    }
+
+
+ALL_LOCATIONS = [location(name) for name in _LOCATION_IDS]
+
+
+def _page(key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(items),
+        "meta": {
+            "pagination": {
+                "page": 1,
+                "per_page": 50,
+                "previous_page": None,
+                "next_page": None,
+                "last_page": 1,
+                "total_entries": len(items),
+            }
+        },
+    }
+
+
 class RecordedHcloudTransport:
-    """Stands in for hcloud's ClientBase.request and answers only the server type endpoint.
+    """Stands in for hcloud's ClientBase.request and answers only the two catalogue listings.
 
     Any other request (a lazy BoundLocation reload, say) fails the test, so code under test
-    can be proven to read only what the server type listing already carries.
+    can be proven to read only what the listings already carry.
     """
 
-    def __init__(self, server_types: list[dict[str, Any]]) -> None:
+    def __init__(self, server_types: list[dict[str, Any]], locations: list[dict[str, Any]] | None = None) -> None:
         self._server_types = server_types
+        self._locations = ALL_LOCATIONS if locations is None else locations
         self.requests: list[tuple[str, dict[str, Any]]] = []
 
     def __call__(self, url: str, method: str, **kwargs: Any) -> dict[str, Any]:
         params = dict(kwargs.get("params") or {})
         self.requests.append((url, params))
-        if method != "GET" or url != "/server_types":
-            raise AssertionError(f"unexpected hcloud request: {method} {url}")
-        types = [st for st in self._server_types if "name" not in params or st["name"] == params["name"]]
-        return {
-            "server_types": copy.deepcopy(types),
-            "meta": {
-                "pagination": {
-                    "page": 1,
-                    "per_page": 50,
-                    "previous_page": None,
-                    "next_page": None,
-                    "last_page": 1,
-                    "total_entries": len(types),
-                }
-            },
-        }
+        if method == "GET" and url == "/server_types":
+            return _page(
+                "server_types",
+                [st for st in self._server_types if "name" not in params or st["name"] == params["name"]],
+            )
+        if method == "GET" and url == "/locations":
+            return _page("locations", self._locations)
+        raise AssertionError(f"unexpected hcloud request: {method} {url}")

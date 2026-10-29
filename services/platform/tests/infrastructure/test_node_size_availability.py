@@ -2,32 +2,14 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.infrastructure.models import CloudProvider, NodeRegion, NodeSize
+from apps.infrastructure.models import CloudProvider, NodeSize
+from tests.helpers.node_catalogue import make_region
 
 User = get_user_model()
-
-
-def make_region(provider: CloudProvider, location: str, *, active: bool = True) -> NodeRegion:
-    return NodeRegion.objects.create(
-        provider=provider, name=location, provider_region_id=location, normalized_code=location[:4],
-        country_code="fi", city=location, is_active=active,
-    )
-
-
-def make_size(provider: CloudProvider, type_id: str, *regions: NodeRegion, active: bool = True) -> NodeSize:
-    size = NodeSize.objects.create(
-        provider=provider, name=type_id.upper(), display_name=type_id, provider_type_id=type_id,
-        vcpus=2, memory_gb=4, disk_gb=40, hourly_cost_eur=Decimal("0.0100"), monthly_cost_eur=Decimal("4.99"),
-        is_active=active,
-    )
-    size.available_regions.add(*regions)
-    return size
 
 
 class SizeCreateTests(TestCase):
