@@ -208,9 +208,9 @@ compensating control.
   1. on the new Platform, run `manage.py revoke_portal_sessions --all --reason rollback` (the
      operator is recorded from the login name);
   2. roll Platform back;
-  3. end any remembered row opened between steps 1 and 2, which the old code would honour for its
-     30 days: `PortalSession.objects.filter(tier="remember", revoked_at__isnull=True)
-     .update(revoked_at=now(), revoke_reason="operator")`;
+  3. end every row still live, of any tier: those the new code opened between steps 1 and 2 would
+     otherwise outlive it, without the re-check: `PortalSession.objects.filter(revoked_at__isnull=True)
+     .update(revoked_at=now(), revoke_reason="operator")`. Customers sign in once more;
   4. roll the Portal back. The users migration only widens the tier choices, so it stays.
 
 Accepted: a compromised *running* portal sees passwords as customers type them, at login and on the
