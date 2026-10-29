@@ -63,6 +63,15 @@ class HostedDnsStaffViewsTests(MigrationTestBase):
         self.assertNotContains(response, "<script>bad()")
         self.assertNotContains(response, "x" * 14000)
 
+    def test_component_codes_survive_a_large_key_that_postgresql_orders_first(self):
+        # PostgreSQL's jsonb stores object keys shorter-first, so "extra" comes back before "components".
+        self.row.results = {"extra": "x" * 20000, "components": self.row.results["components"]}
+        self.row.save(update_fields=["results"])
+        response = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "address_mismatch")
+        self.assertNotContains(response, "x" * 14000)
+
     def test_nonstaff_cannot_read_private_dns_evidence(self):
         customer_user = User.objects.create_user(email="dns-viewer@example.com")
         self.client.force_login(customer_user)

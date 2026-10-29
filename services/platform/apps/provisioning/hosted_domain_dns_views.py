@@ -61,4 +61,10 @@ def recheck_dns(request: HttpRequest, account_id: str) -> HttpResponse:
 
 def stored_evidence(account: VirtualminAccount) -> str:
     row = HostedDomainDnsStatus.objects.filter(account=account).first()
-    return json.dumps(row.results, ensure_ascii=False, indent=2)[:12000] if row else ""
+    if row is None:
+        return ""
+    results = dict(row.results) if isinstance(row.results, dict) else {"results": row.results}
+    # PostgreSQL's jsonb returns keys shorter-first, so a large key could push the component codes past the bound.
+    ordered = {"components": results.pop("components")} if "components" in results else {}
+    ordered.update(results)
+    return json.dumps(ordered, ensure_ascii=False, indent=2)[:12000]
