@@ -1187,7 +1187,11 @@ def size_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                # A hand-made size is offered wherever its provider has an active region; the next
+                # provider sync narrows it to the locations that sell it.
+                size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
             messages.success(request, f"Size '{size.name}' created successfully.")
             return redirect("infrastructure:size_list")
     else:
