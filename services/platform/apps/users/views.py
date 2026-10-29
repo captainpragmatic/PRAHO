@@ -37,6 +37,7 @@ from django.http import (
 )
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -54,6 +55,7 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.transactions import best_effort_atomic
 
 from .credentials import check_password_locked, proof_passed
+from .customer_view import MFA_LOGIN_MARKER as CUSTOMER_VIEW_MFA_MARKER
 from .forms import (
     LOCKED_PASSWORD_CHANGE,
     AccountLockedDuringChange,
@@ -854,6 +856,8 @@ def _verify_pending_login(request: HttpRequest, pending: _PendingLogin, token: s
         # Read by the user_logged_in audit handler.
         setattr(request, LOGIN_METHOD_REQUEST_ATTR, f"2fa_{result.method}")
         login(request, user, backend=pending.backend)
+        # After login(), which cycles the key: the evidence customer view requires (ADR-0065).
+        request.session[CUSTOMER_VIEW_MFA_MARKER] = timezone.now().isoformat()
         return "success", result.method
 
 

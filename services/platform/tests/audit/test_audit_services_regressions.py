@@ -200,7 +200,7 @@ class TestAuditServiceCategorization(TestCase):
 
     def test_system_admin_category(self):
         self.assertEqual(AuditService._get_action_category("system_maintenance_started"), "system_admin")
-        self.assertEqual(AuditService._get_action_category("user_impersonation"), "system_admin")
+        self.assertEqual(AuditService._get_action_category("customer_view_started"), "system_admin")
 
     def test_compliance_category(self):
         self.assertEqual(AuditService._get_action_category("vat_calculation_applied"), "compliance")

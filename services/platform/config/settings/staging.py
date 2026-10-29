@@ -402,7 +402,6 @@ if DEBUG:
 # Staging-specific feature flags
 STAGING_FEATURES = {
     "enable_test_data": True,
-    "allow_staff_impersonation": True,
     "show_debug_info": False,
 }
 
@@ -413,3 +412,4 @@ LOGGING = secure_logging_config(LOGGING)
 PORTAL_HMAC_REQUIRE_ISOLATION = True
 PORTAL_HMAC_MODE = os.environ.get("PORTAL_HMAC_MODE", "enforce")
 PORTAL_SESSION_REQUIRED = os.environ.get("PORTAL_SESSION_REQUIRED", "true").strip().lower() in ("1", "true", "yes")
+PORTAL_PUBLIC_ORIGIN = _os.environ.get("PORTAL_PUBLIC_ORIGIN", "").strip() or f"https://{PORTAL_DOMAIN}"

@@ -533,8 +533,13 @@ class AuditEvent(models.Model):
         ("backup_restored", "Backup Restored"),
         ("configuration_changed", "Configuration Changed"),
         ("setting_override_cleared", _("Setting override cleared")),
-        ("user_impersonation_started", "User Impersonation Started"),
-        ("user_impersonation_ended", "User Impersonation Ended"),
+        # Customer view (ADR-0065): a staff member's scoped, read-only portal session as a customer.
+        ("customer_view_issued", "Customer View Issued"),
+        ("customer_view_issue_denied", "Customer View Issue Denied"),
+        ("customer_view_started", "Customer View Started"),
+        ("customer_view_accessed", "Customer View Accessed"),
+        ("customer_view_denied", "Customer View Denied"),
+        ("customer_view_ended", "Customer View Ended"),
         ("bulk_operation_started", "Bulk Operation Started"),
         ("bulk_operation_completed", "Bulk Operation Completed"),
         # ======================================================================

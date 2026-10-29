@@ -112,6 +112,14 @@ class CSPNonceMiddleware:
         return self.get_response(request)
 
 
+def _extra_form_action(response: HttpResponse) -> str:
+    """One more origin a single response may post a form to (the customer-view handoff, ADR-0065)."""
+    origin = vars(response).get("csp_form_action")
+    if isinstance(origin, str) and origin and all(ch not in origin for ch in " ;'\"\n\r"):
+        return f" {origin}"
+    return ""
+
+
 class SecurityHeadersMiddleware:
     """Add security headers for Romanian hosting compliance"""
 
@@ -154,7 +162,7 @@ class SecurityHeadersMiddleware:
                 "connect-src 'self'; "
                 "object-src 'none'; "
                 "base-uri 'self'; "
-                "form-action 'self';"
+                f"form-action 'self'{_extra_form_action(response)};"
             )
             response["Content-Security-Policy"] = csp
 

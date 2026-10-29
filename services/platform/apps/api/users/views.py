@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import Error as DatabaseFailure
 from django.db import transaction
@@ -34,6 +35,7 @@ from apps.api.secure_auth import (
     public_api_endpoint,
     require_customer_authentication,
     require_portal_authentication,
+    require_portal_service_authentication,
     require_user_authentication,
 )
 from apps.api.users.authentication import HashedTokenAuthentication
@@ -71,7 +73,7 @@ from apps.users.mfa import (
     staff_must_enrol,
     verify_login_second_factor,
 )
-from apps.users.models import APIToken, CustomerMembership, User, UserProfile
+from apps.users.models import APIToken, CustomerMembership, PortalSession, User, UserProfile
 from apps.users.pending_totp import complete_enrolment
 from apps.users.pending_totp import discard as discard_pending_totp
 from apps.users.security_notices import notify_credential_change
@@ -677,11 +679,18 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
                 logger.warning("🚨 [Security] Portal %s session of a staff account without 2FA refused", portal_id)
                 return _uniform_session_error(security_headers)
             current_auth_hash = user.get_session_auth_hash()
-            if not isinstance(session_auth_hash, str) or not (
-                constant_time_compare(session_auth_hash, current_auth_hash)
-                or any(
-                    constant_time_compare(session_auth_hash, fallback_hash)
-                    for fallback_hash in user.get_session_auth_fallback_hash()
+            bound = getattr(request, "portal_session", None)
+            # A customer view holds no credential of the customer: its row (checked by the HMAC
+            # middleware, tier read from Platform's row) is its whole binding (ADR-0065).
+            scoped = bound is not None and bound.tier == PortalSession.TIER_CUSTOMER_VIEW
+            if not scoped and (
+                not isinstance(session_auth_hash, str)
+                or not (
+                    constant_time_compare(session_auth_hash, current_auth_hash)
+                    or any(
+                        constant_time_compare(session_auth_hash, fallback_hash)
+                        for fallback_hash in user.get_session_auth_fallback_hash()
+                    )
                 )
             ):
                 logger.warning("🚨 [Security] Portal %s session credential rejected (jti: %s)", portal_id, jti)
@@ -704,11 +713,10 @@ def validate_session_secure(request: HttpRequest) -> Response:  # noqa: PLR0911 
 
             logger.info(f"✅ [Security] Portal {portal_id} session validated (jti: {jti})")
 
-            bound = getattr(request, "portal_session", None)
             response_data = {
                 **(portal_sessions.deadlines(bound).as_payload() if bound is not None else {}),
                 "active": True,
-                "session_auth_hash": current_auth_hash,
+                **({} if scoped else {"session_auth_hash": current_auth_hash}),
                 "membership_hash": membership_hash,
                 "localisation_preferences": user_localisation_preferences(user),
                 "revoke_before": next_validation.isoformat(),
@@ -741,7 +749,9 @@ def portal_session_end_api(request: HttpRequest, user: User) -> Response:
     row = getattr(request, "portal_session", None)
     if row is None:
         return _uniform_session_error({"Cache-Control": "no-store"})
-    portal_sessions.end(row, portal_sessions.REASON_LOGOUT)
+    portal_sessions.end(
+        row, "staff_ended" if row.tier == PortalSession.TIER_CUSTOMER_VIEW else portal_sessions.REASON_LOGOUT
+    )
     response = Response({"success": True, "active": False})
     response["Cache-Control"] = "no-store"
     return response
@@ -760,6 +770,61 @@ def _keep_calling_session(request: HttpRequest) -> Callable[[str, str], bool]:
         return portal_sessions.restamp(row, old_hash=before, new_hash=new_hash)
 
     return keep
+
+
+# Redemptions per client address per minute (ADR-0065); the portal applies the same budget.
+CUSTOMER_VIEW_REDEEM_LIMIT = 10
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
+@require_portal_service_authentication
+def customer_view_redeem_api(request: HttpRequest, request_data: dict[str, Any]) -> Response:
+    """Redeem a one-time customer-view code for its scoped session (ADR-0065).
+
+    Signed by the portal, which received the code in a body POST from Platform's staff page. The
+    answer names the session the portal binds; it never carries a credential of the customer.
+    """
+    from apps.common import counters  # noqa: PLC0415  # ADR-0007: cross-app, deferred
+    from apps.users import customer_view  # noqa: PLC0415  # ADR-0007: cross-app, deferred
+
+    code = request_data.get("code")
+    client_ip = request_data.get("client_ip")
+    if not isinstance(code, str) or customer_view.CODE_PATTERN.fullmatch(code) is None:
+        return Response({"error": "Invalid grant"}, status=400)
+    # Per address only when the portal could tell addresses apart: one shared bucket would let anyone
+    # lock every staff member out. The HMAC throttles on this view still apply either way.
+    if (
+        isinstance(client_ip, str)
+        and client_ip
+        and counters.increment(f"customer-view-redeem:{client_ip}", 60) > CUSTOMER_VIEW_REDEEM_LIMIT
+    ):
+        return Response({"error": "Too many attempts"}, status=429, headers={"Retry-After": "60"})
+    try:
+        row = customer_view.consume(code)
+    except PermissionDenied:
+        customer_view.audit_refused_redemption(code)
+        return Response({"error": "customer_view_forbidden"}, status=403, headers={"Cache-Control": "no-store"})
+    membership = CustomerMembership.objects.filter(
+        user=row.user, customer=row.customer_view_customer, is_active=True
+    ).first()
+    staff = row.viewed_as_customer_by
+    return Response(
+        {
+            **portal_sessions.deadlines(row).as_payload(),
+            "user": {"id": row.user_id, "email": row.user.email},
+            "customer": {
+                "id": row.customer_view_customer_id,
+                "name": row.customer_view_customer.name if row.customer_view_customer else "",
+                # Ended meanwhile: the view's next request is refused anyway.
+                "role": membership.role if membership is not None else "",
+            },
+            "staff_label": staff.get_full_name() if staff is not None else "",
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _uniform_session_error(headers: dict[str, Any]) -> Response:
@@ -1279,8 +1344,13 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 "date_joined": user.date_joined.isoformat() if user.date_joined else None,
             }
 
-            # Add profile data (create default if doesn't exist)
-            profile, created = UserProfile.objects.get_or_create(user=user)
+            # Add profile data (create default if doesn't exist; a customer view only reads, ADR-0065)
+            bound = getattr(request, "portal_session", None)
+            if bound is not None and bound.tier == PortalSession.TIER_CUSTOMER_VIEW:
+                profile = UserProfile.objects.filter(user=user).first() or UserProfile(user=user)
+                created = False
+            else:
+                profile, created = UserProfile.objects.get_or_create(user=user)
 
             if created:
                 logger.info(f"✅ [Profile API] Created default profile for customer: {user.email}")
@@ -1349,6 +1419,10 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     try:
         # Get customer memberships with role information
         memberships = CustomerMembership.objects.filter(user=user).select_related("customer")
+        bound = getattr(request, "portal_session", None)
+        if bound is not None and bound.tier == PortalSession.TIER_CUSTOMER_VIEW:
+            # A customer view sees the one customer it was opened for (ADR-0065).
+            memberships = memberships.filter(customer_id=bound.customer_view_customer_id, is_active=True)
 
         results = []
         for membership in memberships:

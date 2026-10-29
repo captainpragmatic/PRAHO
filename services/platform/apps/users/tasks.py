@@ -177,11 +177,12 @@ def reconcile_session_index() -> dict[str, int]:
 
 def sweep_portal_sessions() -> dict[str, Any]:
     """Delete portal session rows a day past their end (ADR-0017 section 5)."""
-    from . import portal_sessions  # noqa: PLC0415  # Keeps the task module's import graph flat
+    from . import customer_view, portal_sessions  # noqa: PLC0415  # Keeps the task module's import graph flat
 
+    ended = customer_view.sweep()  # ends unusable customer views with their audit event, voids stale grants
     deleted = portal_sessions.sweep_expired()
-    logger.info("✅ [PortalSessions] Swept %s ended portal sessions", deleted)
-    return {"deleted": deleted}
+    logger.info("✅ [PortalSessions] Ended %s customer views; swept %s ended portal sessions", ended, deleted)
+    return {"customer_views_ended": ended, "deleted": deleted}
 
 
 def cleanup_expired_2fa_sessions() -> dict[str, Any]:

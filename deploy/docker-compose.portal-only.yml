@@ -38,6 +38,9 @@ services:
       # Isolated signing secret matching PORTAL_HMAC_CREDENTIALS[PORTAL_ID].
       - PORTAL_ID=${PORTAL_ID:?PORTAL_ID required (matching its Platform registry entry)}
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:?PORTAL_HMAC_SECRET required}
+      # ADR-0065: the only origin allowed to hand this portal a customer-view code.
+      - CUSTOMER_VIEW_ENABLED=${CUSTOMER_VIEW_ENABLED:-true}
+      - PLATFORM_PUBLIC_ORIGIN=${PLATFORM_PUBLIC_ORIGIN:-https://${PLATFORM_DOMAIN:-platform.localhost}}
       # Login timing floor in seconds (empty = the production default, 1.0).
       - PLATFORM_API_AUTH_MIN_DURATION_SECONDS=${PLATFORM_API_AUTH_MIN_DURATION_SECONDS:-}
       # Production refuses to start without it: the CIDRs your reverse proxy connects from.

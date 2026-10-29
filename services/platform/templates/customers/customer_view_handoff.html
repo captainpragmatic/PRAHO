@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{# Django marks a translated template literal safe, so catalog text is escaped where it is shown (ADR-0065). #}
+{% load ui_components %}
+
+{% block title %}{% trans 'Opening the customer portal' as t1 %}{{ t1|force_escape }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-16 max-w-md mx-auto text-center">
+  <p class="text-slate-200" role="status">
+    {% trans 'Opening the customer portal' as t2 %}{{ t2|force_escape }}: {{ target.get_full_name }}…
+  </p>
+  {# The one-time code travels in the body of this POST only: never in a URL, a log or history. #}
+  {# nosemgrep: django-no-csrf-token — a cross-origin POST to the portal, which checks Platform's exact Origin instead #}
+  <form id="customer-view-handoff" method="post" action="{{ redeem_url }}" class="mt-6" data-single-submit>
+    <input type="hidden" name="code" value="{{ code }}">
+    <noscript>{% trans 'Continue' as continue_label %}{% button continue_label|force_escape type="submit" variant="primary" %}</noscript>
+  </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('customer-view-handoff').requestSubmit();
+  });
+</script>
+{% endblock %}

@@ -54,6 +54,13 @@ ACTION_OVERRIDES: dict[str, dict[str, Any]] = {
     "efactura_submission_failed": {"severity": "high"},
     "security_bnr_outbound_blocked": {"severity": "high"},
     "data_anonymization_completed": {"category": "privacy"},
+    # Customer view (ADR-0065): staff access, not the customer's own authorization changes.
+    "customer_view_issued": {"category": "system_admin", "severity": "high"},
+    "customer_view_issue_denied": {"category": "system_admin"},
+    "customer_view_started": {"category": "system_admin", "severity": "high"},
+    "customer_view_accessed": {"category": "system_admin"},
+    "customer_view_denied": {"category": "system_admin"},
+    "customer_view_ended": {"category": "system_admin"},
     "setting_override_cleared": {"is_sensitive": True},
 }
 
@@ -90,7 +97,7 @@ def _pattern_category(action: str) -> str:
             "system_",
             "backup_",
             "configuration_",
-            "user_impersonation",
+            "customer_view_",
             # Infrastructure operations (node_drain_ is provisioning, not infrastructure)
             "cloud_provider_",
             "drift_",
@@ -158,7 +165,8 @@ def _pattern_severity(action: str) -> str:
         "data_export_requested",
         "data_deletion_requested",
         "gdpr_consent_withdrawn",
-        "user_impersonation_started",
+        "customer_view_issued",
+        "customer_view_started",
         "system_maintenance_started",
         "configuration_changed",
         "payment_failed",
@@ -292,7 +300,8 @@ def _pattern_requires_review(action: str) -> bool:
         "security_incident_detected",
         "suspicious_activity",
         "brute_force_attempt",
-        "user_impersonation_started",
+        "customer_view_issued",
+        "customer_view_started",
         "configuration_changed",
         "system_maintenance_started",
     ]

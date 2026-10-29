@@ -111,7 +111,7 @@ class AuditEvent:
 #### 8. System Administration Events
 - **Purpose**: Track administrative actions, maintenance
 - **Severity**: High
-- **Examples**: `user_impersonation_started`, `configuration_changed`
+- **Examples**: `customer_view_started`, `configuration_changed`
 - **Compliance**: SOX, ISO 27001
 
 #### 9. Integration Events
@@ -431,7 +431,7 @@ REVIEW_REQUIRED_EVENTS = [
     'staff_role_changed',
     'gdpr_consent_withdrawn',
     'data_export_requested',
-    'user_impersonation_started'
+    'customer_view_started'
 ]
 ```
 

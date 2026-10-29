@@ -140,7 +140,14 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         return None
     now = timezone.now()
     row = (
-        PortalSession.objects.select_related("user", "user__credential_version")
+        PortalSession.objects.select_related(
+            "user",
+            "user__credential_version",
+            "viewed_as_customer_by",
+            "viewed_as_customer_by__credential_version",
+            "customer_view_grant",
+            "customer_view_customer",
+        )
         .filter(_live(now), pk=session_id, user_id=user_id, user__is_active=True)
         .first()
     )
@@ -150,7 +157,14 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
     if match is False:
         end(row, REASON_CREDENTIALS)
         return None
-    if match is None:
+    scoped = row.tier == PortalSession.TIER_CUSTOMER_VIEW
+    if scoped:
+        from .customer_view import nonlive_reason  # noqa: PLC0415  # customer_view imports this module
+
+        if why := nonlive_reason(row, now):
+            end(row, why)
+            return None
+    if match is None and not scoped:
         # Signed under a retired key: promote, unless the row changed meanwhile.
         current = row.user.get_session_auth_hash()
         PortalSession.objects.filter(_live(now), pk=row.pk, credential_snapshot=row.credential_snapshot).update(
@@ -158,7 +172,7 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         )
         row.credential_snapshot = current
     if interactive and now - row.last_seen_at >= TOUCH_INTERVAL:
-        idle = min(now + IDLE_TIMEOUT, row.expires_at)
+        idle = min(now + _idle_timeout(row), row.expires_at)
         # In SQL, so it holds against concurrent touches: at most one a minute, never backwards.
         touched = PortalSession.objects.filter(_live(now), pk=row.pk, last_seen_at__lte=now - TOUCH_INTERVAL).update(
             last_seen_at=now, idle_deadline=idle
@@ -168,8 +182,20 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
     return row
 
 
+def _idle_timeout(row: PortalSession) -> timedelta:
+    if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
+        from .customer_view import IDLE_TIMEOUT as CUSTOMER_VIEW_IDLE  # noqa: PLC0415  # import cycle
+
+        return CUSTOMER_VIEW_IDLE
+    return IDLE_TIMEOUT
+
+
 def end(row: PortalSession, reason: str) -> bool:
     """End one session once; the first caller records the reason and the audit event."""
+    if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
+        from .customer_view import end_customer_view  # noqa: PLC0415  # import cycle
+
+        return end_customer_view(row, reason)
     now = timezone.now()
     with transaction.atomic():
         changed = PortalSession.objects.filter(pk=row.pk, revoked_at__isnull=True).update(
@@ -250,4 +276,8 @@ def bind_request(request: HttpRequest, data: dict[str, object]) -> HttpResponse 
     if row is None:
         return session_refused()
     request.portal_session = row  # type: ignore[attr-defined]  # read by the endpoints that end or re-stamp it
+    if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
+        from apps.api.customer_view_policy import check  # noqa: PLC0415  # ADR-0007: cross-app, deferred
+
+        return check(request, data, row)
     return None

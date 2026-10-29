@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Customer view (ADR-0065).** Administrators and support staff can open the customer portal as one member of an active customer, read-only, for at most 30 minutes, from "Sign in as customer" on the member card. Staff give a reason first; every view, page read and refusal is in the audit trail. The customer sees nothing. Turn it off with `CUSTOMER_VIEW_ENABLED=false` on both services.
+- **Platform owns customer portal sessions (ADR-0017).** Every portal call names its Platform session, logout ends it on Platform, and a password or second-factor change ends every other session at its next request. Every signed-in customer logs in again once after this release; see ADR-0017 for the deploy order and `PORTAL_SESSION_REQUIRED`.
+
 - **Release candidates and promotion to staging.** `release-candidate.yml` (dispatched on a `master` commit, blank = the current tip) confirms the commit's pull request passed every required check on exactly the commit's tree, then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that SHA. `make promote-staging SHA=<sha>` deploys only a commit with such a successful run, from a clean checkout of it, and then fast-forwards `staging`, so the branch always names what staging runs. See `docs/deployment/DEPLOYMENT.md`.
 
 ### Changed

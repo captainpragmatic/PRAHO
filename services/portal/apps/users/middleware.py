@@ -30,6 +30,7 @@ from apps.api_client.services import (
 from apps.common import counters, request_context
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.store_unavailable import end_session_or_unavailable, wants_json
+from apps.users import customer_view_policy
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,8 @@ class PortalAuthenticationMiddleware:
     # CommonMiddleware adds the slash only for a 404, so they would otherwise get the login redirect.
     PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset(
         {
+            # Customer view handoff (ADR-0065): arrives with no portal session; checked by exact Origin.
+            "/customer-view/redeem/",
             "/terms/",
             "/terms",
             "/privacy-policy/",
@@ -104,6 +107,9 @@ class PortalAuthenticationMiddleware:
                 # Platform ended the session during the view; the view may have caught the error.
                 logger.warning("🚨 [Auth] Platform ended the portal session during %s", request.path)
                 return self._end_session(request)
+        if request.session.get("customer_view"):
+            # A customer view's pages are never kept by the browser or a shared cache (ADR-0065).
+            response["Cache-Control"] = "no-store"
         return response
 
     def _end_session(self, request: HttpRequest) -> HttpResponse:
@@ -114,9 +120,23 @@ class PortalAuthenticationMiddleware:
             return JsonResponse({"error": "Session ended", "redirect": "/login/"}, status=401)
         return self.redirect_to_login(request)
 
-    def _authenticate(self, request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912 -- one branch per session tier
+    def _customer_view_refusal(self, request: HttpRequest) -> HttpResponse | None:
+        if not request.session.get("customer_view"):
+            return None
+        if not settings.CUSTOMER_VIEW_ENABLED:
+            return self._end_session(request)
+        if customer_view_policy.allowed(request):
+            return None
+        logger.info("🔒 [CustomerView] Refused %s %s", request.method, customer_view_policy.route_name(request))
+        return customer_view_policy.refused(request)
+
+    def _authenticate(self, request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912 -- one branch per session tier
         # Ensure CSRF cookie is available on responses (including redirects).
         get_token(request)
+
+        # ADR-0065: a customer view reads only, public routes included (cookie consent is a write).
+        if (refusal := self._customer_view_refusal(request)) is not None:
+            return refusal
 
         # Skip authentication for public URLs
         if self.is_public_url(request.path):
@@ -256,7 +276,9 @@ class PortalAuthenticationMiddleware:
         session_created_at = self._get_session_datetime(request, "session_created_at", now)
 
         # Validate immediately when metadata or the credential binding is missing.
-        if not validated_at or not next_validate_at or not request.session.get("session_auth_hash"):
+        # A customer view holds no credential of the customer: its Platform session is its binding.
+        bound = request.session.get("session_auth_hash") or request.session.get("customer_view")
+        if not validated_at or not next_validate_at or not bound:
             # Fresh session - validate immediately but set next validation with jitter
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)

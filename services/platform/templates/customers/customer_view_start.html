@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{# Django marks a translated template literal safe, so catalog text is escaped where it is shown (ADR-0065). #}
+{% load ui_components %}
+
+{% block title %}{% trans 'Sign in as customer' as t1 %}{{ t1|force_escape }} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-2xl mx-auto">
+  <a href="{% url 'customers:detail' customer.id %}" class="text-slate-400 hover:text-white">
+    ← {% trans 'Back to customer details' as t2 %}{{ t2|force_escape }}
+  </a>
+  {# nosemgrep: template-translate-as-no-escape — false positive: the rule stops at the word "as" inside this msgid; t3 is rendered through force_escape #}
+  <h1 class="text-2xl font-bold text-white mt-4">{% trans 'Sign in as customer' as t3 %}{{ t3|force_escape }}</h1>
+  {# Labels and values side by side, not one translated sentence around them: no translator text wraps a value. #}
+  <dl class="mt-2 text-sm text-slate-400 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+    <dt>{% trans 'Member' as t4 %}{{ t4|force_escape }}</dt><dd class="text-slate-200">{{ target.get_full_name }} ({{ target.email }})</dd>
+    <dt>{% trans 'Customer' as t5 %}{{ t5|force_escape }}</dt><dd class="text-slate-200">{{ customer.get_display_name }}</dd>
+  </dl>
+  <p class="text-slate-400 text-sm mt-2">{% trans 'You can look, not change anything, for 30 minutes at most.' as t6 %}{{ t6|force_escape }}</p>
+
+  {% if error %}
+    <div class="mt-4">{% alert error variant="danger" %}</div>
+  {% endif %}
+
+  {% for blocker in blockers %}
+    <div class="mt-4" data-customer-view-blocker="{{ blocker.code }}">
+      {% alert blocker.message variant="warning" %}
+      {% if blocker.remedy_url %}
+        <a href="{{ blocker.remedy_url }}" class="inline-block mt-2 text-sm text-primary-400 hover:text-primary-300">{% trans 'Fix this' as t7 %}{{ t7|force_escape }} →</a>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  {% if target_refusal %}
+    <div class="mt-4" data-customer-view-blocker="target">{% alert target_refusal variant="info" %}</div>
+  {% endif %}
+
+  {% if not blockers and not target_refusal %}
+    <form method="post" class="mt-6 space-y-4 bg-slate-800 rounded-lg border border-slate-700 p-6" data-single-submit>
+      {% csrf_token %}
+      {% trans 'Reason category' as category_label %}
+      {% input_field "reason_category" input_type="select" html_id="customer-view-reason-category" label=category_label|force_escape options=reason_options value=values.reason_category required=True %}
+      {% trans 'Reason' as reason_label %}
+      {% trans 'What you need to see, in 10 to 500 characters. It is kept in the audit trail.' as reason_help %}
+      {% input_field "reason" input_type="textarea" html_id="customer-view-reason" label=reason_label|force_escape help_text=reason_help|force_escape value=values.reason rows=3 maxlength=500 required=True %}
+      {% trans 'Ticket reference (optional)' as ticket_label %}
+      {% input_field "ticket_reference" html_id="customer-view-ticket" label=ticket_label|force_escape value=values.ticket_reference maxlength=100 %}
+      {% trans 'Open the portal' as submit_label %}
+      {% url 'customers:detail' customer.id as cancel_url %}
+      {% trans 'Cancel' as cancel_label %}
+      {% form_actions submit_label=submit_label|force_escape cancel_label=cancel_label|force_escape cancel_url=cancel_url %}
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

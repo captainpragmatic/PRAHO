@@ -94,6 +94,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0062](ADR-0062-deployment-branding-layer.md) | Deployment Layer — Brand, Company Identity, Fiscal Identity and Legal Documents | Accepted | 2026-10-14 |
 | [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
 | [ADR-0064](ADR-0064-setup-and-bounded-system-status.md) | Setup Configuration and Bounded Operational Status | Accepted | 2026-10-27 |
+| [ADR-0065](ADR-0065-customer-view.md) | Customer View | Accepted | 2026-10-28 |
 
 ### 🟡 Partially Superseded
 
@@ -230,8 +231,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 64 (ADR-0001 through ADR-0064)
+- **Total ADRs**: 65 (ADR-0001 through ADR-0065)
 - **Active**: 58 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0065
+- **Next available**: ADR-0066

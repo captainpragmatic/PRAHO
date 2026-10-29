@@ -1,0 +1,18 @@
+{% load i18n %}
+{# Django marks a translated template literal safe, so catalog text is escaped where it is shown (ADR-0065). #}
+{# ADR-0065: shown only in the staff browser's customer view, never to the customer. #}
+<div class="sticky top-0 z-50 bg-amber-500 text-slate-900" role="status" data-customer-view-banner>
+  <div class="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+    <p class="font-medium">
+      {# Labels and values side by side: no translator text wraps a value. #}
+      {% trans 'Customer view' as t1 %}{{ t1|force_escape }}: {{ request.session.customer_view_customer_name }}
+      · {% trans 'Staff' as t2 %}{{ t2|force_escape }}: {{ request.session.customer_view_staff_label }}
+      · {% trans 'Nothing can be changed.' as t3 %}{{ t3|force_escape }}
+    </p>
+    <form method="post" action="{% url 'users:customer_view_leave' %}">
+      {% csrf_token %}
+      {# tmpl-allow TMPL002: high-contrast control on the amber banner; the button component has no variant for it #}
+      <button type="submit" class="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-amber-300 hover:bg-slate-800">{% trans "Leave customer view" as t4 %}{{ t4|force_escape }}</button>
+    </form>
+  </div>
+</div>

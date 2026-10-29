@@ -735,3 +735,4 @@ LOGGING = secure_logging_config(LOGGING)
 PORTAL_HMAC_REQUIRE_ISOLATION = True
 PORTAL_HMAC_MODE = os.environ.get("PORTAL_HMAC_MODE", "enforce")
 PORTAL_SESSION_REQUIRED = os.environ.get("PORTAL_SESSION_REQUIRED", "true").strip().lower() in ("1", "true", "yes")
+PORTAL_PUBLIC_ORIGIN = os.environ.get("PORTAL_PUBLIC_ORIGIN", "").strip() or f"https://{PORTAL_DOMAIN}"
