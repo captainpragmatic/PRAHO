@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from apps.common.browser_identity import browser_identity
 from apps.common.middleware import SessionSecurityMiddleware
+from tests.helpers.platform_login import session_fields
 
 CHROME_130_MAC = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -141,6 +142,7 @@ class LoginStampTests(TestCase):
                 "user_id": 123,
                 "customer_id": 456,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",
+                **session_fields(),
             }
             platform.post.return_value = {"success": True, "results": [{"id": 456, "name": "Acme", "role": "owner"}]}
             platform.get_customer_profile.return_value = {"first_name": "Ana"}

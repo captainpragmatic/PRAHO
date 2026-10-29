@@ -1,5 +1,6 @@
 """Contract tests for Platform login response identity mapping."""
 
+import json
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings
@@ -59,6 +60,9 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
             "user": {"id": 7, "customer_id": 3},
             "session_auth_hash": "credential-hash",
             "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+            "session_tier": "remember",
+            "session_expires_at": "2026-11-28T10:00:00+00:00",
+            "session_idle_deadline": "2026-11-05T10:00:00+00:00",
         }
 
         with patch("apps.api_client.services.portal_request", return_value=response):
@@ -75,6 +79,22 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
                 "customer_data": {"id": 7, "customer_id": 3},
                 "session_auth_hash": "credential-hash",
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",
+                "session_tier": "remember",
+                "session_expires_at": "2026-11-28T10:00:00+00:00",
+                "session_idle_deadline": "2026-11-05T10:00:00+00:00",
             },
 
         )
+
+    def test_the_signed_body_says_whether_to_remember_the_session(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {"success": False}
+        for remember, sent in ((True, True), (False, False), ("yes", False)):
+            with self.subTest(remember=remember), patch(
+                "apps.api_client.services.portal_request", return_value=response
+            ) as request:
+                self.api_client.authenticate_customer("a@b.com", "pw", remember_me=remember)  # type: ignore[arg-type]  # a non-boolean on purpose
+                body = json.loads(request.call_args.kwargs["data"])
+                self.assertIs(body["remember_me"], sent)

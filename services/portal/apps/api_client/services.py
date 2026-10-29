@@ -825,8 +825,15 @@ class PlatformAPIClient:
         """A published legal document: {"kind", "language"} for the one in force, or {"id"}; 404 if none."""
         return self._make_request("POST", "/legal/document/", data=request)
 
-    def authenticate_customer(
-        self, email: str, password: str, mfa_token: str = "", client_ip: str = "", user_agent: str = ""
+    def authenticate_customer(  # noqa: PLR0913  # the login form's fields and the browser's
+        self,
+        email: str,
+        password: str,
+        mfa_token: str = "",
+        client_ip: str = "",
+        user_agent: str = "",
+        *,
+        remember_me: bool = False,
     ) -> dict[str, Any] | None:
         """Authenticate a customer, propagating throttles and service failures to the caller."""
         start_time = time.perf_counter()
@@ -838,6 +845,7 @@ class PlatformAPIClient:
                 "password": password,
                 **({"mfa_token": mfa_token} if mfa_token else {}),
                 **_browser_payload(client_ip, user_agent),
+                "remember_me": remember_me is True,  # Platform picks the tier; staff never get remember
             }
             data = self._make_request(
                 "POST",
@@ -858,8 +866,11 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                     "session_auth_hash": data.get("session_auth_hash"),
-                    # ADR-0017 section 5: the Platform session every later call names.
+                    # ADR-0017 section 5: the Platform session every later call names, and its deadlines.
                     "session_id": data.get("session_id"),
+                    "session_tier": data.get("session_tier"),
+                    "session_expires_at": data.get("session_expires_at"),
+                    "session_idle_deadline": data.get("session_idle_deadline"),
                 }
             return None
 

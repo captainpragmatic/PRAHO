@@ -64,7 +64,14 @@ logger = logging.getLogger(__name__)
 KEY_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"selected_customer_id", "selected_customer_name", "selected_customer_role"}),
     frozenset(
-        {"validated_at", "next_validate_at", "membership_hash", "user_memberships", "user_memberships_fetched_at"}
+        {
+            "validated_at",
+            "next_validate_at",
+            "membership_hash",
+            "user_memberships",
+            "user_memberships_fetched_at",
+            "session_idle_deadline",  # Platform's, refreshed by each validation (ADR-0017 section 5)
+        }
     ),
     frozenset(
         {
@@ -73,6 +80,8 @@ KEY_GROUPS: tuple[frozenset[str], ...] = (
             "customer_id",
             "session_auth_hash",
             "portal_session_id",
+            "session_tier",
+            "session_expires_at",
             "authenticated_at",
             "session_created_at",
         }

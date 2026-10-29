@@ -219,7 +219,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
                 session_auth_hash = user.get_session_auth_hash()
                 # ADR-0017 section 5: Platform owns the session; the portal sends its id with every call.
                 portal_session = portal_sessions.open_session(
-                    user, ip=forwarded_ip or client_ip or "", user_agent=str(data.get("client_user_agent", ""))[:500]
+                    user,
+                    remember_me=data.get("remember_me") is True,  # a signed boolean; anything else is no
+                    ip=forwarded_ip or client_ip or "",
+                    user_agent=str(data.get("client_user_agent", ""))[:500],
                 )
 
         if refusal is not None:

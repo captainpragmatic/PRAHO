@@ -11,10 +11,11 @@ from __future__ import annotations
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.users import portal_sessions, session_policy
 from apps.users.models import PortalSession, User
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 PASSWORD = "Correct-Horse-Battery-9"  # test credential
 
@@ -118,3 +119,28 @@ class TierLifetimeTests(TestCase):
         self.assertEqual(session_policy.TIERS["customer_view"].absolute, timedelta(minutes=30))
         self.assertEqual(session_policy.lifetimes(PortalSession.TIER_CUSTOMER_VIEW).idle, timedelta(minutes=10))
         self.assertIsNone(session_policy.lifetimes("unknown"))
+
+
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE, PORTAL_HMAC_MODE="legacy")
+class LoginTierTests(HMACTestMixin, TestCase):
+    def test_a_signed_true_remembers_a_customer_and_nothing_else_does(self) -> None:
+        User.objects.create_user(email="customer@example.ro", password=PASSWORD)
+        User.objects.create_user(email="staff@example.ro", password=PASSWORD, staff_role="support")
+        cases = {
+            "a customer who asked": ("customer@example.ro", True, "remember", timedelta(days=30)),
+            "the text true": ("customer@example.ro", "true", "standard", timedelta(hours=24)),
+            "a customer who did not ask": ("customer@example.ro", None, "standard", timedelta(hours=24)),
+            "staff who asked": ("staff@example.ro", True, "standard", timedelta(hours=24)),
+        }
+        for name, (email, remember, tier, absolute) in cases.items():
+            with self.subTest(case=name):
+                body = {"email": email, "password": PASSWORD}
+                if remember is not None:
+                    body["remember_me"] = remember
+                answer = self.portal_post("/api/users/login/", body).json()
+                self.assertTrue(answer["success"], answer)
+                row = PortalSession.objects.get(pk=answer["session_id"])
+                self.assertEqual((row.tier, row.expires_at - row.last_seen_at), (tier, absolute))
+                self.assertEqual(answer["session_tier"], tier)
+                self.assertEqual(answer["session_expires_at"], row.expires_at.isoformat())
+                self.assertEqual(answer["session_idle_deadline"], row.idle_deadline.isoformat())

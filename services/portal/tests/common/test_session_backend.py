@@ -25,6 +25,7 @@ from config.settings.base import (
     SESSION_COOKIE_SAMESITE,
     SESSION_ENGINE,
 )
+from tests.helpers.platform_login import session_fields
 
 # ---------------------------------------------------------------------------
 # 1. Session key availability — the root cause of the signed-cookie regression
@@ -236,6 +237,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -276,6 +278,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -305,6 +308,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }

@@ -14,6 +14,7 @@ from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common.session_store import SessionSaveContended
 from apps.users.views import _handle_totp_setup_post
+from tests.helpers.platform_login import session_fields
 
 PRODUCTION_MIDDLEWARE = tuple(m for m in settings.MIDDLEWARE if not m.startswith("debug_toolbar."))
 CONTENDED = patch("apps.common.session_store.SessionStore.cycle_key", side_effect=SessionSaveContended("gave up"))
@@ -34,6 +35,7 @@ class ContendedKeyRotationTests(TestCase):
                 "user_id": 123,
                 "customer_id": 456,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",
+                **session_fields(),
             }
             response = client.post("/login/", {"email": "test@example.com", "password": "pass123"})
         self.assertEqual(response.status_code, 503)

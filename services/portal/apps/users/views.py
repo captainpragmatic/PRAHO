@@ -48,6 +48,7 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
+from apps.users import session_deadlines
 from apps.users.constants import (
     PASSWORD_RESET_SESSION_KEY,
     REGISTRATION_CONFIRM_SESSION_KEY,
@@ -342,10 +343,14 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     mfa_token=mfa_token,
                     client_ip=get_safe_client_ip(request),
                     user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                    remember_me=remember_me is True,
                 )
-                if auth_response and auth_response.get("valid") and not auth_response.get("session_id"):
-                    # ADR-0017 section 5: a login Platform opened no session for cannot be used.
-                    raise PlatformAPIError("Login answered without a Platform session", is_unavailable=True)
+                deadlines = None
+                if auth_response and auth_response.get("valid"):
+                    deadlines = session_deadlines.from_platform(auth_response, timezone.now())
+                    if not auth_response.get("session_id") or deadlines is None:
+                        # ADR-0017 section 5: a login Platform opened no usable session for cannot be used.
+                        raise PlatformAPIError("Login answered without a usable Platform session", is_unavailable=True)
 
                 if auth_response and auth_response.get("valid"):
                     # Successful authentication - create Django session
@@ -379,6 +384,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     request.session["session_auth_hash"] = auth_response.get("session_auth_hash") or ""
                     portal_session_id = str(auth_response["session_id"])
                     request.session["portal_session_id"] = portal_session_id
+                    if deadlines is not None:  # always, past the check above
+                        session_deadlines.store(request.session, deadlines)
                     # The membership and profile calls below already belong to this session.
                     request_context.bind(portal_session_id, user_id)
 
