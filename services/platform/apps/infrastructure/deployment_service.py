@@ -48,6 +48,7 @@ from apps.infrastructure.deployment_lifecycle import (
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, ExpectedDnsRecord, get_dns_gateway
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
+from apps.infrastructure.node_teardown import DESTROYABLE_STATES, NodeTeardown, claim_teardown, close_node_admission
 from apps.infrastructure.provider_config import (
     run_provider_command,
 )
@@ -784,7 +785,7 @@ class NodeDeploymentService:
             duration = (timezone.now() - start_time).total_seconds()
             return Err(f"Deployment failed: {e}")
 
-    def destroy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def destroy_node(
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -792,180 +793,92 @@ class NodeDeploymentService:
         user: User | None = None,
     ) -> Result[bool, str]:
         """
-        Destroy a deployed node.
+        Destroy a deployed node through the shared teardown.
+
+        The claim and the workload guard decide together: an occupied node, or a row in another
+        status, is refused with nothing changed. A teardown that stops part-way stays ``destroying``
+        with every unproven identifier kept, for the stale-destroying sweep to resume.
 
         Args:
             deployment: NodeDeployment instance to destroy
             credentials: Provider credentials dict
-            cloudflare_api_token: Cloudflare API token
+            cloudflare_api_token: Unused; DNS teardown reads the stored zone and the configured token
             user: User performing the destruction
 
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-
         logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
-
         audit_ctx = InfrastructureAuditContext(user=user)
 
-        lease: OperationLease | None = None
+        claim = claim_teardown(deployment, kind="destroy", from_states=DESTROYABLE_STATES)
+        if claim.is_err():
+            return self._destroy_failed(deployment, f"Destroy refused: {claim.unwrap_err()}", audit_ctx)
+        lease = claim.unwrap()
+        deployment.refresh_from_db()
+        return self._run_teardown(deployment, lease, credentials.get("api_token", ""), audit_ctx, user)
+
+    def _run_teardown(
+        self,
+        deployment: NodeDeployment,
+        lease: OperationLease,
+        api_token: str,
+        audit_ctx: InfrastructureAuditContext,
+        user: User | None,
+    ) -> Result[bool, str]:
+        """Run the shared teardown for a claimed row; a stop leaves it destroying and audited."""
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
         try:
-            # One locked claim: check-and-transition with a fresh operation token.
-            claim = claim_operation(
-                deployment.pk, from_states=("completed", "failed", "stopped"), to_status="destroying", kind="destroy"
-            )
-            if claim.is_err():
-                return Err(claim.unwrap_err())
-            lease = claim.unwrap()
-
-            # Refresh local instance after atomic block
-            deployment.refresh_from_db()
-
-            # Audit: destroy started
-            try:
-                InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
-            except Exception:
-                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
-
-            NodeDeploymentLog.objects.create(
-                deployment=deployment,
-                level="INFO",
-                message="Starting node destruction",
-                phase="destroying",
-            )
-
-            # Unregister from PRAHO first
-            if deployment.virtualmin_server:
-                unregister_result = self._registration.unregister_node(
-                    deployment=deployment,
-                    delete_server=True,
-                    user=user,
-                )
-                if unregister_result.is_err():
-                    logger.warning(f"Unregistration failed: {unregister_result.unwrap_err()}")
-
-            # Delete DNS first (records point at an IP about to be released) — owner-scoped,
-            # best-effort, independent of external_node_id and before the server-delete
-            # early-return so a server-delete failure never skips DNS cleanup (#347 GAP 3).
-            self._delete_owned_dns(deployment, lease)
-
-            # Delete server via cloud provider gateway
-            if deployment.external_node_id:
-                api_token = credentials.get("api_token", "")
-                if not api_token:
-                    return Err("No API token provided for server deletion")
-
-                provider_type = deployment.provider.provider_type
-                gateway = get_cloud_gateway(provider_type, api_token)
-                delete_result = gateway.delete_server(deployment.external_node_id)
-
-                if delete_result.is_err():
-                    self._mark_failed(
-                        deployment,
-                        f"Server deletion failed: {delete_result.unwrap_err()}",
-                        stage="destroying",
-                        audit_ctx=audit_ctx,
-                        lease=lease,
-                    )
-                    return Err(
-                        f"Server deletion failed: {delete_result.unwrap_err()}",
-                        retriability=retriability_of(delete_result),
-                    )
-
-                # Cloud VM is gone. Clear external_node_id NOW so that if a later
-                # step (vault-key revocation) fails and the destroy is retried, the
-                # retry does not re-invoke delete_server against an already-deleted VM.
-                owned_update(lease, deployment, external_node_id="")
-
-                # Clean up SSH key from provider
-                ssh_key_name = f"praho-{deployment.hostname}"
-                ssh_delete_result = gateway.delete_ssh_key(ssh_key_name)
-                if ssh_delete_result.is_err():
-                    logger.warning(
-                        f"[Destroy:{deployment.hostname}] SSH key cleanup failed: {ssh_delete_result.unwrap_err()}"
-                    )
-
-                # Clean up firewall from provider (best-effort — may not exist on older deployments)
-                # Look up firewall_id from deployment log (stored during deploy_node)
-                firewall_name = f"praho-fw-{deployment.hostname}"
-                fw_log = (
-                    NodeDeploymentLog.objects.filter(
-                        deployment=deployment,
-                        phase="provision_server",
-                        message__startswith="Firewall resource recorded:",
-                    )
-                    .order_by("-created_at")
-                    .first()
-                )
-                firewall_id_to_delete: str | None = (
-                    fw_log.details.get("firewall_id") if fw_log and isinstance(fw_log.details, dict) else None
-                )
-                if firewall_id_to_delete:
-                    logger.info(f"[Destroy:{deployment.hostname}] Deleting firewall id={firewall_id_to_delete}")
-                    try:
-                        fw_delete_result = gateway.delete_firewall(str(firewall_id_to_delete))
-                        if fw_delete_result.is_err():
-                            logger.warning(
-                                f"[Destroy:{deployment.hostname}] Firewall deletion failed (best-effort): "
-                                f"{fw_delete_result.unwrap_err()}"
-                            )
-                        else:
-                            logger.info(f"[Destroy:{deployment.hostname}] Firewall '{firewall_name}' deleted")
-                    except Exception as fw_exc:
-                        logger.warning(
-                            f"[Destroy:{deployment.hostname}] Firewall deletion raised exception (best-effort): "
-                            f"{fw_exc}"
-                        )
-                else:
-                    logger.warning(
-                        f"[Destroy:{deployment.hostname}] No firewall_id found in logs, skipping firewall cleanup"
-                    )
-            else:
-                logger.warning(f"No external_node_id for {deployment.hostname}, skipping cloud deletion")
-
-            # Clean up SSH key from vault
-            key_delete_result = self._ssh_manager.delete_deployment_key(deployment, user=user)
-            if key_delete_result.is_err():
-                error_msg = f"SSH key revocation failed: {key_delete_result.unwrap_err()}"
-                self._mark_failed(deployment, error_msg, stage="destroying", audit_ctx=audit_ctx, lease=lease)
-                return Err(error_msg)
-
-            # Mark as destroyed
-            owned_transition(lease, deployment, "destroyed", release=True, destroyed_at=timezone.now())
-
-            NodeDeploymentLog.objects.create(
-                deployment=deployment,
-                level="INFO",
-                message="Node destroyed successfully",
-                phase="destroyed",
-            )
-
-            # Audit: destroy completed
-            try:
-                InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
-            except Exception:
-                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
-
-            logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
-            return Ok(True)
-
+            InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
+        except Exception:
+            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
+        NodeDeploymentLog.objects.create(
+            deployment=deployment, level="INFO", message="Starting node destruction", phase="destroying"
+        )
+        teardown = NodeTeardown(
+            deployment,
+            lease,
+            api_token=api_token,
+            ssh_manager=self._ssh_manager,
+            registration=self._registration,
+            user=user,
+        )
+        try:
+            result = teardown.run()
         except OperationOwnershipLostError as lost:
             logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Stopped without writing: {lost}")
             return Err(f"Destruction stopped: {lost}")
         except Exception as e:
             logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
-            self._mark_failed(deployment, str(e), stage="destroying", audit_ctx=audit_ctx, lease=lease)
+            result = Err(f"Destruction failed: {e}")
+        if result.is_err():
+            return self._destroy_failed(deployment, result.unwrap_err(), audit_ctx)
 
-            # Audit: destroy failed
-            try:
-                InfrastructureAuditService.log_destroy_failed(deployment, str(e), audit_ctx)
-            except Exception:
-                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
+        NodeDeploymentLog.objects.create(
+            deployment=deployment, level="INFO", message="Node destroyed successfully", phase="destroyed"
+        )
+        try:
+            InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
+        except Exception:
+            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
+        logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
+        return Ok(True)
 
-            return Err(f"Destruction failed: {e}")
+    @staticmethod
+    def _destroy_failed(
+        deployment: NodeDeployment, error_msg: str, audit_ctx: InfrastructureAuditContext
+    ) -> Result[bool, str]:
+        """Record a refused or stopped destroy in the deployment log and the audit trail."""
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] {error_msg}")
+        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=error_msg, phase="destroying")
+        try:
+            InfrastructureAuditService.log_destroy_failed(deployment, error_msg, audit_ctx)
+        except Exception:
+            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
+        return Err(error_msg)
 
     def retry_deployment(
         self,
@@ -1297,32 +1210,12 @@ class NodeDeploymentService:
         force: bool = False,
     ) -> Result[bool, str]:
         """Refuse stopping an undrained Virtualmin node; disable the linked server otherwise."""
-        if not deployment.virtualmin_server_id:
-            return Ok(True)
-        from apps.provisioning.virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
-        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
-
-        with transaction.atomic():
-            server = VirtualminServer.objects.select_for_update().get(pk=deployment.virtualmin_server_id)
-            # Current state only: a finalized historical drain must never exempt
-            # workloads provisioned afterwards, and an in-flight migration
-            # touching this server (as source OR incoming target) has no local
-            # account row yet — check the migration table directly.
-            # Any account not terminated still lives on the node, including one still provisioning.
-            occupied = server.accounts.exclude(status="terminated").exists()
-            migrating = server_has_active_migration(server)
-            if (occupied or migrating) and not force:
-                error_msg = (
-                    "Node has an in-flight migration; resolve it or explicitly force stop"
-                    if migrating
-                    else "Node has undrained accounts; drain it or explicitly force stop"
-                )
-                InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
-                logger.warning("⚠️ [NodeDrain] Stop refused: %s", deployment.hostname)
-                return Err(error_msg)
-            # fsm-bypass: VirtualminServer CharField; close admission before provider I/O.
-            server.status, server.failed_by_health_check = "disabled", False
-            server.save(update_fields=["status", "failed_by_health_check", "updated_at"])
+        closed = close_node_admission(deployment.virtualmin_server_id, force=force)
+        if closed.is_err():
+            error_msg = closed.unwrap_err().replace("explicitly force", "explicitly force stop")
+            InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
+            logger.warning("⚠️ [NodeDrain] Stop refused: %s", deployment.hostname)
+            return Err(error_msg)
         return Ok(True)
 
     def stop_node(  # noqa: PLR0911

@@ -1,0 +1,221 @@
+"""One repeatable teardown for a node deployment, shared by destroy, the sweeps and compensation.
+
+The claim and the workload guard run in one transaction, so a refused teardown changes nothing. After
+that every step either proves its resources gone or stops with the row still ``destroying`` and every
+identifier it has not proven gone kept, so the next run resumes where this one stopped:
+
+  unregister -> withdraw DNS -> delete servers (confirmed) -> firewalls -> SSH keys -> clear identifiers
+  -> revoke the vault key -> destroyed
+
+DNS is withdrawn before any server is deleted, so no record ever points at a released address. Provider
+"not found" answers count as proof only under the token that created the resources.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterable
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from django.db import transaction
+from django.utils import timezone
+
+from apps.common.types import Err, Ok, Result
+from apps.infrastructure.cloud_gateway import get_cloud_gateway
+from apps.infrastructure.deployment_lifecycle import (
+    OperationLease,
+    claim_operation,
+    owned_transition,
+    owned_update,
+    provider_token_fingerprint,
+)
+
+if TYPE_CHECKING:
+    from apps.infrastructure.cloud_gateway import CloudProviderGateway
+    from apps.infrastructure.models import NodeDeployment
+    from apps.users.models import User
+
+logger = logging.getLogger(__name__)
+
+DESTROYABLE_STATES = ("completed", "failed", "stopped")
+
+
+def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
+    """Under the server row lock admission takes: refuse while work lives there, else close the node.
+
+    Every account that is not terminated still lives on the node, including one still provisioning,
+    and an in-flight migration touching the server (as source or target) has no local account row yet.
+    """
+    if not virtualmin_server_id:
+        return Ok(None)
+    from apps.provisioning.virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
+    from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
+
+    with transaction.atomic():
+        server = VirtualminServer.objects.select_for_update().get(pk=virtualmin_server_id)
+        occupied = server.accounts.exclude(status="terminated").exists()
+        migrating = server_has_active_migration(server)
+        if (occupied or migrating) and not force:
+            return Err(
+                "Node has an in-flight migration; resolve it or explicitly force"
+                if migrating
+                else "Node has undrained accounts; drain it or explicitly force"
+            )
+        # fsm-bypass: VirtualminServer CharField; close admission before provider I/O.
+        server.status, server.failed_by_health_check = "disabled", False
+        server.save(update_fields=["status", "failed_by_health_check", "updated_at"])
+    return Ok(None)
+
+
+def claim_teardown(
+    deployment: NodeDeployment,
+    *,
+    kind: str,
+    from_states: Iterable[str],
+    stale_before: datetime | None = None,
+) -> Result[OperationLease, str]:
+    """Claim the row into ``destroying`` and close the node's admission, or change nothing."""
+    with transaction.atomic():
+        claim = claim_operation(
+            deployment.pk, from_states=from_states, to_status="destroying", kind=kind, stale_before=stale_before
+        )
+        if claim.is_err():
+            return claim
+        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+
+        server_id = NodeDeployment.objects.values_list("virtualmin_server_id", flat=True).get(pk=deployment.pk)
+        guard = close_node_admission(server_id)
+        if guard.is_err():
+            transaction.set_rollback(True)  # the claim must not survive a refused guard
+            return Err(guard.unwrap_err())
+    return claim
+
+
+class NodeTeardown:
+    """The teardown steps, run only by the holder of ``lease``."""
+
+    def __init__(  # noqa: PLR0913  # The teardown's collaborators, injected for its callers and tests.
+        self,
+        deployment: NodeDeployment,
+        lease: OperationLease,
+        *,
+        api_token: str,
+        ssh_manager: Any,
+        registration: Any,
+        user: User | None = None,
+    ) -> None:
+        self.deployment = deployment
+        self.lease = lease
+        self.api_token = api_token
+        self.ssh_manager = ssh_manager
+        self.registration = registration
+        self.user = user
+
+    def run(self) -> Result[bool, str]:
+        from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415  # Circular
+
+        deployment = self.deployment
+        if deployment.virtualmin_server_id:
+            unregistered = self.registration.unregister_node(deployment=deployment, delete_server=True, user=self.user)
+            if unregistered.is_err():
+                return Err(f"Unregistration failed: {unregistered.unwrap_err()}")
+        dns = NodeDeploymentService._delete_owned_dns(deployment, self.lease)
+        if dns.is_err():
+            return Err(f"DNS withdrawal incomplete: {dns.unwrap_err()}")
+        cloud = self._delete_cloud_resources()
+        if cloud.is_err():
+            return cloud
+        revoked = self.ssh_manager.delete_deployment_key(deployment, user=self.user)
+        if revoked.is_err():
+            return Err(f"SSH key revocation failed: {revoked.unwrap_err()}")
+        owned_transition(
+            self.lease, deployment, "destroyed", "Node destroyed", release=True, destroyed_at=timezone.now()
+        )
+        return Ok(True)
+
+    # -- Provider resources -------------------------------------------------
+
+    def _may_hold_server(self) -> bool:
+        return bool(self.deployment.external_node_id) or self.deployment.server_create_state in ("intent", "unknown")
+
+    def _reconcile(self, reason: str) -> Result[bool, str]:
+        owned_update(self.lease, self.deployment, needs_reconciliation=True, reconciliation_reason=reason)
+        return Err(reason)
+
+    def _delete_cloud_resources(self) -> Result[bool, str]:
+        deployment = self.deployment
+        if not self._may_hold_server() and not self._recorded_firewall_ids():
+            return Ok(True)  # never reached the provider
+        if not self.api_token:
+            return Err("No provider API token for teardown")
+        stored = deployment.provider_token_fingerprint
+        trusted = bool(stored) and stored == provider_token_fingerprint(self.api_token)
+        if stored and not trusted:
+            return self._reconcile("Provider resources were created with a different provider token")
+
+        gateway = get_cloud_gateway(deployment.provider.provider_type, self.api_token)
+        servers = self._delete_servers(gateway, trusted=trusted)
+        if servers.is_err():
+            return servers
+        owned_update(self.lease, deployment, external_node_id="", ipv4_address=None, ipv6_address=None)
+        firewalls = self._delete_firewalls(gateway)
+        if firewalls.is_err():
+            return firewalls
+        return self._delete_ssh_keys(gateway)
+
+    def _delete_servers(self, gateway: CloudProviderGateway, *, trusted: bool) -> Result[bool, str]:
+        deployment = self.deployment
+        found = gateway.find_servers_by_label(f"praho-deployment={deployment.correlation_id}")
+        if found.is_err():
+            return Err(f"Server discovery failed: {found.unwrap_err()}")
+        ids = {info.server_id for info in found.unwrap()}
+        if deployment.external_node_id:
+            ids.add(deployment.external_node_id)
+        if not trusted:
+            # Unknown provenance: only a server this token can see proves it belongs here, and an
+            # empty search proves nothing about an outcome that may have billed elsewhere.
+            if not ids and deployment.server_create_state in ("intent", "unknown"):
+                return self._reconcile("Server-create outcome unknown and provider token never recorded")
+            for server_id in sorted(ids):
+                seen = gateway.get_server(server_id)
+                if seen.is_err():
+                    return Err(f"Cannot verify server {server_id}: {seen.unwrap_err()}")
+                if seen.unwrap() is None:
+                    return self._reconcile(f"Server {server_id} not visible to this provider token")
+        for server_id in sorted(ids):
+            deleted = gateway.delete_server(server_id)
+            if deleted.is_err():
+                return Err(f"Server {server_id} deletion unconfirmed: {deleted.unwrap_err()}")
+        return Ok(True)
+
+    def _recorded_firewall_ids(self) -> list[str]:
+        """Firewall ids recorded in the deployment log before firewalls were labelled for discovery."""
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred import
+
+        recorded = NodeDeploymentLog.objects.filter(
+            deployment=self.deployment, message__startswith="Firewall resource recorded:"
+        ).values_list("details", flat=True)
+        return [str(d["firewall_id"]) for d in recorded if isinstance(d, dict) and d.get("firewall_id")]
+
+    def _delete_firewalls(self, gateway: CloudProviderGateway) -> Result[bool, str]:
+        found = gateway.find_firewalls_by_label(f"deployment-id={self.deployment.correlation_id}")
+        if found.is_err():
+            return Err(f"Firewall discovery failed: {found.unwrap_err()}")
+        for firewall_id in sorted({*found.unwrap(), *self._recorded_firewall_ids()}):
+            deleted = gateway.delete_firewall(firewall_id)
+            if deleted.is_err():
+                return Err(f"Firewall {firewall_id} deletion failed: {deleted.unwrap_err()}")
+        return Ok(True)
+
+    def _delete_ssh_keys(self, gateway: CloudProviderGateway) -> Result[bool, str]:
+        found = gateway.find_ssh_keys_by_label(f"praho-deployment={self.deployment.correlation_id}")
+        if found.is_err():
+            return Err(f"SSH key discovery failed: {found.unwrap_err()}")
+        for key_id in found.unwrap():
+            deleted = gateway.delete_ssh_key_by_id(key_id)
+            if deleted.is_err():
+                return Err(f"SSH key {key_id} deletion failed: {deleted.unwrap_err()}")
+        # A key uploaded before keys were labelled is left in place: its name can collide with another
+        # deployment's, and nothing here proves which one it is.
+        return Ok(True)
