@@ -64,7 +64,13 @@ def stored_evidence(account: VirtualminAccount) -> str:
     if row is None:
         return ""
     results = dict(row.results) if isinstance(row.results, dict) else {"results": row.results}
-    # PostgreSQL's jsonb returns keys shorter-first, so a large key could push the component codes past the bound.
-    ordered = {"components": results.pop("components")} if "components" in results else {}
-    ordered.update(results)
+    components = results.pop("components", None)
+    # Every component's state and code come first: jsonb returns keys shorter-first and nested evidence
+    # can be long, so the bound below must only ever cut details, never a code staff act on.
+    summary = (
+        {name: {"state": part.get("state"), "code": part.get("code")} for name, part in components.items()}
+        if isinstance(components, dict) and all(isinstance(part, dict) for part in components.values())
+        else {}
+    )
+    ordered = {"summary": summary, "components": components, **results}
     return json.dumps(ordered, ensure_ascii=False, indent=2)[:12000]

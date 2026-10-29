@@ -72,6 +72,18 @@ class HostedDnsStaffViewsTests(MigrationTestBase):
         self.assertContains(response, "address_mismatch")
         self.assertNotContains(response, "x" * 14000)
 
+    def test_every_component_code_survives_large_evidence_in_an_earlier_component(self):
+        self.row.results = {
+            "components": {
+                "www": {"state": "broken", "code": "address_mismatch", "evidence": {"records": ["y" * 400] * 40}},
+                "dnssec": {"state": "broken", "code": "dnssec_ds_key_mismatch", "evidence": {}},
+            }
+        }
+        self.row.save(update_fields=["results"])
+        response = self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
+        self.assertContains(response, "address_mismatch")
+        self.assertContains(response, "dnssec_ds_key_mismatch")
+
     def test_nonstaff_cannot_read_private_dns_evidence(self):
         customer_user = User.objects.create_user(email="dns-viewer@example.com")
         self.client.force_login(customer_user)
