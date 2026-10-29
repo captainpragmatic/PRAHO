@@ -13,6 +13,8 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import IntegrityError
 
@@ -83,6 +85,11 @@ class Command(BaseCommand):
                 raise CommandError(
                     "Superuser password is in the deny list of common passwords. Choose a stronger password."
                 )
+            # The validators every other password passes (length, similarity, common, numeric).
+            try:
+                validate_password(password, User(email=email))
+            except ValidationError as exc:
+                raise CommandError("Superuser password rejected: " + " ".join(exc.messages)) from None
 
         try:
             User.objects.create_superuser(email=email, password=password)

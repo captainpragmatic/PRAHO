@@ -391,6 +391,8 @@ ANYMAIL = {
     "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY"),
     # Mailgun configuration
     "MAILGUN_API_KEY": os.environ.get("MAILGUN_API_KEY"),
+    # Mailgun signs webhooks with the HTTP webhook signing key (falls back to the API key).
+    "MAILGUN_WEBHOOK_SIGNING_KEY": os.environ.get("MAILGUN_WEBHOOK_SIGNING_KEY"),
     "MAILGUN_SENDER_DOMAIN": os.environ.get("MAILGUN_SENDER_DOMAIN"),
     "MAILGUN_API_URL": os.environ.get("MAILGUN_API_URL", "https://api.eu.mailgun.net/v3"),
     # Webhook configuration

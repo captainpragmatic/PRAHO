@@ -1199,7 +1199,7 @@ class EmailService:
         metadata: dict[str, Any] | None = None,
     ) -> bool:
         """
-        Handle email delivery webhook event.
+        Handle email delivery webhook event; a failure is logged and returns False.
 
         Args:
             event_type: Event type (delivered, bounced, complained, opened, clicked)
@@ -1212,37 +1212,51 @@ class EmailService:
             True if event was processed successfully
         """
         try:
-            now = timezone.now()
-            # Suppression is about the address, so it applies whether or not the message is known yet.
-            if event_type == "bounced":
-                EmailSuppressionService.suppress_email(recipient, "hard_bounce")
-            elif event_type == "complained":
-                EmailSuppressionService.suppress_email(recipient, "complaint")
-            with transaction.atomic():
-                # Matched by provider id ONLY: matching by address put one message's bounce on another.
-                email_log = (
-                    EmailLog.objects.select_for_update().filter(provider_id=message_id).first() if message_id else None
-                )
-                if email_log is None:
-                    if message_id and event_type in DELIVERY_STATUS_EVENTS:
-                        # The send may not have recorded its provider id yet: applied when it does.
-                        PendingDeliveryEvent.objects.create(
-                            provider_id=message_id, event_type=event_type, metadata=metadata or {}, recipient=recipient
-                        )
-                    logger.warning(f"No email log yet for delivery event: {message_id}")
-                    return False
-                fields = apply_delivery_event(email_log, event_type, metadata, now)
-                if fields:
-                    email_log.save(update_fields=fields)
-            if event_type == "soft_bounced" and email_log.status == "soft_bounced":
-                suppress_after_soft_bounce(recipient, now)
-
-            logger.info(f"Processed {event_type} event for {recipient[:3]}***")
-            return True
-
+            return cls.process_delivery_event(event_type, message_id, recipient, timestamp, metadata)
         except Exception as e:
             logger.exception(f"Failed to handle delivery event: {e}")
             return False
+
+    @classmethod
+    def process_delivery_event(
+        cls,
+        event_type: str,
+        message_id: str,
+        recipient: str,
+        timestamp: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Apply a delivery event, raising on failure so a caller's transaction can roll back.
+
+        Returns False when the message is not known yet (the event waits as a pending event).
+        """
+        now = timezone.now()
+        # Suppression is about the address, so it applies whether or not the message is known yet.
+        if event_type == "bounced":
+            EmailSuppressionService.suppress_email(recipient, "hard_bounce")
+        elif event_type == "complained":
+            EmailSuppressionService.suppress_email(recipient, "complaint")
+        with transaction.atomic():
+            # Matched by provider id ONLY: matching by address put one message's bounce on another.
+            email_log = (
+                EmailLog.objects.select_for_update().filter(provider_id=message_id).first() if message_id else None
+            )
+            if email_log is None:
+                if message_id and event_type in DELIVERY_STATUS_EVENTS:
+                    # The send may not have recorded its provider id yet: applied when it does.
+                    PendingDeliveryEvent.objects.create(
+                        provider_id=message_id, event_type=event_type, metadata=metadata or {}, recipient=recipient
+                    )
+                logger.warning(f"No email log yet for delivery event: {message_id}")
+                return False
+            fields = apply_delivery_event(email_log, event_type, metadata, now)
+            if fields:
+                email_log.save(update_fields=fields)
+        if event_type == "soft_bounced" and email_log.status == "soft_bounced":
+            suppress_after_soft_bounce(recipient, now)
+
+        logger.info(f"Processed {event_type} event for {recipient[:3]}***")
+        return True
 
     # ===============================================================================
     # AUDIT LOGGING INTEGRATION
@@ -1515,5 +1529,6 @@ class EmailPreferenceService:
                 return True
 
         except Exception:
-            logger.exception("🔥 [Unsubscribe] Failed to process token %s", token_id)
+            # Never the token: it is the bearer secret of the unsubscribe link, still unused after this rollback.
+            logger.exception("🔥 [Unsubscribe] Failed to process an unsubscribe token")
             return False

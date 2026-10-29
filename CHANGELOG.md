@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Email webhooks verify what they claim to.** The SendGrid webhook checked a keyed hash over SendGrid's public key, which anyone holding the key could produce. It now verifies SendGrid's ECDSA signature and refuses deliveries more than five minutes old. The Mailgun webhook applies each signed token once: the claim and the event commit together, a failure rolls both back so Mailgun redelivers, and a duplicate gets 200. Its freshness window covers Mailgun's eight-hour retries. It reads the legacy form the way Mailgun posts it, so a sender's custom variable cannot choose the recipient of a bounce or complaint. Form-encoded Mailgun events were silently dropped before and are now applied.
+  - **Operator action.** If your Mailgun account signs webhooks with an HTTP webhook signing key, set `MAILGUN_WEBHOOK_SIGNING_KEY`. Without it the API key is used, as before.
+- **Translated text is escaped where it reaches markup.** Django renders translation catalog text without escaping, so a translated string with markup characters reached several pages raw. Those places now escape it, and a test refuses catalog entries whose markup does not match the source string. `setup_test_data` refuses to run outside `DEBUG`, `ensure_superuser` validates the password it sets, and rate-limited webhooks and failed unsubscribe attempts no longer store or log the raw payload or token.
+
 - **Security notices are no longer lost, and more changes send one.**
   - **Delivery:** a notice is now a queued email written in the same transaction as the change, so the email queue delivers it and retries it. A notice whose queueing failed, or whose send failed, used to be lost.
   - **New notices:**

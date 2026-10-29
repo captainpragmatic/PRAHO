@@ -127,12 +127,11 @@
         {% trans 'Age' as st3_label %}
         {% if service.service_age_days != None %}
           {% with days=service.service_age_days %}
-            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
             {% blocktrans count days=days asvar st3_age_val %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
-            {% stat_tile st3_label st3_age_val icon="clock" variant="info" %}
+            {% stat_tile st3_label|force_escape st3_age_val|force_escape icon="clock" variant="info" %}
           {% endwith %}
         {% else %}
-          {% trans 'New' as st3_val %}{% stat_tile st3_label st3_val icon="clock" variant="default" %}
+          {% trans 'New' as st3_val %}{% stat_tile st3_label|force_escape st3_val|force_escape icon="clock" variant="default" %}
         {% endif %}
 
         <!-- Auto Renew -->
@@ -190,8 +189,7 @@
                       <span class="text-white">
                         {% if service.service_age_days != None %}
                           {% with days=service.service_age_days %}
-                            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
-                            {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
+                            {% blocktrans count days=days asvar uptime_text %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}{{ uptime_text|force_escape }}
                           {% endwith %}
                         {% else %}
                           <span class="text-slate-500">{% trans "Unavailable" %}</span>
@@ -654,8 +652,7 @@
                       <span class="text-white">
                         {% if service.service_age_days != None %}
                           {% with days=service.service_age_days %}
-                            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
-                            {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
+                            {% blocktrans count days=days asvar uptime_text %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}{{ uptime_text|force_escape }}
                           {% endwith %}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>

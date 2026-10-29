@@ -12,8 +12,6 @@ from typing import Any
 
 from django import template
 from django.utils import timezone
-from django.utils.html import escape  # For XSS prevention
-from django.utils.safestring import SafeString, mark_safe
 
 from apps.common.constants import (
     ROMANIAN_IBAN_LENGTH,
@@ -553,58 +551,3 @@ def divide(value: TemplateNumeric, divisor: TemplateNumeric) -> Decimal:
         return base / div
     except (ValueError, TypeError, ZeroDivisionError):
         return Decimal("0.00")
-
-
-@register.filter
-def highlight_search(text: str, search_term: str) -> SafeString:
-    """
-    Highlight search terms in Romanian text (case-insensitive, diacritic-aware)
-
-    🔒 SECURITY: HTML-escapes input before highlighting to prevent XSS
-
-    Usage:
-        {{ description|highlight_search:query }}
-
-    Args:
-        text: Text to search in
-        search_term: Term to highlight
-    """
-    if not text or not search_term:
-        return mark_safe(escape(text) if text else "")  # noqa: S308  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe
-
-    # First escape HTML to prevent XSS
-    escaped_text = escape(text)
-    escaped_search = escape(search_term)
-
-    # Romanian diacritic mapping for search
-    diacritic_map = {"ă": "a", "â": "a", "î": "i", "ș": "s", "ț": "t", "Ă": "A", "Â": "A", "Î": "I", "Ș": "S", "Ț": "T"}
-
-    def normalize_text(s: str) -> str:
-        """Remove diacritics for search comparison"""
-        for diacritic, replacement in diacritic_map.items():
-            s = s.replace(diacritic, replacement)
-        return s.lower()
-
-    normalized_text = normalize_text(escaped_text)
-    normalized_search = normalize_text(escaped_search)
-
-    # Find matches
-    highlighted: str = escaped_text
-    start = 0
-    while True:
-        pos = normalized_text.find(normalized_search, start)
-        if pos == -1:
-            break
-
-        # Get the original text portion to preserve diacritics
-        original_match = escaped_text[pos : pos + len(escaped_search)]
-        highlighted_match = f'<mark class="bg-yellow-200">{original_match}</mark>'
-
-        # Replace in the highlighted text
-        highlighted = highlighted[:pos] + highlighted_match + highlighted[pos + len(escaped_search) :]
-
-        start = pos + len(highlighted_match)
-        # Update the normalized text for next search
-        normalized_text = normalize_text(highlighted)
-
-    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting  # noqa: S308  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe

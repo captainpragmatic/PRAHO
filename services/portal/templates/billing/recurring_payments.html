@@ -98,7 +98,7 @@
 {{ js_request_failed|force_escape|json_script:"recurring-request-failed" }}
 {{ js_accept_terms|force_escape|json_script:"recurring-accept-terms" }}
 {{ js_withdraw_confirm|force_escape|json_script:"recurring-withdraw-confirm" }}
-{# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
+{# nosemgrep: missing-integrity — accepted risk: Stripe.js v3 is versionless and must load from js.stripe.com, so no SRI hash can be pinned; CSP allows external scripts only from that host #}
 <script src="https://js.stripe.com/v3/"></script>
 <script nonce="{{ csp_nonce }}">
   (() => {
@@ -119,7 +119,7 @@
     document.querySelectorAll('.begin-authorization').forEach((button) => {
       button.addEventListener('click', async () => {
         if (!document.getElementById('recurring-terms').checked) {
-          showToast(acceptTerms, 'warning');
+          showToast('warning', acceptTerms);
           return;
         }
         button.disabled = true;
@@ -145,7 +145,7 @@
           });
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
           button.disabled = false;
         }
       });
@@ -161,7 +161,7 @@
           );
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
         }
       });
     });
@@ -177,7 +177,7 @@
           });
           window.location.reload();
         } catch (error) {
-          showToast(error.message, 'error');
+          showToast('error', error.message);
           select.disabled = false;
         }
       });

@@ -6,7 +6,6 @@ These pin the behaviour that the Bandit B308/B703 clean-up relies on:
   and the result is SafeString for single- and multi-path icons alike.
 - page_header / section_card pass the rendered slot (NodeList.render, already SafeString)
   to their component template unescaped, while variables inside the slot stay escaped.
-- highlight_search escapes its input on the early-return path.
 """
 
 from unittest.mock import patch
@@ -16,7 +15,6 @@ from django.test import SimpleTestCase
 from django.utils.safestring import SafeString
 
 from apps.ui.templatetags import ui_components
-from apps.ui.templatetags.formatting import highlight_search
 from apps.ui.templatetags.ui_components import icon
 
 
@@ -62,15 +60,3 @@ class SlotRenderingTests(SimpleTestCase):
         self.assertIn('<i class="y">body</i>', rendered)
         self.assertNotIn("<script>alert(1)</script>", rendered)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", rendered)
-
-
-class HighlightSearchEarlyReturnTests(SimpleTestCase):
-    def test_empty_search_term_escapes_text(self):
-        result = highlight_search("<b>Ana & Co</b>", "")
-        self.assertIsInstance(result, SafeString)
-        self.assertEqual(result, "&lt;b&gt;Ana &amp; Co&lt;/b&gt;")
-
-    def test_empty_text_returns_empty_safe_string(self):
-        result = highlight_search("", "x")
-        self.assertIsInstance(result, SafeString)
-        self.assertEqual(result, "")

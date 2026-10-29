@@ -935,6 +935,14 @@ lint-imports:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(VENV_DIR)/bin/python scripts/lint_cross_app_model_imports.py $(if $(PRINT_BASELINE),--print-baseline)
 
+# Two Django rules flag every {% trans ... as %} and {% blocktranslate %}, because Django prints a
+# translated template literal unescaped. Escaping every site is not practical; the control is the
+# catalog guard (tests/integration/test_translation_catalog_markup.py), which fails when any
+# translation adds markup its source string does not have.
+SEMGREP_EXCLUDE_RULES := \
+	--exclude-rule=python.django.security.audit.xss.template-translate-as-no-escape.template-translate-as-no-escape \
+	--exclude-rule=python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape
+
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -968,14 +976,14 @@ lint-security:
 		SEMGREP_ENABLE_VERSION_CHECK=0 \
 		SSL_CERT_FILE="$$CERT_PATH" \
 		REQUESTS_CA_BUNDLE="$$CERT_PATH" \
-		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests $(SEMGREP_EXCLUDE_RULES) --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
 	else \
 		XDG_CONFIG_HOME="$$SEMGREP_CACHE_DIR/xdg_config" \
 		XDG_CACHE_HOME="$$SEMGREP_CACHE_DIR/xdg_cache" \
 		SEMGREP_LOG_FILE="$$SEMGREP_CACHE_DIR/semgrep.log" \
 		SEMGREP_SETTINGS_FILE="$$SEMGREP_CACHE_DIR/settings.yml" \
 		SEMGREP_ENABLE_VERSION_CHECK=0 \
-		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+		timeout 300 "$$SEMGREP_BIN" scan --config=auto --exclude=tests $(SEMGREP_EXCLUDE_RULES) --error $$SEMGREP_BASELINE_ARGS services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
 	fi; \
 	cat "$$SEMGREP_TMP"; \
 	if [ $$SEMGREP_EXIT -ne 0 ]; then \

@@ -310,7 +310,6 @@
     // HTMX Error Handling
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error(' HTMX Error:', event.detail);
-      {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "An error occurred. Please try again." as htmx_error_msg %}
       alert('{{ htmx_error_msg|escapejs }}');
     });
