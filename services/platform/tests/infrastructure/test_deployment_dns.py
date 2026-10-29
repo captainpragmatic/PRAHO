@@ -211,7 +211,7 @@ class DeployFailClosedOnDnsError(TestCase):
         svc._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
 
         cloud = MagicMock()
-        cloud.upload_ssh_key.return_value = Ok("praho-key")
+        cloud.upload_owned_ssh_key.return_value = Ok("praho-key")
         cloud.create_firewall.return_value = Ok("fw-1")
         cloud.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")

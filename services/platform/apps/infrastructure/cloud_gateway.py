@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from apps.common.types import Result
+from apps.common.types import Err, Result
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +191,29 @@ class CloudProviderGateway(ABC):
     @abstractmethod
     def delete_snapshot(self, snapshot_id: str) -> Result[bool, str]:
         """Delete a snapshot by ID."""
+
+    # Ownership-aware primitives. A provider adapter that does not implement them fails closed: an
+    # unsupported lookup is an error, never "nothing found", so teardown never treats it as proof.
+
+    def find_servers_by_label(self, label_selector: str) -> Result[list[ServerInfo], str]:
+        """Servers carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover servers by label")
+
+    def find_firewalls_by_label(self, label_selector: str) -> Result[list[str], str]:
+        """IDs of the firewalls carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover firewalls by label")
+
+    def find_ssh_keys_by_label(self, label_selector: str) -> Result[list[str], str]:
+        """IDs of the SSH keys carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover SSH keys by label")
+
+    def upload_owned_ssh_key(self, name: str, public_key: str, labels: dict[str, str]) -> Result[SSHKeyResult, str]:
+        """Upload a labelled SSH key; never replace a same-name key that belongs to someone else."""
+        return Err(f"{type(self).__name__} cannot label SSH keys")
+
+    def delete_ssh_key_by_id(self, key_id: str) -> Result[bool, str]:
+        """Delete one SSH key by ID; a key already gone counts as deleted."""
+        return Err(f"{type(self).__name__} cannot delete SSH keys by ID")
 
 
 # =============================================================================

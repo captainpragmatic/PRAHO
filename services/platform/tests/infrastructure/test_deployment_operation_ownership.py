@@ -40,7 +40,7 @@ def _pipeline_service() -> NodeDeploymentService:
 
 def _gateway() -> MagicMock:
     gateway = MagicMock()
-    gateway.upload_ssh_key.return_value = Ok("praho-key")
+    gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
     gateway.create_firewall.return_value = Ok("fw-1")
     gateway.create_server.return_value = Ok(ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4"))
     gateway.delete_server.return_value = Ok(True)

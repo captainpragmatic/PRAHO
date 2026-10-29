@@ -322,7 +322,7 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         service._registration.register_node.return_value = Ok(MagicMock(id=1))
 
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -362,7 +362,7 @@ class TestCredentialSeamWiring(TestCase):
         service._registration.verify_and_activate.return_value = Ok(registered)
 
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -397,7 +397,7 @@ class TestCredentialSeamWiring(TestCase):
         service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
         service._registration.register_node.return_value = Ok(registered)
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -509,8 +509,8 @@ class TestTransientErrorPreservesExternalId(TestCase):
         mock_gateway = MagicMock()
         # Ok(None) = server confirmed not found
         mock_gateway.get_server.return_value = Ok(None)
-        # Make upload_ssh_key fail so we can check external_node_id was cleared
-        mock_gateway.upload_ssh_key.return_value = Err("key upload failed")
+        # Make upload_owned_ssh_key fail so we can check external_node_id was cleared
+        mock_gateway.upload_owned_ssh_key.return_value = Err("key upload failed")
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),

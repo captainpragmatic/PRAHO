@@ -25,7 +25,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from apps.common.types import Err, Ok, Result, retriability_of
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import (
@@ -42,6 +42,7 @@ from apps.infrastructure.deployment_lifecycle import (
     claim_operation,
     owned_transition,
     owned_update,
+    provider_token_fingerprint,
     still_owns,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
@@ -351,10 +352,30 @@ class NodeDeploymentService:
             if not deployment.external_node_id:
                 log_deployment("info", f"Creating server via {provider_type} API")
 
-                # Upload SSH key to provider
+                # Record the intent and the token's provenance before the first provider write, so a
+                # worker that dies mid-create leaves a row that teardown knows to reconcile. An earlier
+                # "unknown" outcome is never downgraded: that server may still exist.
+                prior_create_state = deployment.server_create_state
+                owned_update(
+                    lease,
+                    deployment,
+                    server_create_state="intent",
+                    provider_token_fingerprint=provider_token_fingerprint(api_token),
+                )
+
+                def settle_create_state(state: str) -> None:
+                    keep = prior_create_state in ("unknown", "intent") and state == "none"
+                    owned_update(lease, deployment, server_create_state=prior_create_state if keep else state)
+
+                # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
                 ssh_key_name = f"praho-{deployment.hostname}"
-                key_upload_result = gateway.upload_ssh_key(ssh_key_name, ssh_public_key)
+                key_upload_result = gateway.upload_owned_ssh_key(
+                    ssh_key_name,
+                    ssh_public_key,
+                    {"managed-by": "praho", "praho-deployment": str(deployment.correlation_id)},
+                )
                 if key_upload_result.is_err():
+                    settle_create_state("none")
                     if gateway is not None and created_resources:
                         self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
@@ -384,6 +405,7 @@ class NodeDeploymentService:
                     },
                 )
                 if firewall_result.is_err():
+                    settle_create_state("none")
                     if gateway is not None and created_resources:
                         self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
@@ -430,6 +452,9 @@ class NodeDeploymentService:
                 server_result = gateway.create_server(create_request)
 
                 if server_result.is_err():
+                    # Only a provable refusal means no server; any other outcome may be billed.
+                    refused = retriability_of(server_result) is Retriability.NOT_RETRIABLE
+                    settle_create_state("none" if refused else "unknown")
                     if gateway is not None and created_resources:
                         self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
                     self._mark_failed(
@@ -445,6 +470,10 @@ class NodeDeploymentService:
 
                 server_create_result = server_result.unwrap()
                 created_resources.append(("server", server_create_result.server_id))
+                # Persist the id at once: a worker that dies before the next stage leaves a known server.
+                owned_update(
+                    lease, deployment, external_node_id=server_create_result.server_id, server_create_state="created"
+                )
             stages_completed.append("provision_server")
             log_deployment("info", f"Server created successfully via {provider_type} gateway")
 

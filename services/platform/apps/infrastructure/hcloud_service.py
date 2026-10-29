@@ -62,6 +62,16 @@ def _is_hcloud_not_found(exc: Exception) -> bool:
     return "not found" in str(exc).lower()
 
 
+# API error codes that do not prove the request was refused before it took effect.
+_AMBIGUOUS_API_CODES = frozenset({"server_error", "service_error", "timeout", "unavailable"})
+
+
+def _provider_refused(exc: Exception) -> bool:
+    """The provider answered the request with an error, so it provably did not take effect."""
+    code = getattr(exc, "code", None)
+    return code is not None and str(code) not in _AMBIGUOUS_API_CODES
+
+
 class HcloudService(CloudProviderGateway):
     """
     Hetzner Cloud SDK wrapper implementing CloudProviderGateway.
@@ -89,6 +99,11 @@ class HcloudService(CloudProviderGateway):
 
         logger.info(f"🚀 [Hcloud] Creating server: {req.name} ({req.server_type} @ {req.location})")
 
+        # Retriability encodes side-effect evidence: NOT_RETRIABLE = the create was never sent or the
+        # provider refused it (provably no server); UNKNOWN = it was sent and no answer proves the
+        # outcome (a server may exist and bill). deploy_node records the second as "unknown".
+        dispatched = False
+        answered = False
         try:
             correlation_id = req.labels.get("praho-deployment", "")
             if correlation_id:
@@ -120,7 +135,9 @@ class HcloudService(CloudProviderGateway):
             if firewalls:
                 create_kwargs["firewalls"] = firewalls
 
+            dispatched = True
             response = self.client.servers.create(**create_kwargs)
+            answered = True
 
             server = response.server
             action = response.action
@@ -144,7 +161,9 @@ class HcloudService(CloudProviderGateway):
 
         except Exception as e:
             logger.error(f"🔥 [Hcloud] Server creation failed: {e}")
-            return Err(f"Server creation failed: {e}")
+            if not dispatched or (not answered and _provider_refused(e)):
+                return Err(f"Server creation failed: {e}", retriability=Retriability.NOT_RETRIABLE)
+            return Err(f"Server creation failed: {e}", retriability=Retriability.UNKNOWN)
 
     def delete_server(self, server_id: str) -> Result[bool, str]:
         """Delete a server by ID."""
@@ -156,9 +175,7 @@ class HcloudService(CloudProviderGateway):
                 return Ok(True)
             action = self.client.servers.delete(server)
             action.wait_until_finished(max_retries=HCLOUD_ACTION_MAX_RETRIES)
-
-            logger.info(f"✅ [Hcloud] Server deleted: {sid}")
-            return Ok(True)
+            return self._confirm_server_absent(sid)
 
         except Exception as e:
             if _is_hcloud_not_found(e):
@@ -166,6 +183,17 @@ class HcloudService(CloudProviderGateway):
                 return Ok(True)
             logger.error(f"🔥 [Hcloud] Server deletion failed: {e}")
             return Err(f"Server deletion failed: {e}")
+
+    def _confirm_server_absent(self, sid: int) -> Result[bool, str]:
+        """Re-read a deleted server: only "not found" proves the delete took effect."""
+        try:
+            self.client.servers.get_by_id(sid)
+        except Exception as e:
+            if _is_hcloud_not_found(e):
+                logger.info(f"✅ [Hcloud] Server deleted: {sid}")
+                return Ok(True)
+            return Err(f"Server deletion unconfirmed: {e}", retriability=Retriability.UNKNOWN)
+        return Err(f"Server deletion unconfirmed: server {sid} still exists", retriability=Retriability.UNKNOWN)
 
     def get_server(self, server_id: str) -> Result[ServerInfo | None, str]:
         """Get server info by ID. Returns None if not found."""
@@ -281,8 +309,18 @@ class HcloudService(CloudProviderGateway):
     def create_firewall(
         self, name: str, rules: list[FirewallRule], labels: dict[str, str] | None = None
     ) -> Result[str, str]:
-        """Create a Hetzner Cloud firewall with rules. Returns firewall ID."""
+        """Create a Hetzner Cloud firewall with rules. Returns firewall ID.
+
+        A firewall already carrying this deployment's ``deployment-id`` label is adopted, so a retry
+        after a lost create response reuses it instead of failing on the taken name.
+        """
         try:
+            deployment_id = (labels or {}).get("deployment-id", "")
+            if deployment_id:
+                existing = self.client.firewalls.get_all(label_selector=f"deployment-id={deployment_id}")
+                if existing:
+                    logger.info(f"✅ [Hcloud] Reusing firewall {existing[0].id} for deployment {deployment_id}")
+                    return Ok(str(existing[0].id))
             hcloud_rules: list[HcloudFirewallRule] = [
                 HcloudFirewallRule(
                     direction=rule.direction,
@@ -319,6 +357,78 @@ class HcloudService(CloudProviderGateway):
                 logger.info(f"✅ [Hcloud] Firewall {firewall_id} already gone — treating delete as success")
                 return Ok(True)
             return Err(f"Firewall deletion failed: {e}")
+
+    # =========================================================================
+    # Ownership-aware primitives
+    # =========================================================================
+
+    def find_servers_by_label(self, label_selector: str) -> Result[list[ServerInfo], str]:
+        try:
+            servers = self.client.servers.get_all(label_selector=label_selector)
+        except Exception as e:
+            return Err(f"Server lookup failed: {e}")
+        return Ok([self._server_to_gateway_info(server) for server in servers])
+
+    def find_firewalls_by_label(self, label_selector: str) -> Result[list[str], str]:
+        try:
+            firewalls = self.client.firewalls.get_all(label_selector=label_selector)
+        except Exception as e:
+            return Err(f"Firewall lookup failed: {e}")
+        return Ok([str(firewall.id) for firewall in firewalls])
+
+    def find_ssh_keys_by_label(self, label_selector: str) -> Result[list[str], str]:
+        try:
+            keys = self.client.ssh_keys.get_all(label_selector=label_selector)
+        except Exception as e:
+            return Err(f"SSH key lookup failed: {e}")
+        return Ok([str(key.id) for key in keys])
+
+    def upload_owned_ssh_key(self, name: str, public_key: str, labels: dict[str, str]) -> Result[SSHKeyResult, str]:
+        """Upload a labelled key under ``name``.
+
+        A same-name key is ours when its ``praho-deployment`` label matches, or when it carries no
+        owner label and holds exactly our public key (a key uploaded before keys were labelled); it is
+        then reused or replaced. Any other same-name key belongs to someone else and is left alone.
+        """
+        owner = labels.get("praho-deployment", "")
+        try:
+            existing = self.client.ssh_keys.get_by_name(name)
+            if existing:
+                existing_owner = (existing.labels or {}).get("praho-deployment", "")
+                same_content = (existing.public_key or "").strip() == public_key.strip()
+                if existing_owner and existing_owner != owner:
+                    return Err(
+                        f"SSH key '{name}' belongs to another deployment", retriability=Retriability.NOT_RETRIABLE
+                    )
+                if same_content:
+                    if existing_owner != owner:
+                        self.client.ssh_keys.update(existing, labels=labels)
+                    return Ok(SSHKeyResult(key_id=str(existing.id), name=name, fingerprint=existing.fingerprint or ""))
+                if not existing_owner:
+                    return Err(
+                        f"SSH key '{name}' exists with other content and no owner label; refusing to replace it",
+                        retriability=Retriability.NOT_RETRIABLE,
+                    )
+                logger.warning(f"⚠️ [Hcloud] Replacing this deployment's stale SSH key '{name}'")
+                self.client.ssh_keys.delete(existing)
+            created = self.client.ssh_keys.create(name=name, public_key=public_key, labels=labels)
+            logger.info(f"✅ [Hcloud] SSH key uploaded: {name}")
+            return Ok(
+                SSHKeyResult(key_id=str(created.id), name=created.name or name, fingerprint=created.fingerprint or "")
+            )
+        except Exception as e:
+            return Err(f"SSH key upload failed: {e}")
+
+    def delete_ssh_key_by_id(self, key_id: str) -> Result[bool, str]:
+        try:
+            key = self.client.ssh_keys.get_by_id(int(key_id))
+            self.client.ssh_keys.delete(key)
+        except Exception as e:
+            if _is_hcloud_not_found(e):
+                return Ok(True)
+            return Err(f"SSH key deletion failed: {e}")
+        logger.info(f"✅ [Hcloud] SSH key deleted: {key_id}")
+        return Ok(True)
 
     def get_locations(self) -> Result[Sequence[LocationInfo], str]:
         """Get all available locations."""
