@@ -190,6 +190,7 @@ def recover_hosting_lines(limit: int = RECOVERY_BATCH) -> dict[str, int]:
 
     Bounded: at most `limit` lines and `limit` orders a run, oldest first.
     """
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007
     from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415  # ADR-0007
 
     from .models import Order, OrderItem  # noqa: PLC0415
@@ -201,12 +202,16 @@ def recover_hosting_lines(limit: int = RECOVERY_BATCH) -> dict[str, int]:
         in_provisioning.filter(
             Q(provisioning_status="pending", updated_at__lt=timezone.now() - DISPATCH_LOST_AFTER)
             | Q(provisioning_status="in_progress", service_id__in=finished_accounts)
-            # Started, but its Service never came on: held while the customer was suspended (ADR-0066).
+            # Started, but its hosting never came on: held while the customer was suspended (ADR-0066).
+            # Only hosting fulfilment turns on: a manual line stays "provisioning" for staff, and selecting
+            # it would fill every batch ahead of hosting that can be recovered.
             | Q(
                 provisioning_status="in_progress",
                 service__status="provisioning",
+                service__service_plan__plan_type__in=Service.VIRTUALMIN_HOSTING_PLAN_TYPES,
                 updated_at__lt=timezone.now() - DISPATCH_LOST_AFTER,
             )
+            & ~Q(service__domain="")
         )
         .order_by("updated_at")
         .values_list("pk", flat=True)[:limit]

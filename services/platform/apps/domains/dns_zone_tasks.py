@@ -542,7 +542,10 @@ def _complete_apply(operation: HostedZoneOperation, zone: HostedZone, token: UUI
             status="waiting",
             phase="activation_identity",
             evidence={
-                key: operation.evidence[key] for key in ("ds_absent_since", "old_ds_ttl") if key in operation.evidence
+                key: operation.evidence[key]
+                # A staff request carries into the step it starts, so suspension does not hold it there.
+                for key in ("ds_absent_since", "old_ds_ttl", service.STAFF_REQUESTED)
+                if key in operation.evidence
             },
             next_attempt_at=timezone.now() + timedelta(seconds=RETRY_SECONDS),
         )

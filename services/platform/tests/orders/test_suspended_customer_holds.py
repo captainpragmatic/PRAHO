@@ -137,6 +137,30 @@ class SuspendedCustomerHoldTests(HostingWorkflowCase):
         service.refresh_from_db()
         self.assertEqual(service.status, "active")
 
+    def test_manual_lines_cannot_starve_recovery(self) -> None:
+        # A manual line (no automatic provisioning) stays "provisioning" for staff and is never moved by
+        # fulfilment, so recovery must not keep selecting it ahead of hosting it can recover.
+        from datetime import timedelta  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.orders.hosting_fulfilment import DISPATCH_LOST_AFTER, recover_hosting_lines  # noqa: PLC0415
+        from apps.orders.models import OrderItem  # noqa: PLC0415
+        from apps.provisioning.models import ServicePlan  # noqa: PLC0415
+
+        manual, manual_service = self._started_line("manual-ssl.ro")
+        ssl = ServicePlan.objects.create(name="SSL", plan_type="ssl", price_monthly=10)
+        Service.objects.filter(pk=manual_service.pk).update(service_plan=ssl)
+        hosting, hosting_service = self._started_line("recoverable.ro")
+        old = timezone.now() - DISPATCH_LOST_AFTER - timedelta(minutes=1)
+        OrderItem.objects.filter(pk=manual.pk).update(updated_at=old - timedelta(minutes=5))  # older: first in line
+        OrderItem.objects.filter(pk=hosting.pk).update(updated_at=old)
+
+        recover_hosting_lines(limit=1)
+
+        hosting_service.refresh_from_db()
+        self.assertEqual(hosting_service.status, "active")
+
     def test_one_failed_dispatch_does_not_stop_the_others(self) -> None:
         from unittest.mock import patch  # noqa: PLC0415
 
