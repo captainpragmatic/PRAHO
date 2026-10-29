@@ -164,6 +164,18 @@ def _name(value: str, *, wildcard_owner: bool = False) -> str:
     return parsed.to_text(omit_final_dot=True)
 
 
+def probeable(value: str, *, wildcard_owner: bool = False) -> bool:
+    """Whether `DnsProbeTransport.query` would ask about this name at all.
+
+    False is a property of the name, decided before any packet: retrying cannot change it.
+    """
+    try:
+        _name(value, wildcard_owner=wildcard_owner)
+    except (ProbeError, dns.exception.DNSException):
+        return False
+    return True
+
+
 def _parent(value: str) -> str:
     """The parent name, or "" above a TLD: no climb asks the DNS root (RFC 8659 stops at the TLD).
 

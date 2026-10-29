@@ -221,6 +221,29 @@ class ZoneWorkerTests(TransactionTestCase):
         self.assertEqual(refresh.call_args.args[1], self.revision.inventory)
         self.assertEqual(self.finish_apply()["action"], "completed")
 
+    def test_an_owner_the_source_check_cannot_ask_parks_instead_of_retrying_for_ever(self):
+        self.revision.crosscheck["checked_at"] = (timezone.now() - timedelta(hours=2)).isoformat()
+        self.revision.save(update_fields=["crosscheck"])
+        self.tick()
+        self.operation.refresh_from_db()
+        self.assertEqual(self.operation.phase, "refresh_source")
+        with patch(
+            "apps.domains.dns_zone_checks.probe_import_batch",
+            return_value={
+                "ok": False,
+                "complete": False,
+                "cursor": 2,
+                "checked_at": timezone.now().isoformat(),
+                "error": "source_owner_uncheckable",
+            },
+        ):
+            self.tick()
+        self.operation.refresh_from_db()
+        self.zone.refresh_from_db()
+        self.assertEqual((self.operation.status, self.operation.last_error), ("parked", "source_owner_uncheckable"))
+        self.assertEqual((self.zone.status, self.zone.last_error), ("failed", "source_owner_uncheckable"))
+        self.assertEqual(self.provider.calls, [])
+
     def test_source_drift_discovered_after_provider_publish_parks_without_nameserver_instructions(self):
         for _ in range(100):
             self.tick()

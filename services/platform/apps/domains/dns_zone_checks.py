@@ -14,6 +14,8 @@ import dns.name
 import dns.rcode
 import dns.rdatatype
 
+from apps.infrastructure.dns_probes import probeable
+
 from .dns_zone_import import make_record_data
 
 MAX_BATCH_QUERIES = 4
@@ -186,6 +188,8 @@ def probe_import_batch(
         result["ds_ttl"] = handover["ds_ttl"]
     for index in range(cursor, min(len(queries), cursor + min(MAX_BATCH_QUERIES, max(1, batch_size)))):
         owner, kind = queries[index]
+        if not probeable(owner, wildcard_owner=True):
+            return {**result, "ok": False, "error": "source_owner_uncheckable"}
         try:
             answer = selected.query(owner, kind, wildcard_owner=True)
             actual_kind, values = _entries(answer)

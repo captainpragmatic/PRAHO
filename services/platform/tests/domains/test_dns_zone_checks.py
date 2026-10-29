@@ -173,13 +173,9 @@ def test_assigned_authority_resolution_never_sends_a_packet_to_a_private_address
     assert all(question.server != "10.0.0.1" for question in wire.calls)
 
 
-def test_an_imported_wildcard_owner_is_cross_checked_by_its_own_name_over_the_real_transport():
-    """A query naming `*.shop` matches the wildcard RRset itself (RFC 4592), so the import can finish."""
-    owner = f"*.shop.{ZONE}"
-    wire = Wire()
-    wire.records = {(owner, "A"): ("95.217.0.11",), (owner, "TXT"): ('"wildcard-proof"',)}
+def _crosscheck_over_wire(wire, records):
+    """Every batch over the real transport and channel, as the worker runs them; observations accumulate."""
     wire.overrides[(DOMAIN, "NS")] = _parent_referral
-    records = inventory('*.shop A 95.217.0.11\n*.shop TXT "wildcard-proof"\n')
     transport = DnsProbeTransport(query=wire, recursive_servers=("1.1.1.1",))
     observations = {}
     cursor = 0
@@ -189,8 +185,18 @@ def test_an_imported_wildcard_owner_is_cross_checked_by_its_own_name_over_the_re
             result = probe_import_batch(ZONE, records, cursor, channel=channel)
             observations.update(result["observations"])
             if not result["ok"] or result["complete"]:
-                break
+                return result, observations
             cursor = result["cursor"]
+    raise AssertionError("bounded cross-check did not finish")
+
+
+def test_an_imported_wildcard_owner_is_cross_checked_by_its_own_name_over_the_real_transport():
+    """A query naming `*.shop` matches the wildcard RRset itself (RFC 4592), so the import can finish."""
+    owner = f"*.shop.{ZONE}"
+    wire = Wire()
+    wire.records = {(owner, "A"): ("95.217.0.11",), (owner, "TXT"): ('"wildcard-proof"',)}
+    records = inventory('*.shop A 95.217.0.11\n*.shop TXT "wildcard-proof"\n')
+    result, observations = _crosscheck_over_wire(wire, records)
     assert result["ok"] is True, result
     assert result["complete"] is True
     assert len(observations[f"{owner}|A"]["digests"]) == 1
@@ -199,3 +205,13 @@ def test_an_imported_wildcard_owner_is_cross_checked_by_its_own_name_over_the_re
     asked = [question for question in wire.calls if question.name == owner]
     assert asked
     assert not any(question.recursive for question in asked)
+
+
+def test_an_owner_the_cross_check_cannot_ask_is_a_terminal_refusal_not_an_unknown():
+    """`a*b` is a literal label the probe refuses to ask; retrying could never prove it, so say so."""
+    wire = Wire()
+    wire.records = {}
+    result, _observations = _crosscheck_over_wire(wire, inventory('a*b TXT "proof"\n'))
+    assert result["ok"] is False
+    assert result["error"] == "source_owner_uncheckable", result
+    assert not any("*" in question.name for question in wire.calls)

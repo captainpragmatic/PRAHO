@@ -212,8 +212,9 @@ def _crosscheck(identifier: UUID, token: UUID, *, continuation: str | None = Non
             status="completed" if continuation is None and finished else "running",
         )
     if not result["ok"]:
-        if result.get("error") == "source_record_missing_from_inventory":
-            _park(identifier, token, "source_record_missing_from_inventory")
+        # Both are facts about the uploaded inventory, so a retry could never clear them.
+        if result.get("error") in {"source_record_missing_from_inventory", "source_owner_uncheckable"}:
+            _park(identifier, token, str(result["error"]))
             return 0
         return RETRY_SECONDS
     return 0
