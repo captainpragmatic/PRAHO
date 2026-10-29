@@ -4,11 +4,14 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import Currency, FXRate
 from apps.customers.models import Customer
+from apps.notifications.models import EmailLog
+from apps.notifications.tasks import send_email_task
 from apps.promotions.gift_cards import create_purchase, record_bank_funding
 from apps.promotions.gift_funding import converge_gift_funding
 from apps.promotions.gift_refunds import reserve_funding_refund
@@ -236,3 +239,15 @@ class GiftPurchaseAPITests(HMACTestMixin, TestCase):
         self.assertFalse(data["payment_closed"])
         self.assertFalse(data["can_pay"])
         self.assertFalse(data["can_refresh"])
+
+    def test_a_revealed_code_is_told_to_the_person_by_its_last_four_characters(self) -> None:
+        staff = User.objects.create_user(email="reveal-notice@example.test", staff_role="billing")
+        purchase = record_bank_funding(self.create().pk, reference="QA-bank", actor=staff)
+        response = self.post("reveal", {"purchase_id": str(purchase.pk)})
+        self.assertEqual(response.status_code, 200, response.content)
+        (notice,) = EmailLog.objects.filter(template_key="security_notice:gift_card_revealed")
+        self.assertEqual(notice.to_addr, self.actor.email)
+        send_email_task(str(notice.pk))
+        (message,) = [sent for sent in mail.outbox if sent.subject == notice.subject]
+        self.assertIn(purchase.gift_card.code[-4:], message.body)
+        self.assertNotIn(purchase.gift_card.code, message.body)

@@ -74,6 +74,7 @@
     "services/platform/apps/notifications/migrations/0009_attachment_render_language.py": "57b079ee505d2ee720fc04187f5ed86045a58d8e9efff3c5235f5f70d30c7a54",
     "services/platform/apps/notifications/migrations/0010_recipient_digests.py": "6c7e58eef4f80393707a777cb9bad2d10f41aba42fe721d0e86c3771208a3079",
     "services/platform/apps/notifications/migrations/0011_email_operator_blocked.py": "a19daa771ceff5919f4fab23b5854042663e09af76bd9426e35e03d7dd7d2b42",
+    "services/platform/apps/notifications/migrations/0012_email_suppression_opt_out.py": "46895490b23ee12e4a196de091040dac75b9fdb5dc4abcb8382ea6bb0bfec86d",
     "services/platform/apps/orders/migrations/0001_initial.py": "c0aa3c345a26160c5e0e8b9aa78811bb1fe3f639024bcfc7f61e6e935e3351ae",
     "services/platform/apps/orders/migrations/0002_initial.py": "73d1086e73b002c2ccb2214ad05f6c7d08bf5277d0dc37cc1727281ee88deca2",
     "services/platform/apps/orders/migrations/0003_initial.py": "fec346767247cb02032dc35cf39e1b514ed4ca72eed4e27bef45563f3c472051",

@@ -1048,6 +1048,11 @@ class GDPRExportService:
                     status="pending",
                     expires_at=timezone.now() + timedelta(days=EXPORT_DOWNLOAD_DAYS),  # Restarted at completion
                 )
+                # Told to the person in the transaction that creates the export: once per export,
+                # however many requests race for it, and never for one that rolled back.
+                from apps.users.security_notices import notify_data_export_requested  # noqa: PLC0415  # ADR-0007
+
+                notify_data_export_requested(current)
 
                 # Log GDPR export request
                 compliance_request = ComplianceEventRequest(

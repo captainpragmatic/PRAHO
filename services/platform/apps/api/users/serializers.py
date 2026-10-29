@@ -25,6 +25,7 @@ from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 from apps.settings.services import get_brand_name
+from apps.users.credentials import check_password_locked, proof_passed
 from apps.users.mfa import MFAService, TOTPService
 from apps.users.pending_totp import discard as discard_pending_totp
 from apps.users.pending_totp import get_or_create_pending
@@ -143,21 +144,23 @@ class MFADisableSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate password and 2FA token"""
+        """Validate password and 2FA token on the user row the view has locked."""
         user = self.context["user"]
 
-        # One answer for a wrong password and a wrong code, as on Platform. The code is checked
-        # only after the password, so a backup code offered with a wrong password is not spent.
+        # One answer for an account without 2FA, a locked account, a wrong password and a wrong
+        # code. An account without 2FA is refused before its password is checked, so the answer
+        # never tells a right password from a wrong one. The code is checked only after the
+        # password, so a backup code offered with a wrong password is not spent.
         incorrect = _("The password or the code is incorrect.")
-        if not user.check_password(data["password"]):
+        if not user.two_factor_enabled or not check_password_locked(
+            user, data["password"], source=self.context.get("check", "mfa_disable")
+        ):
             raise serializers.ValidationError(incorrect)
-
-        if not user.two_factor_enabled:
-            raise serializers.ValidationError(_("2FA is not enabled for this account."))
 
         if not MFAService.verify_mfa_code(user, data["token"], self.context.get("request"))["success"]:
             raise serializers.ValidationError(incorrect)
 
+        proof_passed(user)
         return data
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:

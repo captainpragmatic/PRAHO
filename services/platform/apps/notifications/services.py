@@ -195,24 +195,27 @@ class EmailSuppressionService:
     CACHE_TIMEOUT = 300
 
     @classmethod
-    def is_suppressed(cls, email: str) -> bool:
+    def is_suppressed(cls, email: str, *, essential: bool = False) -> bool:
         """
         Check if an email address is suppressed.
-        Uses cache with database fallback.
+
+        A person who unsubscribed from marketing still gets what protects their account (essential
+        mail, read from the database); a live delivery block stops both. Only a suppressed answer
+        for ordinary mail is cached, so a stale "not suppressed" never reaches an opted-out address.
         """
+        if essential:
+            return EmailSuppression.is_suppressed(email, essential=True)
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         cache_key = f"{SUPPRESSION_CACHE_PREFIX}{email_hash}"
 
         # Check cache first
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return bool(cached)
+        if cache.get(cache_key):
+            return True
 
         # Check database
         is_suppressed = EmailSuppression.is_suppressed(email)
-
-        # Cache the result (both positive and negative)
-        cache.set(cache_key, is_suppressed, timeout=cls.CACHE_TIMEOUT)
+        if is_suppressed:
+            cache.set(cache_key, True, timeout=cls.CACHE_TIMEOUT)
 
         return is_suppressed
 
@@ -249,17 +252,16 @@ class EmailSuppressionService:
 
     @classmethod
     def unsuppress_email(cls, email: str) -> bool:
-        """Remove an email from the suppression list."""
+        """Lift an address's delivery block; a marketing opt-out stays, as only the person can withdraw it."""
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
-        # Delete from database
-        deleted_count, _ = EmailSuppression.objects.filter(email_hash=email_hash).delete()
+        lifted, _row = EmailSuppression.lift_block(email_hash)
 
         # Invalidate cache
         cache_key = f"{SUPPRESSION_CACHE_PREFIX}{email_hash}"
         cache.delete(cache_key)
 
-        return deleted_count > 0
+        return lifted
 
 
 # ===============================================================================
@@ -568,6 +570,7 @@ class EmailService:
         track_opens: bool = True,
         track_clicks: bool = True,
         async_send: bool = True,
+        essential: bool = False,
     ) -> EmailResult:
         """
         Send an email with full tracking and logging.
@@ -590,6 +593,8 @@ class EmailService:
             track_opens: Enable open tracking
             track_clicks: Enable click tracking
             async_send: Send asynchronously via Django-Q2
+            essential: Account-protection mail (security notices): a marketing unsubscribe does not
+                suppress it
 
         Returns:
             EmailResult with success status and message ID
@@ -607,7 +612,7 @@ class EmailService:
         # Check for suppressed addresses
         active_recipients = []
         for recipient in recipients:
-            if EmailSuppressionService.is_suppressed(recipient):
+            if EmailSuppressionService.is_suppressed(recipient, essential=essential):
                 logger.info(f"Skipping suppressed email: {recipient[:3]}***")
             else:
                 active_recipients.append(recipient)
