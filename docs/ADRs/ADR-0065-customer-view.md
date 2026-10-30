@@ -48,6 +48,18 @@ the grant. A page the portal refuses never reaches Platform and is logged, not a
 would have made is refused on Platform too. Session ids appear only as keyed digests. A grant names
 the staff console session that issued it and is deleted a day after its view ends.
 
+**Leaving it.** Leave customer view, logging out of the view, and every end the portal notices while
+the tab is open (Platform ending it, its deadline, the switch turned off, a missing Platform session or
+deadlines) answer with a page that takes that tab to the customer's page on Platform:
+`PLATFORM_PUBLIC_ORIGIN` plus `/customers/<id>/`, built from settings and a positive integer only, read
+before the session is flushed. HTMX gets `HX-Redirect` and a script gets `redirect` with the same
+address. It is a page that navigates by script, with a link, rather than a redirect, because the
+portal's `form-action 'self'` covers the redirect after a form post and the browser would block a
+redirect to Platform after the view had already ended. Two ends cannot know where to go and keep the
+portal login: a tab whose view another tab already ended, and a refusal by the browser binding.
+Opening a second view in another tab replaces the first in the shared cookie, so the first tab's Leave
+fails its CSRF check.
+
 **What the customer sees.** Nothing: no indicator, notification or email. The amber banner and
 "Leave customer view" exist only in the staff browser.
 
