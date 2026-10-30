@@ -53,6 +53,7 @@ from apps.infrastructure.node_teardown import (
     DESTROYABLE_STATES,
     claim_teardown,
     close_node_admission,
+    deactivate_api_credential,
     record_destroy_failure,
     run_claimed_teardown,
 )
@@ -2179,6 +2180,8 @@ class NodeDeploymentService:
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
                 )
 
+        # The node is gone: its Virtualmin API credential, stored before the panel install, goes too.
+        deactivate_api_credential(deployment)
         logger.info(f"[Deployment:{hostname}] Cleanup complete")
 
     @staticmethod

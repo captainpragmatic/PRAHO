@@ -265,3 +265,37 @@ class AmbiguousProviderWritesTests(TestCase):
         self.assertTrue(result.is_ok(), result)
         cloud.delete_firewall.assert_called_once_with("fw-1")
         cloud.delete_ssh_key_by_id.assert_called_once_with("7")
+
+
+class ApiCredentialRevocationTests(TestCase):
+    def _store(self, deployment: NodeDeployment) -> None:
+        from apps.common.credential_vault import CredentialData, get_credential_vault  # noqa: PLC0415
+
+        get_credential_vault().store_credential(
+            CredentialData(service_type="virtualmin", service_identifier=deployment.fqdn, username="praho-api",
+                           password="stored-before-the-panel-install")
+        ).unwrap()
+
+    def _active(self, deployment: NodeDeployment) -> bool:
+        from apps.common.credential_vault import EncryptedCredential  # noqa: PLC0415
+
+        return EncryptedCredential.objects.filter(
+            service_type="virtualmin", service_identifier=deployment.fqdn, is_active=True
+        ).exists()
+
+    def test_teardown_deactivates_the_api_credential_of_a_node_never_registered(self) -> None:
+        deployment = _create_deployment("failed")
+        self._store(deployment)
+
+        result = _make_service().destroy_node(deployment, credentials={})
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertFalse(self._active(deployment))
+
+    def test_compensation_deactivates_the_api_credential(self) -> None:
+        deployment = _create_deployment("provisioning_node")
+        self._store(deployment)
+
+        _make_service()._cleanup_resources(cloud_gateway(), [("server", "srv-1")], deployment)
+
+        self.assertFalse(self._active(deployment))

@@ -69,6 +69,22 @@ def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> R
     return Ok(None)
 
 
+def deactivate_api_credential(deployment: NodeDeployment) -> int:
+    """Deactivate the node's Virtualmin API credential, stored before the panel install.
+
+    Unregistration deactivates it only for a registered node; a deploy that failed before registration
+    still left it in the vault. Returns how many credentials were deactivated.
+    """
+    from apps.common.credential_vault import EncryptedCredential  # noqa: PLC0415  # Circular: cross-app
+
+    count = EncryptedCredential.objects.filter(
+        service_type="virtualmin", service_identifier=deployment.fqdn, is_active=True
+    ).update(is_active=False, updated_at=timezone.now())
+    if count:
+        logger.info(f"🔐 [Teardown:{deployment.hostname}] Deactivated the Virtualmin API credential")
+    return count
+
+
 def claim_teardown(
     deployment: NodeDeployment,
     *,
@@ -127,6 +143,7 @@ class NodeTeardown:
             unregistered = self.registration.unregister_node(deployment=deployment, delete_server=True, user=self.user)
             if unregistered.is_err():
                 return Err(f"Unregistration failed: {unregistered.unwrap_err()}")
+        deactivate_api_credential(deployment)
         dns = NodeDeploymentService._delete_owned_dns(deployment, self.lease)
         if dns.is_err():
             return Err(f"DNS withdrawal incomplete: {dns.unwrap_err()}")
