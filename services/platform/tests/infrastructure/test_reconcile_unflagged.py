@@ -187,3 +187,21 @@ class AttestationCostTests(TestCase):
             list(NodeDeploymentCostRecord.objects.filter(deployment=deployment).values_list("cost_eur", flat=True)),
             [Decimal("0")] * 2,
         )
+
+
+class TeardownProofNeedsASearchTests(TestCase):
+    def test_a_created_row_with_its_server_id_cleared_gets_no_proof_without_a_search(self) -> None:
+        h = TeardownHarness(fingerprint="")
+        NodeDeployment.objects.filter(pk=h.deployment.pk).update(external_node_id="", server_create_state="created")
+        h.deployment.refresh_from_db()
+        h.destroy()
+        after = h.row()
+        self.assertIsNone(after.resources_proved_absent_for)
+        self.assertFalse(after.proved_empty)
+
+    def test_a_row_that_never_reached_the_provider_gets_no_proof_either(self) -> None:
+        h = TeardownHarness(fingerprint="")
+        NodeDeployment.objects.filter(pk=h.deployment.pk).update(external_node_id="", server_create_state="none")
+        h.deployment.refresh_from_db()
+        self.assertTrue(h.destroy().is_ok())
+        self.assertIsNone(h.row().resources_proved_absent_for)

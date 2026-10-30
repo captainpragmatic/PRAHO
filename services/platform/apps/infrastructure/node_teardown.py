@@ -215,8 +215,8 @@ class NodeTeardown:
         self.ssh_manager = ssh_manager
         self.registration = registration
         self.user = user
-        # Set by the cloud step when it proved nothing remains: the row never reached the provider, or the
-        # token that created its resources searched and deleted them. Re-deploy needs this proof.
+        # Set by the cloud step only when the token that created the resources searched the provider and
+        # deleted what it found. Re-deploy needs this proof; a teardown that did not search grants none.
         self.proved_absent = False
 
     def run(self) -> Result[bool, str]:
@@ -246,7 +246,12 @@ class NodeTeardown:
     # -- Provider resources -------------------------------------------------
 
     def _may_hold_server(self) -> bool:
-        return bool(self.deployment.external_node_id) or self.deployment.server_create_state in ("intent", "unknown")
+        # "created" counts too: a row whose server id was cleared still had a server, so it must be searched.
+        return bool(self.deployment.external_node_id) or self.deployment.server_create_state in (
+            "intent",
+            "unknown",
+            "created",
+        )
 
     def _reconcile(self, reason: str) -> Result[bool, str]:
         owned_update(self.lease, self.deployment, needs_reconciliation=True, reconciliation_reason=reason)
@@ -258,8 +263,7 @@ class NodeTeardown:
         # create answer was lost is still discovered even when no server was ever requested.
         reached_provider = bool(deployment.provider_token_fingerprint) or self._may_hold_server()
         if not reached_provider and not self._recorded_firewall_ids():
-            self.proved_absent = True
-            return Ok(True)  # never reached the provider
+            return Ok(True)  # never reached the provider: nothing to delete, and nothing searched
         if not self.api_token:
             return Err("No provider API token for teardown")
         stored = deployment.provider_token_fingerprint
