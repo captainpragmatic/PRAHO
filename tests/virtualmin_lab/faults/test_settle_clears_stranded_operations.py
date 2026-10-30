@@ -33,18 +33,24 @@ def quick(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _standin_locked(container: str) -> bool:
+    """Whether the stand-in's lock is still held. Webmin's own scheduled jobs (the status monitor) take locks of their
+    own at any moment, so asserting that no lock at all is held races them."""
+    return any(line.split()[0] == LOCK for line in held_locks(container))
+
+
 def _records(directory: Path) -> str:
     return "\n".join(path.read_text() for path in sorted(directory.glob("*.txt")))
 
 
 def test_settle_ends_a_stranded_command_and_frees_its_lock(chaos: Chaos, quick: Path) -> None:
     container = _standin(chaos, f"exec -a {COMMAND} sleep 600")
-    assert held_locks(container), "the stand-in's lock is not seen as held"
+    assert _standin_locked(container), "the stand-in's lock is not seen as held"
 
     chaos.settle("vm-a")
 
     assert in_flight_operations(container) == []
-    assert held_locks(container) == []
+    assert not _standin_locked(container)
     record = _records(quick)
     assert COMMAND in record and LOCK in record and "ended" in record
 
@@ -93,11 +99,11 @@ def test_settle_leaves_virtualmins_own_daemon_running(chaos: Chaos, quick: Path)
 def test_settle_ends_a_live_lock_holder_that_is_not_a_command(chaos: Chaos, quick: Path) -> None:
     container = chaos.bench.node("vm-a").container
     docker("exec", "-d", container, "bash", "-c", f"echo $$ > {LOCK}; exec sleep 600")
-    assert held_locks(container) and not in_flight_operations(container)
+    assert _standin_locked(container) and not in_flight_operations(container)
 
     chaos.settle("vm-a")
 
-    assert held_locks(container) == []
+    assert not _standin_locked(container)
     assert LOCK in _records(quick)
 
 
