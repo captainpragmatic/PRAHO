@@ -75,6 +75,12 @@ class EndedPageAssertions(TestCase):
         self.assertIn(f'href="{url}"', html)
         self.assertIn(f'data-platform-url="{url}"', html)
         self.assertIn("js/customer-view-ended.js", html)
+        # Every way out tells the browser to drop the customer's pages, not only Leave.
+        self.assertIn("cache", response["Clear-Site-Data"])
+        # A standalone page: after the flush there is no session or user to draw the portal's chrome with,
+        # and the customer's cookie-consent banner must not appear in a staff tab.
+        self.assertNotIn("cookie-consent", html)
+        self.assertNotIn("data-customer-view-banner", html)
 
 
 @override_settings(**SETTINGS)
@@ -116,6 +122,16 @@ class LeavingTests(EndedPageAssertions):
                 with patch("apps.users.customer_view_views.api_client.end_session"):
                     response = self.client.post(reverse("users:customer_view_leave"))
                 self.assert_ended_page(response, f"{PLATFORM}/")
+
+    def test_a_missing_customer_id_is_logged_when_it_falls_back(self) -> None:
+        self._start(customer_view_customer_id=None)
+        with (
+            patch("apps.users.customer_view_views.api_client.end_session"),
+            self.assertLogs("apps.users.customer_view_views", level="WARNING") as logs,
+        ):
+            response = self.client.post(reverse("users:customer_view_leave"))
+        self.assert_ended_page(response, f"{PLATFORM}/")
+        self.assertIn("customer id", "\n".join(logs.output))
 
     def test_logging_out_of_a_customer_view_returns_to_platform_too(self) -> None:
         self._start()
@@ -222,11 +238,3 @@ class EndedViewTests(EndedPageAssertions):
                     else:
                         self.assertEqual(json.loads(response.content)["redirect"], "/login/")
                     self.assertNotIn("user_id", request.session)
-
-
-class PlatformPathTests(TestCase):
-    def test_the_path_matches_platform_s_customer_page(self) -> None:
-        from apps.users.customer_view_views import PLATFORM_CUSTOMER_PATH  # noqa: PLC0415
-
-        # Platform pins the same literal (services/platform/tests/users/test_customer_view.py).
-        self.assertEqual(PLATFORM_CUSTOMER_PATH.format(id=42), "/customers/42/")

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import rotate_token
@@ -70,7 +70,7 @@ def _unavailable(request: HttpRequest) -> HttpResponse:
     return response
 
 
-def platform_return_url(session: Any) -> str | None:
+def platform_return_url(session: SessionBase) -> str | None:
     """Where a customer view's tab goes when the view ends: the customer's page on Platform.
 
     None for any session that is not a customer view. Built from settings and a positive integer only,
@@ -82,6 +82,7 @@ def platform_return_url(session: Any) -> str | None:
     customer_id = session.get("customer_view_customer_id")
     if type(customer_id) is int and customer_id > 0:
         return origin + PLATFORM_CUSTOMER_PATH.format(id=customer_id)
+    logger.warning("⚠️ [CustomerView] No usable customer id in the view's session; returning to Platform's home page")
     return origin + "/"
 
 
@@ -93,6 +94,8 @@ def ended(request: HttpRequest, platform_url: str) -> HttpResponse:
     """
     page = render(request, "users/customer_view_ended.html", {"platform_url": platform_url})
     page["Cache-Control"] = "no-store"
+    # Every way out of a view tells the browser to drop the customer's pages.
+    page["Clear-Site-Data"] = '"cache"'
     return page
 
 
@@ -191,6 +194,4 @@ def leave(request: HttpRequest) -> HttpResponse:
     _end_current_platform_session(request)
     request.session.flush()
     rotate_token(request)
-    left = ended(request, platform_url)
-    left["Clear-Site-Data"] = '"cache"'
-    return left
+    return ended(request, platform_url)
