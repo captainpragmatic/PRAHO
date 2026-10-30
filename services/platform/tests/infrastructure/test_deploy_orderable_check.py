@@ -13,14 +13,14 @@ from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import CloudProvider, NodeDeployment, PanelType
 from apps.infrastructure.ssh_key_manager import SSHKeyPair
 from tests.helpers.node_catalogue import make_region, make_size
-from tests.helpers.recorded_hcloud import CPX11, CX23, RecordedHcloudTransport, server
+from tests.helpers.recorded_hcloud import CPX11, CPX22, CX23, RecordedHcloudTransport, server
 
 CREDENTIALS = {"api_token": "fixture-token"}
 _DNS_OK = Ok(("dns-token", "zone-id"))
 _KEY = Ok(SSHKeyPair(public_key="ssh-ed25519 AAAA fixture", private_key="fixture", fingerprint="fixture"))
 
 
-class OrderableCheckTests(TestCase):
+class _OrderableCheckCase(TestCase):
     def setUp(self) -> None:
         provider = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
         self.hel1 = make_region(provider, "hel1")
@@ -69,6 +69,8 @@ class OrderableCheckTests(TestCase):
     def urls(self) -> list[str]:
         return [url for url, _ in self.transport.requests]
 
+
+class OrderableCheckTests(_OrderableCheckCase):
     def test_withdrawn_size_fails_before_the_claim_and_any_write(self) -> None:
         deployment = self.deployment(self.cpx11)
         result = self.service.deploy_node(deployment, CREDENTIALS)
@@ -166,3 +168,36 @@ class OrderableCheckTests(TestCase):
         deployment.refresh_from_db()
         self.assertEqual((deployment.status, deployment.retry_count), ("failed", 0))
         self.service._ssh_manager.generate_deployment_key.assert_not_called()
+
+
+class ResizeOrderableCheckTests(_OrderableCheckCase):
+    """A resize asks Hetzner too: the catalogue can still link a size Hetzner withdrew since the sync."""
+
+    def resize(self, size: Any) -> tuple[Any, MagicMock]:
+        self.deployment_row = self.deployment(self.cx23, status="completed", external_node_id="4242")
+        with patch("apps.infrastructure.deployment_service.run_provider_command") as change_type:
+            result = self.service.upgrade_node_size(self.deployment_row, size, CREDENTIALS)
+        return result, change_type
+
+    def test_resize_to_a_withdrawn_size_is_refused_before_any_write(self) -> None:
+        result, change_type = self.resize(self.cpx11)
+        self.assertTrue(result.is_err())
+        self.assertIn("not available in hel1", result.unwrap_err())
+        change_type.assert_not_called()
+        self.assertEqual(self.urls(), ["/server_types"])  # No label lookup: the node already exists.
+        self.queue_sync.assert_called_once_with()
+        self.assertFalse(self.deployment_row.logs.filter(message__startswith="Starting upgrade").exists())
+
+    def test_resize_is_refused_when_hetzner_cannot_be_asked(self) -> None:
+        self.transport = MagicMock(side_effect=ConnectionError("read timed out"))
+        result, change_type = self.resize(self.cpx11)
+        self.assertIn("read timed out", result.unwrap_err())
+        change_type.assert_not_called()
+        self.queue_sync.assert_not_called()
+
+    def test_resize_to_an_orderable_size_goes_ahead(self) -> None:
+        cpx22 = make_size(self.cx23.provider, "cpx22", self.hel1)
+        self.transport = RecordedHcloudTransport([CPX22])
+        _, change_type = self.resize(cpx22)
+        change_type.assert_called_once()
+        self.assertEqual(self.gateway_kwargs, [{"timeout": 10, "max_retries": 1}])

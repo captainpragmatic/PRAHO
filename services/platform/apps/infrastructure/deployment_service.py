@@ -148,6 +148,26 @@ class NodeDeploymentService:
                 )
             )
 
+    @staticmethod
+    def _ask_orderable(
+        deployment: NodeDeployment, api_token: str, server_type: str
+    ) -> tuple[Result[bool | None, str], CloudProviderGateway | None]:
+        """Ask the provider now whether ``server_type`` can be ordered in the deployment's region.
+
+        Uses its own client that fails fast (the SDK default is no timeout and five retries), and
+        contains its own faults: callers run it before they hold any claim or audit context.
+        """
+        try:
+            gateway = get_cloud_gateway(
+                deployment.provider.provider_type,
+                api_token,
+                timeout=ORDERABLE_CHECK_TIMEOUT_SECONDS,
+                max_retries=ORDERABLE_CHECK_MAX_RETRIES,
+            )
+            return gateway.server_type_orderable(server_type, deployment.region.provider_region_id), gateway
+        except Exception as error:  # An unexpected fault refuses; it never escapes.
+            return Err(str(error)), None
+
     def _check_orderable(self, deployment: NodeDeployment, credentials: dict[str, str]) -> Result[bool, str]:
         """Ask the provider, before the first write for a new server, whether its size is still sold in its region.
 
@@ -159,23 +179,14 @@ class NodeDeploymentService:
             return Ok(True)  # deploy_node fails on the missing token itself, before any provider call.
         server_type = deployment.node_size.provider_type_id
         location = deployment.region.provider_region_id
-        try:
-            gateway = get_cloud_gateway(
-                deployment.provider.provider_type,
-                api_token,
-                timeout=ORDERABLE_CHECK_TIMEOUT_SECONDS,
-                max_retries=ORDERABLE_CHECK_MAX_RETRIES,
-            )
-            orderable = gateway.server_type_orderable(server_type, location)
-        except Exception as error:  # Runs before the claim: an unexpected fault refuses, it never escapes.
-            orderable = Err(str(error))
+        orderable, gateway = self._ask_orderable(deployment, api_token, server_type)
         if orderable.is_err():
             return self._refuse_unorderable(
                 deployment,
                 f"Could not confirm that {server_type} can be ordered in {location}; "
                 f"no server was created: {orderable.unwrap_err()}",
             )
-        if orderable.unwrap() is not False:
+        if orderable.unwrap() is not False or gateway is None:
             return Ok(True)
         # A server created before a crash, whose id was never stored, is adopted by create_server
         # through its deployment label. Refusing here would strand it.
@@ -199,12 +210,39 @@ class NodeDeploymentService:
             "Choose another size; a provider sync has been queued to refresh the catalogue.",
         )
 
+    def _check_resize_orderable(
+        self, deployment: NodeDeployment, new_size: NodeSize, credentials: dict[str, str]
+    ) -> Result[bool, str]:
+        """Ask the provider, before a resize writes anything, whether the new size is still sold in the region."""
+        api_token = credentials.get("api_token", "")
+        if not api_token:
+            return Ok(True)  # The resize command fails on the missing token itself.
+        server_type = new_size.provider_type_id
+        location = deployment.region.provider_region_id
+        orderable, _gateway = self._ask_orderable(deployment, api_token, server_type)
+        if orderable.is_err():
+            return self._refuse_unorderable(
+                deployment,
+                f"Could not confirm that {server_type} can be ordered in {location}; "
+                f"the node was not resized: {orderable.unwrap_err()}",
+                phase="upgrading",
+            )
+        if orderable.unwrap() is False:
+            self._queue_catalogue_sync(deployment)
+            return self._refuse_unorderable(
+                deployment,
+                f"Size {server_type} is not available in {location}: the provider no longer sells it there, "
+                "and the node was not resized. A provider sync has been queued to refresh the catalogue.",
+                phase="upgrading",
+            )
+        return Ok(True)
+
     @staticmethod
-    def _refuse_unorderable(deployment: NodeDeployment, message: str) -> Result[bool, str]:
+    def _refuse_unorderable(deployment: NodeDeployment, message: str, phase: str = "init") -> Result[bool, str]:
         from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
 
         logger.warning(f"⚠️ [Deployment:{deployment.hostname}] {message}")
-        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=message, phase="init")
+        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=message, phase=phase)
         return Err(message)
 
     @staticmethod
@@ -1070,6 +1108,10 @@ class NodeDeploymentService:
         refusal = self._upgrade_refusal(deployment, new_size)
         if refusal:
             return Err(refusal)
+        # The catalogue can be a day old: ask the provider before anything is written or resized.
+        orderable_result = self._check_resize_orderable(deployment, new_size, credentials)
+        if orderable_result.is_err():
+            return Err(orderable_result.unwrap_err())
 
         old_size = deployment.node_size
         audit_ctx = InfrastructureAuditContext(user=user)
