@@ -43,13 +43,20 @@ DOMAIN = "wfsync.example.com"
 
 def _verify_new_domain_binding(bench: Bench, lab: Lab) -> None:
     """Prove native template substitution before the first deferred repair."""
-    with bench.hosted("wfusagefuture.example.com", node=lab.node.key) as future:
-        DomainData(lab, future).write("usage.txt", "future usage\n")
-        domain_id = lab.exec("virtualmin", "list-domains", "--domain", future.domain, "--id-only").strip()
-        code = lab.exec("curl", "-sk", "--resolve", f"{future.domain}:443:127.0.0.1", "-o", "/dev/null", "-w", "%{http_code}", f"https://{future.domain}/usage.txt")
-        assert code == "200", code
-        lines = [line.split() for line in lab.exec("cat", "/var/log/praho/usage.log").splitlines()]
-        assert any(line[2] == domain_id and int(line[4]) == len("future usage\n") for line in lines)
+    timers = ("praho-usage.timer", "praho-usage-retention.timer")
+    # Stop in-flight services as well: disabling future timer activations alone
+    # would still let a running collector repair the new domain's vhost.
+    lab.exec("systemctl", "stop", *timers, "praho-usage.service", "praho-usage-retention.service")
+    try:
+        with bench.hosted("wfusagefuture.example.com", node=lab.node.key) as future:
+            DomainData(lab, future).write("usage.txt", "future usage\n")
+            domain_id = lab.exec("virtualmin", "list-domains", "--domain", future.domain, "--id-only").strip()
+            code = lab.exec("curl", "-sk", "--resolve", f"{future.domain}:443:127.0.0.1", "-o", "/dev/null", "-w", "%{http_code}", f"https://{future.domain}/usage.txt")
+            assert code == "200", code
+            lines = [line.split() for line in lab.exec("cat", "/var/log/praho/usage.log").splitlines()]
+            assert any(line[2] == domain_id and int(line[4]) == len("future usage\n") for line in lines)
+    finally:
+        lab.exec("systemctl", "start", *timers)
 
 
 @pytest.fixture(scope="module")
