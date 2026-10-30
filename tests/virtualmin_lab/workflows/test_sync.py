@@ -58,9 +58,29 @@ def account(bench: Bench) -> Iterator[VirtualminAccount]:
         yield hosted
 
 
+def _remove_usage_runtime(lab: Lab) -> None:
+    # Lab nodes can survive a previous workflow run. Prove installation from
+    # absent programs/units, rather than accepting a previous run's timers.
+    installed_units = {line.split()[0] for line in lab.exec("systemctl", "list-unit-files", "--no-legend").splitlines() if line.split()}
+    units = ("praho-usage.timer", "praho-usage-retention.timer", "praho-usage.service", "praho-usage-retention.service")
+    for unit in units:
+        if unit in installed_units:
+            lab.exec("systemctl", "stop", unit)
+            if unit.endswith(".timer"):
+                lab.exec("systemctl", "disable", unit)
+    runtime_paths = [f"/etc/systemd/system/{unit}" for unit in units] + [
+        f"/usr/local/libexec/{name}" for name in ("praho_usage.py", "praho-usage-metadata.pl", "praho-usage-hook")
+    ] + ["/etc/logrotate.d/praho-usage"]
+    lab.exec("rm", "-f", *runtime_paths)
+    lab.exec("systemctl", "daemon-reload")
+    for path in runtime_paths:
+        lab.exec("test", "!", "-e", path)
+
+
 def test_usage_measures_independent_file_database_growth_and_real_http(bench: Bench, account: VirtualminAccount) -> None:
     lab = bench.lab_of(account)
     data = DomainData(lab, account)
+    _remove_usage_runtime(lab)
     installed = AnsibleService().run_playbook(
         account.server.node_deployment, "virtualmin_usage.yml", timeout_seconds=600
     )
