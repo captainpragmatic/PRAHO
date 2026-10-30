@@ -126,8 +126,7 @@ NIGHTLY_FULL_JOB = "nightly-full"
 
 
 NIGHTLY_ACTIVITY_JOB = "check-activity"
-# A skipped full lab is a quiet night only when the selection itself ran clean or did not run (a drift run).
-_QUIET_SELECTION = frozenset({"success", "skipped"})
+NIGHTLY_DRIFT_JOB = "nightly-drift"
 _MAX_PAGES = 20  # 600 runs: months of nightly and drift runs
 
 
@@ -146,9 +145,10 @@ def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, 
 def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
     """The latest completed full Virtualmin lab run on master, which must have passed.
 
-    A run that skipped the full lab is passed over only when its selection ran clean (no change that
-    day) or did not run (a drift run). A failed or cancelled selection is an interrupted night and
-    refuses. A run on any other branch never counts.
+    A run without the full lab is passed over in two cases only: a drift run (its drift job ran;
+    drift is informational, never a gate), or a quiet night (the activity check passed and the whole
+    run succeeded: nothing changed that day). Anything else without the full lab, a failed check or
+    a cancelled night, is an interrupted night and refuses. A run on any other branch never counts.
     """
     for run in _master_lab_runs(repo, gh):
         if run.get("head_branch") != "master":
@@ -159,12 +159,17 @@ def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
         }
         full = jobs.get(NIGHTLY_FULL_JOB)
         if full is None or full == "skipped":
-            selection = jobs.get(NIGHTLY_ACTIVITY_JOB, "skipped")
-            if selection in _QUIET_SELECTION:
+            # Drift is a matrix: its jobs are named "nightly-drift (<runner>)".
+            drift_run = any(
+                name.startswith(NIGHTLY_DRIFT_JOB) and outcome not in (None, "skipped")
+                for name, outcome in jobs.items()
+            )
+            quiet = jobs.get(NIGHTLY_ACTIVITY_JOB) == "success" and run.get("conclusion") == "success"
+            if drift_run or quiet:
                 continue
             raise VerificationError(
-                f"The nightly lab on master (run {run['id']}) could not decide whether to run the full "
-                f"Virtualmin lab: {selection}. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+                f"The nightly lab on master (run {run['id']}, {run.get('conclusion')}) was interrupted before "
+                f"it could run the full Virtualmin lab. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
             )
         if full != "success":
             raise VerificationError(

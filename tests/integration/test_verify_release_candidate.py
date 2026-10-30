@@ -100,11 +100,26 @@ REQUIRED = required_contexts(
 )
 
 
-def nightly(run_id: int, full: str, branch: str = "master", activity: str = "success") -> dict[str, Any]:
-    """A completed nightly lab run: ``full`` is its nightly-full job, ``activity`` its check-activity job
-    ("skipped" on a drift run, which never selects the full lab)."""
-    jobs = [{"name": "check-activity", "conclusion": activity}, {"name": "nightly-full", "conclusion": full}]
-    return {"id": run_id, "head_branch": branch, "jobs": jobs}
+def nightly(  # noqa: PLR0913  # One fixture field per fact a run can carry
+    run_id: int,
+    full: str,
+    branch: str = "master",
+    activity: str = "success",
+    conclusion: str = "success",
+    drift: str = "skipped",
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A completed nightly lab run: ``full`` is its nightly-full job, ``activity`` its check-activity job,
+    ``drift`` its nightly-drift job (it runs only on the drift schedule), ``conclusion`` the run's own."""
+    if jobs is None:
+        jobs = [
+            {"name": "check-activity", "conclusion": activity},
+            {"name": "nightly-full", "conclusion": full},
+            # Drift is a matrix job: GitHub names each leg after its runner.
+            {"name": "nightly-drift (ubuntu-latest)", "conclusion": drift},
+            {"name": "nightly-drift (ubuntu-24.04-arm)", "conclusion": drift},
+        ]
+    return {"id": run_id, "head_branch": branch, "conclusion": conclusion, "jobs": jobs}
 
 
 class FakeGitHub:
@@ -191,9 +206,19 @@ def test_a_failed_selection_is_not_a_quiet_night() -> None:
             verify(SHA, "owner/repo", github)
 
 
-def test_a_drift_run_is_passed_over() -> None:
-    github = FakeGitHub(all_green(), [nightly(907, "skipped", activity="skipped"), nightly(905, "success")])
-    assert SHA in verify(SHA, "owner/repo", github)
+def test_a_drift_run_is_passed_over_whatever_its_outcome() -> None:
+    # Drift tests the latest Virtualmin packages: informational, never a release gate.
+    for drift, conclusion in (("success", "success"), ("failure", "failure")):
+        run = nightly(907, "skipped", activity="skipped", drift=drift, conclusion=conclusion)
+        assert SHA in verify(SHA, "owner/repo", FakeGitHub(all_green(), [run, nightly(905, "success")]))
+
+
+def test_a_cancelled_night_is_not_a_quiet_one() -> None:
+    cancelled_after_selection = nightly(908, "skipped", activity="success", conclusion="cancelled")
+    cancelled_before_jobs = nightly(909, "skipped", conclusion="cancelled", jobs=[])
+    for run in (cancelled_after_selection, cancelled_before_jobs):
+        with pytest.raises(VerificationError, match="full Virtualmin lab"):
+            verify(SHA, "owner/repo", FakeGitHub(all_green(), [run, nightly(905, "success")]))
 
 
 def test_the_last_full_lab_is_found_beyond_the_first_page() -> None:
