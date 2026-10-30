@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import CloudProvider, NodeDeployment, PanelType
@@ -141,6 +142,11 @@ class OrderableCheckTests(_OrderableCheckCase):
 
     def test_stale_server_id_is_checked_before_creating_a_replacement(self) -> None:
         deployment = self.deployment(self.cpx11, external_node_id="4242")
+        # The stored server was created under this token, so its "not found" is trusted.
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            provider_token_fingerprint=provider_token_fingerprint(CREDENTIALS["api_token"])
+        )
+        deployment.refresh_from_db()
         self.service._resolve_dns_config = MagicMock(return_value=_DNS_OK)
         self.service._ssh_manager.get_deployment_key.return_value = _KEY
         result = self.service.deploy_node(deployment, CREDENTIALS)

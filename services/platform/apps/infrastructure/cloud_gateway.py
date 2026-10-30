@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from apps.common.types import Ok, Result
+from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,9 @@ class ServerCreateResult:
     ipv4_address: str
     ipv6_address: str = ""
     root_password: str = ""
+    # True when the provider already held a server for this deployment (found by its label) and the
+    # create returned it instead of making a new one.
+    adopted: bool = False
 
 
 @dataclass
@@ -208,6 +211,51 @@ class CloudProviderGateway(ABC):
     @abstractmethod
     def delete_snapshot(self, snapshot_id: str) -> Result[bool, str]:
         """Delete a snapshot by ID."""
+
+    # Ownership-aware primitives. A provider adapter that does not implement them fails closed: an
+    # unsupported lookup is an error, never "nothing found", so teardown never treats it as proof.
+
+    def find_servers_by_label(self, label_selector: str) -> Result[list[ServerInfo], str]:
+        """Servers carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover servers by label")
+
+    def find_firewalls_by_label(self, label_selector: str) -> Result[list[str], str]:
+        """IDs of the firewalls carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover firewalls by label")
+
+    def find_ssh_keys_by_label(self, label_selector: str) -> Result[list[str], str]:
+        """IDs of the SSH keys carrying the labels in ``label_selector``."""
+        return Err(f"{type(self).__name__} cannot discover SSH keys by label")
+
+    def upload_owned_ssh_key(self, name: str, public_key: str, labels: dict[str, str]) -> Result[SSHKeyResult, str]:
+        """Upload a labelled SSH key; never replace a same-name key that belongs to someone else."""
+        return Err(f"{type(self).__name__} cannot label SSH keys")
+
+    def delete_ssh_key_by_id(self, key_id: str) -> Result[bool, str]:
+        """Delete one SSH key by ID; a key already gone counts as deleted."""
+        return Err(f"{type(self).__name__} cannot delete SSH keys by ID")
+
+    # Read-only lookups for reconciliation: an adapter that cannot answer returns Err, never "none".
+
+    def find_servers_by_name(self, name: str) -> Result[list[ServerInfo], str]:
+        """Servers named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up servers by name")
+
+    def find_firewalls_by_name(self, name: str) -> Result[list[str], str]:
+        """IDs of the firewalls named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up firewalls by name")
+
+    def find_ssh_keys_by_name(self, name: str) -> Result[list[str], str]:
+        """IDs of the SSH keys named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up SSH keys by name")
+
+    def find_ssh_keys_by_fingerprint(self, fingerprint: str) -> Result[list[str], str]:
+        """IDs of the SSH keys whose public key has this provider fingerprint."""
+        return Err(f"{type(self).__name__} cannot look up SSH keys by fingerprint")
+
+    def firewall_exists(self, firewall_id: str) -> Result[bool, str]:
+        """Whether a firewall with this ID still exists."""
+        return Err(f"{type(self).__name__} cannot look up firewalls by ID")
 
 
 # =============================================================================

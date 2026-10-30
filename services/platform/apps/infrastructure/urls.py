@@ -22,6 +22,7 @@ urlpatterns = [
     path("deployments/<int:pk>/destroy/", views.deployment_destroy, name="deployment_destroy"),
     # Lifecycle operations
     path("deployments/<int:pk>/upgrade/", views.deployment_upgrade, name="deployment_upgrade"),
+    path("deployments/<int:pk>/redeploy/", views.deployment_redeploy, name="deployment_redeploy"),
     path("deployments/<int:pk>/stop/", views.deployment_stop, name="deployment_stop"),
     path("deployments/<int:pk>/start/", views.deployment_start, name="deployment_start"),
     path("deployments/<int:pk>/reboot/", views.deployment_reboot, name="deployment_reboot"),

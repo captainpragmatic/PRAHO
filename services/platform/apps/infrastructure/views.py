@@ -55,6 +55,7 @@ from .models import (
 )
 from .permissions import (
     can_deploy_nodes,
+    can_destroy_nodes,
     can_manage_deployments,
     require_deploy_permission,
     require_deployment_management,
@@ -65,10 +66,12 @@ from .permissions import (
     require_size_management,
 )
 from .tasks import (
+    OperationReservationError,
     queue_deploy_node,
     queue_destroy_node,
     queue_maintenance,
     queue_reboot_node,
+    queue_redeploy_node,
     queue_retry_deployment,
     queue_start_node,
     queue_stop_node,
@@ -105,6 +108,8 @@ DEPLOYMENT_DRAFT_TTL = 1800
 
 # Items per page for list views
 ITEMS_PER_PAGE = 25
+# The longest posted primary key accepted before it is parsed (a bigint has 19 digits).
+_MAX_ID_DIGITS = 12
 
 
 def _get_status_variant(status: str) -> str:
@@ -113,7 +118,8 @@ def _get_status_variant(status: str) -> str:
         "pending": "secondary",
         "provisioning_node": "info",
         "configuring_dns": "info",
-        "running_ansible": "info",
+        "installing_panel": "info",
+        "configuring_backups": "info",
         "validating": "info",
         "registering": "info",
         "completed": "success",
@@ -130,7 +136,8 @@ def _get_status_icon(status: str) -> str:
         "pending": "clock",
         "provisioning_node": "server",
         "configuring_dns": "globe",
-        "running_ansible": "terminal",
+        "installing_panel": "terminal",
+        "configuring_backups": "terminal",
         "validating": "check-circle",
         "registering": "user-plus",
         "completed": "check",
@@ -155,7 +162,7 @@ def deployment_dashboard(request: HttpRequest) -> HttpResponse:
     total_deployments = NodeDeployment.objects.count()
     active_deployments = NodeDeployment.objects.filter(status="completed").count()
     pending_deployments = NodeDeployment.objects.filter(
-        status__in=["pending", "provisioning_node", "configuring_dns", "running_ansible", "validating", "registering"]
+        status__in=[status for status in NodeDeployment.POLLING_STATUSES if status != "destroying"]
     ).count()
     failed_deployments = NodeDeployment.objects.filter(status="failed").count()
 
@@ -453,21 +460,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Get recent logs
     logs = NodeDeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[:50]
 
-    # Calculate progress percentage
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "stopped": 100,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -489,19 +482,19 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "can_retry": deployment.status == "failed",
-        "can_destroy": deployment.status in ("completed", "failed", "stopped"),
+        "can_retry": deployment.can_retry,
+        "can_redeploy": (
+            deployment.status in ("failed", "destroyed")
+            and deployment.never_got_a_server
+            and not deployment.needs_reconciliation
+            and can_deploy_nodes(cast("User", request.user))
+            and can_destroy_nodes(cast("User", request.user))
+        ),
+        "can_destroy": deployment.status in ("completed", "failed", "stopped")
+        or (deployment.status == "destroying" and deployment.needs_reconciliation),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
         "fqdn": f"{deployment.hostname}.{deployment.dns_zone}" if deployment.dns_zone else deployment.hostname,
     }
 
@@ -553,11 +546,15 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    task_id = queue_retry_deployment(
-        deployment_id=deployment.id,
-        provider_id=deployment.provider_id,
-        user_id=request.user.id,
-    )
+    try:
+        task_id = queue_retry_deployment(
+            deployment_id=deployment.id,
+            provider_id=deployment.provider_id,
+            user_id=request.user.id,
+        )
+    except OperationReservationError as refused:
+        messages.error(request, str(refused))
+        return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     messages.success(request, f"Retry queued for deployment '{deployment.hostname}'.")
     logger.info(f"[Deployment] Retry queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
@@ -573,7 +570,8 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    if deployment.status not in ("completed", "failed", "stopped"):
+    parked = deployment.status == "destroying" and deployment.needs_reconciliation  # resumable teardown
+    if deployment.status not in ("completed", "failed", "stopped") and not parked:
         messages.error(request, f"Cannot destroy deployment in status '{deployment.get_status_display()}'.")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -587,11 +585,15 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
                 messages.error(request, _provider_credentials_help(deployment.provider))
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-            task_id = queue_destroy_node(
-                deployment_id=deployment.id,
-                provider_id=deployment.provider_id,
-                user_id=request.user.id,
-            )
+            try:
+                task_id = queue_destroy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
             logger.info(
@@ -620,6 +622,64 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     }
 
     return render(request, "infrastructure/deployment_destroy.html", context)
+
+
+@login_required
+@require_deploy_permission
+@require_destroy_permission
+@require_http_methods(["GET", "POST"])
+def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
+    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname."""
+    from .deployment_service import NodeDeploymentService  # noqa: PLC0415  # Deferred: avoids loading Ansible
+
+    deployment = get_object_or_404(NodeDeployment, id=pk)
+    available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
+    form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
+    size_id = str(request.POST.get("new_size", ""))
+    # ASCII digits of a sane length only: "²" passes isdigit(), and a huge number overflows the column.
+    valid_id = size_id.isascii() and size_id.isdecimal() and len(size_id) <= _MAX_ID_DIGITS
+    new_size = available_sizes.filter(id=int(size_id)).first() if valid_id else None
+    if request.method == "POST" and form.is_valid():
+        refusal = (
+            NodeDeploymentService._redeploy_refusal(deployment, new_size)
+            if new_size is not None
+            else str(_("Choose a size sold in this region."))
+        )
+        if refusal or new_size is None:
+            messages.error(request, refusal)
+        elif get_provider_token(deployment.provider).is_err():
+            messages.error(request, _provider_credentials_help(deployment.provider))
+        else:
+            try:
+                task_id = queue_redeploy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    new_size_id=new_size.id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+            else:
+                messages.success(request, _("Re-deploy queued for '%(hostname)s'.") % {"hostname": deployment.hostname})
+                logger.info(f"✅ [Deployment] Re-deploy queued for {deployment.hostname}, task_id={task_id}")
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
+
+    context = {
+        "page_title": _("Re-deploy: %(hostname)s") % {"hostname": deployment.hostname},
+        "breadcrumb_items": [
+            {"text": "Management", "url": "/dashboard/"},
+            {"text": "Infrastructure", "url": reverse("infrastructure:dashboard")},
+            {"text": "Deployments", "url": reverse("infrastructure:deployment_list")},
+            {"text": deployment.hostname, "url": reverse("infrastructure:deployment_detail", args=[deployment.id])},
+            {"text": _("Re-deploy")},
+        ],
+        "deployment": deployment,
+        "form": form,
+        "available_sizes": available_sizes,
+        "form_action": reverse("infrastructure:deployment_redeploy", args=[deployment.id]),
+        "cancel_url": reverse("infrastructure:deployment_detail", args=[deployment.id]),
+    }
+    return render(request, "infrastructure/deployment_redeploy.html", context)
 
 
 # ===============================================================================
@@ -867,20 +927,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
     # Pre-compute progress step for template (0-6 range matching 6 stages)
     progress_step = min(progress_percentage // 16, 6)
 
@@ -891,16 +938,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-            "destroying",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
     }
 
     return render(request, "infrastructure/partials/deployment_status.html", context)

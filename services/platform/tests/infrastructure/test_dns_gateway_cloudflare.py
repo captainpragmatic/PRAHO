@@ -25,6 +25,7 @@ from apps.infrastructure.dns_gateway import (
     DnsRecordType,
     ReconcileOutcome,
 )
+from tests.infrastructure.test_deployment_dns import _lease
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 
 ZONE = "zone123"
@@ -409,7 +410,7 @@ class NodeDeployKeepsHardFailureTests(TestCase):
         )
 
         with patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=gateway):
-            result = _make_service()._configure_dns(deployment, "tok", "z1", lambda level, message: None)
+            result = _make_service()._configure_dns(deployment, "tok", "z1", lambda level, message: None, _lease(deployment))
 
         self.assertTrue(result.is_err())
         self.assertIn("DNS configuration failed: cloudflare HTTP 429", result.unwrap_err())

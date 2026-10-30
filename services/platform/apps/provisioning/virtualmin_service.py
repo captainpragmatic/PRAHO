@@ -245,7 +245,23 @@ class VirtualminProvisioningService:
 
         return self._gateway
 
-    def create_virtualmin_account(self, creation_data: VirtualminAccountCreationData) -> Result[VirtualminAccount, str]:
+    @staticmethod
+    def _lock_open_server(server: VirtualminServer) -> Result[VirtualminServer, str]:
+        """Lock the server row teardown's guard locks and admit only an active, undrained server.
+
+        Called inside the transaction that inserts the account, so the refusal comes before any row
+        exists: a closing node is never left holding an account, not even an error one.
+        """
+        locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+        if locked.is_draining:
+            return Err("Target server is draining", retriability=Retriability.RETRIABLE)
+        if locked.status != "active":
+            return Err(f"Server {locked.name} is not accepting new accounts")
+        return Ok(locked)
+
+    def create_virtualmin_account(  # noqa: PLR0911, PLR0912  # One refusal per admission check
+        self, creation_data: VirtualminAccountCreationData
+    ) -> Result[VirtualminAccount, str]:
         """
         Create new Virtualmin account for PRAHO service.
 
@@ -291,6 +307,11 @@ class VirtualminProvisioningService:
 
             # Create account record
             with transaction.atomic():
+                # Admission under the server row lock that node teardown's guard takes: once the guard
+                # found the node empty and closed it, no account can land on it afterwards.
+                admission = self._lock_open_server(server)
+                if admission.is_err():
+                    return Err(admission.unwrap_err(), retriability=retriability_of(admission))
                 account = VirtualminAccount(
                     domain=domain,
                     service=creation_data.service,

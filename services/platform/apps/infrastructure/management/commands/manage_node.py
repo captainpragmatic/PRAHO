@@ -195,7 +195,9 @@ class Command(BaseCommand):
             "upgrade": (stoppable, "Cannot upgrade a node in '{status}' status. Must be: completed."),
         }
 
-        if action in checks:
+        # A teardown parked for reconciliation is resumed by destroy (once the creating token is back).
+        parked = action == "destroy" and status == "destroying" and bool(deployment.needs_reconciliation)
+        if action in checks and not parked:
             valid_statuses, msg_template = checks[action]
             if status not in valid_statuses:
                 raise CommandError(msg_template.format(status=status))
@@ -219,6 +221,7 @@ class Command(BaseCommand):
         self._validate_status_for_action(deployment, action)
 
         from apps.infrastructure.tasks import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+            OperationReservationError,
             queue_destroy_node,
             queue_reboot_node,
             queue_retry_deployment,
@@ -236,16 +239,12 @@ class Command(BaseCommand):
             task_id = queue_start_node(deployment.id, provider_id)
         elif action == "reboot":
             task_id = queue_reboot_node(deployment.id, provider_id)
-        elif action == "destroy":
-            task_id = queue_destroy_node(
-                deployment.id,
-                provider_id,
-            )
-        elif action == "retry":
-            task_id = queue_retry_deployment(
-                deployment.id,
-                provider_id,
-            )
+        elif action in ("destroy", "retry"):
+            queue = queue_destroy_node if action == "destroy" else queue_retry_deployment
+            try:
+                task_id = queue(deployment.id, provider_id)
+            except OperationReservationError as refused:
+                raise CommandError(str(refused)) from refused
         elif action == "upgrade":
             size = self._resolve_size(deployment, options["size"])
             task_id = queue_upgrade_node(deployment.id, size.id, provider_id)
