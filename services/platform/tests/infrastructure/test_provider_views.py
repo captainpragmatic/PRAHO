@@ -226,7 +226,7 @@ class TestDeploymentDetailProgress(_DeploymentTestMixin, TestCase):
 
     def test_deployment_detail_has_progress_step_in_context(self) -> None:
         """deployment_detail context includes progress_step and stages list."""
-        deployment = self._create_deployment(status="running_ansible")
+        deployment = self._create_deployment(status="installing_panel")
         url = reverse("infrastructure:deployment_detail", args=[deployment.pk])
         response = self.client.get(url)
 
@@ -450,6 +450,7 @@ class TestDeploymentCreateDnsZone(TestCase):
             hourly_cost_eur=Decimal("0.0100"),
             monthly_cost_eur=Decimal("7.20"),
         )
+        self.size.available_regions.add(self.region)
         self.panel = PanelType.objects.create(
             name="Virtualmin",
             panel_type="virtualmin",

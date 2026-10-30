@@ -139,6 +139,8 @@ class AnsibleService:
             "virtualmin.yml",
             "virtualmin_harden.yml",
             "virtualmin_backup.yml",
+            "virtualmin_usage.yml",
+            "virtualmin_usage_read.yml",
             "blesta.yml",
             "virtualmin_migrate_fetch.yml",
             "virtualmin_migrate_push.yml",
@@ -274,6 +276,9 @@ class AnsibleService:
             return Err(f"Playbook not allowed: {playbook}")
         if not playbook_path.exists():
             return Err(f"Playbook not found: {playbook_path}")
+        usage_read = playbook == "virtualmin_usage_read.yml"
+        if usage_read and not deployment.ssh_host_keys:
+            return Err("Usage export requires enrolled SSH host trust; bootstrap is not a read operation")
 
         # Get SSH key
         key_result = self._ssh_manager.get_private_key_file(
@@ -293,7 +298,9 @@ class AnsibleService:
                 if ssh_wait.is_err():
                     return Err(ssh_wait.unwrap_err())
             known_hosts_file = trusted_node_known_hosts(deployment, self._scan_host_key)
-            connection_port = recover_connection_port(deployment, key_file, known_hosts_file)
+            connection_port = (
+                deployment.ssh_port if usage_read else recover_connection_port(deployment, key_file, known_hosts_file)
+            )
             if playbook != "ssh-hardening.yml" and (
                 playbook in self.SSH_POLICY_ENTRYPOINTS or connection_port != deployment.ssh_port
             ):
@@ -301,7 +308,11 @@ class AnsibleService:
                 if transition.is_err():
                     return Err(transition.unwrap_err())
                 connection_port = deployment.ssh_port
-            ssh_wait = self._wait_for_ssh(deployment.ipv4_address, port=connection_port)
+            ssh_wait = (
+                self._wait_for_ssh(deployment.ipv4_address, port=connection_port, timeout=min(effective_timeout, 10))
+                if usage_read
+                else self._wait_for_ssh(deployment.ipv4_address, port=connection_port)
+            )
             if ssh_wait.is_err():
                 return Err(ssh_wait.unwrap_err())
 

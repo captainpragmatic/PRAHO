@@ -5,9 +5,10 @@ Clean up stale failed deployments by removing orphaned cloud resources
 and marking deployments as cleaned. This provides CLI parity with the
 ``cleanup_failed_deployments_task`` that runs as a scheduled Django-Q2 task.
 
-The cleanup is best-effort: if the cloud server was already deleted (404),
-the deployment is still marked as cleaned. Only the cloud resources are
-removed — the database record is preserved for audit trail purposes.
+Each deployment runs through the same teardown as destroy and the sweep: a
+deployment is marked destroyed only when its DNS, servers, firewalls and keys
+are proven gone. Only the cloud resources are removed — the database record is
+preserved for audit trail purposes.
 
 Usage examples::
 
@@ -49,9 +50,9 @@ class Command(BaseCommand):
     but runs interactively with progress output and --dry-run support.
 
     Design decisions:
-    - Best-effort cloud cleanup: if the provider API call fails (server
-      already gone, token expired), the deployment is still counted as
-      cleaned. The goal is to mark stale records, not guarantee cloud deletion.
+    - The shared teardown (node_teardown): a provider call that fails, or a
+      token that is missing, leaves the deployment 'destroying' with its
+      identifiers for the next run, never 'destroyed'.
     - Database records are never deleted — they're preserved for the audit
       trail. Only the cloud-side resources are cleaned up.
     - The ``destroyed`` status transition marks cleanup completion.
@@ -134,7 +135,7 @@ class Command(BaseCommand):
         errors = 0
 
         for dep in deployments:
-            success = self._cleanup_deployment(dep)
+            success = self._cleanup_deployment(dep, cutoff)
             if success:
                 cleaned += 1
             else:
@@ -145,91 +146,32 @@ class Command(BaseCommand):
             f"\n📊 Cleanup complete: {cleaned} cleaned, {errors} error(s) out of {len(deployments)} total"
         )
 
-    def _cleanup_deployment(self, deployment: Any) -> bool:
+    def _cleanup_deployment(self, deployment: Any, stale_before: Any) -> bool:
         """
-        Clean up a single failed deployment.
+        Clean up a single failed deployment through the shared teardown.
 
-        Attempts to delete the cloud server. Only marks the deployment as
-        'destroyed' if cloud deletion succeeded (or no cloud server existed).
-        If deletion fails, the deployment keeps its current status to prevent
-        hiding orphaned servers that cost money.
+        The same path as the scheduled sweep and destroy: the claim re-checks status and age under the
+        row lock and refuses an occupied node, and every step proves its resources gone. A step that
+        cannot leaves the row 'destroying' with its identifiers, never 'destroyed' (H15).
 
         Args:
             deployment: NodeDeployment instance in 'failed' status.
+            stale_before: The age cutoff, re-checked under the row lock.
 
         Returns:
-            True if cleanup completed successfully,
-            False if cloud deletion failed or an unexpected error occurred.
+            True if the teardown finished, False if it was refused or stopped.
         """
+        from apps.infrastructure.node_teardown import teardown_stale_deployment  # noqa: PLC0415  # Circular
+
         self.stdout.write(f"  🧹 Cleaning {deployment.hostname}...")
-
         try:
-            # Attempt to delete cloud server if one was provisioned
-            cloud_delete_ok = True
-            if deployment.external_node_id and deployment.provider:
-                cloud_delete_ok = self._delete_cloud_server(deployment)
-
-            if cloud_delete_ok:
-                # Only mark as destroyed if cloud deletion succeeded (H15 fix)
-                deployment.destroyed_at = timezone.now()
-                deployment.status = "destroyed"
-                deployment.save(update_fields=["status", "destroyed_at", "updated_at"])
-                self.stdout.write(self.style.SUCCESS(f"    ✅ Cleaned: {deployment.hostname}"))
-                return True
-            else:
-                # Cloud deletion failed — keep current status to avoid hiding
-                # orphaned servers that cost money
-                self.stderr.write(
-                    self.style.WARNING(
-                        f"    ⚠️  Cloud deletion failed for {deployment.hostname}, keeping status '{deployment.status}'"
-                    )
-                )
-                return False
-
+            result = teardown_stale_deployment(deployment, stale_before=stale_before)
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"    🔥 Error cleaning {deployment.hostname}: {e}"))
             logger.error(f"[Cleanup] Error cleaning {deployment.hostname}: {e}")
             return False
-
-    def _delete_cloud_server(self, deployment: Any) -> bool:
-        """
-        Delete the cloud server via the provider gateway.
-
-        Returns True if the server was successfully deleted (or no token
-        available to attempt deletion). Returns False if the deletion
-        API call failed, indicating an orphaned server may still exist.
-        """
-        from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
-            get_cloud_gateway,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-        from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
-            get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-
-        token_result = get_provider_token(deployment.provider)
-        if token_result.is_err():
-            self.stderr.write(
-                self.style.WARNING(f"    ⚠️  No token for {deployment.provider.name}, skipping cloud deletion")
-            )
-            # No token = can't verify server exists, treat as success
-            return True
-
-        try:
-            gateway = get_cloud_gateway(
-                deployment.provider.provider_type,
-                token_result.unwrap(),
-            )
-            delete_result = gateway.delete_server(deployment.external_node_id)
-
-            if delete_result.is_ok():
-                self.stdout.write(f"    🗑️  Cloud server deleted: {deployment.external_node_id}")
-                return True
-            else:
-                # Deletion failed — server may still be running and costing money
-                self.stderr.write(
-                    self.style.WARNING(f"    ⚠️  Could not delete cloud server: {delete_result.unwrap_err()}")
-                )
-                return False
-        except Exception as e:
-            self.stderr.write(self.style.WARNING(f"    ⚠️  Cloud deletion error: {e}"))
+        if result.is_err():
+            self.stderr.write(self.style.WARNING(f"    ⚠️  {deployment.hostname}: {result.unwrap_err()}"))
             return False
+        self.stdout.write(self.style.SUCCESS(f"    ✅ Cleaned: {deployment.hostname}"))
+        return True

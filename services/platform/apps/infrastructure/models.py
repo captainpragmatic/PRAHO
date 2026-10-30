@@ -219,6 +219,15 @@ class NodeSize(models.Model):
     is_active = models.BooleanField(default=True, verbose_name=_("Active"))
     sort_order = models.PositiveIntegerField(default=0, verbose_name=_("Sort Order"))
 
+    # Regions where a new node of this size can be created. The provider sync maintains it:
+    # Hetzner retires server types per location, so a size is offered only where it is sold.
+    available_regions = models.ManyToManyField(
+        NodeRegion,
+        blank=True,
+        related_name="available_sizes",
+        verbose_name=_("Available Regions"),
+    )
+
     class Meta:
         db_table = "infrastructure_node_sizes"
         verbose_name = _("Node Size")
@@ -228,6 +237,15 @@ class NodeSize(models.Model):
 
     def __str__(self) -> str:
         return f"{self.display_name} ({self.provider.code})"
+
+    @classmethod
+    def offered_in(cls, region: NodeRegion) -> models.QuerySet[NodeSize]:
+        """Active sizes a new node, or a resize, can use in this region."""
+        return cls.objects.filter(is_active=True, provider_id=region.provider_id, available_regions=region)
+
+    def is_offered_in(self, region: NodeRegion) -> bool:
+        """Whether a new node, or a resize, can use this size in this region."""
+        return NodeSize.offered_in(region).filter(pk=self.pk).exists()
 
 
 class PanelType(models.Model):
@@ -289,6 +307,30 @@ class NodeDeployment(models.Model):
         ("failed", _("Failed")),
         ("destroying", _("Destroying")),
         ("destroyed", _("Destroyed")),
+    ]
+
+    OPERATION_KIND_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("deploy", _("Deploy")),
+        ("retry", _("Retry")),
+        ("destroy", _("Destroy")),
+        ("teardown", _("Teardown")),
+        ("registration", _("Registration resume")),
+        ("reconcile", _("Reconcile")),
+        ("redeploy", _("Re-deploy")),
+    ]
+
+    SERVER_CREATE_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("none", _("Never requested")),
+        ("intent", _("Requested")),
+        ("created", _("Created")),
+        ("unknown", _("Outcome unknown")),
+    ]
+
+    REGISTRATION_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("none", _("Not registered")),
+        ("started", _("Started")),
+        ("registered", _("Registered")),
+        ("activated", _("Activated")),
     ]
 
     ENVIRONMENT_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
@@ -517,6 +559,29 @@ class NodeDeployment(models.Model):
         verbose_name=_("Correlation ID"),
     )
 
+    # Operation ownership. correlation_id names the deployment's cloud resources and never changes;
+    # operation_token names the one worker allowed to write lifecycle state right now. Every claim
+    # rotates it, so a worker resumed after recovery finds its token gone and writes nothing.
+    operation_token = models.UUIDField(null=True, blank=True, editable=False)
+    operation_kind = models.CharField(max_length=20, choices=OPERATION_KIND_CHOICES, blank=True, editable=False)
+
+    # What the provider was last asked to do with this deployment's server. "unknown" means a create
+    # call may have reached the provider without a confirmed answer, so the row may be billed.
+    server_create_state = models.CharField(
+        max_length=10, choices=SERVER_CREATE_STATE_CHOICES, default="none", editable=False
+    )
+    registration_state = models.CharField(
+        max_length=12, choices=REGISTRATION_STATE_CHOICES, default="none", editable=False
+    )
+    # One-way fingerprint of the provider token that created this deployment's resources. Blank
+    # means unknown provenance: a "not found" answer from the provider then proves nothing.
+    provider_token_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
+    needs_reconciliation = models.BooleanField(default=False)
+    reconciliation_reason = models.TextField(blank=True)
+    # What an operator's reconciliation proved or attested, with who, when and the evidence. Kept apart
+    # from the creator provenance and the create state, which stay as history.
+    reconciliation_record = models.JSONField(default=dict, blank=True, editable=False)
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -661,13 +726,53 @@ class NodeDeployment(models.Model):
         return self.status in ("completed", "failed", "stopped")
 
     @property
+    def never_got_a_server(self) -> bool:
+        """No server was ever created: a create state of "none", or a reconciled never-created attestation."""
+        if self.server_create_state == "none":
+            return True
+        record = self.reconciliation_record or {}
+        # An attestation covers the attempt it was made for only: a re-deploy rotates the correlation id.
+        attested = bool(record.get("never_created_attested")) and record.get("correlation_id") == str(
+            self.correlation_id
+        )
+        return attested and self.server_create_state in ("unknown", "intent")
+
+    @property
     def can_retry(self) -> bool:
-        """Check if deployment can be retried"""
-        return self.status == "failed" and self.last_successful_phase != ""
+        """A failed deployment can be retried unless its provider resources must be reconciled first."""
+        return self.status == "failed" and not self.needs_reconciliation
+
+    # Statuses whose page keeps refreshing: a worker is moving the row on.
+    POLLING_STATUSES: ClassVar[tuple[str, ...]] = (
+        "pending",
+        "provisioning_node",
+        "configuring_dns",
+        "installing_panel",
+        "configuring_backups",
+        "validating",
+        "registering",
+        "destroying",
+    )
+
+    PROGRESS_PERCENT: ClassVar[dict[str, int]] = {
+        "pending": 0,
+        "provisioning_node": 15,
+        "configuring_dns": 35,
+        "installing_panel": 55,
+        "configuring_backups": 70,
+        "validating": 80,
+        "registering": 90,
+        "completed": 100,
+        "failed": 0,
+        "stopped": 100,
+        "destroying": 50,
+        "destroyed": 100,
+    }
 
     # Valid state transitions map
     VALID_TRANSITIONS: ClassVar[dict[str, list[str]]] = {
-        "pending": ["provisioning_node", "failed"],
+        # pending -> registering is the registration-only resume: the node is provisioned and installed.
+        "pending": ["provisioning_node", "registering", "failed"],
         "provisioning_node": ["configuring_dns", "failed"],
         "configuring_dns": ["installing_panel", "failed"],
         "installing_panel": ["configuring_backups", "failed"],
@@ -678,7 +783,8 @@ class NodeDeployment(models.Model):
         "stopped": ["completed", "destroying", "failed"],
         "failed": ["pending", "destroying"],  # Can retry or destroy
         "destroying": ["destroyed", "failed"],
-        "destroyed": [],  # Terminal state
+        # Terminal, except a re-deploy of a row that never got a server (it keeps the hostname).
+        "destroyed": ["pending"],
     }
 
     def is_valid_transition(self, new_status: str) -> bool:
@@ -687,13 +793,20 @@ class NodeDeployment(models.Model):
         return new_status in valid_next_states
 
     def transition_to(self, new_status: str, message: str = "") -> None:
-        """Transition to a new status with validation"""
+        """Transition to a new status with validation.
+
+        Compare-and-set on the status this instance last read: a stale instance (another worker moved the
+        row meanwhile) raises instead of overwriting the newer status.
+        """
         if not self.is_valid_transition(new_status):
             raise ValidationError(_(f"Cannot transition from '{self.status}' to '{new_status}'"))
-        self.status = new_status
+        values: dict[str, Any] = {"status": new_status, "updated_at": timezone.now()}
         if message:
-            self.status_message = message
-        self.save(update_fields=["status", "status_message", "updated_at"])
+            values["status_message"] = message
+        if type(self).objects.filter(pk=self.pk, status=self.status).update(**values) != 1:
+            raise ValidationError(_(f"Cannot transition from '{self.status}': the deployment changed concurrently"))
+        for name, value in values.items():
+            setattr(self, name, value)
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running"""

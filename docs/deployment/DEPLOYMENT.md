@@ -6,6 +6,8 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 
 ## Table of Contents
 
+- [Hosting usage observations](#hosting-usage-observations)
+
 - [Choosing a Deployment Method](#choosing-a-deployment-method)
 - [Managed-node SSH Trust](#managed-node-ssh-trust)
 - [Deployment Options](#deployment-options)
@@ -1497,3 +1499,50 @@ The pre-restore backup and stopping all writers are mandatory. SQL errors leave 
 failed starts or bounded readiness checks stop them again. Inspect the failure and safety backup
 before explicitly restarting. A running worker service still requires a separate queue execution
 check. The script does not roll back a partially restored database automatically.
+
+## Hosting usage observations
+
+Rollout for #782 / ADR-0068 is additive and disabled by default:
+
+1. Deploy the migration, Platform API and nullable Portal templates together. Reconcile
+   schedules with `setup_scheduled_tasks` in the deployed Platform environment. Confirm
+   the old owned `Collect Virtualmin Usage` schedule is gone and `virtualmin-usage-sync`
+   is present at `10 * * * *` on `praho-cluster`.
+2. Install `services/platform/infrastructure/ansible/playbooks/virtualmin_usage.yml`
+   on existing nodes using the operator's already enrolled root SSH key, exact port
+   and host trust. New `virtualmin.yml` deployments include the same tasks. Do not
+   bootstrap trust or replace keys to make a poll work. Imported nodes require
+   `VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH` and `PRAHO_SSH_KNOWN_HOSTS_PATH` as
+   documented for archive transport.
+3. On each isolated acceptance node, verify `praho-usage.timer`, run
+   `systemctl start praho-usage.service`, inspect its small exit status, and verify
+   Apache configuration and the original access logs still work. Private state is
+   `/var/lib/praho/usage`, with root-only traffic logs in `/var/log/praho`.
+   The adapter preserves the previous Virtualmin hook through a private dispatcher.
+   Unsupported templates/storage/mail must stay unknown; do not substitute quota
+   counters. The node stays on UTC. Exact operator-month boundaries use Platform's
+   `TIME_ZONE`, normally Europe/Bucharest.
+4. Grow an account's files and local database independently, generate HTTP and HTTPS
+   traffic, and verify both account and Service projections, actual source time and
+   portal breakdown. Run `make test-virtualmin-lab-full` against the isolated lab.
+   After pushing a branch, the same gate can run with
+   `gh workflow run virtualmin-lab.yml --ref BRANCH -f suite=full`.
+5. Enable `provisioning.usage_sync_enabled` in Advanced settings. Collection runs at
+   :00; Platform reads cached observations at :10 with no filesystem scan in the SSH
+   export. Confirm a missing node preserves old values/time and raises usage attention
+   after six hours. First-month/incomplete traffic stays partial until full coverage
+   exists; zero is only a measured zero.
+
+Bandwidth is HTTP response-body bytes, not interface bytes or a billable quantity.
+The operator month never changes subscription billing periods. Usage does not create
+metering events, charges, email warnings or quota enforcement. Existing backup sizing
+remains an estimate; telemetry availability does not gate backup/restore and archive
+size/free-space checks still apply.
+
+Rollback: disable `provisioning.usage_sync_enabled`; leave additive tables/readings
+in place. Portal continues to show the last source time and becomes stale. To stop
+node collection, disable `praho-usage.timer` separately; preserve the ledger and
+root-controlled log configuration so the loss interval is explicit on resumption.
+Do not restore legacy commands or the billing collector. Resetting/replacing a node
+installation identity requires explicit operator reconciliation; an old binding is
+never silently trusted under a new installation UUID.

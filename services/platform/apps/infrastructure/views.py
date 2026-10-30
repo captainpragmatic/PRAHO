@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, models, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -32,6 +32,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.common.pagination import pagination_query
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
+from apps.infrastructure.provider_sync import PROVIDERS_WITH_LOCATION_DATA
 from apps.settings.services import SettingsService
 
 from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
@@ -54,6 +55,7 @@ from .models import (
 )
 from .permissions import (
     can_deploy_nodes,
+    can_destroy_nodes,
     can_manage_deployments,
     require_deploy_permission,
     require_deployment_management,
@@ -64,13 +66,16 @@ from .permissions import (
     require_size_management,
 )
 from .tasks import (
+    OperationReservationError,
     queue_deploy_node,
     queue_destroy_node,
     queue_maintenance,
     queue_reboot_node,
+    queue_redeploy_node,
     queue_retry_deployment,
     queue_start_node,
     queue_stop_node,
+    queue_sync_providers,
     queue_upgrade_node,
 )
 
@@ -103,6 +108,8 @@ DEPLOYMENT_DRAFT_TTL = 1800
 
 # Items per page for list views
 ITEMS_PER_PAGE = 25
+# The longest posted primary key accepted before it is parsed (a bigint has 19 digits).
+_MAX_ID_DIGITS = 12
 
 
 def _get_status_variant(status: str) -> str:
@@ -111,7 +118,8 @@ def _get_status_variant(status: str) -> str:
         "pending": "secondary",
         "provisioning_node": "info",
         "configuring_dns": "info",
-        "running_ansible": "info",
+        "installing_panel": "info",
+        "configuring_backups": "info",
         "validating": "info",
         "registering": "info",
         "completed": "success",
@@ -128,7 +136,8 @@ def _get_status_icon(status: str) -> str:
         "pending": "clock",
         "provisioning_node": "server",
         "configuring_dns": "globe",
-        "running_ansible": "terminal",
+        "installing_panel": "terminal",
+        "configuring_backups": "terminal",
         "validating": "check-circle",
         "registering": "user-plus",
         "completed": "check",
@@ -153,7 +162,7 @@ def deployment_dashboard(request: HttpRequest) -> HttpResponse:
     total_deployments = NodeDeployment.objects.count()
     active_deployments = NodeDeployment.objects.filter(status="completed").count()
     pending_deployments = NodeDeployment.objects.filter(
-        status__in=["pending", "provisioning_node", "configuring_dns", "running_ansible", "validating", "registering"]
+        status__in=[status for status in NodeDeployment.POLLING_STATUSES if status != "destroying"]
     ).count()
     failed_deployments = NodeDeployment.objects.filter(status="failed").count()
 
@@ -389,21 +398,24 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         .select_related("provider")
         .values("id", "name", "provider_id", "country_code", "normalized_code", "city")
     )
-    sizes = list(
-        NodeSize.objects.filter(is_active=True)
-        .select_related("provider")
-        .values(
-            "id",
-            "name",
-            "display_name",
-            "provider_id",
-            "vcpus",
-            "memory_gb",
-            "disk_gb",
-            "monthly_cost_eur",
-            "max_domains",
+    # One entry per size, with the active regions it is offered in (a .values() join would repeat sizes)
+    sizes = [
+        {
+            "id": size.id,
+            "name": size.name,
+            "display_name": size.display_name,
+            "provider_id": size.provider_id,
+            "vcpus": size.vcpus,
+            "memory_gb": size.memory_gb,
+            "disk_gb": size.disk_gb,
+            "monthly_cost_eur": size.monthly_cost_eur,
+            "max_domains": size.max_domains,
+            "region_ids": [region.id for region in size.available_regions.all()],
+        }
+        for size in NodeSize.objects.filter(is_active=True).prefetch_related(
+            Prefetch("available_regions", queryset=NodeRegion.objects.filter(is_active=True))
         )
-    )
+    ]
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -448,21 +460,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Get recent logs
     logs = NodeDeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[:50]
 
-    # Calculate progress percentage
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "stopped": 100,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -484,19 +482,19 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "can_retry": deployment.status == "failed",
-        "can_destroy": deployment.status in ("completed", "failed", "stopped"),
+        "can_retry": deployment.can_retry,
+        "can_redeploy": (
+            deployment.status in ("failed", "destroyed")
+            and deployment.never_got_a_server
+            and not deployment.needs_reconciliation
+            and can_deploy_nodes(cast("User", request.user))
+            and can_destroy_nodes(cast("User", request.user))
+        ),
+        "can_destroy": deployment.status in ("completed", "failed", "stopped")
+        or (deployment.status == "destroying" and deployment.needs_reconciliation),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
         "fqdn": f"{deployment.hostname}.{deployment.dns_zone}" if deployment.dns_zone else deployment.hostname,
     }
 
@@ -548,11 +546,15 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    task_id = queue_retry_deployment(
-        deployment_id=deployment.id,
-        provider_id=deployment.provider_id,
-        user_id=request.user.id,
-    )
+    try:
+        task_id = queue_retry_deployment(
+            deployment_id=deployment.id,
+            provider_id=deployment.provider_id,
+            user_id=request.user.id,
+        )
+    except OperationReservationError as refused:
+        messages.error(request, str(refused))
+        return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     messages.success(request, f"Retry queued for deployment '{deployment.hostname}'.")
     logger.info(f"[Deployment] Retry queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
@@ -568,7 +570,8 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    if deployment.status not in ("completed", "failed", "stopped"):
+    parked = deployment.status == "destroying" and deployment.needs_reconciliation  # resumable teardown
+    if deployment.status not in ("completed", "failed", "stopped") and not parked:
         messages.error(request, f"Cannot destroy deployment in status '{deployment.get_status_display()}'.")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -582,11 +585,15 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
                 messages.error(request, _provider_credentials_help(deployment.provider))
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-            task_id = queue_destroy_node(
-                deployment_id=deployment.id,
-                provider_id=deployment.provider_id,
-                user_id=request.user.id,
-            )
+            try:
+                task_id = queue_destroy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
             logger.info(
@@ -617,6 +624,64 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "infrastructure/deployment_destroy.html", context)
 
 
+@login_required
+@require_deploy_permission
+@require_destroy_permission
+@require_http_methods(["GET", "POST"])
+def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
+    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname."""
+    from .deployment_service import NodeDeploymentService  # noqa: PLC0415  # Deferred: avoids loading Ansible
+
+    deployment = get_object_or_404(NodeDeployment, id=pk)
+    available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
+    form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
+    size_id = str(request.POST.get("new_size", ""))
+    # ASCII digits of a sane length only: "²" passes isdigit(), and a huge number overflows the column.
+    valid_id = size_id.isascii() and size_id.isdecimal() and len(size_id) <= _MAX_ID_DIGITS
+    new_size = available_sizes.filter(id=int(size_id)).first() if valid_id else None
+    if request.method == "POST" and form.is_valid():
+        refusal = (
+            NodeDeploymentService._redeploy_refusal(deployment, new_size)
+            if new_size is not None
+            else str(_("Choose a size sold in this region."))
+        )
+        if refusal or new_size is None:
+            messages.error(request, refusal)
+        elif get_provider_token(deployment.provider).is_err():
+            messages.error(request, _provider_credentials_help(deployment.provider))
+        else:
+            try:
+                task_id = queue_redeploy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    new_size_id=new_size.id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+            else:
+                messages.success(request, _("Re-deploy queued for '%(hostname)s'.") % {"hostname": deployment.hostname})
+                logger.info(f"✅ [Deployment] Re-deploy queued for {deployment.hostname}, task_id={task_id}")
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
+
+    context = {
+        "page_title": _("Re-deploy: %(hostname)s") % {"hostname": deployment.hostname},
+        "breadcrumb_items": [
+            {"text": "Management", "url": "/dashboard/"},
+            {"text": "Infrastructure", "url": reverse("infrastructure:dashboard")},
+            {"text": "Deployments", "url": reverse("infrastructure:deployment_list")},
+            {"text": deployment.hostname, "url": reverse("infrastructure:deployment_detail", args=[deployment.id])},
+            {"text": _("Re-deploy")},
+        ],
+        "deployment": deployment,
+        "form": form,
+        "available_sizes": available_sizes,
+        "form_action": reverse("infrastructure:deployment_redeploy", args=[deployment.id]),
+        "cancel_url": reverse("infrastructure:deployment_detail", args=[deployment.id]),
+    }
+    return render(request, "infrastructure/deployment_redeploy.html", context)
+
+
 # ===============================================================================
 # LIFECYCLE OPERATIONS
 # ===============================================================================
@@ -634,14 +699,9 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only upgrade running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get available sizes for this provider (larger than current)
+    # Sizes the node can be resized to: active and still sold in its region
     available_sizes = (
-        NodeSize.objects.filter(
-            provider=deployment.provider,
-            is_active=True,
-        )
-        .exclude(id=deployment.node_size_id)
-        .order_by("monthly_cost_eur")
+        NodeSize.offered_in(deployment.region).exclude(id=deployment.node_size_id).order_by("monthly_cost_eur")
     )
 
     if request.method == "POST":
@@ -650,7 +710,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, _("Please select a new size."))
         else:
             try:
-                new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
+                new_size = available_sizes.get(id=new_size_id)
 
                 # Validate token exists before queuing (fail fast)
                 token_result = get_provider_token(deployment.provider)
@@ -867,20 +927,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
     # Pre-compute progress step for template (0-6 range matching 6 stages)
     progress_step = min(progress_percentage // 16, 6)
 
@@ -891,16 +938,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-            "destroying",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
     }
 
     return render(request, "infrastructure/partials/deployment_status.html", context)
@@ -1179,6 +1217,33 @@ def size_list(request: HttpRequest) -> HttpResponse:
     return render(request, "infrastructure/size_list.html", context)
 
 
+def _refresh_offer(size: NodeSize) -> bool:
+    """Reset where a size staff created, re-identified or reactivated is offered.
+
+    A provider that reports where each size is sold (Hetzner) leaves it to the provider sync: the
+    size is offered nowhere until the sync records its locations. Any other provider offers it in
+    every active region. Returns True when the caller must queue a provider sync.
+    """
+    if size.provider.provider_type in PROVIDERS_WITH_LOCATION_DATA:
+        size.available_regions.clear()
+        return True
+    size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
+    return False
+
+
+def _queue_catalogue_sync(request: HttpRequest, reason: str) -> None:
+    """Queue a provider sync (after the caller's transaction) and tell staff why."""
+    try:
+        queue_sync_providers()
+    except Exception:  # The change stands; the daily sync records the locations instead.
+        logger.warning("⚠️ [Infrastructure] Could not queue a provider sync", exc_info=True)
+        messages.warning(
+            request, _("%(reason)s The provider sync could not be queued; run Sync providers.") % {"reason": reason}
+        )
+        return
+    messages.info(request, _("%(reason)s A provider sync was queued to record it.") % {"reason": reason})
+
+
 @login_required
 @require_size_management
 def size_create(request: HttpRequest) -> HttpResponse:
@@ -1187,7 +1252,11 @@ def size_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                needs_sync = _refresh_offer(size)
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' created successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1221,7 +1290,16 @@ def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST, instance=size)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                changed = set(form.changed_data)
+                # Another provider or type: the regions recorded for the old identity no longer apply.
+                # A reactivated size offered nowhere would stay undeployable until the next sync.
+                reidentified = bool({"provider", "provider_type_id"} & changed)
+                reactivated = "is_active" in changed and size.is_active and not size.available_regions.exists()
+                needs_sync = _refresh_offer(size) if reidentified or reactivated else False
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' updated successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1283,8 +1361,20 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)
-    region.is_active = not region.is_active
-    region.save()
+    needs_sync = False
+    with transaction.atomic():
+        region.is_active = not region.is_active
+        region.save()
+        # A provider that reports where sizes are sold: a region no size lists (disabled before the
+        # catalogue tracked regions) is left to the sync, which is queued. Any other provider offers
+        # every active size there, including sizes created while the region was disabled.
+        if region.is_active:
+            if region.provider.provider_type not in PROVIDERS_WITH_LOCATION_DATA:
+                region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
+            elif not region.available_sizes.exists():
+                needs_sync = True
+    if needs_sync:
+        _queue_catalogue_sync(request, str(_("The sizes sold in this region are not known yet.")))
 
     # Audit: region toggled
     try:

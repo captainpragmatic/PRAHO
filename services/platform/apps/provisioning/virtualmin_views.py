@@ -2042,54 +2042,26 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         # that lost the account's primary domain.
                         logger.warning("⚠️ [AccountSync] Primary domain missing from listing: account=%s", account.pk)
                         continue
-                    # Update existing account
-                    account.domain = account_data["primary_domain"]
-                    account.domains = account_data["domains"]
-                    account.server = server
-                    account.last_sync_at = timezone.now()
+                    with transaction.atomic():
+                        from .virtualmin_usage_service import move_interval  # noqa: PLC0415
 
-                    # Fetch actual usage data from Virtualmin API
-                    try:
-                        gateway = provisioning_service._get_gateway(server)
-                        domain_info_result = gateway.get_domain_info(account.domain)
-
-                        if domain_info_result.is_ok():
-                            domain_info = domain_info_result.unwrap()
-                            account.current_disk_usage_mb = domain_info.get("disk_usage_mb", 0)
-                            account.current_bandwidth_usage_mb = domain_info.get("bandwidth_usage_mb", 0)
-
-                            # Update quotas if available
-                            if domain_info.get("disk_quota_mb"):
-                                account.disk_quota_mb = domain_info["disk_quota_mb"]
-                            if domain_info.get("bandwidth_quota_mb"):
-                                account.bandwidth_quota_mb = domain_info["bandwidth_quota_mb"]
-
-                            logger.info(
-                                f"✅ [UsageSync] Updated usage for {username}: {domain_info['disk_usage_mb']}MB disk, {domain_info['bandwidth_usage_mb']}MB bandwidth"
-                            )
-                        else:
-                            logger.warning(
-                                f"⚠️ [UsageSync] Failed to get usage for {account.domain}: {domain_info_result.unwrap_err()}"
-                            )
-                    except Exception as e:
-                        logger.warning(f"⚠️ [UsageSync] Exception getting usage for {account.domain}: {e}")
-                        # Keep existing values if API call fails
-
-                    # Only what this sync changed: a full save after the remote usage call would write
-                    # a stale copy of every other field over a concurrent change (status, suspension).
-                    account.save(
-                        update_fields=[
-                            "domain",
-                            "domains",
-                            "server",
-                            "last_sync_at",
-                            "current_disk_usage_mb",
-                            "current_bandwidth_usage_mb",
-                            "disk_quota_mb",
-                            "bandwidth_quota_mb",
-                            "updated_at",
-                        ]
-                    )
+                        account = (
+                            VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
+                            .select_related("server")
+                            .get(pk=account.pk)
+                        )
+                        if account_has_active_migration(account) or (
+                            account.server_id != server.pk and account.server.status == "active"
+                        ):
+                            continue
+                        if account.server_id != server.pk:
+                            move_interval(account.pk, server.pk)
+                        account.domain = account_data["primary_domain"]
+                        account.domains = account_data["domains"]
+                        account.server = server
+                        account.last_sync_at = timezone.now()
+                        # Discovery owns identity; only the measured publisher owns usage.
+                        account.save(update_fields=["domain", "domains", "server", "last_sync_at", "updated_at"])
                     sync_results["accounts_updated"] += 1
 
                 except VirtualminAccount.DoesNotExist:
@@ -2119,38 +2091,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                             service.domain = account_data["primary_domain"]
                             service.save(update_fields=["domain", "updated_at"])
 
-                        # Fetch actual usage data from Virtualmin API
-                        disk_usage_mb = 0
-                        bandwidth_usage_mb = 0
-                        disk_quota_mb = 1000  # Default quota
-                        bandwidth_quota_mb = 10000  # Default quota
-
-                        try:
-                            gateway = provisioning_service._get_gateway(server)
-                            domain_info_result = gateway.get_domain_info(account_data["primary_domain"])
-
-                            if domain_info_result.is_ok():
-                                domain_info = domain_info_result.unwrap()
-                                disk_usage_mb = domain_info.get("disk_usage_mb", 0)
-                                bandwidth_usage_mb = domain_info.get("bandwidth_usage_mb", 0)
-
-                                # Update quotas if available
-                                if domain_info.get("disk_quota_mb"):
-                                    disk_quota_mb = domain_info["disk_quota_mb"]
-                                if domain_info.get("bandwidth_quota_mb"):
-                                    bandwidth_quota_mb = domain_info["bandwidth_quota_mb"]
-
-                                logger.info(
-                                    f"✅ [AccountSync] Fetched usage data for {account_data['primary_domain']}: {disk_usage_mb}MB disk, {bandwidth_usage_mb}MB bandwidth"
-                                )
-                            else:
-                                logger.warning(
-                                    f"⚠️ [AccountSync] Failed to fetch usage data for {account_data['primary_domain']}: {domain_info_result.unwrap_err()}"
-                                )
-                        except Exception as e:
-                            logger.warning(
-                                f"⚠️ [AccountSync] Exception fetching usage data for {account_data['primary_domain']}: {e!s}"
-                            )
+                        disk_quota_mb = (service.service_plan.disk_space_gb or 0) * 1024
+                        bandwidth_quota_mb = (service.service_plan.bandwidth_gb or 0) * 1024
 
                         # Create VirtualminAccount linked to the Service
                         VirtualminAccount.objects.create(
@@ -2162,8 +2104,6 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                             status="active",  # Assume active since it exists on server
                             disk_quota_mb=disk_quota_mb,
                             bandwidth_quota_mb=bandwidth_quota_mb,
-                            current_disk_usage_mb=disk_usage_mb,
-                            current_bandwidth_usage_mb=bandwidth_usage_mb,
                             last_sync_at=timezone.now(),
                         )
                         sync_results["accounts_created"] += 1

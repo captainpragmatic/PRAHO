@@ -398,133 +398,10 @@ def check_all_usage_thresholds() -> dict[str, Any]:
 
 
 def collect_virtualmin_usage() -> dict[str, Any]:
-    """
-    Collect usage data from Virtualmin servers.
-
-    Queries all active Virtualmin accounts for:
-    - Disk usage
-    - Bandwidth usage
-
-    Should be run hourly or more frequently.
-    Uses iterator() for memory-efficient processing of large datasets.
-    """
-    from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        VirtualminAccount,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    from .metering_models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        UsageMeter,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-    from .metering_service import (  # Deferred: django-q task  # noqa: PLC0415  # Deferred: avoids circular import
-        MeteringService,
-        UsageEventData,
-    )
-
-    logger.info("Collecting Virtualmin usage data")
-
-    try:
-        service = MeteringService()
-
-        # Get meters first (fail fast if not configured)
-        disk_meter = UsageMeter.objects.filter(name="disk_usage_gb").first()
-        bandwidth_meter = UsageMeter.objects.filter(name="bandwidth_gb").first()
-
-        if not disk_meter or not bandwidth_meter:
-            logger.warning("Usage meters not configured for Virtualmin")
-            return {"success": False, "error": "Meters not configured"}
-
-        # Get count first for reporting
-        total_accounts = VirtualminAccount.objects.filter(status="active").count()
-
-        # Use iterator() for memory-efficient processing
-        accounts = (
-            VirtualminAccount.objects.filter(status="active")
-            .select_related("service", "service__customer")
-            .iterator(chunk_size=billing_config.ITERATOR_CHUNK_SIZE)
-        )
-
-        events_created = 0
-        errors = 0
-        accounts_processed = 0
-
-        for account in accounts:
-            if not account.service or not account.service.customer:
-                continue
-
-            accounts_processed += 1
-            customer = account.service.customer
-
-            try:
-                # Record disk usage
-                disk_gb = Decimal(account.current_disk_usage_gb or 0)  # type: ignore[attr-defined]
-                if disk_gb > 0:
-                    result = service.record_event(
-                        UsageEventData(
-                            meter_name="disk_usage_gb",
-                            customer_id=str(customer.id),
-                            value=disk_gb,
-                            service_id=str(account.service.id),
-                            source="virtualmin",
-                            properties={
-                                "virtualmin_account_id": str(account.id),
-                                "domain": account.domain,
-                            },
-                        )
-                    )
-                    if result.is_ok():
-                        events_created += 1
-                    else:
-                        errors += 1
-
-                # Record bandwidth usage
-                bandwidth_gb = Decimal(account.current_bandwidth_usage_gb or 0)  # type: ignore[attr-defined]
-                if bandwidth_gb > 0:
-                    result = service.record_event(
-                        UsageEventData(
-                            meter_name="bandwidth_gb",
-                            customer_id=str(customer.id),
-                            value=bandwidth_gb,
-                            service_id=str(account.service.id),
-                            source="virtualmin",
-                            properties={
-                                "virtualmin_account_id": str(account.id),
-                                "domain": account.domain,
-                            },
-                        )
-                    )
-                    if result.is_ok():
-                        events_created += 1
-                    else:
-                        errors += 1
-
-            except Exception as e:
-                logger.error(f"Error recording usage for account {account.id}: {e}")
-                errors += 1
-
-        # Log collection
-        AuditService.log_simple_event(
-            event_type="virtualmin_usage_collected",
-            user=None,
-            content_object=None,
-            description=f"Collected {events_created} usage events from Virtualmin",
-            actor_type="system",
-            metadata={
-                "accounts_processed": accounts_processed,
-                "total_accounts": total_accounts,
-                "events_created": events_created,
-                "errors": errors,
-            },
-        )
-
-        return {
-            "success": errors == 0,
-            "accounts_processed": accounts_processed,
-            "events_created": events_created,
-            "errors": errors,
-        }
-    except Exception as e:
-        logger.exception(f"Error collecting Virtualmin usage: {e}")
-        return {"success": False, "error": str(e)}
+    """Retired compatibility entry point for already queued messages (#782)."""
+    # Compatibility for messages queued before the schedule was retired. Node
+    # observations do not authorize rating or charging a customer's account.
+    return {"success": True, "accounts_processed": 0, "events_created": 0, "errors": 0}
 
 
 def collect_service_usage() -> dict[str, Any]:
@@ -553,7 +430,7 @@ def collect_service_usage() -> dict[str, Any]:
 
         # Use iterator() for memory-efficient processing
         services = (
-            Service.objects.filter(status="active")
+            Service.objects.filter(status="active", virtualmin_account__isnull=True)
             .select_related("customer", "service_plan")
             .iterator(chunk_size=billing_config.ITERATOR_CHUNK_SIZE)
         )
@@ -688,16 +565,15 @@ def register_scheduled_tasks() -> None:
             "minutes": 15,
         },
         {
-            "name": "Collect Virtualmin Usage",
-            "func": "apps.billing.metering_tasks.collect_virtualmin_usage",
-            "schedule_type": Schedule.HOURLY,
-        },
-        {
             "name": "Collect Service Usage",
             "func": "apps.billing.metering_tasks.collect_service_usage",
             "schedule_type": Schedule.HOURLY,
         },
     ]
+
+    Schedule.objects.filter(
+        name="Collect Virtualmin Usage", func="apps.billing.metering_tasks.collect_virtualmin_usage"
+    ).delete()
 
     for config in schedules:
         Schedule.objects.update_or_create(

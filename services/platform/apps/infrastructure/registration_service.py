@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, InterfaceError, transaction
+from django.db.models import ProtectedError
 
 from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_fingerprint
 from apps.common.types import Err, Ok, Result
@@ -399,8 +400,15 @@ class NodeRegistrationService:
                         server.save(update_fields=["status", "updated_at"])
                     else:
                         server_id = server.id
-                        server.delete()
-                        logger.info(f"📝 [Registration] Deleted VirtualminServer(id={server_id})")
+                        try:
+                            with transaction.atomic():
+                                server.delete()
+                            logger.info(f"📝 [Registration] Deleted VirtualminServer(id={server_id})")
+                        except ProtectedError:
+                            # Drain, migration and bridge history keep the record; the node is gone.
+                            server.status = "disabled"
+                            server.save(update_fields=["status", "updated_at"])
+                            logger.info(f"📝 [Registration] Kept VirtualminServer(id={server_id}) for its history")
                 else:
                     # Just deactivate
                     server.status = "disabled"

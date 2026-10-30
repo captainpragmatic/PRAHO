@@ -27,6 +27,11 @@ Without detection, PRAHO's database silently becomes stale. Operations like upgr
 
 ## Decision
 
+Account usage is reconciled separately by the hourly, observational
+`virtualmin-usage-sync` task (ADR-0068). Missing or unassigned account observations
+raise staff attention; they do not import customers, change quotas or remediate
+nodes. This does not implement the proposed cloud/OS remediation system below.
+
 Implement a three-layer config drift detection and remediation system with:
 
 1. **Periodic scanning** via Django-Q2 scheduled tasks (every 15 minutes for active deployments)

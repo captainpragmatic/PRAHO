@@ -312,6 +312,7 @@ class Wp16SupportBillingTests(SimpleTestCase):
                     "status": "active",
                     "currency_code": "RON",
                     "disk_usage_percentage": 25,
+                    "disk_usage_gb": 2.5,
                     "service_plan": {"name": "Basic", "disk_space_gb": 10},
                 },
             },

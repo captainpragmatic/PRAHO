@@ -367,6 +367,9 @@
         dest: /etc/praho-virtualmin-install
         mode: '0644'
 
+    - name: Install private hosting usage collection
+      ansible.builtin.import_tasks: virtualmin_usage_tasks.yml
+
   handlers:
     - name: Restart webmin
       ansible.builtin.service:

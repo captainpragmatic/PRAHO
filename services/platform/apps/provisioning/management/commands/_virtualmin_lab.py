@@ -173,6 +173,7 @@ def ensure_lab_deployment(
             "is_active": False,
         },
     )
+    size.available_regions.add(region)
     panel, _ = PanelType.objects.get_or_create(
         panel_type="virtualmin",
         defaults={"name": "Virtualmin", "ansible_playbook": "virtualmin.yml"},

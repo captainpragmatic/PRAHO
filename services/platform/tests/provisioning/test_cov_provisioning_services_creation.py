@@ -124,16 +124,15 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
         self.assertFalse(VirtualminProvisioningJob.objects.exists())
         self.assertEqual(self.requests, [])
 
-    def test_draining_explicit_server_records_retriable_failed_job(self) -> None:
+    def test_draining_explicit_server_is_refused_retriably_before_any_row(self) -> None:
+        # Admission decides under the server lock teardown takes, so a draining node never gains an
+        # account row, not even an error one that would block its teardown; the task layer retries.
         VirtualminServer.objects.filter(pk=self.server.pk).update(is_draining=True)
         result = self.provisioning.create_virtualmin_account(self._creation())
         self.assertEqual(result.unwrap_err(), "Target server is draining")
         self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
-        account = VirtualminAccount.objects.get(service=self.service)
-        self.assertEqual(account.status, "error")
-        job = VirtualminProvisioningJob.objects.get(account=account)
-        self.assertEqual(job.status, "failed")
-        self.assertIsNotNone(job.next_retry_at)
+        self.assertFalse(VirtualminAccount.objects.filter(service=self.service).exists())
+        self.assertFalse(VirtualminProvisioningJob.objects.filter(server=self.server).exists())
         self.assertEqual(self.requests, [])
 
     def test_capacity_preflight_failure_preserves_counter_and_avoids_creation(self) -> None:

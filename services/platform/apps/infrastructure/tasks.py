@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +17,8 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Result
+from apps.infrastructure.deployment_lifecycle import invalidate_stale_operation
 from apps.infrastructure.deployment_service import get_deployment_service
 from apps.infrastructure.validation_service import get_validation_service
 
@@ -36,6 +38,8 @@ _STUCK_TIMEOUT_HOURS = 3
 # no recovery path. 'destroying' is handled separately (teardown retry, not
 # fail) by the stale-destroying sweep.
 _INTERMEDIATE_STATUSES = [
+    # A pending row this old lost its queued task (enqueue failed, or the broker dropped it).
+    "pending",
     "provisioning_node",
     "configuring_dns",
     "installing_panel",
@@ -49,28 +53,68 @@ _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
 # provider provisioning and validation. Keep the worker alive for the full
 # supported pipeline with one hour of margin.
 NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
+# Teardown waits on at most a few provider actions (each polled for up to ~5 minutes) plus DNS and
+# unregistration; a stalled run stays 'destroying' for the stale-destroying sweep to resume.
+NODE_DESTROY_TASK_TIMEOUT_SECONDS = 30 * 60
+# Lifecycle tasks run once: a failed or timed-out run is acknowledged instead of replayed by the broker
+# hours later. Recovery is the application's (the operation token and the sweeps), never the queue's.
+LIFECYCLE_TASK_OPTIONS: dict[str, Any] = {"ack_failure": True}
 
 
-def _fail_before_first_phase(deployment: Any, error: str) -> dict[str, Any]:
+class OperationReservationError(Exception):
+    """The deployment cannot take this operation now; nothing was queued."""
+
+
+def _reserve(
+    deployment_id: int,
+    *,
+    from_states: tuple[str, ...],
+    kind: str,
+    require_reconciled: bool = False,
+    flagged_states: tuple[str, ...] = (),
+) -> str:
+    from apps.infrastructure.deployment_lifecycle import reserve_operation  # noqa: PLC0415  # Deferred import
+
+    reserved = reserve_operation(
+        deployment_id,
+        from_states=from_states,
+        kind=kind,
+        require_reconciled=require_reconciled,
+        flagged_states=flagged_states,
+    )
+    if reserved.is_err():
+        raise OperationReservationError(reserved.unwrap_err())
+    return str(reserved.unwrap())
+
+
+def _fail_before_first_phase(deployment: Any, error: str, operation_token: str | None = None) -> dict[str, Any]:
     """A deployment that never reached its first phase fails with the reason; it is never left pending.
 
     Returning (not raising) lets the completion hook log the error and acknowledges the task, so the
     queue does not silently run it again hours later. Only a row still pending is ours to fail: a row
-    already past pending belongs to the worker running it.
+    already past pending belongs to the worker running it, and a pending row reserved by a newer
+    enqueue belongs to that task.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
 
     with transaction.atomic():
         locked = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
-        if locked.status == "pending":
+        reserved_elsewhere = operation_token is not None and str(locked.operation_token) != operation_token
+        if locked.status == "pending" and not reserved_elsewhere:
             locked.transition_to("failed", f"Deployment did not start: {error}")
+            NodeDeployment.objects.filter(pk=locked.pk).update(operation_token=None, operation_kind="")
     return {"success": False, "deployment_id": deployment.pk, "hostname": deployment.hostname, "error": error}
+
+
+def _token(operation_token: str | None) -> uuid.UUID | None:
+    return uuid.UUID(operation_token) if operation_token else None
 
 
 def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure, each failing the row.
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to deploy a node.
@@ -83,6 +127,7 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         deployment_id: ID of the NodeDeployment to deploy
         provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the deployment
+        operation_token: The token queue_deploy_node reserved; None for a task queued before reservations
 
     Returns:
         dict with deployment result information
@@ -112,7 +157,7 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         provider = CloudProvider.objects.get(id=provider_id)
     except CloudProvider.DoesNotExist:
         logger.error(f"[Task:deploy_node] Provider {provider_id} not found")
-        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found")
+        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found", operation_token)
 
     try:
         token_result = get_provider_token(provider)
@@ -120,10 +165,14 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
     except Exception as error:  # A vault or settings fault; its text may describe secrets, so only its type is kept.
         logger.error(f"[Task:deploy_node] Could not read deployment credentials: {type(error).__name__}")
-        return _fail_before_first_phase(deployment, f"Could not read deployment credentials ({type(error).__name__})")
+        return _fail_before_first_phase(
+            deployment, f"Could not read deployment credentials ({type(error).__name__})", operation_token
+        )
     if token_result.is_err():
         logger.error(f"[Task:deploy_node] Failed to get token for provider {provider.name}")
-        return _fail_before_first_phase(deployment, f"Failed to get provider token: {token_result.unwrap_err()}")
+        return _fail_before_first_phase(
+            deployment, f"Failed to get provider token: {token_result.unwrap_err()}", operation_token
+        )
 
     credentials: dict[str, str] = {"api_token": token_result.unwrap()}
     cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
@@ -137,17 +186,18 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         service = get_deployment_service()
     except Exception as error:  # A worker that cannot build the service (no ansible-playbook, say) must say why.
         logger.error(f"[Task:deploy_node] Deployment service unavailable: {error}")
-        return _fail_before_first_phase(deployment, str(error))
+        return _fail_before_first_phase(deployment, str(error), operation_token)
     result = service.deploy_node(
         deployment=deployment,
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
         # A refusal before the row was claimed (deployment disabled, say) leaves it pending; fail it there.
-        return _fail_before_first_phase(deployment, result.unwrap_err())
+        return _fail_before_first_phase(deployment, result.unwrap_err(), operation_token)
 
     deploy_result = result.unwrap()
     return {
@@ -164,6 +214,7 @@ def destroy_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to destroy a node.
@@ -228,6 +279,7 @@ def destroy_node_task(
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
@@ -250,6 +302,7 @@ def retry_deployment_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to retry a failed deployment.
@@ -314,9 +367,11 @@ def retry_deployment_task(
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
+        deployment.refresh_from_db()
         return {
             "success": False,
             "deployment_id": deployment_id,
@@ -331,6 +386,58 @@ def retry_deployment_task(
         "deployment_id": deployment_id,
         "hostname": deploy_result.hostname,
         "retry_count": deployment.retry_count,
+        "stages_completed": deploy_result.stages_completed,
+        "duration_seconds": deploy_result.duration_seconds,
+    }
+
+
+def redeploy_node_task(
+    deployment_id: int,
+    provider_id: int,
+    new_size_id: int,
+    user_id: int | None = None,
+    operation_token: str | None = None,
+) -> dict[str, Any]:
+    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname.
+
+    Credentials are fetched at execution time. A refusal before the claim leaves the row as it was; the
+    service settles a refused start under its own claim.
+    """
+    from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeSize  # noqa: PLC0415  # Deferred
+    from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415  # Deferred
+    from apps.users.models import User  # noqa: PLC0415  # Deferred: avoids circular import
+
+    logger.info(f"🚀 [Task:redeploy_node] Re-deploying deployment_id={deployment_id}")
+    try:
+        deployment = NodeDeployment.objects.get(id=deployment_id)
+        new_size = NodeSize.objects.get(id=new_size_id)
+        provider = CloudProvider.objects.get(id=provider_id)
+    except (NodeDeployment.DoesNotExist, NodeSize.DoesNotExist, CloudProvider.DoesNotExist) as missing:
+        return {"success": False, "deployment_id": deployment_id, "error": str(missing)}
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        return {"success": False, "deployment_id": deployment_id, "error": token_result.unwrap_err()}
+    user = User.objects.filter(id=user_id).first() if user_id else None
+
+    result = get_deployment_service().redeploy_node(
+        deployment=deployment,
+        new_size=new_size,
+        credentials={"api_token": token_result.unwrap()},
+        user=user,
+        expected_token=_token(operation_token),
+    )
+    if result.is_err():
+        return {
+            "success": False,
+            "deployment_id": deployment_id,
+            "hostname": deployment.hostname,
+            "error": result.unwrap_err(),
+        }
+    deploy_result = result.unwrap()
+    return {
+        "success": True,
+        "deployment_id": deployment_id,
+        "hostname": deploy_result.hostname,
         "stages_completed": deploy_result.stages_completed,
         "duration_seconds": deploy_result.duration_seconds,
     }
@@ -479,110 +586,19 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     }
 
 
-def _teardown_owned_dns(deployment: Any) -> None:
-    """Best-effort owner-scoped DNS deletion for the teardown sweep; never raises."""
-    try:
-        from apps.infrastructure.deployment_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-            NodeDeploymentService,  # Circular: cross-app
-        )
+def _teardown_cloud_deployment(deployment: Any, stale_before: datetime) -> Result[bool, str]:
+    """Run a failed or stranded deployment through the shared, resumable teardown.
 
-        NodeDeploymentService._delete_owned_dns(deployment)
-    except Exception as dns_exc:
-        logger.warning(f"[Task:cleanup] DNS teardown raised for {deployment.hostname}: {dns_exc}")
-
-
-def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:  # noqa: PLR0911  # Convergent teardown: one early Err per distinct failure mode (claim/token/delete/save)
-    """Idempotent, convergent teardown for a failed/stranded deployment.
-
-    Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery
-    sweep so a partial teardown converges on the next run instead of stranding.
-    Nothing is cleared until it is confirmed gone:
-
-      failed -> destroying (claim) -> delete the cloud server -> only on a
-      confirmed delete: clear identifiers, write a log + audit, destroying ->
-      destroyed. A delete failure leaves the row in 'destroying' with its
-      external_node_id intact and returns Err, to be retried by the next sweep.
+    Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery sweep: the claim
+    re-checks status and age under the row lock and closes the node's admission, and every step
+    proves its resources gone or leaves the row 'destroying' for the next sweep (node_teardown).
     """
-    from apps.infrastructure.audit_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        InfrastructureAuditService,  # Circular: cross-app
-    )
-    from apps.infrastructure.cloud_gateway import get_cloud_gateway  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        NodeDeploymentLog,  # Circular: cross-app
-    )
-    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
-        get_provider_token,  # Circular: cross-app
-    )
-
-    # Claim into 'destroying' (idempotent — a retried stale-destroying row is
-    # already there).
-    if deployment.status == "failed":
-        try:
-            deployment.transition_to("destroying", "Scheduled teardown of failed deployment")
-        except Exception as e:
-            return Err(f"Cannot start teardown for {deployment.hostname}: {e}")
-
-    # Delete owned DNS first (best-effort, owner-scoped). This is the compensation path the
-    # common failed-deploy case actually takes, so DNS cleanup must live here too — not only
-    # in destroy_node (#347 GAP 3). Idempotent on retry; must never crash the sweep.
-    _teardown_owned_dns(deployment)
-
-    # Delete the cloud server if one was ever created.
-    if deployment.external_node_id and deployment.provider:
-        # Token retrieval decrypts a stored provider credential — which can RAISE
-        # under the fail-closed encryption reads (#346) on a corrupt credential —
-        # and the provider SDK may raise rather than return Err. Contain both
-        # inside one boundary so a single bad deployment defers to the next sweep
-        # instead of crashing the whole cleanup run and skipping every other row.
-        try:
-            token_result = get_provider_token(deployment.provider)
-            if token_result.is_err():
-                return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
-            gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
-            delete_result = gateway.delete_server(deployment.external_node_id)
-        except Exception as e:
-            return Err(f"Teardown provider call raised for {deployment.hostname}: {e}")
-        if delete_result.is_err():
-            try:
-                InfrastructureAuditService.log_destroy_failed(deployment, delete_result.unwrap_err())
-            except Exception as audit_err:
-                logger.warning(f"[Task:cleanup] Audit failed for destroy failure: {audit_err}")
-            return Err(f"Server deletion failed for {deployment.hostname}: {delete_result.unwrap_err()}")
-
-        # Confirmed gone (delete is idempotent on not-found): clear identifiers so
-        # this row is never reprocessed and the provider is never re-hit. A DB
-        # error on this write must not crash the sweep — the row stays 'destroying'
-        # with its external_node_id intact and the next sweep re-converges (the
-        # delete is a no-op on the already-gone server).
-        try:
-            deployment.external_node_id = ""
-            deployment.ipv4_address = None
-            deployment.save(update_fields=["external_node_id", "ipv4_address", "updated_at"])
-        except Exception as e:
-            return Err(f"Failed to clear identifiers for {deployment.hostname} after delete: {e}")
-
-    # Best-effort log — a transient DB write must not crash the sweep.
-    try:
-        NodeDeploymentLog.objects.create(
-            deployment=deployment,
-            level="info",
-            message="Cloud resources torn down by scheduled cleanup",
-            phase="destroying",
-        )
-    except Exception as log_err:
-        logger.warning(f"[Task:cleanup] Could not write teardown log for {deployment.hostname}: {log_err}")
+    from apps.infrastructure.node_teardown import teardown_stale_deployment  # noqa: PLC0415  # Circular
 
     try:
-        deployment.transition_to("destroyed", "Teardown complete")
-    except Exception as e:
-        return Err(f"Cannot finalize teardown for {deployment.hostname}: {e}")
-
-    try:
-        InfrastructureAuditService.log_destroy_completed(deployment)
-    except Exception as audit_err:
-        logger.warning(f"[Task:cleanup] Audit failed for destroy completion: {audit_err}")
-
-    return Ok(True)
+        return teardown_stale_deployment(deployment, stale_before=stale_before)
+    except Exception as e:  # One bad row must never stop the sweep over the others.
+        return Err(f"Teardown of {deployment.hostname} raised: {e}")
 
 
 def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
@@ -603,13 +619,15 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
     cutoff = timezone.now() - timedelta(hours=max_age_hours)
-    failed_deployments = NodeDeployment.objects.filter(status="failed", updated_at__lt=cutoff)
+    failed_deployments = NodeDeployment.objects.filter(
+        status="failed", updated_at__lt=cutoff, needs_reconciliation=False
+    )
 
     cleaned_count = 0
     errors: list[dict[str, str]] = []
 
     for deployment in failed_deployments:
-        result = _teardown_cloud_deployment(deployment)
+        result = _teardown_cloud_deployment(deployment, cutoff)
         if result.is_ok():
             cleaned_count += 1
             logger.info(f"[Task:cleanup] Tore down {deployment.hostname}")
@@ -664,8 +682,18 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
             error_msg = (
                 f"Deployment stuck in '{deployment.status}' for {stuck_duration:.1f}h — auto-recovered to failed"
             )
+            # Re-check status and age under the lock and clear the owner's token, so a worker that was
+            # only slow finds its next write refused instead of overwriting the recovery.
+            if not invalidate_stale_operation(
+                deployment.pk,
+                from_states=_INTERMEDIATE_STATUSES,
+                to_status="failed",
+                stale_before=cutoff,
+                message=error_msg,
+            ):
+                continue
+            deployment.refresh_from_db()
             logger.warning(f"⚠️ [Task:recover_stuck] {deployment.hostname}: {error_msg}")
-            deployment.transition_to("failed", error_msg)
             try:
                 InfrastructureAuditService.log_deployment_failed(deployment, error_msg, stage="recovery")
             except Exception as audit_err:
@@ -677,9 +705,11 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
 
     # 2. Stranded 'destroying' rows (a teardown whose delete failed, or a worker
     # that died mid-destroy) -> retry the idempotent teardown to convergence.
-    stale_destroying = NodeDeployment.objects.filter(status="destroying", updated_at__lt=cutoff)
+    stale_destroying = NodeDeployment.objects.filter(
+        status="destroying", updated_at__lt=cutoff, needs_reconciliation=False
+    )
     for deployment in stale_destroying:
-        result = _teardown_cloud_deployment(deployment)
+        result = _teardown_cloud_deployment(deployment, cutoff)
         if result.is_ok():
             torn_down_count += 1
         else:
@@ -1195,14 +1225,17 @@ def queue_deploy_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    token = _reserve(deployment_id, from_states=("pending",), kind="deploy")
     task_id = async_task(
         "apps.infrastructure.tasks.deploy_node_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"deploy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
         timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Deployment queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -1229,13 +1262,24 @@ def queue_destroy_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    from apps.infrastructure.node_teardown import (  # noqa: PLC0415  # Deferred import
+        DESTROYABLE_STATES,
+        PARKED_TEARDOWN_STATES,
+    )
+
+    token = _reserve(
+        deployment_id, from_states=DESTROYABLE_STATES, kind="destroy", flagged_states=PARKED_TEARDOWN_STATES
+    )
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"destroy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.destruction_complete_hook",
+        timeout=NODE_DESTROY_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Destruction queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -1262,18 +1306,47 @@ def queue_retry_deployment(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    token = _reserve(deployment_id, from_states=("failed",), kind="retry", require_reconciled=True)
     task_id = async_task(
         "apps.infrastructure.tasks.retry_deployment_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"retry_deployment_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
         timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Retry queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
+
+
+def queue_redeploy_node(
+    deployment_id: int,
+    provider_id: int,
+    new_size_id: int,
+    user_id: int | None = None,
+) -> str:
+    """Queue a re-deploy, reserving its operation token; it runs once with the deploy pipeline's timeout."""
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: django-q task
+
+    token = _reserve(deployment_id, from_states=("failed", "destroyed"), kind="redeploy", require_reconciled=True)
+    task_id = async_task(
+        "apps.infrastructure.tasks.redeploy_node_task",
+        deployment_id,
+        provider_id,
+        new_size_id,
+        user_id,
+        token,
+        task_name=f"redeploy_node_{deployment_id}",
+        hook="apps.infrastructure.tasks.deployment_complete_hook",
+        timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
+    )
+    logger.info(f"✅ [Queue] Re-deploy queued: deployment_id={deployment_id}, task_id={task_id}")
+    return str(task_id)
 
 
 def queue_upgrade_node(

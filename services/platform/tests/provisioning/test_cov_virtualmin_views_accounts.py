@@ -60,7 +60,8 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         self.assertIn("domain", response.context["form"].errors)
         self.assertEqual(VirtualminAccount.objects.count(), 1)
 
-    def test_sync_updates_domains_and_usage_from_multiline_response(self) -> None:
+    def test_discovery_updates_domains_and_preserves_usage_and_quota(self) -> None:
+        old_usage, old_quota = self.account.current_disk_usage_mb, self.account.disk_quota_mb
         self.payload["data"] = [
             {
                 "name": self.account.domain,
@@ -81,8 +82,8 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         self.assertContains(response, self.account.domain)
         self.account.refresh_from_db()
         self.assertEqual(self.account.domains, [self.account.domain, "alias.example.com"])
-        self.assertEqual(self.account.current_disk_usage_mb, 12)
-        self.assertEqual(self.account.disk_quota_mb, 256)
+        self.assertEqual(self.account.current_disk_usage_mb, old_usage)
+        self.assertEqual(self.account.disk_quota_mb, old_quota)
         self.assertIsNotNone(self.account.last_sync_at)
         self.assertFalse(VirtualminAccount.objects.filter(virtualmin_username="ignored").exists())
         self.assertIn("1 updated", self.messages(response))

@@ -36,6 +36,7 @@ providing a historical record of why the system is built the way it is.
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
+| [ADR-0068](ADR-0068-observational-hosting-usage.md) | Observational hosting usage | Proposed | 2026-10-30 |
 | [ADR-0001](ADR-0001-pytest-playwright-for-e2e-testing.md) | pytest-playwright for E2E Testing | Accepted | 2025-08-25 |
 | [ADR-0002](ADR-0002-strategic-linting-framework.md) | Strategic Linting Framework | Accepted | 2025-08-25 |
 | [ADR-0004](ADR-0004-custom-2fa-implementation.md) | Custom 2FA Implementation vs django-otp | Accepted | 2024-08-24 |
@@ -232,8 +233,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 66 (ADR-0001 through ADR-0066)
-- **Active**: 59 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 67 (ADR-0001 through ADR-0066, and ADR-0068)
+- **Active**: 60 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
 - **Next available**: ADR-0067

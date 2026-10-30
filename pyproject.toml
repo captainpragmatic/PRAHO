@@ -212,7 +212,7 @@ platform = [
     # Server provisioning & SSH
     "ansible-core==2.20.6",  # Controller used by Platform jobs and native deployment checks
     "paramiko>=4.0.0",
-    "hcloud>=2.0.0",
+    "hcloud>=2.16.0",
     "dnspython>=2.8.0",
     "pydo>=0.3.0",
 
@@ -296,6 +296,9 @@ exclude = [
     "media",
     "tests",
 ]
+
+[tool.ruff.per-file-target-version]
+"services/platform/infrastructure/ansible/playbooks/files/praho_usage.py" = "py310"
 
 [tool.ruff.lint]
 # ===============================================================================

@@ -2,7 +2,7 @@
 
 Provisioning transitions are exercised by the real ORM workflow tests. Customer
 requests and private staff decisions are covered in test_service_request_workflow.
-Usage history charts are not implemented; current usage is.
+Usage history is empty until source observations exist.
 """
 
 import re
@@ -69,10 +69,15 @@ def test_customer_service_usage_chart(monitored_customer_page: Page, e2e_baselin
     page.get_by_role("button", name="Usage & Performance", exact=True).click()
     usage = page.locator("[x-show=\"isTab('usage')\"]")
     expect(usage).to_be_visible()
-    expect(usage).to_contain_text("0.1 GB / 10 GB")
+    disk = usage.locator('[data-usage-resource="disk"]')
+    bandwidth = usage.locator('[data-usage-resource="bandwidth"]')
+    expect(disk).to_contain_text("0.1 GB")
+    expect(disk).to_contain_text("of 10 GB used")
     expect(usage).to_contain_text("1.2% used")
-    expect(usage).to_contain_text("0.0 GB / 100 GB")
-    expect(usage).to_contain_text("Usage charts will be available soon")
+    expect(bandwidth).to_contain_text("0.0 GB")
+    expect(bandwidth).to_contain_text("of 100 GB used")
+    expect(usage).to_contain_text("No disk usage history is available yet.")
+    expect(usage.locator("polyline")).to_have_count(0)
     page.get_by_role("button", name="Overview", exact=True).click()
     expect(usage).to_be_hidden()
     expect(page.get_by_role("heading", name="Service Health")).to_be_visible()

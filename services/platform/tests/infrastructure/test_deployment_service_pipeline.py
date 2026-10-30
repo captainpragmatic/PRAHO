@@ -26,6 +26,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.forms import NodeDeploymentForm
@@ -55,6 +56,7 @@ def _ok_dns_gateway() -> MagicMock:
     gw.get_zone_name.return_value = Ok("test.example.com")
     gw.reconcile_records.return_value = ReconcileOutcome(applied=[], error=None)
     gw.delete_owned_records.return_value = Ok([])
+    gw.confirm_no_owned_records.return_value = Ok(True)
     return gw
 
 
@@ -129,6 +131,26 @@ def _create_deployment(status: str = "pending", external_node_id: str = "") -> N
     return deployment
 
 
+def _created_by_token(status: str, server_id: str, token: str) -> NodeDeployment:
+    """A deployment whose server was created under ``token``, so that token's answers are proof."""
+    deployment = _create_deployment(status, external_node_id=server_id)
+    NodeDeployment.objects.filter(pk=deployment.pk).update(
+        server_create_state="created", provider_token_fingerprint=provider_token_fingerprint(token)
+    )
+    deployment.refresh_from_db()
+    return deployment
+
+
+def _teardown_gateway() -> MagicMock:
+    """A provider gateway for teardown: nothing else discovered, every delete confirmed."""
+    gateway = MagicMock()
+    gateway.find_servers_by_label.return_value = Ok([])
+    gateway.find_firewalls_by_label.return_value = Ok([])
+    gateway.find_ssh_keys_by_label.return_value = Ok([])
+    gateway.delete_server.return_value = Ok(True)
+    return gateway
+
+
 def _make_service() -> NodeDeploymentService:
     """Create a NodeDeploymentService with mocked sub-services."""
     with patch("apps.infrastructure.deployment_service.get_ansible_service", return_value=MagicMock()):
@@ -142,6 +164,8 @@ def _make_service() -> NodeDeploymentService:
     service._validation = MagicMock()
     service._registration = MagicMock()
     service._node_firewall_rules = MagicMock(return_value=STANDARD_FIREWALL_RULES)
+    # The provider orderable check has its own tests (test_deploy_orderable_check).
+    service._check_orderable = MagicMock(return_value=Ok(True))
     return service
 
 
@@ -322,7 +346,7 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         service._registration.register_node.return_value = Ok(MagicMock(id=1))
 
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -362,7 +386,7 @@ class TestCredentialSeamWiring(TestCase):
         service._registration.verify_and_activate.return_value = Ok(registered)
 
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -397,7 +421,7 @@ class TestCredentialSeamWiring(TestCase):
         service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
         service._registration.register_node.return_value = Ok(registered)
         gateway = MagicMock()
-        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -500,8 +524,15 @@ class TestTransientErrorPreservesExternalId(TestCase):
         self.assertEqual(deployment.external_node_id, "srv-123")
 
     def test_confirmed_not_found_clears_external_node_id(self) -> None:
-        """When get_server returns Ok(None), it's safe to clear external_node_id."""
+        """When get_server returns Ok(None), it's safe to clear external_node_id.
+
+        Only under the token that created the server: another token's "not found" proves nothing.
+        """
         deployment = _create_deployment("pending", external_node_id="srv-456")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            provider_token_fingerprint=provider_token_fingerprint("test-token")
+        )
+        deployment.refresh_from_db()
         service = _make_service()
 
         service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
@@ -509,8 +540,8 @@ class TestTransientErrorPreservesExternalId(TestCase):
         mock_gateway = MagicMock()
         # Ok(None) = server confirmed not found
         mock_gateway.get_server.return_value = Ok(None)
-        # Make upload_ssh_key fail so we can check external_node_id was cleared
-        mock_gateway.upload_ssh_key.return_value = Err("key upload failed")
+        # Make upload_owned_ssh_key fail so we can check external_node_id was cleared
+        mock_gateway.upload_owned_ssh_key.return_value = Err("key upload failed")
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
@@ -662,15 +693,13 @@ class TestDestroyNodeAtomicTransition(TestCase):
 
     @patch("apps.infrastructure.deployment_service.run_provider_command")
     def test_destroy_completed_succeeds(self, mock_run_cmd: MagicMock) -> None:
-        deployment = _create_deployment("completed", external_node_id="srv-1")
+        deployment = _created_by_token("completed", "srv-1", "test")
         service = _make_service()
         service._registration.unregister_node.return_value = Ok(True)
 
-        mock_gateway = MagicMock()
-        mock_gateway.delete_server.return_value = Ok(True)
-        mock_gateway.delete_ssh_key.return_value = Ok(True)
+        mock_gateway = _teardown_gateway()
 
-        with patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway):
+        with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(
                 deployment=deployment,
                 credentials={"api_token": "test"},
@@ -682,15 +711,13 @@ class TestDestroyNodeAtomicTransition(TestCase):
 
     @patch("apps.infrastructure.deployment_service.run_provider_command")
     def test_destroy_stopped_succeeds(self, mock_run_cmd: MagicMock) -> None:
-        deployment = _create_deployment("stopped", external_node_id="srv-2")
+        deployment = _created_by_token("stopped", "srv-2", "test")
         service = _make_service()
         service._registration.unregister_node.return_value = Ok(True)
 
-        mock_gateway = MagicMock()
-        mock_gateway.delete_server.return_value = Ok(True)
-        mock_gateway.delete_ssh_key.return_value = Ok(True)
+        mock_gateway = _teardown_gateway()
 
-        with patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway):
+        with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(
                 deployment=deployment,
                 credentials={"api_token": "test"},
@@ -1065,22 +1092,21 @@ class TestDestroyClearsExternalIdForRetryIdempotency(TestCase):
     re-invoke delete_server against an already-deleted VM."""
 
     def test_destroy_clears_external_node_id_after_cloud_deletion(self) -> None:
-        deployment = _create_deployment("completed", external_node_id="srv-123")
+        deployment = _created_by_token("completed", "srv-123", "tok")
         service = _make_service()
         # Vault revocation FAILS after cloud deletion succeeds -> destroy returns Err.
         service._ssh_manager.delete_deployment_key.return_value = Err("vault unavailable")
 
-        mock_gateway = MagicMock()
-        mock_gateway.delete_server.return_value = Ok(True)
-        mock_gateway.delete_ssh_key.return_value = Ok(True)
+        mock_gateway = _teardown_gateway()
 
-        with patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway):
+        with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(deployment, credentials={"api_token": "tok"})
 
         self.assertTrue(result.is_err())
         mock_gateway.delete_server.assert_called_once_with("srv-123")
         deployment.refresh_from_db()
         self.assertEqual(deployment.external_node_id, "")
+        self.assertEqual(deployment.status, "destroying")  # resumed by the stale-destroying sweep
 
 
 class TestSshKeyFallbackAggregateRetriability(TestCase):
