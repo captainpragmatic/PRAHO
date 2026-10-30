@@ -156,12 +156,16 @@ class CostTrackingService:
     ) -> Result[tuple[Decimal, Decimal], str]:
         """A deployment without server lifetimes: its own started_at .. destroyed_at window at its current size.
 
-        No ``started_at`` means no server ever ran (it is set when one is created), so no time is billed.
+        Without ``started_at`` the window starts at ``created_at``, as before lifetimes existed: a lost create answer
+        does not prove no server ran. Only a row that provably never got a server is billed nothing.
         """
         none = Ok((Decimal("0"), Decimal("0")))
-        if deployment.started_at is None:
-            return none
-        effective_start = max(period_start, deployment.started_at)
+        started_at = deployment.started_at
+        if started_at is None:
+            if deployment.never_got_a_server:
+                return none
+            started_at = deployment.created_at
+        effective_start = max(period_start, started_at)
         effective_end = min(period_end, deployment.destroyed_at or timezone.now())
         if effective_end <= effective_start:
             return none

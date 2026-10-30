@@ -103,6 +103,32 @@ class NoServerNoCostTests(TestCase):
         self.assertEqual((record.cost_eur, record.compute_cost), (Decimal("0"), Decimal("0")))
 
 
+    def _legacy_unknown_create(self, **record: object) -> NodeDeployment:
+        """A row from before lifetimes whose create answer was lost: no started_at, no lifetime, a server may have run."""
+        deployment = _create_deployment("destroyed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            started_at=None, created_at=at(2), destroyed_at=at(2, 10), server_create_state="unknown",
+            reconciliation_record=record,
+        )
+        deployment.refresh_from_db()
+        self.assertFalse(deployment.server_lifetimes.exists())
+        return deployment
+
+    def test_a_legacy_unknown_create_is_billed_from_its_creation(self) -> None:
+        deployment = self._legacy_unknown_create()
+        rate = str(deployment.node_size.monthly_cost_eur)
+        record = CostTrackingService().calculate_deployment_costs(deployment, at(1), at(8)).unwrap()
+        self.assertEqual(record.cost_eur.quantize(Decimal("0.0001")), cost(rate, 10).quantize(Decimal("0.0001")))
+
+    def test_a_legacy_unknown_create_attested_never_created_costs_nothing(self) -> None:
+        deployment = self._legacy_unknown_create()
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            reconciliation_record={"never_created_attested": True, "correlation_id": str(deployment.correlation_id)}
+        )
+        deployment.refresh_from_db()
+        self.assertTrue(deployment.never_got_a_server)
+        self.assertTrue(CostTrackingService().calculate_deployment_costs(deployment, at(1), at(8)).is_err())
+
 class BreakdownRateTests(TestCase):
     def test_the_rate_uses_cost_and_hours_of_the_same_lifetimes(self) -> None:
         deployment = _create_deployment("destroyed")
