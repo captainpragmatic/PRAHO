@@ -12,6 +12,7 @@ Orchestrates the complete node deployment pipeline:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import secrets
 import uuid
@@ -182,7 +183,7 @@ class NodeDeploymentService:
 
     @staticmethod
     def _claim_deploy(
-        deployment: NodeDeployment, expected_token: uuid.UUID | None
+        deployment: NodeDeployment, expected_token: uuid.UUID | None, kind: str
     ) -> Result[tuple[OperationLease, str], str]:
         """Claim a pending row for the pipeline together with its provider, under both row locks."""
         from apps.infrastructure.models import CloudProvider  # noqa: PLC0415 -- Claim the current provider too.
@@ -192,7 +193,7 @@ class NodeDeploymentService:
                 deployment.pk,
                 from_states=("pending",),
                 to_status="provisioning_node",
-                kind="retry" if expected_token else "deploy",
+                kind=kind,
                 expected_token=expected_token,
             )
             if claim.is_err():
@@ -211,6 +212,7 @@ class NodeDeploymentService:
         user: User | None = None,
         progress_callback: Callable[..., None] | None = None,
         expected_token: uuid.UUID | None = None,
+        operation_kind: str = "deploy",
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -221,7 +223,8 @@ class NodeDeploymentService:
             cloudflare_api_token: Cloudflare API token (optional)
             user: User performing the deployment
             progress_callback: Optional callback for progress updates
-            expected_token: The retry's operation token; only its holder may start the pipeline
+            expected_token: The token reserved at enqueue (or by the retry claim); only its holder starts
+            operation_kind: "deploy", or "retry" when retry_deployment hands over its claim
 
         Returns:
             Result with DeploymentResult or error
@@ -273,7 +276,7 @@ class NodeDeploymentService:
                 return Err("Node deployment is disabled in settings")
 
             # One locked claim: only a pending row starts, and a retry only with the token it reserved.
-            claim = self._claim_deploy(deployment, expected_token)
+            claim = self._claim_deploy(deployment, expected_token, operation_kind)
             if claim.is_err():
                 return Err(claim.unwrap_err())
             lease, claimed_provider_type = claim.unwrap()
@@ -791,6 +794,7 @@ class NodeDeploymentService:
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
+        expected_token: uuid.UUID | None = None,
     ) -> Result[bool, str]:
         """
         Destroy a deployed node through the shared teardown.
@@ -804,6 +808,7 @@ class NodeDeploymentService:
             credentials: Provider credentials dict
             cloudflare_api_token: Unused; DNS teardown reads the stored zone and the configured token
             user: User performing the destruction
+            expected_token: The token reserved at enqueue; a task holding an older one is refused
 
         Returns:
             Result with success status or error
@@ -811,7 +816,9 @@ class NodeDeploymentService:
         logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
         audit_ctx = InfrastructureAuditContext(user=user)
 
-        claim = claim_teardown(deployment, kind="destroy", from_states=DESTROYABLE_STATES)
+        claim = claim_teardown(
+            deployment, kind="destroy", from_states=DESTROYABLE_STATES, expected_token=expected_token
+        )
         if claim.is_err():
             return record_destroy_failure(deployment, f"Destroy refused: {claim.unwrap_err()}", audit_ctx)
         lease = claim.unwrap()
@@ -832,6 +839,7 @@ class NodeDeploymentService:
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
+        expected_token: uuid.UUID | None = None,
     ) -> Result[DeploymentResult, str]:
         """
         Retry a failed deployment.
@@ -841,6 +849,7 @@ class NodeDeploymentService:
             credentials: Provider credentials dict
             cloudflare_api_token: Cloudflare API token
             user: User performing the retry
+            expected_token: The token reserved at enqueue; a task holding an older one is refused
 
         Returns:
             Result with DeploymentResult or error
@@ -864,6 +873,7 @@ class NodeDeploymentService:
             kind="retry",
             increment_retry=True,
             require_reconciled=True,
+            expected_token=expected_token,
         )
         if claim.is_err():
             return Err(claim.unwrap_err())
@@ -884,13 +894,23 @@ class NodeDeploymentService:
         except Exception:
             logger.warning(f"[Retry:{deployment.hostname}] Failed to log audit: deployment retry")
 
-        return self.deploy_node(
+        result = self.deploy_node(
             deployment=deployment,
             credentials=credentials,
             cloudflare_api_token=cloudflare_api_token,
             user=user,
             expected_token=lease.token,
+            operation_kind="retry",
         )
+        if result.is_err():
+            # Refused before the pipeline claimed the row: this retry still owns it in pending. Fail it
+            # there so it is never stranded; once the pipeline claimed it, the pipeline settled it.
+            deployment.refresh_from_db()
+            with contextlib.suppress(OperationOwnershipLostError, ValidationError):
+                owned_transition(
+                    lease, deployment, "failed", f"Retry did not start: {result.unwrap_err()}", release=True
+                )
+        return result
 
     @staticmethod
     def _store_api_credential(

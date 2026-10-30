@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import inspect
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings as django_settings
@@ -227,28 +228,36 @@ class TestCloudflareTokenFetchedAtRuntime(TestCase):
 class TestQueueFunctionsNoCloudflareInPayload(TestCase):
     """C3: Queue functions must not pass cloudflare tokens to async_task."""
 
-    @patch("django_q.tasks.async_task", return_value="task-123")
-    def test_queue_deploy_no_cloudflare_in_args(self, mock_async: MagicMock) -> None:
-        queue_deploy_node(deployment_id=1, provider_id=2, user_id=3)
-        args = mock_async.call_args
-        # Positional args after the function path should be: deployment_id, provider_id, user_id
-        positional_args = args[0]
-        self.assertEqual(positional_args, ("apps.infrastructure.tasks.deploy_node_task", 1, 2, 3))
+    def _payload(self, queue: Any, status: str) -> tuple[tuple[Any, ...], Any, NodeDeployment]:
+        deployment = _create_test_deployment(status)
+        with patch("django_q.tasks.async_task", return_value="task-123") as mock_async:
+            queue(deployment_id=deployment.pk, provider_id=deployment.provider_id, user_id=3)
+        deployment.refresh_from_db()
+        return mock_async.call_args[0], mock_async.call_args, deployment
+
+    def test_queue_deploy_no_cloudflare_in_args(self) -> None:
+        # Positional args after the function path: deployment_id, provider_id, user_id and the
+        # operation token reserved for this task (an identifier, not a credential).
+        positional_args, args, d = self._payload(queue_deploy_node, "pending")
+        self.assertEqual(
+            positional_args,
+            ("apps.infrastructure.tasks.deploy_node_task", d.pk, d.provider_id, 3, str(d.operation_token)),
+        )
         self.assertGreaterEqual(args.kwargs["timeout"], NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS)
 
-    @patch("django_q.tasks.async_task", return_value="task-123")
-    def test_queue_destroy_no_cloudflare_in_args(self, mock_async: MagicMock) -> None:
-        queue_destroy_node(deployment_id=1, provider_id=2, user_id=3)
-        args = mock_async.call_args
-        positional_args = args[0]
-        self.assertEqual(positional_args, ("apps.infrastructure.tasks.destroy_node_task", 1, 2, 3))
+    def test_queue_destroy_no_cloudflare_in_args(self) -> None:
+        positional_args, _args, d = self._payload(queue_destroy_node, "completed")
+        self.assertEqual(
+            positional_args,
+            ("apps.infrastructure.tasks.destroy_node_task", d.pk, d.provider_id, 3, str(d.operation_token)),
+        )
 
-    @patch("django_q.tasks.async_task", return_value="task-123")
-    def test_queue_retry_no_cloudflare_in_args(self, mock_async: MagicMock) -> None:
-        queue_retry_deployment(deployment_id=1, provider_id=2, user_id=3)
-        args = mock_async.call_args
-        positional_args = args[0]
-        self.assertEqual(positional_args, ("apps.infrastructure.tasks.retry_deployment_task", 1, 2, 3))
+    def test_queue_retry_no_cloudflare_in_args(self) -> None:
+        positional_args, args, d = self._payload(queue_retry_deployment, "failed")
+        self.assertEqual(
+            positional_args,
+            ("apps.infrastructure.tasks.retry_deployment_task", d.pk, d.provider_id, 3, str(d.operation_token)),
+        )
         self.assertGreaterEqual(args.kwargs["timeout"], NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS)
 
     def test_cluster_retry_exceeds_longest_deployment_task(self) -> None:

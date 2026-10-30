@@ -14,6 +14,7 @@ DNS is withdrawn before any server is deleted, so no record ever points at a rel
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -74,11 +75,17 @@ def claim_teardown(
     kind: str,
     from_states: Iterable[str],
     stale_before: datetime | None = None,
+    expected_token: uuid.UUID | None = None,
 ) -> Result[OperationLease, str]:
     """Claim the row into ``destroying`` and close the node's admission, or change nothing."""
     with transaction.atomic():
         claim = claim_operation(
-            deployment.pk, from_states=from_states, to_status="destroying", kind=kind, stale_before=stale_before
+            deployment.pk,
+            from_states=from_states,
+            to_status="destroying",
+            kind=kind,
+            stale_before=stale_before,
+            expected_token=expected_token,
         )
         if claim.is_err():
             return claim

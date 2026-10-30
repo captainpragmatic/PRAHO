@@ -64,6 +64,7 @@ from .permissions import (
     require_size_management,
 )
 from .tasks import (
+    OperationReservationError,
     queue_deploy_node,
     queue_destroy_node,
     queue_maintenance,
@@ -548,11 +549,15 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _provider_credentials_help(deployment.provider))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    task_id = queue_retry_deployment(
-        deployment_id=deployment.id,
-        provider_id=deployment.provider_id,
-        user_id=request.user.id,
-    )
+    try:
+        task_id = queue_retry_deployment(
+            deployment_id=deployment.id,
+            provider_id=deployment.provider_id,
+            user_id=request.user.id,
+        )
+    except OperationReservationError as refused:
+        messages.error(request, str(refused))
+        return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     messages.success(request, f"Retry queued for deployment '{deployment.hostname}'.")
     logger.info(f"[Deployment] Retry queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
@@ -582,11 +587,15 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
                 messages.error(request, _provider_credentials_help(deployment.provider))
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-            task_id = queue_destroy_node(
-                deployment_id=deployment.id,
-                provider_id=deployment.provider_id,
-                user_id=request.user.id,
-            )
+            try:
+                task_id = queue_destroy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
             logger.info(

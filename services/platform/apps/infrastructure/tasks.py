@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,8 @@ _STUCK_TIMEOUT_HOURS = 3
 # no recovery path. 'destroying' is handled separately (teardown retry, not
 # fail) by the stale-destroying sweep.
 _INTERMEDIATE_STATUSES = [
+    # A pending row this old lost its queued task (enqueue failed, or the broker dropped it).
+    "pending",
     "provisioning_node",
     "configuring_dns",
     "installing_panel",
@@ -50,28 +53,57 @@ _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
 # provider provisioning and validation. Keep the worker alive for the full
 # supported pipeline with one hour of margin.
 NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
+# Teardown waits on at most a few provider actions (each polled for up to ~5 minutes) plus DNS and
+# unregistration; a stalled run stays 'destroying' for the stale-destroying sweep to resume.
+NODE_DESTROY_TASK_TIMEOUT_SECONDS = 30 * 60
+# Lifecycle tasks run once: a failed or timed-out run is acknowledged instead of replayed by the broker
+# hours later. Recovery is the application's (the operation token and the sweeps), never the queue's.
+LIFECYCLE_TASK_OPTIONS: dict[str, Any] = {"ack_failure": True}
 
 
-def _fail_before_first_phase(deployment: Any, error: str) -> dict[str, Any]:
+class OperationReservationError(Exception):
+    """The deployment cannot take this operation now; nothing was queued."""
+
+
+def _reserve(deployment_id: int, *, from_states: tuple[str, ...], kind: str, require_reconciled: bool = False) -> str:
+    from apps.infrastructure.deployment_lifecycle import reserve_operation  # noqa: PLC0415  # Deferred import
+
+    reserved = reserve_operation(
+        deployment_id, from_states=from_states, kind=kind, require_reconciled=require_reconciled
+    )
+    if reserved.is_err():
+        raise OperationReservationError(reserved.unwrap_err())
+    return str(reserved.unwrap())
+
+
+def _fail_before_first_phase(deployment: Any, error: str, operation_token: str | None = None) -> dict[str, Any]:
     """A deployment that never reached its first phase fails with the reason; it is never left pending.
 
     Returning (not raising) lets the completion hook log the error and acknowledges the task, so the
     queue does not silently run it again hours later. Only a row still pending is ours to fail: a row
-    already past pending belongs to the worker running it.
+    already past pending belongs to the worker running it, and a pending row reserved by a newer
+    enqueue belongs to that task.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
 
     with transaction.atomic():
         locked = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
-        if locked.status == "pending":
+        reserved_elsewhere = operation_token is not None and str(locked.operation_token) != operation_token
+        if locked.status == "pending" and not reserved_elsewhere:
             locked.transition_to("failed", f"Deployment did not start: {error}")
+            NodeDeployment.objects.filter(pk=locked.pk).update(operation_token=None, operation_kind="")
     return {"success": False, "deployment_id": deployment.pk, "hostname": deployment.hostname, "error": error}
+
+
+def _token(operation_token: str | None) -> uuid.UUID | None:
+    return uuid.UUID(operation_token) if operation_token else None
 
 
 def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure, each failing the row.
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to deploy a node.
@@ -84,6 +116,7 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         deployment_id: ID of the NodeDeployment to deploy
         provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the deployment
+        operation_token: The token queue_deploy_node reserved; None for a task queued before reservations
 
     Returns:
         dict with deployment result information
@@ -113,7 +146,7 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         provider = CloudProvider.objects.get(id=provider_id)
     except CloudProvider.DoesNotExist:
         logger.error(f"[Task:deploy_node] Provider {provider_id} not found")
-        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found")
+        return _fail_before_first_phase(deployment, f"Provider {provider_id} not found", operation_token)
 
     try:
         token_result = get_provider_token(provider)
@@ -121,10 +154,14 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
     except Exception as error:  # A vault or settings fault; its text may describe secrets, so only its type is kept.
         logger.error(f"[Task:deploy_node] Could not read deployment credentials: {type(error).__name__}")
-        return _fail_before_first_phase(deployment, f"Could not read deployment credentials ({type(error).__name__})")
+        return _fail_before_first_phase(
+            deployment, f"Could not read deployment credentials ({type(error).__name__})", operation_token
+        )
     if token_result.is_err():
         logger.error(f"[Task:deploy_node] Failed to get token for provider {provider.name}")
-        return _fail_before_first_phase(deployment, f"Failed to get provider token: {token_result.unwrap_err()}")
+        return _fail_before_first_phase(
+            deployment, f"Failed to get provider token: {token_result.unwrap_err()}", operation_token
+        )
 
     credentials: dict[str, str] = {"api_token": token_result.unwrap()}
     cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
@@ -138,17 +175,18 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
         service = get_deployment_service()
     except Exception as error:  # A worker that cannot build the service (no ansible-playbook, say) must say why.
         logger.error(f"[Task:deploy_node] Deployment service unavailable: {error}")
-        return _fail_before_first_phase(deployment, str(error))
+        return _fail_before_first_phase(deployment, str(error), operation_token)
     result = service.deploy_node(
         deployment=deployment,
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
         # A refusal before the row was claimed (deployment disabled, say) leaves it pending; fail it there.
-        return _fail_before_first_phase(deployment, result.unwrap_err())
+        return _fail_before_first_phase(deployment, result.unwrap_err(), operation_token)
 
     deploy_result = result.unwrap()
     return {
@@ -165,6 +203,7 @@ def destroy_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to destroy a node.
@@ -229,6 +268,7 @@ def destroy_node_task(
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
@@ -251,6 +291,7 @@ def retry_deployment_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    operation_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to retry a failed deployment.
@@ -315,9 +356,11 @@ def retry_deployment_task(
         credentials=credentials,
         cloudflare_api_token=cloudflare_api_token,
         user=user,
+        expected_token=_token(operation_token),
     )
 
     if result.is_err():
+        deployment.refresh_from_db()
         return {
             "success": False,
             "deployment_id": deployment_id,
@@ -1119,14 +1162,17 @@ def queue_deploy_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    token = _reserve(deployment_id, from_states=("pending",), kind="deploy")
     task_id = async_task(
         "apps.infrastructure.tasks.deploy_node_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"deploy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
         timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Deployment queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -1153,13 +1199,19 @@ def queue_destroy_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    from apps.infrastructure.node_teardown import DESTROYABLE_STATES  # noqa: PLC0415  # Deferred import
+
+    token = _reserve(deployment_id, from_states=DESTROYABLE_STATES, kind="destroy")
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"destroy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.destruction_complete_hook",
+        timeout=NODE_DESTROY_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Destruction queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -1186,14 +1238,17 @@ def queue_retry_deployment(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    token = _reserve(deployment_id, from_states=("failed",), kind="retry", require_reconciled=True)
     task_id = async_task(
         "apps.infrastructure.tasks.retry_deployment_task",
         deployment_id,
         provider_id,
         user_id,
+        token,
         task_name=f"retry_deployment_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
         timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
     )
 
     logger.info(f"[Queue] Retry queued: deployment_id={deployment_id}, task_id={task_id}")
