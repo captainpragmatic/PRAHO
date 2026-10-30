@@ -33,11 +33,13 @@
                 {% trans "Change customer status" as status_title %}
                 <form id="status-form-{{ action }}" method="post" action="{% url 'customers:status_change' customer.pk action %}" class="inline">
                     {% csrf_token %}
-                    {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-action form id; attrs takes one literal string #}
-                    <button type="button" class="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded {% if action == 'suspend' or action == 'deactivate' %}bg-amber-900 text-amber-200 hover:bg-amber-800{% else %}bg-slate-700 text-slate-100 hover:bg-slate-600{% endif %} transition-colors"
-                      data-action="confirm-dangerous" data-title="{{ status_title|force_escape }}" data-message="{{ status_message|force_escape }}" data-confirm-text="{{ status_label|force_escape }}" data-submit-form="status-form-{{ action }}">
-                        {{ status_label|force_escape }}
-                    </button>
+                    {% with status_form="status-form-"|add:action %}
+                        {% if action == "suspend" or action == "deactivate" %}
+                            {% button status_label|force_escape variant="warning" data_action="confirm-dangerous" confirm_title=status_title confirm_message=status_message confirm_text=status_label submit_form=status_form %}
+                        {% else %}
+                            {% button status_label|force_escape variant="secondary" data_action="confirm-dangerous" confirm_title=status_title confirm_message=status_message confirm_text=status_label submit_form=status_form %}
+                        {% endif %}
+                    {% endwith %}
                 </form>
             {% endfor %}
             {% url 'customers:edit' customer.pk as edit_url %}
@@ -280,10 +282,10 @@
                                     {% trans "Sign in as customer" as customer_view_label %}
                                     {% if membership.is_active and membership.user.is_active and not membership.user.is_staff_user %}
                                         {% url 'customers:customer_view_start' customer.pk membership.user.pk as customer_view_url %}
-                                        {% button customer_view_label|force_escape href=customer_view_url variant="secondary" size="xs" icon="eye" %}
+                                        {% button customer_view_label|force_escape href=customer_view_url variant="secondary" size="xs" icon="eye" new_tab=True %}
                                     {% else %}
                                         {% trans "Only an active member who is not staff can be viewed." as customer_view_why %}
-                                        <span title="{{ customer_view_why|force_escape }}">{% button customer_view_label|force_escape variant="secondary" size="xs" icon="eye" disabled=True %}</span>
+                                        {% button customer_view_label|force_escape variant="secondary" size="xs" icon="eye" disabled=True title=customer_view_why %}
                                     {% endif %}
                                 {% endif %}
                                 {% if membership.user.is_active %}
@@ -291,49 +293,38 @@
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
                                         {% trans "Suspend" as suspend_btn %}
-                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
-                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-amber-900 text-amber-200 hover:bg-amber-800 transition-colors"
-                                          data-action="confirm-dangerous" data-title="{% trans "Suspend User" %}" data-message="{% trans "Are you sure you want to suspend this user?" %}" data-confirm-text="{% trans "Suspend" %}" data-submit-form="suspend-form-{{ membership.user.pk }}">
-                                          {% icon "clock" size="sm" %} {{ suspend_btn }}
-                                        </button>
+                                        {% trans "Suspend User" as suspend_title %}{% trans "Are you sure you want to suspend this user?" as suspend_message %}
+                                        {% with user_pk=membership.user.pk|stringformat:"s" %}{% with suspend_form="suspend-form-"|add:user_pk %}
+                                        {% button suspend_btn|force_escape variant="warning" size="xs" icon="clock" data_action="confirm-dangerous" confirm_title=suspend_title confirm_message=suspend_message confirm_text=suspend_btn submit_form=suspend_form %}
+                                        {% endwith %}{% endwith %}
                                     </form>
                                 {% else %}
                                     <form id="activate-form-{{ membership.user.pk }}" method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
                                         {% trans "Activate" as activate_btn %}
-                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
-                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-green-900 text-green-200 hover:bg-green-800 transition-colors"
-                                          data-action="confirm-dangerous" data-title="{% trans "Activate User" %}" data-message="{% trans "Are you sure you want to activate this user?" %}" data-confirm-text="{% trans "Activate" %}" data-submit-form="activate-form-{{ membership.user.pk }}">
-                                          {% icon "check" size="sm" %} {{ activate_btn }}
-                                        </button>
+                                        {% trans "Activate User" as activate_title %}{% trans "Are you sure you want to activate this user?" as activate_message %}
+                                        {% with user_pk=membership.user.pk|stringformat:"s" %}{% with activate_form="activate-form-"|add:user_pk %}
+                                        {% button activate_btn|force_escape variant="success" size="xs" icon="check" data_action="confirm-dangerous" confirm_title=activate_title confirm_message=activate_message confirm_text=activate_btn submit_form=activate_form %}
+                                        {% endwith %}{% endwith %}
                                     </form>
                                 {% endif %}
 
                                 <!-- Remove Button with Safeguards -->
                                 {% if is_last_user %}
-                                    {# tmpl-allow TMPL002: its title tooltip is translated prose; attrs takes one literal string, so it would need an |add chain a quote in the translation breaks #}
-                                    <button type="button" disabled
-                                            class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
-                                            title="{% trans 'Cannot remove the last user from customer' %}">
-                                        {% icon "ban" %} {% trans "Cannot Remove" %}
-                                    </button>
+                                    {% trans "Cannot Remove" as cannot_remove_label %}{% trans "Cannot remove the last user from customer" as cannot_remove_why %}
+                                    {% button cannot_remove_label|force_escape variant="secondary" size="xs" icon="ban" disabled=True title=cannot_remove_why %}
                                 {% elif membership.role == 'owner' and is_last_owner %}
-                                    {# tmpl-allow TMPL002: its title tooltip is translated prose; attrs takes one literal string, so it would need an |add chain a quote in the translation breaks #}
-                                    <button type="button" disabled
-                                            class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
-                                            title="{% trans 'Cannot remove the only owner' %}">
-                                        {% icon "ban" %} {% trans "Cannot Remove" %}
-                                    </button>
+                                    {% trans "Cannot Remove" as cannot_remove_label %}{% trans "Cannot remove the only owner" as cannot_remove_why %}
+                                    {% button cannot_remove_label|force_escape variant="secondary" size="xs" icon="ban" disabled=True title=cannot_remove_why %}
                                 {% else %}
                                     <form id="remove-form-{{ membership.pk }}" method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" class="inline">
                                         {% csrf_token %}
                                         {% trans "Remove" as remove_btn %}
-                                        {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-row form id; attrs takes one literal string, so these would need an |add chain a quote in any translation breaks #}
-                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-red-900 text-red-200 hover:bg-red-800 transition-colors"
-                                          data-action="confirm-dangerous" data-title="{% trans "Remove User" %}" data-message="{% trans "Are you sure you want to remove this user? They will lose all access to this customer." %}" data-confirm-text="{% trans "Remove" %}" data-submit-form="remove-form-{{ membership.pk }}">
-                                          {% icon "x" size="sm" %} {{ remove_btn }}
-                                        </button>
+                                        {% trans "Remove User" as remove_title %}{% trans "Are you sure you want to remove this user? They will lose all access to this customer." as remove_message %}
+                                        {% with membership_pk=membership.pk|stringformat:"s" %}{% with remove_form="remove-form-"|add:membership_pk %}
+                                        {% button remove_btn|force_escape variant="danger" size="xs" icon="x" data_action="confirm-dangerous" confirm_title=remove_title confirm_message=remove_message confirm_text=remove_btn submit_form=remove_form %}
+                                        {% endwith %}{% endwith %}
                                     </form>
                                 {% endif %}
                             </div>

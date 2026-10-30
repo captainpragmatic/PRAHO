@@ -118,6 +118,14 @@ class ButtonConfig:
     data_copy: str = ""
     data_invoke: str = ""
     data_confirm: str = ""
+    # The dangerous-action modal's text and the form it submits, a tooltip, and a link's new tab: values are
+    # passed raw (a {% trans … as v %} value as it is); button.html escapes each once.
+    confirm_title: str = ""
+    confirm_message: str = ""
+    confirm_text: str = ""
+    submit_form: str = ""
+    title: str = ""
+    new_tab: bool = False
 
 
 @dataclass
@@ -278,7 +286,19 @@ def button(
 
     _apply_arguments("button", kwargs, config, htmx, aliases=_BUTTON_ALIASES)
 
-    clean_attrs = serialize_button_attributes(config.attrs)
+    # attrs may not add a second copy of an attribute an argument of this call already writes.
+    owned = frozenset(
+        attribute
+        for attribute, value in (
+            ("title", config.title),
+            ("data-title", config.confirm_title),
+            ("data-message", config.confirm_message),
+            ("data-confirm-text", config.confirm_text),
+            ("data-submit-form", config.submit_form),
+        )
+        if value
+    )
+    clean_attrs = serialize_button_attributes(config.attrs, owned)
 
     return {
         "text": text,
@@ -313,6 +333,12 @@ def button(
         "data_copy": config.data_copy,
         "data_invoke": config.data_invoke,
         "data_confirm": config.data_confirm,
+        "confirm_title": config.confirm_title,
+        "confirm_message": config.confirm_message,
+        "confirm_text": config.confirm_text,
+        "submit_form": config.submit_form,
+        "title": config.title,
+        "new_tab": config.new_tab,
     }
 
 

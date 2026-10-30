@@ -92,7 +92,7 @@ class ButtonVariantTests(SimpleTestCase):
         self.assertIn("bg-slate-600", self._button("secondary"))
 
     def test_success_variant_uses_green_bg(self) -> None:
-        self.assertIn("bg-green-600", self._button("success"))
+        self.assertIn("bg-green-700", self._button("success"))
 
     def test_danger_variant_uses_red_bg(self) -> None:
         self.assertIn("bg-red-600", self._button("danger"))
