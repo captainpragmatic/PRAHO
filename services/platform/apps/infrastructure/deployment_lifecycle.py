@@ -142,12 +142,19 @@ def claim_operation(  # noqa: PLR0911, PLR0913  # Every argument is one claim co
 
 
 def reserve_operation(
-    deployment_id: int, *, from_states: Iterable[str], kind: str, require_reconciled: bool = False
+    deployment_id: int,
+    *,
+    from_states: Iterable[str],
+    kind: str,
+    require_reconciled: bool = False,
+    flagged_states: Iterable[str] = (),
 ) -> Result[uuid.UUID, str]:
     """Reserve the next operation at enqueue time, without changing the status.
 
     The queued task claims only with this token, so of two clicks only the later reservation runs, and
     a task queued long ago is refused once any later claim or reservation has rotated the token.
+    ``flagged_states`` are accepted only for a row flagged for reconciliation: a parked teardown, never a
+    live one whose token a reservation would take.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
 
@@ -155,7 +162,8 @@ def reserve_operation(
         row = NodeDeployment.objects.select_for_update().filter(pk=deployment_id).first()
         if row is None:
             return Err(f"Deployment {deployment_id} not found")
-        if row.status not in tuple(from_states):
+        parked = row.needs_reconciliation and row.status in tuple(flagged_states)
+        if row.status not in tuple(from_states) and not parked:
             return Err(f"Cannot {kind} node in status '{row.status}'")
         if require_reconciled and row.needs_reconciliation:
             return Err(f"Cannot {kind} node: reconcile it first ({row.reconciliation_reason})")

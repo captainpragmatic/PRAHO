@@ -130,7 +130,10 @@ def _precondition_refusal(deployment: NodeDeployment, *, quiet_since: Any) -> st
     if deployment.status not in RECONCILABLE_STATES:
         return f"Cannot reconcile a deployment in status '{deployment.status}'"
     if deployment.external_node_id:
-        return "The deployment still has a server id; destroy it instead"
+        return (
+            "The deployment still has a server id: restore the provider token that created it, "
+            "then run Destroy again to resume the teardown"
+        )
     if deployment.virtualmin_server_id:
         return "The deployment is still linked to its Virtualmin node; destroy it instead"
     if deployment.updated_at >= quiet_since:

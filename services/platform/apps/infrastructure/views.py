@@ -490,7 +490,8 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
             and can_deploy_nodes(cast("User", request.user))
             and can_destroy_nodes(cast("User", request.user))
         ),
-        "can_destroy": deployment.status in ("completed", "failed", "stopped"),
+        "can_destroy": deployment.status in ("completed", "failed", "stopped")
+        or (deployment.status == "destroying" and deployment.needs_reconciliation),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
         "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
@@ -569,7 +570,8 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    if deployment.status not in ("completed", "failed", "stopped"):
+    parked = deployment.status == "destroying" and deployment.needs_reconciliation  # resumable teardown
+    if deployment.status not in ("completed", "failed", "stopped") and not parked:
         messages.error(request, f"Cannot destroy deployment in status '{deployment.get_status_display()}'.")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 

@@ -41,6 +41,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DESTROYABLE_STATES = ("completed", "failed", "stopped")
+# A teardown parked for reconciliation keeps "destroying"; Destroy resumes it (see claim_teardown).
+PARKED_TEARDOWN_STATES = ("destroying",)
+PROVENANCE_MISMATCH_REFUSAL = (
+    "This deployment's provider resources were created with a different provider token; restore that token, "
+    "then run Destroy again to resume the teardown"
+)
 
 
 # Job retriabilities that prove a create_domain did not take effect on the node (see Retriability).
@@ -142,16 +148,32 @@ def deactivate_api_credential(deployment: NodeDeployment) -> int:
     return count
 
 
-def claim_teardown(
+def claim_teardown(  # noqa: PLR0913  # One argument per claim condition
     deployment: NodeDeployment,
     *,
     kind: str,
     from_states: Iterable[str],
     stale_before: datetime | None = None,
     expected_token: uuid.UUID | None = None,
+    credential_fingerprint: str | None = None,
 ) -> Result[OperationLease, str]:
-    """Claim the row into ``destroying`` and close the node's admission, or change nothing."""
+    """Claim the row into ``destroying`` and close the node's admission, or change nothing.
+
+    With ``credential_fingerprint`` (Destroy), a teardown parked for reconciliation in "destroying" is
+    resumed: only when the token that created its resources is the current one again, or was never
+    recorded (the teardown then deletes only what this token can see). The flag is cleared inside the
+    claim; the guard and the teardown's own provenance checks run as for any destroy.
+    """
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+
     with transaction.atomic():
+        row = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+        resuming = credential_fingerprint is not None and row.status == "destroying" and row.needs_reconciliation
+        if resuming:
+            stored = row.provider_token_fingerprint
+            if stored and stored != credential_fingerprint:
+                return Err(PROVENANCE_MISMATCH_REFUSAL)
+            from_states = (*from_states, *PARKED_TEARDOWN_STATES)
         claim = claim_operation(
             deployment.pk,
             from_states=from_states,
@@ -162,7 +184,8 @@ def claim_teardown(
         )
         if claim.is_err():
             return claim
-        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+        if resuming:
+            owned_update(claim.unwrap(), deployment, needs_reconciliation=False, reconciliation_reason="")
 
         server_id = NodeDeployment.objects.values_list("virtualmin_server_id", flat=True).get(pk=deployment.pk)
         guard = close_node_admission(server_id)
@@ -236,7 +259,7 @@ class NodeTeardown:
         stored = deployment.provider_token_fingerprint
         trusted = bool(stored) and stored == provider_token_fingerprint(self.api_token)
         if stored and not trusted:
-            return self._reconcile("Provider resources were created with a different provider token")
+            return self._reconcile(PROVENANCE_MISMATCH_REFUSAL)
 
         gateway = get_cloud_gateway(deployment.provider.provider_type, self.api_token)
         servers = self._delete_servers(gateway, trusted=trusted)

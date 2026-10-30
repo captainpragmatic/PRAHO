@@ -78,10 +78,10 @@ class Harness:
             mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value="dns-tok"),
         )
 
-    def destroy(self) -> Any:
+    def destroy(self, token: str = TOKEN) -> Any:
         cloud, dns, setting = self._patches()
         with cloud, dns, setting:
-            return self.service.destroy_node(self.deployment, credentials={"api_token": TOKEN})
+            return self.service.destroy_node(self.deployment, credentials={"api_token": token})
 
     def resume(self) -> Any:
         from apps.infrastructure.node_teardown import claim_teardown, run_claimed_teardown  # noqa: PLC0415
@@ -299,3 +299,46 @@ class ApiCredentialRevocationTests(TestCase):
         _make_service()._cleanup_resources(cloud_gateway(), [("server", "srv-1")], deployment)
 
         self.assertFalse(self._active(deployment))
+
+
+class ResumeAFlaggedTeardownTests(TestCase):
+    """A teardown run under another provider token parks the row; Destroy resumes it once the token is back."""
+
+    def _parked(self) -> Harness:
+        h = Harness()
+        self.assertTrue(h.destroy(token="another-token").is_err())
+        row = h.row()
+        self.assertEqual((row.status, row.needs_reconciliation, row.external_node_id), ("destroying", True, "srv-1"))
+        h.deployment.refresh_from_db()
+        return h
+
+    def test_restoring_the_token_lets_destroy_resume_and_delete_the_server(self) -> None:
+        h = self._parked()
+
+        result = h.destroy()
+
+        self.assertTrue(result.is_ok(), result)
+        row = h.row()
+        self.assertEqual((row.status, row.needs_reconciliation, row.external_node_id), ("destroyed", False, ""))
+        h.cloud.delete_server.assert_called_once_with("srv-1")
+
+    def test_a_still_different_token_is_refused_and_names_the_way_out(self) -> None:
+        h = self._parked()
+
+        result = h.destroy(token="another-token")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("run Destroy again", result.unwrap_err())
+        row = h.row()
+        self.assertEqual((row.status, row.needs_reconciliation, row.external_node_id), ("destroying", True, "srv-1"))
+        h.cloud.delete_server.assert_not_called()
+
+    def test_the_parked_row_can_be_queued_for_destroy(self) -> None:
+        from apps.infrastructure.tasks import queue_destroy_node  # noqa: PLC0415
+
+        h = self._parked()
+
+        with mock.patch("django_q.tasks.async_task", return_value="task-1") as async_task:
+            queue_destroy_node(h.deployment.pk, h.deployment.provider_id, None)
+
+        async_task.assert_called_once()

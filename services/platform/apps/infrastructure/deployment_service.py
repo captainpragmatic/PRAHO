@@ -986,16 +986,33 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
-        audit_ctx = InfrastructureAuditContext(user=user)
+        logger.info(f"🚀 [Destroy:{deployment.hostname}] Starting node destruction")
+        api_token = credentials.get("api_token", "")
+        # A teardown parked for reconciliation (another token's resources) resumes here once the creating
+        # token is back; claim_teardown checks the fingerprint under the lock and clears the flag.
+        resuming = deployment.status == "destroying" and deployment.needs_reconciliation
+        audit_ctx = InfrastructureAuditContext(user=user, metadata={"resumed_parked_teardown": resuming})
 
         claim = claim_teardown(
-            deployment, kind="destroy", from_states=DESTROYABLE_STATES, expected_token=expected_token
+            deployment,
+            kind="destroy",
+            from_states=DESTROYABLE_STATES,
+            expected_token=expected_token,
+            credential_fingerprint=provider_token_fingerprint(api_token) if api_token else None,
         )
         if claim.is_err():
             return record_destroy_failure(deployment, f"Destroy refused: {claim.unwrap_err()}", audit_ctx)
         lease = claim.unwrap()
         deployment.refresh_from_db()
+        if resuming:
+            from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred import
+
+            NodeDeploymentLog.objects.create(
+                deployment=deployment,
+                level="INFO",
+                phase="destroying",
+                message="Resuming a teardown parked for reconciliation: the creating provider token is back",
+            )
         return run_claimed_teardown(
             deployment,
             lease,

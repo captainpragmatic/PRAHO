@@ -65,11 +65,22 @@ class OperationReservationError(Exception):
     """The deployment cannot take this operation now; nothing was queued."""
 
 
-def _reserve(deployment_id: int, *, from_states: tuple[str, ...], kind: str, require_reconciled: bool = False) -> str:
+def _reserve(
+    deployment_id: int,
+    *,
+    from_states: tuple[str, ...],
+    kind: str,
+    require_reconciled: bool = False,
+    flagged_states: tuple[str, ...] = (),
+) -> str:
     from apps.infrastructure.deployment_lifecycle import reserve_operation  # noqa: PLC0415  # Deferred import
 
     reserved = reserve_operation(
-        deployment_id, from_states=from_states, kind=kind, require_reconciled=require_reconciled
+        deployment_id,
+        from_states=from_states,
+        kind=kind,
+        require_reconciled=require_reconciled,
+        flagged_states=flagged_states,
     )
     if reserved.is_err():
         raise OperationReservationError(reserved.unwrap_err())
@@ -1251,9 +1262,14 @@ def queue_destroy_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
-    from apps.infrastructure.node_teardown import DESTROYABLE_STATES  # noqa: PLC0415  # Deferred import
+    from apps.infrastructure.node_teardown import (  # noqa: PLC0415  # Deferred import
+        DESTROYABLE_STATES,
+        PARKED_TEARDOWN_STATES,
+    )
 
-    token = _reserve(deployment_id, from_states=DESTROYABLE_STATES, kind="destroy")
+    token = _reserve(
+        deployment_id, from_states=DESTROYABLE_STATES, kind="destroy", flagged_states=PARKED_TEARDOWN_STATES
+    )
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
         deployment_id,
