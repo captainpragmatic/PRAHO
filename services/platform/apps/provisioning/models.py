@@ -21,6 +21,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
+from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityReview
 from .virtualmin_usage_models import AccountUsageState, NodeUsageSyncState, UsageInterval, UsageReading
 
 # Re-export for external imports
@@ -33,6 +34,8 @@ __all__ = [
     "HostedDomainDnsStatus",
     "MigrationBridge",
     "NodeDrain",
+    "NodeSecurityDecision",
+    "NodeSecurityReview",
     "NodeUsageSyncState",
     "ProvisioningTask",
     "Server",

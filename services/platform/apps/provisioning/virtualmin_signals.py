@@ -27,8 +27,47 @@ from apps.common.transactions import best_effort_atomic, swallow_application_err
 from .hosted_zone_ownership import save_field_intent
 from .virtualmin_migration_models import MigrationBridge
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityReview
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=NodeSecurityReview)
+def audit_node_security_review(
+    sender: type[NodeSecurityReview], instance: NodeSecurityReview, created: bool, **kwargs: Any
+) -> None:
+    """Audit only the evidence reference, never copy a remote payload into audit storage."""
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="security_scan_detected",
+                content_object=instance,
+                description="Node security inspection recorded",
+                new_values={
+                    "server_id": str(instance.server_id),
+                    "digest": instance.digest,
+                    "policy_version": instance.policy_version,
+                },
+            ),
+            context=AuditContext(actor_type="system", metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=NodeSecurityDecision)
+def audit_node_security_decision(
+    sender: type[NodeSecurityDecision], instance: NodeSecurityDecision, created: bool, **kwargs: Any
+) -> None:
+    """A source acknowledgment is an operator action, never a verification result."""
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="configuration_changed",
+                content_object=instance,
+                description="Operator acknowledged node as a migration source",
+                new_values={"review_id": str(instance.review_id), "action": instance.action},
+            ),
+            context=AuditContext(user=instance.actor, metadata={"source_app": "provisioning"}),
+        )
 
 
 # ===============================================================================

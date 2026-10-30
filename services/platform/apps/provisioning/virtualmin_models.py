@@ -116,6 +116,24 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
 
     # Server status and health
     is_draining = models.BooleanField(default=False)
+    security_state = models.CharField(
+        max_length=32,
+        choices=[
+            ("unreviewed", _("Unreviewed")),
+            ("acknowledged_source_only", _("Acknowledged migration source")),
+            ("verified_web", _("Verified web-only")),
+        ],
+        default="unreviewed",
+        editable=False,
+    )
+    current_security_review = models.ForeignKey(
+        "provisioning.NodeSecurityReview",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        editable=False,
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
