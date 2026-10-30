@@ -17,7 +17,6 @@ creator provenance and the create state are kept as history; what was proved or 
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
 import logging
 from dataclasses import dataclass, field
@@ -32,11 +31,9 @@ from apps.common.types import Err, Ok, Result
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import get_cloud_gateway
 from apps.infrastructure.deployment_lifecycle import (
-    OperationLease,
     OperationOwnershipLostError,
     claim_operation,
     owned_transition,
-    owned_update,
     provider_token_fingerprint,
 )
 from apps.infrastructure.dns_gateway import get_dns_gateway
@@ -250,9 +247,15 @@ def _prove_dns_absent(deployment: NodeDeployment) -> list[str]:
     return searched
 
 
-def _claim(deployment: NodeDeployment, quiet_since: Any) -> Result[OperationLease, str]:
-    """Claim the quiet, flagged row; re-check every precondition on the locked row."""
+def _claim_and_settle(deployment: NodeDeployment, quiet_since: Any, record: dict[str, Any], operator: Any) -> None:
+    """Claim, re-check and settle destroyed with its log and audit event, all in one transaction.
+
+    The search ran before this without a claim, so a refusal never moves the row. The claim re-checks the
+    quiet window: any write to the row since the search began (a destroy, a sweep, another reconcile)
+    refuses the claim. Any failure, the audit event included, undoes everything.
+    """
     from apps.infrastructure.models import NodeDeployment as Model  # noqa: PLC0415  # Deferred: circular import
+    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
     with transaction.atomic():
         claim = claim_operation(
@@ -263,31 +266,18 @@ def _claim(deployment: NodeDeployment, quiet_since: Any) -> Result[OperationLeas
             stale_before=quiet_since,
         )
         if claim.is_err():
-            return claim
+            raise _RefusalError(claim.unwrap_err())
         locked = Model.objects.get(pk=deployment.pk)
         refusal = _precondition_refusal(locked, quiet_since=timezone.now() + timedelta(seconds=1))
-        if refusal:
-            transaction.set_rollback(True)
-            return Err(refusal)
-    return claim
-
-
-def _settle(deployment: NodeDeployment, lease: OperationLease, record: dict[str, Any], operator: Any) -> None:
-    """Settle destroyed with its log and audit event in one transaction; any failure undoes all of it."""
-    from apps.infrastructure.models import NodeDeployment as Model  # noqa: PLC0415  # Deferred: circular import
-    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
-
-    with transaction.atomic():
-        locked = Model.objects.select_for_update().get(pk=deployment.pk)
         snapshot = record["snapshot"]
-        if (locked.external_node_id, locked.virtualmin_server_id, locked.dns_record_ids) != (
+        if refusal or (locked.external_node_id, locked.virtualmin_server_id, locked.dns_record_ids) != (
             snapshot["external_node_id"],
             snapshot["virtualmin_server_id"],
             snapshot["dns_record_ids"],
         ):
-            raise _RefusalError("The deployment changed while it was being reconciled")
+            raise _RefusalError(refusal or "The deployment changed while it was being reconciled")
         owned_transition(
-            lease,
+            claim.unwrap(),
             locked,
             "destroyed",
             "Reconciled: nothing it owned remains",
@@ -309,14 +299,10 @@ def _settle(deployment: NodeDeployment, lease: OperationLease, record: dict[str,
         )
 
 
-def _record_refusal(
-    deployment: NodeDeployment, lease: OperationLease, message: str, operator: Any, record: dict[str, Any]
-) -> Err[str]:
-    """Release the claim (the row stays destroying and flagged) and record why, with the search so far."""
+def _record_refusal(deployment: NodeDeployment, message: str, operator: Any, record: dict[str, Any]) -> Err[str]:
+    """Record why reconciliation refused, with the search so far; the row is left as it was."""
     from apps.infrastructure.node_teardown import record_destroy_failure  # noqa: PLC0415  # Deferred import
 
-    with contextlib.suppress(OperationOwnershipLostError):
-        owned_update(lease, deployment, operation_token=None, operation_kind="")
     record_destroy_failure(
         deployment,
         f"Reconcile refused: {message}",
@@ -357,11 +343,6 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
             return Err(str(found))
         return Ok(report)
 
-    claim = _claim(deployment, quiet_since)
-    if claim.is_err():
-        return Err(claim.unwrap_err())
-    lease = claim.unwrap()
-    deployment.refresh_from_db()
     record: dict[str, Any] = {
         "operator": operator.email,
         "invoker": request.invoker,
@@ -384,15 +365,16 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
     try:
         report.searched = _search_provider(deployment, api_token, ssh_manager) + _prove_dns_absent(deployment)
         record["searched"] = report.searched
+        # Revoking the vault key is idempotent and right whatever happens next: the node is gone.
         revoked = ssh_manager.delete_deployment_key(deployment, user=operator)
         if revoked.is_err():
             raise _RefusalError(f"SSH key revocation failed: {revoked.unwrap_err()}")
-        _settle(deployment, lease, record, operator)
+        _claim_and_settle(deployment, quiet_since, record, operator)
     except (_RefusalError, OperationOwnershipLostError) as refused:
-        return _record_refusal(deployment, lease, str(refused), operator, record)
-    except Exception as error:  # An audit or database fault undoes the settlement; the row stays flagged.
+        return _record_refusal(deployment, str(refused), operator, record)
+    except Exception as error:  # An audit or database fault undoes the settlement; the row is left as it was.
         logger.exception(f"🔥 [Reconcile:{deployment.hostname}] Settlement failed: {error}")
-        return _record_refusal(deployment, lease, f"Settlement failed: {error}", operator, record)
+        return _record_refusal(deployment, f"Settlement failed: {error}", operator, record)
     report.settled = True
     logger.info(f"✅ [Reconcile:{deployment.hostname}] Settled destroyed ({provenance})")
     return Ok(report)

@@ -228,7 +228,7 @@ class SearchRefusesTests(TestCase):
 
                 self.assertTrue(h.run(deployment, attest_no_resources=True).is_err(), name)
 
-                unchanged(self, deployment, status="destroying")
+                unchanged(self, deployment)
                 h.ssh_manager.delete_deployment_key.assert_not_called()
 
     def test_a_key_is_searched_by_the_vault_key_fingerprint(self) -> None:
@@ -268,7 +268,7 @@ class DnsProofTests(TestCase):
                 self.assertTrue(h.run(deployment, attest_no_resources=True).is_err(), name)
 
                 row = NodeDeployment.objects.get(pk=deployment.pk)
-                self.assertEqual((row.status, row.needs_reconciliation, len(row.dns_record_ids)), ("destroying", True, 1))
+                self.assertEqual((row.status, row.needs_reconciliation, len(row.dns_record_ids)), ("failed", True, 1))
 
     def test_every_stored_name_and_the_current_name_are_searched(self) -> None:
         h = Harness()
@@ -310,7 +310,7 @@ class NeverCreatedTests(TestCase):
 
 
 class SettlementIsAtomicTests(TestCase):
-    def test_an_audit_failure_leaves_the_row_flagged(self) -> None:
+    def test_an_audit_failure_leaves_the_row_as_it_was(self) -> None:
         h = Harness()
         deployment = legacy_row()
 
@@ -321,18 +321,39 @@ class SettlementIsAtomicTests(TestCase):
             self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())
 
         row = NodeDeployment.objects.get(pk=deployment.pk)
-        self.assertEqual((row.status, row.needs_reconciliation), ("destroying", True))
+        self.assertEqual((row.status, row.needs_reconciliation, row.operation_token), ("failed", True, None))
         self.assertEqual(row.reconciliation_record, {})
 
-    def test_a_second_reconcile_right_after_the_first_claimed_is_refused(self) -> None:
+    def test_a_write_to_the_row_during_the_search_refuses_the_settlement(self) -> None:
         h = Harness()
         deployment = legacy_row()
-        h.cloud.find_servers_by_name.return_value = Ok([mock.Mock(server_id="9", labels={})])
-        self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())  # claimed, then refused
-        h.cloud.find_servers_by_name.return_value = Ok([])
 
-        self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())  # inside the quiet window
-        self.assertEqual(NodeDeployment.objects.get(pk=deployment.pk).status, "destroying")
+        def destroy_claims_meanwhile(*_args: Any) -> Ok[list[str]]:
+            NodeDeployment.objects.filter(pk=deployment.pk).update(updated_at=timezone.now())
+            return Ok([])
+
+        h.cloud.find_servers_by_name.side_effect = destroy_claims_meanwhile
+
+        self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())
+        row = NodeDeployment.objects.get(pk=deployment.pk)
+        self.assertEqual((row.status, row.needs_reconciliation), ("failed", True))
+
+
+class RefusalKeepsTheRowDestroyableTests(TestCase):
+    def test_a_refused_reconcile_leaves_the_row_for_destroy(self) -> None:
+        from tests.infrastructure.test_deployment_service_pipeline import _make_service  # noqa: PLC0415
+
+        h = Harness()
+        h.cloud.find_servers_by_name.return_value = Ok([mock.Mock(server_id="9", labels={})])
+        deployment = legacy_row()
+
+        self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())
+
+        row = NodeDeployment.objects.get(pk=deployment.pk)
+        self.assertEqual((row.status, row.operation_token), ("failed", None))
+        with mock.patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=h.cloud):
+            _make_service().destroy_node(row, credentials={"api_token": TOKEN})
+        self.assertNotEqual(NodeDeployment.objects.get(pk=deployment.pk).status, "failed")
 
 
 class CommandTests(TestCase):
