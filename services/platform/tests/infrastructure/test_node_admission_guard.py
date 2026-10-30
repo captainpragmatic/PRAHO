@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from unittest import mock
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -201,3 +202,35 @@ class ErrorAccountFencingTests(TestCase):
         type(job).objects.filter(pk=job.pk).update(status="pending")
 
         self.assertTrue(_make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext()).is_err())
+
+
+class FenceOrderingTests(TestCase):
+    def _setup(self, name: str) -> tuple[NodeDeployment, Any]:
+        return ErrorAccountFencingTests._setup(ErrorAccountFencingTests(), name)
+
+    def test_a_retry_claimed_between_the_evidence_and_the_fence_keeps_the_node_occupied(self) -> None:
+        from apps.infrastructure import node_teardown  # noqa: PLC0415
+
+        deployment, job = self._setup("between")
+        original = node_teardown._never_reached_node
+
+        def evidence_then_retry_claims(account: Any) -> Any:
+            verdict = original(account)
+            type(job).objects.filter(pk=job.pk, status="failed").update(status="pending")
+            return verdict
+
+        with mock.patch.object(node_teardown, "_never_reached_node", side_effect=evidence_then_retry_claims):
+            result = _make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext())
+
+        self.assertTrue(result.is_err())
+
+    def test_a_refused_guard_leaves_the_jobs_untouched(self) -> None:
+        deployment, job = self._setup("migrating")
+
+        with mock.patch("apps.provisioning.virtualmin_drain_service.server_has_active_migration", return_value=True):
+            result = _make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext())
+
+        self.assertTrue(result.is_err())
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertIsNotNone(job.next_retry_at)

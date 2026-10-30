@@ -47,71 +47,74 @@ DESTROYABLE_STATES = ("completed", "failed", "stopped")
 _NOT_APPLIED = frozenset({"retriable", "not_retriable"})
 
 
-def _never_reached_node(account: Any) -> bool:
-    """An "error" account whose own create jobs prove its domain was never created on the node.
+def _never_reached_node(account: Any) -> list[Any] | None:
+    """The failed create jobs proving an "error" account never reached the node, or None when unproven.
 
     Conservative: it needs at least one create_domain job, every one of them failed or cancelled, and each
     failed one either refused before taking effect (a retriable or not-retriable failure) or rolled back
-    successfully. An account that was ever provisioned, or has any other evidence, still counts.
+    successfully. An account that was ever provisioned, or has any other evidence, still counts (None).
+    The failed jobs returned are the ones the guard must fence against a retry.
     """
     if account.status != "error" or account.provisioned_at is not None:
-        return False
+        return None
     jobs = list(account.provisioning_jobs.filter(operation="create_domain"))
     if not jobs:
-        return False
+        return None
+    failed = []
     for job in jobs:
         if job.status == "cancelled":
             continue
         rolled_back = job.rollback_executed and job.rollback_status == "success"
         refused = (job.result or {}).get("retriability") in _NOT_APPLIED
         if job.status != "failed" or not (rolled_back or refused):
-            return False
-    return True
+            return None
+        failed.append(job.pk)
+    return failed
 
 
-def _fence_create_retries(accounts: list[Any]) -> bool:
-    """Cancel the exempted accounts' failed create jobs so no retry can create them on a closing node.
+def _fence_create_retries(job_ids: list[Any]) -> bool:
+    """Cancel exactly the failed create jobs the evidence relied on, so no retry can run them.
 
     A retry claims a failed job with a conditional update from "failed"; this fence is the same kind of
-    update, so exactly one wins. Returns False when a retry got there first: the node is then occupied.
+    update on the same ids, so exactly one wins each job. Returns False when a retry claimed any of them
+    first, at any moment since the evidence was read: the node is then occupied.
     """
     from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
-    expected = list(
-        VirtualminProvisioningJob.objects.filter(
-            account__in=accounts, operation="create_domain", status="failed"
-        ).values_list("pk", flat=True)
-    )
-    fenced = VirtualminProvisioningJob.objects.filter(pk__in=expected, status="failed").update(
+    fenced = VirtualminProvisioningJob.objects.filter(pk__in=job_ids, status="failed").update(
         status="cancelled", next_retry_at=None, updated_at=timezone.now()
     )
-    return fenced == len(expected)
+    return fenced == len(job_ids)
 
 
 def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
     """Under the server row lock admission takes: refuse while work lives there, else close the node.
 
     Every account that is not terminated still lives on the node, including one still provisioning,
-    except an "error" account whose jobs prove it never reached the node. An in-flight migration touching
-    the server (as source or target) has no local account row yet.
+    except an "error" account whose jobs prove it never reached the node; those jobs are fenced against
+    a retry before the node closes. An in-flight migration touching the server (as source or target) has
+    no local account row yet. A refusal writes nothing.
     """
     if not virtualmin_server_id:
         return Ok(None)
     from apps.provisioning.virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
     from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
 
+    occupied_message = "Node has undrained accounts; drain it or explicitly force"
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=virtualmin_server_id)
-        accounts = list(server.accounts.exclude(status="terminated"))
-        exempt = [account for account in accounts if _never_reached_node(account)]
-        occupied = len(exempt) < len(accounts) or (not force and not _fence_create_retries(exempt))
+        evidence = [_never_reached_node(account) for account in server.accounts.exclude(status="terminated")]
+        occupied = any(jobs is None for jobs in evidence)
         migrating = server_has_active_migration(server)
         if (occupied or migrating) and not force:
             return Err(
-                "Node has an in-flight migration; resolve it or explicitly force"
-                if migrating
-                else "Node has undrained accounts; drain it or explicitly force"
+                "Node has an in-flight migration; resolve it or explicitly force" if migrating else occupied_message
             )
+        if not force:
+            job_ids = [job_id for jobs in evidence if jobs for job_id in jobs]
+            if not _fence_create_retries(job_ids):
+                transaction.set_rollback(True)  # a retry won: undo the jobs this fence already cancelled
+                return Err(occupied_message)
         # fsm-bypass: VirtualminServer CharField; close admission before provider I/O.
         server.status, server.failed_by_health_check = "disabled", False
         server.save(update_fields=["status", "failed_by_health_check", "updated_at"])
