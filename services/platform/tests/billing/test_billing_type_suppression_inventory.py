@@ -45,7 +45,6 @@ EXPECTED_SUPPRESSIONS: dict[str, int] = {
     "billing/efactura/xml_builder.py": 3,
     "billing/gateways/stripe_gateway.py": 1,
     "billing/metering_service.py": 1,
-    "billing/metering_tasks.py": 2,
     "billing/refund_service.py": 2,
     "billing/tax_models.py": 1,
     "billing/views.py": 5,

@@ -809,6 +809,7 @@ class TestCheckAllUsageThresholds(TestCase):
 
 
 class TestCollectVirtualminUsage(TestCase):
+    """Queued legacy calls are harmless regardless of meters or account state."""
     def test_meters_not_configured(self) -> None:
         from apps.billing.metering_tasks import collect_virtualmin_usage  # noqa: PLC0415
 
@@ -820,8 +821,9 @@ class TestCollectVirtualminUsage(TestCase):
         ):
             mock_meter.objects.filter.return_value.first.return_value = None
             result = collect_virtualmin_usage()
-        assert result["success"] is False
-        assert "not configured" in result["error"]
+        assert result["success"] is True
+        assert result["events_created"] == 0
+        mock_meter.objects.filter.assert_not_called()
 
     def test_success_with_accounts(self) -> None:
         from apps.billing.metering_tasks import collect_virtualmin_usage  # noqa: PLC0415
@@ -855,7 +857,9 @@ class TestCollectVirtualminUsage(TestCase):
             mock_svc.return_value.record_event.return_value = ok_result
             result = collect_virtualmin_usage()
         assert result["success"] is True
-        assert result["events_created"] == 2
+        assert result["events_created"] == 0
+        mock_svc.assert_not_called()
+        mock_va.objects.filter.assert_not_called()
 
     def test_account_without_service(self) -> None:
         from apps.billing.metering_tasks import collect_virtualmin_usage  # noqa: PLC0415
@@ -905,7 +909,8 @@ class TestCollectVirtualminUsage(TestCase):
             mock_va.objects.filter.return_value.select_related.return_value.iterator.return_value = [mock_account]
             mock_svc.return_value.record_event.return_value = err_result
             result = collect_virtualmin_usage()
-        assert result["errors"] == 1
+        assert result["errors"] == 0
+        mock_svc.assert_not_called()
 
     def test_account_exception(self) -> None:
         from apps.billing.metering_tasks import collect_virtualmin_usage  # noqa: PLC0415
@@ -932,14 +937,16 @@ class TestCollectVirtualminUsage(TestCase):
             mock_va.objects.filter.return_value.select_related.return_value.iterator.return_value = [mock_account]
             mock_svc.return_value.record_event.side_effect = RuntimeError("kaboom")
             result = collect_virtualmin_usage()
-        assert result["errors"] == 1
+        assert result["errors"] == 0
+        mock_svc.assert_not_called()
 
     def test_outer_exception(self) -> None:
         from apps.billing.metering_tasks import collect_virtualmin_usage  # noqa: PLC0415
 
-        with patch("apps.billing.metering_service.MeteringService", side_effect=RuntimeError("boom")):
+        with patch("apps.billing.metering_service.MeteringService", side_effect=RuntimeError("boom")) as meter:
             result = collect_virtualmin_usage()
-        assert result["success"] is False
+        assert result["success"] is True
+        meter.assert_not_called()
 
 
 class TestCollectServiceUsage(TestCase):
@@ -1076,7 +1083,7 @@ class TestRegisterScheduledTasks(TestCase):
             mock_schedule.MINUTES = 1
             mock_schedule.HOURLY = 2
             register_scheduled_tasks()
-        assert mock_schedule.objects.update_or_create.call_count == 5
+        assert mock_schedule.objects.update_or_create.call_count == 4
 
 
 class TestEFacturaAuditPayloadReachesTheAuditService(TestCase):

@@ -7,6 +7,14 @@ work" into "provably works". Run it against ONE real Hetzner node before claimin
 auto-deploy is customer-ready.
 
 ## Prerequisites
+
+- For #782, install `virtualmin_usage.yml` on the isolated node, verify the root timer
+  and HTTP/HTTPS logging, grow files and a database separately and run the hourly
+  usage publisher. Check both account and Service byte projections plus the portal
+  breakdown/source time. Generate traffic before/after an injected month boundary;
+  incomplete first-month coverage must stay partial. The full lab's `test_sync.py`
+  covers real collection without relying on filesystem quota support. Do not
+  enable `provisioning.usage_sync_enabled` on production before this acceptance.
 - A Hetzner Cloud API token (project-scoped) configured in PRAHO (provider token / vault).
 - PRAHO platform running with node-deployment settings configured.
 - `infrastructure.node_admin_allowed_cidrs` set to Platform's egress addresses plus your admin network

@@ -43,8 +43,17 @@ def test_service_detail_shows_the_full_name_on_mobile(
         expect(period).to_be_visible()
         expect(period.locator("option")).to_have_text(["Last 7 days", "Last 30 days", "Last 90 days"])
         assert period.locator("option").evaluate_all("els => els.map(el => el.value)") == ["7d", "30d", "90d"]
-        period.select_option("90d")
+        # A successful request alone cannot prove HTMX displayed its response.
+        # Mark the original fragment and require its replacement in the DOM.
+        page.locator("#service-usage-content > :first-child").evaluate(
+            "el => el.setAttribute('data-before-usage-refresh', 'true')"
+        )
+        with page.expect_response(f"**/services/{owner['service_id']}/usage/?period=90d") as refreshed:
+            period.select_option("90d")
+        assert refreshed.value.status == 200
+        expect(page.locator("[data-before-usage-refresh]")).to_have_count(0)
         expect(period).to_have_value("90d")
+        expect(page.locator("#service-usage-content")).to_contain_text("No disk usage history is available yet.")
         page.get_by_role("button", name="Billing", exact=True).click()
         expect(page.locator("[x-show=\"isTab('billing')\"]")).to_be_visible()
         expect(usage).to_be_hidden()

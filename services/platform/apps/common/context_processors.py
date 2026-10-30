@@ -147,6 +147,7 @@ def setup_attention(request: HttpRequest) -> dict[str, object]:
     from apps.common.status_models import INTERNAL_CHECK_KEYS, SystemCheckState  # noqa: PLC0415
     from apps.common.status_observations import display_level  # noqa: PLC0415
     from apps.common.system_status import node_input_identities, runtime_input_identity  # noqa: PLC0415
+    from apps.provisioning.virtualmin_usage_service import node_usage_status  # noqa: PLC0415
     from apps.settings.setup_checklist import get_setup_report  # noqa: PLC0415
 
     try:
@@ -160,6 +161,7 @@ def setup_attention(request: HttpRequest) -> dict[str, object]:
                 in {"red", "amber", "unknown"}
                 for row in rows
             )
+            issues += sum(bool(row["attention"]) for row in node_usage_status())
             return {"setup_remaining": report.remaining, "health_attention_count": issues}
     except (DatabaseError, InterfaceError):
         # Bootstrap can render before additive migrations; absence is never reported as complete.

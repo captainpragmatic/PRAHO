@@ -21,6 +21,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
+from .virtualmin_usage_models import AccountUsageState, NodeUsageSyncState, UsageInterval, UsageReading
 
 # Re-export for external imports
 __all__ = [
@@ -28,9 +29,11 @@ __all__ = [
     "AccountNameCertificate",
     "AccountNameCertificateBudget",
     "AccountNameCertificateInstall",
+    "AccountUsageState",
     "HostedDomainDnsStatus",
     "MigrationBridge",
     "NodeDrain",
+    "NodeUsageSyncState",
     "ProvisioningTask",
     "Server",
     "Service",
@@ -41,6 +44,8 @@ __all__ = [
     "ServicePlanPrice",
     "ServiceRelationship",
     "ServiceRequest",
+    "UsageInterval",
+    "UsageReading",
     # Virtualmin models
     "VirtualminAccount",
     "VirtualminDriftRecord",

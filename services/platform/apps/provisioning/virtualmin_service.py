@@ -431,7 +431,7 @@ class VirtualminProvisioningService:
         logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
         on_account_ready(account)
 
-    def _execute_domain_creation(  # noqa: PLR0911  # Complexity: cohesive workflow
+    def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Verified create and atomic node-ownership commit
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
@@ -495,6 +495,7 @@ class VirtualminProvisioningService:
                         # One transaction: recovery reads an active account as "already counted",
                         # so the account must never be active without the server's count raised.
                         with transaction.atomic():
+                            VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
                             # fsm-bypass: CharField status
                             account.status = "active"
                             account.provisioned_at = timezone.now()

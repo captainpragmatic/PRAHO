@@ -1,0 +1,136 @@
+---
+- name: Install node usage runtime
+  ansible.builtin.apt:
+    name: [python3, tzdata, libjson-pp-perl, logrotate]
+    state: present
+
+- name: Create private usage directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop: [/var/lib/praho/usage, /var/log/praho]
+
+- name: Create root program directory
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install fixed usage programs
+  ansible.builtin.copy:
+    src: "files/{{ item }}"
+    dest: "/usr/local/libexec/{{ item }}"
+    owner: root
+    group: root
+    mode: '0700'
+  loop: [praho_usage.py, praho-usage-metadata.pl, praho-usage-hook]
+
+- name: Initialize node installation identity
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /usr/local/libexec/praho_usage.py, init]
+  changed_when: false
+
+- name: Reconcile private usage logging
+  ansible.builtin.command:
+    argv: [/usr/bin/perl, /usr/local/libexec/praho-usage-metadata.pl, reconcile]
+  register: usage_reconcile
+  changed_when: "'changed=0' not in usage_reconcile.stdout"
+
+- name: Install hourly usage service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-usage.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Collect bounded private hosting usage
+      After=apache2.service mariadb.service
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/python3 /usr/local/libexec/praho_usage.py refresh
+      TimeoutStartSec=240
+      UMask=0077
+      Nice=10
+      NoNewPrivileges=true
+
+- name: Install hourly usage timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-usage.timer
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Hourly hosting usage collection
+      [Timer]
+      OnCalendar=*-*-* *:00:00 UTC
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+- name: Install size bounded private log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/praho-usage
+    mode: '0644'
+    content: |
+      /var/log/praho/usage.log {
+          daily
+          maxsize 32M
+          rotate 16
+          missingok
+          notifempty
+          create 0600 root root
+          sharedscripts
+          prerotate
+              /usr/bin/python3 /usr/local/libexec/praho_usage.py prepare-rotation
+          endscript
+          postrotate
+              /usr/sbin/apachectl graceful && /usr/bin/python3 /usr/local/libexec/praho_usage.py rotated
+          endscript
+      }
+
+- name: Install private usage retention and rotation service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-usage-retention.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Enforce the private usage storage budget
+      ConditionPathExists=/var/log/praho/usage.log
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/python3 /usr/local/libexec/praho_usage.py retention
+      ExecStart=/usr/sbin/logrotate --state /var/lib/logrotate/status /etc/logrotate.d/praho-usage
+      TimeoutStartSec=120
+      UMask=0077
+      Nice=10
+      NoNewPrivileges=true
+
+- name: Install private usage retention timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-usage-retention.timer
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Check private usage storage each minute
+      [Timer]
+      OnCalendar=*-*-* *:*:00 UTC
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable usage collection
+  ansible.builtin.systemd:
+    name: praho-usage.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Enable private usage retention
+  ansible.builtin.systemd:
+    name: praho-usage-retention.timer
+    daemon_reload: true
+    enabled: true
+    state: started

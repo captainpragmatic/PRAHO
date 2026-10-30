@@ -1,0 +1,10 @@
+#!/bin/sh
+# Virtualmin invokes this fixed root-owned dispatcher with no arguments.
+set -eu
+if ! /usr/bin/perl /usr/local/libexec/praho-usage-metadata.pl reconcile-hook; then
+    printf '%s\n' 'PRAHO usage reconciliation could not be queued' >&2
+fi
+if [ -s /var/lib/praho/usage/previous-hook ]; then
+    previous_hook=$(cat /var/lib/praho/usage/previous-hook)
+    /bin/sh -c "$previous_hook"
+fi

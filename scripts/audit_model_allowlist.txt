@@ -117,6 +117,10 @@ billing.SmartBillRateGate       # outbound call scheduler: one timestamp per API
 common.Counter                  # infrastructure counters and claims: expiring rows with no business, financial or customer data
 common.SystemCheckState         # bounded current operational evidence and claims, not business history; security and backup jobs retain their own audits (ADR-0064)
 common.NodeResourceHourlySummary # 30-day aggregate telemetry, no customer data; per-poll auditing would create an unbounded duplicate history (ADR-0064)
+provisioning.AccountUsageState   # current technical owner scope and last-good metric pointers; business ownership writes retain audits (ADR-0068)
+provisioning.NodeUsageSyncState  # bounded hourly usage claim and transport outcome; credential access retains audits (ADR-0068)
+provisioning.UsageInterval       # technical canonical-node attribution and finalized response-byte segments; migration retains lifecycle audits (ADR-0068)
+provisioning.UsageReading        # ninety-day technical observations; never business billing events or per-poll AuditEvents (ADR-0068)
 common.LegalDocument            # publish_legal_document() writes legal_document_published in the same transaction; rows are immutable, so there is no other write to audit
 users.UserSession               # session revocation index (key to user); the sessions it mirrors are not audited either
 users.UserCredentialVersion     # monotonic MFA binding version; every change is written by an audited MFA state change

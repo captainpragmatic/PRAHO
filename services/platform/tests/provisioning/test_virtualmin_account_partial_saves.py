@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import models
 from django.urls import reverse
 
@@ -47,16 +48,18 @@ class PartialSaveTests(VirtualminViewsFixture):
         self.account.refresh_from_db()
         self.assertEqual(self.account.chain_epoch, 2 + CONCURRENT_EPOCHS, "a stale save overwrote the chain epoch")
 
-    def test_the_usage_sync_command_keeps_the_chain_epoch(self) -> None:
+    def test_retired_usage_command_cannot_write_usage_or_chain_epoch(self) -> None:
         usage = Ok({"disk_usage_mb": 77, "bandwidth_usage_mb": 88})
         with (
             patch.object(VirtualminGateway, "get_domain_info", return_value=usage),
             patch.object(VirtualminAccount, "save", autospec=True, side_effect=self.concurrent_invalidation()),
+            self.assertRaisesRegex(CommandError, "Unknown command: 'sync_virtualmin_usage'"),
         ):
             call_command("sync_virtualmin_usage", "--server", self.server.name, stdout=io.StringIO(), no_color=True)
-        self.assert_chain_untouched()
-        self.assertEqual(self.account.current_disk_usage_mb, 77)
-        self.assertIsNotNone(self.account.last_sync_at)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.chain_epoch, 2)
+        self.assertEqual(self.account.current_disk_usage_mb, 0)
+        self.assertIsNone(self.account.last_sync_at)
 
     def test_the_staff_account_sync_keeps_the_chain_epoch(self) -> None:
         self.payload["data"] = [
@@ -69,7 +72,7 @@ class PartialSaveTests(VirtualminViewsFixture):
         ):
             self.client.post(reverse("provisioning:virtualmin_accounts_sync"))
         self.assert_chain_untouched()
-        self.assertEqual(self.account.current_disk_usage_mb, 12)
+        self.assertEqual(self.account.current_disk_usage_mb, 0)
         self.assertIsNotNone(self.account.last_sync_at)
 
     def test_the_protection_toggle_keeps_the_chain_epoch(self) -> None:
