@@ -286,7 +286,19 @@ def button(
 
     _apply_arguments("button", kwargs, config, htmx, aliases=_BUTTON_ALIASES)
 
-    clean_attrs = serialize_button_attributes(config.attrs)
+    # attrs may not add a second copy of an attribute an argument of this call already writes.
+    owned = frozenset(
+        attribute
+        for attribute, value in (
+            ("title", config.title),
+            ("data-title", config.confirm_title),
+            ("data-message", config.confirm_message),
+            ("data-confirm-text", config.confirm_text),
+            ("data-submit-form", config.submit_form),
+        )
+        if value
+    )
+    clean_attrs = serialize_button_attributes(config.attrs, owned)
 
     return {
         "text": text,

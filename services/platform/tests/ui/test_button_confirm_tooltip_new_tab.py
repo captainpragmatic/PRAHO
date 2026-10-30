@@ -97,3 +97,40 @@ class NewTabTests(SimpleTestCase):
         _html, attrs, _raw = render("new_tab=True")
         self.assertNotIn("target", attrs)
         self.assertNotIn("rel", attrs)
+
+
+class Wrapped(HTMLParser):
+    """The tags around and including the control, in order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append((tag, dict(attrs)))
+
+
+class DisabledTooltipTests(SimpleTestCase):
+    def test_a_disabled_button_s_reason_sits_on_a_wrapper_that_receives_the_pointer(self) -> None:
+        # Some browsers send no pointer events to a disabled control, so its own title never shows.
+        html = Template('{% load ui_components %}{% button "Go" disabled=True title="Why not" %}').render(Context())
+        parsed = Wrapped()
+        parsed.feed(html)
+        tag, attrs = parsed.tags[0]
+        self.assertEqual((tag, attrs.get("title")), ("span", "Why not"))
+        button = next(a for t, a in parsed.tags if t == "button")
+        self.assertIn("disabled", button)
+
+    def test_an_enabled_button_carries_its_own_title_and_no_wrapper(self) -> None:
+        html = Template('{% load ui_components %}{% button "Go" title="Why" %}').render(Context())
+        parsed = Wrapped()
+        parsed.feed(html)
+        self.assertEqual(parsed.tags[0][0], "button")
+        self.assertEqual(parsed.tags[0][1].get("title"), "Why")
+
+
+class AttrsTitleTests(SimpleTestCase):
+    def test_attrs_may_still_give_a_title_when_the_argument_is_not_used(self) -> None:
+        _html, attrs, _raw = render('attrs=\'title="From attrs" data-title="Kept"\'')
+        self.assertEqual(attrs.get("title"), "From attrs")
+        self.assertEqual(attrs.get("data-title"), "Kept")

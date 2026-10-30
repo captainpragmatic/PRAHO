@@ -144,7 +144,7 @@ class CustomerPageButtonTests(TestCase):
 
     def test_no_hand_written_button_remains_for_want_of_component_arguments(self) -> None:
         source = TEMPLATE.read_text()
-        exemptions = re.findall(r"tmpl-allow TMPL002: ([^#]*)#\}", source)
+        exemptions = re.findall(r"tmpl-allow TMPL002: (.*?)#\}", source)
         self.assertEqual([e for e in exemptions if "attrs takes one literal string" in e], [])
         # The rest are a drop-down's menu entries, its Alpine toggle and an icon-only copy control.
         self.assertEqual(len(exemptions), 6)
