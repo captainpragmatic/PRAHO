@@ -370,6 +370,7 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
         "provenance": provenance,
         "attested_no_resources": request.attest_no_resources,
         "never_created_attested": request.attest_never_created,
+        "correlation_id": str(deployment.correlation_id),
         "credential_fingerprint": credential,
         "snapshot": {
             "external_node_id": deployment.external_node_id,

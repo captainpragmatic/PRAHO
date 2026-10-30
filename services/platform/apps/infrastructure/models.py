@@ -730,7 +730,11 @@ class NodeDeployment(models.Model):
         """No server was ever created: a create state of "none", or a reconciled never-created attestation."""
         if self.server_create_state == "none":
             return True
-        attested = bool((self.reconciliation_record or {}).get("never_created_attested"))
+        record = self.reconciliation_record or {}
+        # An attestation covers the attempt it was made for only: a re-deploy rotates the correlation id.
+        attested = bool(record.get("never_created_attested")) and record.get("correlation_id") == str(
+            self.correlation_id
+        )
         return attested and self.server_create_state in ("unknown", "intent")
 
     @property

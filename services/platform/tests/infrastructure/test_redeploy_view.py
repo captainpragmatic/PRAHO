@@ -69,6 +69,14 @@ class RedeployPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         queue.assert_not_called()
 
+    def test_a_malformed_size_is_refused_without_an_error_page(self) -> None:
+        self.client.force_login(self.admin)
+
+        response, queue = self._post(self.deployment.hostname, "abc")
+
+        self.assertEqual(response.status_code, 200)
+        queue.assert_not_called()
+
     def test_a_size_not_sold_in_the_region_queues_nothing(self) -> None:
         self.client.force_login(self.admin)
 

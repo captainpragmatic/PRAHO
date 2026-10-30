@@ -291,6 +291,8 @@ class NeverCreatedTests(TestCase):
 
         row = NodeDeployment.objects.get(pk=deployment.pk)
         self.assertTrue(row.reconciliation_record["never_created_attested"])
+        self.assertEqual(row.reconciliation_record["correlation_id"], str(row.correlation_id))
+        self.assertTrue(row.never_got_a_server)
         self.assertEqual(row.server_create_state, "unknown")
 
     def test_creation_evidence_refuses_the_attestation(self) -> None:

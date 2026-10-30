@@ -630,7 +630,8 @@ def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
     available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
     form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
-    new_size = available_sizes.filter(id=request.POST.get("new_size") or 0).first()
+    size_id = str(request.POST.get("new_size", ""))
+    new_size = available_sizes.filter(id=int(size_id)).first() if size_id.isdigit() else None
     if request.method == "POST" and form.is_valid():
         refusal = (
             NodeDeploymentService._redeploy_refusal(deployment, new_size)

@@ -103,9 +103,11 @@ class RedeployTests(TestCase):
         self.assertTrue(gateway.create_firewall.call_args.kwargs["name"].endswith(suffix))
 
     def test_a_reconciled_never_created_row_is_eligible(self) -> None:
-        deployment = destroyed_row(
-            server_create_state="unknown", reconciliation_record={"never_created_attested": True}
+        deployment = destroyed_row(server_create_state="unknown")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            reconciliation_record={"never_created_attested": True, "correlation_id": str(deployment.correlation_id)}
         )
+        deployment.refresh_from_db()
 
         result, _gateway_used = redeploy(deployment, new_size(deployment))
 
@@ -181,3 +183,28 @@ class DestroyedIsTerminalExceptForRedeployTests(TestCase):
             with self.subTest(target=target), self.assertRaises(ValidationError):
                 _create_deployment("destroyed").transition_to(target)
         self.assertTrue(_create_deployment("destroyed").is_valid_transition("pending"))
+
+
+class RedeployReviewFindingsTests(TestCase):
+    def test_costs_start_when_the_new_server_is_created(self) -> None:
+        from datetime import timedelta  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        long_ago = timezone.now() - timedelta(days=30)
+        deployment = destroyed_row(started_at=long_ago)
+        before = timezone.now()
+
+        result, _gateway_used = redeploy(deployment, new_size(deployment))
+
+        self.assertTrue(result.is_ok(), result)
+        assert deployment.started_at is not None
+        self.assertGreaterEqual(deployment.started_at, before)
+
+    def test_an_attestation_for_an_earlier_attempt_does_not_qualify(self) -> None:
+        deployment = destroyed_row(
+            server_create_state="unknown",
+            reconciliation_record={"never_created_attested": True, "correlation_id": "an-earlier-attempt"},
+        )
+
+        self.assertFalse(deployment.never_got_a_server)

@@ -656,7 +656,12 @@ class NodeDeploymentService:
                     created_resources.append(("server", server_create_result.server_id))
                 # Persist the id at once: a worker that dies before the next stage leaves a known server.
                 owned_update(
-                    lease, deployment, external_node_id=server_create_result.server_id, server_create_state="created"
+                    lease,
+                    deployment,
+                    external_node_id=server_create_result.server_id,
+                    server_create_state="created",
+                    # Costs run from the first server this attempt created; a re-deploy resets it.
+                    started_at=deployment.started_at or timezone.now(),
                 )
             stages_completed.append("provision_server")
             log_deployment("info", f"Server created successfully via {provider_type} gateway")
@@ -1178,6 +1183,7 @@ class NodeDeploymentService:
                 ssh_port=22,
                 ssh_host_keys=None,
                 ssh_key_credential_id="",
+                started_at=None,
                 completed_at=None,
                 destroyed_at=None,
                 status_message="",
