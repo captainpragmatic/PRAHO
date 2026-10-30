@@ -11,7 +11,9 @@ from html.parser import HTMLParser
 from django.utils.html import escape
 
 _ATTRIBUTE_NAME = re.compile(r"(?:data-[a-z0-9_-]+|aria-[a-z0-9_-]+)\Z")
-_ALLOWED = frozenset({"name", "value", "title", "tabindex", "role", "form", "hx-include"})
+_ALLOWED = frozenset({"name", "value", "tabindex", "role", "form", "hx-include"})
+# The button's own arguments write these (data_action, title, confirm_*, submit_form); attrs never adds a second copy.
+_OWNED = frozenset({"data-action", "title", "data-title", "data-message", "data-confirm-text", "data-submit-form"})
 
 
 class _AttributeParser(HTMLParser):
@@ -38,8 +40,7 @@ def serialize_button_attributes(raw: object) -> str:
         attributes = parser.attributes
     accepted: dict[str, str] = {}
     for name, value in attributes:
-        if name == "data-action":
-            # The explicit data_action argument owns delegated behavior.
+        if name in _OWNED:
             continue
         if value is not None and (name in _ALLOWED or _ATTRIBUTE_NAME.fullmatch(name)):
             accepted.setdefault(name, value)
