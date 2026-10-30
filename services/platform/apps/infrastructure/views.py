@@ -32,6 +32,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.common.pagination import pagination_query
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
+from apps.infrastructure.provider_sync import PROVIDERS_WITH_LOCATION_DATA
 from apps.settings.services import SettingsService
 
 from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
@@ -71,6 +72,7 @@ from .tasks import (
     queue_retry_deployment,
     queue_start_node,
     queue_stop_node,
+    queue_sync_providers,
     queue_upgrade_node,
 )
 
@@ -1177,10 +1179,31 @@ def size_list(request: HttpRequest) -> HttpResponse:
     return render(request, "infrastructure/size_list.html", context)
 
 
-def _offer_in_every_active_region(size: NodeSize) -> None:
-    """A size staff created or re-identified by hand is offered wherever its provider has an active
-    region; the next provider sync narrows it to the locations that sell it."""
+def _refresh_offer(size: NodeSize) -> bool:
+    """Reset where a size staff created, re-identified or reactivated is offered.
+
+    A provider that reports where each size is sold (Hetzner) leaves it to the provider sync: the
+    size is offered nowhere until the sync records its locations. Any other provider offers it in
+    every active region. Returns True when the caller must queue a provider sync.
+    """
+    if size.provider.provider_type in PROVIDERS_WITH_LOCATION_DATA:
+        size.available_regions.clear()
+        return True
     size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
+    return False
+
+
+def _queue_catalogue_sync(request: HttpRequest, reason: str) -> None:
+    """Queue a provider sync (after the caller's transaction) and tell staff why."""
+    try:
+        queue_sync_providers()
+    except Exception:  # The change stands; the daily sync records the locations instead.
+        logger.warning("⚠️ [Infrastructure] Could not queue a provider sync", exc_info=True)
+        messages.warning(
+            request, _("%(reason)s The provider sync could not be queued; run Sync providers.") % {"reason": reason}
+        )
+        return
+    messages.info(request, _("%(reason)s A provider sync was queued to record it.") % {"reason": reason})
 
 
 @login_required
@@ -1193,7 +1216,9 @@ def size_create(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             with transaction.atomic():
                 size = form.save()
-                _offer_in_every_active_region(size)
+                needs_sync = _refresh_offer(size)
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' created successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1229,9 +1254,14 @@ def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if form.is_valid():
             with transaction.atomic():
                 size = form.save()
+                changed = set(form.changed_data)
                 # Another provider or type: the regions recorded for the old identity no longer apply.
-                if {"provider", "provider_type_id"} & set(form.changed_data):
-                    _offer_in_every_active_region(size)
+                # A reactivated size offered nowhere would stay undeployable until the next sync.
+                reidentified = bool({"provider", "provider_type_id"} & changed)
+                reactivated = "is_active" in changed and size.is_active and not size.available_regions.exists()
+                needs_sync = _refresh_offer(size) if reidentified or reactivated else False
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' updated successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1293,13 +1323,20 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)
+    needs_sync = False
     with transaction.atomic():
         region.is_active = not region.is_active
         region.save()
-        # A region no size was ever recorded in (disabled before the catalogue tracked regions)
-        # offers its provider's active sizes; the next provider sync narrows them.
+        # A region no size was ever recorded in (disabled before the catalogue tracked regions): a
+        # provider that reports where sizes are sold leaves it to the sync, which is queued; any
+        # other provider offers its active sizes there.
         if region.is_active and not region.available_sizes.exists():
-            region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
+            if region.provider.provider_type in PROVIDERS_WITH_LOCATION_DATA:
+                needs_sync = True
+            else:
+                region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
+    if needs_sync:
+        _queue_catalogue_sync(request, str(_("The sizes sold in this region are not known yet.")))
 
     # Audit: region toggled
     try:

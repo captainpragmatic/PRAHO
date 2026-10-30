@@ -41,6 +41,10 @@ HETZNER_LOCATION_MAP: dict[str, dict[str, str]] = {
     "sin": {"normalized_code": "sin1", "country_code": "sg", "city": "Singapore"},
 }
 
+# Providers whose catalogue says where each size is sold; their sync records it per region.
+# For the others, a size is offered in every active region of its provider.
+PROVIDERS_WITH_LOCATION_DATA = frozenset({"hetzner"})
+
 # Memory tier thresholds (GB) for max_domains calculation
 MEMORY_TIER_XL = 32  # 500 domains
 MEMORY_TIER_LG = 16  # 200 domains

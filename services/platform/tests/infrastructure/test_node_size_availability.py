@@ -13,7 +13,7 @@ from django.http import HttpResponse
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeRegion, NodeSize, PanelType
 from tests.helpers.node_catalogue import make_region, make_size
 
@@ -21,28 +21,29 @@ User = get_user_model()
 
 
 class SizeFormTests(TestCase):
+    """Sizes staff create or re-identify: offered everywhere when the provider reports no locations,
+    otherwise left to the provider sync, which is queued."""
+
     def setUp(self) -> None:
         self.client.force_login(User.objects.create_superuser(email="admin@test.com", password="testpass123"))
         self.hetzner = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
         self.other = CloudProvider.objects.create(name="Vultr", provider_type="vultr", code="vul")
+        patcher = patch("apps.infrastructure.views.queue_sync_providers", return_value="sync-task")
+        self.queue_sync = patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def test_new_size_is_offered_in_every_active_region_of_its_provider(self) -> None:
-        hel1 = make_region(self.hetzner, "hel1")
-        fsn1 = make_region(self.hetzner, "fsn1")
-        make_region(self.hetzner, "nbg1", active=False)
-        make_region(self.other, "ewr")
+    def create(self, provider: CloudProvider, type_id: str) -> NodeSize:
         response = self.client.post(
             reverse("infrastructure:size_create"),
             {
-                "provider": self.hetzner.pk, "name": "CX23", "display_name": "2 vCPU / 4GB / 40GB",
-                "provider_type_id": "cx23", "vcpus": 2, "memory_gb": 4, "disk_gb": 40,
+                "provider": provider.pk, "name": type_id.upper(), "display_name": "2 vCPU / 4GB / 40GB",
+                "provider_type_id": type_id, "vcpus": 2, "memory_gb": 4, "disk_gb": 40,
                 "hourly_cost_eur": "0.0100", "monthly_cost_eur": "4.99", "max_domains": 50,
                 "max_bandwidth_gb": 1000, "is_active": True, "sort_order": 2,
             },
         )
         self.assertEqual(response.status_code, 302)
-        size = NodeSize.objects.get(provider_type_id="cx23")
-        self.assertEqual(set(size.available_regions.all()), {hel1, fsn1})
+        return NodeSize.objects.get(provider=provider, provider_type_id=type_id)
 
     def edit(self, size: NodeSize, **changes: object) -> None:
         data = {
@@ -56,12 +57,28 @@ class SizeFormTests(TestCase):
         response = self.client.post(reverse("infrastructure:size_edit", args=[size.pk]), data)
         self.assertEqual(response.status_code, 302)
 
-    def test_changing_the_provider_type_offers_the_size_where_the_new_type_may_be_sold(self) -> None:
+    def test_new_size_is_offered_in_every_active_region_of_a_provider_without_location_data(self) -> None:
+        ewr = make_region(self.other, "ewr")
+        fra = make_region(self.other, "fra")
+        make_region(self.other, "sgp", active=False)
+        make_region(self.hetzner, "hel1")
+        size = self.create(self.other, "vc2-1c-1gb")
+        self.assertEqual(set(size.available_regions.all()), {ewr, fra})
+        self.queue_sync.assert_not_called()
+
+    def test_new_hetzner_size_waits_for_the_sync_to_record_its_locations(self) -> None:
+        make_region(self.hetzner, "hel1")
+        size = self.create(self.hetzner, "cx23")
+        self.assertEqual(set(size.available_regions.all()), set())
+        self.queue_sync.assert_called_once_with()
+
+    def test_changing_the_hetzner_type_drops_the_old_type_locations_and_queues_a_sync(self) -> None:
         hel1 = make_region(self.hetzner, "hel1")
-        ash = make_region(self.hetzner, "ash")
+        make_region(self.hetzner, "ash")
         size = make_size(self.hetzner, "cx23", hel1)
         self.edit(size, provider_type_id="cpx11")
-        self.assertEqual(set(size.available_regions.all()), {hel1, ash})
+        self.assertEqual(set(size.available_regions.all()), set())
+        self.queue_sync.assert_called_once_with()
 
     def test_changing_the_provider_moves_the_offer_to_the_new_provider(self) -> None:
         hel1 = make_region(self.hetzner, "hel1")
@@ -70,33 +87,61 @@ class SizeFormTests(TestCase):
         self.edit(size, provider=self.other.pk)
         self.assertEqual(set(size.available_regions.all()), {ewr})
 
+    def test_reactivating_a_size_offered_nowhere_offers_it_again(self) -> None:
+        ewr = make_region(self.other, "ewr")
+        size = make_size(self.other, "vc2-1c-1gb", active=False)
+        self.edit(size, is_active=True)
+        self.assertEqual(set(size.available_regions.all()), {ewr})
+
+    def test_reactivating_a_hetzner_size_offered_nowhere_queues_a_sync(self) -> None:
+        make_region(self.hetzner, "hel1")
+        size = make_size(self.hetzner, "cx23", active=False)
+        self.edit(size, is_active=True)
+        self.assertEqual(set(size.available_regions.all()), set())
+        self.queue_sync.assert_called_once_with()
+
     def test_editing_other_fields_keeps_the_synced_offer(self) -> None:
         hel1 = make_region(self.hetzner, "hel1")
         make_region(self.hetzner, "ash")
         size = make_size(self.hetzner, "cx23", hel1)
         self.edit(size, display_name="2 vCPU / 4 GB")
         self.assertEqual(set(size.available_regions.all()), {hel1})
+        self.queue_sync.assert_not_called()
 
 
 class RegionToggleTests(TestCase):
     def setUp(self) -> None:
         self.client.force_login(User.objects.create_superuser(email="admin@test.com", password="testpass123"))
         self.hetzner = CloudProvider.objects.create(name="Hetzner", provider_type="hetzner", code="het")
+        self.other = CloudProvider.objects.create(name="Vultr", provider_type="vultr", code="vul")
+        patcher = patch("apps.infrastructure.views.queue_sync_providers", return_value="sync-task")
+        self.queue_sync = patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def toggle(self, region: NodeRegion) -> None:
-        self.client.post(reverse("infrastructure:region_toggle", args=[region.pk]))
+    def toggle(self, region: NodeRegion) -> HttpResponse:
+        response = self.client.post(reverse("infrastructure:region_toggle", args=[region.pk]), follow=True)
         region.refresh_from_db()
+        return response
 
     def test_enabling_a_region_nothing_is_offered_in_offers_the_active_sizes(self) -> None:
-        hel1 = make_region(self.hetzner, "hel1")
-        sin = make_region(self.hetzner, "sin", active=False)  # Disabled before the catalogue recorded regions.
-        cx23 = make_size(self.hetzner, "cx23", hel1)
-        make_size(self.hetzner, "cx11", hel1, active=False)
-        other = CloudProvider.objects.create(name="Vultr", provider_type="vultr", code="vul")
-        make_size(other, "vc2", make_region(other, "ewr"))
-        self.toggle(sin)
+        ewr = make_region(self.other, "ewr")
+        sgp = make_region(self.other, "sgp", active=False)  # Disabled before the catalogue recorded regions.
+        vc2 = make_size(self.other, "vc2", ewr)
+        make_size(self.other, "vc1", ewr, active=False)
+        make_size(self.hetzner, "cx23", make_region(self.hetzner, "hel1"))
+        self.toggle(sgp)
+        self.assertTrue(sgp.is_active)
+        self.assertEqual(set(sgp.available_sizes.all()), {vc2})
+        self.queue_sync.assert_not_called()
+
+    def test_enabling_a_hetzner_region_nothing_is_offered_in_queues_a_sync(self) -> None:
+        make_size(self.hetzner, "cpx11", make_region(self.hetzner, "ash"))  # Retired in sin; must not be linked.
+        sin = make_region(self.hetzner, "sin", active=False)
+        response = self.toggle(sin)
         self.assertTrue(sin.is_active)
-        self.assertEqual(set(sin.available_sizes.all()), {cx23})
+        self.assertEqual(set(sin.available_sizes.all()), set())
+        self.queue_sync.assert_called_once_with()
+        self.assertContains(response, "provider sync")
 
     def test_enabling_a_region_keeps_its_synced_offer(self) -> None:
         hel1 = make_region(self.hetzner, "hel1", active=False)
@@ -104,6 +149,7 @@ class RegionToggleTests(TestCase):
         make_size(self.hetzner, "cpx11", make_region(self.hetzner, "ash"))
         self.toggle(hel1)
         self.assertEqual(set(hel1.available_sizes.all()), {cx23})
+        self.queue_sync.assert_not_called()
 
 
 def _setting(key: str, default: object = None) -> object:
@@ -187,6 +233,27 @@ class DeployNodeCommandSizeRegionTests(TestCase):
 
     def test_size_sold_in_region_is_planned(self) -> None:
         self.assertIn("DRY RUN", self.call("cx23"))
+
+    def test_synchronous_deploy_refused_before_it_starts_fails_the_row(self) -> None:
+        refusal = "cx23 can no longer be ordered in hel1; no server was created."
+        service = MagicMock()
+        service.deploy_node.return_value = Err(refusal)
+        with (
+            patch("apps.settings.services.SettingsService.get_setting", side_effect=_setting),
+            patch(
+                "apps.infrastructure.management.commands.deploy_node.get_provider_token",
+                return_value=Ok("fixture-token"),
+            ),
+            patch("apps.infrastructure.deployment_service.get_deployment_service", return_value=service),
+            self.assertRaisesMessage(CommandError, refusal),
+        ):
+            call_command(
+                "deploy_node", "--provider=hetzner", "--environment=stg", "--region=hel1", "--size=cx23",
+                stdout=StringIO(),
+            )
+        deployment = NodeDeployment.objects.get()
+        self.assertEqual(deployment.status, "failed")
+        self.assertIn(refusal, deployment.status_message)
 
 
 class UpgradeSizeRegionTests(TestCase):

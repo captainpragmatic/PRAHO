@@ -311,6 +311,13 @@ class Command(BaseCommand):
         result = service.deploy_node(deployment, credentials)
 
         if result.is_err():
+            # A refusal before the row was claimed (an unorderable size, say) leaves it pending; fail
+            # it with the reason, as the queued task does.
+            from apps.infrastructure.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                _fail_before_first_phase,
+            )
+
+            _fail_before_first_phase(deployment, result.unwrap_err())
             raise CommandError(f"Deployment failed: {result.unwrap_err()}")
 
         deploy_result = result.unwrap()
