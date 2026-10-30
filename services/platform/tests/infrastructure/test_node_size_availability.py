@@ -134,6 +134,15 @@ class RegionToggleTests(TestCase):
         self.assertEqual(set(sgp.available_sizes.all()), {vc2})
         self.queue_sync.assert_not_called()
 
+    def test_enabling_a_region_offers_sizes_created_while_it_was_disabled(self) -> None:
+        sgp = make_region(self.other, "sgp")
+        vc2 = make_size(self.other, "vc2", sgp)
+        self.toggle(sgp)  # Disabled; vc3 is created meanwhile, offered only where regions are active.
+        vc3 = make_size(self.other, "vc3", make_region(self.other, "ewr"))
+        self.toggle(sgp)
+        self.assertTrue(sgp.is_active)
+        self.assertEqual(set(sgp.available_sizes.all()), {vc2, vc3})
+
     def test_enabling_a_hetzner_region_nothing_is_offered_in_queues_a_sync(self) -> None:
         make_size(self.hetzner, "cpx11", make_region(self.hetzner, "ash"))  # Retired in sin; must not be linked.
         sin = make_region(self.hetzner, "sin", active=False)

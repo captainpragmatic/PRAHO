@@ -1327,14 +1327,14 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     with transaction.atomic():
         region.is_active = not region.is_active
         region.save()
-        # A region no size was ever recorded in (disabled before the catalogue tracked regions): a
-        # provider that reports where sizes are sold leaves it to the sync, which is queued; any
-        # other provider offers its active sizes there.
-        if region.is_active and not region.available_sizes.exists():
-            if region.provider.provider_type in PROVIDERS_WITH_LOCATION_DATA:
-                needs_sync = True
-            else:
+        # A provider that reports where sizes are sold: a region no size lists (disabled before the
+        # catalogue tracked regions) is left to the sync, which is queued. Any other provider offers
+        # every active size there, including sizes created while the region was disabled.
+        if region.is_active:
+            if region.provider.provider_type not in PROVIDERS_WITH_LOCATION_DATA:
                 region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
+            elif not region.available_sizes.exists():
+                needs_sync = True
     if needs_sync:
         _queue_catalogue_sync(request, str(_("The sizes sold in this region are not known yet.")))
 
