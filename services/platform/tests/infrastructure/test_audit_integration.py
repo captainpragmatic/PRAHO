@@ -16,7 +16,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from apps.audit.models import AuditEvent
-from apps.common.types import Err
+from apps.common.types import Err, Ok
 from apps.infrastructure.audit_service import (
     InfrastructureAuditContext,
     InfrastructureAuditService,
@@ -294,6 +294,7 @@ class TestDeploymentServiceAuditIntegration(TestCase):
 
         svc = NodeDeploymentService()
         svc._ssh_manager = mock_ssh_mgr
+        svc._check_orderable = MagicMock(return_value=Ok(True))  # Covered in test_deploy_orderable_check.
         svc.deploy_node(deployment, {"api_token": "test"}, user=self.user)
 
         # Audit started should have been called

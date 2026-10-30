@@ -24,6 +24,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.common.types import Ok
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.models import (
     CloudProvider,
@@ -335,6 +336,7 @@ class TestDeployNodeTransitionBugFix(TestCase):
         service._ansible = MagicMock()
         service._validation = MagicMock()
         service._registration = MagicMock()
+        service._check_orderable = MagicMock(return_value=Ok(True))  # Covered in test_deploy_orderable_check.
 
         # SSH key generation returns error (simplest path to test transition)
         service._ssh_manager.generate_deployment_key.return_value = MagicMock(

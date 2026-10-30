@@ -219,6 +219,15 @@ class NodeSize(models.Model):
     is_active = models.BooleanField(default=True, verbose_name=_("Active"))
     sort_order = models.PositiveIntegerField(default=0, verbose_name=_("Sort Order"))
 
+    # Regions where a new node of this size can be created. The provider sync maintains it:
+    # Hetzner retires server types per location, so a size is offered only where it is sold.
+    available_regions = models.ManyToManyField(
+        NodeRegion,
+        blank=True,
+        related_name="available_sizes",
+        verbose_name=_("Available Regions"),
+    )
+
     class Meta:
         db_table = "infrastructure_node_sizes"
         verbose_name = _("Node Size")
@@ -228,6 +237,15 @@ class NodeSize(models.Model):
 
     def __str__(self) -> str:
         return f"{self.display_name} ({self.provider.code})"
+
+    @classmethod
+    def offered_in(cls, region: NodeRegion) -> models.QuerySet[NodeSize]:
+        """Active sizes a new node, or a resize, can use in this region."""
+        return cls.objects.filter(is_active=True, provider_id=region.provider_id, available_regions=region)
+
+    def is_offered_in(self, region: NodeRegion) -> bool:
+        """Whether a new node, or a resize, can use this size in this region."""
+        return NodeSize.offered_in(region).filter(pk=self.pk).exists()
 
 
 class PanelType(models.Model):

@@ -72,6 +72,17 @@ def _provider_refused(exc: Exception) -> bool:
     return code is not None and str(code) not in _AMBIGUOUS_API_CODES
 
 
+def _usable_locations(st: ServerType) -> tuple[str, ...]:
+    """Locations where a new server of this type can be created: listed, with no deprecation at all.
+
+    Hetzner retires server types per location (``locations[].deprecation``, since 2025-09-24); the
+    type-level ``deprecated`` flag is no longer maintained. An announced deprecation already counts,
+    because a node lives for years. Only ``location.name`` is read: the listing embeds incomplete
+    BoundLocations, and any other attribute would fetch each location from the API.
+    """
+    return tuple(str(entry.location.name) for entry in st.locations or () if entry.deprecation is None)
+
+
 class HcloudService(CloudProviderGateway):
     """
     Hetzner Cloud SDK wrapper implementing CloudProviderGateway.
@@ -455,6 +466,7 @@ class HcloudService(CloudProviderGateway):
             results: list[ServerTypeInfo] = []
             for st in server_types:
                 price_monthly = self._extract_monthly_price(st.prices)
+                locations = _usable_locations(st)
                 results.append(
                     ServerTypeInfo(
                         name=str(st.name),
@@ -463,12 +475,31 @@ class HcloudService(CloudProviderGateway):
                         memory_gb=float(st.memory or 0),
                         disk_gb=int(st.disk or 0),
                         price_monthly=price_monthly,
-                        available=not bool(st.deprecated),
+                        available=bool(locations),
+                        locations=locations,
                     )
                 )
             return Ok(results)
         except Exception as e:
             return Err(f"Failed to get server types: {e}")
+
+    def server_type_orderable(self, server_type: str, location: str) -> Result[bool | None, str]:
+        """Ask Hetzner now whether a new server of this type can be created in this location."""
+        try:
+            st = self.client.server_types.get_by_name(server_type)
+        except Exception as e:
+            return Err(f"Failed to check server type {server_type} in {location}: {e}")
+        if st is None:
+            return Ok(False)
+        return Ok(location in _usable_locations(st))
+
+    def find_deployment_server(self, deployment_label: str) -> Result[str | None, str]:
+        """The id of the server create_server would adopt for this deployment, if one exists."""
+        try:
+            servers = self.client.servers.get_all(label_selector=f"praho-deployment={deployment_label}")
+        except Exception as e:
+            return Err(f"Failed to look up servers for deployment {deployment_label}: {e}")
+        return Ok(str(servers[0].id) if servers else None)
 
     @staticmethod
     def _extract_monthly_price(prices: Any) -> float:

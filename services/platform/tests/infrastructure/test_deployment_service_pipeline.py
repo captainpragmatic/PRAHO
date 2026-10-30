@@ -164,6 +164,8 @@ def _make_service() -> NodeDeploymentService:
     service._validation = MagicMock()
     service._registration = MagicMock()
     service._node_firewall_rules = MagicMock(return_value=STANDARD_FIREWALL_RULES)
+    # The provider orderable check has its own tests (test_deploy_orderable_check).
+    service._check_orderable = MagicMock(return_value=Ok(True))
     return service
 
 

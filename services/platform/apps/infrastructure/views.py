@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, models, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -32,6 +32,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.common.pagination import pagination_query
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
+from apps.infrastructure.provider_sync import PROVIDERS_WITH_LOCATION_DATA
 from apps.settings.services import SettingsService
 
 from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
@@ -72,6 +73,7 @@ from .tasks import (
     queue_retry_deployment,
     queue_start_node,
     queue_stop_node,
+    queue_sync_providers,
     queue_upgrade_node,
 )
 
@@ -392,21 +394,24 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         .select_related("provider")
         .values("id", "name", "provider_id", "country_code", "normalized_code", "city")
     )
-    sizes = list(
-        NodeSize.objects.filter(is_active=True)
-        .select_related("provider")
-        .values(
-            "id",
-            "name",
-            "display_name",
-            "provider_id",
-            "vcpus",
-            "memory_gb",
-            "disk_gb",
-            "monthly_cost_eur",
-            "max_domains",
+    # One entry per size, with the active regions it is offered in (a .values() join would repeat sizes)
+    sizes = [
+        {
+            "id": size.id,
+            "name": size.name,
+            "display_name": size.display_name,
+            "provider_id": size.provider_id,
+            "vcpus": size.vcpus,
+            "memory_gb": size.memory_gb,
+            "disk_gb": size.disk_gb,
+            "monthly_cost_eur": size.monthly_cost_eur,
+            "max_domains": size.max_domains,
+            "region_ids": [region.id for region in size.available_regions.all()],
+        }
+        for size in NodeSize.objects.filter(is_active=True).prefetch_related(
+            Prefetch("available_regions", queryset=NodeRegion.objects.filter(is_active=True))
         )
-    )
+    ]
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -623,14 +628,9 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only upgrade running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get available sizes for this provider (larger than current)
+    # Sizes the node can be resized to: active and still sold in its region
     available_sizes = (
-        NodeSize.objects.filter(
-            provider=deployment.provider,
-            is_active=True,
-        )
-        .exclude(id=deployment.node_size_id)
-        .order_by("monthly_cost_eur")
+        NodeSize.offered_in(deployment.region).exclude(id=deployment.node_size_id).order_by("monthly_cost_eur")
     )
 
     if request.method == "POST":
@@ -639,7 +639,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, _("Please select a new size."))
         else:
             try:
-                new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
+                new_size = available_sizes.get(id=new_size_id)
 
                 # Validate token exists before queuing (fail fast)
                 token_result = get_provider_token(deployment.provider)
@@ -1146,6 +1146,33 @@ def size_list(request: HttpRequest) -> HttpResponse:
     return render(request, "infrastructure/size_list.html", context)
 
 
+def _refresh_offer(size: NodeSize) -> bool:
+    """Reset where a size staff created, re-identified or reactivated is offered.
+
+    A provider that reports where each size is sold (Hetzner) leaves it to the provider sync: the
+    size is offered nowhere until the sync records its locations. Any other provider offers it in
+    every active region. Returns True when the caller must queue a provider sync.
+    """
+    if size.provider.provider_type in PROVIDERS_WITH_LOCATION_DATA:
+        size.available_regions.clear()
+        return True
+    size.available_regions.set(NodeRegion.objects.filter(provider=size.provider, is_active=True))
+    return False
+
+
+def _queue_catalogue_sync(request: HttpRequest, reason: str) -> None:
+    """Queue a provider sync (after the caller's transaction) and tell staff why."""
+    try:
+        queue_sync_providers()
+    except Exception:  # The change stands; the daily sync records the locations instead.
+        logger.warning("⚠️ [Infrastructure] Could not queue a provider sync", exc_info=True)
+        messages.warning(
+            request, _("%(reason)s The provider sync could not be queued; run Sync providers.") % {"reason": reason}
+        )
+        return
+    messages.info(request, _("%(reason)s A provider sync was queued to record it.") % {"reason": reason})
+
+
 @login_required
 @require_size_management
 def size_create(request: HttpRequest) -> HttpResponse:
@@ -1154,7 +1181,11 @@ def size_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                needs_sync = _refresh_offer(size)
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' created successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1188,7 +1219,16 @@ def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = NodeSizeForm(request.POST, instance=size)
         if form.is_valid():
-            size = form.save()
+            with transaction.atomic():
+                size = form.save()
+                changed = set(form.changed_data)
+                # Another provider or type: the regions recorded for the old identity no longer apply.
+                # A reactivated size offered nowhere would stay undeployable until the next sync.
+                reidentified = bool({"provider", "provider_type_id"} & changed)
+                reactivated = "is_active" in changed and size.is_active and not size.available_regions.exists()
+                needs_sync = _refresh_offer(size) if reidentified or reactivated else False
+            if needs_sync:
+                _queue_catalogue_sync(request, str(_("The regions this size is sold in are not known yet.")))
             messages.success(request, f"Size '{size.name}' updated successfully.")
             return redirect("infrastructure:size_list")
     else:
@@ -1250,8 +1290,20 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)
-    region.is_active = not region.is_active
-    region.save()
+    needs_sync = False
+    with transaction.atomic():
+        region.is_active = not region.is_active
+        region.save()
+        # A provider that reports where sizes are sold: a region no size lists (disabled before the
+        # catalogue tracked regions) is left to the sync, which is queued. Any other provider offers
+        # every active size there, including sizes created while the region was disabled.
+        if region.is_active:
+            if region.provider.provider_type not in PROVIDERS_WITH_LOCATION_DATA:
+                region.available_sizes.set(NodeSize.objects.filter(provider_id=region.provider_id, is_active=True))
+            elif not region.available_sizes.exists():
+                needs_sync = True
+    if needs_sync:
+        _queue_catalogue_sync(request, str(_("The sizes sold in this region are not known yet.")))
 
     # Audit: region toggled
     try:

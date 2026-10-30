@@ -70,6 +70,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The orderable check runs on a queue worker before the claim: fail fast instead of the SDK's
+# default of no timeout and five retries.
+ORDERABLE_CHECK_TIMEOUT_SECONDS = 10
+ORDERABLE_CHECK_MAX_RETRIES = 1
+
 
 @dataclass
 class DeploymentProgress:
@@ -204,7 +209,115 @@ class NodeDeploymentService:
                 return Err(gettext("Provider image support changed before deployment claim; no VM was created."))
         return Ok((claim.unwrap(), claimed_provider.provider_type))
 
-    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Complexity: multi-step business logic
+    @staticmethod
+    def _ask_orderable(
+        deployment: NodeDeployment, api_token: str, server_type: str
+    ) -> tuple[Result[bool | None, str], CloudProviderGateway | None]:
+        """Ask the provider now whether ``server_type`` can be ordered in the deployment's region.
+
+        Uses its own client that fails fast (the SDK default is no timeout and five retries), and
+        contains its own faults: callers run it before they hold any claim or audit context.
+        """
+        try:
+            gateway = get_cloud_gateway(
+                deployment.provider.provider_type,
+                api_token,
+                timeout=ORDERABLE_CHECK_TIMEOUT_SECONDS,
+                max_retries=ORDERABLE_CHECK_MAX_RETRIES,
+            )
+            return gateway.server_type_orderable(server_type, deployment.region.provider_region_id), gateway
+        except Exception as error:  # An unexpected fault refuses; it never escapes.
+            return Err(str(error)), None
+
+    def _check_orderable(self, deployment: NodeDeployment, credentials: dict[str, str]) -> Result[bool, str]:
+        """Ask the provider, before the first write for a new server, whether its size is still sold in its region.
+
+        The synced catalogue can be a day old, and Hetzner retires server types per location. A
+        refusal queues a provider sync, which corrects the catalogue; this check never edits it.
+        """
+        api_token = credentials.get("api_token", "")
+        if not api_token:
+            return Ok(True)  # deploy_node fails on the missing token itself, before any provider call.
+        server_type = deployment.node_size.provider_type_id
+        location = deployment.region.provider_region_id
+        orderable, gateway = self._ask_orderable(deployment, api_token, server_type)
+        if orderable.is_err():
+            return self._refuse_unorderable(
+                deployment,
+                f"Could not confirm that {server_type} can be ordered in {location}; "
+                f"no server was created: {orderable.unwrap_err()}",
+            )
+        if orderable.unwrap() is not False or gateway is None:
+            return Ok(True)
+        # A server created before a crash, whose id was never stored, is adopted by create_server
+        # through its deployment label. Refusing here would strand it.
+        existing = gateway.find_deployment_server(str(deployment.correlation_id))
+        if existing.is_err():
+            return self._refuse_unorderable(
+                deployment,
+                f"{server_type} can no longer be ordered in {location}, and the check for a server already "
+                f"created for this deployment failed; no server was created: {existing.unwrap_err()}",
+            )
+        if existing.unwrap():
+            logger.info(
+                f"✅ [Deployment:{deployment.hostname}] Server {existing.unwrap()} already exists for this "
+                f"deployment; it is adopted although {server_type} is no longer sold in {location}"
+            )
+            return Ok(True)
+        self._queue_catalogue_sync(deployment)
+        return self._refuse_unorderable(
+            deployment,
+            f"{server_type} can no longer be ordered in {location}; no server was created. "
+            "Choose another size; a provider sync has been queued to refresh the catalogue.",
+        )
+
+    def _check_resize_orderable(
+        self, deployment: NodeDeployment, new_size: NodeSize, credentials: dict[str, str]
+    ) -> Result[bool, str]:
+        """Ask the provider, before a resize writes anything, whether the new size is still sold in the region."""
+        api_token = credentials.get("api_token", "")
+        if not api_token:
+            return Ok(True)  # The resize command fails on the missing token itself.
+        server_type = new_size.provider_type_id
+        location = deployment.region.provider_region_id
+        orderable, _gateway = self._ask_orderable(deployment, api_token, server_type)
+        if orderable.is_err():
+            return self._refuse_unorderable(
+                deployment,
+                f"Could not confirm that {server_type} can be ordered in {location}; "
+                f"the node was not resized: {orderable.unwrap_err()}",
+                phase="upgrading",
+            )
+        if orderable.unwrap() is False:
+            self._queue_catalogue_sync(deployment)
+            return self._refuse_unorderable(
+                deployment,
+                f"Size {server_type} is not available in {location}: the provider no longer sells it there, "
+                "and the node was not resized. A provider sync has been queued to refresh the catalogue.",
+                phase="upgrading",
+            )
+        return Ok(True)
+
+    @staticmethod
+    def _refuse_unorderable(deployment: NodeDeployment, message: str, phase: str = "init") -> Result[bool, str]:
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+        logger.warning(f"⚠️ [Deployment:{deployment.hostname}] {message}")
+        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=message, phase=phase)
+        return Err(message)
+
+    @staticmethod
+    def _queue_catalogue_sync(deployment: NodeDeployment) -> None:
+        from apps.infrastructure.tasks import (  # noqa: PLC0415  # Deferred: tasks imports this module
+            queue_sync_providers,
+        )
+
+        try:
+            queue_sync_providers()
+        except Exception as error:  # The refusal stands without a sync; the daily sync corrects the catalogue.
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Could not queue a provider sync: {error}")
+
+    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Complexity: multi-step business logic; retry passes check_orderable
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -213,6 +326,7 @@ class NodeDeploymentService:
         progress_callback: Callable[..., None] | None = None,
         expected_token: uuid.UUID | None = None,
         operation_kind: str = "deploy",
+        check_orderable: bool = True,
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -225,6 +339,7 @@ class NodeDeploymentService:
             progress_callback: Optional callback for progress updates
             expected_token: The token reserved at enqueue (or by the retry claim); only its holder starts
             operation_kind: "deploy", or "retry" when retry_deployment hands over its claim
+            check_orderable: False when the caller (retry_deployment) already ran the orderable check
 
         Returns:
             Result with DeploymentResult or error
@@ -274,6 +389,14 @@ class NodeDeploymentService:
             # Check if deployment is enabled
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
+
+            # A new server will be created: confirm its size is still sold in its region before the
+            # claim and before any vault or provider write. An existing VM is reused unchecked, and a
+            # row the claim will refuse anyway is not checked.
+            if check_orderable and not deployment.external_node_id and deployment.status == "pending":
+                orderable_result = self._check_orderable(deployment, credentials)
+                if orderable_result.is_err():
+                    return Err(orderable_result.unwrap_err())
 
             # One locked claim: only a pending row starts, and a retry only with the token it reserved.
             claim = self._claim_deploy(deployment, expected_token, operation_kind)
@@ -386,6 +509,17 @@ class NodeDeploymentService:
                 else:
                     log_deployment("warning", "Previously created server not found, creating new one")
                     owned_update(lease, deployment, external_node_id="")
+                    # The pre-claim check was skipped for the stored server; a replacement is new.
+                    orderable_result = self._check_orderable(deployment, credentials)
+                    if orderable_result.is_err():
+                        self._mark_failed(
+                            deployment,
+                            orderable_result.unwrap_err(),
+                            stage="provision_server",
+                            audit_ctx=audit_ctx,
+                            lease=lease,
+                        )
+                        return Err(orderable_result.unwrap_err())
 
             if not deployment.external_node_id:
                 log_deployment("info", f"Creating server via {provider_type} API")
@@ -833,7 +967,7 @@ class NodeDeploymentService:
             audit_ctx=audit_ctx,
         )
 
-    def retry_deployment(
+    def retry_deployment(  # noqa: PLR0911  # One refusal per pre-claim check
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -863,6 +997,12 @@ class NodeDeploymentService:
         fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
         if fqdn_result.is_err():
             return Err(fqdn_result.unwrap_err())
+        # A refused size is not an attempt: check before counting it, and only once. A row resuming its
+        # registration creates no server, so it is never asked.
+        if not deployment.external_node_id and deployment.registration_state == "none":
+            orderable_result = self._check_orderable(deployment, credentials)
+            if orderable_result.is_err():
+                return Err(orderable_result.unwrap_err())
 
         # One locked claim: failed -> pending, the attempt counted in the same statement. A second retry
         # of the same row finds it no longer failed and runs nothing.
@@ -901,6 +1041,7 @@ class NodeDeploymentService:
             user=user,
             expected_token=lease.token,
             operation_kind="retry",
+            check_orderable=False,
         )
         if result.is_err():
             # Refused before the pipeline claimed the row: this retry still owns it in pending. Fail it
@@ -1036,7 +1177,23 @@ class NodeDeploymentService:
             )
         )
 
-    def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic
+    @staticmethod
+    def _upgrade_refusal(deployment: NodeDeployment, new_size: NodeSize) -> str:
+        """Why the node cannot be resized to this size, or "" when it can.
+
+        The upgrade view, the upgrade task and the manage_node command all resize through here.
+        """
+        if deployment.status != "completed":
+            return f"Can only upgrade completed deployments, current status: {deployment.status}"
+        if deployment.node_size == new_size:
+            return "Node is already using the selected size"
+        if new_size.provider != deployment.provider:
+            return "New size must be from the same provider"
+        if not new_size.is_offered_in(deployment.region):
+            return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
+        return ""
+
+    def upgrade_node_size(  # Complexity: deployment orchestration
         self,
         deployment: NodeDeployment,
         new_size: NodeSize,
@@ -1061,14 +1218,13 @@ class NodeDeploymentService:
 
         logger.info(f"[Upgrade:{deployment.hostname}] Starting node resize to {new_size.name}")
 
-        if deployment.status != "completed":
-            return Err(f"Can only upgrade completed deployments, current status: {deployment.status}")
-
-        if deployment.node_size == new_size:
-            return Err("Node is already using the selected size")
-
-        if new_size.provider != deployment.provider:
-            return Err("New size must be from the same provider")
+        refusal = self._upgrade_refusal(deployment, new_size)
+        if refusal:
+            return Err(refusal)
+        # The catalogue can be a day old: ask the provider before anything is written or resized.
+        orderable_result = self._check_resize_orderable(deployment, new_size, credentials)
+        if orderable_result.is_err():
+            return Err(orderable_result.unwrap_err())
 
         old_size = deployment.node_size
         audit_ctx = InfrastructureAuditContext(user=user)

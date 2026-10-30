@@ -266,9 +266,26 @@ document.addEventListener("alpine:init", function () {
         if (!this.provider) return [];
         return this.regions.filter((r) => r.provider_id == this.provider);
       },
+      // Sizes the provider still sells in the chosen region. Ids are compared as strings:
+      // json_script gives numbers, x-model and restored drafts give strings.
       get filteredSizes() {
-        if (!this.provider) return [];
-        return this.sizes.filter((s) => s.provider_id == this.provider);
+        if (!this.provider || !this.region) return [];
+        const region = String(this.region);
+        return this.sizes.filter(
+          (s) => String(s.provider_id) === String(this.provider) && s.region_ids.map(String).includes(region)
+        );
+      },
+      get showSizeHint() {
+        return !this.provider || !this.region;
+      },
+      get showNoSizesInRegion() {
+        return !this.showSizeHint && this.filteredSizes.length === 0;
+      },
+      sizeOffered(sizeId) {
+        return this.filteredSizes.some((s) => String(s.id) === String(sizeId));
+      },
+      dropUnofferedSize() {
+        if (this.nodeSize && !this.sizeOffered(this.nodeSize)) this.nodeSize = "";
       },
 
       // Labels for x-for rows: take the loop item as an argument (the CSP build allows
@@ -287,7 +304,7 @@ document.addEventListener("alpine:init", function () {
       },
 
       get canSubmit() {
-        return this.provider && this.region && this.nodeSize;
+        return Boolean(this.provider && this.region && this.nodeSize) && this.sizeOffered(this.nodeSize);
       },
 
       updateRegions() {
@@ -326,6 +343,8 @@ document.addEventListener("alpine:init", function () {
         }
         this.dnsZone = this.$el.dataset.dnsZone;
         this.hostnamePreviewUrl = this.$el.dataset.hostnamePreviewUrl;
+        this.dropUnofferedSize();
+        this.$watch("region", () => this.dropUnofferedSize());
         this.$watch("environment", () => this.updateHostname());
         this.$watch("nodeType", () => this.updateHostname());
         this.updateHostname();

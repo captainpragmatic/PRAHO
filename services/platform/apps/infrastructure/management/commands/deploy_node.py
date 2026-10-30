@@ -204,6 +204,12 @@ class Command(BaseCommand):
                 f"Size '{options['size']}' not found for {provider.name}. "
                 f"Available: {', '.join(available) or 'none (run sync_providers first)'}"
             )
+        if not size.is_offered_in(region):
+            offered = list(NodeSize.offered_in(region).values_list("provider_type_id", flat=True))
+            raise CommandError(
+                f"Size '{options['size']}' is not available in {region.provider_region_id}. "
+                f"Available there: {', '.join(offered) or 'none (run sync_providers first)'}"
+            )
 
         # --- Resolve panel type ---
         panel = PanelType.objects.filter(panel_type=options["panel"], is_active=True).first()
@@ -305,6 +311,13 @@ class Command(BaseCommand):
         result = service.deploy_node(deployment, credentials)
 
         if result.is_err():
+            # A refusal before the row was claimed (an unorderable size, say) leaves it pending; fail
+            # it with the reason, as the queued task does.
+            from apps.infrastructure.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                _fail_before_first_phase,
+            )
+
+            _fail_before_first_phase(deployment, result.unwrap_err())
             raise CommandError(f"Deployment failed: {result.unwrap_err()}")
 
         deploy_result = result.unwrap()
