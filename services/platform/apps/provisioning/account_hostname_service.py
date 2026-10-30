@@ -22,6 +22,7 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from django.db import IntegrityError, transaction
@@ -801,7 +802,9 @@ def _record_outcome(
         return Err(f"DNS reconcile failed: {outcome.error}", retriability=outcome.retriability)
     from .account_hostname_hosting import announce_when_live  # noqa: PLC0415  # Deferred: imports acme
 
-    announce_when_live(hostname)
+    # After publication commits: the announcement locks the account, and nothing may take the
+    # account's lock while holding this name's (see lock_for_publication).
+    transaction.on_commit(partial(announce_when_live, hostname), robust=True)
     return Ok("published")
 
 

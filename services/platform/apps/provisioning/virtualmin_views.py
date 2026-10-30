@@ -2043,13 +2043,13 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         logger.warning("⚠️ [AccountSync] Primary domain missing from listing: account=%s", account.pk)
                         continue
                     with transaction.atomic():
+                        from .account_locks import lock_account  # noqa: PLC0415
                         from .virtualmin_usage_service import move_interval  # noqa: PLC0415
 
-                        account = (
-                            VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-                            .select_related("server")
-                            .get(pk=account.pk)
-                        )
+                        locked = lock_account(account.pk)
+                        if locked is None:
+                            continue
+                        account = locked.account  # Its server is read after the lock.
                         if account_has_active_migration(account) or (
                             account.server_id != server.pk and account.server.status == "active"
                         ):

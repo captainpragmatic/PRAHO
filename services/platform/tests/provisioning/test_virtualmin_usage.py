@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -19,7 +20,7 @@ from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
 from apps.provisioning import virtualmin_usage_service as usage
 from apps.provisioning.service_models import Service
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob, VirtualminServer
-from apps.provisioning.virtualmin_usage_models import NodeUsageSyncState, UsageInterval, UsageReading
+from apps.provisioning.virtualmin_usage_models import AccountUsageState, NodeUsageSyncState, UsageInterval, UsageReading
 from apps.provisioning.virtualmin_usage_tasks import dispatch_usage_sync, sync_node_usage, transport_identity
 from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
@@ -408,6 +409,50 @@ class UsagePublicationTests(MigrationTestBase):
         self.assertEqual(self.usage.publish_snapshot(self.server.pk, payload, captured, token=token), 1)
         self.assertEqual(self.usage.publish_snapshot(self.server.pk, payload, captured, token=token), 0)
         self.assertEqual(UsageReading.objects.filter(account=self.account).count(), 1)
+
+    def test_transfer_committed_while_waiting_for_the_account_lock_resets_the_owner_once(self):
+        # On PostgreSQL a waited FOR UPDATE OF self re-reads only the account row: columns joined in
+        # the same statement keep their pre-wait values. Commit the transfer right after that
+        # statement, as a transfer holding the lock would, so anything it read with it is stale.
+        other = Customer.objects.create(name="Owner during wait", primary_email="owner-during-wait@example.net")
+        after_transfer = {}
+
+        def transfer_after_lock(execute, sql, params, many, context):
+            result = execute(sql, params, many, context)
+            if not after_transfer and 'FROM "provisioning_virtualmin_accounts"' in sql:
+                after_transfer["scope"] = None
+                Service.objects.filter(pk=self.service.pk).update(customer=other)
+                after_transfer["scope"] = AccountUsageState.objects.get(account=self.account).owner_scope
+            return result
+
+        with connection.execute_wrapper(transfer_after_lock):
+            state = self.usage.current_state(self.account)
+        self.assertIsNotNone(after_transfer["scope"])
+        self.assertEqual(state.owner_scope, after_transfer["scope"])
+        self.assertEqual(state.customer_id_snapshot, other.pk)
+        self.assertEqual(UsageInterval.objects.filter(account=self.account, owner_scope=state.owner_scope).count(), 1)
+
+    def test_capture_of_a_transfer_after_the_candidate_query_is_consistent(self):
+        # The transfer commits after capture() listed its accounts and before it locked this one: the
+        # capture must describe the locked state, owner included, or publication silently skips it.
+        other = Customer.objects.create(name="Owner after listing", primary_email="owner-after-listing@example.net")
+        moved = []
+
+        def transfer_after_listing(execute, sql, params, many, context):
+            result = execute(sql, params, many, context)
+            if not moved and 'FROM "provisioning_virtualmin_accounts"' in sql and '"provisioning_usage_interval"' in sql:
+                moved.append(sql)
+                Service.objects.filter(pk=self.service.pk).update(customer=other)
+            return result
+
+        with connection.execute_wrapper(transfer_after_listing):
+            captured = self.usage.capture(self.server)
+        self.assertTrue(moved)
+        state = AccountUsageState.objects.get(account=self.account)
+        self.assertEqual(
+            captured[self.account.pk],
+            usage.AccountCapture(state.owner_scope, self.service.pk, other.pk, self.account.chain_epoch),
+        )
 
     def test_customer_a_b_a_never_resurrects_original_history_through_bulk_writers(self):
         self.usage.publish_snapshot(self.server.pk, self.payload(), self.usage.capture(self.server))

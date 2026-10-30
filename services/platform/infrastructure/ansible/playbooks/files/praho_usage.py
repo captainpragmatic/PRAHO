@@ -42,6 +42,12 @@ MAX_QUERY_ROWS = 500_000
 MAX_INGEST_RECORDS = 10_000
 PRUNE_BATCH = 10_000
 COLLECTION_SECONDS = 210
+# The end of each collection belongs to retention and traffic ingestion. Disk scans stop this
+# early and resume from their cursor next time, so large homes can never starve traffic.
+TRAFFIC_RESERVE_SECONDS = 60
+# Within that reserve, age pruning stops this early, so ingestion itself always gets time.
+INGEST_RESERVE_SECONDS = 40
+HOME_SCAN_SECONDS = 20
 RETENTION_SECONDS = 90 * 86400
 
 
@@ -355,8 +361,12 @@ def file_identity(path: Path) -> str:
     return json.dumps([info.st_dev, info.st_ino])
 
 
-def ingest_logs(ledger: Ledger, *, deadline: float) -> bool:
-    """Advance bounded prefixes and verify the current file's rotation lineage."""
+def ingest_logs(ledger: Ledger, *, deadline: float, retention_deadline: float | None = None) -> bool:
+    """Advance bounded prefixes and verify the current file's rotation lineage.
+
+    Age pruning between prefixes stops at `retention_deadline` (default: `deadline`); storage
+    pressure is still relieved until `deadline`.
+    """
     paths = log_files()
     current = LOG_ROOT / "usage.log"
     caught_up = current in paths
@@ -382,7 +392,7 @@ def ingest_logs(ledger: Ledger, *, deadline: float) -> bool:
         while True:
             if time.monotonic() >= deadline:
                 break
-            enforce_retention(ledger, deadline=deadline, now=utc_now())
+            enforce_retention(ledger, deadline=deadline, now=utc_now(), age_deadline=retention_deadline)
             ledger.ingest(path, budget_seconds=min(20, deadline - time.monotonic()))
             row = ledger.connection.execute(
                 "SELECT offset FROM files WHERE device=? AND inode=?", (info.st_dev, info.st_ino)
@@ -447,8 +457,13 @@ def prune_rotations(ledger: Ledger, *, cutoff: int, now: str) -> None:
             ledger.connection.execute("DELETE FROM files WHERE device=? AND inode=?", (info.st_dev, info.st_ino))
 
 
-def enforce_retention(ledger: Ledger, *, deadline: float, now: str) -> None:
-    """Enforce age and combined byte budgets at collection/rotation checkpoints."""
+def enforce_retention(ledger: Ledger, *, deadline: float, now: str, age_deadline: float | None = None) -> None:
+    """Enforce age and combined byte budgets at collection/rotation checkpoints.
+
+    Age pruning stops at `age_deadline` (default: `deadline`); relieving storage pressure, which
+    only runs when the private budget is nearly used, keeps the full `deadline`.
+    """
+    age_stop = deadline if age_deadline is None else age_deadline
     cutoff = epoch_us(now) - RETENTION_SECONDS * 1_000_000
     with ledger.connection:
         if ledger.value("pending_pressure_loss") is not None:
@@ -458,7 +473,7 @@ def enforce_retention(ledger: Ledger, *, deadline: float, now: str) -> None:
         prior = ledger.value("coverage_start")
         if prior is not None and epoch_us(prior) < cutoff:
             ledger.store("coverage_start", boundary)
-    while time.monotonic() < deadline:
+    while time.monotonic() < age_stop:
         with ledger.connection:
             removed = ledger.connection.execute(
                 "DELETE FROM traffic WHERE rowid IN (SELECT rowid FROM traffic WHERE completed<? ORDER BY completed LIMIT 10000)",
@@ -580,6 +595,8 @@ def refresh(ledger: Ledger) -> None:
     """One bounded local collection; no credentials or raw metadata are exported."""
     started = utc_now()  # Includes every database measurement in the Perl batch.
     deadline = time.monotonic() + COLLECTION_SECONDS
+    disk_deadline = deadline - TRAFFIC_RESERVE_SECONDS
+    retention_deadline = deadline - INGEST_RESERVE_SECONDS
     # Hooks defer rather than holding a customer's API request behind this lock.
     # Reconcile here before attesting bindings, with no second flock in Perl.
     read_metadata(deadline=deadline, action="reconcile-locked")
@@ -629,15 +646,19 @@ def refresh(ledger: Ledger) -> None:
                 "binding_started_at": account.get("binding_started_at"),
             }
         )
+        budget = 0.0
+        measured_now = False
         try:
-            remaining = deadline - time.monotonic()
+            remaining = disk_deadline - time.monotonic()
             if not account.get("unavailable") and remaining > 0:
+                budget = min(HOME_SCAN_SECONDS, remaining)
                 measured = disk_measurement(
                     Path(account["home"]),
                     [(Path(db["path"]), db["bytes"]) for db in account["databases"]],
-                    budget_seconds=min(20, remaining),
+                    budget_seconds=budget,
                 )
                 row.update({"scan_started_at": started, "scan_finished_at": utc_now(), **measured})
+                measured_now = True
         except (OSError, ValueError, TimeoutError):
             pass  # Keep the last good gauge and its original collection interval.
         row.pop("members", None)
@@ -650,11 +671,13 @@ def refresh(ledger: Ledger) -> None:
                 "INSERT INTO inventory VALUES (?,?) ON CONFLICT(domain) DO UPDATE SET seen_at=excluded.seen_at",
                 (account["id"], epoch_us(started)),
             )
-            if remaining > 0:
+            # A home cut short by the disk deadline keeps its turn; one that failed with its full
+            # budget does not, or it would hold every later home back.
+            if remaining > 0 and (measured_now or account.get("unavailable") or budget >= HOME_SCAN_SECONDS):
                 ledger.store("gauge_cursor", account["id"])
     observed_at = utc_now()
-    enforce_retention(ledger, deadline=deadline, now=observed_at)
-    caught_up = ingest_logs(ledger, deadline=deadline)
+    enforce_retention(ledger, deadline=deadline, now=observed_at, age_deadline=retention_deadline)
+    caught_up = ingest_logs(ledger, deadline=deadline, retention_deadline=retention_deadline)
     with ledger.connection:
         ledger.store("observed_at", observed_at)
         ledger.store("caught_up", str(int(caught_up)))

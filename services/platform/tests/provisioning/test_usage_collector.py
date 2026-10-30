@@ -94,6 +94,128 @@ class UsageCollectorTests(SimpleTestCase):
             self.refresh_fixture(ledger, logs, [account, other], "2026-10-01T01:00:00+00:00")
         self.assertEqual(json.loads(ledger.connection.execute("SELECT payload FROM gauges WHERE domain='43'").fetchone()[0])["disk_total_bytes"], 12)
 
+    def test_traffic_is_ingested_when_disk_scans_use_up_their_time(self):
+        ledger, logs, account = self.node_fixture()
+        start, end = "2026-10-01T00:00:00+00:00", "2026-10-01T01:00:00+00:00"
+        (logs / "usage.log").write_text(f"v1 node 42 {self.collector.epoch_us(start)} 100\n")
+        # Eleven large homes at 20 s each outlast the whole collection window on every refresh.
+        accounts = [account] + [
+            {**account, "id": str(43 + n), "domain": f"home{n}.test", "members": [str(43 + n)]} for n in range(10)
+        ]
+        clock = [0.0]
+
+        def large_home(_home, _databases, **_kwargs):
+            clock[0] += 20
+            return {"disk_files_bytes": 12, "disk_db_bytes": 0, "disk_total_bytes": 12, "databases": 0}
+
+        with (
+            patch.object(self.collector.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(self.collector, "disk_measurement", side_effect=large_home),
+        ):
+            for observed in (start, end):
+                clock[0] = 0.0
+                self.refresh_fixture(ledger, logs, accounts, observed)
+                self.assertEqual(ledger.value("caught_up"), "1")
+        self.assertEqual(self.snapshot_segment(ledger, start, end)["bytes"], 100)
+
+    def scan_with_clock(self, ledger, logs, accounts, durations, *, elapsed_before_scans=0.0):
+        """Refresh where each home's scan takes `durations[id]` seconds, timing out when its budget is shorter.
+
+        The deadline is set at 0 s; the scans start `elapsed_before_scans` seconds into the window.
+        """
+        reads = [0]
+
+        def monotonic():
+            reads[0] += 1
+            return 0.0 if reads[0] == 1 else clock[0]
+
+        clock = [elapsed_before_scans]
+        budgets = {}
+
+        def scan(home, _databases, *, budget_seconds):
+            identifier = next(account["id"] for account in accounts if account["home"] == str(home))
+            budgets[identifier] = budget_seconds
+            needed = durations[identifier]
+            clock[0] += min(needed, budget_seconds)
+            if needed > budget_seconds:
+                raise TimeoutError("Filesystem measurement budget exceeded")
+            return {"disk_files_bytes": 12, "disk_db_bytes": 0, "disk_total_bytes": 12, "databases": 0}
+
+        with (
+            patch.object(self.collector.time, "monotonic", side_effect=monotonic),
+            patch.object(self.collector, "disk_measurement", side_effect=scan),
+        ):
+            self.refresh_fixture(ledger, logs, accounts, "2026-10-01T00:00:00+00:00")
+        return budgets
+
+    def two_homes(self, logs, account):
+        (logs / "usage.log").touch()
+        second = Path(self.directory) / "second"
+        second.mkdir()
+        return [account, {**account, "id": "43", "domain": "second.test", "home": str(second), "members": ["43"]}]
+
+    def test_a_scan_cut_short_by_the_deadline_keeps_its_turn(self):
+        ledger, logs, account = self.node_fixture()
+        accounts = self.two_homes(logs, account)
+        disk_window = self.collector.COLLECTION_SECONDS - self.collector.TRAFFIC_RESERVE_SECONDS
+        # The scans start 6 s before the disk window closes: the first home takes 1 s, the second needs 10 s.
+        budgets = self.scan_with_clock(
+            ledger, logs, accounts, {"42": 1, "43": 10}, elapsed_before_scans=disk_window - 6
+        )
+        self.assertEqual(budgets["43"], 5)
+        self.assertEqual(ledger.value("gauge_cursor"), "42")
+
+    def test_a_home_that_used_its_full_budget_does_not_hold_the_cursor(self):
+        ledger, logs, account = self.node_fixture()
+        accounts = self.two_homes(logs, account)
+        budgets = self.scan_with_clock(ledger, logs, accounts, {"42": 1000, "43": 1})
+        self.assertEqual(budgets["42"], 20)
+        self.assertEqual(ledger.value("gauge_cursor"), "43")
+
+    def test_traffic_is_ingested_when_retention_uses_all_the_time_it_is_given(self):
+        ledger, logs, account = self.node_fixture()
+        start, end = "2026-10-01T00:00:00+00:00", "2026-10-01T01:00:00+00:00"
+        (logs / "usage.log").write_text(f"v1 node 42 {self.collector.epoch_us(start)} 100\n")
+        clock = [0.0]
+
+        def endless_retention(_ledger, *, deadline, now, age_deadline=None):
+            clock[0] = max(clock[0], age_deadline or deadline)  # Age-pruning batches until its deadline.
+
+        with (
+            patch.object(self.collector.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(self.collector, "enforce_retention", side_effect=endless_retention),
+        ):
+            for observed in (start, end):
+                clock[0] = 0.0
+                self.refresh_fixture(ledger, logs, [account], observed)
+                self.assertEqual(ledger.value("caught_up"), "1")
+        self.assertEqual(self.snapshot_segment(ledger, start, end)["bytes"], 100)
+
+    def test_storage_pressure_is_still_relieved_after_age_pruning_has_stopped(self):
+        ledger, logs, account = self.node_fixture()
+        start = "2026-10-01T00:00:00+00:00"
+        epoch = self.collector.epoch_us(start)
+        (logs / "usage.log").write_text(f"v1 node 42 {epoch} 100\n")
+        with ledger.connection:
+            ledger.connection.executemany(
+                "INSERT INTO traffic VALUES (?,?,?,?)", [("node", "42", epoch - n, 1) for n in range(1, 10_001)]
+            )
+        reads = [0]
+
+        def monotonic():
+            # The deadline is set at 0 s; everything after runs 180 s in: past the retention
+            # sub-deadline, inside the collection window.
+            reads[0] += 1
+            return 0.0 if reads[0] == 1 else 180.0
+
+        with (
+            patch.object(self.collector, "MAX_DATABASE_BYTES", 64 * 1024),
+            patch.object(self.collector.time, "monotonic", side_effect=monotonic),
+        ):
+            self.refresh_fixture(ledger, logs, [account], start)
+        self.assertEqual(ledger.value("last_loss_reason"), "history_storage_pressure")
+        self.assertEqual(ledger.value("caught_up"), "1")
+
     def test_export_uses_request_time_top_identity_not_current_members(self):
         ledger, logs, account = self.node_fixture()
         start, end = "2026-10-01T00:00:00+00:00", "2026-10-01T00:01:00+00:00"

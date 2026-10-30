@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from django.core import mail
 from django.core.management import call_command
+from django.db import connection
 from django.utils import timezone
 
 from apps.notifications.services import EmailResult
@@ -106,6 +107,63 @@ class ActivationEmailTests(AccountNameTestCase):
         self._sync()
 
         self.assertEqual(mail.outbox, [])
+
+    def test_an_account_suspended_while_the_claim_waits_is_not_told(self) -> None:
+        # On PostgreSQL a waited FOR UPDATE OF self re-reads only the hostname row; a joined account
+        # keeps its status from before the wait. Suspend it right after the locking statement.
+        self._certificate_installed()
+        suspended = []
+
+        def suspend_after_lock(execute, sql, params, many, context):
+            result = execute(sql, params, many, context)
+            claim = 'FROM "provisioning_account_hostnames"' in sql and '"activation_notified_at" IS NULL' in sql
+            if not suspended and claim:
+                suspended.append(sql)
+                # fsm-bypass: a suspension committed by another transaction while the claim waited.
+                type(self.account).objects.filter(pk=self.account.pk).update(status="suspended")
+            return result
+
+        with connection.execute_wrapper(suspend_after_lock):
+            self._sync()
+
+        self.assertTrue(suspended)
+        self.assertEqual(mail.outbox, [])
+        self.hostname.refresh_from_db()
+        self.assertIsNone(self.hostname.activation_notified_at)
+
+    def test_an_account_suspended_after_the_claim_is_not_told_and_the_claim_is_given_back(self) -> None:
+        # The suspension commits after the claim's checks and before the message goes out.
+        self._certificate_installed()
+        suspended = []
+
+        def suspend_after_claim(execute, sql, params, many, context):
+            result = execute(sql, params, many, context)
+            claim = sql.startswith('UPDATE "provisioning_account_hostnames"') and "activation_notified_at" in sql
+            if not suspended and claim:
+                suspended.append(sql)
+                # fsm-bypass: a suspension committed by another transaction after the claim.
+                type(self.account).objects.filter(pk=self.account.pk).update(status="suspended")
+            return result
+
+        with connection.execute_wrapper(suspend_after_claim):
+            self._sync()
+
+        self.assertTrue(suspended)
+        self.assertEqual(mail.outbox, [])
+        self.hostname.refresh_from_db()
+        self.assertIsNone(self.hostname.activation_notified_at)
+
+    def test_the_announcement_waits_until_publication_commits(self) -> None:
+        # Publication holds the name's lock; the announcement locks the account and then the name,
+        # the order ownership writers use, so it must not run inside publication's transaction.
+        self._certificate_installed()
+        with patch("apps.provisioning.account_hostname_hosting.announce_when_live") as announce:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                self.assertEqual(service.sync_account_hostname(self.hostname).unwrap(), "published")
+                announce.assert_not_called()
+            for callback in callbacks:  # Publication committed.
+                callback()
+        announce.assert_called_once()
 
     def test_the_template_is_seeded_in_both_languages(self) -> None:
         from apps.notifications.models import EmailTemplate  # noqa: PLC0415

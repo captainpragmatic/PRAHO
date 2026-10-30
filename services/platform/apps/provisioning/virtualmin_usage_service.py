@@ -14,6 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from .account_locks import LockedAccount, lock_account
 from .service_models import Service
 from .virtualmin_migration_models import account_blocks_reconcile
 from .virtualmin_models import VirtualminAccount, VirtualminServer
@@ -61,24 +62,28 @@ def integer(value: object) -> int:
     return value
 
 
-@transaction.atomic
 def current_state(account: VirtualminAccount) -> AccountUsageState:
-    account = (
-        VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-        .select_related("service")
-        .get(pk=account.pk)
-    )
+    return locked_state(account.pk)[0]
+
+
+@transaction.atomic
+def locked_state(account_id: UUID) -> tuple[AccountUsageState, LockedAccount]:
+    """The account's usage state, brought up to date under the account lock, and the locked account."""
+    locked = lock_account(account_id)
+    if locked is None:
+        raise VirtualminAccount.DoesNotExist(f"Virtualmin account {account_id} does not exist")
+    account, customer_id = locked.account, locked.customer_id
     state, _ = AccountUsageState.objects.get_or_create(
         account=account,
         defaults={
             "service_id_snapshot": account.service_id,
-            "customer_id_snapshot": account.service.customer_id,
+            "customer_id_snapshot": customer_id,
             "server_id_snapshot": account.server_id,
             "chain_epoch_snapshot": account.chain_epoch,
             "gauge_not_before": account.created_at,
         },
     )
-    if (state.service_id_snapshot, state.customer_id_snapshot) != (account.service_id, account.service.customer_id):
+    if (state.service_id_snapshot, state.customer_id_snapshot) != (account.service_id, customer_id):
         reset_owner_scope(account.pk)
         state.refresh_from_db()
     if state.server_id_snapshot != account.server_id:
@@ -99,7 +104,7 @@ def current_state(account: VirtualminAccount) -> AccountUsageState:
             "started_at": state.owner_started_at,
         },
     )
-    return state
+    return state, locked
 
 
 def reset_owner_scope(account_id: UUID) -> None:
@@ -198,14 +203,17 @@ def capture(server: VirtualminServer) -> dict[UUID, AccountCapture]:
             Q(server=server, status__in=("active", "suspended")) | Q(usage_intervals__server=server)
         )
         .distinct()
-        .select_related("service")
+        .values_list("pk", flat=True)
     )
-    for account in candidates:
-        state = current_state(account)
-        captures[account.pk] = AccountCapture(
-            state.owner_scope, account.service_id, account.service.customer_id, account.chain_epoch
-        )
+    for account_id in candidates:
+        # Every captured field comes from the locked read, never from the listing above.
+        state, locked = locked_state(account_id)
+        captures[account_id] = owner_capture(state, locked)
     return captures
+
+
+def owner_capture(state: AccountUsageState, locked: LockedAccount) -> AccountCapture:
+    return AccountCapture(state.owner_scope, locked.account.service_id, locked.customer_id, locked.account.chain_epoch)
 
 
 def record_failure(server_id: UUID, reason: str) -> None:
@@ -247,19 +255,12 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
             return 0
     for account_id, expected in captured.items():
         with transaction.atomic():
-            account = (
-                VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-                .select_related("service")
-                .filter(pk=account_id)
-                .first()
-            )
+            # The pk-ordered bulk lock above already holds this account.
+            account = VirtualminAccount.objects.filter(pk=account_id).first()
             if account is None or account.server_id != server_id or account_blocks_reconcile(account):
                 continue
-            state = current_state(account)
-            if (
-                AccountCapture(state.owner_scope, account.service_id, account.service.customer_id, account.chain_epoch)
-                != expected
-            ):
+            state, locked = locked_state(account_id)
+            if owner_capture(state, locked) != expected:
                 continue
             matches = [
                 row
@@ -380,14 +381,12 @@ def publish_segments(  # noqa: C901, PLR0913  # Independent source and ownership
                 ).first()
                 if interval is None:
                     continue
-                account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=interval.account_id)
-                state = current_state(account)
+                state, locked = locked_state(interval.account_id)
+                account = locked.account
                 interval = UsageInterval.objects.select_for_update().filter(pk=identifier, server_id=server_id).first()
                 if interval is None:
                     continue
-                expected = AccountCapture(
-                    state.owner_scope, account.service_id, account.service.customer_id, account.chain_epoch
-                )
+                expected = owner_capture(state, locked)
                 if (
                     interval.owner_scope != state.owner_scope
                     or captured.get(account.pk) != expected
