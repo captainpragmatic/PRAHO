@@ -20,7 +20,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentCostRecord
+    from apps.infrastructure.models import NodeDeployment, NodeDeploymentCostRecord, NodeServerLifetime
 
 logger = logging.getLogger(__name__)
 
@@ -327,10 +327,10 @@ class CostTrackingService:
             hourly_rate = monthly_rate / self.HOURS_PER_MONTH if monthly_rate else Decimal("0")
             usage = lifetime_usage(deployment, period_start, period_end)
             if usage is not None:
-                # Uptime is the lifetimes' time in the period; the rate is effective (lifetimes may differ), with
-                # its cost and hours taken from the same lifetimes.
-                hours, lifetime_cost = usage
-                hourly_rate = lifetime_cost / hours if hours else Decimal("0")
+                # Total, uptime and rate all describe the lifetimes' hours in this period; the rate is effective,
+                # since lifetimes may carry different rates.
+                hours, data["total"] = usage
+                hourly_rate = data["total"] / hours if hours else Decimal("0")
                 monthly_rate = hourly_rate * self.HOURS_PER_MONTH
 
             breakdowns.append(
@@ -420,21 +420,20 @@ def recalculate_recorded_costs(deployment: NodeDeployment) -> int:
     return len(periods)
 
 
-def lifetime_usage(
-    deployment: NodeDeployment, period_start: datetime, period_end: datetime
-) -> tuple[Decimal, Decimal] | None:
-    """Hours and cost of the deployment's server lifetimes inside the period; None when it has no lifetimes."""
+def _lifetimes_of(deployment: NodeDeployment) -> list[NodeServerLifetime]:
     from apps.infrastructure.models import NodeServerLifetime  # noqa: PLC0415  # Deferred: avoids circular import
 
-    if not NodeServerLifetime.objects.filter(deployment=deployment).exists():
-        return None
-    overlapping = NodeServerLifetime.objects.filter(deployment=deployment, started_at__lt=period_end).filter(
-        models.Q(ended_at__isnull=True) | models.Q(ended_at__gt=period_start)
-    )
+    return list(NodeServerLifetime.objects.filter(deployment=deployment))
+
+
+def _priced(
+    lifetimes: list[NodeServerLifetime], period_start: datetime | None, period_end: datetime
+) -> tuple[Decimal, Decimal]:
+    """Hours and cost of ``lifetimes`` clipped to the period (no lower bound when ``period_start`` is None)."""
     now = timezone.now()
     hours = cost = Decimal("0")
-    for lifetime in overlapping:
-        start = max(period_start, lifetime.started_at)
+    for lifetime in lifetimes:
+        start = lifetime.started_at if period_start is None else max(period_start, lifetime.started_at)
         end = min(period_end, lifetime.ended_at or now)
         if end <= start:
             continue
@@ -442,6 +441,20 @@ def lifetime_usage(
         hours += span
         cost += lifetime.monthly_cost_eur / CostTrackingService.HOURS_PER_MONTH * span
     return hours, cost
+
+
+def lifetime_usage(
+    deployment: NodeDeployment, period_start: datetime, period_end: datetime
+) -> tuple[Decimal, Decimal] | None:
+    """Hours and cost of the deployment's server lifetimes inside the period; None when it has no lifetimes."""
+    lifetimes = _lifetimes_of(deployment)
+    return _priced(lifetimes, period_start, period_end) if lifetimes else None
+
+
+def lifetime_totals(deployment: NodeDeployment) -> tuple[Decimal, Decimal] | None:
+    """Hours and cost of all the deployment's server lifetimes up to now; None when it has none."""
+    lifetimes = _lifetimes_of(deployment)
+    return _priced(lifetimes, None, timezone.now()) if lifetimes else None
 
 
 # Module-level singleton

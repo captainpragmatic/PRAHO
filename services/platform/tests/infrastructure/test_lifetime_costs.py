@@ -8,7 +8,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.infrastructure.cost_service import CostTrackingService
+from apps.infrastructure.cost_service import CostTrackingService, lifetime_usage
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentCostRecord, NodeServerLifetime
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 
@@ -114,6 +114,22 @@ class BreakdownRateTests(TestCase):
         (row,) = service.get_deployment_breakdown(at(1), at(8))
         self.assertEqual(row.cost_per_hour_eur.quantize(Decimal("0.000001")),
                          (Decimal("7.30") / HOURS_PER_MONTH).quantize(Decimal("0.000001")))
+
+    def test_total_uptime_and_rate_describe_the_same_hours(self) -> None:
+        deployment = _create_deployment("destroyed")
+        lifetime(deployment, "7.30", at(2), at(2, 10))
+        service = CostTrackingService()
+        service.calculate_deployment_costs(deployment, at(1), at(3)).unwrap()  # Records cover the first 10 h only.
+        lifetime(deployment, "7.30", at(6), at(6, 10), "later")
+        (row,) = service.get_deployment_breakdown(at(1), at(8))
+        self.assertEqual(row.uptime_hours, 20.0)
+        self.assertEqual(row.total_cost_eur.quantize(Decimal("0.0001")), cost("7.30", 20).quantize(Decimal("0.0001")))
+
+    def test_lifetime_usage_reads_the_lifetimes_once(self) -> None:
+        deployment = _create_deployment("destroyed")
+        lifetime(deployment, "7.30", at(2), at(2, 10))
+        with self.assertNumQueries(1):
+            lifetime_usage(deployment, at(1), at(8))
 
 
 class RowWindowFallbackTests(TestCase):

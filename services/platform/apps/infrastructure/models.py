@@ -825,10 +825,13 @@ class NodeDeployment(models.Model):
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running: across its server lifetimes when it has any."""
-        lifetimes = list(self.server_lifetimes.all())
-        if lifetimes:
-            now = timezone.now()
-            return sum(((lt.ended_at or now) - lt.started_at).total_seconds() for lt in lifetimes) / 3600
+        from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            lifetime_totals,
+        )
+
+        totals = lifetime_totals(self)
+        if totals is not None:
+            return float(totals[0])
 
         if not self.started_at:
             return 0.0
@@ -842,14 +845,13 @@ class NodeDeployment(models.Model):
 
     def estimate_cost(self) -> float:
         """Estimate current cost: each server lifetime at its recorded rate, else running hours at the size's rate."""
-        lifetimes = list(self.server_lifetimes.all())
-        if lifetimes:
-            now = timezone.now()
-            total = sum(
-                float(lt.monthly_cost_eur) / 730 * ((lt.ended_at or now) - lt.started_at).total_seconds() / 3600
-                for lt in lifetimes
-            )
-            return round(total, 4)
+        from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            lifetime_totals,
+        )
+
+        totals = lifetime_totals(self)
+        if totals is not None:
+            return round(float(totals[1]), 4)
         if not self.node_size:
             return 0.0
 
