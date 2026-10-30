@@ -168,11 +168,15 @@ class NodeDeploymentService:
 
     @staticmethod
     def _provenance_refusal(deployment: NodeDeployment, api_token: str) -> str:
-        """Why this token may not act on the row's provider resources, or "" when it may."""
-        may_hold_resources = bool(deployment.external_node_id) or deployment.server_create_state in (
-            "intent",
-            "unknown",
-            "created",
+        """Why this token may not act on the row's provider resources, or "" when it may.
+
+        A recorded fingerprint means a provider write was attempted (it is stored first): a key or
+        firewall may exist under that token even when no server was, so only that token may continue.
+        """
+        may_hold_resources = (
+            bool(deployment.external_node_id)
+            or bool(deployment.provider_token_fingerprint)
+            or deployment.server_create_state in ("intent", "unknown", "created")
         )
         if not may_hold_resources or deployment.provider_token_fingerprint == provider_token_fingerprint(api_token):
             return ""

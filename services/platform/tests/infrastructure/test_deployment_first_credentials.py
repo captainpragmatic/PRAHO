@@ -75,14 +75,17 @@ class ProvenanceTests(TestCase):
         self.assertEqual(deployment.provider_token_fingerprint, provider_token_fingerprint("token-b"))
         gateway.create_server.assert_called_once()
 
-    def test_a_row_holding_nothing_takes_the_current_token(self) -> None:
-        # A refused create under token A left nothing behind, so the retry's resources are token B's.
+    def test_a_rotated_token_is_refused_after_any_provider_write_was_recorded(self) -> None:
+        # A key or firewall whose create answer was lost leaves state "none" but a recorded fingerprint;
+        # token B can neither see nor clean token A's resources, and must not take over the provenance.
         deployment = _row(provider_token_fingerprint=provider_token_fingerprint("token-a"))
 
-        result, _gateway_used, _service = _deploy(deployment, token="token-b")
+        result, gateway, _service = _deploy(deployment, token="token-b")
 
-        self.assertTrue(result.is_ok(), result)
-        self.assertEqual(deployment.provider_token_fingerprint, provider_token_fingerprint("token-b"))
+        self.assertTrue(result.is_err())
+        self.assertTrue(deployment.needs_reconciliation)
+        self.assertEqual(deployment.provider_token_fingerprint, provider_token_fingerprint("token-a"))
+        gateway.upload_owned_ssh_key.assert_not_called()
 
     def test_a_matching_token_still_trusts_not_found(self) -> None:
         deployment = _row(
