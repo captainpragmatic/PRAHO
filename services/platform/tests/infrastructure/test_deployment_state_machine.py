@@ -216,12 +216,12 @@ class TestInvalidTransitions(TestCase):
         with self.assertRaises(ValidationError):
             deployment.transition_to("provisioning_node")
 
-    def test_destroyed_is_terminal(self) -> None:
-        """Destroyed deployments cannot transition to any state."""
-        deployment = _create_deployment("destroyed")
-        for target in ["pending", "failed", "completed", "destroying"]:
+    def test_destroyed_is_terminal_except_for_redeploy(self) -> None:
+        """Destroyed deployments move only to pending, which only a re-deploy claims."""
+        for target in ["failed", "completed", "destroying"]:
             with self.subTest(target=target), self.assertRaises(ValidationError):
-                deployment.transition_to(target)
+                _create_deployment("destroyed").transition_to(target)
+        self.assertEqual(NodeDeployment.VALID_TRANSITIONS["destroyed"], ["pending"])
 
     def test_completed_cannot_go_backwards(self) -> None:
         """Completed cannot go back to provisioning stages."""

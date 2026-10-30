@@ -545,7 +545,10 @@ class NodeDeploymentService:
                     owned_update(lease, deployment, server_create_state=prior_create_state if keep else state)
 
                 # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
-                ssh_key_name = f"praho-{deployment.hostname}"
+                # Named per attempt: a re-deploy keeps the hostname, and a key or firewall left under an
+                # older attempt's name (or an unlabelled legacy key) can never collide with this one.
+                attempt = str(deployment.correlation_id)[:8]
+                ssh_key_name = f"praho-{deployment.hostname}-{attempt}"
                 key_upload_result = gateway.upload_owned_ssh_key(
                     ssh_key_name,
                     ssh_public_key,
@@ -570,7 +573,7 @@ class NodeDeploymentService:
                 log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
 
                 # Create firewall before server — attach during provisioning
-                firewall_name = f"praho-fw-{deployment.hostname}"
+                firewall_name = f"praho-fw-{deployment.hostname}-{attempt}"
                 log_deployment("info", f"Creating firewall '{firewall_name}'")
                 firewall_result = gateway.create_firewall(
                     name=firewall_name,
@@ -1052,14 +1055,164 @@ class NodeDeploymentService:
             operation_kind="retry",
             check_orderable=False,
         )
-        if result.is_err():
-            # Refused before the pipeline claimed the row: this retry still owns it in pending. Fail it
-            # there so it is never stranded; once the pipeline claimed it, the pipeline settled it.
-            deployment.refresh_from_db()
-            with contextlib.suppress(OperationOwnershipLostError, ValidationError):
-                owned_transition(
-                    lease, deployment, "failed", f"Retry did not start: {result.unwrap_err()}", release=True
-                )
+        self._settle_refused_start(deployment, lease, result, "Retry")
+        return result
+
+    @staticmethod
+    def _settle_refused_start(
+        deployment: NodeDeployment, lease: OperationLease, result: Result[DeploymentResult, str], what: str
+    ) -> None:
+        """A pipeline refused before its claim leaves the row pending under ``lease``: fail it there.
+
+        Once the pipeline claimed the row, the pipeline settled it and the lease no longer owns it.
+        """
+        if result.is_ok():
+            return
+        deployment.refresh_from_db()
+        with contextlib.suppress(OperationOwnershipLostError, ValidationError):
+            owned_transition(lease, deployment, "failed", f"{what} did not start: {result.unwrap_err()}", release=True)
+
+    @staticmethod
+    def _redeploy_refusal(deployment: NodeDeployment, new_size: NodeSize) -> str:  # noqa: PLR0911  # One per guard.
+        """Why this row cannot be re-deployed with this size, or "" when it can."""
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            DriftRemediationRequest,
+            NodeDeploymentLog,
+        )
+        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
+
+        if deployment.status not in ("failed", "destroyed"):
+            return f"Can only re-deploy a failed or destroyed deployment, not '{deployment.status}'"
+        if deployment.needs_reconciliation:
+            return f"Reconcile the deployment first: {deployment.reconciliation_reason}"
+        if not deployment.never_got_a_server:
+            return "This deployment had a server; re-deploying it needs costs that track separate server lifetimes"
+        if deployment.external_node_id or deployment.dns_record_ids or deployment.virtualmin_server_id:
+            return "The deployment still holds a server id, DNS records or a registered node; destroy it first"
+        reached_provider = (
+            bool(deployment.provider_token_fingerprint)
+            or NodeDeploymentLog.objects.filter(
+                deployment=deployment, message__startswith="Firewall resource recorded:"
+            ).exists()
+        )
+        if deployment.status == "failed" and reached_provider:
+            return "This failed deployment reached the provider; destroy it before re-deploying"
+        if not new_size.is_active or new_size.provider_id != deployment.provider_id:
+            return "The new size must be an active size from the deployment's provider"
+        if not new_size.is_offered_in(deployment.region):
+            return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
+        if VirtualminServer.objects.filter(hostname=deployment.fqdn).exists():
+            return f"A Virtualmin node is already registered as {deployment.fqdn}"
+        open_statuses = DriftRemediationRequest.OPEN_STATUSES
+        if DriftRemediationRequest.objects.filter(deployment=deployment, status__in=open_statuses).exists():
+            return "A drift remediation is open for this deployment"
+        return ""
+
+    def redeploy_node(  # noqa: PLR0911  # One refusal per pre-claim check
+        self,
+        deployment: NodeDeployment,
+        new_size: NodeSize,
+        credentials: dict[str, str],
+        user: User | None = None,
+        expected_token: uuid.UUID | None = None,
+    ) -> Result[DeploymentResult, str]:
+        """Deploy a failed or destroyed deployment again, keeping its hostname, with ``new_size``.
+
+        Only a row that never got a server qualifies. The hostname, number, logs, audit and costs stay;
+        everything that described the old attempt is reset, and the correlation id is rotated so nothing
+        left under the old labels can be adopted. Needs the destroy permission.
+        """
+        from apps.infrastructure.models import NodeDeployment as Model  # noqa: PLC0415  # Deferred: circular import
+        from apps.infrastructure.permissions import can_destroy_nodes  # noqa: PLC0415  # Deferred import
+
+        if user is None or not can_destroy_nodes(user):
+            return Err(gettext("Re-deploying a node needs the destroy permission."))
+        provider_result = self._deployment_preflight(deployment)
+        if provider_result.is_err():
+            return Err(provider_result.unwrap_err())
+        fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
+        if fqdn_result.is_err():
+            return Err(fqdn_result.unwrap_err())
+        refusal = self._redeploy_refusal(deployment, new_size)
+        if refusal:
+            return Err(refusal)
+        # The new size must still be sold here: ask before the claim, as a first deploy does.
+        old_size = deployment.node_size
+        deployment.node_size = new_size
+        orderable_result = self._check_orderable(deployment, credentials)
+        deployment.node_size = old_size
+        if orderable_result.is_err():
+            return Err(orderable_result.unwrap_err())
+
+        from_status = deployment.status
+        with transaction.atomic():
+            # Every guard again on the locked row, then the claim in the same transaction.
+            locked = Model.objects.select_for_update().get(pk=deployment.pk)
+            refusal = self._redeploy_refusal(locked, new_size)
+            if refusal:
+                return Err(refusal)
+            claim = claim_operation(
+                deployment.pk,
+                from_states=("failed", "destroyed"),
+                to_status="pending",
+                kind="redeploy",
+                increment_retry=True,
+                require_reconciled=True,
+                expected_token=expected_token,
+            )
+            if claim.is_err():
+                return Err(claim.unwrap_err())
+            lease = claim.unwrap()
+            locked.refresh_from_db()
+            locked.node_size = new_size
+            locked.set_max_domains_from_size()
+            owned_update(
+                lease,
+                locked,
+                node_size=new_size,
+                max_domains=locked.max_domains,
+                correlation_id=uuid.uuid4(),
+                external_node_id="",
+                ipv4_address=None,
+                ipv6_address=None,
+                ssh_port=22,
+                ssh_host_keys=None,
+                ssh_key_credential_id="",
+                completed_at=None,
+                destroyed_at=None,
+                status_message="",
+                server_create_state="none",
+                provider_token_fingerprint="",
+                registration_state="none",
+                dns_record_ids=[],
+            )
+        deployment.refresh_from_db()
+        logger.info(f"🚀 [Redeploy:{deployment.hostname}] Re-deploying with {new_size.provider_type_id}")
+        try:
+            InfrastructureAuditService.log_deployment_retry(
+                deployment,
+                InfrastructureAuditContext(
+                    user=user,
+                    metadata={
+                        "mode": "redeploy",
+                        "old_size": old_size.provider_type_id,
+                        "new_size": new_size.provider_type_id,
+                        "from_status": from_status,
+                    },
+                ),
+            )
+        except Exception:
+            logger.warning(f"[Redeploy:{deployment.hostname}] Failed to log audit: re-deploy")
+
+        result = self.deploy_node(
+            deployment=deployment,
+            credentials=credentials,
+            user=user,
+            expected_token=lease.token,
+            operation_kind="redeploy",
+            check_orderable=False,
+        )
+        self._settle_refused_start(deployment, lease, result, "Re-deploy")
         return result
 
     @staticmethod

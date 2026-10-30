@@ -316,6 +316,7 @@ class NodeDeployment(models.Model):
         ("teardown", _("Teardown")),
         ("registration", _("Registration resume")),
         ("reconcile", _("Reconcile")),
+        ("redeploy", _("Re-deploy")),
     ]
 
     SERVER_CREATE_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
@@ -725,6 +726,14 @@ class NodeDeployment(models.Model):
         return self.status in ("completed", "failed", "stopped")
 
     @property
+    def never_got_a_server(self) -> bool:
+        """No server was ever created: a create state of "none", or a reconciled never-created attestation."""
+        if self.server_create_state == "none":
+            return True
+        attested = bool((self.reconciliation_record or {}).get("never_created_attested"))
+        return attested and self.server_create_state in ("unknown", "intent")
+
+    @property
     def can_retry(self) -> bool:
         """A failed deployment can be retried unless its provider resources must be reconciled first."""
         return self.status == "failed" and not self.needs_reconciliation
@@ -770,7 +779,8 @@ class NodeDeployment(models.Model):
         "stopped": ["completed", "destroying", "failed"],
         "failed": ["pending", "destroying"],  # Can retry or destroy
         "destroying": ["destroyed", "failed"],
-        "destroyed": [],  # Terminal state
+        # Terminal, except a re-deploy of a row that never got a server (it keeps the hostname).
+        "destroyed": ["pending"],
     }
 
     def is_valid_transition(self, new_status: str) -> bool:
