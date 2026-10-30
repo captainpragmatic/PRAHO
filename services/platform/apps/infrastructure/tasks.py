@@ -396,7 +396,7 @@ def redeploy_node_task(
     from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415  # Deferred
     from apps.users.models import User  # noqa: PLC0415  # Deferred: avoids circular import
 
-    logger.info(f"[Task:redeploy_node] Re-deploying deployment_id={deployment_id}")
+    logger.info(f"🚀 [Task:redeploy_node] Re-deploying deployment_id={deployment_id}")
     try:
         deployment = NodeDeployment.objects.get(id=deployment_id)
         new_size = NodeSize.objects.get(id=new_size_id)
@@ -1329,7 +1329,7 @@ def queue_redeploy_node(
         timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
         **LIFECYCLE_TASK_OPTIONS,
     )
-    logger.info(f"[Queue] Re-deploy queued: deployment_id={deployment_id}, task_id={task_id}")
+    logger.info(f"✅ [Queue] Re-deploy queued: deployment_id={deployment_id}, task_id={task_id}")
     return str(task_id)
 
 

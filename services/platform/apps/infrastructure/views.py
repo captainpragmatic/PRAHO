@@ -487,6 +487,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
             deployment.status in ("failed", "destroyed")
             and deployment.never_got_a_server
             and not deployment.needs_reconciliation
+            and can_deploy_nodes(cast("User", request.user))
             and can_destroy_nodes(cast("User", request.user))
         ),
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
@@ -657,18 +658,18 @@ def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
             except OperationReservationError as refused:
                 messages.error(request, str(refused))
             else:
-                messages.success(request, f"Re-deploy queued for '{deployment.hostname}'.")
-                logger.info(f"[Deployment] Re-deploy queued for {deployment.hostname}, task_id={task_id}")
+                messages.success(request, _("Re-deploy queued for '%(hostname)s'.") % {"hostname": deployment.hostname})
+                logger.info(f"✅ [Deployment] Re-deploy queued for {deployment.hostname}, task_id={task_id}")
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     context = {
-        "page_title": f"Re-deploy: {deployment.hostname}",
+        "page_title": _("Re-deploy: %(hostname)s") % {"hostname": deployment.hostname},
         "breadcrumb_items": [
             {"text": "Management", "url": "/dashboard/"},
             {"text": "Infrastructure", "url": reverse("infrastructure:dashboard")},
             {"text": "Deployments", "url": reverse("infrastructure:deployment_list")},
             {"text": deployment.hostname, "url": reverse("infrastructure:deployment_detail", args=[deployment.id])},
-            {"text": "Re-deploy"},
+            {"text": _("Re-deploy")},
         ],
         "deployment": deployment,
         "form": form,

@@ -143,3 +143,20 @@ class RedeployQueueTests(TestCase):
         self.assertTrue(result["success"], result)
         kwargs = service.redeploy_node.call_args.kwargs
         self.assertEqual((kwargs["new_size"], kwargs["user"], str(kwargs["expected_token"])), (size, admin, token))
+
+
+class RedeployButtonPermissionTests(TestCase):
+    def test_the_button_needs_the_deploy_permission_as_well_as_destroy(self) -> None:
+        deployment = destroyed_row()
+        destroyer = User.objects.create_user(email="destroyer@example.com", password="x", is_staff=True)
+        self.client.force_login(destroyer)
+
+        with (
+            mock.patch("apps.infrastructure.views.can_destroy_nodes", return_value=True),
+            mock.patch("apps.infrastructure.views.can_deploy_nodes", return_value=False),
+            mock.patch("apps.infrastructure.permissions.can_view_infrastructure", return_value=True),
+        ):
+            response: Any = self.client.get(reverse("infrastructure:deployment_detail", args=[deployment.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["can_redeploy"])

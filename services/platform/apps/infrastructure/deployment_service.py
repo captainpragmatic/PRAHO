@@ -1094,28 +1094,37 @@ class NodeDeploymentService:
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
 
         if deployment.status not in ("failed", "destroyed"):
-            return f"Can only re-deploy a failed or destroyed deployment, not '{deployment.status}'"
+            return gettext("Can only re-deploy a failed or destroyed deployment, not '%(status)s'.") % {
+                "status": deployment.status
+            }
         if deployment.needs_reconciliation:
-            return f"Reconcile the deployment first: {deployment.reconciliation_reason}"
+            return gettext("Reconcile the deployment first: %(reason)s") % {"reason": deployment.reconciliation_reason}
         if not deployment.never_got_a_server:
-            return "This deployment had a server; re-deploying it needs costs that track separate server lifetimes"
+            return gettext(
+                "This deployment had a server; re-deploying it needs costs that track separate server lifetimes."
+            )
         if deployment.external_node_id or deployment.dns_record_ids or deployment.virtualmin_server_id:
-            return "The deployment still holds a server id, DNS records or a registered node; destroy it first"
+            return gettext(
+                "The deployment still holds a server id, DNS records or a registered node; destroy it first."
+            )
         recorded = recorded_provider_resources(deployment)
         reached_provider = bool(
             deployment.provider_token_fingerprint or recorded["firewall_names"] or recorded["firewall_ids"]
         )
         if deployment.status == "failed" and reached_provider:
-            return "This failed deployment reached the provider; destroy it before re-deploying"
+            return gettext("This failed deployment reached the provider; destroy it before re-deploying.")
         if not new_size.is_active or new_size.provider_id != deployment.provider_id:
-            return "The new size must be an active size from the deployment's provider"
+            return gettext("The new size must be an active size from the deployment's provider.")
         if not new_size.is_offered_in(deployment.region):
-            return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
+            return gettext("Size %(size)s is not available in %(region)s.") % {
+                "size": new_size.provider_type_id,
+                "region": deployment.region.provider_region_id,
+            }
         if VirtualminServer.objects.filter(hostname=deployment.fqdn).exists():
-            return f"A Virtualmin node is already registered as {deployment.fqdn}"
+            return gettext("A Virtualmin node is already registered as %(fqdn)s.") % {"fqdn": deployment.fqdn}
         open_statuses = DriftRemediationRequest.OPEN_STATUSES
         if DriftRemediationRequest.objects.filter(deployment=deployment, status__in=open_statuses).exists():
-            return "A drift remediation is open for this deployment"
+            return gettext("A drift remediation is open for this deployment.")
         return ""
 
     def redeploy_node(  # noqa: PLR0911  # One refusal per pre-claim check
@@ -1213,7 +1222,7 @@ class NodeDeploymentService:
                 ),
             )
         except Exception:
-            logger.warning(f"[Redeploy:{deployment.hostname}] Failed to log audit: re-deploy")
+            logger.warning(f"⚠️ [Redeploy:{deployment.hostname}] Failed to log audit: re-deploy")
 
         result = self.deploy_node(
             deployment=deployment,
@@ -1329,7 +1338,7 @@ class NodeDeploymentService:
             logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Resume stopped without writing: {lost}")
             return Err(f"Registration resume stopped: {lost}")
         except Exception as e:
-            logger.exception(f"Registration resume failed for {deployment.hostname}: {e}")
+            logger.exception(f"🔥 [Deployment:{deployment.hostname}] Registration resume failed: {e}")
             self._mark_failed(deployment, f"Registration resume failed: {e}", stage="registration", lease=lease)
             return Err(f"Registration resume failed: {e}")
 
@@ -1338,7 +1347,7 @@ class NodeDeploymentService:
         try:
             InfrastructureAuditService.log_deployment_completed(deployment, audit_ctx, duration_seconds=duration)
         except Exception:
-            logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment completed")
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failed to log audit: deployment completed")
         return Ok(
             DeploymentResult(
                 success=True,
@@ -2194,15 +2203,15 @@ class NodeDeploymentService:
             "ssh_key": ("SSH key name", gateway.delete_ssh_key),
         }
         if resource_type not in deleters:
-            logger.warning(f"[Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
+            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
             return
         label, delete = deleters[resource_type]
-        logger.info(f"[Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
+        logger.info(f"🗑️ [Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
         result = delete(resource_id)
         if result.is_err():
-            logger.warning(f"[Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
+            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
         else:
-            logger.info(f"[Deployment:{hostname}] Cleanup: {label}={resource_id} deleted ✅")
+            logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
 
     def _mark_failed(
         self,

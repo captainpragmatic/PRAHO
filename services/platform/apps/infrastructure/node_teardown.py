@@ -281,7 +281,7 @@ def record_destroy_failure(deployment: NodeDeployment, error_msg: str, audit_ctx
     try:
         InfrastructureAuditService.log_destroy_failed(deployment, error_msg, audit_ctx)
     except Exception:
-        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
+        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
     return Err(error_msg)
 
 
@@ -305,7 +305,7 @@ def run_claimed_teardown(  # noqa: PLR0913  # The teardown's collaborators, inje
     try:
         InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
     except Exception:
-        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
+        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Failed to log audit: destroy started")
     NodeDeploymentLog.objects.create(
         deployment=deployment, level="INFO", message="Starting node destruction", phase="destroying"
     )
@@ -323,7 +323,7 @@ def run_claimed_teardown(  # noqa: PLR0913  # The teardown's collaborators, inje
         logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Stopped without writing: {lost}")
         return Err(f"Destruction stopped: {lost}")
     except Exception as e:
-        logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
+        logger.exception(f"🔥 [Destroy:{deployment.hostname}] Destruction failed: {e}")
         result = Err(f"Destruction failed: {e}")
     if result.is_err():
         return record_destroy_failure(deployment, result.unwrap_err(), audit_ctx)
@@ -334,7 +334,7 @@ def run_claimed_teardown(  # noqa: PLR0913  # The teardown's collaborators, inje
     try:
         InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
     except Exception:
-        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
+        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
     logger.info(f"✅ [Destroy:{deployment.hostname}] Node destroyed")
     return Ok(True)
 
