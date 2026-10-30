@@ -111,6 +111,10 @@ class NodeDeploymentForm(forms.ModelForm):
         if provider and node_size and node_size.provider != provider:
             raise ValidationError({"node_size": _("Selected size does not belong to the selected provider")})
 
+        # Hetzner retires server types per location; only a size still sold in the region can be deployed
+        if region and node_size and not node_size.is_offered_in(region):
+            raise ValidationError({"node_size": _("Selected size is not available in the selected region")})
+
         return cleaned_data
 
 

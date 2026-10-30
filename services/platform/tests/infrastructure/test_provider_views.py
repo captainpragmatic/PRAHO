@@ -450,6 +450,7 @@ class TestDeploymentCreateDnsZone(TestCase):
             hourly_cost_eur=Decimal("0.0100"),
             monthly_cost_eur=Decimal("7.20"),
         )
+        self.size.available_regions.add(self.region)
         self.panel = PanelType.objects.create(
             name="Virtualmin",
             panel_type="virtualmin",

@@ -2146,7 +2146,7 @@ platform = [
     { name = "django-storages", extras = ["s3"], specifier = ">=1.14.4" },
     { name = "dnspython", specifier = ">=2.8.0" },
     { name = "drf-spectacular", specifier = ">=0.26.0" },
-    { name = "hcloud", specifier = ">=2.0.0" },
+    { name = "hcloud", specifier = ">=2.16.0" },
     { name = "josepy", specifier = ">=2.0.0" },
     { name = "lxml", specifier = ">=4.9.0" },
     { name = "markdown", specifier = ">=3.5.0" },
