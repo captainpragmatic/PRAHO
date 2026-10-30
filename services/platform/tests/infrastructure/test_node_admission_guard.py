@@ -126,3 +126,43 @@ class TeardownGuardSeesEveryLiveAccountTests(TestCase):
         self.assertTrue(result.is_ok(), result)
         server.refresh_from_db()
         self.assertEqual(server.status, "disabled")
+
+
+class ErrorAccountEvidenceTests(TestCase):
+    """An "error" account counts unless its own jobs prove the domain never reached the node."""
+
+    def _error_account(self, server: VirtualminServer, domain: str, retriability: str | None) -> VirtualminAccount:
+        from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
+
+        account = VirtualminAccount.objects.create(
+            domain=domain, service=make_service(domain), server=server,
+            virtualmin_username=domain.partition(".")[0][:8], status="error",
+        )
+        if retriability is not None:
+            VirtualminProvisioningJob.objects.create(
+                operation="create_domain", server=server, account=account, status="failed",
+                result={"retriability": retriability}, correlation_id=f"create_domain_{account.id}",
+            )
+        return account
+
+    def _guard(self, deployment: NodeDeployment) -> Result[bool, str]:
+        service: NodeDeploymentService = _make_service()
+        return service._disable_linked_server_for_stop(deployment, InfrastructureAuditContext())
+
+    def test_an_error_account_proven_never_created_does_not_block(self) -> None:
+        server, deployment = make_node("refused")
+        self._error_account(server, "refused.example.com", "retriable")
+
+        self.assertTrue(self._guard(deployment).is_ok())
+
+    def test_an_error_account_with_an_unknown_outcome_still_blocks(self) -> None:
+        server, deployment = make_node("unknown")
+        self._error_account(server, "unknown.example.com", "unknown")
+
+        self.assertTrue(self._guard(deployment).is_err())
+
+    def test_an_error_account_with_no_job_still_blocks(self) -> None:
+        server, deployment = make_node("nojob")
+        self._error_account(server, "nojob.example.com", None)
+
+        self.assertTrue(self._guard(deployment).is_err())

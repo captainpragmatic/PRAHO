@@ -42,11 +42,38 @@ logger = logging.getLogger(__name__)
 DESTROYABLE_STATES = ("completed", "failed", "stopped")
 
 
+# Job retriabilities that prove a create_domain did not take effect on the node (see Retriability).
+_NOT_APPLIED = frozenset({"retriable", "not_retriable"})
+
+
+def _never_reached_node(account: Any) -> bool:
+    """An "error" account whose own create jobs prove its domain was never created on the node.
+
+    Conservative: it needs at least one create_domain job, every one of them failed or cancelled, and each
+    failed one either refused before taking effect (a retriable or not-retriable failure) or rolled back
+    successfully. An account that was ever provisioned, or has any other evidence, still counts.
+    """
+    if account.status != "error" or account.provisioned_at is not None:
+        return False
+    jobs = list(account.provisioning_jobs.filter(operation="create_domain"))
+    if not jobs:
+        return False
+    for job in jobs:
+        if job.status == "cancelled":
+            continue
+        rolled_back = job.rollback_executed and job.rollback_status == "success"
+        refused = (job.result or {}).get("retriability") in _NOT_APPLIED
+        if job.status != "failed" or not (rolled_back or refused):
+            return False
+    return True
+
+
 def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
     """Under the server row lock admission takes: refuse while work lives there, else close the node.
 
     Every account that is not terminated still lives on the node, including one still provisioning,
-    and an in-flight migration touching the server (as source or target) has no local account row yet.
+    except an "error" account whose jobs prove it never reached the node. An in-flight migration touching
+    the server (as source or target) has no local account row yet.
     """
     if not virtualmin_server_id:
         return Ok(None)
@@ -55,7 +82,7 @@ def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> R
 
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=virtualmin_server_id)
-        occupied = server.accounts.exclude(status="terminated").exists()
+        occupied = any(not _never_reached_node(account) for account in server.accounts.exclude(status="terminated"))
         migrating = server_has_active_migration(server)
         if (occupied or migrating) and not force:
             return Err(
