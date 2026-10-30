@@ -11,7 +11,7 @@ active member of one customer, in any lifecycle status (ADR-0066), read-only, fo
 Platform-owned portal session of its own tier (ADR-0017 section 6), never a second login, and it holds
 no credential of the customer.
 
-**Opening it.** The member card on the staff customer page links to a page that names the member,
+**Opening it.** The member card on the staff customer page links, in a new tab, to a page that names the member,
 explains anything that stops the view, and asks for a reason category, a reason of 10 to 500
 characters and an optional ticket reference. Submitting it issues a grant: 32 random bytes, stored
 only as a SHA-256 digest, valid for 60 seconds, consumed once by a conditional update. The answer is
