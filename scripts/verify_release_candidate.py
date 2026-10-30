@@ -16,6 +16,10 @@ when its own `changes` job succeeded in the same run and that run completed succ
 run also skips it). A commit with no merge_group run was merged around the queue (an owner bypass), and
 is refused.
 
+It also refuses unless the latest full Virtualmin lab on master passed (``latest_full_lab``): the
+candidate runs no lab of its own, since the queue ran the lab suites on it and the nightly full lab
+covers node deploy, fault injection and its browser tests.
+
 Needs `gh` (authenticated).
 """
 
@@ -112,7 +116,38 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
         raise VerificationError(
             f"The merge queue did not pass every required check on {sha}:\n  " + "\n  ".join(problems)
         )
-    return f"The merge queue passed every required check on the candidate itself ({sha})"
+    lab = latest_full_lab(repo, gh)
+    return f"The merge queue passed every required check on the candidate itself ({sha}), and {lab}"
+
+
+# The nightly full lab: it runs on master every night master changed (virtualmin-lab.yml).
+NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
+NIGHTLY_FULL_JOB = "nightly-full"
+
+
+def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
+    """The latest completed full Virtualmin lab run on master, which must have passed.
+
+    A run whose full job was skipped (no change that day) is passed over: the last run that ran it
+    decides. A run on any other branch never counts.
+    """
+    runs = gh(f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs?branch=master&status=completed&per_page=30")
+    for run in sorted(runs["workflow_runs"], key=lambda run: int(run["id"]), reverse=True):
+        if run.get("head_branch") != "master":
+            continue
+        jobs = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+        full = [job for job in jobs if job["name"] == NIGHTLY_FULL_JOB]
+        if not full or full[0].get("conclusion") == "skipped":
+            continue
+        if full[0].get("conclusion") != "success":
+            raise VerificationError(
+                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: "
+                f"{full[0].get('conclusion')}. Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite full, first."
+            )
+        return f"the latest full Virtualmin lab on master passed (run {run['id']})"
+    raise VerificationError(
+        f"No full Virtualmin lab run on master is on record. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+    )
 
 
 def main(argv: list[str]) -> int:

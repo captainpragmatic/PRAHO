@@ -544,8 +544,11 @@ pull request → `master` → release candidate → staging → (later) producti
 1. **Run the release candidate.** Actions → *Release candidate* → *Run workflow*, or
    `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank SHA means
    the current `master` commit; the run title names it. The run checks that the
-   merge queue passed every required check on that exact commit, then runs the whole platform suite on PostgreSQL and the full Virtualmin lab on that
-   SHA. Expect an hour or more. On success the commit shows the status
+   merge queue passed every required check on that exact commit and that the latest
+   nightly full Virtualmin lab on master passed, then runs the whole platform suite on
+   PostgreSQL on that SHA. Expect about twenty minutes. If the latest full lab failed, fix
+   it or dispatch `virtualmin-lab.yml` with suite `full` on master first. On success the
+   commit shows the status
    `release-candidate`.
 2. **If it is red,** staging is untouched: fix it through a pull request into `master`
    and start a new candidate.

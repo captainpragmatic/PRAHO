@@ -100,19 +100,27 @@ REQUIRED = required_contexts(
 )
 
 
-class FakeGitHub:
-    """Answers the two lookups verify() makes, and records them."""
+def nightly(run_id: int, full: str, branch: str = "master") -> dict[str, Any]:
+    """A completed run of the nightly lab workflow; ``full`` is its nightly-full job's conclusion."""
+    return {"id": run_id, "head_branch": branch, "jobs": [{"name": "nightly-full", "conclusion": full}]}
 
-    def __init__(self, runs: list[dict[str, Any]]) -> None:
+
+class FakeGitHub:
+    """Answers the lookups verify() makes, and records them."""
+
+    def __init__(self, runs: list[dict[str, Any]], nightly_runs: list[dict[str, Any]] | None = None) -> None:
         self.runs = runs
+        self.nightly_runs = [nightly(900, "success")] if nightly_runs is None else nightly_runs
         self.paths: list[str] = []
 
     def __call__(self, path: str) -> Any:
         self.paths.append(path)
+        every = self.runs + self.nightly_runs
         if "/jobs?" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            return {"jobs": next(run["jobs"] for run in self.runs if run["id"] == run_id)}
-        return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in self.runs]}
+            return {"jobs": next(run["jobs"] for run in every if run["id"] == run_id)}
+        listed = self.nightly_runs if "workflows/virtualmin-lab.yml/runs" in path else self.runs
+        return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in listed]}
 
 
 def all_green() -> list[dict[str, Any]]:
@@ -139,3 +147,30 @@ def test_a_red_check_in_the_queue_is_refused() -> None:
 
     with pytest.raises(VerificationError, match=f"{runs[0]['jobs'][0]['name']}: failure"):
         verify(SHA, "owner/repo", FakeGitHub(runs))
+
+
+def test_the_latest_full_nightly_lab_must_have_passed() -> None:
+    # The release candidate runs no lab of its own: the queue ran the lab suites on the candidate,
+    # and the nightly full lab covers node deploy, faults and browser tests on master.
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), [nightly(902, "failure"), nightly(901, "success")]))
+
+
+def test_nightly_runs_that_skipped_the_full_lab_are_passed_over() -> None:
+    # check-activity skips the full lab on a day without changes: the last run that ran it decides.
+    green = FakeGitHub(all_green(), [nightly(903, "skipped"), nightly(902, "success")])
+    assert SHA in verify(SHA, "owner/repo", green)
+    red = FakeGitHub(all_green(), [nightly(903, "skipped"), nightly(902, "failure")])
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", red)
+
+
+def test_a_full_lab_run_on_another_branch_does_not_count() -> None:
+    github = FakeGitHub(all_green(), [nightly(904, "success", branch="feature")])
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", github)
+
+
+def test_no_full_lab_on_record_is_refused() -> None:
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), []))

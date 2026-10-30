@@ -58,7 +58,7 @@ Locally, contributors and agents run only what takes seconds on what they touche
 
 `nightly.yml` runs at 02:30 UTC when there was activity: the whole platform suite on PostgreSQL (`make test-platform-postgres-full`), the full suite with coverage, integration, cache and security suites on PostgreSQL, types, Semgrep against the staging release, and the browser suite with server-side coverage. `virtualmin-lab.yml` runs the full lab nightly and a drift run against the latest Virtualmin.
 
-`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused), then the workflow runs only what pull requests cannot afford, on that SHA: the whole platform suite on PostgreSQL and the full Virtualmin lab. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
+`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused), and that the latest nightly full Virtualmin lab on master passed. It then runs the whole platform suite on PostgreSQL on that SHA. It runs no lab of its own (amended 2026-10-30): the queue ran the lab suites on the candidate, and the nightly full lab runs node deploy, fault injection and the browser tests on master every night master changed. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
 
 ### Promotion to staging
 
@@ -82,7 +82,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 |------|---------|
 | `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request, required |
 | `.github/workflows/virtualmin-lab-pr.yml` | Tier 1 when relevant, required |
-| `.github/workflows/virtualmin-lab.yml` | Nightly full and drift runs; the release candidate's lab |
+| `.github/workflows/virtualmin-lab.yml` | Nightly full and drift runs; the release candidate requires the latest full run on master to have passed |
 | `.github/workflows/nightly.yml` | Tier 2 — scheduled nightly |
 | `.github/workflows/release-candidate.yml` | Tier 2 — the release gate before staging |
 | `.github/rulesets/*.json` | Branch and tag rules, applied with `gh api` (see that directory's README) |
@@ -94,7 +94,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 ### Positive
 - A red check blocks the merge; nothing depends on contributors or agents remembering to run the full gate
 - Local machines run seconds of checks instead of 15–20 minutes, and agents are not blocked waiting for them
-- Every commit staging receives passed the whole suite on PostgreSQL and the full lab on that exact SHA
+- Every commit staging receives passed the queue's checks and the lab suites on that exact SHA, and the whole suite on PostgreSQL; the full lab (node deploy, faults, browser tests) last passed on master, possibly on an earlier commit
 - No test is permanently skipped — the full suite always runs somewhere
 
 ### Negative
