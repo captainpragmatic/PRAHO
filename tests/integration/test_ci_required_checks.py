@@ -321,6 +321,12 @@ class TestReleaseCandidate:
             for step in checkouts:
                 assert step["with"]["ref"] == "${{ needs.resolve.outputs.sha }}", job_id
 
+    def test_the_candidate_runs_no_lab_of_its_own(self) -> None:
+        # The queue ran the lab suites on the candidate, and the verifier requires the latest nightly
+        # full lab on master to have passed (scripts/verify_release_candidate.py).
+        for job_id, job in self.jobs.items():
+            assert "virtualmin-lab" not in str(job.get("uses", "")), job_id
+
     def test_the_status_is_posted_only_after_every_check(self) -> None:
         record = self.jobs["record"]
         assert set(record["needs"]) == set(self.jobs) - {"record"}

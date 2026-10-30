@@ -16,6 +16,10 @@ when its own `changes` job succeeded in the same run and that run completed succ
 run also skips it). A commit with no merge_group run was merged around the queue (an owner bypass), and
 is refused.
 
+It also refuses unless the latest full Virtualmin lab on master passed (``latest_full_lab``): the
+candidate runs no lab of its own, since the queue ran the lab suites on it and the nightly full lab
+covers node deploy, fault injection and its browser tests.
+
 Needs `gh` (authenticated).
 """
 
@@ -25,7 +29,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +116,70 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
         raise VerificationError(
             f"The merge queue did not pass every required check on {sha}:\n  " + "\n  ".join(problems)
         )
-    return f"The merge queue passed every required check on the candidate itself ({sha})"
+    lab = latest_full_lab(repo, gh)
+    return f"The merge queue passed every required check on the candidate itself ({sha}), and {lab}"
+
+
+# The nightly full lab: it runs on master every night master changed (virtualmin-lab.yml).
+NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
+NIGHTLY_FULL_JOB = "nightly-full"
+
+
+NIGHTLY_ACTIVITY_JOB = "check-activity"
+NIGHTLY_DRIFT_JOB = "nightly-drift"
+_MAX_PAGES = 20  # 600 runs: months of nightly and drift runs
+
+
+def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, Any]]:
+    """Completed nightly lab runs on master, newest first, page by page until the history ends."""
+    for page in range(1, _MAX_PAGES + 1):
+        listed = gh(
+            f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs"
+            f"?branch=master&status=completed&per_page=30&page={page}"
+        )["workflow_runs"]
+        if not listed:
+            return
+        yield from sorted(listed, key=lambda run: int(run["id"]), reverse=True)
+
+
+def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
+    """The latest completed full Virtualmin lab run on master, which must have passed.
+
+    A run without the full lab is passed over in two cases only: a drift run (its drift job ran;
+    drift is informational, never a gate), or a quiet night (the activity check passed and the whole
+    run succeeded: nothing changed that day). Anything else without the full lab, a failed check or
+    a cancelled night, is an interrupted night and refuses. A run on any other branch never counts.
+    """
+    for run in _master_lab_runs(repo, gh):
+        if run.get("head_branch") != "master":
+            continue
+        jobs = {
+            job["name"]: job.get("conclusion")
+            for job in gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+        }
+        full = jobs.get(NIGHTLY_FULL_JOB)
+        if full is None or full == "skipped":
+            # Drift is a matrix: its jobs are named "nightly-drift (<runner>)".
+            drift_run = any(
+                name.startswith(NIGHTLY_DRIFT_JOB) and outcome not in (None, "skipped")
+                for name, outcome in jobs.items()
+            )
+            quiet = jobs.get(NIGHTLY_ACTIVITY_JOB) == "success" and run.get("conclusion") == "success"
+            if drift_run or quiet:
+                continue
+            raise VerificationError(
+                f"The nightly lab on master (run {run['id']}, {run.get('conclusion')}) was interrupted before "
+                f"it could run the full Virtualmin lab. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+            )
+        if full != "success":
+            raise VerificationError(
+                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: {full}. "
+                f"Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite full, first."
+            )
+        return f"the latest full Virtualmin lab on master passed (run {run['id']})"
+    raise VerificationError(
+        f"No full Virtualmin lab run on master is on record. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+    )
 
 
 def main(argv: list[str]) -> int:

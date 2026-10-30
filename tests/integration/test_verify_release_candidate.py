@@ -100,19 +100,49 @@ REQUIRED = required_contexts(
 )
 
 
-class FakeGitHub:
-    """Answers the two lookups verify() makes, and records them."""
+def nightly(  # noqa: PLR0913  # One fixture field per fact a run can carry
+    run_id: int,
+    full: str,
+    branch: str = "master",
+    activity: str = "success",
+    conclusion: str = "success",
+    drift: str = "skipped",
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A completed nightly lab run: ``full`` is its nightly-full job, ``activity`` its check-activity job,
+    ``drift`` its nightly-drift job (it runs only on the drift schedule), ``conclusion`` the run's own."""
+    if jobs is None:
+        jobs = [
+            {"name": "check-activity", "conclusion": activity},
+            {"name": "nightly-full", "conclusion": full},
+            # Drift is a matrix job: GitHub names each leg after its runner.
+            {"name": "nightly-drift (ubuntu-latest)", "conclusion": drift},
+            {"name": "nightly-drift (ubuntu-24.04-arm)", "conclusion": drift},
+        ]
+    return {"id": run_id, "head_branch": branch, "conclusion": conclusion, "jobs": jobs}
 
-    def __init__(self, runs: list[dict[str, Any]]) -> None:
+
+class FakeGitHub:
+    """Answers the lookups verify() makes, and records them."""
+
+    def __init__(self, runs: list[dict[str, Any]], nightly_runs: list[dict[str, Any]] | None = None) -> None:
         self.runs = runs
+        self.nightly_runs = [nightly(900, "success")] if nightly_runs is None else nightly_runs
         self.paths: list[str] = []
 
     def __call__(self, path: str) -> Any:
         self.paths.append(path)
+        every = self.runs + self.nightly_runs
         if "/jobs?" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            return {"jobs": next(run["jobs"] for run in self.runs if run["id"] == run_id)}
-        return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in self.runs]}
+            return {"jobs": next(run["jobs"] for run in every if run["id"] == run_id)}
+        if "workflows/virtualmin-lab.yml/runs" in path:
+            # GitHub pages a listing; three runs a page here, so a test can reach page two.
+            page = int(path.rsplit("page=", maxsplit=1)[-1]) if "&page=" in path else 1
+            listed = self.nightly_runs[(page - 1) * 3 : page * 3]
+        else:
+            listed = self.runs
+        return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in listed]}
 
 
 def all_green() -> list[dict[str, Any]]:
@@ -139,3 +169,59 @@ def test_a_red_check_in_the_queue_is_refused() -> None:
 
     with pytest.raises(VerificationError, match=f"{runs[0]['jobs'][0]['name']}: failure"):
         verify(SHA, "owner/repo", FakeGitHub(runs))
+
+
+def test_the_latest_full_nightly_lab_must_have_passed() -> None:
+    # The release candidate runs no lab of its own: the queue ran the lab suites on the candidate,
+    # and the nightly full lab covers node deploy, faults and browser tests on master.
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), [nightly(902, "failure"), nightly(901, "success")]))
+
+
+def test_nightly_runs_that_skipped_the_full_lab_are_passed_over() -> None:
+    # check-activity skips the full lab on a day without changes: the last run that ran it decides.
+    green = FakeGitHub(all_green(), [nightly(903, "skipped"), nightly(902, "success")])
+    assert SHA in verify(SHA, "owner/repo", green)
+    red = FakeGitHub(all_green(), [nightly(903, "skipped"), nightly(902, "failure")])
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", red)
+
+
+def test_a_full_lab_run_on_another_branch_does_not_count() -> None:
+    github = FakeGitHub(all_green(), [nightly(904, "success", branch="feature")])
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", github)
+
+
+def test_no_full_lab_on_record_is_refused() -> None:
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), []))
+
+
+def test_a_failed_selection_is_not_a_quiet_night() -> None:
+    # check-activity failing skips the full lab too: that night was interrupted, not uneventful.
+    for activity in ("failure", "cancelled"):
+        github = FakeGitHub(all_green(), [nightly(906, "skipped", activity=activity), nightly(905, "success")])
+        with pytest.raises(VerificationError, match="full Virtualmin lab"):
+            verify(SHA, "owner/repo", github)
+
+
+def test_a_drift_run_is_passed_over_whatever_its_outcome() -> None:
+    # Drift tests the latest Virtualmin packages: informational, never a release gate.
+    for drift, conclusion in (("success", "success"), ("failure", "failure")):
+        run = nightly(907, "skipped", activity="skipped", drift=drift, conclusion=conclusion)
+        assert SHA in verify(SHA, "owner/repo", FakeGitHub(all_green(), [run, nightly(905, "success")]))
+
+
+def test_a_cancelled_night_is_not_a_quiet_one() -> None:
+    cancelled_after_selection = nightly(908, "skipped", activity="success", conclusion="cancelled")
+    cancelled_before_jobs = nightly(909, "skipped", conclusion="cancelled", jobs=[])
+    for run in (cancelled_after_selection, cancelled_before_jobs):
+        with pytest.raises(VerificationError, match="full Virtualmin lab"):
+            verify(SHA, "owner/repo", FakeGitHub(all_green(), [run, nightly(905, "success")]))
+
+
+def test_the_last_full_lab_is_found_beyond_the_first_page() -> None:
+    quiet = [nightly(920 - n, "skipped") for n in range(4)]  # quiet nights fill page one and part of two
+    github = FakeGitHub(all_green(), [*quiet, nightly(900, "success")])
+    assert "run 900" in verify(SHA, "owner/repo", github)

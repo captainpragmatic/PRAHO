@@ -5,13 +5,13 @@
 # `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank candidate means the master
 # commit at the moment of the dispatch; the run title names the commit either way.
 #
-# Pull requests already ran every required check on this exact tree: master requires them and
-# requires the branch to be up to date, so the squashed commit is the tree its PR tested. `resolve`
-# proves that from the PR's own check runs (an owner bypass could merge a red PR). Then only what PR
-# CI cannot afford runs here, on the candidate SHA:
-#   - the whole platform suite on PostgreSQL (PRs run it on SQLite plus the PostgreSQL-gated tests);
-#   - the full Virtualmin lab: node deploy, fault injection, its browser tests.
-# When both pass, `record` posts the commit status `release-candidate` = success, which
+# The merge queue ran every required check on this exact commit, the Virtualmin lab suites among them,
+# before master moved to it. `resolve` proves that from the queue's own runs on the candidate (an owner
+# bypass merges around the queue), and that the latest nightly full Virtualmin lab on master passed:
+# node deploy, fault injection and its browser tests run there, every night master changed, so the
+# candidate does not run them again (ADR-0036). Then only the whole platform suite on PostgreSQL runs
+# here, on the candidate SHA (pull requests run it on SQLite plus the PostgreSQL-gated tests).
+# When it passes, `record` posts the commit status `release-candidate` = success, which
 # `make promote-staging SHA=<sha>` requires before it deploys anything.
 #
 # Security: anyone who can push could post a commit status named `release-candidate`, so
@@ -130,21 +130,8 @@ jobs:
         if: always()
         run: make ci-postgres-stop
 
-  rc-virtualmin-lab:
-    needs: resolve
-    # The lab workflow declares its scheduled-failure notifier and activity check; a called workflow may
-    # only ask for what the caller grants, even for jobs this call skips.
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: read
-    uses: ./.github/workflows/virtualmin-lab.yml
-    with:
-      suite: full
-      ref: ${{ needs.resolve.outputs.sha }}
-
   record:
-    needs: [resolve, rc-platform-postgres, rc-virtualmin-lab]
+    needs: [resolve, rc-platform-postgres]
     runs-on: ubuntu-latest
     permissions:
       statuses: write

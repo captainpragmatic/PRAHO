@@ -7,7 +7,8 @@
 #                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
 #                  workflow of its own so that its required check never shares a name with a job this workflow
 #                  skips on a schedule or a dispatch.
-#   release        release-candidate.yml calls this workflow (suite: full) with the candidate SHA in `ref`.
+#   release        release-candidate.yml runs no lab: its verifier requires the latest nightly full run on master
+#                  to have passed. A workflow_call (suite: full, `ref`) still runs it for a given commit.
 #   nightly full   03:30 UTC, skipped when nothing changed in 24h: the same, plus the from-scratch node deploy,
 #                  fault injection and the browser smoke tests (make test-virtualmin-lab-full), PINNED version.
 #   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
