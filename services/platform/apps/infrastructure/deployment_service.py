@@ -541,7 +541,9 @@ class NodeDeploymentService:
                 )
 
                 def settle_create_state(state: str) -> None:
-                    keep = prior_create_state in ("unknown", "intent") and state == "none"
+                    # "none" never overwrites history: a server that existed (created) or may have
+                    # (unknown, intent) keeps the row out of never_got_a_server for good.
+                    keep = prior_create_state != "none" and state == "none"
                     owned_update(lease, deployment, server_create_state=prior_create_state if keep else state)
 
                 # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
@@ -650,9 +652,12 @@ class NodeDeploymentService:
 
                 server_create_result = server_result.unwrap()
                 server_from_create = True  # new, or adopted before it was ever enrolled
-                if not server_create_result.adopted:
-                    # An adopted server holds this deployment's earlier work: a later failure of this
-                    # attempt fails the row with its id kept, for retry or teardown, and never deletes it.
+                if server_create_result.adopted:
+                    # An adopted server holds this deployment's earlier work, and its firewall is attached
+                    # to it: a later failure of this attempt fails the row with both kept, for retry or
+                    # teardown, and deletes neither.
+                    created_resources[:] = [r for r in created_resources if r[0] != "firewall"]
+                else:
                     created_resources.append(("server", server_create_result.server_id))
                 # Persist the id at once: a worker that dies before the next stage leaves a known server.
                 owned_update(

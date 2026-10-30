@@ -14,7 +14,7 @@ from unittest import mock
 
 from django.test import TestCase
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment
 from tests.infrastructure.test_deployment_operation_ownership import _gateway, _pipeline_service
@@ -109,3 +109,28 @@ class FirstKeyTests(TestCase):
 
         service._ssh_manager.generate_deployment_key.assert_not_called()
         service._ssh_manager.get_deployment_key.assert_called_once()
+
+
+class CreateStateHistoryTests(TestCase):
+    def test_a_row_that_had_a_server_never_returns_to_none(self) -> None:
+        # Its server was created, then deleted by compensation; the retry's key upload then fails.
+        deployment = _row(
+            external_node_id="srv-gone",
+            server_create_state="created",
+            provider_token_fingerprint=provider_token_fingerprint("token-b"),
+        )
+        gateway = _gateway()
+        gateway.get_server.return_value = Ok(None)
+        gateway.upload_owned_ssh_key.return_value = Err("api down")
+        service = _pipeline_service()
+        with (
+            mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            mock.patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "token-b"})
+
+        self.assertTrue(result.is_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.server_create_state, "created")
+        self.assertFalse(deployment.never_got_a_server)

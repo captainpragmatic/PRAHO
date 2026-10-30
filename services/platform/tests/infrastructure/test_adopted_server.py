@@ -74,3 +74,31 @@ class AdoptedServerRetryTests(TestCase):
         gateway.delete_server.assert_not_called()
         deployment.refresh_from_db()
         self.assertEqual((deployment.status, deployment.external_node_id), ("failed", "srv-adopted"))
+
+
+class AdoptedFirewallTests(TestCase):
+    def test_the_firewall_of_an_adopted_server_is_not_deleted_on_a_later_failure(self) -> None:
+        deployment = _create_deployment("pending")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="unknown", provider_token_fingerprint=provider_token_fingerprint("tok")
+        )
+        deployment.refresh_from_db()
+        service = _pipeline_service()
+        gateway = _gateway()
+        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        from apps.infrastructure.cloud_gateway import ServerCreateResult  # noqa: PLC0415
+
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-adopted", ipv4_address="1.2.3.4", adopted=True)
+        )
+        dns = _ok_dns_gateway()
+        dns.reconcile_records.return_value = ReconcileOutcome(applied=[], error="cloudflare rejected the record")
+
+        with (
+            mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=dns),
+            mock.patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            service.deploy_node(deployment=deployment, credentials={"api_token": "tok"}, check_orderable=False)
+
+        gateway.delete_firewall.assert_not_called()
