@@ -32,7 +32,7 @@ from apps.api_client.services import (
 from apps.common import counters, request_context
 from apps.common.localisation_services import store_localisation_preferences
 from apps.common.store_unavailable import end_session_or_unavailable, wants_json
-from apps.users import customer_view_policy, session_deadlines
+from apps.users import customer_view_policy, customer_view_views, session_deadlines
 
 logger = logging.getLogger(__name__)
 
@@ -178,21 +178,29 @@ class PortalAuthenticationMiddleware:
         return redirect(target)
 
     def _end_session(self, request: HttpRequest) -> HttpResponse:
-        """End the session, and answer the caller in a form it can follow to the login page."""
+        """End the session, and answer the caller in a form it can follow to the login page.
+
+        Every involuntary end passes here. A customer view's tab goes back to Platform instead; where is
+        read before the flush, which forgets that the session was a customer view (ADR-0065).
+        """
+        platform_url = customer_view_views.platform_return_url(request.session)
         unavailable_response = end_session_or_unavailable(request)
         if unavailable_response is not None:
             return unavailable_response
-        return self._signed_out(request)
+        return self._signed_out(request, platform_url)
 
-    def _signed_out(self, request: HttpRequest) -> HttpResponse:
-        """Send a caller without a session to the login page in a form it can follow."""
+    def _signed_out(self, request: HttpRequest, platform_url: str | None = None) -> HttpResponse:
+        """Send a caller without a session to the login page, or an ended customer view to Platform."""
+        target = platform_url or "/login/"
         if request.headers.get("HX-Request"):
             # A 302 would be followed by HTMX and the login page swapped into the target; HX-Redirect navigates.
             response = HttpResponse(status=200)
-            response["HX-Redirect"] = "/login/"
+            response["HX-Redirect"] = target
             return response
         if wants_json(request):
-            return JsonResponse({"error": "Session ended", "redirect": "/login/"}, status=401)
+            return JsonResponse({"error": "Session ended", "redirect": target}, status=401)
+        if platform_url is not None:
+            return customer_view_views.ended(request, platform_url)
         return self.redirect_to_login(request)
 
     def _customer_view_refusal(self, request: HttpRequest) -> HttpResponse | None:

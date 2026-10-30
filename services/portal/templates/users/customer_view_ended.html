@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% load i18n static %}
+{# Django marks a translated template literal safe, so catalog text is escaped where it is shown (ADR-0065). #}
+
+{% block title %}{% trans 'Customer view ended' as t1 %}{{ t1|force_escape }} - {{ company.brand_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-16 text-center" data-platform-url="{{ platform_url }}">
+  <h1 class="text-xl font-semibold text-white">{% trans 'Customer view ended' as t2 %}{{ t2|force_escape }}</h1>
+  <p class="mt-3 text-slate-300">{% trans 'Taking you back to the staff console.' as t3 %}{{ t3|force_escape }}</p>
+  <a href="{{ platform_url }}" class="inline-block mt-6 text-primary-400 hover:text-primary-300">{% trans 'Back to the staff console' as t4 %}{{ t4|force_escape }} →</a>
+</div>
+<script src="{% static 'js/customer-view-ended.js' %}"></script>
+{% endblock %}

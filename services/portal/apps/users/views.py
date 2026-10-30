@@ -47,7 +47,7 @@ from apps.common.rate_limiting import mark_auth_failure, mark_auth_success
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.session_store import SessionSaveContended
 from apps.common.store_unavailable import end_session_or_unavailable
-from apps.users import session_deadlines
+from apps.users import customer_view_views, session_deadlines
 from apps.users.constants import (
     PASSWORD_RESET_SESSION_KEY,
     REGISTRATION_CONFIRM_SESSION_KEY,
@@ -523,17 +523,21 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     customer_id = request.session.get("customer_id", "unknown")
     logger.info(f"✅ [Portal Auth] Customer {customer_id} logged out")
 
+    # A customer view's tab goes back to Platform, read before the session is flushed (ADR-0065).
+    platform_url = customer_view_views.platform_return_url(request.session)
     if request.method == "POST":
         _end_platform_session(request)
         # End authentication and flush as one guarded operation.
         unavailable_response = end_session_or_unavailable(request)
         if unavailable_response is not None:
             return unavailable_response
+        if platform_url is not None:
+            return customer_view_views.ended(request, platform_url)
         messages.success(request, _("You have been logged out successfully."))
         return redirect("/login/")
 
-    # GET requests redirect to login
-    return redirect("/login/")
+    # GET ends nothing. A customer view may not read /login/, so it stays on its dashboard.
+    return redirect("/dashboard/" if platform_url is not None else "/login/")
 
 
 def check_authentication(request: HttpRequest) -> dict | None:
