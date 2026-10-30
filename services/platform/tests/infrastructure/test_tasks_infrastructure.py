@@ -22,6 +22,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import (
     CloudProvider,
     NodeDeployment,
@@ -41,6 +42,7 @@ from apps.infrastructure.tasks import (
     recover_stuck_deployments_task,
     retry_deployment_task,
 )
+from tests.infrastructure.test_deployment_service_pipeline import _teardown_gateway
 
 User = get_user_model()
 
@@ -450,15 +452,20 @@ class TestCleanupFailedDeploymentsTeardown(TestCase):
         d = _create_test_deployment("failed")
         d.external_node_id = external_node_id
         d.save(update_fields=["external_node_id"])
-        NodeDeployment.objects.filter(pk=d.pk).update(updated_at=timezone.now() - timedelta(hours=48))
+        # Created under the token the sweep reads, so that token's answers prove the server gone.
+        NodeDeployment.objects.filter(pk=d.pk).update(
+            updated_at=timezone.now() - timedelta(hours=48),
+            server_create_state="created",
+            provider_token_fingerprint=provider_token_fingerprint("tok"),
+        )
         return d
 
     @patch("apps.infrastructure.provider_config.get_provider_token")
-    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    @patch("apps.infrastructure.node_teardown.get_cloud_gateway")
     def test_failed_deployment_torn_down_and_destroyed(self, mock_gw_factory, mock_token):
         d = self._aged_failed()
         mock_token.return_value = Ok("tok")
-        gw = MagicMock()
+        gw = _teardown_gateway()
         gw.delete_server.return_value = Ok(True)
         mock_gw_factory.return_value = gw
 
@@ -471,11 +478,11 @@ class TestCleanupFailedDeploymentsTeardown(TestCase):
         gw.delete_server.assert_called_once()
 
     @patch("apps.infrastructure.provider_config.get_provider_token")
-    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    @patch("apps.infrastructure.node_teardown.get_cloud_gateway")
     def test_delete_failure_leaves_destroying_for_retry(self, mock_gw_factory, mock_token):
         d = self._aged_failed()
         mock_token.return_value = Ok("tok")
-        gw = MagicMock()
+        gw = _teardown_gateway()
         gw.delete_server.return_value = Err("provider 500")
         mock_gw_factory.return_value = gw
 
@@ -517,14 +524,17 @@ class TestRecoverStuckDeployments(TestCase):
         self.assertEqual(d.status, "installing_panel")
 
     @patch("apps.infrastructure.provider_config.get_provider_token")
-    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    @patch("apps.infrastructure.node_teardown.get_cloud_gateway")
     def test_stale_destroying_retried_to_destroyed(self, mock_gw_factory, mock_token):
         d = _create_test_deployment("failed")
         d.external_node_id = "srv-1"
         d.save(update_fields=["external_node_id"])
+        NodeDeployment.objects.filter(pk=d.pk).update(
+            server_create_state="created", provider_token_fingerprint=provider_token_fingerprint("tok")
+        )
         self._force(d, "destroying", 5)
         mock_token.return_value = Ok("tok")
-        gw = MagicMock()
+        gw = _teardown_gateway()
         gw.delete_server.return_value = Ok(True)
         mock_gw_factory.return_value = gw
 

@@ -16,14 +16,8 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
-from apps.infrastructure.deployment_lifecycle import (
-    OperationOwnershipLostError,
-    claim_operation,
-    invalidate_stale_operation,
-    owned_transition,
-    owned_update,
-)
+from apps.common.types import Err, Result
+from apps.infrastructure.deployment_lifecycle import invalidate_stale_operation
 from apps.infrastructure.deployment_service import get_deployment_service
 from apps.infrastructure.validation_service import get_validation_service
 
@@ -486,127 +480,19 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     }
 
 
-def _teardown_owned_dns(deployment: Any, lease: Any) -> None:
-    """Best-effort owner-scoped DNS deletion for the teardown sweep; never raises."""
-    try:
-        from apps.infrastructure.deployment_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-            NodeDeploymentService,  # Circular: cross-app
-        )
-
-        NodeDeploymentService._delete_owned_dns(deployment, lease)
-    except Exception as dns_exc:
-        logger.warning(f"[Task:cleanup] DNS teardown raised for {deployment.hostname}: {dns_exc}")
-
-
 def _teardown_cloud_deployment(deployment: Any, stale_before: datetime) -> Result[bool, str]:
-    """Idempotent, convergent teardown for a failed/stranded deployment.
+    """Run a failed or stranded deployment through the shared, resumable teardown.
 
-    Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery
-    sweep so a partial teardown converges on the next run instead of stranding.
-    Nothing is cleared until it is confirmed gone:
-
-      failed -> destroying (claim) -> delete the cloud server -> only on a
-      confirmed delete: clear identifiers, write a log + audit, destroying ->
-      destroyed. A delete failure leaves the row in 'destroying' with its
-      external_node_id intact and returns Err, to be retried by the next sweep.
-      Only a row not written since ``stale_before`` is claimed.
+    Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery sweep: the claim
+    re-checks status and age under the row lock and closes the node's admission, and every step
+    proves its resources gone or leaves the row 'destroying' for the next sweep (node_teardown).
     """
-    # Claim into 'destroying' under the row lock, re-checking status and age; a stale-destroying row
-    # is re-claimed, which takes it away from a teardown that died or stalled.
-    claim = claim_operation(
-        deployment.pk,
-        from_states=("failed", "destroying"),
-        to_status="destroying",
-        kind="teardown",
-        stale_before=stale_before,
-        message="Scheduled teardown of failed deployment" if deployment.status == "failed" else "",
-    )
-    if claim.is_err():
-        return Err(f"Cannot start teardown for {deployment.hostname}: {claim.unwrap_err()}")
-    lease = claim.unwrap()
-    deployment.refresh_from_db()
-    try:
-        return _teardown_owned_deployment(deployment, lease)
-    except OperationOwnershipLostError as lost:
-        return Err(f"Teardown of {deployment.hostname} stopped: {lost}")
-
-
-def _teardown_owned_deployment(deployment: Any, lease: Any) -> Result[bool, str]:
-    """The teardown steps, run only by the holder of ``lease``."""
-    from apps.infrastructure.audit_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        InfrastructureAuditService,  # Circular: cross-app
-    )
-    from apps.infrastructure.cloud_gateway import get_cloud_gateway  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        NodeDeploymentLog,  # Circular: cross-app
-    )
-    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
-        get_provider_token,  # Circular: cross-app
-    )
-
-    # Delete owned DNS first (best-effort, owner-scoped). This is the compensation path the
-    # common failed-deploy case actually takes, so DNS cleanup must live here too — not only
-    # in destroy_node (#347 GAP 3). Idempotent on retry; must never crash the sweep.
-    _teardown_owned_dns(deployment, lease)
-
-    # Delete the cloud server if one was ever created.
-    if deployment.external_node_id and deployment.provider:
-        # Token retrieval decrypts a stored provider credential — which can RAISE
-        # under the fail-closed encryption reads (#346) on a corrupt credential —
-        # and the provider SDK may raise rather than return Err. Contain both
-        # inside one boundary so a single bad deployment defers to the next sweep
-        # instead of crashing the whole cleanup run and skipping every other row.
-        try:
-            token_result = get_provider_token(deployment.provider)
-            if token_result.is_err():
-                return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
-            gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
-            delete_result = gateway.delete_server(deployment.external_node_id)
-        except Exception as e:
-            return Err(f"Teardown provider call raised for {deployment.hostname}: {e}")
-        if delete_result.is_err():
-            try:
-                InfrastructureAuditService.log_destroy_failed(deployment, delete_result.unwrap_err())
-            except Exception as audit_err:
-                logger.warning(f"[Task:cleanup] Audit failed for destroy failure: {audit_err}")
-            return Err(f"Server deletion failed for {deployment.hostname}: {delete_result.unwrap_err()}")
-
-        # Confirmed gone (delete is idempotent on not-found): clear identifiers so
-        # this row is never reprocessed and the provider is never re-hit. A DB
-        # error on this write must not crash the sweep — the row stays 'destroying'
-        # with its external_node_id intact and the next sweep re-converges (the
-        # delete is a no-op on the already-gone server).
-        try:
-            owned_update(lease, deployment, external_node_id="", ipv4_address=None)
-        except OperationOwnershipLostError:
-            raise
-        except Exception as e:
-            return Err(f"Failed to clear identifiers for {deployment.hostname} after delete: {e}")
-
-    # Best-effort log — a transient DB write must not crash the sweep.
-    try:
-        NodeDeploymentLog.objects.create(
-            deployment=deployment,
-            level="info",
-            message="Cloud resources torn down by scheduled cleanup",
-            phase="destroying",
-        )
-    except Exception as log_err:
-        logger.warning(f"[Task:cleanup] Could not write teardown log for {deployment.hostname}: {log_err}")
+    from apps.infrastructure.node_teardown import teardown_stale_deployment  # noqa: PLC0415  # Circular
 
     try:
-        owned_transition(lease, deployment, "destroyed", "Teardown complete", release=True)
-    except OperationOwnershipLostError:
-        raise
-    except Exception as e:
-        return Err(f"Cannot finalize teardown for {deployment.hostname}: {e}")
-
-    try:
-        InfrastructureAuditService.log_destroy_completed(deployment)
-    except Exception as audit_err:
-        logger.warning(f"[Task:cleanup] Audit failed for destroy completion: {audit_err}")
-
-    return Ok(True)
+        return teardown_stale_deployment(deployment, stale_before=stale_before)
+    except Exception as e:  # One bad row must never stop the sweep over the others.
+        return Err(f"Teardown of {deployment.hostname} raised: {e}")
 
 
 def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
@@ -627,7 +513,9 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
     cutoff = timezone.now() - timedelta(hours=max_age_hours)
-    failed_deployments = NodeDeployment.objects.filter(status="failed", updated_at__lt=cutoff)
+    failed_deployments = NodeDeployment.objects.filter(
+        status="failed", updated_at__lt=cutoff, needs_reconciliation=False
+    )
 
     cleaned_count = 0
     errors: list[dict[str, str]] = []
@@ -711,7 +599,9 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
 
     # 2. Stranded 'destroying' rows (a teardown whose delete failed, or a worker
     # that died mid-destroy) -> retry the idempotent teardown to convergence.
-    stale_destroying = NodeDeployment.objects.filter(status="destroying", updated_at__lt=cutoff)
+    stale_destroying = NodeDeployment.objects.filter(
+        status="destroying", updated_at__lt=cutoff, needs_reconciliation=False
+    )
     for deployment in stale_destroying:
         result = _teardown_cloud_deployment(deployment, cutoff)
         if result.is_ok():

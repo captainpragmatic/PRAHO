@@ -21,7 +21,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok
-
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
+from apps.infrastructure.models import NodeDeployment
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _teardown_gateway
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -688,66 +690,45 @@ class TestCleanupDeploymentsCommand(TestCase):
         # Verify filter was called (the command builds a queryset)
         mock_nd.objects.select_related.return_value.filter.assert_called()
 
-    @patch(
-        "apps.infrastructure.cloud_gateway.get_cloud_gateway"
-    )
-    @patch(
-        "apps.infrastructure.provider_config.get_provider_token"
-    )
-    @patch("apps.infrastructure.models.NodeDeployment")
-    def test_cloud_deletion_failure_does_not_mark_destroyed(
-        self,
-        mock_nd: MagicMock,
-        mock_token: MagicMock,
-        mock_gateway_fn: MagicMock,
-    ) -> None:
+    def _stale_billed_row(self, external_node_id: str = "srv-c1") -> NodeDeployment:
+        """A real failed row whose server was created under the token the command reads."""
+        deployment = _create_deployment("failed", external_node_id=external_node_id)
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            updated_at=timezone.now() - timedelta(hours=48),
+            server_create_state="created" if external_node_id else "none",
+            provider_token_fingerprint=provider_token_fingerprint("test-token"),
+        )
+        deployment.refresh_from_db()
+        return deployment
+
+    def _run_with_gateway(self, gateway: MagicMock) -> None:
+        with (
+            patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("test-token")),
+            patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=gateway),
+        ):
+            call_command("cleanup_deployments", stdout=StringIO(), stderr=StringIO())
+
+    def test_cloud_deletion_failure_does_not_mark_destroyed(self) -> None:
         """H15: If cloud deletion fails, deployment should NOT be marked destroyed."""
-        dep = self._make_failed_deployment()
-        mock_nd.objects.select_related.return_value.filter.return_value = [dep]
+        deployment = self._stale_billed_row()
+        gateway = _teardown_gateway()
+        gateway.delete_server.return_value = Err("API error: server not responding")
 
-        mock_token.return_value = Ok("test-token")
-        mock_gateway = MagicMock()
-        mock_gateway.delete_server.return_value = Err("API error: server not responding")
-        mock_gateway_fn.return_value = mock_gateway
+        self._run_with_gateway(gateway)
 
-        out = StringIO()
-        err = StringIO()
-        call_command("cleanup_deployments", stdout=out, stderr=err)
+        deployment.refresh_from_db()
+        self.assertEqual((deployment.status, deployment.external_node_id), ("destroying", "srv-c1"))
 
-        # The deployment should NOT have status set to "destroyed"
-        # It should keep its original "failed" status
-        if dep.save.called:
-            # Check that status was NOT set to "destroyed"
-            self.assertNotEqual(dep.status, "destroyed")
-
-    @patch(
-        "apps.infrastructure.cloud_gateway.get_cloud_gateway"
-    )
-    @patch(
-        "apps.infrastructure.provider_config.get_provider_token"
-    )
-    @patch("apps.infrastructure.models.NodeDeployment")
-    def test_successful_deletion_marks_destroyed(
-        self,
-        mock_nd: MagicMock,
-        mock_token: MagicMock,
-        mock_gateway_fn: MagicMock,
-    ) -> None:
+    def test_successful_deletion_marks_destroyed(self) -> None:
         """Successful cloud deletion should mark deployment as destroyed."""
-        dep = self._make_failed_deployment()
-        mock_nd.objects.select_related.return_value.filter.return_value = [dep]
+        deployment = self._stale_billed_row()
+        gateway = _teardown_gateway()
 
-        mock_token.return_value = Ok("test-token")
-        mock_gateway = MagicMock()
-        mock_gateway.delete_server.return_value = Ok(True)
-        mock_gateway_fn.return_value = mock_gateway
+        self._run_with_gateway(gateway)
 
-        out = StringIO()
-        call_command("cleanup_deployments", stdout=out)
-
-        # Now the deployment SHOULD be marked as destroyed
-        dep.save.assert_called()
-        self.assertEqual(dep.status, "destroyed")
+        deployment.refresh_from_db()
+        self.assertEqual((deployment.status, deployment.external_node_id), ("destroyed", ""))
+        gateway.delete_server.assert_called_once_with("srv-c1")
 
     @patch("apps.infrastructure.models.NodeDeployment")
     def test_no_stale_deployments_prints_message(self, mock_nd: MagicMock) -> None:
@@ -759,22 +740,13 @@ class TestCleanupDeploymentsCommand(TestCase):
 
         self.assertIn("No stale failed deployments", out.getvalue())
 
-    @patch(
-        "apps.infrastructure.provider_config.get_provider_token"
-    )
-    @patch("apps.infrastructure.models.NodeDeployment")
-    def test_no_external_id_skips_cloud_deletion(
-        self,
-        mock_nd: MagicMock,
-        mock_token: MagicMock,
-    ) -> None:
-        """Deployments without external_node_id should skip cloud deletion but still be marked."""
-        dep = self._make_failed_deployment(external_node_id=None)
-        mock_nd.objects.select_related.return_value.filter.return_value = [dep]
+    def test_no_external_id_skips_cloud_deletion(self) -> None:
+        """Deployments that never reached the provider skip cloud deletion but are still marked."""
+        deployment = self._stale_billed_row(external_node_id="")
 
-        out = StringIO()
-        call_command("cleanup_deployments", stdout=out)
+        with patch("apps.infrastructure.node_teardown.get_cloud_gateway") as get_gateway:
+            call_command("cleanup_deployments", stdout=StringIO(), stderr=StringIO())
 
-        # Should still mark as destroyed since there's nothing to delete in cloud
-        dep.save.assert_called()
-        self.assertEqual(dep.status, "destroyed")
+        get_gateway.assert_not_called()
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "destroyed")

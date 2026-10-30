@@ -84,13 +84,20 @@ class Harness:
             return self.service.destroy_node(self.deployment, credentials={"api_token": TOKEN})
 
     def resume(self) -> Any:
-        from apps.infrastructure.node_teardown import claim_teardown  # noqa: PLC0415  # Imported where used
+        from apps.infrastructure.node_teardown import claim_teardown, run_claimed_teardown  # noqa: PLC0415
 
         lease = claim_teardown(self.deployment, kind="teardown", from_states=("destroying",)).unwrap()
         self.deployment.refresh_from_db()
         cloud, dns, setting = self._patches()
         with cloud, dns, setting:
-            return self.service._run_teardown(self.deployment, lease, TOKEN, InfrastructureAuditContext(), None)
+            return run_claimed_teardown(
+                self.deployment,
+                lease,
+                TOKEN,
+                ssh_manager=self.service._ssh_manager,
+                registration=self.service._registration,
+                audit_ctx=InfrastructureAuditContext(),
+            )
 
     def row(self) -> NodeDeployment:
         return NodeDeployment.objects.get(pk=self.deployment.pk)

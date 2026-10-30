@@ -20,6 +20,7 @@ from django_q.tasks import async_task
 from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.infrastructure.apps import InfrastructureConfig
 from apps.infrastructure.cloud_gateway import ServerInfo
+from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.drift_remediation import EXECUTION_TASK_TIMEOUT_SECONDS, DriftRemediationService
 from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import (
@@ -1792,18 +1793,27 @@ class PR341HardeningTests(DriftRemediationTestBase):
         not crash the sweep (the idempotent delete re-converges on the next run)."""
         from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
 
-        self.deployment.status = "destroying"
-        self.deployment.save(update_fields=["status"])
+        NodeDeployment.objects.filter(pk=self.deployment.pk).update(
+            status="destroying",
+            external_node_id="srv-w2",
+            server_create_state="created",
+            provider_token_fingerprint=provider_token_fingerprint("token"),
+        )
+        self.deployment.refresh_from_db()
         mock_gw = MagicMock()
+        mock_gw.find_servers_by_label.return_value = Ok([])
         mock_gw.delete_server.return_value = Ok(True)
         with (
             patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
-            patch("apps.infrastructure.cloud_gateway.get_cloud_gateway", return_value=mock_gw),
-            patch("apps.infrastructure.tasks.owned_update", side_effect=RuntimeError("db down")),
+            patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gw),
+            patch("apps.infrastructure.node_teardown.owned_update", side_effect=RuntimeError("db down")),
         ):
             result = _teardown_cloud_deployment(self.deployment, timezone.now() + timedelta(minutes=1))
 
         self.assertTrue(result.is_err())
+        mock_gw.delete_server.assert_called_once_with("srv-w2")
+        self.deployment.refresh_from_db()
+        self.assertEqual((self.deployment.status, self.deployment.external_node_id), ("destroying", "srv-w2"))
 
     def test_hcloud_not_found_trusts_code_over_message(self) -> None:
         """Deploy-W1: a structured non-404 .code must not be overridden by a 'not found'

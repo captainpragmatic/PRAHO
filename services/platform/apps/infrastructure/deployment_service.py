@@ -48,7 +48,13 @@ from apps.infrastructure.deployment_lifecycle import (
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, ExpectedDnsRecord, get_dns_gateway
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
-from apps.infrastructure.node_teardown import DESTROYABLE_STATES, NodeTeardown, claim_teardown, close_node_admission
+from apps.infrastructure.node_teardown import (
+    DESTROYABLE_STATES,
+    claim_teardown,
+    close_node_admission,
+    record_destroy_failure,
+    run_claimed_teardown,
+)
 from apps.infrastructure.provider_config import (
     run_provider_command,
 )
@@ -813,72 +819,18 @@ class NodeDeploymentService:
 
         claim = claim_teardown(deployment, kind="destroy", from_states=DESTROYABLE_STATES)
         if claim.is_err():
-            return self._destroy_failed(deployment, f"Destroy refused: {claim.unwrap_err()}", audit_ctx)
+            return record_destroy_failure(deployment, f"Destroy refused: {claim.unwrap_err()}", audit_ctx)
         lease = claim.unwrap()
         deployment.refresh_from_db()
-        return self._run_teardown(deployment, lease, credentials.get("api_token", ""), audit_ctx, user)
-
-    def _run_teardown(
-        self,
-        deployment: NodeDeployment,
-        lease: OperationLease,
-        api_token: str,
-        audit_ctx: InfrastructureAuditContext,
-        user: User | None,
-    ) -> Result[bool, str]:
-        """Run the shared teardown for a claimed row; a stop leaves it destroying and audited."""
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
-
-        try:
-            InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
-        except Exception:
-            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
-        NodeDeploymentLog.objects.create(
-            deployment=deployment, level="INFO", message="Starting node destruction", phase="destroying"
-        )
-        teardown = NodeTeardown(
+        return run_claimed_teardown(
             deployment,
             lease,
-            api_token=api_token,
+            credentials.get("api_token", ""),
             ssh_manager=self._ssh_manager,
             registration=self._registration,
             user=user,
+            audit_ctx=audit_ctx,
         )
-        try:
-            result = teardown.run()
-        except OperationOwnershipLostError as lost:
-            logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Stopped without writing: {lost}")
-            return Err(f"Destruction stopped: {lost}")
-        except Exception as e:
-            logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
-            result = Err(f"Destruction failed: {e}")
-        if result.is_err():
-            return self._destroy_failed(deployment, result.unwrap_err(), audit_ctx)
-
-        NodeDeploymentLog.objects.create(
-            deployment=deployment, level="INFO", message="Node destroyed successfully", phase="destroyed"
-        )
-        try:
-            InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
-        except Exception:
-            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
-        logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
-        return Ok(True)
-
-    @staticmethod
-    def _destroy_failed(
-        deployment: NodeDeployment, error_msg: str, audit_ctx: InfrastructureAuditContext
-    ) -> Result[bool, str]:
-        """Record a refused or stopped destroy in the deployment log and the audit trail."""
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
-
-        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] {error_msg}")
-        NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=error_msg, phase="destroying")
-        try:
-            InfrastructureAuditService.log_destroy_failed(deployment, error_msg, audit_ctx)
-        except Exception:
-            logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
-        return Err(error_msg)
 
     def retry_deployment(
         self,
@@ -1729,6 +1681,16 @@ class NodeDeploymentService:
             # The row belongs to another owner now; its resources are no longer ours to delete.
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup skipped: this operation no longer owns the deployment")
             return
+        # DNS first: no record may point at an address about to be released. Unconfirmed, the server is
+        # kept (the row fails with its id) and the teardown sweep finishes the job.
+        try:
+            dns = self._delete_owned_dns(deployment, lease)
+        except OperationOwnershipLostError as lost:
+            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
+            return
+        if dns.is_err():
+            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup kept the server: {dns.unwrap_err()}")
+            return
         logger.info(f"[Deployment:{hostname}] Starting best-effort cleanup of {len(resources)} resource(s)")
 
         for resource_type, resource_id in reversed(resources):
@@ -1738,14 +1700,6 @@ class NodeDeploymentService:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
                 )
-
-        # DNS records are created after the VM, so a post-DNS failure reaches this compensator.
-        # Remove any records this deployment owns so we never leave an A record pointing at a
-        # released IP (subdomain-takeover risk) — the third teardown path (#347 GAP 3).
-        try:
-            self._delete_owned_dns(deployment, lease)
-        except OperationOwnershipLostError as lost:
-            logger.warning(f"⚠️ [Deployment:{hostname}] DNS cleanup not recorded: {lost}")
 
         logger.info(f"[Deployment:{hostname}] Cleanup complete")
 
@@ -1796,8 +1750,8 @@ class NodeDeploymentService:
             except OperationOwnershipLostError as lost:
                 logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failure not recorded: {lost}")
                 return
-        else:
-            self._force_failed(deployment)
+        elif not self._force_failed(deployment):
+            return
 
         NodeDeploymentLog.objects.create(
             deployment=deployment,
@@ -1820,14 +1774,18 @@ class NodeDeploymentService:
         logger.error(f"[Deployment:{deployment.hostname}] Failed at stage '{failed_stage}': {error_message}")
 
     @staticmethod
-    def _force_failed(deployment: NodeDeployment) -> None:
-        """Unowned failure write, kept for callers that hold no lease."""
+    def _force_failed(deployment: NodeDeployment) -> bool:
+        """Unowned failure write for callers that hold no lease.
+
+        Only a valid transition is written: forcing "failed" over "destroyed" (or any status another
+        worker just wrote) would offer Retry on a half-destroyed node.
+        """
         try:
             deployment.transition_to("failed")
-        except ValidationError:
-            # Force-set if transition is somehow invalid (e.g., from destroyed)
-            deployment.status = "failed"
-            deployment.save(update_fields=["status", "updated_at"])
+        except ValidationError as refused:
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failure not recorded: {refused}")
+            return False
+        return True
 
 
 # Module-level singleton

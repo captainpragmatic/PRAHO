@@ -219,3 +219,93 @@ class NodeTeardown:
         # A key uploaded before keys were labelled is left in place: its name can collide with another
         # deployment's, and nothing here proves which one it is.
         return Ok(True)
+
+
+def record_destroy_failure(deployment: NodeDeployment, error_msg: str, audit_ctx: Any = None) -> Result[bool, str]:
+    """Record a refused or stopped teardown in the deployment log and the audit trail."""
+    from apps.infrastructure.audit_service import InfrastructureAuditService  # noqa: PLC0415  # Circular
+    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+    logger.warning(f"⚠️ [Destroy:{deployment.hostname}] {error_msg}")
+    NodeDeploymentLog.objects.create(deployment=deployment, level="ERROR", message=error_msg, phase="destroying")
+    try:
+        InfrastructureAuditService.log_destroy_failed(deployment, error_msg, audit_ctx)
+    except Exception:
+        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
+    return Err(error_msg)
+
+
+def run_claimed_teardown(  # noqa: PLR0913  # The teardown's collaborators, injectable for the service and tests.
+    deployment: NodeDeployment,
+    lease: OperationLease,
+    api_token: str,
+    *,
+    ssh_manager: Any = None,
+    registration: Any = None,
+    user: User | None = None,
+    audit_ctx: Any = None,
+) -> Result[bool, str]:
+    """Run the teardown for a claimed row; a stop leaves it destroying, logged and audited."""
+    from apps.infrastructure.audit_service import InfrastructureAuditService  # noqa: PLC0415  # Circular
+    from apps.infrastructure.deployment_lifecycle import OperationOwnershipLostError  # noqa: PLC0415
+    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.infrastructure.registration_service import get_registration_service  # noqa: PLC0415  # Circular
+    from apps.infrastructure.ssh_key_manager import get_ssh_key_manager  # noqa: PLC0415  # Circular
+
+    try:
+        InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
+    except Exception:
+        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
+    NodeDeploymentLog.objects.create(
+        deployment=deployment, level="INFO", message="Starting node destruction", phase="destroying"
+    )
+    teardown = NodeTeardown(
+        deployment,
+        lease,
+        api_token=api_token,
+        ssh_manager=ssh_manager or get_ssh_key_manager(),
+        registration=registration or get_registration_service(),
+        user=user,
+    )
+    try:
+        result = teardown.run()
+    except OperationOwnershipLostError as lost:
+        logger.warning(f"⚠️ [Destroy:{deployment.hostname}] Stopped without writing: {lost}")
+        return Err(f"Destruction stopped: {lost}")
+    except Exception as e:
+        logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
+        result = Err(f"Destruction failed: {e}")
+    if result.is_err():
+        return record_destroy_failure(deployment, result.unwrap_err(), audit_ctx)
+
+    NodeDeploymentLog.objects.create(
+        deployment=deployment, level="INFO", message="Node destroyed successfully", phase="destroyed"
+    )
+    try:
+        InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
+    except Exception:
+        logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
+    logger.info(f"✅ [Destroy:{deployment.hostname}] Node destroyed")
+    return Ok(True)
+
+
+def teardown_stale_deployment(deployment: NodeDeployment, *, stale_before: datetime) -> Result[bool, str]:
+    """The sweeps' and the cleanup command's entry: a failed or stranded row untouched since ``stale_before``.
+
+    A row flagged for reconciliation is left to the operator: running it again proves nothing new.
+    """
+    from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415  # Circular
+
+    if deployment.needs_reconciliation:
+        return Err(f"{deployment.hostname} needs reconciliation: {deployment.reconciliation_reason}")
+    claim = claim_teardown(deployment, kind="teardown", from_states=("failed", "destroying"), stale_before=stale_before)
+    if claim.is_err():
+        return Err(f"Cannot start teardown for {deployment.hostname}: {claim.unwrap_err()}")
+    lease = claim.unwrap()
+    deployment.refresh_from_db()
+    try:
+        token_result = get_provider_token(deployment.provider)
+        api_token = token_result.unwrap() if token_result.is_ok() else ""
+    except Exception as e:  # A corrupt stored credential raises under fail-closed decryption (#346).
+        return record_destroy_failure(deployment, f"Teardown provider token read raised: {type(e).__name__}")
+    return run_claimed_teardown(deployment, lease, api_token)

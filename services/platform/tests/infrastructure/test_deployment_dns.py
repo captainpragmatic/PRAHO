@@ -225,6 +225,9 @@ class DeployFailClosedOnDnsError(TestCase):
         dns = MagicMock()
         dns.get_zone_name.return_value = Ok("test.example.com")
         dns.reconcile_records.return_value = ReconcileOutcome(applied=[], error="cloudflare rejected the record")
+        # The server is released only after the deployment's DNS is withdrawn and confirmed gone.
+        dns.delete_owned_records.return_value = Ok([])
+        dns.confirm_no_owned_records.return_value = Ok(True)
 
         with (
             patch(_GET_SETTING, return_value=True),
