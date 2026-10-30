@@ -1,5 +1,6 @@
 """Service action requests create attributed support tickets."""
 
+from datetime import timedelta
 from uuid import uuid4
 
 from django.contrib.contenttypes.models import ContentType
@@ -14,12 +15,13 @@ from apps.orders.models import Order
 from apps.provisioning.service_models import Server, Service, ServicePlan
 from apps.provisioning.service_request_models import ServiceRequest
 from apps.tickets.models import SupportCategory, Ticket
-from apps.users.models import CustomerMembership, User
+from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin, bound_fields, fresh_session
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE, LANGUAGE_CODE="en")
-class ServiceActionRequestTests(HMACTestMixin, TestCase):
+class ServiceActionRequestTests(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
             code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
@@ -58,6 +60,18 @@ class ServiceActionRequestTests(HMACTestMixin, TestCase):
             "customer_id": self.customer.pk, "user_id": self.users[role].pk, "action": action, "reason": reason,
             "submission_id": str(uuid4()),
         }
+
+    def test_a_request_needs_a_recent_identity_check(self) -> None:
+        session = fresh_session(self.users["owner"])
+        PortalSession.objects.filter(pk=session.pk).update(reauth_at=timezone.now() - timedelta(seconds=301))
+        stale = self.portal_post(self.path, {**self._body("cancel_request"), **bound_fields(session)})
+        self.assertEqual(stale.status_code, 403, stale.content)
+        self.assertEqual(stale.json(), {"success": False, "code": "reauth_required"})
+        self.assertFalse(Ticket.objects.filter(related_service=self.service).exists())
+        PortalSession.objects.filter(pk=session.pk).update(reauth_at=timezone.now())
+        fresh = self.portal_post(self.path, {**self._body("cancel_request"), **bound_fields(session)})
+        self.assertEqual(fresh.status_code, 201, fresh.content)
+        self.assertEqual(Ticket.objects.filter(related_service=self.service).count(), 1)
 
     def test_owner_cancel_request_creates_a_ticket_with_actor_and_audit(self) -> None:
         response = self.portal_post(self.path, self._body("cancel_request"))

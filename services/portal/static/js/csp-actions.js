@@ -168,6 +168,22 @@
     }
   });
 
+  // A form that must reach the server once (confirming your identity turns the session key): a second
+  // submit within ten seconds, from a double click or Enter, is dropped while the first is on its way.
+  // A page restored from the back-forward cache later can still be submitted.
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("form[data-submit-once]");
+    if (!form || event.defaultPrevented) {
+      return;
+    }
+    var now = Date.now();
+    if (now - Number(form.dataset.submittedAt || 0) < 10000) {
+      event.preventDefault();
+      return;
+    }
+    form.dataset.submittedAt = String(now);
+  });
+
   document.addEventListener("change", function (event) {
     var el = event.target.closest('[data-action="switch-customer"]');
     if (el && typeof window.switchCustomer === "function") {

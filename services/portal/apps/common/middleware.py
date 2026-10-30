@@ -11,10 +11,12 @@ import uuid
 from collections.abc import Callable
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
 
+from apps.common.browser_identity import browser_identity
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import end_session_or_unavailable
 
@@ -74,18 +76,12 @@ class SessionSecurityMiddleware(MiddlewareMixin):
     🔒 Enhanced session security middleware to prevent session attacks.
 
     Features:
-    - Session IP binding validation
-    - User agent binding validation
-    - Session timeout enforcement
+    - Browser binding (family and operating system, stamped at login; never the IP address)
     - Automatic session rotation
     - Session hijacking detection
     """
 
-    # Security constants
-    SESSION_TIMEOUT_SECONDS = 3600  # 1 hour default
-    ACTIVITY_STAMP_INTERVAL_SECONDS = 60  # Refresh last_activity at most this often
-    MAX_SESSION_AGE_SECONDS = 8 * 3600  # 8 hours absolute max
-    IP_CHANGE_TOLERANCE = False  # Strict IP binding by default
+    # A session's lifetimes are Platform's; PortalAuthenticationMiddleware follows its deadlines.
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
@@ -112,14 +108,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
                 )
                 return self._handle_security_violation(request, "session_integrity_failed")
 
-            # 🔒 SECURITY: Check session timeout
-            if self._is_session_expired(request):
-                logger.info(f"🔒 [Session] Session expired for {(request.session.session_key or 'unknown')[:8]}...")
-                return self._handle_session_timeout(request)
-
-            # 🔒 SECURITY: Update last activity
-            self._update_session_activity(request)
-
             return None
 
         except Exception as e:
@@ -140,79 +128,43 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         path = request.path
         return any(path.startswith(skip_path) for skip_path in skip_paths)
 
+    @staticmethod
+    def stamp_fingerprint(session: SessionBase, user_agent: str) -> None:
+        """Bind a new session to the browser that signed in (login calls this, ADR-0017 section 5)."""
+        session["security_fingerprint"] = {
+            "browser": browser_identity(user_agent),
+            "user_agent_hash": hashlib.sha256(user_agent.encode()).hexdigest()[:16],
+            "created_at": time.time(),
+        }
+
     def _validate_session_integrity(self, request: HttpRequest) -> bool:
-        """🔒 Validate session hasn't been hijacked or tampered with"""
+        """The session is still in the browser that signed in: same family and operating system.
 
-        # Get current session data
-        session = request.session
-        client_ip = self._get_client_ip(request)
-        user_agent = request.META.get("HTTP_USER_AGENT", "")
-        user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:16]
-
-        # Check for first-time session setup
-        if "security_fingerprint" not in session:
-            # Initialize security fingerprint
-            session["security_fingerprint"] = {
-                "ip_hash": hashlib.sha256(client_ip.encode()).hexdigest()[:16],
-                "user_agent_hash": user_agent_hash,
-                "created_at": time.time(),
-            }
-            session.modified = True
-            logger.info(f"🔒 [Session] Security fingerprint created for {(session.session_key or 'unknown')[:8]}...")
-            return True
-
-        fingerprint = session["security_fingerprint"]
-
-        # 🔒 SECURITY: Validate IP address hasn't changed
-        expected_ip_hash = fingerprint.get("ip_hash", "")
-        current_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
-
-        if not self.IP_CHANGE_TOLERANCE and expected_ip_hash != current_ip_hash:
-            logger.warning(
-                f"🔒 [Session] IP address changed for session {(session.session_key or 'unknown')[:8]}... "
-                f"(expected: {expected_ip_hash}, got: {current_ip_hash})"
-            )
-            return False
-
-        # 🔒 SECURITY: Validate user agent hasn't changed significantly
-        expected_ua_hash = fingerprint.get("user_agent_hash", "")
-        if expected_ua_hash != user_agent_hash:
-            logger.warning(
-                f"🔒 [Session] User agent changed for session {(session.session_key or 'unknown')[:8]}... "
-                f"(expected: {expected_ua_hash}, got: {user_agent_hash})"
-            )
-            return False
-
-        return True
-
-    def _is_session_expired(self, request: HttpRequest) -> bool:
-        """🔒 Check if session has exceeded timeout limits"""
-
-        session = request.session
-        current_time = time.time()
-
-        # Check last activity timeout
-        last_activity = session.get("last_activity", current_time)
-        if current_time - last_activity > self.SESSION_TIMEOUT_SECONDS:
-            return True
-
-        # Check absolute session age
-        fingerprint = session.get("security_fingerprint", {})
-        created_at = fingerprint.get("created_at", current_time)
-        return bool(current_time - created_at > self.MAX_SESSION_AGE_SECONDS)
-
-    def _update_session_activity(self, request: HttpRequest) -> None:
-        """Refresh the session's last-activity stamp, at most once a minute.
-
-        Every write saves the whole session row, so stamping every request made two concurrent
-        requests of one customer race, and the later save could undo the earlier one's changes.
-        A missing stamp is written at once: `_is_session_expired` reads it as "now", so it must
-        not stay missing. Idle expiry can therefore fire up to a minute early, never late.
+        A browser update keeps it (the stored user agent is re-stamped); a new network does too. A
+        session login did not stamp ends, unless PORTAL_BROWSER_FINGERPRINT_REQUIRED is off (tests
+        that build a session by hand), in which case it is bound now.
         """
-        now = time.time()
-        last_activity = request.session.get("last_activity")
-        if last_activity is None or now - last_activity >= self.ACTIVITY_STAMP_INTERVAL_SECONDS:
-            request.session["last_activity"] = now
+        session = request.session
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        fingerprint = session.get("security_fingerprint")
+        if not isinstance(fingerprint, dict) or "browser" not in fingerprint:
+            if getattr(settings, "PORTAL_BROWSER_FINGERPRINT_REQUIRED", True):
+                logger.warning(f"🔒 [Session] No browser binding for {(session.session_key or 'unknown')[:8]}...")
+                return False
+            self.stamp_fingerprint(session, user_agent)
+            return True
+
+        if fingerprint["browser"] != browser_identity(user_agent):
+            logger.warning(
+                f"🔒 [Session] Browser changed for session {(session.session_key or 'unknown')[:8]}... "
+                f"(expected: {fingerprint['browser']}, got: {browser_identity(user_agent)})"
+            )
+            return False
+
+        user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:16]
+        if fingerprint.get("user_agent_hash") != user_agent_hash:
+            session["security_fingerprint"] = {**fingerprint, "user_agent_hash": user_agent_hash}  # an update
+        return True
 
     def _handle_security_violation(self, request: HttpRequest, violation_type: str) -> HttpResponse:
         """🔒 Handle detected security violations"""
@@ -233,21 +185,6 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
         # Redirect to login with security message
         return redirect("/login/?security=session_security_violation")
-
-    def _handle_session_timeout(self, request: HttpRequest) -> HttpResponse:
-        """Handle expired sessions gracefully"""
-
-        # Log timeout
-        session_key = (getattr(request.session, "session_key", None) or "unknown")[:8]
-        logger.info(f"🕒 [Session] Session timeout for {session_key}...")
-
-        # Clear expired session
-        unavailable_response = end_session_or_unavailable(request)
-        if unavailable_response is not None:
-            return unavailable_response
-
-        # Redirect to login with timeout message
-        return redirect("/login/?timeout=session_expired")
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""

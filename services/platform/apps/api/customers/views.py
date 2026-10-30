@@ -30,6 +30,7 @@ from apps.api.secure_auth import (
     require_customer_role_in,
     require_portal_authentication,
 )
+from apps.api.step_up import step_up_refusal
 from apps.common.cnp_validator import CNPValidator
 from apps.common.identity_fields import normalize_phone, normalize_vat_number
 from apps.common.localisation import country_name
@@ -791,7 +792,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 # DEFAULT_THROTTLE_CLASSES set for this endpoint.
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
 @require_customer_role_in(*BILLING_ROLES)
-def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+def update_customer_billing_address(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:
     """
@@ -844,6 +845,9 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
     """
 
     logger.info(f"🏠 [Billing Address API] Update request for customer {customer.id}")
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     # Validate input using our custom serializer
     existing_address = customer.get_primary_address()
@@ -1040,6 +1044,36 @@ def _lock_customer(customer: Customer) -> Customer:
     return Customer.objects.select_for_update(no_key=True).get(pk=customer.pk)
 
 
+def _has_legal_identity(identity: dict[str, Any]) -> bool:
+    """Whether a tax profile already names the company or person; filling the first one needs no check."""
+    return any(str(identity[field] or "").strip() for field in ("cui", "vat_number", "registration_number", "cnp"))
+
+
+def _effective(identity: dict[str, Any]) -> dict[str, Any]:
+    """What a tax identity says, so a missing value and an empty one, or a reformatted equal one, compare equal."""
+    return {
+        field: bool(value) if field == "is_vat_payer" else str(value or "").strip() for field, value in identity.items()
+    }
+
+
+def _comparable(identity: dict[str, Any], country: str | None) -> dict[str, Any]:
+    """A tax identity as this view would store it, so a value stored in another form is no change.
+
+    The CUI is reduced to its digits and the VAT number given its prefix, as an incoming value is;
+    a stored value that no longer validates compares as written.
+    """
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+    comparable = _effective(identity)
+    if comparable["cui"] and (cui := CUIValidator.validate_strict(comparable["cui"])).is_valid:
+        comparable["cui"] = cui.digits
+    if comparable["vat_number"]:
+        vat_number, error = _checked_vat_number(comparable["vat_number"], country)
+        if error is None:
+            comparable["vat_number"] = vat_number
+    return comparable
+
+
 def _contact_details(customer: Customer) -> dict[str, Any]:
     return {field: getattr(customer, field) for field in _CONTACT_FIELDS}
 
@@ -1136,6 +1170,9 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     target_user_id = data.get("target_user_id")
     role = data.get("role", "viewer")
@@ -1211,6 +1248,9 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     email_input = data.get("email", "")
     role = data.get("role", "viewer")
@@ -1301,6 +1341,9 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:  
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     target_user_id = data.get("target_user_id")
     new_role = data.get("new_role")
@@ -1371,6 +1414,9 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     target_user_id = data.get("target_user_id")
     if not target_user_id:
@@ -1427,6 +1473,9 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     target_user_id = data.get("target_user_id")
     if not target_user_id:
@@ -1487,6 +1536,9 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
         return _uniform_error_response()
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     update_fields = []
     with transaction.atomic():
@@ -1604,6 +1656,13 @@ def customer_tax_profile_update(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Val
         tax_profile.is_vat_payer = True
         update_fields.append("is_vat_payer")
 
+    billing = customer.get_billing_address()
+    country = billing.country if billing else None
+    if _has_legal_identity(before) and _comparable(_tax_identity(tax_profile), country) != _comparable(before, country):
+        refusal = step_up_refusal(request)
+        if refusal is not None:
+            return refusal
+
     if update_fields:
         with transaction.atomic():
             tax_profile.save(update_fields=[*update_fields, "updated_at"])
@@ -1659,7 +1718,7 @@ def customer_addresses_list(request: HttpRequest, customer: Customer) -> Respons
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:
+def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Add a new address to a customer."""
     data = _get_request_data(request)
     try:
@@ -1670,6 +1729,9 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     # Enforce max address limit
     current_count = CustomerAddress.objects.filter(customer=customer).count()
@@ -1720,7 +1782,7 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_addresses_update(request: HttpRequest, customer: Customer) -> Response:
+def customer_addresses_update(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Update an existing customer address."""
     data = _get_request_data(request)
     try:
@@ -1731,6 +1793,9 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     address_id = data.get("address_id")
     if not address_id:
@@ -1778,7 +1843,7 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Response:
+def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Delete a customer address."""
     data = _get_request_data(request)
     try:
@@ -1789,6 +1854,9 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     address_id = data.get("address_id")
     if not address_id:
@@ -1838,6 +1906,9 @@ def customer_addresses_set_primary(request: HttpRequest, customer: Customer) -> 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     address_id = data.get("address_id")
     if not address_id:
@@ -1869,6 +1940,9 @@ def customer_addresses_set_billing(request: HttpRequest, customer: Customer) -> 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
         return owner_error
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
 
     address_id = data.get("address_id")
     if not address_id:

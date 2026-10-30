@@ -10,11 +10,11 @@ Endpoints tested:
 import time
 
 from django.test import TestCase, override_settings
-from rest_framework.test import APIRequestFactory
-from tests.factories.core_factories import UserCreationRequest, create_user
 
 from apps.api.gdpr.views import consent_history_api, cookie_consent_api, data_export_api
 from apps.audit.models import CookieConsent
+from tests.factories.core_factories import UserCreationRequest, create_user
+from tests.helpers.portal_session import BoundAPIRequestFactory
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=True)
@@ -22,7 +22,7 @@ class CookieConsentAPITests(TestCase):
     """Tests for POST /api/gdpr/cookie-consent/"""
 
     def setUp(self) -> None:
-        self.factory = APIRequestFactory()
+        self.factory = BoundAPIRequestFactory()
         self.user = create_user(UserCreationRequest(
             username='gdpr_user',
             email='gdpr@test.com',
@@ -183,7 +183,7 @@ class ConsentHistoryAPITests(TestCase):
     """Tests for POST /api/gdpr/consent-history/"""
 
     def setUp(self) -> None:
-        self.factory = APIRequestFactory()
+        self.factory = BoundAPIRequestFactory()
         self.user = create_user(UserCreationRequest(
             username='history_user',
             email='history@test.com',
@@ -231,7 +231,7 @@ class DataExportAPITests(TestCase):
     """Tests for POST /api/gdpr/data-export/"""
 
     def setUp(self) -> None:
-        self.factory = APIRequestFactory()
+        self.factory = BoundAPIRequestFactory()
         self.user = create_user(UserCreationRequest(
             username='export_user',
             email='export@test.com',

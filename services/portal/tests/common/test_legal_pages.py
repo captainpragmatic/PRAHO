@@ -159,6 +159,13 @@ class LegalPagesTests(SimpleTestCase):
         privacy = Client().get("/privacy-policy/").content.decode()
         self.assertIn(f'href="{reverse("users:privacy_dashboard")}"', privacy)
 
+    def test_the_session_cookie_is_described_as_platform_s_session_lives(self) -> None:
+        # ADR-0017 section 5: until the browser closes, or up to 30 days when the person stays signed in.
+        self.serve(release("cookies"))
+        cookies = Client().get("/cookie-policy/").content.decode()
+        self.assertIn("Until you close your browser, or up to 30 days if you choose to stay signed in", cookies)
+        self.assertNotIn("1 day, or", cookies)
+
     def test_each_page_names_the_operator_and_the_privacy_page_its_privacy_contacts(self) -> None:
         published = {**IDENTITY, "registration_number": "J40/1234/2020", "address": "Str. Exemplu 1", "email_dpo": "dpo@legal.example.test"}
         payload = {"success": True, "localisation": LocalisationDefaults().customer_payload(), "company": published}

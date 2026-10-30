@@ -20,6 +20,7 @@
     "services/platform/apps/audit/migrations/0017_alter_auditevent_action.py": "e11531c82346de748cb7ad5a6bf163bd6d65ef3616f1bac00582ab30614df9dc",
     "services/platform/apps/audit/migrations/0018_alter_auditevent_action.py": "0864e18a3ee5cd1727542cccce5bb398df7ef73229007a93567cd9f8d4c22855",
     "services/platform/apps/audit/migrations/0019_customer_view_actions.py": "9f9842eb33bb64d6589d39f59a10ad848027a4a82610b4792c5025e0f06146f0",
+    "services/platform/apps/audit/migrations/0020_session_security_actions.py": "a47e58d492827458359d736e7cc41cc93566d0ac5407bb0b93ed7dfd0dd7b48e",
     "services/platform/apps/billing/migrations/0001_initial.py": "8407779156bb0295475690a2c80e9a420f83d95abd30b64c855f8e261406ff29",
     "services/platform/apps/billing/migrations/0002_initial.py": "2a80143877f926a7c0e6df8635e319cfc3cb37905319fa4e222954adbc6d9278",
     "services/platform/apps/billing/migrations/0003_postgres_event_storage_indexes.py": "4f8d67e96f6b4898764ccb27b73c4d0ec4a3c62fde4e61de20836f82f5ba2677",
@@ -129,6 +130,7 @@
     "services/platform/apps/users/migrations/0010_persistent_secret_contexts.py": "4abf8d0c5de24f8c42db0ca31cdd843bdcefc39bd032c44f817a3bcbdf8ba485",
     "services/platform/apps/users/migrations/0011_portal_session.py": "574cb6e9a44894d02eeba15a951d95973e56ef346b699fa4913f067fced20ccb",
     "services/platform/apps/users/migrations/0012_customer_view.py": "d6ff8558751e9c06b865d80b79af53509e6d4d69a8317b39c3082857cb663f9d",
+    "services/platform/apps/users/migrations/0013_portal_session_remember_tier.py": "1f29b517017f58655aa54ab7c74d3045e63cae1efc7019ae6cc4d162f8760538",
     "services/portal/apps/common/migrations/0001_initial.py": "65b7089126ce34c4a247d2f06c45c6cad4deed56468e4c707c0ae0a9eeccfeca"
   },
   "version": 1

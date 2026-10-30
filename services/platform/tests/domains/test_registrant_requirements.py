@@ -18,6 +18,7 @@ from apps.domains.services import DomainLifecycleService
 from apps.users.models import CustomerMembership, User
 from tests.customers.test_tax_profile_cnp_encryption import stored_cnp
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
 
 from .test_domain_order_flow import DomainOrderLineFixture
 from .test_registrar_contracts import CONTACT
@@ -42,7 +43,7 @@ class RegistrantRequirementsTests(TestCase):
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class RegistrantCNPAPITests(HMACTestMixin, DomainOrderLineFixture, TestCase):
+class RegistrantCNPAPITests(BoundSessionMixin, HMACTestMixin, DomainOrderLineFixture, TestCase):
     def setUp(self) -> None:
         super().setUp()
         cache.clear()

@@ -5,13 +5,14 @@ import time
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 from rest_framework.response import Response
 
 from apps.api.customers.views import customer_addresses_add, customer_addresses_update
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership
+from tests.helpers.portal_session import BoundRequestFactory
 
 User = get_user_model()
 
@@ -20,7 +21,7 @@ class CustomerAddressBooleanAPITests(TestCase):
     """Address flags must be validated before model designation side effects."""
 
     def setUp(self) -> None:
-        self.factory = RequestFactory()
+        self.factory = BoundRequestFactory()
         self.owner = User.objects.create_user(email="address-owner@example.com", password="pass123")
         self.customer = Customer.objects.create(name="Boolean Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner")

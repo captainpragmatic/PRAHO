@@ -11,6 +11,7 @@ from apps.customers.models import Customer
 from apps.users.mfa import BackupCodeService
 from apps.users.models import CustomerMembership, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
+from tests.helpers.portal_session import BoundSessionMixin
 
 
 @override_settings(
@@ -19,7 +20,7 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
     HMAC_ALLOW_LEGACY_SECRET=True,
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
-class AccountSecurityWorkflows(HMACTestMixin, TestCase):
+class AccountSecurityWorkflows(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self):
         cache.clear()
         self.other = User.objects.create_user(email="other@example.com", password="Other-secure123!")
@@ -35,7 +36,7 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
 
     def update_profile(self, **data):
         path = "/api/users/profile/"
-        body = json.dumps({"user_id": self.user.pk, "timestamp": time.time(), **data}).encode()
+        body = json.dumps(self._bound({"user_id": self.user.pk, "timestamp": time.time(), **data})).encode()
         return self.client.put(path, body, content_type="application/json", **hmac_headers("PUT", path, body))
 
     def test_profile_phone_formats_are_normalized_and_persisted_for_only_the_authenticated_user(self):

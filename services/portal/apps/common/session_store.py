@@ -34,6 +34,7 @@ import json
 import logging
 import random
 import time
+from datetime import datetime
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -64,7 +65,14 @@ logger = logging.getLogger(__name__)
 KEY_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"selected_customer_id", "selected_customer_name", "selected_customer_role"}),
     frozenset(
-        {"validated_at", "next_validate_at", "membership_hash", "user_memberships", "user_memberships_fetched_at"}
+        {
+            "validated_at",
+            "next_validate_at",
+            "membership_hash",
+            "user_memberships",
+            "user_memberships_fetched_at",
+            "session_idle_deadline",  # Platform's, refreshed by each validation (ADR-0017 section 5)
+        }
     ),
     frozenset(
         {
@@ -73,6 +81,8 @@ KEY_GROUPS: tuple[frozenset[str], ...] = (
             "customer_id",
             "session_auth_hash",
             "portal_session_id",
+            "session_tier",
+            "session_expires_at",
             "authenticated_at",
             "session_created_at",
         }
@@ -100,12 +110,25 @@ RECORD_MAPS = frozenset(
     {"order_checkout_attempts", "gift_purchase_forms", "service_request_submissions", "gift_payment_requests"}
 )
 
+# Platform's end for this session (ADR-0017 section 5), stored at login by apps.users.session_deadlines.
+PLATFORM_END_KEY = "session_expires_at"
+
 MAX_MERGE_ATTEMPTS = 25
 # Between attempts, a short random wait growing with the attempt, so requests that collided do not
 # collide again in lockstep. The worst case is well under a second.
 MERGE_BACKOFF_SECONDS = 0.002
 
 _MISSING = object()
+
+
+def _aware_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.utcoffset() is not None else None
 
 
 class SessionSaveContended(Exception):  # noqa: N818  # reads as what happened, like UpdateError
@@ -257,6 +280,19 @@ class SessionStore(db.SessionStore):
     def _publish(self, data: dict[str, Any], text: str) -> None:
         """Only an acknowledged write becomes the new baseline."""
         self._baseline, self._baseline_text = copy.deepcopy(data), text
+
+    # ---- expiry --------------------------------------------------------------------------------
+
+    def get_expiry_date(self, **kwargs: Any) -> datetime:
+        """The stored row never outlives Platform's end for the session, whatever expiry it carries.
+
+        A cookie that ends with the browser would give the row Django's default cookie age (two
+        weeks), and any other expiry could reach past Platform's end on a later save: a
+        credential-bearing row would then outlive its session.
+        """
+        expiry_date: datetime = super().get_expiry_date(**kwargs)
+        end = _aware_time(self.get(PLATFORM_END_KEY))
+        return expiry_date if end is None else min(expiry_date, end)
 
     # ---- writing -------------------------------------------------------------------------------
 

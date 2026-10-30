@@ -7,8 +7,7 @@ snapshot still matches the user's session hash. Every password or second-factor 
 hash, so it ends every other session of the user at their next request. The few portal endpoints
 where customers change their own credentials re-stamp only the calling session (``restamp``).
 
-Lifetimes are today's (idle 1 h, absolute 8 h); the longer tiers of section 5 wait for the 300 s
-re-check that makes them acceptable.
+Each tier's lifetimes come from ``session_policy``; a row whose tier the policy does not know ends.
 """
 
 from __future__ import annotations
@@ -17,8 +16,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import transaction
@@ -29,23 +27,23 @@ from django.utils.crypto import constant_time_compare
 
 from apps.audit.session_digest import session_key_digest
 
+from . import session_policy
 from .models import PortalSession, User
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-IDLE_TIMEOUT = timedelta(hours=1)
-ABSOLUTE_TIMEOUT = timedelta(hours=8)
 # Interactive activity extends the idle deadline at most this often, so a busy page costs one
 # write a minute, not one per request.
 TOUCH_INTERVAL = timedelta(seconds=60)
 SWEEP_RETENTION = timedelta(days=1)
+# A sensitive action needs a password (and second factor) check this recent; login counts as one.
+STEP_UP_WINDOW = timedelta(seconds=300)
 SWEEP_BATCH = 500
 
 REASON_LOGOUT = "logout"
 REASON_CREDENTIALS = "credentials_changed"
+REASON_OPERATOR = "operator"
+REASON_POLICY = "policy"  # the tier is unknown, or no longer allowed for this person
 
 
 @dataclass(frozen=True)
@@ -87,16 +85,19 @@ def deadlines(row: PortalSession) -> SessionDeadlines:
     return SessionDeadlines(str(row.pk), row.tier, row.idle_deadline, row.expires_at)
 
 
-def open_session(user: User, *, ip: str = "", user_agent: str = "") -> PortalSession:
-    """Open a standard session for a login that has just passed every check, and audit it."""
+def open_session(user: User, *, remember_me: bool = False, ip: str = "", user_agent: str = "") -> PortalSession:
+    """Open a session for a login that has just passed every check, in the tier it may have, and audit it."""
     now = timezone.now()
+    tier = session_policy.tier_for(user, remember_me=remember_me)
+    life = session_policy.TIERS[tier]
     with transaction.atomic():
         row = PortalSession.objects.create(
             user=user,
+            tier=tier,
             credential_snapshot=user.get_session_auth_hash(),
             last_seen_at=now,
-            idle_deadline=now + IDLE_TIMEOUT,
-            expires_at=now + ABSOLUTE_TIMEOUT,
+            idle_deadline=now + life.idle,
+            expires_at=now + life.absolute,
             reauth_at=now,
             ip_digest=_digest(ip),
             ua_digest=_digest(user_agent),
@@ -157,6 +158,11 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
     if match is False:
         end(row, REASON_CREDENTIALS)
         return None
+    life = session_policy.lifetimes(row.tier)
+    if life is None or (row.tier == PortalSession.TIER_REMEMBER and row.user.is_staff_user):
+        # Ended, never raised: a 500 here is an outage the portal would fail open on.
+        end(row, REASON_POLICY)
+        return None
     scoped = row.tier == PortalSession.TIER_CUSTOMER_VIEW
     if scoped:
         from .customer_view import nonlive_reason  # noqa: PLC0415  # customer_view imports this module
@@ -172,7 +178,7 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         )
         row.credential_snapshot = current
     if interactive and now - row.last_seen_at >= TOUCH_INTERVAL:
-        idle = min(now + _idle_timeout(row), row.expires_at)
+        idle = min(now + life.idle, row.expires_at)
         # In SQL, so it holds against concurrent touches: at most one a minute, never backwards.
         touched = PortalSession.objects.filter(_live(now), pk=row.pk, last_seen_at__lte=now - TOUCH_INTERVAL).update(
             last_seen_at=now, idle_deadline=idle
@@ -180,14 +186,6 @@ def resolve(raw_session_id: object, user_id: int, *, interactive: bool) -> Porta
         if touched:
             row.last_seen_at, row.idle_deadline = now, idle
     return row
-
-
-def _idle_timeout(row: PortalSession) -> timedelta:
-    if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
-        from .customer_view import IDLE_TIMEOUT as CUSTOMER_VIEW_IDLE  # noqa: PLC0415  # import cycle
-
-        return CUSTOMER_VIEW_IDLE
-    return IDLE_TIMEOUT
 
 
 def end(row: PortalSession, reason: str) -> bool:
@@ -226,6 +224,66 @@ def restamp(row: PortalSession | None, *, old_hash: str, new_hash: str) -> bool:
             credential_snapshot=new_hash
         )
     )
+
+
+def recently_reauthenticated(row: PortalSession, now: datetime) -> bool:
+    """True when the session's last identity check is at most STEP_UP_WINDOW old, and not in the future."""
+    if row.reauth_at is None:
+        return False
+    return timedelta(0) <= now - row.reauth_at <= STEP_UP_WINDOW
+
+
+def still_live(row: PortalSession, user: User) -> bool:
+    """Whether a session read under its row lock is live for this user's current credentials."""
+    now = timezone.now()
+    return (
+        row.user_id == user.pk
+        and user.is_active
+        and row.revoked_at is None
+        and row.expires_at > now
+        and row.idle_deadline > now
+        and _snapshot_matches(row, user) is not False
+    )
+
+
+def record_step_up(row: PortalSession, *, confirmed: bool) -> None:
+    """Audit an identity check made in this session, which the audit names by its digest only."""
+    if confirmed:
+        _audit("step_up_confirmed", row, description="Identity confirmed for sensitive actions")
+    else:
+        _audit("step_up_failed", row, description="Identity check for sensitive actions failed")
+
+
+def mark_reauth(row: PortalSession) -> datetime | None:
+    """Record a passed identity check on a live session, and return its new window; an ended one is never marked."""
+    now = timezone.now()
+    marked = PortalSession.objects.filter(_live(now), pk=row.pk).update(reauth_at=now)
+    if not marked:
+        return None
+    row.reauth_at = now
+    return now
+
+
+def step_up_stamp(row: PortalSession) -> str:
+    """The window a login or identity check opened, as the portal must echo it to act in it."""
+    return row.reauth_at.isoformat() if row.reauth_at is not None else ""
+
+
+def window_open(row: PortalSession, echoed: object, now: datetime) -> bool:
+    """Whether a request may act in the session's 300 s window (ADR-0017 section 7).
+
+    Read from the row as it is now, not as the request bound it: a check made meanwhile replaces the
+    window. The request must echo exactly that window, which only the browser that opened it holds,
+    so a request that loaded the session before the person confirmed cannot act in what they opened.
+    """
+    current = PortalSession.objects.filter(_live(now), pk=row.pk).values_list("reauth_at", flat=True).first()
+    if current is None or not isinstance(echoed, str):
+        return False
+    try:
+        echoed_at = datetime.fromisoformat(echoed)
+    except ValueError:
+        return False
+    return echoed_at == current and timedelta(0) <= now - current <= STEP_UP_WINDOW
 
 
 def sweep_expired(*, now: datetime | None = None) -> int:
@@ -276,6 +334,7 @@ def bind_request(request: HttpRequest, data: dict[str, object]) -> HttpResponse 
     if row is None:
         return session_refused()
     request.portal_session = row  # type: ignore[attr-defined]  # read by the endpoints that end or re-stamp it
+    request.portal_step_up_at = data.get("step_up_at")  # type: ignore[attr-defined]  # read by step_up_refusal
     if row.tier == PortalSession.TIER_CUSTOMER_VIEW:
         from apps.api.customer_view_policy import check  # noqa: PLC0415  # ADR-0007: cross-app, deferred
 

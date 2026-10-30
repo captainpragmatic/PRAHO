@@ -25,6 +25,7 @@ from config.settings.base import (
     SESSION_COOKIE_SAMESITE,
     SESSION_ENGINE,
 )
+from tests.helpers.platform_login import session_fields
 
 # ---------------------------------------------------------------------------
 # 1. Session key availability — the root cause of the signed-cookie regression
@@ -160,7 +161,8 @@ class SessionSecurityMiddlewareTests(TestCase):
 
         fp = request.session.get("security_fingerprint")
         self.assertIsNotNone(fp)
-        self.assertIn("ip_hash", fp)
+        self.assertEqual(fp["browser"], "other/other")  # bound to the browser, not the address
+        self.assertNotIn("ip_hash", fp)
         self.assertIn("user_agent_hash", fp)
         self.assertIn("created_at", fp)
 
@@ -235,6 +237,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -275,6 +278,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }
@@ -304,6 +308,7 @@ class LoginSessionPersistenceTests(TestCase):
             mock_api.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 123,
                 "customer_id": 456,
             }

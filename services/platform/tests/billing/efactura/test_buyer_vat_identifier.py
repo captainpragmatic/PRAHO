@@ -27,6 +27,7 @@ from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership, User
 from tests.factories.billing_factories import CurrencyFactory, InvoiceFactory, InvoiceLineFactory
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
 
 NS = {
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -220,7 +221,7 @@ class CreditNoteBuyerVATIdentifierTests(TestCase):
     COMPANY_BANK_ACCOUNT="RO49AAAA1B31007593840000",
     COMPANY_BANK_NAME="Supplier Bank",
 )
-class VATNumberStorageTests(HMACTestMixin, TestCase):
+class VATNumberStorageTests(BoundSessionMixin, HMACTestMixin, TestCase):
     """A VAT number is stored with its prefix by every writer, so a document without evidence keeps it."""
 
     def setUp(self) -> None:

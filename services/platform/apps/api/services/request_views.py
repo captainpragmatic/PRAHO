@@ -8,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.api.secure_auth import SUPPORT_ROLES, require_customer_role_in
+from apps.api.step_up import step_up_refusal
 from apps.customers.models import Customer
 from apps.provisioning.service_request_models import ServiceRequest
 from apps.provisioning.service_request_service import ServiceRequestError, submit_service_request
@@ -33,6 +34,9 @@ def service_request_api(request: Request, customer: Customer, service_id: int) -
     serializer = ServiceRequestSerializer(data=request.data)
     if not serializer.is_valid():
         return Response({"success": False, "errors": serializer.errors}, status=400)
+    refusal = step_up_refusal(request)
+    if refusal is not None:
+        return refusal
     user = User.objects.get(pk=request.data["user_id"], is_active=True)
     try:
         receipt, created = submit_service_request(

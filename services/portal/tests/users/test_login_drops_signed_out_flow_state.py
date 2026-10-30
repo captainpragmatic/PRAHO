@@ -21,6 +21,7 @@ from apps.users.constants import (
     REGISTRATION_INTENT_SESSION_KEY,
     REGISTRATION_PREFILL_SESSION_KEY,
 )
+from tests.helpers.platform_login import session_fields
 
 LEFT_BY_SIGNED_OUT_FLOWS = (
     PASSWORD_RESET_SESSION_KEY,
@@ -49,6 +50,7 @@ class LoginDropsSignedOutFlowStateTests(TestCase):
                 "user_id": 123,
                 "customer_id": 456,
                 "session_id": str(uuid4()),  # Platform opens the session (ADR-0017 section 5)
+                **session_fields(),
             }
             platform.post.return_value = {"success": True, "results": [{"id": 456, "name": "Acme", "role": "owner"}]}
             platform.get_customer_profile.return_value = {"first_name": "Ana"}

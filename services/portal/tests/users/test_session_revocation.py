@@ -17,6 +17,7 @@ from django.utils import timezone
 from apps.api_client.services import PlatformAPIClient
 from apps.common import counters
 from apps.users.middleware import PortalAuthenticationMiddleware
+from tests.helpers.platform_login import session_fields
 
 
 @override_settings(
@@ -215,6 +216,7 @@ class SessionRevocationTests(TransactionTestCase):
             platform.authenticate_customer.return_value = {
                 "valid": True,
                 "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+                **session_fields(),
                 "user_id": 42,
                 "customer_id": 7,
                 "customer_data": {"id": 42, "email": "user@example.com"},

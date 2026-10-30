@@ -13,6 +13,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common import counters
+from tests.helpers.platform_login import session_fields
 
 
 @override_settings(
@@ -69,6 +70,7 @@ class AuthenticationRateLimitTests(TestCase):
         platform.authenticate_customer.return_value = {
             "valid": True,
             "session_id": "6f1c2a0e-8a5b-4d0c-9a77-0d4b3c2e1f00",  # Platform's session (ADR-0017 section 5)
+            **session_fields(),
             "user_id": 1,
             "customer_id": 1,
             "customer_data": {},
@@ -179,11 +181,11 @@ class AuthenticationRateLimitTests(TestCase):
             platform.authenticate_customer.return_value = None
             self.client.post(reverse("users:login"), self.credentials)
             platform.authenticate_customer.assert_called_with(
-                self.email, self.credentials["password"], mfa_token="", client_ip="127.0.0.1", user_agent=""
+                self.email, self.credentials["password"], mfa_token="", client_ip="127.0.0.1", user_agent="", remember_me=False
             )
             self.client.post(reverse("users:login"), {**self.credentials, "mfa_token": "123456"})
             platform.authenticate_customer.assert_called_with(
-                self.email, self.credentials["password"], mfa_token="123456", client_ip="127.0.0.1", user_agent=""
+                self.email, self.credentials["password"], mfa_token="123456", client_ip="127.0.0.1", user_agent="", remember_me=False
             )
 
     def test_falsy_valid_response_counts_as_failure(self) -> None:

@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 from apps.billing.models import RecurringPaymentAuthorization
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.customers.models import Customer, CustomerPaymentMethod
-from apps.users.models import CustomerMembership, User
+from apps.users.models import CustomerMembership, PortalSession, User
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin, fresh_session
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
-class RecurringPaymentsAPITestCase(HMACTestMixin, TestCase):
+class RecurringPaymentsAPITestCase(BoundSessionMixin, HMACTestMixin, TestCase):
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
             name="API Mandate Customer SRL",
@@ -125,6 +127,32 @@ class RecurringPaymentsAPITestCase(HMACTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["setup_intent_id"], "seti_api_begin")
+
+    @patch("apps.api.billing.views.SettingsService.get_setting", return_value="pk_test_recurring")
+    @patch("apps.billing.recurring_authorization_service.PaymentGatewayFactory.get_default_gateway")
+    def test_begin_needs_a_recent_identity_check(self, factory: MagicMock, _get_setting: MagicMock) -> None:
+        factory.return_value.create_setup_intent.return_value = {
+            "success": True,
+            "setup_intent_id": "seti_stale",
+            "client_secret": "seti_stale_secret",
+            "error": None,
+        }
+        session = fresh_session(self.owner)
+        PortalSession.objects.filter(pk=session.pk).update(reauth_at=timezone.now() - timedelta(seconds=301))
+        response = self.portal_post(
+            "/api/billing/recurring-payments/authorize/begin/",
+            self._payload(
+                "begin_recurring_authorization",
+                session_id=str(session.pk),
+                payment_method_id=self.method.id,
+                terms_accepted=True,
+                terms_version=RecurringPaymentAuthorizationService.TERMS_VERSION,
+            ),
+        )
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json(), {"success": False, "code": "reauth_required"})
+        factory.assert_not_called()  # no setup intent was asked of the gateway
+        self.assertFalse(RecurringPaymentAuthorization.objects.filter(customer=self.customer).exists())
 
     @patch("apps.api.billing.views.SettingsService.get_setting", return_value="pk_test_recurring")
     @patch("apps.billing.recurring_authorization_service.PaymentGatewayFactory.get_default_gateway")

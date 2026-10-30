@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.audit.session_digest import session_key_digest
-from apps.users import portal_sessions
+from apps.users import portal_sessions, session_policy
 from apps.users.models import PortalSession, User
 from apps.users.pending_totp import complete_enrolment
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin, hmac_headers
@@ -38,12 +38,12 @@ class PortalSessionServiceTests(TestCase):
     def setUp(self) -> None:
         self.user = _customer()
 
-    def test_open_session_binds_the_credentials_and_today_s_lifetimes(self) -> None:
+    def test_open_session_binds_the_credentials_and_the_standard_lifetimes(self) -> None:
         before = timezone.now()
         row = portal_sessions.open_session(self.user, ip="203.0.113.9", user_agent="Firefox")
         self.assertEqual(row.credential_snapshot, self.user.get_session_auth_hash())
-        self.assertGreaterEqual(row.expires_at, before + portal_sessions.ABSOLUTE_TIMEOUT)
-        self.assertLessEqual(row.idle_deadline, row.last_seen_at + portal_sessions.IDLE_TIMEOUT)
+        self.assertGreaterEqual(row.expires_at, before + session_policy.TIERS["standard"].absolute)
+        self.assertLessEqual(row.idle_deadline, row.last_seen_at + session_policy.TIERS["standard"].idle)
         self.assertNotIn("203.0.113.9", row.ip_digest)
         event = AuditEvent.objects.filter(action="login_success").latest("timestamp")
         self.assertEqual(event.metadata["portal_session"], session_key_digest(str(row.pk)))
