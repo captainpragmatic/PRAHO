@@ -215,6 +215,9 @@ class NodeTeardown:
         self.ssh_manager = ssh_manager
         self.registration = registration
         self.user = user
+        # Set by the cloud step when it proved nothing remains: the row never reached the provider, or the
+        # token that created its resources searched and deleted them. Re-deploy needs this proof.
+        self.proved_absent = False
 
     def run(self) -> Result[bool, str]:
         from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415  # Circular
@@ -234,8 +237,9 @@ class NodeTeardown:
         revoked = self.ssh_manager.delete_deployment_key(deployment, user=self.user)
         if revoked.is_err():
             return Err(f"SSH key revocation failed: {revoked.unwrap_err()}")
+        proof = {"resources_proved_absent_for": deployment.correlation_id} if self.proved_absent else {}
         owned_transition(
-            self.lease, deployment, "destroyed", "Node destroyed", release=True, destroyed_at=timezone.now()
+            self.lease, deployment, "destroyed", "Node destroyed", release=True, destroyed_at=timezone.now(), **proof
         )
         return Ok(True)
 
@@ -254,6 +258,7 @@ class NodeTeardown:
         # create answer was lost is still discovered even when no server was ever requested.
         reached_provider = bool(deployment.provider_token_fingerprint) or self._may_hold_server()
         if not reached_provider and not self._recorded_firewall_ids():
+            self.proved_absent = True
             return Ok(True)  # never reached the provider
         if not self.api_token:
             return Err("No provider API token for teardown")
@@ -271,7 +276,9 @@ class NodeTeardown:
         firewalls = self._delete_firewalls(gateway)
         if firewalls.is_err():
             return firewalls
-        return self._delete_ssh_keys(gateway)
+        keys = self._delete_ssh_keys(gateway)
+        self.proved_absent = keys.is_ok() and trusted
+        return keys
 
     def _delete_servers(self, gateway: CloudProviderGateway, *, trusted: bool) -> Result[bool, str]:
         deployment = self.deployment
