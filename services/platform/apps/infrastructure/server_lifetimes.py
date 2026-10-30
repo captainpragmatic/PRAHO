@@ -148,6 +148,23 @@ def split_lifetime_for_resize(lifetime_id: Any, server_id: str, new_size: NodeSi
         return True
 
 
+def start_lifetimes_at_resize(
+    deployment: NodeDeployment, server_id: str, old_size: NodeSize, new_size: NodeSize
+) -> bool:
+    """The first resize of a row whose window predates lifetimes: keep that window at the old rate, then bill on.
+
+    Nothing happens when the row already has lifetimes (``split_lifetime_for_resize`` handles those) or has no
+    window of its own.
+    """
+    now = timezone.now()
+    with transaction.atomic():
+        if deployment.started_at is None or _model().objects.filter(deployment=deployment).exists():
+            return False
+        _new(deployment, old_size, deployment.started_at, ended_at=now, legacy=True)
+        _new(deployment, new_size, now, server_id=server_id)
+        return True
+
+
 def delete_unconfirmed_lifetimes(deployment: NodeDeployment) -> int:
     """A never-created attestation: open lifetimes with no confirmed server billed nothing."""
     deleted, _ = _model().objects.filter(deployment=deployment, ended_at__isnull=True, server_id="").delete()

@@ -75,6 +75,7 @@ from apps.infrastructure.server_lifetimes import (
     open_pending_lifetime,
     save_legacy_window,
     split_lifetime_for_resize,
+    start_lifetimes_at_resize,
 )
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
@@ -1539,7 +1540,9 @@ class NodeDeploymentService:
             deployment.node_size = new_size
             deployment.save(update_fields=["node_size", "updated_at"])
             # The hours before the resize keep the old rate; a successor bills the new one.
-            split_lifetime_for_resize(lifetime_id, resized_server, new_size)
+            split_lifetime_for_resize(lifetime_id, resized_server, new_size) or start_lifetimes_at_resize(
+                deployment, resized_server, old_size, new_size
+            )
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,

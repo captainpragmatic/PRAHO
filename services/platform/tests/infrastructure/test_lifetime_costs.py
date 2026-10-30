@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.infrastructure.cost_service import CostTrackingService
-from apps.infrastructure.models import NodeDeployment, NodeServerLifetime
+from apps.infrastructure.models import NodeDeployment, NodeDeploymentCostRecord, NodeServerLifetime
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 
 HOURS_PER_MONTH = Decimal("730")
@@ -85,6 +85,35 @@ class LifetimeCostTests(TestCase):
         lifetime(self.deployment, "14.60", at(5), at(5, 4), "b")
         self.assertAlmostEqual(self.deployment.calculate_running_hours(), 14.0)
         self.assertAlmostEqual(self.deployment.estimate_cost(), float(cost("7.30", 10) + cost("14.60", 4)), places=4)
+
+
+class NoServerNoCostTests(TestCase):
+    def test_a_row_that_never_ran_a_server_costs_nothing_and_a_stale_record_is_cleared(self) -> None:
+        deployment = _create_deployment("destroyed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(started_at=None, destroyed_at=at(5))
+        deployment.refresh_from_db()
+        # A record computed while an unconfirmed lifetime was open; the lifetime was then attested away.
+        NodeDeploymentCostRecord.objects.create(
+            deployment=deployment, period_start=at(1), period_end=at(8), cost_eur=Decimal("1.5"),
+            compute_cost=Decimal("1.5"),
+        )
+        result = CostTrackingService().calculate_deployment_costs(deployment, at(1), at(8))
+        self.assertTrue(result.is_err())
+        record = NodeDeploymentCostRecord.objects.get(deployment=deployment, period_start=at(1))
+        self.assertEqual((record.cost_eur, record.compute_cost), (Decimal("0"), Decimal("0")))
+
+
+class BreakdownRateTests(TestCase):
+    def test_the_rate_uses_cost_and_hours_of_the_same_lifetimes(self) -> None:
+        deployment = _create_deployment("destroyed")
+        lifetime(deployment, "7.30", at(2), at(2, 10))
+        service = CostTrackingService()
+        # Recorded for the first days only; the breakdown asks for a longer range with more lifetime hours.
+        service.calculate_deployment_costs(deployment, at(1), at(3)).unwrap()
+        lifetime(deployment, "7.30", at(6), at(6, 10), "later")
+        (row,) = service.get_deployment_breakdown(at(1), at(8))
+        self.assertEqual(row.cost_per_hour_eur.quantize(Decimal("0.000001")),
+                         (Decimal("7.30") / HOURS_PER_MONTH).quantize(Decimal("0.000001")))
 
 
 class RowWindowFallbackTests(TestCase):

@@ -97,13 +97,18 @@ class CostTrackingService:
         if usage is not None:
             # Each server lifetime, at the rate it recorded: re-deploys and resizes keep their history.
             hours_active, compute_cost = usage
-            if hours_active <= 0:
-                return Err("No active time in this period")
         else:
             window = self._row_window_usage(deployment, period_start, period_end)
             if window.is_err():
                 return Err(window.unwrap_err())
             hours_active, compute_cost = window.unwrap()
+        if hours_active <= 0:
+            # Recalculation is authoritative: a record from before (an unconfirmed lifetime attested never
+            # created, say) is zeroed rather than left charging.
+            NodeDeploymentCostRecord.objects.filter(
+                deployment=deployment, period_start=period_start, period_end=period_end
+            ).update(cost_eur=0, compute_cost=0, bandwidth_cost=0, storage_cost=0)
+            return Err("No active time in this period")
 
         # For now, bandwidth and storage are 0 (included in base price)
         # In future, could integrate with provider API to get actual usage
@@ -149,15 +154,17 @@ class CostTrackingService:
     def _row_window_usage(
         self, deployment: NodeDeployment, period_start: datetime, period_end: datetime
     ) -> Result[tuple[Decimal, Decimal], str]:
-        """A deployment without server lifetimes: its own started_at .. destroyed_at window at its current size."""
-        if deployment.started_at and deployment.started_at > period_end:
-            return Err("Deployment not active during this period")
-        if deployment.destroyed_at and deployment.destroyed_at < period_start:
-            return Err("Deployment already destroyed before this period")
-        effective_start = max(period_start, deployment.started_at or deployment.created_at)
+        """A deployment without server lifetimes: its own started_at .. destroyed_at window at its current size.
+
+        No ``started_at`` means no server ever ran (it is set when one is created), so no time is billed.
+        """
+        none = Ok((Decimal("0"), Decimal("0")))
+        if deployment.started_at is None:
+            return none
+        effective_start = max(period_start, deployment.started_at)
         effective_end = min(period_end, deployment.destroyed_at or timezone.now())
         if effective_end <= effective_start:
-            return Err("No active time in this period")
+            return none
         hours_active = Decimal(str((effective_end - effective_start).total_seconds() / 3600))
         if not deployment.node_size:
             return Err("Deployment has no associated node size")
@@ -320,9 +327,10 @@ class CostTrackingService:
             hourly_rate = monthly_rate / self.HOURS_PER_MONTH if monthly_rate else Decimal("0")
             usage = lifetime_usage(deployment, period_start, period_end)
             if usage is not None:
-                # Uptime is the lifetimes' time in the period; the rate is effective, since lifetimes may differ.
-                hours = usage[0]
-                hourly_rate = data["total"] / hours if hours else Decimal("0")
+                # Uptime is the lifetimes' time in the period; the rate is effective (lifetimes may differ), with
+                # its cost and hours taken from the same lifetimes.
+                hours, lifetime_cost = usage
+                hourly_rate = lifetime_cost / hours if hours else Decimal("0")
                 monthly_rate = hourly_rate * self.HOURS_PER_MONTH
 
             breakdowns.append(

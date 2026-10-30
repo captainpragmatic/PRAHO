@@ -135,7 +135,16 @@ class ResizeWritePointTests(TestCase):
             [("srv-1", Decimal("3.29"), False), ("srv-1", Decimal("13.99"), True)],
         )
 
-    def test_a_resize_of_a_row_without_lifetimes_starts_none(self) -> None:
+    def test_the_first_resize_of_a_row_without_lifetimes_keeps_its_window_at_the_old_rate(self) -> None:
         self.lifetime.delete()
+        started = timezone.now() - timedelta(days=5)
+        NodeDeployment.objects.filter(pk=self.deployment.pk).update(started_at=started)
+        self.deployment.refresh_from_db()
+        old_rate = self.deployment.node_size.monthly_cost_eur
         self.assertTrue(self.resize().is_ok())
-        self.assertFalse(NodeServerLifetime.objects.filter(deployment=self.deployment).exists())
+        rows = list(NodeServerLifetime.objects.filter(deployment=self.deployment).order_by("started_at"))
+        self.assertEqual(
+            [(lt.server_id, lt.monthly_cost_eur, lt.legacy, lt.ended_at is None) for lt in rows],
+            [("", old_rate, True, False), ("srv-1", Decimal("13.99"), False, True)],
+        )
+        self.assertEqual(rows[0].started_at, started)
