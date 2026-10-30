@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 from django.db import close_old_connections, connection, transaction
 from django.test import TransactionTestCase
 
-from apps.common.types import Result
+from apps.common.types import Ok, Result
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
+from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 from tests.infrastructure.test_deployment_service_pipeline import _make_service
-from tests.infrastructure.test_node_admission_guard import create_account, make_node, make_service
+from tests.infrastructure.test_node_admission_guard import make_node, make_service
 
 # Long enough for an unblocked second side to finish inside the hold, short enough to keep the test quick.
 _HOLD_SECONDS = 2.0
@@ -38,7 +40,10 @@ class GuardAndAdmissionRaceTests(TransactionTestCase):
         return _make_service()._disable_linked_server_for_stop(self.deployment, InfrastructureAuditContext())
 
     def _admit(self) -> Result[VirtualminAccount, str]:
-        return create_account(self.server, "admitted.example.com", self.admitted_service)
+        data = VirtualminAccountCreationData(
+            service=self.admitted_service, domain="admitted.example.com", server=self.server
+        )
+        return VirtualminProvisioningService().create_virtualmin_account(data)
 
     def _race(self, first: str) -> tuple[Result[bool, str], Result[VirtualminAccount, str]]:
         first_holds_lock = threading.Event()
@@ -71,7 +76,12 @@ class GuardAndAdmissionRaceTests(TransactionTestCase):
                 second_done.set()
                 connection.close()
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        # Patched here, not inside the workers: a patch entered and exited on two threads at once
+        # can restore the real method while the other thread still needs the stub.
+        with (
+            patch.object(VirtualminProvisioningService, "_execute_domain_creation", return_value=Ok(True)),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
             holder = executor.submit(first_side)
             other = executor.submit(second_side)
             holder.result(timeout=30)
