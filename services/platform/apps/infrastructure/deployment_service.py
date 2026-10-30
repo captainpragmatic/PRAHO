@@ -1441,6 +1441,38 @@ class NodeDeploymentService:
             return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
         return ""
 
+    @staticmethod
+    def _record_resize(
+        deployment: NodeDeployment,
+        old_size: NodeSize,
+        new_size: NodeSize,
+        lifetime_id: uuid.UUID | None,
+        server_id: str,
+    ) -> None:
+        """The provider resized the server: record the new size and its cost window together.
+
+        A failure of the cost window does not undo a resize that happened: the size is still recorded and the
+        problem is logged for the cost records, not reported as a failed upgrade.
+        """
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,
+        )
+
+        # Write only the size: a full save would write back a lifecycle state read before the resize.
+        deployment.node_size = new_size
+        try:
+            with transaction.atomic():
+                deployment.save(update_fields=["node_size", "updated_at"])
+                # The hours before the resize keep the old rate; a successor bills the new one.
+                split_lifetime_for_resize(lifetime_id, server_id, new_size) or start_lifetimes_at_resize(
+                    deployment, server_id, old_size, new_size
+                )
+        except Exception as error:  # The resize happened: keep the size, flag the cost window.
+            deployment.save(update_fields=["node_size", "updated_at"])
+            message = f"Resized to {new_size.name}, but its cost window was not updated: {error}"
+            logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] {message}")
+            NodeDeploymentLog.objects.create(deployment=deployment, level="WARNING", message=message, phase="upgrading")
+
     def upgrade_node_size(  # Complexity: deployment orchestration
         self,
         deployment: NodeDeployment,
@@ -1536,13 +1568,7 @@ class NodeDeploymentService:
                     logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
-            # Write only the size: a full save would write back a lifecycle state read before the resize.
-            deployment.node_size = new_size
-            deployment.save(update_fields=["node_size", "updated_at"])
-            # The hours before the resize keep the old rate; a successor bills the new one.
-            split_lifetime_for_resize(lifetime_id, resized_server, new_size) or start_lifetimes_at_resize(
-                deployment, resized_server, old_size, new_size
-            )
+            self._record_resize(deployment, old_size, new_size, lifetime_id, resized_server)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,

@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
-from apps.infrastructure.models import NodeDeployment, NodeServerLifetime, NodeSize
+from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeServerLifetime, NodeSize
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 from tests.infrastructure.test_node_teardown import Harness
 
@@ -192,4 +192,18 @@ class ResizeWritePointTests(TestCase):
             service.upgrade_node_size(self.deployment, self.bigger, {"api_token": "test-token"})
         self.assertFalse(
             NodeServerLifetime.objects.filter(deployment=self.deployment, ended_at__isnull=True).exists()
+        )
+
+    def test_a_cost_window_failure_after_a_done_resize_is_not_an_upgrade_failure(self) -> None:
+        with patch(
+            "apps.infrastructure.deployment_service.split_lifetime_for_resize", side_effect=RuntimeError("db hiccup")
+        ):
+            result = self.resize()
+        self.assertTrue(result.is_ok(), result)
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.node_size_id, self.bigger.pk)
+        self.assertTrue(
+            NodeDeploymentLog.objects.filter(
+                deployment=self.deployment, level="WARNING", message__contains="cost window"
+            ).exists()
         )
