@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
+from django.utils.html import strip_tags
 
 SOURCE_TIME = "2026-10-29T10:15:00+00:00"
 
@@ -169,6 +170,24 @@ class UsageObservationTemplateTests(SimpleTestCase):
             with self.subTest(fragment='<!DOCTYPE' not in html):
                 self.assertIn("No disk usage history is available yet", html)
                 self.assertNotIn("<polyline", html)
+
+    def test_detail_retains_an_accessible_period_selector_connected_to_usage(self) -> None:
+        html = self.page(observation())
+        self.assertIn('aria-label="Usage history period"', html)
+        self.assertIn('name="period"', html)
+        self.assertIn('hx-get="/services/5/usage/"', html)
+        self.assertIn('hx-target="#service-usage-content"', html)
+        self.assertIn('id="service-usage-content"', html)
+        self.assertIn('value="30d" selected', html)
+        self.assertIn('value="90d"', html)
+
+    def test_known_usage_percentages_remain_readable_without_the_progress_bar(self) -> None:
+        current = observation(disk_usage_gb=3.5, disk_usage_percentage=35,
+                              bandwidth_usage_gb=2, bandwidth_usage_percentage=2, bandwidth_state="fresh")
+        for html in (self.page(current), self.fragment(current)):
+            text = " ".join(strip_tags(html).split())
+            self.assertIn("35.0% used", text)
+            self.assertIn("2.0% used", text)
 
     def test_service_age_is_not_labelled_as_measured_uptime(self) -> None:
         html = self.page(observation(service_age_days=5))
