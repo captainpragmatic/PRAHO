@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Re-deploy Node" %} - {{ deployment.hostname }}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+  <div class="max-w-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-white">{% trans "Re-deploy Node" %}</h1>
+      <p class="text-slate-400 mt-1">{% trans "Deploy this node again under the same hostname, with a size sold in its region." %}</p>
+    </div>
+
+    {% trans "This creates a new server, which is billed from creation. The hostname, node number, logs, audit trail and costs are kept. Each re-deploy requests a new Let's Encrypt certificate for the same name, and repeated certificates for one name are rate-limited, so avoid re-deploying the same node many times in a short period." as redeploy_warning %}
+    {% alert redeploy_warning variant="warning" %}
+
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 my-6">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-400">{% trans "Hostname" %}</label>
+          <p class="mt-1 text-white font-mono">{{ deployment.hostname }}</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-400">{% trans "Region" %}</label>
+          <p class="mt-1 text-white">{{ deployment.region.name }}</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-400">{% trans "Current size" %}</label>
+          <p class="mt-1 text-white">{{ deployment.node_size.display_name }}</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-400">{% trans "Status" %}</label>
+          <p class="mt-1 text-white">{{ deployment.get_status_display }}</p>
+        </div>
+      </div>
+    </div>
+
+    <form method="post" action="{{ form_action }}">
+      {% csrf_token %}
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold text-white mb-3">{% trans "Size" %}</h2>
+          {% if available_sizes %}
+          <div class="space-y-3">
+            {% for size in available_sizes %}
+            <label class="flex items-center p-4 bg-slate-700/50 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors border border-slate-600 hover:border-cyan-500">
+              {% with size_id=size.id|stringformat:"s" size_label=size.display_name|default:size.name %}
+              {% input_field "new_size" input_type="radio" value=size.id html_id="new-size-"|add:size_id aria_label=size_label css_class="h-4 w-4 text-cyan-500 focus:ring-cyan-500 border-slate-500 bg-slate-800" %}
+              {% endwith %}
+              <span class="ml-4 text-white">{{ size.display_name|default:size.name }} ({{ size.provider_type_id }}), &euro;{{ size.monthly_cost_eur }}/mo</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-slate-400">{% trans "No size is sold in this region. Run Sync providers, then try again." %}</p>
+          {% endif %}
+        </div>
+        <div>
+          <p class="text-slate-300 mb-2">
+            {% trans "To confirm, type the hostname exactly:" %}
+            <code class="ml-2 px-2 py-1 bg-slate-700 rounded text-amber-400 font-mono">{{ deployment.hostname }}</code>
+          </p>
+          {{ form.confirm_hostname }}
+          {% if form.confirm_hostname.errors %}
+          <div class="mt-2">{% alert form.confirm_hostname.errors.0 variant="danger" %}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-4 mt-6">
+        <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
+          {% trans "Cancel" %}
+        </a>
+        {% trans "Re-deploy" as redeploy_label %}{% button redeploy_label type="submit" variant="warning" %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

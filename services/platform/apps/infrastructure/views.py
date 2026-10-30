@@ -55,6 +55,7 @@ from .models import (
 )
 from .permissions import (
     can_deploy_nodes,
+    can_destroy_nodes,
     can_manage_deployments,
     require_deploy_permission,
     require_deployment_management,
@@ -70,6 +71,7 @@ from .tasks import (
     queue_destroy_node,
     queue_maintenance,
     queue_reboot_node,
+    queue_redeploy_node,
     queue_retry_deployment,
     queue_start_node,
     queue_stop_node,
@@ -479,6 +481,12 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
         "can_retry": deployment.can_retry,
+        "can_redeploy": (
+            deployment.status in ("failed", "destroyed")
+            and deployment.never_got_a_server
+            and not deployment.needs_reconciliation
+            and can_destroy_nodes(cast("User", request.user))
+        ),
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
@@ -609,6 +617,61 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     }
 
     return render(request, "infrastructure/deployment_destroy.html", context)
+
+
+@login_required
+@require_deploy_permission
+@require_destroy_permission
+@require_http_methods(["GET", "POST"])
+def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
+    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname."""
+    from .deployment_service import NodeDeploymentService  # noqa: PLC0415  # Deferred: avoids loading Ansible
+
+    deployment = get_object_or_404(NodeDeployment, id=pk)
+    available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
+    form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
+    new_size = available_sizes.filter(id=request.POST.get("new_size") or 0).first()
+    if request.method == "POST" and form.is_valid():
+        refusal = (
+            NodeDeploymentService._redeploy_refusal(deployment, new_size)
+            if new_size is not None
+            else str(_("Choose a size sold in this region."))
+        )
+        if refusal or new_size is None:
+            messages.error(request, refusal)
+        elif get_provider_token(deployment.provider).is_err():
+            messages.error(request, _provider_credentials_help(deployment.provider))
+        else:
+            try:
+                task_id = queue_redeploy_node(
+                    deployment_id=deployment.id,
+                    provider_id=deployment.provider_id,
+                    new_size_id=new_size.id,
+                    user_id=request.user.id,
+                )
+            except OperationReservationError as refused:
+                messages.error(request, str(refused))
+            else:
+                messages.success(request, f"Re-deploy queued for '{deployment.hostname}'.")
+                logger.info(f"[Deployment] Re-deploy queued for {deployment.hostname}, task_id={task_id}")
+                return redirect("infrastructure:deployment_detail", pk=deployment.id)
+
+    context = {
+        "page_title": f"Re-deploy: {deployment.hostname}",
+        "breadcrumb_items": [
+            {"text": "Management", "url": "/dashboard/"},
+            {"text": "Infrastructure", "url": reverse("infrastructure:dashboard")},
+            {"text": "Deployments", "url": reverse("infrastructure:deployment_list")},
+            {"text": deployment.hostname, "url": reverse("infrastructure:deployment_detail", args=[deployment.id])},
+            {"text": "Re-deploy"},
+        ],
+        "deployment": deployment,
+        "form": form,
+        "available_sizes": available_sizes,
+        "form_action": reverse("infrastructure:deployment_redeploy", args=[deployment.id]),
+        "cancel_url": reverse("infrastructure:deployment_detail", args=[deployment.id]),
+    }
+    return render(request, "infrastructure/deployment_redeploy.html", context)
 
 
 # ===============================================================================

@@ -380,6 +380,58 @@ def retry_deployment_task(
     }
 
 
+def redeploy_node_task(
+    deployment_id: int,
+    provider_id: int,
+    new_size_id: int,
+    user_id: int | None = None,
+    operation_token: str | None = None,
+) -> dict[str, Any]:
+    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname.
+
+    Credentials are fetched at execution time. A refusal before the claim leaves the row as it was; the
+    service settles a refused start under its own claim.
+    """
+    from apps.infrastructure.models import CloudProvider, NodeDeployment, NodeSize  # noqa: PLC0415  # Deferred
+    from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415  # Deferred
+    from apps.users.models import User  # noqa: PLC0415  # Deferred: avoids circular import
+
+    logger.info(f"[Task:redeploy_node] Re-deploying deployment_id={deployment_id}")
+    try:
+        deployment = NodeDeployment.objects.get(id=deployment_id)
+        new_size = NodeSize.objects.get(id=new_size_id)
+        provider = CloudProvider.objects.get(id=provider_id)
+    except (NodeDeployment.DoesNotExist, NodeSize.DoesNotExist, CloudProvider.DoesNotExist) as missing:
+        return {"success": False, "deployment_id": deployment_id, "error": str(missing)}
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        return {"success": False, "deployment_id": deployment_id, "error": token_result.unwrap_err()}
+    user = User.objects.filter(id=user_id).first() if user_id else None
+
+    result = get_deployment_service().redeploy_node(
+        deployment=deployment,
+        new_size=new_size,
+        credentials={"api_token": token_result.unwrap()},
+        user=user,
+        expected_token=_token(operation_token),
+    )
+    if result.is_err():
+        return {
+            "success": False,
+            "deployment_id": deployment_id,
+            "hostname": deployment.hostname,
+            "error": result.unwrap_err(),
+        }
+    deploy_result = result.unwrap()
+    return {
+        "success": True,
+        "deployment_id": deployment_id,
+        "hostname": deploy_result.hostname,
+        "stages_completed": deploy_result.stages_completed,
+        "duration_seconds": deploy_result.duration_seconds,
+    }
+
+
 def validate_node_task(deployment_id: int) -> dict[str, Any]:
     """
     Async task to validate a deployed node.
@@ -1253,6 +1305,32 @@ def queue_retry_deployment(
 
     logger.info(f"[Queue] Retry queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
+
+
+def queue_redeploy_node(
+    deployment_id: int,
+    provider_id: int,
+    new_size_id: int,
+    user_id: int | None = None,
+) -> str:
+    """Queue a re-deploy, reserving its operation token; it runs once with the deploy pipeline's timeout."""
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: django-q task
+
+    token = _reserve(deployment_id, from_states=("failed", "destroyed"), kind="redeploy", require_reconciled=True)
+    task_id = async_task(
+        "apps.infrastructure.tasks.redeploy_node_task",
+        deployment_id,
+        provider_id,
+        new_size_id,
+        user_id,
+        token,
+        task_name=f"redeploy_node_{deployment_id}",
+        hook="apps.infrastructure.tasks.deployment_complete_hook",
+        timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
+        **LIFECYCLE_TASK_OPTIONS,
+    )
+    logger.info(f"[Queue] Re-deploy queued: deployment_id={deployment_id}, task_id={task_id}")
+    return str(task_id)
 
 
 def queue_upgrade_node(

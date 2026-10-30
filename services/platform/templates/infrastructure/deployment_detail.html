@@ -71,6 +71,13 @@
                     {% trans "Retry" as retry_label %}{% button retry_label type="submit" variant="warning" icon="refresh" %}
                 </form>
                 {% endif %}
+                {% if can_redeploy %}
+                <a href="{% url 'infrastructure:deployment_redeploy' deployment.id %}"
+                   class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors">
+                    {% icon "refresh" css_class="inline mr-1" %}
+                    {% trans "Re-deploy" %}
+                </a>
+                {% endif %}
                 {% if can_destroy %}
                 <a href="{% url 'infrastructure:deployment_destroy' deployment.id %}"
                    class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
