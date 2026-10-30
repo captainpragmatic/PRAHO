@@ -1891,7 +1891,7 @@ class NodeDeploymentService:
             except OperationOwnershipLostError as lost:
                 logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failure not recorded: {lost}")
                 return
-        elif not self._force_failed(deployment):
+        elif not self._force_failed(deployment, error_message):
             return
 
         NodeDeploymentLog.objects.create(
@@ -1915,14 +1915,14 @@ class NodeDeploymentService:
         logger.error(f"[Deployment:{deployment.hostname}] Failed at stage '{failed_stage}': {error_message}")
 
     @staticmethod
-    def _force_failed(deployment: NodeDeployment) -> bool:
+    def _force_failed(deployment: NodeDeployment, error_message: str) -> bool:
         """Unowned failure write for callers that hold no lease.
 
         Only a valid transition is written: forcing "failed" over "destroyed" (or any status another
         worker just wrote) would offer Retry on a half-destroyed node.
         """
         try:
-            deployment.transition_to("failed")
+            deployment.transition_to("failed", error_message)
         except ValidationError as refused:
             logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Failure not recorded: {refused}")
             return False

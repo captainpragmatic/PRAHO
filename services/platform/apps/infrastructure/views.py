@@ -112,7 +112,8 @@ def _get_status_variant(status: str) -> str:
         "pending": "secondary",
         "provisioning_node": "info",
         "configuring_dns": "info",
-        "running_ansible": "info",
+        "installing_panel": "info",
+        "configuring_backups": "info",
         "validating": "info",
         "registering": "info",
         "completed": "success",
@@ -129,7 +130,8 @@ def _get_status_icon(status: str) -> str:
         "pending": "clock",
         "provisioning_node": "server",
         "configuring_dns": "globe",
-        "running_ansible": "terminal",
+        "installing_panel": "terminal",
+        "configuring_backups": "terminal",
         "validating": "check-circle",
         "registering": "user-plus",
         "completed": "check",
@@ -154,7 +156,7 @@ def deployment_dashboard(request: HttpRequest) -> HttpResponse:
     total_deployments = NodeDeployment.objects.count()
     active_deployments = NodeDeployment.objects.filter(status="completed").count()
     pending_deployments = NodeDeployment.objects.filter(
-        status__in=["pending", "provisioning_node", "configuring_dns", "running_ansible", "validating", "registering"]
+        status__in=[status for status in NodeDeployment.POLLING_STATUSES if status != "destroying"]
     ).count()
     failed_deployments = NodeDeployment.objects.filter(status="failed").count()
 
@@ -449,21 +451,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Get recent logs
     logs = NodeDeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[:50]
 
-    # Calculate progress percentage
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "stopped": 100,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -485,19 +473,11 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "can_retry": deployment.status == "failed",
+        "can_retry": deployment.can_retry,
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
         "fqdn": f"{deployment.hostname}.{deployment.dns_zone}" if deployment.dns_zone else deployment.hostname,
     }
 
@@ -876,20 +856,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
-    progress_stages = {
-        "pending": 0,
-        "provisioning_node": 15,
-        "configuring_dns": 35,
-        "running_ansible": 55,
-        "validating": 80,
-        "registering": 90,
-        "completed": 100,
-        "failed": 0,
-        "destroying": 50,
-        "destroyed": 100,
-    }
-
-    progress_percentage = progress_stages.get(deployment.status, 0)
+    progress_percentage = NodeDeployment.PROGRESS_PERCENT.get(deployment.status, 0)
     # Pre-compute progress step for template (0-6 range matching 6 stages)
     progress_step = min(progress_percentage // 16, 6)
 
@@ -900,16 +867,7 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status
-        in (
-            "pending",
-            "provisioning_node",
-            "configuring_dns",
-            "running_ansible",
-            "validating",
-            "registering",
-            "destroying",
-        ),
+        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
     }
 
     return render(request, "infrastructure/partials/deployment_status.html", context)

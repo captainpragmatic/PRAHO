@@ -226,7 +226,7 @@ class TestDeploymentDetailProgress(_DeploymentTestMixin, TestCase):
 
     def test_deployment_detail_has_progress_step_in_context(self) -> None:
         """deployment_detail context includes progress_step and stages list."""
-        deployment = self._create_deployment(status="running_ansible")
+        deployment = self._create_deployment(status="installing_panel")
         url = reverse("infrastructure:deployment_detail", args=[deployment.pk])
         response = self.client.get(url)
 

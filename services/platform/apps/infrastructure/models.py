@@ -704,8 +704,35 @@ class NodeDeployment(models.Model):
 
     @property
     def can_retry(self) -> bool:
-        """Check if deployment can be retried"""
-        return self.status == "failed" and self.last_successful_phase != ""
+        """A failed deployment can be retried unless its provider resources must be reconciled first."""
+        return self.status == "failed" and not self.needs_reconciliation
+
+    # Statuses whose page keeps refreshing: a worker is moving the row on.
+    POLLING_STATUSES: ClassVar[tuple[str, ...]] = (
+        "pending",
+        "provisioning_node",
+        "configuring_dns",
+        "installing_panel",
+        "configuring_backups",
+        "validating",
+        "registering",
+        "destroying",
+    )
+
+    PROGRESS_PERCENT: ClassVar[dict[str, int]] = {
+        "pending": 0,
+        "provisioning_node": 15,
+        "configuring_dns": 35,
+        "installing_panel": 55,
+        "configuring_backups": 70,
+        "validating": 80,
+        "registering": 90,
+        "completed": 100,
+        "failed": 0,
+        "stopped": 100,
+        "destroying": 50,
+        "destroyed": 100,
+    }
 
     # Valid state transitions map
     VALID_TRANSITIONS: ClassVar[dict[str, list[str]]] = {
