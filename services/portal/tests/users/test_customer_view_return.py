@@ -9,10 +9,12 @@ Platform. An ordinary customer's session still ends on the login page.
 
 from __future__ import annotations
 
+import copy
 import json
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings as django_settings
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
@@ -33,6 +35,10 @@ SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
     "CACHES": {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "cv-return"}},
 }
+
+
+def refuse_processing(request: HttpRequest) -> dict[str, object]:
+    raise AssertionError("a context processor ran for the customer-view ended page")
 
 
 def _view_session(**changes: object) -> dict[str, object]:
@@ -126,10 +132,13 @@ class LeavingTests(EndedPageAssertions):
     def test_the_ended_page_runs_no_context_processor(self) -> None:
         # The session is gone; a processor reaching the cache or Platform could delay or break the way back.
         self._start()
+        # A fresh engine (TEMPLATES changes reset it) with a processor that fails if any request render runs:
+        # patching the module-level processors would miss an engine that already cached them.
+        templates = copy.deepcopy(django_settings.TEMPLATES)
+        templates[0]["OPTIONS"]["context_processors"].append(f"{__name__}.refuse_processing")
         with (
+            override_settings(TEMPLATES=templates),
             patch("apps.users.customer_view_views.api_client.end_session"),
-            patch("apps.common.context_processors.company_identity", side_effect=AssertionError("ran")),
-            patch("apps.common.context_processors.portal_context", side_effect=AssertionError("ran")),
         ):
             response = self.client.post(reverse("users:customer_view_leave"))
         self.assert_ended_page(response)
