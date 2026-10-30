@@ -453,6 +453,22 @@ def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
     assert task.get("no_log") is True
 
 
+@pytest.mark.integration
+def test_every_deploy_inventory_notices_a_dead_ssh_connection() -> None:
+    # Without a keepalive, a link that drops silently mid-play leaves Ansible waiting forever (a staging
+    # promotion sat an hour on a task the host had already finished). With one, a dead link fails the run
+    # within minutes instead, and the promotion can be run again. The host answers the probes while a quiet task
+    # runs, so a long task keeps its connection.
+    for inventory in ("native-single-server.yml", "dev.yml"):
+        hosts = yaml.safe_load((ANSIBLE / "inventory" / inventory).read_text())["all"]["hosts"]
+        for name, host in hosts.items():
+            options = dict(re.findall(r"-o (\w+)=(\S+)", host["ansible_ssh_common_args"]))
+            with_context = (inventory, name, options)
+            assert "ServerAliveInterval" in options and "ServerAliveCountMax" in options, with_context
+            noticed_after = int(options["ServerAliveInterval"]) * int(options["ServerAliveCountMax"])
+            assert 60 <= noticed_after <= 300, with_context
+
+
 def test_node_ssh_overlay_mounts_only_public_keys_in_both_platform_processes() -> None:
     overlay = yaml.safe_load((PROJECT_ROOT / "deploy/docker-compose.node-ssh.yml").read_text())
     assert set(overlay["services"]) == {"platform", "qcluster"}
