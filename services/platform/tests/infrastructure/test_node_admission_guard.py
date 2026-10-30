@@ -234,3 +234,24 @@ class FenceOrderingTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
         self.assertIsNotNone(job.next_retry_at)
+
+    def test_a_job_retried_and_failed_again_since_the_evidence_keeps_the_node_occupied(self) -> None:
+        from apps.infrastructure import node_teardown  # noqa: PLC0415
+
+        deployment, job = self._setup("aba")
+        original = node_teardown._never_reached_node
+
+        def evidence_then_a_whole_retry(account: Any) -> Any:
+            verdict = original(account)
+            # A retry claims (counting the attempt), runs, and fails again with an unknown outcome.
+            type(job).objects.filter(pk=job.pk).update(
+                status="failed", retry_count=job.retry_count + 1, result={"retriability": "unknown"}
+            )
+            return verdict
+
+        with mock.patch.object(node_teardown, "_never_reached_node", side_effect=evidence_then_a_whole_retry):
+            result = _make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext())
+
+        self.assertTrue(result.is_err())
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")

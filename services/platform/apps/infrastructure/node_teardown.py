@@ -47,13 +47,13 @@ DESTROYABLE_STATES = ("completed", "failed", "stopped")
 _NOT_APPLIED = frozenset({"retriable", "not_retriable"})
 
 
-def _never_reached_node(account: Any) -> list[Any] | None:
+def _never_reached_node(account: Any) -> list[tuple[Any, int]] | None:
     """The failed create jobs proving an "error" account never reached the node, or None when unproven.
 
     Conservative: it needs at least one create_domain job, every one of them failed or cancelled, and each
     failed one either refused before taking effect (a retriable or not-retriable failure) or rolled back
     successfully. An account that was ever provisioned, or has any other evidence, still counts (None).
-    The failed jobs returned are the ones the guard must fence against a retry.
+    The failed jobs returned, as (id, retry_count), are the ones the guard must fence against a retry.
     """
     if account.status != "error" or account.provisioned_at is not None:
         return None
@@ -68,23 +68,28 @@ def _never_reached_node(account: Any) -> list[Any] | None:
         refused = (job.result or {}).get("retriability") in _NOT_APPLIED
         if job.status != "failed" or not (rolled_back or refused):
             return None
-        failed.append(job.pk)
+        failed.append((job.pk, job.retry_count))
     return failed
 
 
-def _fence_create_retries(job_ids: list[Any]) -> bool:
-    """Cancel exactly the failed create jobs the evidence relied on, so no retry can run them.
+def _fence_create_retries(jobs: list[tuple[Any, int]]) -> bool:
+    """Cancel exactly the failed create jobs the evidence relied on, as they were, so no retry runs them.
 
-    A retry claims a failed job with a conditional update from "failed"; this fence is the same kind of
-    update on the same ids, so exactly one wins each job. Returns False when a retry claimed any of them
-    first, at any moment since the evidence was read: the node is then occupied.
+    A retry claims a failed job with a conditional update from "failed" that also counts the attempt; this
+    fence matches the same id, "failed" and the attempt count the evidence saw, so a job retried since
+    (even one that failed again with another outcome) is not cancelled. Returns False when any job
+    changed: the node is then occupied.
     """
     from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
-    fenced = VirtualminProvisioningJob.objects.filter(pk__in=job_ids, status="failed").update(
-        status="cancelled", next_retry_at=None, updated_at=timezone.now()
-    )
-    return fenced == len(job_ids)
+    now = timezone.now()
+    for job_id, retry_count in jobs:
+        fenced = VirtualminProvisioningJob.objects.filter(pk=job_id, status="failed", retry_count=retry_count).update(
+            status="cancelled", next_retry_at=None, updated_at=now
+        )
+        if fenced != 1:
+            return False
+    return True
 
 
 def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
@@ -111,8 +116,8 @@ def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> R
                 "Node has an in-flight migration; resolve it or explicitly force" if migrating else occupied_message
             )
         if not force:
-            job_ids = [job_id for jobs in evidence if jobs for job_id in jobs]
-            if not _fence_create_retries(job_ids):
+            observed = [job for jobs in evidence if jobs for job in jobs]
+            if not _fence_create_retries(observed):
                 transaction.set_rollback(True)  # a retry won: undo the jobs this fence already cancelled
                 return Err(occupied_message)
         # fsm-bypass: VirtualminServer CharField; close admission before provider I/O.
