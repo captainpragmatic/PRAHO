@@ -1,7 +1,8 @@
-"""The warning button's label is readable on its yellow (WCAG 2.2 AA, 4.5:1 for normal text).
+"""The warning and success buttons' labels are readable on their colour (WCAG 2.2 AA, 4.5:1 for normal text).
 
-It was white on yellow-500, 1.9:1, so the page's most consequential actions (Suspend, Deactivate) had the
-least readable labels. The colours are Tailwind's; the ratio is computed, not asserted by hand.
+Warning was white on yellow-500, 1.9:1, so the page's most consequential actions (Suspend, Deactivate) had
+the least readable labels; success was white on green-600, 3.3:1. The colours are Tailwind's; the ratio is
+computed, not asserted by hand.
 """
 
 from django.template import Context, Template
@@ -13,7 +14,11 @@ PALETTE = {
     "slate-900": "#0f172a",
     "yellow-500": "#eab308",
     "yellow-600": "#ca8a04",
+    "green-600": "#16a34a",
+    "green-700": "#15803d",
+    "green-800": "#166534",
 }
+VARIANTS = ("warning", "success")
 
 
 def _luminance(hex_colour: str) -> float:
@@ -29,9 +34,9 @@ def contrast(first: str, second: str) -> float:
     return (high + 0.05) / (low + 0.05)
 
 
-class WarningContrastTests(SimpleTestCase):
-    def _colours(self, extra: str) -> tuple[str, list[str]]:
-        html = Template('{% load ui_components %}{% button "Suspend" variant="warning"' + extra + " %}").render(
+class VariantContrastTests(SimpleTestCase):
+    def _colours(self, variant: str, extra: str) -> tuple[str, list[str]]:
+        html = Template('{% load ui_components %}{% button "Suspend" variant="' + variant + '"' + extra + " %}").render(
             Context()
         )
         classes = html.split('class="ui-btn', 1)[1].split('"', 1)[0].split()
@@ -42,8 +47,9 @@ class WarningContrastTests(SimpleTestCase):
         return text[0], backgrounds
 
     def test_the_label_is_readable_at_rest_and_on_hover_for_links_and_buttons(self) -> None:
-        for extra in ("", ' href="/x/"'):
-            text, backgrounds = self._colours(extra)
-            for background in backgrounds:
-                with self.subTest(element="link" if extra else "button", background=background):
-                    self.assertGreaterEqual(contrast(PALETTE[text], PALETTE[background]), 4.5)
+        for variant in VARIANTS:
+            for extra in ("", ' href="/x/"'):
+                text, backgrounds = self._colours(variant, extra)
+                for background in backgrounds:
+                    with self.subTest(variant=variant, element="link" if extra else "button", background=background):
+                        self.assertGreaterEqual(contrast(PALETTE[text], PALETTE[background]), 4.5)
