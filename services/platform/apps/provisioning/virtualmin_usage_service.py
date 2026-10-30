@@ -31,7 +31,7 @@ MAX_PROJECTION = (1 << 31) - 1
 def enabled() -> bool:
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    return bool(SettingsService.get_setting("provisioning.usage_sync_enabled", False))
+    return bool(SettingsService.get_setting("provisioning.usage_sync_enabled", True))
 
 
 def observations_apply(service: Service) -> bool:

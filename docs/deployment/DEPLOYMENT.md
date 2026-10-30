@@ -1527,7 +1527,7 @@ Rollout for #782 / ADR-0068 is additive and disabled by default:
    portal breakdown. Run `make test-virtualmin-lab-full` against the isolated lab.
    After pushing a branch, the same gate can run with
    `gh workflow run virtualmin-lab.yml --ref BRANCH -f suite=full`.
-5. Enable `provisioning.usage_sync_enabled` in Advanced settings. Collection runs at
+5. `provisioning.usage_sync_enabled` (Advanced settings) is on by default. Collection runs at
    :00; Platform reads cached observations at :10 with no filesystem scan in the SSH
    export. Confirm a missing node preserves old values/time and raises usage attention
    after six hours. First-month/incomplete traffic stays partial until full coverage

@@ -2775,11 +2775,13 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="provisioning.usage_sync_enabled",
         data_type="boolean",
-        default=False,
+        default=True,
         group="advanced",
         section=_("Provisioning"),
         label=_("Measured hosting usage"),
-        help_text=_("Enable owner-scoped usage polling after node collectors have been installed."),
+        help_text=_(
+            "Poll measured hosting usage from each node's collector. New nodes install it; nodes deployed before it need the usage playbook."
+        ),
         input_kind="toggle",
     ),
     SettingDef(
