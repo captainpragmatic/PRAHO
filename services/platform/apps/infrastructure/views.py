@@ -108,6 +108,8 @@ DEPLOYMENT_DRAFT_TTL = 1800
 
 # Items per page for list views
 ITEMS_PER_PAGE = 25
+# The longest posted primary key accepted before it is parsed (a bigint has 19 digits).
+_MAX_ID_DIGITS = 12
 
 
 def _get_status_variant(status: str) -> str:
@@ -631,7 +633,9 @@ def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
     available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
     form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
     size_id = str(request.POST.get("new_size", ""))
-    new_size = available_sizes.filter(id=int(size_id)).first() if size_id.isdigit() else None
+    # ASCII digits of a sane length only: "²" passes isdigit(), and a huge number overflows the column.
+    valid_id = size_id.isascii() and size_id.isdecimal() and len(size_id) <= _MAX_ID_DIGITS
+    new_size = available_sizes.filter(id=int(size_id)).first() if valid_id else None
     if request.method == "POST" and form.is_valid():
         refusal = (
             NodeDeploymentService._redeploy_refusal(deployment, new_size)

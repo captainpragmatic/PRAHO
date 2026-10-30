@@ -72,10 +72,12 @@ class RedeployPageTests(TestCase):
     def test_a_malformed_size_is_refused_without_an_error_page(self) -> None:
         self.client.force_login(self.admin)
 
-        response, queue = self._post(self.deployment.hostname, "abc")
+        for malformed in ("abc", "²", "9" * 40):
+            with self.subTest(malformed=malformed):
+                response, queue = self._post(self.deployment.hostname, malformed)
 
-        self.assertEqual(response.status_code, 200)
-        queue.assert_not_called()
+                self.assertEqual(response.status_code, 200)
+                queue.assert_not_called()
 
     def test_a_size_not_sold_in_the_region_queues_nothing(self) -> None:
         self.client.force_login(self.admin)
