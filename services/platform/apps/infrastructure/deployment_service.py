@@ -990,6 +990,7 @@ class NodeDeploymentService:
         api_token = credentials.get("api_token", "")
         # A teardown parked for reconciliation (another token's resources) resumes here once the creating
         # token is back; claim_teardown checks the fingerprint under the lock and clears the flag.
+        deployment.refresh_from_db(fields=["status", "needs_reconciliation"])  # the caller's copy may be stale
         resuming = deployment.status == "destroying" and deployment.needs_reconciliation
         audit_ctx = InfrastructureAuditContext(user=user, metadata={"resumed_parked_teardown": resuming})
 

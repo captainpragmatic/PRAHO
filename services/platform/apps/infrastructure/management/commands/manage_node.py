@@ -195,7 +195,9 @@ class Command(BaseCommand):
             "upgrade": (stoppable, "Cannot upgrade a node in '{status}' status. Must be: completed."),
         }
 
-        if action in checks:
+        # A teardown parked for reconciliation is resumed by destroy (once the creating token is back).
+        parked = action == "destroy" and status == "destroying" and bool(deployment.needs_reconciliation)
+        if action in checks and not parked:
             valid_statuses, msg_template = checks[action]
             if status not in valid_statuses:
                 raise CommandError(msg_template.format(status=status))

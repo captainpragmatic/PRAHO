@@ -11,6 +11,7 @@ import itertools
 from typing import Any
 from unittest import mock
 
+from django.core.management.base import CommandError
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
@@ -342,3 +343,15 @@ class ResumeAFlaggedTeardownTests(TestCase):
             queue_destroy_node(h.deployment.pk, h.deployment.provider_id, None)
 
         async_task.assert_called_once()
+
+
+class ManageNodeResumeTests(TestCase):
+    def test_manage_node_accepts_a_parked_teardown_for_destroy(self) -> None:
+        from apps.infrastructure.management.commands.manage_node import Command  # noqa: PLC0415
+
+        parked = mock.Mock(status="destroying", needs_reconciliation=True)
+        live = mock.Mock(status="destroying", needs_reconciliation=False)
+
+        Command()._validate_status_for_action(parked, "destroy")
+        with self.assertRaises(CommandError):
+            Command()._validate_status_for_action(live, "destroy")
