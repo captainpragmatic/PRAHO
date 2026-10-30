@@ -56,6 +56,7 @@ def _ok_dns_gateway() -> MagicMock:
     gw.get_zone_name.return_value = Ok("test.example.com")
     gw.reconcile_records.return_value = ReconcileOutcome(applied=[], error=None)
     gw.delete_owned_records.return_value = Ok([])
+    gw.confirm_no_owned_records.return_value = Ok(True)
     return gw
 
 

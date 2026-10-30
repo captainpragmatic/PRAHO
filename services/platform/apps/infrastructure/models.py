@@ -709,7 +709,8 @@ class NodeDeployment(models.Model):
 
     # Valid state transitions map
     VALID_TRANSITIONS: ClassVar[dict[str, list[str]]] = {
-        "pending": ["provisioning_node", "failed"],
+        # pending -> registering is the registration-only resume: the node is provisioned and installed.
+        "pending": ["provisioning_node", "registering", "failed"],
         "provisioning_node": ["configuring_dns", "failed"],
         "configuring_dns": ["installing_panel", "failed"],
         "installing_panel": ["configuring_backups", "failed"],

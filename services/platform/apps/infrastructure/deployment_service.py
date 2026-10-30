@@ -602,6 +602,14 @@ class NodeDeploymentService:
                 virtualmin_api_password = "".join(
                     secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
                 )
+                # Stored before the panel install sets it on the node, so a registration that fails
+                # later can resume without reinstalling the panel (the only other way to learn it).
+                stored = self._store_api_credential(deployment, virtualmin_api_username, virtualmin_api_password, user)
+                if stored.is_err():
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                    self._mark_failed(deployment, stored.unwrap_err(), stage="ansible_panel", lease=lease)
+                    return Err(stored.unwrap_err())
 
             playbook_names = self._ansible.get_playbook_order(panel_type)
             stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
@@ -707,6 +715,9 @@ class NodeDeploymentService:
             owned_transition(lease, deployment, "registering")
             log_deployment("info", "Registering node as VirtualminServer")
 
+            # From here the node is provisioned and installed: a failure keeps it (no compensation),
+            # and Retry resumes registration alone.
+            owned_update(lease, deployment, registration_state="started")
             registration_result = self._registration.register_node(
                 deployment=deployment,
                 admin_username=virtualmin_api_username,
@@ -714,33 +725,15 @@ class NodeDeploymentService:
                 user=user,
             )
 
-            virtualmin_server_id = None
             if registration_result.is_err():
-                log_deployment("warning", f"Registration failed: {registration_result.unwrap_err()}")
-                # Continue anyway - registration can be retried
-            else:
-                server = registration_result.unwrap()
-                virtualmin_server_id = server.id
-                log_deployment("info", f"Registered as VirtualminServer(id={server.id})")
-                # #347: confirm the credential the playbook provisioned actually
-                # authenticates, then activate. A failed check leaves the server
-                # 'disabled' (safe, never customer-routed) — the deployment still
-                # completes; the node simply isn't customer-ready until resolved.
-                # Activation is best-effort: a failed/raised check leaves the server 'disabled'
-                # (safe, never customer-routed) but must NEVER fail an otherwise-complete deployment
-                # (#348 finding #7). verify_and_activate is total, but guard the call anyway so a
-                # future regression there can't roll back paid provisioning work.
-                try:
-                    activation = self._registration.verify_and_activate(server)
-                except Exception as activation_err:  # best-effort: activation must never be fatal to the deploy
-                    log_deployment(
-                        "warning", f"Node registered but activation raised (left disabled): {activation_err}"
-                    )
-                else:
-                    if activation.is_ok():
-                        log_deployment("info", f"VirtualminServer(id={server.id}) credential-verified and activated")
-                    else:
-                        log_deployment("warning", f"Node registered but left disabled: {activation.unwrap_err()}")
+                message = f"Registration failed: {registration_result.unwrap_err()}"
+                self._mark_failed(deployment, message, stage="registration", audit_ctx=audit_ctx, lease=lease)
+                return Err(message, retriability=retriability_of(registration_result))
+            server = registration_result.unwrap()
+            virtualmin_server_id = server.id
+            owned_update(lease, deployment, registration_state="registered")
+            log_deployment("info", f"Registered as VirtualminServer(id={server.id})")
+            self._activate_registered(deployment, lease, server, log_deployment)
 
             stages_completed.append("registration")
 
@@ -783,8 +776,9 @@ class NodeDeploymentService:
             return Err(f"Deployment stopped: {lost}")
         except Exception as e:
             logger.exception(f"Deployment failed for {deployment.hostname}: {e}")
-            # Best-effort cleanup of any cloud resources created before the failure
-            if gateway is not None and created_resources:
+            # Best-effort cleanup of cloud resources created before the failure; once registration has
+            # started the node is installed and kept, for Retry to resume registration alone.
+            if gateway is not None and created_resources and deployment.registration_state == "none":
                 self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
             self._mark_failed(deployment, str(e), audit_ctx=audit_ctx, lease=lease)
 
@@ -877,6 +871,9 @@ class NodeDeploymentService:
         deployment.refresh_from_db()
 
         logger.info(f"[Retry:{deployment.hostname}] Retrying deployment (attempt {deployment.retry_count})")
+        if deployment.registration_state != "none":
+            # Provisioning, DNS and the panel install already succeeded: never run them again.
+            return self._resume_registration(deployment, lease, user)
 
         # Audit: deployment retry
         try:
@@ -893,6 +890,130 @@ class NodeDeploymentService:
             cloudflare_api_token=cloudflare_api_token,
             user=user,
             expected_token=lease.token,
+        )
+
+    @staticmethod
+    def _store_api_credential(
+        deployment: NodeDeployment, username: str, password: str, user: User | None
+    ) -> Result[None, str]:
+        """Store the node's Virtualmin API credential under the key registration and activation read."""
+        from apps.common.credential_vault import CredentialData, get_credential_vault  # noqa: PLC0415  # Circular
+
+        stored = get_credential_vault().store_credential(
+            CredentialData(
+                service_type="virtualmin",
+                service_identifier=deployment.fqdn,
+                username=username,
+                password=password,
+                metadata={"deployment_id": str(deployment.id), "pending_registration": True},
+                expires_in_days=365,
+                user=user,
+                reason=f"Node deploy API credential for {deployment.hostname}, before the panel install",
+            )
+        )
+        if stored.is_err():
+            return Err(f"Could not store the Virtualmin API credential: {stored.unwrap_err()}")
+        return Ok(None)
+
+    def _activate_registered(
+        self,
+        deployment: NodeDeployment,
+        lease: OperationLease,
+        server: Any,
+        log: Callable[[str, str], None],
+    ) -> None:
+        """Best-effort activation of a registered node; records "activated" only when it succeeds.
+
+        #347: confirm the credential the playbook provisioned actually authenticates, then activate. A
+        failed or raised check leaves the server 'disabled' (safe, never customer-routed) and never fails
+        an otherwise-complete deployment (#348 finding #7).
+        """
+        try:
+            activation = self._registration.verify_and_activate(server)
+        except Exception as activation_err:  # best-effort: activation must never be fatal to the deploy
+            log("warning", f"Node registered but activation raised (left disabled): {activation_err}")
+            return
+        if activation.is_ok():
+            owned_update(lease, deployment, registration_state="activated")
+            log("info", f"VirtualminServer(id={server.id}) credential-verified and activated")
+        else:
+            log("warning", f"Node registered but left disabled: {activation.unwrap_err()}")
+
+    def _resume_registration(
+        self, deployment: NodeDeployment, lease: OperationLease, user: User | None
+    ) -> Result[DeploymentResult, str]:
+        """Finish a node whose provisioning, DNS and panel install succeeded: register, activate, complete.
+
+        Never calls the provider, DNS or Ansible. An unregistered node registers with the API credential
+        stored before its panel install; without it, resuming would need the panel reinstalled, so the
+        row fails closed.
+        """
+        from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415  # Circular
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+        audit_ctx = InfrastructureAuditContext(user=user)
+        start_time = timezone.now()
+
+        def log(level: str, message: str) -> None:
+            getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
+            NodeDeploymentLog.objects.create(
+                deployment=deployment, level=level.upper(), message=message, phase="registration"
+            )
+
+        try:
+            owned_transition(lease, deployment, "registering", "Resuming registration")
+            server = deployment.virtualmin_server
+            if server is None:
+                credential = get_credential_vault().get_credential(
+                    service_type="virtualmin",
+                    service_identifier=deployment.fqdn,
+                    reason=f"Registration resume for {deployment.hostname}",
+                )
+                if credential.is_err() or not all(credential.unwrap()[:2]):
+                    message = gettext(
+                        "The node's Virtualmin API credential is not stored; registration cannot resume "
+                        "without reinstalling the panel."
+                    )
+                    self._mark_failed(deployment, message, stage="registration", audit_ctx=audit_ctx, lease=lease)
+                    return Err(message)
+                username, password, _metadata = credential.unwrap()
+                owned_update(lease, deployment, registration_state="started")
+                registered = self._registration.register_node(
+                    deployment=deployment, admin_username=username, admin_password=password, user=user
+                )
+                if registered.is_err():
+                    message = f"Registration failed: {registered.unwrap_err()}"
+                    self._mark_failed(deployment, message, stage="registration", audit_ctx=audit_ctx, lease=lease)
+                    return Err(message, retriability=retriability_of(registered))
+                server = registered.unwrap()
+                owned_update(lease, deployment, registration_state="registered")
+                log("info", f"Registered as VirtualminServer(id={server.id})")
+            if deployment.registration_state != "activated":
+                self._activate_registered(deployment, lease, server, log)
+            owned_transition(lease, deployment, "completed", release=True, completed_at=timezone.now())
+        except OperationOwnershipLostError as lost:
+            logger.warning(f"⚠️ [Deployment:{deployment.hostname}] Resume stopped without writing: {lost}")
+            return Err(f"Registration resume stopped: {lost}")
+        except Exception as e:
+            logger.exception(f"Registration resume failed for {deployment.hostname}: {e}")
+            self._mark_failed(deployment, f"Registration resume failed: {e}", stage="registration", lease=lease)
+            return Err(f"Registration resume failed: {e}")
+
+        duration = (timezone.now() - start_time).total_seconds()
+        log("info", f"Registration resumed and deployment completed in {duration:.1f}s")
+        try:
+            InfrastructureAuditService.log_deployment_completed(deployment, audit_ctx, duration_seconds=duration)
+        except Exception:
+            logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment completed")
+        return Ok(
+            DeploymentResult(
+                success=True,
+                deployment_id=deployment.id,
+                hostname=deployment.hostname,
+                stages_completed=["registration", "complete"],
+                virtualmin_server_id=server.id,
+                duration_seconds=duration,
+            )
         )
 
     def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic
