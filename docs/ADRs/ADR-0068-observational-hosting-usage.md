@@ -63,7 +63,8 @@ after 25 minutes. Technical observations do not emit business AuditEvent rows pe
 poll; existing credential access, configuration and provisioning audits remain.
 
 The additive schema and nullable portal contract deploy before enablement. Install
-and verify collectors, then enable `provisioning.usage_sync_enabled` (default false).
+and verify collectors on nodes deployed before this change; new nodes install them during deployment.
+`provisioning.usage_sync_enabled` defaults to on (changed from off after the first staging rollout).
 Disable the flag to stop polling; preserve observations and display their original
 age. Collector installation/reconciliation is an operator action on existing nodes.
 See [the deployment guide](../deployment/DEPLOYMENT.md#hosting-usage-observations).

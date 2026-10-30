@@ -13,8 +13,9 @@ auto-deploy is customer-ready.
   usage publisher. Check both account and Service byte projections plus the portal
   breakdown/source time. Generate traffic before/after an injected month boundary;
   incomplete first-month coverage must stay partial. The full lab's `test_sync.py`
-  covers real collection without relying on filesystem quota support. Do not
-  enable `provisioning.usage_sync_enabled` on production before this acceptance.
+  covers real collection without relying on filesystem quota support.
+  `provisioning.usage_sync_enabled` is on by default; turn it off in Advanced settings
+  to stop polling while this acceptance is pending.
 - A Hetzner Cloud API token (project-scoped) configured in PRAHO (provider token / vault).
 - PRAHO platform running with node-deployment settings configured.
 - `infrastructure.node_admin_allowed_cidrs` set to Platform's egress addresses plus your admin network
