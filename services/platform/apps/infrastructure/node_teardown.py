@@ -69,6 +69,25 @@ def _never_reached_node(account: Any) -> bool:
     return True
 
 
+def _fence_create_retries(accounts: list[Any]) -> bool:
+    """Cancel the exempted accounts' failed create jobs so no retry can create them on a closing node.
+
+    A retry claims a failed job with a conditional update from "failed"; this fence is the same kind of
+    update, so exactly one wins. Returns False when a retry got there first: the node is then occupied.
+    """
+    from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
+
+    expected = list(
+        VirtualminProvisioningJob.objects.filter(
+            account__in=accounts, operation="create_domain", status="failed"
+        ).values_list("pk", flat=True)
+    )
+    fenced = VirtualminProvisioningJob.objects.filter(pk__in=expected, status="failed").update(
+        status="cancelled", next_retry_at=None, updated_at=timezone.now()
+    )
+    return fenced == len(expected)
+
+
 def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
     """Under the server row lock admission takes: refuse while work lives there, else close the node.
 
@@ -83,7 +102,9 @@ def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> R
 
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=virtualmin_server_id)
-        occupied = any(not _never_reached_node(account) for account in server.accounts.exclude(status="terminated"))
+        accounts = list(server.accounts.exclude(status="terminated"))
+        exempt = [account for account in accounts if _never_reached_node(account)]
+        occupied = len(exempt) < len(accounts) or (not force and not _fence_create_retries(exempt))
         migrating = server_has_active_migration(server)
         if (occupied or migrating) and not force:
             return Err(

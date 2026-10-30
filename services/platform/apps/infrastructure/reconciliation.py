@@ -252,7 +252,9 @@ def _prove_dns_absent(deployment: NodeDeployment) -> list[str]:
     return searched
 
 
-def _claim_and_settle(deployment: NodeDeployment, quiet_since: Any, record: dict[str, Any], operator: Any) -> None:
+def _claim_and_settle(
+    deployment: NodeDeployment, quiet_since: Any, record: dict[str, Any], operator: Any, ssh_manager: Any
+) -> None:
     """Claim, re-check and settle destroyed with its log and audit event, all in one transaction.
 
     The search ran before this without a claim, so a refusal never moves the row. The claim re-checks the
@@ -281,6 +283,12 @@ def _claim_and_settle(deployment: NodeDeployment, quiet_since: Any, record: dict
             snapshot["dns_record_ids"],
         ):
             raise _RefusalError(refusal or "The deployment changed while it was being reconciled")
+        # Revoked after the claim: the vault write touches the row, and before the claim it would break
+        # the quiet-window check. Inside the transaction, a later failure undoes it too.
+        revoked = ssh_manager.delete_deployment_key(locked, user=operator)
+        if revoked.is_err():
+            raise _RefusalError(f"SSH key revocation failed: {revoked.unwrap_err()}")
+        locked.refresh_from_db()
         owned_transition(
             claim.unwrap(),
             locked,
@@ -370,11 +378,7 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
     try:
         report.searched = _search_provider(deployment, api_token, ssh_manager) + _prove_dns_absent(deployment)
         record["searched"] = report.searched
-        # Revoking the vault key is idempotent and right whatever happens next: the node is gone.
-        revoked = ssh_manager.delete_deployment_key(deployment, user=operator)
-        if revoked.is_err():
-            raise _RefusalError(f"SSH key revocation failed: {revoked.unwrap_err()}")
-        _claim_and_settle(deployment, quiet_since, record, operator)
+        _claim_and_settle(deployment, quiet_since, record, operator, ssh_manager)
     except (_RefusalError, OperationOwnershipLostError) as refused:
         return _record_refusal(deployment, str(refused), operator, record)
     except Exception as error:  # An audit or database fault undoes the settlement; the row is left as it was.

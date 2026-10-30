@@ -10,9 +10,11 @@ test_node_admission_race.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.models import Currency
 from apps.common.types import Ok, Result
@@ -166,3 +168,36 @@ class ErrorAccountEvidenceTests(TestCase):
         self._error_account(server, "nojob.example.com", None)
 
         self.assertTrue(self._guard(deployment).is_err())
+
+
+class ErrorAccountFencingTests(TestCase):
+    """An exempted error account's create job is fenced, so no retry can create it on a node being torn down."""
+
+    def _setup(self, name: str) -> tuple[NodeDeployment, Any]:
+        from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
+
+        server, deployment = make_node(name)
+        account = VirtualminAccount.objects.create(
+            domain=f"{name}.example.com", service=make_service(f"{name}.example.com"), server=server,
+            virtualmin_username=name[:8], status="error",
+        )
+        job = VirtualminProvisioningJob.objects.create(
+            operation="create_domain", server=server, account=account, status="failed",
+            result={"retriability": "retriable"}, next_retry_at=timezone.now(),
+            correlation_id=f"create_domain_{account.id}",
+        )
+        return deployment, job
+
+    def test_the_exempted_job_is_fenced_against_retry(self) -> None:
+        deployment, job = self._setup("fenced")
+
+        self.assertTrue(_make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext()).is_ok())
+
+        job.refresh_from_db()
+        self.assertEqual((job.status, job.next_retry_at), ("cancelled", None))
+
+    def test_a_job_a_retry_already_claimed_still_occupies_the_node(self) -> None:
+        deployment, job = self._setup("claimed")
+        type(job).objects.filter(pk=job.pk).update(status="pending")
+
+        self.assertTrue(_make_service()._disable_linked_server_for_stop(deployment, InfrastructureAuditContext()).is_err())

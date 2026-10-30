@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
@@ -42,8 +42,9 @@ class OperationLease:
     kind: str
 
 
-# The deployment-log message that records a firewall the deploy created (and the key it uploaded).
+# The deployment-log messages that record a firewall the deploy created and a key it uploaded.
 FIREWALL_RECORD_PREFIX = "Firewall resource recorded:"
+KEY_RECORD_PREFIX = "SSH key resource recorded:"
 
 
 def attempt_resource_names(hostname: str, correlation_id: Any) -> tuple[str, str]:
@@ -67,7 +68,9 @@ def recorded_provider_resources(deployment: NodeDeployment) -> dict[str, list[st
     from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
 
     found: dict[str, list[str]] = {"firewall_ids": [], "firewall_names": [], "ssh_key_names": []}
-    entries = NodeDeploymentLog.objects.filter(deployment=deployment, message__startswith=FIREWALL_RECORD_PREFIX)
+    entries = NodeDeploymentLog.objects.filter(deployment=deployment).filter(
+        Q(message__startswith=FIREWALL_RECORD_PREFIX) | Q(message__startswith=KEY_RECORD_PREFIX)
+    )
     for details in entries.values_list("details", flat=True):
         if not isinstance(details, dict):
             continue

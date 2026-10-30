@@ -39,6 +39,7 @@ from apps.infrastructure.cloud_gateway import (
 )
 from apps.infrastructure.deployment_lifecycle import (
     FIREWALL_RECORD_PREFIX,
+    KEY_RECORD_PREFIX,
     OperationLease,
     OperationOwnershipLostError,
     attempt_resource_names,
@@ -576,6 +577,16 @@ class NodeDeploymentService:
                     )
 
                 created_resources.append(("ssh_key", ssh_key_name))
+                # Recorded at once, so reconciliation finds this attempt's key by name after a re-deploy.
+                from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred import
+
+                NodeDeploymentLog.objects.create(
+                    deployment=deployment,
+                    level="INFO",
+                    message=f"{KEY_RECORD_PREFIX} {ssh_key_name}",
+                    phase="provision_server",
+                    details={"ssh_key_name": ssh_key_name},
+                )
                 log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
 
                 # Create firewall before server — attach during provisioning
@@ -605,7 +616,10 @@ class NodeDeploymentService:
                     )
 
                 firewall_id = firewall_result.unwrap()
-                created_resources.append(("firewall", firewall_id))
+                # After an earlier attempt that may have created a server, this firewall may be that
+                # attempt's (adopted by label) and in use: compensation keeps it, teardown finds it by label.
+                if prior_create_state == "none":
+                    created_resources.append(("firewall", firewall_id))
                 log_deployment("info", f"Firewall '{firewall_name}' created (id={firewall_id})")
                 # Persist firewall_id in a structured log entry so destroy_node can retrieve it by ID
                 from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import

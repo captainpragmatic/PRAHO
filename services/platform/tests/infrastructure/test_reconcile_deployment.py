@@ -401,3 +401,21 @@ class PerAttemptNameTests(TestCase):
         searched_firewalls = {call.args[0] for call in h.cloud.find_firewalls_by_name.call_args_list}
         self.assertIn("praho-old-attempt", searched_keys)
         self.assertIn("praho-fw-old-attempt", searched_firewalls)
+
+
+class RevocationWritesTheRowTests(TestCase):
+    def test_a_revocation_that_writes_the_row_does_not_refuse_the_settlement(self) -> None:
+        h = Harness()
+        deployment = legacy_row(ssh_key_credential_id="vault-1")
+        h.ssh_manager.get_deployment_key.return_value = Ok(mock.Mock(public_key=f"ssh-ed25519 {KEY_BLOB} key"))
+
+        def revoke_like_the_vault(target: NodeDeployment, **_kwargs: Any) -> Ok[bool]:
+            NodeDeployment.objects.filter(pk=target.pk).update(ssh_key_credential_id="", updated_at=timezone.now())
+            return Ok(True)
+
+        h.ssh_manager.delete_deployment_key.side_effect = revoke_like_the_vault
+
+        result = h.run(deployment, attest_no_resources=True)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(NodeDeployment.objects.get(pk=deployment.pk).status, "destroyed")
