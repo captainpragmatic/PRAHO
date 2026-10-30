@@ -11,7 +11,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.utils.cache import patch_cache_control
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy as _lazy
+from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
@@ -59,7 +59,7 @@ def _failure(request: HttpRequest, code: int, *, suspended: bool = False) -> Htt
 
 
 # Platform refuses DNS publication for a suspended customer, but keeps reads and exports open.
-SUSPENDED_NOTICE = _lazy(
+SUSPENDED_NOTICE = gettext_lazy(
     "DNS changes are paused while your account is suspended. You can still view and export your zones; "
     "contact support to resolve the suspension."
 )
