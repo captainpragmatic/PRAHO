@@ -125,6 +125,11 @@ class UsagePostgresConcurrencyTests(TransactionTestCase):
             def publish():
                 def observe_account_lock(execute, sql, params, many, context):
                     if self.account._meta.db_table in sql and "FOR " in sql:
+                        # pg_stat_activity truncates this wide account SELECT
+                        # before its lock clause with PostgreSQL's default
+                        # track_activity_query_size. Check the complete SQL here;
+                        # the database observation below proves its actual wait.
+                        self.assertRegex(sql, r"\bFOR (?:NO KEY )?UPDATE\b")
                         publisher_attempting_lock.set()
                     return execute(sql, params, many, context)
 
@@ -149,7 +154,7 @@ class UsagePostgresConcurrencyTests(TransactionTestCase):
                         terminal_pids[0],
                         publisher,
                         table=self.account._meta.db_table,
-                        statement=r"\bFOR (?:NO KEY )?UPDATE\b",
+                        statement=r"^SELECT\b",
                     )
                 finally:
                     release.set()
