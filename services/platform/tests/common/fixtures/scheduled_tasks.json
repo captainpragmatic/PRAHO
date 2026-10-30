@@ -18,15 +18,6 @@
     "cluster": null
   },
   {
-    "name": "Collect Virtualmin Usage",
-    "func": "apps.billing.metering_tasks.collect_virtualmin_usage",
-    "schedule_type": "H",
-    "minutes": null,
-    "cron": null,
-    "repeats": -1,
-    "cluster": null
-  },
-  {
     "name": "Process Pending Usage Events",
     "func": "apps.billing.metering_tasks.process_pending_usage_events",
     "schedule_type": "I",
@@ -653,6 +644,15 @@
     "schedule_type": "C",
     "minutes": null,
     "cron": "0 */6 * * *",
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "virtualmin-usage-sync",
+    "func": "apps.provisioning.virtualmin_usage_tasks.dispatch_usage_sync",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "10 * * * *",
     "repeats": -1,
     "cluster": "praho-cluster"
   },

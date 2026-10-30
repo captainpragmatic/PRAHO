@@ -2773,6 +2773,16 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="provisioning.usage_sync_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Measured hosting usage"),
+        help_text=_("Enable owner-scoped usage polling after node collectors have been installed."),
+        input_kind="toggle",
+    ),
+    SettingDef(
         key="provisioning.max_concurrent_health_checks",
         data_type="integer",
         default=10,

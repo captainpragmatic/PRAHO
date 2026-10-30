@@ -27,6 +27,15 @@
     </section>
     {% empty %}<p class="text-slate-400">{% trans "No observations yet. Last check information will appear after a background check." %}</p>{% endfor %}
   </div>
+  {% for usage in usage_rows %}
+  <section class="p-4 bg-slate-800 border border-slate-700 rounded-lg">
+    <h2 class="text-white font-semibold">{{ usage.server.name }} · {% trans "Account usage" %}</h2>
+    {% if usage.attention %}{% trans "Needs attention" as usage_label %}{% badge usage_label variant="warning" %}{% else %}{% trans "Hourly observations" as usage_label %}{% badge usage_label variant="info" %}{% endif %}
+    <p class="mt-2 text-sm text-slate-300">{% trans "Accounts without a recent disk observation (six hours)" %}: {{ usage.stale_accounts }}</p>
+    {% if usage.outcome == 'missing_accounts' %}<p class="text-sm text-amber-300">{% trans "Accounts expected by Platform were absent from the node snapshot." %}</p>{% elif usage.outcome == 'unassigned_accounts' %}<p class="text-sm text-amber-300">{% trans "The node reported accounts that are not assigned in Platform. Review account discovery." %}</p>{% endif %}
+    <p class="mt-2 text-xs text-slate-400">{% trans "Last attempt" %}: {{ usage.last_attempt|default:'—' }} · {% trans "Last success" %}: {{ usage.last_success|default:'—' }}</p>
+  </section>
+  {% endfor %}
   {% trans "Hourly resource summaries" as summaries_title %}
   {% section_card title=summaries_title %}
   <p class="text-sm text-slate-400 mb-3">{% trans "Last 48 hours: averages, peaks and sample counts. Summaries are retained for 30 days. Network rates are not exposed by this Virtualmin API." %}</p>

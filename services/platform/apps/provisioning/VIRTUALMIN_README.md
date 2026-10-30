@@ -2,6 +2,17 @@
 
 ## 🎯 Overview
 
+Measured hosting usage is owned solely by `virtualmin_usage_tasks` and
+`virtualmin_usage_service` (ADR-0068). `virtualmin-usage-sync` dispatches hourly at
+:10 to `praho-cluster`, using a single cached root SSH export per node. The local
+collector runs at :00 and measures allocated files plus separate databases;
+Apache records response-body bytes with literal account identities. No usage
+poll creates billing events. Readings are retained 90 days with independent
+last-good pointers. Discovery no longer writes usage; `sync_virtualmin_usage`
+and `reset_virtualmin_usage_data` are removed. Missing data stays unknown.
+See [deployment](../../../../docs/deployment/DEPLOYMENT.md#hosting-usage-observations)
+for the disabled-by-default rollout and rollback.
+
 This implementation provides comprehensive Virtualmin API integration for the PRAHO hosting platform, following the architecture specified in `virtualmin.md` and addressing security concerns from `virtualmin_review.md`.
 
 ## 📁 Files Implemented

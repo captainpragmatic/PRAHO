@@ -2,6 +2,14 @@
 
 ## Overview
 
+Hosting usage (#782) uses the separate private collector, not these legacy listing
+extractors. Its Perl adapter emits an allowlist of account identities and allocated
+database sizes; raw `list-domains` output (including `password_for_mysql`) must never
+enter logs, Q2 results or observations. Files and databases are measured independently
+and summed once; missing fields never become zero. Bandwidth is logged response-body
+bytes, selected by exact operator-month UTC endpoints. See ADR-0068 for semantics and
+the deployment guide for collector installation and the feature gate.
+
 This document describes the comprehensive production optimizations implemented for the Virtualmin system in PRAHO Platform. These enhancements make the system fully ready for deployment to major Romanian hosting providers.
 
 ## 🚀 Implementation Summary

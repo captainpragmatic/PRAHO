@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 BACKUP_PLAYBOOKS = frozenset(
     {
+        "virtualmin_usage_read.yml",
         "virtualmin_backup_fetch.yml",
         "virtualmin_backup_push.yml",
         "virtualmin_remote_cleanup.yml",

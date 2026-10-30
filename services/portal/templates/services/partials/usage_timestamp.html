@@ -1,0 +1,14 @@
+{% load i18n localisation_tags %}
+<div class="mt-2 text-xs text-slate-400" data-usage-state="{{ state|default:'unknown' }}">
+  {% if state == 'stale' %}
+    <span>{% trans "Stale reading" %}</span>
+  {% elif state == 'partial' %}
+    <span>{% trans "Monthly bandwidth is incomplete." %}</span>
+  {% endif %}
+  {% if as_of %}
+    <span>{% trans "As of" %} <time datetime="{{ as_of }}" title="{{ as_of }}">{% localised_date as_of "datetime" %}</time></span>
+    {% if age_hours is not None %}
+      <span>({% if age_hours == 0 %}{% trans "Less than 1 hour ago" %}{% else %}{% blocktrans count hours=age_hours %}{{ hours }} hour ago{% plural %}{{ hours }} hours ago{% endblocktrans %}{% endif %})</span>
+    {% endif %}
+  {% endif %}
+</div>

@@ -1,0 +1,17 @@
+---
+- name: Read one bounded private usage snapshot
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Export the cached node snapshot
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/libexec/praho_usage.py, export]
+        stdin: "{{ usage_request | to_json }}"
+      register: usage_snapshot
+      changed_when: false
+      no_log: true
+
+    - name: Return the allowlisted snapshot
+      ansible.builtin.debug:
+        msg: "PRAHO_USAGE_SNAPSHOT={{ usage_snapshot.stdout | b64encode }}"

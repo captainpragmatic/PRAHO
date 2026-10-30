@@ -28,6 +28,13 @@ One administrator attention area links to health issues first, then incomplete s
 
 ## Refresh limits and failure handling
 
+Account usage is shown separately from node resource health. With
+`provisioning.usage_sync_enabled`, hourly account observations retain their actual
+source time; six hours without a valid disk observation raises usage attention.
+Missing/unassigned node accounts are reported for staff review without importing
+or remediating them. Unknown/partial monthly response bytes remain explicit in the
+portal. The 25-minute node-health expiry and ten-minute health schedule are unchanged.
+
 External probes run in short-lived subprocesses with a five-second deadline per provider and a shared twenty-second budget. The deadline includes DNS, connection, TLS, headers and body streaming. HTTP probes use the outbound HTTPS/DNS protections, accept at most 256 KiB of decoded response data, and neither redirect nor retry. Credentials travel through a private pipe, not command arguments. Probe output consists only of fixed result codes, not raw provider responses or exception text.
 
 Only the configured email provider is contacted. Supported API endpoints are the standard SendGrid US/EU, Mailgun US/EU, Stripe, ANAF and regional SES endpoints. Custom endpoints/backends remain unverified. Restricted credentials can allow sending while denying a diagnostic API; a generic 403 is therefore “Access rejected”, not an invented claim that credentials or permissions are wrong.

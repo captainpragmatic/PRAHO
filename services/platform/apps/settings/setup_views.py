@@ -44,6 +44,7 @@ def system_status_page(request: HttpRequest) -> HttpResponse:
         SystemCheckState,
     )
     from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
+    from apps.provisioning.virtualmin_usage_service import node_usage_status  # noqa: PLC0415
 
     states = (
         SystemCheckState.objects.exclude(check_key__in=INTERNAL_CHECK_KEYS)
@@ -93,7 +94,12 @@ def system_status_page(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "settings/system_status.html",
-        {"rows": rows, "summaries": Paginator(summaries, 48).get_page(request.GET.get("page")), "selected_node": node},
+        {
+            "rows": rows,
+            "summaries": Paginator(summaries, 48).get_page(request.GET.get("page")),
+            "selected_node": node,
+            "usage_rows": node_usage_status(node.pk if node else None),
+        },
     )
 
 

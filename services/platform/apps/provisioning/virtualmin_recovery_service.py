@@ -297,6 +297,9 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             ):
                 raise ValueError("Recovery ownership changed before the commit")
             self._move(migration, token, "activating", cutover_committed_at=timezone.now())
+            from .virtualmin_usage_service import move_interval  # noqa: PLC0415
+
+            move_interval(account.pk, migration.target_server_id)
             account.server = migration.target_server
             account.save(update_fields=["server", "updated_at"])
             name.target_server = migration.target_server

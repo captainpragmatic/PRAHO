@@ -44,7 +44,12 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 | `billing-grace-expirations` | Apply subscription and service non-payment lifecycle |
 | `Process Pending Usage Events` | Retry usage events that were not aggregated immediately |
 | `Run Billing Cycle Workflow` | Close expired cycles, rate usage, issue usage invoices, and collect due authorized usage charges |
-| `Collect Virtualmin Usage` / `Collect Service Usage` | Record local cumulative hosting snapshots |
+| `Collect Service Usage` | Record eligible non-Virtualmin service snapshots |
+
+`virtualmin-usage-sync` is an observational provisioning task (ADR-0068), not a
+billing source. `Collect Virtualmin Usage` is retired, queued calls are no-ops,
+and the generic service collector excludes Virtualmin-backed services. Operator
+calendar-month response bytes never redefine a subscription's billing periods.
 
 The fixed renewal schedule is proforma at period end minus the configurable `billing.invoice_generation_lead_days` (default 14, bounded 7-30) and automatic charge at period end minus the fixed 7-day collection lead; the invoice lead is floored at the collection lead so a charge can never precede its billing notice. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated and invoiced after the measured period ends; its automatic charge is scheduled for period end plus 7 days and is not attempted when the invoice is issued.
 

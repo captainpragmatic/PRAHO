@@ -6,6 +6,10 @@
 
 ## Decision
 
+Account usage has a separate hourly collection and six-hour attention clock
+(ADR-0068); its source timestamps do not refresh node-health evidence. The
+25-minute expiry below continues to apply to infrastructure observations.
+
 Setup is a derived configuration checklist. Operational failures belong to System Status.
 The dashboard remains the login landing page. Administrators see one compact attention
 area linking to both pages, with health issues first. Optional branding and domain sales

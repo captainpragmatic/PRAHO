@@ -4,6 +4,14 @@ Ansible playbooks and roles for automated Virtualmin GPL installation and server
 
 ## Structure
 
+`playbooks/virtualmin_usage.yml` installs the private usage collector on existing
+nodes; `virtualmin.yml` includes the same tasks for new nodes. It preserves normal
+access logs and existing Virtualmin hooks, validates Apache before reload and enables
+the hourly root timer. `virtualmin_usage_read.yml` is the fixed, bounded cached export
+used by Platform's enrolled SSH transport. It does not scan files during a web request.
+Enable Platform polling only after verifying the collector (ADR-0068 and the deployment
+guide). Helper state/logs are root-only and outside account backup homes.
+
 ```
 ansible/
 ├── ansible.cfg                  # Ansible configuration
