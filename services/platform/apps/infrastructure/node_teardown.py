@@ -152,7 +152,10 @@ class NodeTeardown:
 
     def _delete_cloud_resources(self) -> Result[bool, str]:
         deployment = self.deployment
-        if not self._may_hold_server() and not self._recorded_firewall_ids():
+        # The fingerprint is recorded before the first provider write, so a key or firewall whose
+        # create answer was lost is still discovered even when no server was ever requested.
+        reached_provider = bool(deployment.provider_token_fingerprint) or self._may_hold_server()
+        if not reached_provider and not self._recorded_firewall_ids():
             return Ok(True)  # never reached the provider
         if not self.api_token:
             return Err("No provider API token for teardown")

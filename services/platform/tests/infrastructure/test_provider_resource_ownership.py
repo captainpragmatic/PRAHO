@@ -262,7 +262,9 @@ class DeployRecordsProviderOutcomesTests(TestCase):
             mock.Mock(server_id="srv-0", ipv4_address="1.2.3.4", ipv6_address="")
         )
         deployment = _create_deployment("pending", external_node_id="srv-0")
-        NodeDeployment.objects.filter(pk=deployment.pk).update(server_create_state="created")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="created", provider_token_fingerprint=provider_token_fingerprint("tok")
+        )
         service = _pipeline_service()
         service._ssh_manager.get_deployment_key.return_value = Ok(mock.Mock(public_key="ssh-rsa AAAA"))
         with (
@@ -270,8 +272,10 @@ class DeployRecordsProviderOutcomesTests(TestCase):
             mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
             mock.patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
-            service.deploy_node(deployment=deployment, credentials={"api_token": "tok"})
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "tok"})
 
+        self.assertTrue(result.is_ok(), result)
         deployment.refresh_from_db()
         self.assertEqual(deployment.server_create_state, "created")
+        gateway.get_server.assert_called_once_with("srv-0")
         gateway.create_server.assert_not_called()

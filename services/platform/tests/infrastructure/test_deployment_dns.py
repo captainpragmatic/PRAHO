@@ -84,7 +84,8 @@ class ConfigureDnsTests(TestCase):
             res = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
         self.assertTrue(res.is_err())
         dep.refresh_from_db()
-        self.assertEqual(len(dep.dns_record_ids), 1)
+        # The applied A record is persisted; the intent marker stays, since nothing proved AAAA absent.
+        self.assertEqual([e["type"] for e in dep.dns_record_ids], ["A", "intent"])
 
     def test_reconcile_error_leaves_cleanup_provenance(self) -> None:
         # A failed/ambiguous create (applied empty, error set — e.g. the POST reached

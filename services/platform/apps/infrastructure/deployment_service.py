@@ -1674,8 +1674,16 @@ class NodeDeploymentService:
         owned_update(lease, deployment, dns_record_ids=[*stored, intent])
 
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag)
+        applied = [r.as_provenance() for r in outcome.applied]
+        if outcome.error:
+            # A partial outcome proves only the applied records: every other stored record, and the
+            # intent marker, stay until a later run proves them converged or gone.
+            applied_ids = {entry["record_id"] for entry in applied}
+            unresolved = [e for e in [*stored, intent] if e.get("record_id") not in applied_ids]
+            owned_update(lease, deployment, dns_record_ids=[*applied, *unresolved])
+        elif applied:
+            owned_update(lease, deployment, dns_record_ids=applied)
         if outcome.applied:
-            owned_update(lease, deployment, dns_record_ids=[r.as_provenance() for r in outcome.applied])
             log("info", f"DNS configured: {', '.join(r.record_type for r in outcome.applied)} for {fqdn}")
         if outcome.error:
             return Err(f"DNS configuration failed: {outcome.error}")
@@ -1698,11 +1706,11 @@ class NodeDeploymentService:
             return Ok(None)
         token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token") or "").strip()
         if not token:
-            return NodeDeploymentService._dns_unresolved(deployment, entries, "no Cloudflare token")
+            return NodeDeploymentService._dns_unresolved(deployment, entries, "no Cloudflare token", lease)
         try:
             gateway = get_dns_gateway("cloudflare", token)
         except ValueError as exc:
-            return NodeDeploymentService._dns_unresolved(deployment, entries, f"provider unavailable: {exc}")
+            return NodeDeploymentService._dns_unresolved(deployment, entries, f"provider unavailable: {exc}", lease)
 
         unique_tag = NodeDeploymentService._unique_dns_owner_tag(deployment)
         remaining: list[dict[str, Any]] = []

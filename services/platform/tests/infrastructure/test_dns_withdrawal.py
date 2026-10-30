@@ -10,15 +10,22 @@ record id is ambiguous and is kept for reconciliation, never swept by tag.
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import requests
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from apps.common.types import Err, Ok, retriability_of
 from apps.infrastructure.deployment_service import NodeDeploymentService
-from apps.infrastructure.dns_gateway import CloudflareDnsGateway, ExpectedDnsRecord, ReconcileOutcome
+from apps.infrastructure.dns_gateway import (
+    CloudflareDnsGateway,
+    DnsRecordResult,
+    ExpectedDnsRecord,
+    ReconcileOutcome,
+)
 from apps.infrastructure.models import NodeDeployment
 from tests.infrastructure.test_deployment_dns import _lease, _noop_log
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
@@ -37,6 +44,18 @@ def response(status: int, body: Any = None) -> requests.Response:
 
 def record(rid: str = "rA", content: str = "1.2.3.4", comment: str = LEGACY_TAG) -> dict[str, Any]:
     return {"id": rid, "type": "A", "name": "node.test.example.com", "content": content, "comment": comment}
+
+
+def mock_record(rid: str) -> DnsRecordResult:
+    return DnsRecordResult(
+        provider="cloudflare",
+        zone_id="z1",
+        record_id=rid,
+        record_type="A",
+        name="node.test.example.com",
+        content="1.2.3.4",
+        owner_tag=LEGACY_TAG,
+    )
 
 
 def expected(rid: str = "rA") -> ExpectedDnsRecord:
@@ -204,3 +223,53 @@ class WithdrawalTests(TestCase):
         self.assertTrue(self._withdraw(dep, gw).is_err())
         dep.refresh_from_db()
         self.assertEqual(len(dep.dns_record_ids), 1)
+
+
+class PartialReconcileKeepsUnresolvedRecordsTests(TestCase):
+    def test_a_failed_aaaa_keeps_its_stored_id_and_the_intent_marker(self) -> None:
+        dep = _create_deployment("provisioning_node")
+        aaaa = {**_entry(LEGACY_TAG, "rB", "AAAA"), "content": "2001:db8::1"}
+        NodeDeployment.objects.filter(pk=dep.pk).update(
+            dns_record_ids=[_entry(LEGACY_TAG, "rA"), aaaa], ipv4_address="1.2.3.4", ipv6_address="2001:db8::1"
+        )
+        dep.refresh_from_db()
+        gw = MagicMock()
+        gw.get_zone_name.return_value = Ok("test.example.com")
+        applied = mock_record("rA2")
+        gw.reconcile_records.return_value = ReconcileOutcome(applied=[applied], error="AAAA update failed")
+
+        with patch(_DNS_GW, return_value=gw):
+            result = _make_service()._configure_dns(dep, "tok", "z1", _noop_log, _lease(dep))
+
+        self.assertTrue(result.is_err())
+        dep.refresh_from_db()
+        ids = {e["record_id"] for e in dep.dns_record_ids}
+        # Nothing proved the old A record (rA) or the AAAA record (rB) gone, so both stay with the intent marker.
+        self.assertEqual(ids, {"rA2", "rA", "rB", ""})
+
+
+class OwnershipOnDnsErrorPathsTests(TestCase):
+    def test_a_reclaimed_worker_cannot_restore_stale_entries_without_a_token(self) -> None:
+        from apps.infrastructure.deployment_lifecycle import (  # noqa: PLC0415
+            OperationOwnershipLostError,
+            invalidate_stale_operation,
+        )
+
+        dep = _create_deployment("provisioning_node")
+        NodeDeployment.objects.filter(pk=dep.pk).update(dns_record_ids=[_entry(LEGACY_TAG)])
+        dep.refresh_from_db()
+        lease = _lease(dep)
+        dep.refresh_from_db()
+        invalidate_stale_operation(
+            dep.pk,
+            from_states=("provisioning_node",),
+            to_status="failed",
+            stale_before=timezone.now() + timedelta(seconds=1),
+            message="recovered",
+        )
+        NodeDeployment.objects.filter(pk=dep.pk).update(dns_record_ids=[])
+
+        with patch(_GET_SETTING, return_value=""), self.assertRaises(OperationOwnershipLostError):
+            NodeDeploymentService._delete_owned_dns(dep, lease)
+
+        self.assertEqual(NodeDeployment.objects.get(pk=dep.pk).dns_record_ids, [])

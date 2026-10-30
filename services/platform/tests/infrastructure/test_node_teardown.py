@@ -231,3 +231,37 @@ class ProvenanceTests(TestCase):
         get_gateway.assert_not_called()
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "destroyed")
+
+
+class DrainedNodeTests(TestCase):
+    def test_a_server_kept_by_its_drain_history_is_unregistered_not_deleted(self) -> None:
+        from apps.infrastructure.registration_service import get_registration_service  # noqa: PLC0415
+        from apps.provisioning.virtualmin_migration_models import NodeDrain  # noqa: PLC0415
+
+        h = Harness()
+        NodeDrain.objects.create(server=h.server, status="completed")
+
+        result = get_registration_service().unregister_node(h.deployment, delete_server=True)
+
+        self.assertTrue(result.is_ok(), result)
+        h.deployment.refresh_from_db()
+        self.assertIsNone(h.deployment.virtualmin_server_id)
+        self.assertEqual(VirtualminServer.objects.get(pk=h.server.pk).status, "disabled")
+
+
+class AmbiguousProviderWritesTests(TestCase):
+    def test_a_key_or_firewall_created_without_a_server_is_still_discovered(self) -> None:
+        deployment = _create_deployment("failed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="none", provider_token_fingerprint=provider_token_fingerprint(TOKEN)
+        )
+        deployment.refresh_from_db()
+        cloud = cloud_gateway()
+        service = _make_service()
+
+        with mock.patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=cloud):
+            result = service.destroy_node(deployment, credentials={"api_token": TOKEN})
+
+        self.assertTrue(result.is_ok(), result)
+        cloud.delete_firewall.assert_called_once_with("fw-1")
+        cloud.delete_ssh_key_by_id.assert_called_once_with("7")

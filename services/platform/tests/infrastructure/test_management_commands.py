@@ -696,7 +696,8 @@ class TestCleanupDeploymentsCommand(TestCase):
         NodeDeployment.objects.filter(pk=deployment.pk).update(
             updated_at=timezone.now() - timedelta(hours=48),
             server_create_state="created" if external_node_id else "none",
-            provider_token_fingerprint=provider_token_fingerprint("test-token"),
+            # Recorded before the first provider write: a row that never reached the provider has none.
+            provider_token_fingerprint=provider_token_fingerprint("test-token") if external_node_id else "",
         )
         deployment.refresh_from_db()
         return deployment
