@@ -315,6 +315,7 @@ class NodeDeployment(models.Model):
         ("destroy", _("Destroy")),
         ("teardown", _("Teardown")),
         ("registration", _("Registration resume")),
+        ("reconcile", _("Reconcile")),
     ]
 
     SERVER_CREATE_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
@@ -576,6 +577,9 @@ class NodeDeployment(models.Model):
     provider_token_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
     needs_reconciliation = models.BooleanField(default=False)
     reconciliation_reason = models.TextField(blank=True)
+    # What an operator's reconciliation proved or attested, with who, when and the evidence. Kept apart
+    # from the creator provenance and the create state, which stay as history.
+    reconciliation_record = models.JSONField(default=dict, blank=True, editable=False)
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)

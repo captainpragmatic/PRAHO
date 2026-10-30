@@ -77,7 +77,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='nodedeployment',
             name='operation_kind',
-            field=models.CharField(blank=True, choices=[('deploy', 'Deploy'), ('retry', 'Retry'), ('destroy', 'Destroy'), ('teardown', 'Teardown'), ('registration', 'Registration resume')], editable=False, max_length=20),
+            field=models.CharField(blank=True, choices=[('deploy', 'Deploy'), ('retry', 'Retry'), ('destroy', 'Destroy'), ('teardown', 'Teardown'), ('registration', 'Registration resume'), ('reconcile', 'Reconcile')], editable=False, max_length=20),
         ),
         migrations.AddField(
             model_name='nodedeployment',
@@ -88,6 +88,11 @@ class Migration(migrations.Migration):
             model_name='nodedeployment',
             name='provider_token_fingerprint',
             field=models.CharField(blank=True, editable=False, max_length=64),
+        ),
+        migrations.AddField(
+            model_name='nodedeployment',
+            name='reconciliation_record',
+            field=models.JSONField(blank=True, default=dict, editable=False),
         ),
         migrations.AddField(
             model_name='nodedeployment',
