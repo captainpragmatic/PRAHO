@@ -235,6 +235,28 @@ class CloudProviderGateway(ABC):
         """Delete one SSH key by ID; a key already gone counts as deleted."""
         return Err(f"{type(self).__name__} cannot delete SSH keys by ID")
 
+    # Read-only lookups for reconciliation: an adapter that cannot answer returns Err, never "none".
+
+    def find_servers_by_name(self, name: str) -> Result[list[ServerInfo], str]:
+        """Servers named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up servers by name")
+
+    def find_firewalls_by_name(self, name: str) -> Result[list[str], str]:
+        """IDs of the firewalls named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up firewalls by name")
+
+    def find_ssh_keys_by_name(self, name: str) -> Result[list[str], str]:
+        """IDs of the SSH keys named ``name``."""
+        return Err(f"{type(self).__name__} cannot look up SSH keys by name")
+
+    def find_ssh_keys_by_fingerprint(self, fingerprint: str) -> Result[list[str], str]:
+        """IDs of the SSH keys whose public key has this provider fingerprint."""
+        return Err(f"{type(self).__name__} cannot look up SSH keys by fingerprint")
+
+    def firewall_exists(self, firewall_id: str) -> Result[bool, str]:
+        """Whether a firewall with this ID still exists."""
+        return Err(f"{type(self).__name__} cannot look up firewalls by ID")
+
 
 # =============================================================================
 # Status Normalization — canonical status is "running"

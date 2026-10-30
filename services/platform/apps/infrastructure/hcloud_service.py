@@ -431,6 +431,43 @@ class HcloudService(CloudProviderGateway):
         except Exception as e:
             return Err(f"SSH key upload failed: {e}")
 
+    def find_servers_by_name(self, name: str) -> Result[list[ServerInfo], str]:
+        try:
+            server = self.client.servers.get_by_name(name)
+        except Exception as e:
+            return Err(f"Server lookup failed: {e}")
+        return Ok([self._server_to_gateway_info(server)] if server else [])
+
+    def find_firewalls_by_name(self, name: str) -> Result[list[str], str]:
+        try:
+            firewall = self.client.firewalls.get_by_name(name)
+        except Exception as e:
+            return Err(f"Firewall lookup failed: {e}")
+        return Ok([str(firewall.id)] if firewall else [])
+
+    def find_ssh_keys_by_name(self, name: str) -> Result[list[str], str]:
+        try:
+            key = self.client.ssh_keys.get_by_name(name)
+        except Exception as e:
+            return Err(f"SSH key lookup failed: {e}")
+        return Ok([str(key.id)] if key else [])
+
+    def find_ssh_keys_by_fingerprint(self, fingerprint: str) -> Result[list[str], str]:
+        try:
+            keys = self.client.ssh_keys.get_all(fingerprint=fingerprint)
+        except Exception as e:
+            return Err(f"SSH key lookup failed: {e}")
+        return Ok([str(key.id) for key in keys])
+
+    def firewall_exists(self, firewall_id: str) -> Result[bool, str]:
+        try:
+            self.client.firewalls.get_by_id(int(firewall_id))
+        except Exception as e:
+            if _is_hcloud_not_found(e):
+                return Ok(False)
+            return Err(f"Firewall lookup failed: {e}")
+        return Ok(True)
+
     def delete_ssh_key_by_id(self, key_id: str) -> Result[bool, str]:
         try:
             key = self.client.ssh_keys.get_by_id(int(key_id))

@@ -214,6 +214,14 @@ class DnsProviderGateway(ABC):
         """Whether no record in ``zone_id`` still bears ``owner_tag``."""
         return Err(f"{type(self).__name__} cannot list records by owner")
 
+    def get_record(self, zone_id: str, record_id: str) -> Result[dict[str, Any] | None, str]:
+        """One record by id; None when it no longer exists."""
+        return Err(f"{type(self).__name__} cannot read records by id")
+
+    def find_records_by_name(self, zone_id: str, name: str) -> Result[list[dict[str, Any]], str]:
+        """The A, AAAA and CNAME records named ``name`` in ``zone_id``."""
+        return Err(f"{type(self).__name__} cannot list records by name")
+
     @abstractmethod
     def reconcile_txt_values(
         self, zone_id: str, name: str, values: list[str], owner_tag: str, *, ttl: int = DNS_RECORD_TTL_SECONDS
@@ -571,6 +579,25 @@ class CloudflareDnsGateway(DnsProviderGateway):
         if listed.is_err():
             return Err(listed.unwrap_err())
         return Ok(not listed.unwrap())
+
+    def get_record(self, zone_id: str, record_id: str) -> Result[dict[str, Any] | None, str]:
+        try:
+            return self._get_record(zone_id, record_id)
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
+        except (requests.RequestException, OutboundSecurityError) as exc:
+            return Err(f"cloudflare transport error: {exc}")
+
+    def find_records_by_name(self, zone_id: str, name: str) -> Result[list[dict[str, Any]], str]:
+        try:
+            listed = self._list_records(zone_id, {"name": name})
+        except DnsTransientError as exc:
+            return Err(f"cloudflare transient error: {exc}", retriability=exc.retriability)
+        except (requests.RequestException, OutboundSecurityError) as exc:
+            return Err(f"cloudflare transport error: {exc}")
+        if listed.is_err():
+            return Err(listed.unwrap_err())
+        return Ok([r for r in listed.unwrap() if r.get("type") in ("A", "AAAA", "CNAME")])
 
     def _get_record(self, zone_id: str, record_id: str) -> Result[dict[str, Any] | None, str]:
         """One record by id; None when it no longer exists."""
