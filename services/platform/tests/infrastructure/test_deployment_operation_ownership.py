@@ -236,9 +236,12 @@ class UpgradeDoesNotWriteStaleLifecycleTests(TestCase):
         new_size.pk = None
         new_size.provider_type_id = "cx22"
         new_size.save()
+        new_size.available_regions.add(deployment.region)  # sold in the node's region
         NodeDeployment.objects.filter(pk=deployment.pk).update(status="destroying")
+        service = _make_service()
 
-        result = _make_service().upgrade_node_size(deployment, new_size, credentials={"api_token": "t"})
+        with patch.object(service, "_check_resize_orderable", return_value=Ok(True)):
+            result = service.upgrade_node_size(deployment, new_size, credentials={"api_token": "t"})
 
         self.assertTrue(result.is_ok(), result)
         deployment.refresh_from_db()
