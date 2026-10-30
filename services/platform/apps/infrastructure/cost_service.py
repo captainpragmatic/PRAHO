@@ -315,6 +315,7 @@ class CostTrackingService:
                 }
 
             deployment_costs[dep_id]["total"] += record.cost_eur
+            deployment_costs[dep_id].setdefault("periods", []).append((record.period_start, record.period_end))
 
             # Calculate hours from period
             period_hours = (record.period_end - record.period_start).total_seconds() / 3600
@@ -325,11 +326,11 @@ class CostTrackingService:
             monthly_rate = deployment.node_size.monthly_cost_eur if deployment.node_size else Decimal("0")
             hours = data["hours"]
             hourly_rate = monthly_rate / self.HOURS_PER_MONTH if monthly_rate else Decimal("0")
-            usage = lifetime_usage(deployment, period_start, period_end)
-            if usage is not None:
-                # Total, uptime and rate all describe the lifetimes' hours in this period; the rate is effective,
-                # since lifetimes may carry different rates.
-                hours, data["total"] = usage
+            lifetimes = _lifetimes_of(deployment)
+            if lifetimes:
+                # The total is the stored records', as in the summary and provider totals; uptime is the lifetimes'
+                # hours inside those same record periods, and the rate is effective (lifetimes may differ).
+                hours = sum((_priced(lifetimes, start, end)[0] for start, end in data["periods"]), start=Decimal("0"))
                 hourly_rate = data["total"] / hours if hours else Decimal("0")
                 monthly_rate = hourly_rate * self.HOURS_PER_MONTH
 

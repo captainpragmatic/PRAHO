@@ -207,3 +207,18 @@ class ResizeWritePointTests(TestCase):
                 deployment=self.deployment, level="WARNING", message__contains="cost window"
             ).exists()
         )
+
+    def test_a_resize_that_finishes_after_a_re_deploy_leaves_the_new_attempt_alone(self) -> None:
+        def replaced_meanwhile(**_kwargs: Any) -> Any:
+            # Teardown and re-deploy ran during the provider call: a new attempt with its own size.
+            NodeDeployment.objects.filter(pk=self.deployment.pk).update(
+                correlation_id=uuid.uuid4(), external_node_id="srv-2"
+            )
+            return Ok(MagicMock(success=True, stderr=""))
+
+        old_size_id = self.deployment.node_size_id
+        service = _make_service()
+        service._check_resize_orderable = MagicMock(return_value=Ok(True))
+        with patch("apps.infrastructure.deployment_service.run_provider_command", side_effect=replaced_meanwhile):
+            service.upgrade_node_size(self.deployment, self.bigger, {"api_token": "test-token"})
+        self.assertEqual(NodeDeployment.objects.get(pk=self.deployment.pk).node_size_id, old_size_id)

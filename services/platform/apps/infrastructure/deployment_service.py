@@ -1451,24 +1451,33 @@ class NodeDeploymentService:
     ) -> None:
         """The provider resized the server: record the new size and its cost window together.
 
-        A failure of the cost window does not undo a resize that happened: the size is still recorded and the
-        problem is logged for the cost records, not reported as a failed upgrade.
+        Only while the row is still the attempt and server that were resized: a teardown and re-deploy that ran
+        during the provider call own the row now, and their size is left alone. A failure of the cost window does
+        not undo a resize that happened: the size is still recorded and the problem is logged for the cost records.
         """
         from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            NodeDeploymentLog,
+            NodeDeployment as Model,
         )
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
-        # Write only the size: a full save would write back a lifecycle state read before the resize.
-        deployment.node_size = new_size
+        same_attempt = {"pk": deployment.pk, "correlation_id": deployment.correlation_id, "external_node_id": server_id}
         try:
             with transaction.atomic():
-                deployment.save(update_fields=["node_size", "updated_at"])
+                row = Model.objects.select_for_update().filter(**same_attempt).first()
+                if row is None:
+                    logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] Resized, but the node was replaced meanwhile")
+                    return
+                # Write only the size: a full save would write back a lifecycle state read before the resize.
+                row.node_size = new_size
+                row.save(update_fields=["node_size", "updated_at"])
                 # The hours before the resize keep the old rate; a successor bills the new one.
                 split_lifetime_for_resize(lifetime_id, server_id, new_size) or start_lifetimes_at_resize(
-                    deployment, server_id, old_size, new_size
+                    row, server_id, old_size, new_size
                 )
+            deployment.node_size = new_size
         except Exception as error:  # The resize happened: keep the size, flag the cost window.
-            deployment.save(update_fields=["node_size", "updated_at"])
+            if Model.objects.filter(**same_attempt).update(node_size=new_size, updated_at=timezone.now()):
+                deployment.node_size = new_size
             message = f"Resized to {new_size.name}, but its cost window was not updated: {error}"
             logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(deployment=deployment, level="WARNING", message=message, phase="upgrading")

@@ -115,15 +115,18 @@ class BreakdownRateTests(TestCase):
         self.assertEqual(row.cost_per_hour_eur.quantize(Decimal("0.000001")),
                          (Decimal("7.30") / HOURS_PER_MONTH).quantize(Decimal("0.000001")))
 
-    def test_total_uptime_and_rate_describe_the_same_hours(self) -> None:
+    def test_total_uptime_and_rate_describe_the_recorded_hours(self) -> None:
         deployment = _create_deployment("destroyed")
         lifetime(deployment, "7.30", at(2), at(2, 10))
         service = CostTrackingService()
         service.calculate_deployment_costs(deployment, at(1), at(3)).unwrap()  # Records cover the first 10 h only.
         lifetime(deployment, "7.30", at(6), at(6, 10), "later")
         (row,) = service.get_deployment_breakdown(at(1), at(8))
-        self.assertEqual(row.uptime_hours, 20.0)
-        self.assertEqual(row.total_cost_eur.quantize(Decimal("0.0001")), cost("7.30", 20).quantize(Decimal("0.0001")))
+        # The same records the summary and provider totals sum: 10 h, not the 20 lifetime hours in the range.
+        self.assertEqual(row.uptime_hours, 10.0)
+        self.assertEqual(row.total_cost_eur.quantize(Decimal("0.0001")), cost("7.30", 10).quantize(Decimal("0.0001")))
+        summary = service.get_cost_summary(at(1), at(8))
+        self.assertEqual(row.total_cost_eur, summary.total_eur)
 
     def test_lifetime_usage_reads_the_lifetimes_once(self) -> None:
         deployment = _create_deployment("destroyed")
