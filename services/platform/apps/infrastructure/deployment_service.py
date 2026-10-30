@@ -66,6 +66,12 @@ from apps.infrastructure.provider_config import (
     run_provider_command,
 )
 from apps.infrastructure.registration_service import get_registration_service
+from apps.infrastructure.server_lifetimes import (
+    close_server_lifetimes,
+    confirm_lifetime,
+    discard_lifetime,
+    open_pending_lifetime,
+)
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
 from apps.settings.services import SettingsService
@@ -519,7 +525,10 @@ class NodeDeploymentService:
                     )
                 else:
                     log_deployment("warning", "Previously created server not found, creating new one")
-                    owned_update(lease, deployment, external_node_id="")
+                    # Its lifetime ends now: the true end is unknown, so this over-counts at most to here.
+                    close_server_lifetimes(
+                        lease, deployment, server_id=deployment.external_node_id, external_node_id=""
+                    )
                     # The pre-claim check was skipped for the stored server; a replacement is new.
                     orderable_result = self._check_orderable(deployment, credentials)
                     if orderable_result.is_err():
@@ -539,7 +548,8 @@ class NodeDeploymentService:
                 # worker that dies mid-create leaves a row that teardown knows to reconcile. An earlier
                 # "unknown" outcome is never downgraded: that server may still exist.
                 prior_create_state = deployment.server_create_state
-                owned_update(
+                # A server's billable window opens with the intent: a create whose answer is lost stays billed.
+                pending_lifetime, opened_lifetime = open_pending_lifetime(
                     lease,
                     deployment,
                     server_create_state="intent",
@@ -550,7 +560,17 @@ class NodeDeploymentService:
                     # "none" never overwrites history: a server that existed (created) or may have
                     # (unknown, intent) keeps the row out of never_got_a_server for good.
                     keep = prior_create_state != "none" and state == "none"
-                    owned_update(lease, deployment, server_create_state=prior_create_state if keep else state)
+                    settled = prior_create_state if keep else state
+                    if state == "none":
+                        # Provably refused: this create billed nothing, so the lifetime it opened goes.
+                        discard_lifetime(
+                            lease,
+                            deployment,
+                            pending_lifetime if opened_lifetime else None,
+                            server_create_state=settled,
+                        )
+                    else:
+                        owned_update(lease, deployment, server_create_state=settled)
 
                 # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
                 # Named per attempt: a re-deploy keeps the hostname, and a key or firewall left under an
@@ -677,12 +697,14 @@ class NodeDeploymentService:
                 else:
                     created_resources.append(("server", server_create_result.server_id))
                 # Persist the id at once: a worker that dies before the next stage leaves a known server.
-                owned_update(
+                confirm_lifetime(
                     lease,
                     deployment,
+                    pending_lifetime,
+                    server_create_result.server_id,
                     external_node_id=server_create_result.server_id,
                     server_create_state="created",
-                    # Costs run from the first server this attempt created; a re-deploy resets it.
+                    # The current attempt's start, for display; costs come from the server lifetimes.
                     started_at=deployment.started_at or timezone.now(),
                 )
             stages_completed.append("provision_server")
@@ -2214,7 +2236,9 @@ class NodeDeploymentService:
 
         for resource_type, resource_id in reversed(resources):
             try:
-                self._delete_created_resource(gateway, resource_type, resource_id, hostname)
+                deleted = self._delete_created_resource(gateway, resource_type, resource_id, hostname)
+                if deleted and resource_type == "server" and lease is not None:
+                    close_server_lifetimes(lease, deployment, server_id=resource_id)
             except Exception as exc:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
@@ -2227,8 +2251,8 @@ class NodeDeploymentService:
     @staticmethod
     def _delete_created_resource(
         gateway: CloudProviderGateway, resource_type: str, resource_id: str, hostname: str
-    ) -> None:
-        """Delete one resource this deployment created; logs the outcome, raises only what the SDK raises."""
+    ) -> bool:
+        """Delete one resource this deployment created; True when confirmed. Raises only what the SDK raises."""
         deleters = {
             "server": ("server id", gateway.delete_server),
             "firewall": ("firewall id", gateway.delete_firewall),
@@ -2236,14 +2260,15 @@ class NodeDeploymentService:
         }
         if resource_type not in deleters:
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
-            return
+            return False
         label, delete = deleters[resource_type]
         logger.info(f"🗑️ [Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
         result = delete(resource_id)
         if result.is_err():
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
-        else:
-            logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
+            return False
+        logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
+        return True
 
     def _mark_failed(
         self,
