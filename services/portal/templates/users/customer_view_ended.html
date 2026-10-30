@@ -1,7 +1,7 @@
 {% load i18n static %}<!DOCTYPE html>
 {# Standalone (ADR-0065): drawn after the session is flushed, so it reads no session, user or portal chrome. #}
 {# Django marks a translated template literal safe, so catalog text is escaped where it is shown. #}
-<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="h-full bg-slate-900">
+<html lang="{{ language_code|default:'en' }}" class="h-full bg-slate-900">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">

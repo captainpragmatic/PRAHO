@@ -15,7 +15,9 @@ from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import rotate_token
 from django.shortcuts import redirect, render
+from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.translation import get_language
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
@@ -92,11 +94,21 @@ def ended(request: HttpRequest, platform_url: str) -> HttpResponse:
     Not a redirect: the portal's CSP `form-action 'self'` covers the redirect after a form POST, and
     Chromium blocks a cross-origin one, stranding the tab after the view has already ended.
     """
-    page = render(request, "users/customer_view_ended.html", {"platform_url": platform_url})
+    # Rendered without the request: the session is flushed, and no context processor may reach the cache
+    # or Platform on the way out.
+    page = HttpResponse(
+        render_to_string(
+            "users/customer_view_ended.html", {"platform_url": platform_url, "language_code": get_language()}
+        )
+    )
     page["Cache-Control"] = "no-store"
-    # Every way out of a view tells the browser to drop the customer's pages.
-    page["Clear-Site-Data"] = '"cache"'
-    return page
+    return clear_cache(page)
+
+
+def clear_cache(response: HttpResponse) -> HttpResponse:
+    """Every way out of a customer view tells the browser to drop the customer's pages."""
+    response["Clear-Site-Data"] = '"cache"'
+    return response
 
 
 def _end_current_platform_session(request: HttpRequest) -> None:

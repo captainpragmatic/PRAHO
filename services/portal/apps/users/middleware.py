@@ -196,12 +196,13 @@ class PortalAuthenticationMiddleware:
             # A 302 would be followed by HTMX and the login page swapped into the target; HX-Redirect navigates.
             response = HttpResponse(status=200)
             response["HX-Redirect"] = target
-            return response
-        if wants_json(request):
-            return JsonResponse({"error": "Session ended", "redirect": target}, status=401)
-        if platform_url is not None:
+        elif wants_json(request):
+            response = JsonResponse({"error": "Session ended", "redirect": target}, status=401)
+        elif platform_url is not None:
             return customer_view_views.ended(request, platform_url)
-        return self.redirect_to_login(request)
+        else:
+            return self.redirect_to_login(request)
+        return customer_view_views.clear_cache(response) if platform_url is not None else response
 
     def _customer_view_refusal(self, request: HttpRequest) -> HttpResponse | None:
         if not request.session.get("customer_view"):

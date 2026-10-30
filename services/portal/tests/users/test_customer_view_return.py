@@ -123,6 +123,17 @@ class LeavingTests(EndedPageAssertions):
                     response = self.client.post(reverse("users:customer_view_leave"))
                 self.assert_ended_page(response, f"{PLATFORM}/")
 
+    def test_the_ended_page_runs_no_context_processor(self) -> None:
+        # The session is gone; a processor reaching the cache or Platform could delay or break the way back.
+        self._start()
+        with (
+            patch("apps.users.customer_view_views.api_client.end_session"),
+            patch("apps.common.context_processors.company_identity", side_effect=AssertionError("ran")),
+            patch("apps.common.context_processors.portal_context", side_effect=AssertionError("ran")),
+        ):
+            response = self.client.post(reverse("users:customer_view_leave"))
+        self.assert_ended_page(response)
+
     def test_a_missing_customer_id_is_logged_when_it_falls_back(self) -> None:
         self._start(customer_view_customer_id=None)
         with (
@@ -219,6 +230,7 @@ class EndedViewTests(EndedPageAssertions):
                     else:
                         self.assertEqual(response.status_code, 401)
                         self.assertEqual(json.loads(response.content)["redirect"], RETURN)
+                    self.assertIn("cache", response.get("Clear-Site-Data", ""))
                     self.assertNotIn("customer_view", request.session)
 
     def test_an_ended_customer_session_still_goes_to_the_login_page(self) -> None:
