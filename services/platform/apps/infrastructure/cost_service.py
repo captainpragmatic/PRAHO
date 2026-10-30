@@ -68,7 +68,7 @@ class CostTrackingService:
     HOURS_PER_MONTH = Decimal("730")  # Average hours per month
     HOURS_PER_DAY = Decimal("24")
 
-    def calculate_deployment_costs(  # Complexity: multi-step workflow  # noqa: PLR0911  # Complexity: multi-step business logic
+    def calculate_deployment_costs(  # Complexity: multi-step workflow
         self,
         deployment: NodeDeployment,
         period_start: datetime,
@@ -93,38 +93,17 @@ class CostTrackingService:
         if period_end <= period_start:
             return Err("Period end must be after period start")
 
-        # Skip if deployment wasn't active during this period
-        if deployment.started_at and deployment.started_at > period_end:
-            return Err("Deployment not active during this period")
-
-        if deployment.destroyed_at and deployment.destroyed_at < period_start:
-            return Err("Deployment already destroyed before this period")
-
-        # Calculate effective period (when node was actually running)
-        effective_start = max(
-            period_start,
-            deployment.started_at or deployment.created_at,
-        )
-        effective_end = min(
-            period_end,
-            deployment.destroyed_at or timezone.now(),
-        )
-
-        if effective_end <= effective_start:
-            return Err("No active time in this period")
-
-        # Calculate hours of operation
-        hours_active = Decimal(str((effective_end - effective_start).total_seconds() / 3600))
-
-        # Get hourly rate from node size
-        if not deployment.node_size:
-            return Err("Deployment has no associated node size")
-
-        monthly_rate = deployment.node_size.monthly_cost_eur
-        hourly_rate = monthly_rate / self.HOURS_PER_MONTH
-
-        # Calculate compute cost
-        compute_cost = hourly_rate * hours_active
+        usage = lifetime_usage(deployment, period_start, period_end)
+        if usage is not None:
+            # Each server lifetime, at the rate it recorded: re-deploys and resizes keep their history.
+            hours_active, compute_cost = usage
+            if hours_active <= 0:
+                return Err("No active time in this period")
+        else:
+            window = self._row_window_usage(deployment, period_start, period_end)
+            if window.is_err():
+                return Err(window.unwrap_err())
+            hours_active, compute_cost = window.unwrap()
 
         # For now, bandwidth and storage are 0 (included in base price)
         # In future, could integrate with provider API to get actual usage
@@ -167,6 +146,24 @@ class CostTrackingService:
 
         return Ok(record)
 
+    def _row_window_usage(
+        self, deployment: NodeDeployment, period_start: datetime, period_end: datetime
+    ) -> Result[tuple[Decimal, Decimal], str]:
+        """A deployment without server lifetimes: its own started_at .. destroyed_at window at its current size."""
+        if deployment.started_at and deployment.started_at > period_end:
+            return Err("Deployment not active during this period")
+        if deployment.destroyed_at and deployment.destroyed_at < period_start:
+            return Err("Deployment already destroyed before this period")
+        effective_start = max(period_start, deployment.started_at or deployment.created_at)
+        effective_end = min(period_end, deployment.destroyed_at or timezone.now())
+        if effective_end <= effective_start:
+            return Err("No active time in this period")
+        hours_active = Decimal(str((effective_end - effective_start).total_seconds() / 3600))
+        if not deployment.node_size:
+            return Err("Deployment has no associated node size")
+        hourly_rate = deployment.node_size.monthly_cost_eur / self.HOURS_PER_MONTH
+        return Ok((hours_active, hourly_rate * hours_active))
+
     def calculate_all_deployment_costs(
         self,
         period_start: datetime,
@@ -186,20 +183,18 @@ class CostTrackingService:
             NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
         )
 
-        # Get all deployments that were active during this period
+        # Deployments active during this period by their own window, or with a server lifetime overlapping it
+        # (a re-deployed row's earlier server is billed whatever its new attempt's status).
+        row_window = (
+            models.Q(status__in=["completed", "stopped", "destroyed"])
+            & (models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True))
+            & (models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True))
+        )
+        lifetime_overlap = models.Q(server_lifetimes__started_at__lte=period_end) & (
+            models.Q(server_lifetimes__ended_at__isnull=True) | models.Q(server_lifetimes__ended_at__gte=period_start)
+        )
         active_deployments = (
-            NodeDeployment.objects.filter(
-                status__in=["completed", "stopped", "destroyed"],
-            )
-            .filter(
-                # Started before period end
-                models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True),
-            )
-            .filter(
-                # Not destroyed before period start
-                models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True),
-            )
-            .select_related("node_size")
+            NodeDeployment.objects.filter(row_window | lifetime_overlap).distinct().select_related("node_size")
         )
 
         results = []
@@ -323,6 +318,12 @@ class CostTrackingService:
             monthly_rate = deployment.node_size.monthly_cost_eur if deployment.node_size else Decimal("0")
             hours = data["hours"]
             hourly_rate = monthly_rate / self.HOURS_PER_MONTH if monthly_rate else Decimal("0")
+            usage = lifetime_usage(deployment, period_start, period_end)
+            if usage is not None:
+                # Uptime is the lifetimes' time in the period; the rate is effective, since lifetimes may differ.
+                hours = usage[0]
+                hourly_rate = data["total"] / hours if hours else Decimal("0")
+                monthly_rate = hourly_rate * self.HOURS_PER_MONTH
 
             breakdowns.append(
                 DeploymentCostBreakdown(
@@ -396,6 +397,30 @@ class CostTrackingService:
         now = timezone.now()
         month_start = timezone.make_aware(datetime(now.year, now.month, 1))
         return self.get_cost_summary(month_start, now)
+
+
+def lifetime_usage(
+    deployment: NodeDeployment, period_start: datetime, period_end: datetime
+) -> tuple[Decimal, Decimal] | None:
+    """Hours and cost of the deployment's server lifetimes inside the period; None when it has no lifetimes."""
+    from apps.infrastructure.models import NodeServerLifetime  # noqa: PLC0415  # Deferred: avoids circular import
+
+    if not NodeServerLifetime.objects.filter(deployment=deployment).exists():
+        return None
+    overlapping = NodeServerLifetime.objects.filter(deployment=deployment, started_at__lt=period_end).filter(
+        models.Q(ended_at__isnull=True) | models.Q(ended_at__gt=period_start)
+    )
+    now = timezone.now()
+    hours = cost = Decimal("0")
+    for lifetime in overlapping:
+        start = max(period_start, lifetime.started_at)
+        end = min(period_end, lifetime.ended_at or now)
+        if end <= start:
+            continue
+        span = Decimal(str((end - start).total_seconds() / 3600))
+        hours += span
+        cost += lifetime.monthly_cost_eur / CostTrackingService.HOURS_PER_MONTH * span
+    return hours, cost
 
 
 # Module-level singleton

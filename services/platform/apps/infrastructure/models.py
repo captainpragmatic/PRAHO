@@ -812,7 +812,11 @@ class NodeDeployment(models.Model):
             setattr(self, name, value)
 
     def calculate_running_hours(self) -> float:
-        """Calculate hours the node has been running"""
+        """Calculate hours the node has been running: across its server lifetimes when it has any."""
+        lifetimes = list(self.server_lifetimes.all())
+        if lifetimes:
+            now = timezone.now()
+            return sum(((lt.ended_at or now) - lt.started_at).total_seconds() for lt in lifetimes) / 3600
 
         if not self.started_at:
             return 0.0
@@ -825,7 +829,15 @@ class NodeDeployment(models.Model):
         return delta.total_seconds() / 3600
 
     def estimate_cost(self) -> float:
-        """Estimate current cost based on running hours and node size"""
+        """Estimate current cost: each server lifetime at its recorded rate, else running hours at the size's rate."""
+        lifetimes = list(self.server_lifetimes.all())
+        if lifetimes:
+            now = timezone.now()
+            total = sum(
+                float(lt.monthly_cost_eur) / 730 * ((lt.ended_at or now) - lt.started_at).total_seconds() / 3600
+                for lt in lifetimes
+            )
+            return round(total, 4)
         if not self.node_size:
             return 0.0
 
