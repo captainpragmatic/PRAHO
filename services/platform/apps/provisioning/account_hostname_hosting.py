@@ -19,9 +19,10 @@ from django.utils import timezone
 
 from . import account_hostname_config as config
 from .account_hostname_models import AccountHostname
+from .account_locks import lock_account
+from .service_models import Service
 
 if TYPE_CHECKING:
-    from .service_models import Service
     from .virtualmin_models import VirtualminAccount
 
 logger = logging.getLogger(__name__)
@@ -90,18 +91,27 @@ def announce_when_live(hostname: AccountHostname) -> bool:
     The claim (`activation_notified_at`) is taken under the row lock after everything is checked
     again there, and the message is sent only once that claim commits, so two syncs never send two.
     A suspended account, a name not live yet or a customer without an address is not told.
+
+    Runs after publication commits. It locks the account, whose row a suspension writes, and then
+    the name: the order ownership writers use (hosted_zone_ownership), so the two never deadlock.
     """
+    account_id = AccountHostname.objects.filter(pk=hostname.pk).values_list("account_id", flat=True).first()
+    if account_id is None:
+        return False
     with transaction.atomic():
+        locked = lock_account(account_id)
         row = (
             AccountHostname.objects.select_for_update(of=("self",))
-            .select_related("account__service__customer")
-            .filter(pk=hostname.pk, retired_at__isnull=True, activation_notified_at__isnull=True)
+            .filter(pk=hostname.pk, account_id=account_id, retired_at__isnull=True, activation_notified_at__isnull=True)
             .first()
         )
-        account = row.account if row is not None else None
-        if row is None or account is None or account.status != "active" or live_account_name(account) is None:
+        if row is None or locked is None:
             return False
-        if not account.service.customer.primary_email:
+        account = locked.account
+        if account.status != "active" or live_account_name(account) is None:
+            return False
+        address = Service.objects.filter(pk=account.service_id).values_list("customer__primary_email", flat=True).get()
+        if not address:
             return False
         claimed = timezone.now()
         row.activation_notified_at = claimed
@@ -118,6 +128,14 @@ def _send_activation(hostname_pk: UUID, claimed: datetime) -> None:
     row = AccountHostname.objects.select_related("account__service__customer").get(pk=hostname_pk)
     account = row.account
     if account is None:
+        return
+    if account.status != "active":
+        # Suspended after the claim committed: say nothing, and give the claim back so the
+        # customer is told once the account is active again.
+        AccountHostname.objects.filter(pk=hostname_pk, activation_notified_at=claimed).update(
+            activation_notified_at=None
+        )
+        logger.info("⚠️ [AccountName] %s not announced: account is %s", row.fqdn, account.status)
         return
     customer = account.service.customer
     www, apex = dns_instructions(account.domain, row.fqdn)
