@@ -13,6 +13,7 @@ Orchestrates the complete node deployment pipeline:
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 import secrets
 import uuid
@@ -72,6 +73,7 @@ from apps.infrastructure.server_lifetimes import (
     discard_lifetime,
     open_lifetime_id,
     open_pending_lifetime,
+    save_legacy_window,
     split_lifetime_for_resize,
 )
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
@@ -1155,9 +1157,10 @@ class NodeDeploymentService:
             }
         if deployment.needs_reconciliation:
             return gettext("Reconcile the deployment first: %(reason)s") % {"reason": deployment.reconciliation_reason}
-        if not deployment.never_got_a_server:
+        if not (deployment.never_got_a_server or deployment.proved_empty):
             return gettext(
-                "This deployment had a server; re-deploying it needs costs that track separate server lifetimes."
+                "This deployment had a server that is not proven gone: reconcile it "
+                "(manage.py reconcile_deployment), then re-deploy."
             )
         if deployment.external_node_id or deployment.dns_record_ids or deployment.virtualmin_server_id:
             return gettext(
@@ -1193,7 +1196,8 @@ class NodeDeploymentService:
     ) -> Result[DeploymentResult, str]:
         """Deploy a failed or destroyed deployment again, keeping its hostname, with ``new_size``.
 
-        Only a row that never got a server qualifies. The hostname, number, logs, audit and costs stay;
+        Only a row that never got a server, or a destroyed one proved empty for this attempt, qualifies. The
+        hostname, number, logs, audit and costs (its earlier server lifetimes) stay;
         everything that described the old attempt is reset, and the correlation id is rotated so nothing
         left under the old labels can be adopted. Needs the destroy permission.
         """
@@ -1239,6 +1243,8 @@ class NodeDeploymentService:
                 return Err(claim.unwrap_err())
             lease = claim.unwrap()
             locked.refresh_from_db()
+            # The earlier server's window, if it lives only in the row's timestamps, is kept before the reset.
+            before_reset = copy.copy(locked)
             locked.node_size = new_size
             locked.set_max_domains_from_size()
             owned_update(
@@ -1261,7 +1267,10 @@ class NodeDeploymentService:
                 provider_token_fingerprint="",
                 registration_state="none",
                 dns_record_ids=[],
+                resources_proved_absent_for=None,
             )
+            if not before_reset.never_got_a_server:
+                save_legacy_window(before_reset, timezone.now())
         deployment.refresh_from_db()
         logger.info(f"🚀 [Redeploy:{deployment.hostname}] Re-deploying with {new_size.provider_type_id}")
         try:

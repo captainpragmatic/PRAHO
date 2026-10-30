@@ -741,6 +741,18 @@ class NodeDeployment(models.Model):
         return attested and self.server_create_state in ("unknown", "intent")
 
     @property
+    def proved_empty(self) -> bool:
+        """Destroyed, and a teardown or reconciliation proved this attempt's provider resources gone."""
+        return (
+            self.status == "destroyed"
+            and self.resources_proved_absent_for is not None
+            and self.resources_proved_absent_for == self.correlation_id
+            and not (self.external_node_id or self.dns_record_ids or self.virtualmin_server_id)
+            and not self.needs_reconciliation
+            and not self.server_lifetimes.filter(ended_at__isnull=True).exists()
+        )
+
+    @property
     def can_retry(self) -> bool:
         """A failed deployment can be retried unless its provider resources must be reconciled first."""
         return self.status == "failed" and not self.needs_reconciliation
@@ -786,7 +798,7 @@ class NodeDeployment(models.Model):
         "stopped": ["completed", "destroying", "failed"],
         "failed": ["pending", "destroying"],  # Can retry or destroy
         "destroying": ["destroyed", "failed"],
-        # Terminal, except a re-deploy of a row that never got a server (it keeps the hostname).
+        # Terminal, except a re-deploy (a row that never got a server, or one proved empty; it keeps the hostname).
         "destroyed": ["pending"],
     }
 
