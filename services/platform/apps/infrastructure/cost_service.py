@@ -407,6 +407,19 @@ class CostTrackingService:
         return self.get_cost_summary(month_start, now)
 
 
+def recalculate_recorded_costs(deployment: NodeDeployment) -> int:
+    """Recalculate every cost record the deployment has, after its billable windows changed. Returns the count."""
+    from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415  # Deferred: avoids circular import
+
+    service = get_cost_tracking_service()
+    periods = list(
+        NodeDeploymentCostRecord.objects.filter(deployment=deployment).values_list("period_start", "period_end")
+    )
+    for period_start, period_end in periods:
+        service.calculate_deployment_costs(deployment, period_start, period_end)
+    return len(periods)
+
+
 def lifetime_usage(
     deployment: NodeDeployment, period_start: datetime, period_end: datetime
 ) -> tuple[Decimal, Decimal] | None:

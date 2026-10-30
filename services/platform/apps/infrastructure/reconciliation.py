@@ -447,4 +447,12 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
         return _record_refusal(deployment, f"Settlement failed: {error}", operator, record)
     report.settled = True
     logger.info(f"✅ [Reconcile:{deployment.hostname}] Settled destroyed ({provenance})")
+    if request.attest_never_created:
+        # Costs recorded while the create outcome was unknown described a server attested never to have existed.
+        from apps.infrastructure.cost_service import recalculate_recorded_costs  # noqa: PLC0415  # Deferred import
+
+        try:
+            recalculate_recorded_costs(Model.objects.get(pk=deployment.pk))
+        except Exception as error:  # The settlement stands; the next recalculation of those periods corrects them.
+            logger.warning(f"⚠️ [Reconcile:{deployment.hostname}] Cost records not recalculated: {error}")
     return Ok(report)

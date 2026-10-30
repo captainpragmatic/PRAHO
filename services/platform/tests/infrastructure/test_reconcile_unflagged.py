@@ -160,3 +160,30 @@ class TeardownProofTests(TestCase):
         row_after = h.row()
         self.assertEqual(row_after.status, "destroyed")
         self.assertIsNone(row_after.resources_proved_absent_for)
+
+
+class AttestationCostTests(TestCase):
+    def test_costs_recorded_for_an_attested_never_created_server_are_recalculated_to_zero(self) -> None:
+        from decimal import Decimal  # noqa: PLC0415  # Local to this case.
+
+        from apps.infrastructure.cost_service import CostTrackingService  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
+
+        h = Harness()
+        deployment = staging_002()
+        NodeServerLifetime.objects.create(
+            deployment=deployment, server_id="", node_size=deployment.node_size, monthly_cost_eur=Decimal("7.30"),
+            started_at=LONG_AGO - timedelta(days=3),
+        )
+        service = CostTrackingService()
+        for day in (3, 2):  # Daily records written while the create outcome was unknown.
+            start = LONG_AGO - timedelta(days=day)
+            service.calculate_deployment_costs(deployment, start, start + timedelta(days=1)).unwrap()
+        self.assertTrue(NodeDeploymentCostRecord.objects.filter(deployment=deployment, cost_eur__gt=0).exists())
+
+        self.assertTrue(h.run(deployment, attest_never_created=True, attest_no_resources=True).is_ok())
+
+        self.assertEqual(
+            list(NodeDeploymentCostRecord.objects.filter(deployment=deployment).values_list("cost_eur", flat=True)),
+            [Decimal("0")] * 2,
+        )

@@ -153,15 +153,24 @@ def start_lifetimes_at_resize(
 ) -> bool:
     """The first resize of a row whose window predates lifetimes: keep that window at the old rate, then bill on.
 
-    Nothing happens when the row already has lifetimes (``split_lifetime_for_resize`` handles those) or has no
-    window of its own.
+    Nothing happens when the row already has lifetimes (``split_lifetime_for_resize`` handles those), has no window
+    of its own, or is no longer this running server's row: a teardown that finished during the resize wins.
     """
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: models import lifecycle
+
     now = timezone.now()
     with transaction.atomic():
-        if deployment.started_at is None or _model().objects.filter(deployment=deployment).exists():
+        row = NodeDeployment.objects.select_for_update().filter(pk=deployment.pk).first()
+        if (
+            row is None
+            or row.status != "completed"
+            or row.external_node_id != server_id
+            or row.started_at is None
+            or _model().objects.filter(deployment=row).exists()
+        ):
             return False
-        _new(deployment, old_size, deployment.started_at, ended_at=now, legacy=True)
-        _new(deployment, new_size, now, server_id=server_id)
+        _new(row, old_size, row.started_at, ended_at=now, legacy=True)
+        _new(row, new_size, now, server_id=server_id)
         return True
 
 

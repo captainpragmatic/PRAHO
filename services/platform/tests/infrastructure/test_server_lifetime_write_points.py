@@ -148,3 +148,22 @@ class ResizeWritePointTests(TestCase):
             [("", old_rate, True, False), ("srv-1", Decimal("13.99"), False, True)],
         )
         self.assertEqual(rows[0].started_at, started)
+
+    def test_a_teardown_during_the_first_resize_opens_no_lifetime(self) -> None:
+        self.lifetime.delete()
+        NodeDeployment.objects.filter(pk=self.deployment.pk).update(started_at=timezone.now() - timedelta(days=5))
+        self.deployment.refresh_from_db()
+
+        def torn_down_meanwhile(**_kwargs: Any) -> Any:
+            NodeDeployment.objects.filter(pk=self.deployment.pk).update(
+                status="destroyed", external_node_id="", destroyed_at=timezone.now()
+            )
+            return Ok(MagicMock(success=True, stderr=""))
+
+        service = _make_service()
+        service._check_resize_orderable = MagicMock(return_value=Ok(True))
+        with patch("apps.infrastructure.deployment_service.run_provider_command", side_effect=torn_down_meanwhile):
+            service.upgrade_node_size(self.deployment, self.bigger, {"api_token": "test-token"})
+        self.assertFalse(
+            NodeServerLifetime.objects.filter(deployment=self.deployment, ended_at__isnull=True).exists()
+        )
