@@ -581,6 +581,9 @@ class NodeDeployment(models.Model):
     # What an operator's reconciliation proved or attested, with who, when and the evidence. Kept apart
     # from the creator provenance and the create state, which stay as history.
     reconciliation_record = models.JSONField(default=dict, blank=True, editable=False)
+    # The correlation id whose provider resources a teardown or reconciliation proved gone: re-deploying
+    # a row that had a server needs this proof for its current attempt.
+    resources_proved_absent_for = models.UUIDField(null=True, blank=True, editable=False)
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -891,6 +894,41 @@ class NodeDeploymentLog(models.Model):
 
     def __str__(self) -> str:
         return f"[{self.level.upper()}] {self.phase}: {self.message[:50]}"
+
+
+class NodeServerLifetime(models.Model):
+    """One server's billable window: from the create intent (or the confirmed create) until teardown proves it gone.
+
+    A deployment that is re-deployed keeps every earlier lifetime, so its costs never lose a window. The rate is a
+    snapshot: later catalogue price changes do not reprice history, and a resize closes the window and opens a
+    successor at the new rate. A blank ``server_id`` means the create outcome was never confirmed.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    deployment = models.ForeignKey(
+        NodeDeployment, on_delete=models.CASCADE, related_name="server_lifetimes", verbose_name=_("Deployment")
+    )
+    server_id = models.CharField(max_length=100, blank=True, default="", verbose_name=_("Provider Server ID"))
+    node_size = models.ForeignKey(NodeSize, on_delete=models.PROTECT, related_name="+", verbose_name=_("Size"))
+    monthly_cost_eur = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Monthly Cost (EUR)"))
+    started_at = models.DateTimeField(verbose_name=_("Started At"))
+    ended_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Ended At"))
+    legacy = models.BooleanField(
+        default=False, verbose_name=_("Legacy Window"), help_text=_("Saved from the deployment's own timestamps")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "infrastructure_node_server_lifetimes"
+        db_table_comment = "Billable window of each server a node deployment created, priced at a snapshot rate."
+        verbose_name = _("Node Server Lifetime")
+        verbose_name_plural = _("Node Server Lifetimes")
+        ordering = ["started_at"]
+        indexes = [models.Index(fields=["deployment", "ended_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.deployment_id}:{self.server_id or 'unconfirmed'} {self.started_at:%Y-%m-%d %H:%M}"
 
 
 class NodeDeploymentCostRecord(models.Model):
