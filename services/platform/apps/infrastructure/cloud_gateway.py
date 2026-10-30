@@ -47,6 +47,9 @@ class ServerCreateResult:
     ipv4_address: str
     ipv6_address: str = ""
     root_password: str = ""
+    # True when the provider already held a server for this deployment (found by its label) and the
+    # create returned it instead of making a new one.
+    adopted: bool = False
 
 
 @dataclass

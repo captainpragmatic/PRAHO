@@ -129,6 +129,7 @@ class HcloudService(CloudProviderGateway):
                             ipv4_address=ipv4,
                             ipv6_address=ipv6,
                             root_password="",
+                            adopted=True,
                         )
                     )
 

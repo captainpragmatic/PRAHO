@@ -482,6 +482,7 @@ class NodeDeploymentService:
 
             # Idempotent: skip server creation if external_node_id already set (retry scenario)
             server_create_result: ServerCreateResult | None = None
+            server_from_create = False
             if deployment.external_node_id:
                 log_deployment("info", f"Server already exists (id={deployment.external_node_id}), skipping creation")
                 server_info_result = gateway.get_server(deployment.external_node_id)
@@ -641,7 +642,11 @@ class NodeDeploymentService:
                     )
 
                 server_create_result = server_result.unwrap()
-                created_resources.append(("server", server_create_result.server_id))
+                server_from_create = True  # new, or adopted before it was ever enrolled
+                if not server_create_result.adopted:
+                    # An adopted server holds this deployment's earlier work: a later failure of this
+                    # attempt fails the row with its id kept, for retry or teardown, and never deletes it.
+                    created_resources.append(("server", server_create_result.server_id))
                 # Persist the id at once: a worker that dies before the next stage leaves a known server.
                 owned_update(
                     lease, deployment, external_node_id=server_create_result.server_id, server_create_state="created"
@@ -661,7 +666,7 @@ class NodeDeploymentService:
                 return Err("Server creation did not return an IP address")
 
             identity: dict[str, Any] = {}
-            if any(kind == "server" for kind, _identifier in created_resources):
+            if server_from_create:
                 # Fresh provider images retain their bootstrap listener; None is the explicit
                 # first-enrollment marker, never set by a retry.
                 identity = {"ssh_port": 22, "ssh_host_keys": None}
