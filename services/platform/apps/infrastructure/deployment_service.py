@@ -13,7 +13,6 @@ Orchestrates the complete node deployment pipeline:
 from __future__ import annotations
 
 import contextlib
-import copy
 import logging
 import secrets
 import uuid
@@ -566,8 +565,9 @@ class NodeDeploymentService:
                     # (unknown, intent) keeps the row out of never_got_a_server for good.
                     keep = prior_create_state != "none" and state == "none"
                     settled = prior_create_state if keep else state
-                    if state == "none":
-                        # Provably refused: this create billed nothing, so the lifetime it opened goes.
+                    if state == "none" and prior_create_state not in ("unknown", "intent"):
+                        # Provably refused: this create billed nothing, so the lifetime it opened goes. After an
+                        # earlier unknown create it stays: that server may exist, and this is its only window.
                         discard_lifetime(
                             lease,
                             deployment,
@@ -1244,8 +1244,10 @@ class NodeDeploymentService:
                 return Err(claim.unwrap_err())
             lease = claim.unwrap()
             locked.refresh_from_db()
-            # The earlier server's window, if it lives only in the row's timestamps, is kept before the reset.
-            before_reset = copy.copy(locked)
+            # The earlier server's window, if it lives only in the row's timestamps, is kept before the reset
+            # (under the claim just taken, in this transaction).
+            if not locked.never_got_a_server:
+                save_legacy_window(locked, timezone.now())
             locked.node_size = new_size
             locked.set_max_domains_from_size()
             owned_update(
@@ -1270,8 +1272,6 @@ class NodeDeploymentService:
                 dns_record_ids=[],
                 resources_proved_absent_for=None,
             )
-            if not before_reset.never_got_a_server:
-                save_legacy_window(before_reset, timezone.now())
         deployment.refresh_from_db()
         logger.info(f"🚀 [Redeploy:{deployment.hostname}] Re-deploying with {new_size.provider_type_id}")
         try:
@@ -2259,6 +2259,10 @@ class NodeDeploymentService:
                 deleted = self._delete_created_resource(gateway, resource_type, resource_id, hostname)
                 if deleted and resource_type == "server" and lease is not None:
                     close_server_lifetimes(lease, deployment, server_id=resource_id)
+            except OperationOwnershipLostError as lost:
+                # Another operation owns the row now: what is left is its to delete or keep.
+                logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
+                return
             except Exception as exc:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -82,6 +83,31 @@ class DeployWritePointTests(TestCase):
         self.assertEqual(_lifetimes(deployment), [("", False, True), ("srv-2", True, False)])
         legacy = NodeServerLifetime.objects.get(deployment=deployment, legacy=True)
         self.assertEqual(legacy.started_at, started)
+
+    def test_a_refused_create_keeps_the_only_window_of_an_earlier_unknown_create(self) -> None:
+        # A row from before lifetimes whose earlier create outcome is unknown: that server may exist, and this
+        # attempt's window is the only one that can bill it.
+        deployment = _create_deployment("pending")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="unknown", provider_token_fingerprint=provider_token_fingerprint("test-token")
+        )
+        deployment.refresh_from_db()
+        _deploy(deployment, _gateway(Err("invalid server type", retriability=Retriability.NOT_RETRIABLE)))
+        self.assertEqual(_lifetimes(deployment), [("", True, False)])
+
+    def test_cleanup_stops_when_the_operation_loses_the_row(self) -> None:
+        deployment = _create_deployment("pending")
+        gateway = _gateway(Ok(ServerCreateResult(server_id="srv-1", ipv4_address="")))
+
+        def taken_over(_server_id: str) -> Any:
+            NodeDeployment.objects.filter(pk=deployment.pk).update(operation_token=uuid.uuid4())
+            return Ok(True)
+
+        gateway.delete_server.side_effect = taken_over
+        _deploy(deployment, gateway)
+        gateway.delete_server.assert_called_once()
+        gateway.delete_firewall.assert_not_called()
+        gateway.delete_ssh_key.assert_not_called()
 
     def test_cleanup_that_deletes_the_new_server_closes_its_lifetime(self) -> None:
         deployment = _create_deployment("pending")
