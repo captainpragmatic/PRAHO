@@ -913,6 +913,37 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(self.service.suspension_reason, "")
         self.assertEqual(self.service.expires_at, self.billing_cycle.period_end)
 
+    def test_late_renewal_payment_leaves_a_suspended_customer_s_service_to_its_unsuspension(self) -> None:
+        """Paying while staff hold the customer pays the cycle, but hosting waits for the unsuspension (ADR-0066)."""
+        from apps.customers.models import Customer  # noqa: PLC0415
+
+        self.subscription.mark_payment_failed()
+        self.subscription.grace_period_ends_at = timezone.now() - timedelta(minutes=1)
+        self.subscription.save(update_fields=["grace_period_ends_at", "updated_at"])
+        SubscriptionLifecycleService.handle_grace_period_expirations()
+        self.service.refresh_from_db()
+        self.assertEqual((self.service.status, self.service.suspension_reason), ("suspended", "payment_overdue"))
+        Customer.objects.filter(pk=self.service.customer_id).update(status="suspended")
+        payment = self._create_pending_invoice_payment("pi_suspended_customer_recovery_301")
+
+        result = PaymentSuccessService.converge_gateway_success(
+            payment.gateway_txn_id or "",
+            self._succeeded_gateway_result(),
+        )
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        self.subscription.refresh_from_db()
+        self.service.refresh_from_db()
+        self.assertEqual(self.subscription.status, "active")
+        self.assertEqual((self.service.status, self.service.suspension_reason), ("suspended", "customer_suspended"))
+        # Unsuspending resumes it: the suspension now owns the hold, and the cycle is paid.
+        customer = Customer.objects.get(pk=self.service.customer_id)
+        with self.captureOnCommitCallbacks(execute=True):  # the real unsuspension, and its cascade
+            customer.unsuspend()
+            customer.save()
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.status, "active")
+
     def test_renewal_payment_does_not_clear_nonpayment_unrelated_suspension(self) -> None:
         self.subscription.mark_payment_failed()
         self.service.suspend(reason="abuse_review")

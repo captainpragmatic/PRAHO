@@ -96,6 +96,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0063](ADR-0063-no-malware-scanning.md) | PRAHO Does No Malware Scanning of Attachments | Accepted | 2026-10-17 |
 | [ADR-0064](ADR-0064-setup-and-bounded-system-status.md) | Setup Configuration and Bounded Operational Status | Accepted | 2026-10-27 |
 | [ADR-0065](ADR-0065-customer-view.md) | Customer View | Accepted | 2026-10-28 |
+| [ADR-0066](ADR-0066-customer-status-is-a-lifecycle-label.md) | Customer Status Is a Lifecycle Label | Accepted | 2026-10-29 |
 
 ### 🟡 Partially Superseded
 
@@ -232,8 +233,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 66 (ADR-0001 through ADR-0065 and ADR-0068)
-- **Active**: 59 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 67 (ADR-0001 through ADR-0066, and ADR-0068)
+- **Active**: 60 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0066
+- **Next available**: ADR-0067

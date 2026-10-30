@@ -37,6 +37,7 @@ from apps.settings.services import SettingsService
 
 from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 from .customer_models import Customer
+from .lifecycle import CUSTOMER_SUSPENSION_REASON
 from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
 logger = logging.getLogger(__name__)
@@ -1067,11 +1068,10 @@ def _handle_customer_activation(customer: Customer) -> None:
         with best_effort_atomic(logger=logger, scope="Customers", message="Customer activation display logging failed"):
             logger.info(f"✅ [Customer] Customer activated: {customer.get_display_name()}")
 
-        # Send activation welcome email after transaction commits.
+        # Send activation welcome email after transaction commits. Nothing else: orders and billing
+        # turn services on, each for what was paid (ADR-0066). Activating every pending service here
+        # switched on unpaid orders and raced the paid order's own confirmation.
         transaction.on_commit(lambda inst=customer: _send_customer_activation_email(inst))
-
-        # Enable services if any were pending — after transaction commits so status is visible.
-        transaction.on_commit(lambda inst=customer: _activate_customer_services(inst))
 
 
 def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
@@ -1107,6 +1107,11 @@ def _handle_customer_deactivation(customer: Customer) -> None:
 # ===============================================================================
 
 
+def _status_email_context(customer: Customer) -> dict[str, str]:
+    """What the customer status templates use. A model instance named nothing they read."""
+    return {"customer_name": str(customer.get_display_name())}
+
+
 def _send_customer_welcome_email(customer: Customer) -> None:
     """Send welcome email to new customers"""
     with best_effort_atomic(logger=logger, scope="customers", message="_send_customer_welcome_email failed"):
@@ -1115,7 +1120,7 @@ def _send_customer_welcome_email(customer: Customer) -> None:
         EmailService.send_template_email(
             template_key="customer_welcome",
             recipient=customer.primary_email,
-            context={"customer": customer},
+            context=_status_email_context(customer),
             priority="normal",
         )
 
@@ -1128,7 +1133,7 @@ def _send_customer_activation_email(customer: Customer) -> None:
         EmailService.send_template_email(
             template_key="customer_activated",
             recipient=customer.primary_email,
-            context={"customer": customer},
+            context=_status_email_context(customer),
             priority="high",
         )
 
@@ -1141,7 +1146,7 @@ def _send_customer_suspension_email(customer: Customer) -> None:
         EmailService.send_template_email(
             template_key="customer_suspended",
             recipient=customer.primary_email,
-            context={"customer": customer},
+            context=_status_email_context(customer),
             priority="high",
         )
 
@@ -1152,7 +1157,9 @@ def _send_customer_deactivation_email(customer: Customer) -> None:
         from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
-            template_key="customer_deactivated", recipient=customer.primary_email, context={"customer": customer}
+            template_key="customer_deactivated",
+            recipient=customer.primary_email,
+            context=_status_email_context(customer),
         )
     except Exception as e:
         logger.exception(f"🔥 [Customer] Failed to send deactivation email: {e}")
@@ -1197,26 +1204,6 @@ class CascadeSuspensionError(Exception):
     """
 
 
-CUSTOMER_SUSPENSION_REASON = "customer_suspended"
-
-
-def _activate_customer_services(customer: Customer) -> None:
-    """Activate customer services when customer becomes active"""
-    from apps.provisioning.models import Service
-    from apps.provisioning.services import ServiceActivationService
-
-    pending_services: list[Service] = []
-    with best_effort_atomic(logger=logger, scope="Customers", message="Pending service lookup failed"):
-        pending_services = list(Service.objects.filter(customer=customer, status="pending"))
-
-    for service in pending_services:
-        with best_effort_atomic(logger=logger, scope="Customers", message="Service activation failed"):
-            result = ServiceActivationService.activate_service(service=service, activation_reason="Customer activated")
-            if result.is_err():
-                raise RuntimeError(str(result.unwrap_err()))
-            logger.info(f"✅ [Customer] Service activated: {service.id}")
-
-
 def _handle_customer_unsuspension(customer: Customer) -> None:
     """Handle a customer returning from suspended to active."""
     with swallow_application_errors(logger=logger, scope="customers", message="_handle_customer_unsuspension failed"):
@@ -1226,11 +1213,22 @@ def _handle_customer_unsuspension(customer: Customer) -> None:
             logger.info(f"⚡ [Customer] Customer unsuspended: {customer.get_display_name()}")
 
         transaction.on_commit(lambda inst=customer: _resume_cascade_suspended_services(inst))
+        transaction.on_commit(lambda inst=customer: _dispatch_held_order_lines(inst))
 
 
 # A subscription in any of these states is not paid up. Resuming its service would be
 # giving away hosting: the money side has already decided this one should be off.
 DELINQUENT_SUBSCRIPTION_STATES = ("past_due", "paused", "cancelled", "expired")
+
+
+def _dispatch_held_order_lines(customer: Customer) -> None:
+    """Order lines held while the customer was suspended move again (ADR-0066)."""
+    with swallow_application_errors(logger=logger, scope="customers", message="_dispatch_held_order_lines failed"):
+        from apps.orders.hosting_fulfilment import dispatch_held_lines  # ADR-0007: cross-app, deferred
+
+        queued = dispatch_held_lines(customer.pk)
+        if queued:
+            logger.info(f"🔄 [Customer] Queued {queued} held order line(s) for {customer.get_display_name()}")
 
 
 def _resume_cascade_suspended_services(customer: Customer) -> None:
@@ -1268,6 +1266,15 @@ def _resume_cascade_suspended_services(customer: Customer) -> None:
 
         for service_id in candidate_ids:
             with best_effort_atomic(logger=logger, scope="Customers", message="Service resume failed"):
+                # Customer, then Service. The customer may have been suspended again since the
+                # unsuspension committed: then this cascade must leave every service off.
+                if (
+                    not Customer.all_objects.select_for_update(of=("self",))
+                    .filter(pk=customer.pk, status="active")
+                    .exists()
+                ):
+                    logger.info(f"⏭️ [Customer] {customer.pk} is no longer active; services left suspended")
+                    return
                 service = (
                     Service.objects.select_for_update(of=("self",))
                     .filter(id=service_id, status="suspended", suspension_reason=CUSTOMER_SUSPENSION_REASON)
@@ -1319,6 +1326,15 @@ def _suspend_customer_services(customer: Customer) -> None:
         # The queryset already filtered on status="active", so an Err here is a genuine
         # anomaly such as a concurrent transition, not an ordinary refusal.
         with transaction.atomic():
+            # Customer, then Service: the established lock order. Staff may have unsuspended the
+            # customer after the suspension committed and before this callback ran.
+            if (
+                not Customer.all_objects.select_for_update(of=("self",))
+                .filter(pk=customer.pk, status="suspended")
+                .exists()
+            ):
+                logger.info(f"⏭️ [Customer] {customer.pk} is no longer suspended; services left as they are")
+                return
             for service in active_services:
                 result = ServiceManagementService.manage_service(
                     str(service.id), "suspend", reason=CUSTOMER_SUSPENSION_REASON

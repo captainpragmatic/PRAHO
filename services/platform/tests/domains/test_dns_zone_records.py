@@ -80,6 +80,89 @@ class ZoneRecordIntentTests(TestCase):
         self.assertEqual(result.unwrap().number, self.zone.current_revision + 1)
         self.assertEqual(HostedZoneOperation.objects.get(status="pending").kind, "edit")
 
+    def _suspend_customer(self):
+        Customer.objects.filter(pk=self.zone.customer_id).update(status="suspended")
+        self.assertEqual(Customer.objects.get(pk=self.zone.customer_id).status, "suspended")
+
+    def _record_change(self, actor):
+        return zones.request_record_change(
+            self.zone,
+            self.zone.current_revision,
+            actor=actor,
+            name="_verify." + self.zone.name,
+            record_type="TXT",
+            rdata='"held"',
+            ttl=300,
+        )
+
+    def test_a_suspended_customer_publishes_nothing_but_still_reads_and_exports(self):
+        from apps.domains.dns_zone_lifecycle import request_nameserver_switch  # noqa: PLC0415
+
+        self._suspend_customer()
+        self.assertEqual(self._record_change(self.actor).unwrap_err(), "customer_suspended")
+        self.assertEqual(
+            request_nameserver_switch(self.zone, self.zone.current_revision, actor=self.actor).unwrap_err(),
+            "customer_suspended",
+        )
+        revision = self.zone.revisions.get(number=self.zone.current_revision)
+        self.assertEqual(
+            zones.confirm_import(
+                self.zone, revision.number, revision.manifest_digest, actor=self.actor
+            ).unwrap_err(),
+            "customer_suspended",
+        )
+        self.assertFalse(HostedZoneOperation.objects.filter(status="pending").exists())
+        self.assertTrue(zones.export_zone_file(self.zone, actor=self.actor).is_ok())
+
+    def test_staff_may_still_publish_for_a_suspended_customer(self):
+        # Staff act for us, for example to remove an abusive record, so their change runs now.
+        from apps.domains import dns_zone_tasks  # noqa: PLC0415
+
+        self._suspend_customer()
+        staff = User.objects.create_user(email="dns-staff@example.test", password="x", staff_role="admin")
+        self.assertTrue(self._record_change(staff).is_ok())
+        operation = HostedZoneOperation.objects.get(status="pending", kind="edit")
+
+        class ReachedError(Exception):
+            pass
+
+        with patch.object(dns_zone_tasks, "_apply_step", side_effect=ReachedError), self.assertRaises(ReachedError):
+            dns_zone_tasks._step(operation.pk, operation.pk)
+
+    def test_a_staff_import_keeps_its_exemption_into_activation(self):
+        # The apply a staff confirmation queued creates the activation step after it: that step runs too.
+        import uuid  # noqa: PLC0415
+        from datetime import timedelta  # noqa: PLC0415
+
+        from apps.domains import dns_zone_tasks  # noqa: PLC0415
+
+        token = uuid.uuid4()
+        apply = HostedZoneOperation.objects.create(
+            zone=self.zone,
+            revision=self.zone.revisions.get(number=self.zone.current_revision),
+            kind="apply",
+            evidence={zones.STAFF_REQUESTED: True},
+            lease_token=token,
+            lease_until=timezone.now() + timedelta(minutes=5),
+        )
+        # A zone whose import is applied but not yet activated: an activation step follows the apply.
+        self.zone.activation = {k: v for k, v in self.zone.activation.items() if k != "activated_at"}
+        self.zone.save(update_fields=["activation"])
+        self.assertFalse(self.zone.activation.get("activated_at"))
+        HostedZoneOperation.objects.filter(kind="activate").delete()
+        dns_zone_tasks._complete_apply(apply, self.zone, token)
+        child = HostedZoneOperation.objects.get(kind="activate")
+        self.assertTrue(child.evidence.get(zones.STAFF_REQUESTED))
+
+    def test_publishing_queued_before_the_suspension_waits_for_its_end(self):
+        from apps.domains import dns_zone_tasks  # noqa: PLC0415
+
+        self.assertTrue(self._record_change(self.actor).is_ok())
+        operation = HostedZoneOperation.objects.get(status="pending", kind="edit")
+        self._suspend_customer()
+        with patch.object(dns_zone_tasks, "_guard", side_effect=AssertionError("held work must not run")):
+            self.assertEqual(dns_zone_tasks._step(operation.pk, operation.pk), dns_zone_tasks.SUSPENDED_HOLD_SECONDS)
+
     def test_export_receipt_is_bound_to_real_bytes_revision_and_current_manifest(self):
         exported = zones.export_zone_file(self.zone, actor=self.actor).unwrap()
         parsed = parse_zone_file(exported, self.zone.name)

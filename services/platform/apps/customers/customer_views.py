@@ -32,6 +32,7 @@ from apps.users.services import CustomerUserService, UserCreationRequest, UserLi
 from .customer_models import Customer
 from .customer_service import CustomerService
 from .forms import CustomerCreationForm, CustomerEditForm, CustomerUserAssignmentForm
+from .lifecycle import status_actions
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -328,6 +329,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         # Navigation and access
         "breadcrumb_items": breadcrumb_items,
         "is_staff_user": user.is_staff_user,
+        "status_actions": status_actions(user, customer) if user.is_staff_user else [],
     }
 
     return render(request, "customers/detail.html", context)

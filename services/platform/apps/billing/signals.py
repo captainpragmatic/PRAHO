@@ -15,6 +15,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -1148,10 +1149,19 @@ def _activate_payment_services(payment: Payment) -> None:
                 ]
         if invoice is None:
             return
+        from apps.customers.lifecycle import hold_for_suspension  # ADR-0007: cross-app, deferred
+
         for service in services:
             with best_effort_atomic(logger=logger, scope="Payment Services", message="Failed to activate service"):
+                if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
+                    logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
+                    continue
+                # Re-read under its lock, after the customer's: the instance above may be stale.
+                fresh = Service.objects.select_for_update(of=("self",)).get(pk=service.pk)
+                if fresh.status not in ("pending", "suspended"):
+                    continue
                 result = ServiceActivationService.activate_service(
-                    service=service, activation_reason=f"Payment received for invoice {invoice.number}"
+                    service=fresh, activation_reason=f"Payment received for invoice {invoice.number}"
                 )
                 if result.is_err():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
@@ -1475,6 +1485,11 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
             # Defence behind the transition guard, and it covers more than the receipt:
             # this handler also credits payment history and activates pending services.
             return
+        # First, so no later optional step can keep it from being scheduled. It runs after the
+        # payment commits, in its own transaction, and never raises (ADR-0066).
+        from apps.customers.customer_service import activate_customer_after_payment  # ADR-0007: cross-app, deferred
+
+        transaction.on_commit(partial(activate_customer_after_payment, invoice.customer_id, invoice.pk))
         if not invoice.paid_at:
             # Required invoice data: database failures must reach the caller.
             Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
@@ -1940,9 +1955,18 @@ def _activate_pending_services(invoice: Invoice) -> None:
                 for item in order.items.filter(service__isnull=False)
                 if item.service and item.service.status == "pending" and _payment_may_activate(order, item.service)
             ]
+        from apps.customers.lifecycle import hold_for_suspension  # ADR-0007: cross-app, deferred
+
         for service in services:
             with best_effort_atomic(logger=logger, scope="Invoice Services", message="Failed to activate service"):
-                result = ServiceActivationService.activate_service(service)
+                if hold_for_suspension(service):  # paid, but hosting stays off while suspended (ADR-0066)
+                    logger.info(f"⏸️ [Service] {service.id} held after payment: its customer is suspended")
+                    continue
+                # Re-read under its lock, after the customer's: the instance above may be stale.
+                fresh = Service.objects.select_for_update(of=("self",)).get(pk=service.pk)
+                if fresh.status != "pending":
+                    continue
+                result = ServiceActivationService.activate_service(fresh)
                 if not result.is_ok():
                     raise RuntimeError(f"Service activation failed: {result.unwrap_err()}")
                 logger.info(f"⚡ [Service] Activated {service.id} after payment")

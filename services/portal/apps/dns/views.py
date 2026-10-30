@@ -11,6 +11,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.utils.cache import patch_cache_control
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
@@ -35,10 +36,10 @@ MEMBER_ROLES = TECH_ROLES | {"billing", "viewer"}
 MAX_POLLS = 12
 
 
-def _failure(request: HttpRequest, code: int) -> HttpResponse:
+def _failure(request: HttpRequest, code: int, *, suspended: bool = False) -> HttpResponse:
     allowed = {400, 403, 404, 409, 429, 503}
     status = code if code in allowed else 503
-    response = render(request, "dns/error.html", {"status": status}, status=status)
+    response = render(request, "dns/error.html", {"status": status, "suspended": suspended}, status=status)
     if request.headers.get("HX-Request") == "true":
         # HTMX leaves 4xx/5xx bodies unswapped. Its existing event listener displays this
         # notice while preserving the form and the real failure status.
@@ -46,13 +47,22 @@ def _failure(request: HttpRequest, code: int) -> HttpResponse:
             {
                 "showToast": {
                     "variant": "error",
-                    "message": _(
+                    "message": str(SUSPENDED_NOTICE)  # json.dumps cannot serialise a lazy string
+                    if suspended
+                    else _(
                         "The DNS operation could not be completed. Reload the zone and review the current information."
                     ),
                 }
             }
         )
     return response
+
+
+# Platform refuses DNS publication for a suspended customer, but keeps reads and exports open.
+SUSPENDED_NOTICE = gettext_lazy(
+    "DNS changes are paused while your account is suspended. You can still view and export your zones; "
+    "contact support to resolve the suspension."
+)
 
 
 def _access(*, write: bool = False) -> Callable[..., Any]:
@@ -69,7 +79,8 @@ def _access(*, write: bool = False) -> Callable[..., Any]:
                 else:
                     response = view(request, customer_id, user_id, *args, can_edit=role in TECH_ROLES, **kwargs)
             except PlatformAPIError as error:
-                response = _failure(request, error.status_code or 503)
+                held = (error.response_data or {}).get("error") == "customer_suspended"
+                response = _failure(request, error.status_code or 503, suspended=held)
             patch_cache_control(response, private=True, no_store=True)
             return response
 

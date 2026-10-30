@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Customers created by staff can use the Portal and become active.** Staff-created customers start as prospects, and nothing ever moved them on, while Platform refused every customer-scoped call for a customer that was not active: their people could sign in but not price a cart, pay or open a ticket. Inactive and suspended customers could not pay either. A customer's status now describes its lifecycle and decides no access (ADR-0066):
+  - A first paid invoice makes a prospect active, and a new one makes an inactive customer active again.
+  - Staff change the status from the customer page: admins and managers every transition, support suspend and unsuspend.
+  - A suspended customer's people still read, pay and open tickets, but the customer gets no new or restored hosting and its people publish no DNS changes until staff unsuspend it.
+  - "Sign in as customer" works for a customer in any status.
+  - The customer status emails greeted "Hello ," and now use the customer's name; activating a customer no longer switches on its unpaid services.
 - **The customer portal's DNS pages, DNS checks and customer view are in Romanian.** The Romanian catalogue had not been refreshed since they were added, so 151 of their strings showed in English. They are translated now, and the catalogue matches the portal's source again.
 - **Node sizes follow Hetzner's per-location availability.** Hetzner now retires server types per location (cpx11 to cpx51 are gone from hel1, fsn1, nbg1 and sin), so a deployment could pick a size the location no longer sells and fail at server creation. The provider sync now records the regions each size is sold in, and the deploy form, the `deploy_node` command and resizes offer and accept only those. Right before a new server is created or a node is resized, Hetzner is asked again; a size withdrawn since the last sync is refused before anything is written and a provider sync is queued. A sync that finds nothing orderable changes nothing.
   - **Operator action.** Run "Sync providers" after deploying. Until then every size stays offered in every active region of its provider, and the deploy-time check refuses the ones Hetzner no longer sells.

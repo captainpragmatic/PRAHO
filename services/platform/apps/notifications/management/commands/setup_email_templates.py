@@ -23,7 +23,18 @@ class Command(BaseCommand):
     # Corrections to already-seeded bodies that must reach upgrades, not only fresh
     # databases. Keyed on the exact stale text, so an operator's own edit is never
     # touched — only a body still carrying the original seeded wording is repaired.
-    STALE_SEEDED_TEXT: ClassVar[tuple[tuple[str, str], ...]] = (("{{threshold}} EUR", "{{threshold}} {{currency}}"),)
+    STALE_SEEDED_TEXT: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("{{threshold}} EUR", "{{threshold}} {{currency}}"),
+        # A customer becomes active by paying (ADR-0066), so it has already ordered.
+        (
+            "a fost activat cu succes. Puteți comanda servicii de hosting!",
+            "este acum activ. Vă mulțumim pentru prima comandă!",
+        ),
+        (
+            "account has been successfully activated. You can now order hosting services!",
+            "account is now active. Thank you for your first order!",
+        ),
+    )
 
     def _repair_stale_seeded_body(self, template: Any) -> bool:
         """Correct known-stale seeded wording in place. Returns True if changed."""
@@ -1478,7 +1489,7 @@ class Command(BaseCommand):
                 "body_html": """
                 <h2>✅ Cont activat</h2>
                 <p>Bună ziua {{customer_name}},</p>
-                <p>Contul dumneavoastră {{brand_name}} a fost activat cu succes. Puteți comanda servicii de hosting!</p>
+                <p>Contul dumneavoastră {{brand_name}} este acum activ. Vă mulțumim pentru prima comandă!</p>
                 <p>Echipa {{brand_name}}</p>
                 """,
                 "description": "Confirmare activare cont client",
@@ -1492,7 +1503,7 @@ class Command(BaseCommand):
                 "body_html": """
                 <h2>✅ Account activated</h2>
                 <p>Hello {{customer_name}},</p>
-                <p>Your {{brand_name}} account has been successfully activated. You can now order hosting services!</p>
+                <p>Your {{brand_name}} account is now active. Thank you for your first order!</p>
                 <p>The {{brand_name}} Team</p>
                 """,
                 "description": "Customer account activation confirmation",

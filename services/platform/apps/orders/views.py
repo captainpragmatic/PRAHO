@@ -811,7 +811,7 @@ def _render_order_create(
 ) -> HttpResponse:
     policy = get_selling_currency_policy()
     # Get customers and products for selection — scoped to accessible customers (H13)
-    customers = Customer.objects.filter(status="active", id__in=accessible_customer_ids).order_by("company_name")
+    customers = Customer.objects.filter(id__in=accessible_customer_ids).order_by("company_name")  # any status
     products = (
         Product.objects.filter(
             is_active=True,

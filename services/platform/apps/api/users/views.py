@@ -1566,7 +1566,13 @@ def verify_customer_access_api(request: HttpRequest, user: User) -> Response:
     except (TypeError, ValueError):
         return Response({"success": False, "error": "Invalid customer ID"}, status=400)
     membership = (
-        CustomerMembership.objects.filter(user=user, customer_id=customer_id, is_active=True, customer__status="active")
+        CustomerMembership.objects.filter(
+            # Any lifecycle status; a related lookup skips the soft-delete manager, so say it here.
+            user=user,
+            customer_id=customer_id,
+            is_active=True,
+            customer__deleted_at__isnull=True,
+        )
         .select_related("customer")
         .first()
     )

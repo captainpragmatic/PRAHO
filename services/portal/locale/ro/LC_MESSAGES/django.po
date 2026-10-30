@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-29 21:32+0200\n"
+"POT-Creation-Date: 2026-10-30 01:17+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -364,7 +364,7 @@ msgstr "Stocarea contoarelor Portalului este indisponibilă."
 msgid "Run migrate sessions --noinput and migrate common --noinput on the Portal database."
 msgstr "Executați migrate sessions --noinput și migrate common --noinput pe baza de date Portal."
 
-#: apps/common/context_processors.py:46 apps/users/views.py:826 templates/users/profile.html:5 templates/users/profile.html:9
+#: apps/common/context_processors.py:46 apps/users/views.py:837 templates/users/profile.html:5 templates/users/profile.html:9
 msgid "Account Settings"
 msgstr "Setări Cont"
 
@@ -372,7 +372,7 @@ msgstr "Setări Cont"
 msgid "Security"
 msgstr "Securitate"
 
-#: apps/common/context_processors.py:49 apps/users/views.py:1604 templates/components/mobile_header.html:135 templates/users/company_profile.html:5 templates/users/company_profile.html:11
+#: apps/common/context_processors.py:49 apps/users/views.py:1697 templates/components/mobile_header.html:135 templates/users/company_profile.html:5 templates/users/company_profile.html:11
 msgid "Company Profile"
 msgstr "Profilul companiei"
 
@@ -472,7 +472,7 @@ msgstr "DD/MM/YYYY — 23/11/2026"
 msgid "MM/DD/YYYY — 11/23/2026"
 msgstr "MM/DD/YYYY — 11/23/2026"
 
-#: apps/common/localisation.py:27 config/settings/base.py:268
+#: apps/common/localisation.py:27 config/settings/base.py:272
 msgid "English"
 msgstr "Engleză"
 
@@ -531,39 +531,39 @@ msgstr "Primim în acest moment multe solicitări. Vă rugăm să încercați di
 msgid "We're receiving many requests right now. Please try again shortly."
 msgstr "Primim în acest moment multe solicitări. Vă rugăm să încercați din nou în curând."
 
-#: apps/common/rate_limiting.py:177
+#: apps/common/rate_limiting.py:178
 msgid "Too many attempts. Please try again later."
 msgstr "Prea multe încercări. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/common/rate_limiting.py:179
+#: apps/common/rate_limiting.py:180
 msgid "Too many password reset requests. Please try again later."
 msgstr "Prea multe solicitări de resetare a parolei. Vă rugăm să încercați mai târziu."
 
-#: apps/common/rate_limiting.py:250 apps/common/rate_limiting.py:264 apps/common/rate_limiting.py:274
+#: apps/common/rate_limiting.py:251 apps/common/rate_limiting.py:265 apps/common/rate_limiting.py:275
 msgid "Too many authentication attempts. Please try again in 15 minutes."
 msgstr "Prea multe încercări de autentificare. Încercați din nou în 15 minute."
 
-#: apps/common/rate_limiting.py:282
+#: apps/common/rate_limiting.py:283
 msgid "Account temporarily locked due to too many failed attempts."
 msgstr "Contul este temporar blocat din cauza prea multor încercări eșuate."
 
-#: apps/common/rate_limiting.py:529
+#: apps/common/rate_limiting.py:534
 msgid "Too many requests in a short period. Please slow down."
 msgstr "Prea multe cereri într-un interval scurt. Vă rugăm să încetiniți."
 
-#: apps/common/rate_limiting.py:543
+#: apps/common/rate_limiting.py:548
 msgid "Rate limit exceeded. Please try again in 1 minute."
 msgstr "Limită de cereri depășită. Vă rugăm să încercați din nou în 1 minut."
 
-#: apps/common/rate_limiting.py:604
+#: apps/common/rate_limiting.py:609
 msgid "Too many cart updates. Please slow down."
 msgstr "Prea multe actualizări ale coșului. Vă rugăm să reduceți ritmul."
 
-#: apps/common/store_unavailable.py:49 apps/orders/security.py:68 apps/orders/views.py:344 apps/users/views.py:1245 apps/users/views.py:1289
+#: apps/common/store_unavailable.py:49 apps/orders/security.py:68 apps/orders/views.py:344 apps/users/views.py:1256 apps/users/views.py:1300
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/common/views.py:124
+#: apps/common/views.py:125
 #, python-format
 msgid "%(count)d day"
 msgid_plural "%(count)d days"
@@ -571,60 +571,60 @@ msgstr[0] "%(count)d zi"
 msgstr[1] "%(count)d zile"
 msgstr[2] "%(count)d de zile"
 
-#: apps/common/views.py:129
+#: apps/common/views.py:131
 #, python-format
 msgid "Until you close your browser, or up to %(remember)s if you choose to stay signed in"
 msgstr "Până la închiderea browserului sau cel mult %(remember)s dacă alegeți să rămâneți autentificat"
 
-#: apps/common/views.py:135
+#: apps/common/views.py:136
 msgid "Keeps you signed in"
 msgstr "Vă menține autentificat"
 
-#: apps/common/views.py:138
+#: apps/common/views.py:139
 msgid "Protects forms against cross-site request forgery"
 msgstr "Protejează formularele împotriva falsificării cererilor între site-uri"
 
-#: apps/common/views.py:141
+#: apps/common/views.py:142
 msgid "Your cookie choices"
 msgstr "Alegerile dvs. privind cookie-urile"
 
-#: apps/common/views.py:142
+#: apps/common/views.py:143
 msgid "Links your cookie choices to the record of them"
 msgstr "Leagă alegerile dvs. privind cookie-urile de înregistrarea lor"
 
-#: apps/common/views.py:143
+#: apps/common/views.py:144
 msgid "The language you chose"
 msgstr "Limba aleasă de dvs."
 
-#: apps/common/views.py:146
+#: apps/common/views.py:147
 msgid "Your cookie choices, kept in local storage until they are recorded"
 msgstr "Alegerile dvs. privind cookie-urile, păstrate în stocarea locală până sunt înregistrate"
 
-#: apps/common/views.py:147
+#: apps/common/views.py:148
 msgid "Until recorded"
 msgstr "Până la înregistrare"
 
-#: apps/common/views.py:151
+#: apps/common/views.py:152
 msgid "Pages opened in this tab, for the Back button, kept in session storage"
 msgstr "Paginile deschise în această filă, pentru butonul Înapoi, păstrate în stocarea sesiunii"
 
-#: apps/common/views.py:152
+#: apps/common/views.py:153
 msgid "Until the tab is closed"
 msgstr "Până la închiderea filei"
 
-#: apps/common/views.py:156
+#: apps/common/views.py:157
 msgid "On payment pages only, Stripe sets its own cookies to process the payment and prevent fraud"
 msgstr "Doar pe paginile de plată, Stripe setează propriile cookie-uri pentru a procesa plata și a preveni frauda"
 
-#: apps/common/views.py:157
+#: apps/common/views.py:158
 msgid "As Stripe sets them"
 msgstr "Așa cum le setează Stripe"
 
-#: apps/common/views.py:167
+#: apps/common/views.py:168
 msgid "Legal document"
 msgstr "Document juridic"
 
-#: apps/common/views.py:168
+#: apps/common/views.py:169
 msgid "This page cannot be shown right now. Please try again in a few minutes."
 msgstr "Această pagină nu poate fi afișată acum. Încercați din nou în câteva minute."
 
@@ -796,87 +796,87 @@ msgstr "A/AAAA: adresă. MX: prioritate țintă. TXT: text între ghilimele. SRV
 msgid "TTL (seconds)"
 msgstr "TTL (secunde)"
 
-#: apps/dns/views.py:50
+#: apps/dns/views.py:53
 msgid "The DNS operation could not be completed. Reload the zone and review the current information."
 msgstr "Operațiunea DNS nu a putut fi finalizată. Reîncărcați zona și verificați informațiile actuale."
 
-#: apps/dns/views.py:104
+#: apps/dns/views.py:115
 msgid "This zone includes record types that cannot be imported safely."
 msgstr "Această zonă conține tipuri de înregistrări care nu pot fi importate în siguranță."
 
-#: apps/dns/views.py:105
+#: apps/dns/views.py:116
 msgid "The provider cannot preserve one or more records exactly."
 msgstr "Furnizorul nu poate păstra exact una sau mai multe înregistrări."
 
-#: apps/dns/views.py:106
+#: apps/dns/views.py:117
 msgid "Records in the same set have conflicting TTL values."
 msgstr "Înregistrările din același set au valori TTL contradictorii."
 
-#: apps/dns/views.py:107
+#: apps/dns/views.py:118
 msgid "A record's TTL must be between 60 and 86400 seconds."
 msgstr "TTL-ul unei înregistrări trebuie să fie între 60 și 86400 de secunde."
 
-#: apps/dns/views.py:108
+#: apps/dns/views.py:119
 msgid "Include the original zone's SOA and apex NS records."
 msgstr "Includeți înregistrările SOA și NS de la apex ale zonei originale."
 
-#: apps/dns/views.py:109
+#: apps/dns/views.py:120
 msgid "A record name is outside this zone."
 msgstr "Un nume de înregistrare este în afara acestei zone."
 
-#: apps/dns/views.py:110
+#: apps/dns/views.py:121
 msgid "The complete zone exceeds the supported export size."
 msgstr "Zona completă depășește dimensiunea de export acceptată."
 
-#: apps/dns/views.py:111
+#: apps/dns/views.py:122
 msgid "A record set exceeds the supported limit of 128 values."
 msgstr "Un set de înregistrări depășește limita acceptată de 128 de valori."
 
-#: apps/dns/views.py:116
+#: apps/dns/views.py:127
 msgid "The zone file could not be imported safely."
 msgstr "Fișierul de zonă nu a putut fi importat în siguranță."
 
-#: apps/dns/views.py:124
+#: apps/dns/views.py:135
 msgid "Import pending"
 msgstr "Import în așteptare"
 
-#: apps/dns/views.py:125
+#: apps/dns/views.py:136
 msgid "Awaiting nameserver change"
 msgstr "Se așteaptă schimbarea serverelor de nume"
 
-#: apps/dns/views.py:126 apps/services/views.py:57 apps/services/views.py:187 templates/customers/team.html:52 templates/services/partials/dashboard_widget.html:26 templates/services/service_request_action.html:230 templates/users/profile.html:96
+#: apps/dns/views.py:137 apps/services/views.py:57 apps/services/views.py:187 templates/customers/team.html:52 templates/services/partials/dashboard_widget.html:26 templates/services/service_request_action.html:230 templates/users/profile.html:96
 msgid "Active"
 msgstr "Activ"
 
-#: apps/dns/views.py:127
+#: apps/dns/views.py:138
 msgid "Deletion in progress"
 msgstr "Ștergere în curs"
 
-#: apps/dns/views.py:128
+#: apps/dns/views.py:139
 msgid "Deleted"
 msgstr "Ștearsă"
 
-#: apps/dns/views.py:129
+#: apps/dns/views.py:140
 msgid "Needs attention"
 msgstr "Necesită atenție"
 
-#: apps/dns/views.py:131
+#: apps/dns/views.py:142
 msgid "Status unavailable"
 msgstr "Stare indisponibilă"
 
-#: apps/dns/views.py:136
+#: apps/dns/views.py:147
 msgid "Managed hosting records"
 msgstr "Înregistrări de găzduire administrate"
 
-#: apps/dns/views.py:137
+#: apps/dns/views.py:148
 msgid "Duplicate record removed"
 msgstr "Înregistrare duplicată eliminată"
 
-#: apps/dns/views.py:138
+#: apps/dns/views.py:149
 msgid "DNS record changes"
 msgstr "Modificări ale înregistrărilor DNS"
 
-#: apps/dns/views.py:141
+#: apps/dns/views.py:152
 msgid "DNS record adjustment"
 msgstr "Ajustare a înregistrării DNS"
 
@@ -1745,15 +1745,15 @@ msgstr "În curs de revizuire"
 msgid "Loading..."
 msgstr "Se încarcă..."
 
-#: apps/users/customer_view_views.py:52
+#: apps/users/customer_view_views.py:54
 msgid "This customer view cannot be opened. Open it again from the staff console; a link works once, for one minute."
 msgstr "Această vizualizare ca client nu poate fi deschisă. Deschideți-o din nou din consola echipei; un link funcționează o singură dată, timp de un minut."
 
-#: apps/users/customer_view_views.py:62
+#: apps/users/customer_view_views.py:64
 msgid "The customer view could not be opened just now. Try again shortly."
 msgstr "Vizualizarea ca client nu a putut fi deschisă acum. Încercați din nou în curând."
 
-#: apps/users/customer_view_views.py:101
+#: apps/users/customer_view_views.py:103
 msgid "Too many attempts. Wait a minute and try again."
 msgstr "Prea multe încercări. Așteptați un minut și încercați din nou."
 
@@ -1921,7 +1921,7 @@ msgstr "Accept termenii și condițiile"
 msgid "Required: Agreement to terms of service."
 msgstr "Obligatoriu: Acordul cu termenii serviciului."
 
-#: apps/users/forms.py:313 apps/users/views.py:654 apps/users/views.py:662
+#: apps/users/forms.py:313 apps/users/views.py:665 apps/users/views.py:673
 msgid "Enter a valid CUI."
 msgstr "Introduceți un CUI valid."
 
@@ -2213,365 +2213,381 @@ msgstr "Cod de verificare"
 msgid "Enter the 6-digit code from your authenticator app."
 msgstr "Introduceți codul de 6 cifre din aplicația de autentificare."
 
-#: apps/users/forms.py:990 apps/users/forms.py:999 templates/users/mfa_setup_totp.html:151
+#: apps/users/forms.py:990 apps/users/forms.py:1000 apps/users/forms.py:1016 templates/users/mfa_setup_totp.html:151
 msgid "Current password"
 msgstr "Parola actuală"
 
-#: apps/users/views.py:179
+#: apps/users/views.py:182
 msgid "Failed to initialize MFA setup. Please try again."
 msgstr "Inițializarea configurării MFA a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:188 templates/users/mfa_management.html:109 templates/users/mfa_setup_totp.html:5 templates/users/mfa_setup_totp.html:9
+#: apps/users/views.py:191 templates/users/mfa_management.html:109 templates/users/mfa_setup_totp.html:5 templates/users/mfa_setup_totp.html:9
 msgid "Set Up Authenticator App"
 msgstr "Configurați aplicația de autentificare"
 
-#: apps/users/views.py:194 templates/orders/checkout.html:505
+#: apps/users/views.py:197 templates/orders/checkout.html:505
 msgid "An error occurred. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:212 apps/users/views.py:222
+#: apps/users/views.py:215 apps/users/views.py:225
 msgid "Too many attempts. Please wait and try again."
 msgstr "Prea multe încercări. Vă rugăm să așteptați și să încercați din nou."
 
-#: apps/users/views.py:227
+#: apps/users/views.py:230
 msgid "Two-factor authentication is already on."
 msgstr "Autentificarea cu doi factori este deja activată."
 
-#: apps/users/views.py:230
+#: apps/users/views.py:233
 msgid "This setup expired. Scan the new code and try again."
 msgstr "Această configurare a expirat. Scanați noul cod și încercați din nou."
 
-#: apps/users/views.py:235
+#: apps/users/views.py:238
 msgid "The password or the code is incorrect."
 msgstr "Parola sau codul este incorect."
 
-#: apps/users/views.py:262
+#: apps/users/views.py:265
 msgid "Two-factor authentication has been enabled successfully!"
 msgstr "Autentificarea cu doi factori a fost activată cu succes!"
 
-#: apps/users/views.py:415
+#: apps/users/views.py:426
 #, python-format
 msgid "Sign in confirmed, %(name)s!"
 msgstr "Autentificare confirmată, %(name)s!"
 
-#: apps/users/views.py:418 apps/users/views.py:421
+#: apps/users/views.py:429 apps/users/views.py:432
 msgid "Sign in confirmed!"
 msgstr "Autentificare confirmată!"
 
-#: apps/users/views.py:430
+#: apps/users/views.py:441
 msgid "Invalid email address or password. Please try again."
 msgstr "Adresă de email sau parolă invalidă. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:447 apps/users/views.py:469
+#: apps/users/views.py:458 apps/users/views.py:480
 msgid "Authentication service is temporarily unavailable. Please try again later."
 msgstr "Serviciul de autentificare este temporar indisponibil. Vă rugăm să încercați mai târziu."
 
-#: apps/users/views.py:463
+#: apps/users/views.py:474
 #, python-format
 msgid "Too many login attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări de autentificare. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:476 templates/orders/order_confirmation.html:479
+#: apps/users/views.py:487 templates/orders/order_confirmation.html:479
 msgid "An unexpected error occurred. Please try again."
 msgstr "A apărut o eroare neașteptată. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:480
+#: apps/users/views.py:491
 msgid "Customer Login"
 msgstr "Autentificare client"
 
-#: apps/users/views.py:521
+#: apps/users/views.py:532
 msgid "You have been logged out successfully."
 msgstr "Ați fost deconectat cu succes."
 
-#: apps/users/views.py:554
+#: apps/users/views.py:565
 msgid "Too many registration attempts. Please try again later."
 msgstr "Prea multe încercări de înregistrare. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/users/views.py:557
+#: apps/users/views.py:568
 msgid "Registration is temporarily unavailable. Please try again in a few minutes."
 msgstr "Înregistrarea este temporar indisponibilă. Vă rugăm să încercați din nou peste câteva minute."
 
-#: apps/users/views.py:593
+#: apps/users/views.py:604
 msgid "Thank you. Check your email for a message with the next step."
 msgstr "Vă mulțumim. Verificați-vă e-mailul pentru un mesaj cu pasul următor."
 
-#: apps/users/views.py:597
+#: apps/users/views.py:608
 msgid "Registration failed. Please check your information and try again."
 msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
 
-#: apps/users/views.py:604 apps/users/views.py:607
+#: apps/users/views.py:615 apps/users/views.py:618
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr "A apărut o eroare neașteptată în timpul înregistrării. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:611
+#: apps/users/views.py:622
 msgid "Customer Registration"
 msgstr "Înregistrare client"
 
-#: apps/users/views.py:655 templates/users/register.html:64
+#: apps/users/views.py:666 templates/users/register.html:64
 msgid "The company lookup is not available right now. Fill in the details yourself."
 msgstr "Căutarea companiei nu este disponibilă acum. Completați datele manual."
 
-#: apps/users/views.py:667
+#: apps/users/views.py:678
 msgid "ANAF has no company with this CUI."
 msgstr "ANAF nu are nicio companie cu acest CUI."
 
-#: apps/users/views.py:698
+#: apps/users/views.py:709
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:729
+#: apps/users/views.py:740
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:734 apps/users/views.py:738
+#: apps/users/views.py:745 apps/users/views.py:749
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:858
+#: apps/users/views.py:869
 msgid "If an eligible account exists and email delivery is available, you will receive password reset instructions."
 msgstr "Dacă există un cont eligibil și livrarea e-mailului este disponibilă, veți primi instrucțiuni de resetare a parolei."
 
-#: apps/users/views.py:872 apps/users/views.py:946
+#: apps/users/views.py:883 apps/users/views.py:957
 msgid "Password recovery is temporarily unavailable. Please try again later."
 msgstr "Recuperarea parolei nu este disponibilă temporar. Încercați din nou mai târziu."
 
-#: apps/users/views.py:889
+#: apps/users/views.py:900
 msgid "Please check your new password and try again."
 msgstr "Verificați noua parolă și încercați din nou."
 
-#: apps/users/views.py:926
+#: apps/users/views.py:937
 msgid "Password reset successfully. Please sign in with your new password."
 msgstr "Parola a fost resetată cu succes. Autentificați-vă cu noua parolă."
 
-#: apps/users/views.py:964
+#: apps/users/views.py:975
 msgid "Registration opens once the Terms of Service are published."
 msgstr "Înregistrarea se deschide după publicarea Termenilor și condițiilor."
 
-#: apps/users/views.py:971
+#: apps/users/views.py:982
 msgid "Account confirmation is temporarily unavailable. Please try again later."
 msgstr "Confirmarea contului este temporar indisponibilă. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/users/views.py:1042
+#: apps/users/views.py:1053
 msgid "The Terms of Service have changed. Please read them again before confirming."
 msgstr "Termenii de Serviciu s-au modificat. Vă rugăm să îi citiți din nou înainte de confirmare."
 
-#: apps/users/views.py:1053
+#: apps/users/views.py:1064
 msgid "Please check the form and try again."
 msgstr "Vă rugăm să verificați formularul și să încercați din nou."
 
-#: apps/users/views.py:1059
+#: apps/users/views.py:1070
 msgid "Your account is confirmed. You can sign in now."
 msgstr "Contul dumneavoastră a fost confirmat. Vă puteți autentifica acum."
 
-#: apps/users/views.py:1100
+#: apps/users/views.py:1111
 msgid "This page was for an earlier link. Check these details and submit again."
 msgstr "Această pagină era pentru un link anterior. Verificați aceste date și trimiteți din nou."
 
-#: apps/users/views.py:1119
+#: apps/users/views.py:1130
 msgid "This link has expired or was already used."
 msgstr "Acest link a expirat sau a fost deja folosit."
 
-#: apps/users/views.py:1120
+#: apps/users/views.py:1131
 msgid "These details are no longer available. Please register again."
 msgstr "Aceste date nu mai sunt disponibile. Vă rugăm să vă înregistrați din nou."
 
-#: apps/users/views.py:1160
+#: apps/users/views.py:1171
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#: apps/users/views.py:1162
+#: apps/users/views.py:1173
 msgid "Password change failed. Check your current password and authentication code."
 msgstr "Schimbarea parolei a eșuat. Verificați parola actuală și codul de autentificare."
 
-#: apps/users/views.py:1167
+#: apps/users/views.py:1178
 #, python-format
 msgid "Too many attempts. Please try again in %(seconds)s seconds."
 msgstr "Prea multe încercări. Încercați din nou în %(seconds)s secunde."
 
-#: apps/users/views.py:1173
+#: apps/users/views.py:1184
 msgid "Password change failed. Please try again."
 msgstr "Schimbarea parolei a eșuat. Încercați din nou."
 
-#: apps/users/views.py:1203 templates/users/privacy_dashboard.html:5 templates/users/privacy_dashboard.html:9 templates/users/profile.html:255
+#: apps/users/views.py:1214 templates/users/privacy_dashboard.html:5 templates/users/privacy_dashboard.html:9 templates/users/profile.html:255
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:1228
+#: apps/users/views.py:1239
 msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
-#: apps/users/views.py:1236
+#: apps/users/views.py:1247
 msgid "Your data export is being prepared. Refresh this page in a few minutes to download it."
 msgstr "Exportul datelor dvs. este în pregătire. Reîncărcați această pagină în câteva minute pentru a-l descărca."
 
-#: apps/users/views.py:1239
+#: apps/users/views.py:1250
 msgid "Failed to create export request. Please try again."
 msgstr "Nu s-a putut crea cererea de export. Vă rugăm să încercați din nou."
 
 #  Duplicate merged with apps/common/rate_limiting.py entry above
 #  msgid "Service temporarily unavailable. Please try again later."
-#: apps/users/views.py:1248
+#: apps/users/views.py:1259
 msgid "Error processing your data export request. Please try again."
 msgstr "Eroare la procesarea cererii dvs. de export de date. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1268 templates/users/data_export.html:5 templates/users/data_export.html:9 templates/users/privacy_dashboard.html:60 templates/users/profile.html:268
+#: apps/users/views.py:1279 templates/users/data_export.html:5 templates/users/data_export.html:9 templates/users/privacy_dashboard.html:60 templates/users/profile.html:268
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:1292 templates/users/data_export.html:150
+#: apps/users/views.py:1303 templates/users/data_export.html:150
 msgid "This export is too large to download here. Contact support to receive it."
 msgstr "Acest export este prea mare pentru a fi descărcat aici. Contactați suportul pentru a-l primi."
 
-#: apps/users/views.py:1295
+#: apps/users/views.py:1306
 msgid "This export is not available to download. Request a new one below."
 msgstr "Acest export nu poate fi descărcat. Solicitați unul nou mai jos."
 
-#: apps/users/views.py:1346 templates/users/consent_history.html:5 templates/users/consent_history.html:9 templates/users/privacy_dashboard.html:73 templates/users/profile.html:281
+#: apps/users/views.py:1357 templates/users/consent_history.html:5 templates/users/consent_history.html:9 templates/users/privacy_dashboard.html:73 templates/users/profile.html:281
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:1382
+#: apps/users/views.py:1393
 msgid "Multi-Factor Authentication"
 msgstr "Autentificare multifactor"
 
-#: apps/users/views.py:1430 apps/users/views.py:1448
+#: apps/users/views.py:1441 apps/users/views.py:1459
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:1452
+#: apps/users/views.py:1463
 msgid "Could not regenerate codes. Check your password and authentication code."
 msgstr "Nu s-au putut regenera codurile. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1479
+#: apps/users/views.py:1523
+msgid "The password or code is not right."
+msgstr "Parola sau codul nu sunt corecte."
+
+#: apps/users/views.py:1527
+msgid "We could not check that right now. Please try again in a moment."
+msgstr "Nu am putut verifica acum. Vă rugăm să încercați din nou în câteva momente."
+
+#: apps/users/views.py:1545
+#, python-format
+msgid "You have %(count)s backup code left."
+msgid_plural "You have %(count)s backup codes left."
+msgstr[0] "Vă mai rămâne %(count)s cod de rezervă."
+msgstr[1] "Vă mai rămân %(count)s coduri de rezervă."
+msgstr[2] "Vă mai rămân %(count)s de coduri de rezervă."
+
+#: apps/users/views.py:1572
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:1482 apps/users/views.py:1499
+#: apps/users/views.py:1575 apps/users/views.py:1592
 msgid "Could not disable MFA. Check your password and authentication code."
 msgstr "Nu s-a putut dezactiva MFA. Verificați parola și codul de autentificare."
 
-#: apps/users/views.py:1495
+#: apps/users/views.py:1588
 msgid "Two-factor authentication is required for staff accounts, so it cannot be disabled."
 msgstr "Autentificarea în doi pași este obligatorie pentru conturile de personal, deci nu poate fi dezactivată."
 
-#: apps/users/views.py:1518
+#: apps/users/views.py:1611
 msgid "Please select a customer to view profile."
 msgstr "Selectați un client pentru a vizualiza profilul."
 
-#: apps/users/views.py:1588
+#: apps/users/views.py:1681
 msgid "Unable to load company profile data."
 msgstr "Nu s-au putut încărca datele profilului companiei."
 
-#: apps/users/views.py:1596
+#: apps/users/views.py:1689
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la încărcarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1599
+#: apps/users/views.py:1692
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:1628
+#: apps/users/views.py:1721
 msgid "Please select a customer to edit profile."
 msgstr "Selectați un client pentru a edita profilul."
 
-#: apps/users/views.py:1640
+#: apps/users/views.py:1733
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1684
+#: apps/users/views.py:1777
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca datele curente ale companiei."
 
-#: apps/users/views.py:1688
+#: apps/users/views.py:1781
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la încărcarea datelor companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1713
+#: apps/users/views.py:1806
 msgid "Company profile updated successfully!"
 msgstr "Profilul companiei a fost actualizat cu succes!"
 
-#: apps/users/views.py:1733
+#: apps/users/views.py:1826
 #, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Actualizarea profilului a eșuat: {}"
 
-#: apps/users/views.py:1739
+#: apps/users/views.py:1832
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1742
+#: apps/users/views.py:1835
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1744
+#: apps/users/views.py:1837
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1749 templates/users/company_profile.html:25 templates/users/company_profile_edit.html:5 templates/users/company_profile_edit.html:11
+#: apps/users/views.py:1842 templates/users/company_profile.html:25 templates/users/company_profile_edit.html:5 templates/users/company_profile_edit.html:11
 msgid "Edit Company Profile"
 msgstr "Editare profil companie"
 
-#: apps/users/views.py:1778
+#: apps/users/views.py:1871
 msgid "Please select a valid customer."
 msgstr "Selectați un client valid."
 
-#: apps/users/views.py:1802
+#: apps/users/views.py:1895
 msgid "Customer access verification failed. Please try again."
 msgstr "Verificarea accesului clientului a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1811
+#: apps/users/views.py:1904
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1826
+#: apps/users/views.py:1919
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-a putut verifica accesul clientului. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1867 templates/components/customer_selector.html:21 templates/components/customer_selector.html:72 templates/customers/team.html:73 templates/customers/team_invite.html:57
+#: apps/users/views.py:1960 templates/components/customer_selector.html:21 templates/components/customer_selector.html:72 templates/customers/team.html:73 templates/customers/team_invite.html:57
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1868
+#: apps/users/views.py:1961
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1869
+#: apps/users/views.py:1962
 msgid "Billing Manager"
 msgstr "Manager facturare"
 
-#: apps/users/views.py:1870
+#: apps/users/views.py:1963
 msgid "Technical Manager"
 msgstr "Manager tehnic"
 
-#: apps/users/views.py:1871 templates/components/customer_selector.html:24 templates/components/customer_selector.html:75 templates/customers/team.html:70 templates/customers/team_invite.html:54
+#: apps/users/views.py:1964 templates/components/customer_selector.html:24 templates/components/customer_selector.html:75 templates/customers/team.html:70 templates/customers/team_invite.html:54
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1875
+#: apps/users/views.py:1968
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Comutat la {customer} ({role})"
 
-#: apps/users/views.py:1946
+#: apps/users/views.py:2039
 #, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1969
+#: apps/users/views.py:2062
 #, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Crearea companiei a eșuat: {}"
 
-#: apps/users/views.py:1975
+#: apps/users/views.py:2068
 msgid "Error creating company. Please try again."
 msgstr "Eroare la crearea companiei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:1979 templates/users/create_company.html:5 templates/users/create_company.html:273 templates/users/profile.html:200
+#: apps/users/views.py:2072 templates/users/create_company.html:5 templates/users/create_company.html:273 templates/users/profile.html:200
 msgid "Create Company"
 msgstr "Creați compania"
 
-#: config/settings/base.py:269
+#: config/settings/base.py:273
 msgid "Română"
 msgstr "Română"
 
@@ -3956,26 +3972,30 @@ msgid "DNS management"
 msgstr "Administrare DNS"
 
 #: templates/dns/error.html:7
+msgid "DNS changes are paused while your account is suspended. You can still view and export your zones; contact support to resolve the suspension."
+msgstr "Modificările DNS sunt suspendate cât timp contul dumneavoastră este suspendat. Puteți în continuare să vă vizualizați și să vă exportați zonele; contactați suportul pentru a rezolva suspendarea."
+
+#: templates/dns/error.html:9
 msgid "You do not have permission to perform this DNS operation."
 msgstr "Nu aveți permisiunea să efectuați această operațiune DNS."
 
-#: templates/dns/error.html:9
+#: templates/dns/error.html:11
 msgid "This DNS resource was not found."
 msgstr "Această resursă DNS nu a fost găsită."
 
-#: templates/dns/error.html:11
+#: templates/dns/error.html:13
 msgid "The DNS configuration changed or this operation is not ready. Reload the zone and review the current information."
 msgstr "Configurația DNS s-a schimbat sau această operațiune nu este pregătită. Reîncărcați zona și verificați informațiile actuale."
 
-#: templates/dns/error.html:13
+#: templates/dns/error.html:15
 msgid "Review the form and its required confirmations before trying again."
 msgstr "Verificați formularul și confirmările obligatorii înainte de a încerca din nou."
 
-#: templates/dns/error.html:15
+#: templates/dns/error.html:17
 msgid "DNS management is temporarily unavailable. Try again later."
 msgstr "Administrarea DNS este temporar indisponibilă. Încercați din nou mai târziu."
 
-#: templates/dns/error.html:18
+#: templates/dns/error.html:20
 msgid "Return to DNS zones"
 msgstr "Înapoi la zonele DNS"
 
@@ -6135,6 +6155,18 @@ msgstr "Actualizările informațiilor de contact vor fi reflectate în toate com
 msgid "All information is encrypted and stored securely"
 msgstr "Toate informațiile sunt criptate și stocate în siguranță"
 
+#: templates/users/confirm_identity.html:3 templates/users/confirm_identity.html:6
+msgid "Confirm it is you"
+msgstr "Confirmați că sunteți dumneavoastră"
+
+#: templates/users/confirm_identity.html:7
+msgid "This action needs your password again. You will go back to where you were."
+msgstr "Această acțiune necesită din nou parola dumneavoastră. Veți reveni apoi unde erați."
+
+#: templates/users/confirm_identity.html:18
+msgid "Confirm"
+msgstr "Confirmă"
+
 #: templates/users/consent_history.html:9
 msgid "View and manage your GDPR consents and marketing preferences"
 msgstr "Vizualizați și gestionați acordurile GDPR și preferințele de marketing"
@@ -7000,33 +7032,6 @@ msgstr "Înregistrați-vă din nou"
 #: tests/common/pagination_assertions.py:20
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
-
-#: templates/users/confirm_identity.html
-msgid "Confirm it is you"
-msgstr "Confirmați că sunteți dumneavoastră"
-
-#: templates/users/confirm_identity.html
-msgid "This action needs your password again. You will go back to where you were."
-msgstr "Această acțiune necesită din nou parola dumneavoastră. Veți reveni apoi unde erați."
-
-#: templates/users/confirm_identity.html
-msgid "Confirm"
-msgstr "Confirmă"
-
-#: apps/users/views.py
-msgid "The password or code is not right."
-msgstr "Parola sau codul nu sunt corecte."
-
-#: apps/users/views.py
-msgid "We could not check that right now. Please try again in a moment."
-msgstr "Nu am putut verifica acum. Vă rugăm să încercați din nou în câteva momente."
-
-#: apps/users/views.py
-msgid "You have %(count)s backup code left."
-msgid_plural "You have %(count)s backup codes left."
-msgstr[0] "Vă mai rămâne %(count)s cod de rezervă."
-msgstr[1] "Vă mai rămân %(count)s coduri de rezervă."
-msgstr[2] "Vă mai rămân %(count)s de coduri de rezervă."
 
 #~ msgid "Romanian phone number (+40.XX.XXX.XXXX)"
 #~ msgstr "Număr de telefon din România (+40.XX.XXX.XXXX)"

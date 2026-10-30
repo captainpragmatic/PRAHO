@@ -164,6 +164,8 @@ def request_record_change(
         current = lock_data_zone(zone, actor)
         if current is None:
             return Err("zone_access_denied")
+        if service.publication_held(current.customer_id, actor):
+            return Err("customer_suspended")
         if current.current_revision != expected_revision:
             return Err("stale_import_revision")
         refusal = _editable(current)
@@ -234,7 +236,10 @@ def request_record_change(
         current.readiness = {}
         current.save(update_fields=["current_revision", "confirmed_revision", "readiness", "updated_at"])
         operation = HostedZoneOperation.objects.create(
-            zone=current, revision=revision, kind="edit", evidence={"prior_manifest": before}
+            zone=current,
+            revision=revision,
+            kind="edit",
+            evidence={"prior_manifest": before, **service.staff_evidence(actor)},
         )
         service._audit(
             current,

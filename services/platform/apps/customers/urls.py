@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import customer_view_views, views
+from . import customer_view_views, status_views, views
 
 app_name = "customers"
 
@@ -20,6 +20,7 @@ urlpatterns = [
     path("<int:customer_id>/", views.customer_detail, name="detail"),
     path("<int:customer_id>/edit/", views.customer_edit, name="edit"),
     path("<int:customer_id>/delete/", views.customer_delete, name="delete"),
+    path("<int:customer_id>/status/<str:action>/", status_views.customer_status_change, name="status_change"),
     # Customer Profile Management
     path("<int:customer_id>/tax-profile/", views.customer_tax_profile, name="tax_profile"),
     path("<int:customer_id>/tax-profile/anaf/", views.customer_anaf_verify, name="anaf_verify"),

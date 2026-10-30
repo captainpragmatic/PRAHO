@@ -23,7 +23,23 @@
                 • {% trans 'Status' %}: {{ customer.get_status_display }}
             </p>
         </div>
-        <div>
+        <div class="flex flex-wrap items-center gap-2">
+            {% for action in status_actions %}
+                {% if action == "activate" %}{% trans "Activate" as status_label %}{% trans "Mark this prospect as an active customer?" as status_message %}
+                {% elif action == "deactivate" %}{% trans "Deactivate" as status_label %}{% trans "Mark this customer as inactive? Its people keep their access." as status_message %}
+                {% elif action == "reactivate" %}{% trans "Reactivate" as status_label %}{% trans "Mark this customer as active again?" as status_message %}
+                {% elif action == "suspend" %}{% trans "Suspend" as status_label %}{% trans "Suspend this customer? All its hosting is suspended too, and it gets no new hosting or DNS changes until unsuspended. Its people can still sign in, pay and open tickets." as status_message %}
+                {% else %}{% trans "Unsuspend" as status_label %}{% trans "Unsuspend this customer? Hosting suspended with it is resumed." as status_message %}{% endif %}
+                {% trans "Change customer status" as status_title %}
+                <form id="status-form-{{ action }}" method="post" action="{% url 'customers:status_change' customer.pk action %}" class="inline">
+                    {% csrf_token %}
+                    {# tmpl-allow TMPL002: data-title, data-message and data-confirm-text carry translated prose and data-submit-form a per-action form id; attrs takes one literal string #}
+                    <button type="button" class="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded {% if action == 'suspend' or action == 'deactivate' %}bg-amber-900 text-amber-200 hover:bg-amber-800{% else %}bg-slate-700 text-slate-100 hover:bg-slate-600{% endif %} transition-colors"
+                      data-action="confirm-dangerous" data-title="{{ status_title|force_escape }}" data-message="{{ status_message|force_escape }}" data-confirm-text="{{ status_label|force_escape }}" data-submit-form="status-form-{{ action }}">
+                        {{ status_label|force_escape }}
+                    </button>
+                </form>
+            {% endfor %}
             {% url 'customers:edit' customer.pk as edit_url %}
             {% trans "Edit Customer" as bt1 %}{% button bt1 variant="primary" href=edit_url icon="edit" %}
         </div>
@@ -262,11 +278,11 @@
                             <div class="flex gap-2">
                                 {% if request.user.staff_role == 'admin' or request.user.staff_role == 'support' %}
                                     {% trans "Sign in as customer" as customer_view_label %}
-                                    {% if customer.status == 'active' and membership.is_active and membership.user.is_active and not membership.user.is_staff_user %}
+                                    {% if membership.is_active and membership.user.is_active and not membership.user.is_staff_user %}
                                         {% url 'customers:customer_view_start' customer.pk membership.user.pk as customer_view_url %}
                                         {% button customer_view_label|force_escape href=customer_view_url variant="secondary" size="xs" icon="eye" %}
                                     {% else %}
-                                        {% if customer.status != 'active' %}{% trans "Only an active customer's portal can be opened." as customer_view_why %}{% else %}{% trans "Only an active member who is not staff can be viewed." as customer_view_why %}{% endif %}
+                                        {% trans "Only an active member who is not staff can be viewed." as customer_view_why %}
                                         <span title="{{ customer_view_why|force_escape }}">{% button customer_view_label|force_escape variant="secondary" size="xs" icon="eye" disabled=True %}</span>
                                     {% endif %}
                                 {% endif %}

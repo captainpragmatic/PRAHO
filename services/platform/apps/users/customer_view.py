@@ -47,7 +47,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 STAFF_ROLES = frozenset({"admin", "support"})
-CUSTOMER_STATUSES = frozenset({"active"})  # PRAHO customers start as "prospect"; see ADR-0065
 REASON_CATEGORIES = frozenset(value for value, _label in CustomerViewGrant.REASON_CHOICES)
 MIN_REASON, MAX_REASON, MAX_TICKET_REFERENCE = 10, 500, 100
 HOURLY_LIMIT = 20
@@ -128,9 +127,12 @@ def staff_blockers(
 
 
 def target_refusal(target: User, customer: Customer) -> str:
-    """Why this member's portal cannot be opened, or an empty string."""
-    if customer.status not in CUSTOMER_STATUSES or getattr(customer, "deleted_at", None) is not None:
-        return _("Only an active customer's portal can be opened.")
+    """Why this member's portal cannot be opened, or an empty string.
+
+    The customer's lifecycle status does not matter: whatever its people can see, staff can see.
+    """
+    if getattr(customer, "deleted_at", None) is not None:
+        return _("This customer has been deleted.")
     if not target.is_active or target.is_staff_user:
         return _("Only an active customer member who is not staff can be viewed.")
     if not CustomerMembership.objects.filter(user=target, customer=customer, is_active=True).exists():

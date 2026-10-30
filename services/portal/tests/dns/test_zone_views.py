@@ -357,6 +357,19 @@ class DnsZoneViewsTests(SimpleTestCase):
         self.assertNotIn("node-secret", response["HX-Trigger"])
         self.assertNotContains(response, "node-secret", status_code=409)
 
+    def test_a_suspended_customer_is_told_why_dns_changes_are_paused(self):
+        notice = "DNS changes are paused while your account is suspended"
+        self.action.side_effect = PlatformAPIError(
+            "refused", status_code=409, response_data={"success": False, "error": "customer_suspended"}
+        )
+        page = self.client.post(self.path + "crosscheck/", {"expected_revision": 2})
+        self.assertContains(page, notice, status_code=409)
+        htmx = self.client.post(self.path + "crosscheck/", {"expected_revision": 2}, HTTP_HX_REQUEST="true")
+        self.assertIn(notice, htmx["HX-Trigger"])
+        # Any other refusal keeps the general notice.
+        self.action.side_effect = PlatformAPIError("refused", status_code=409, response_data={"error": "stale"})
+        self.assertNotContains(self.client.post(self.path + "crosscheck/", {"expected_revision": 2}), notice, status_code=409)
+
     def test_nameserver_instructions_require_fresh_ready_receipt(self):
         self.read.return_value = zone_payload(status="pending_import", nameservers=[], pending=True)
         response = self.client.get(self.path)

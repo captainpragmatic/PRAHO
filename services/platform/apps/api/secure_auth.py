@@ -108,10 +108,15 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> tuple[dict[str,
 
 
 def _validate_customer_exists(customer_id: str | int) -> tuple[Customer | None, Response | None]:
-    """Validate that customer exists and is active"""
+    """The customer, unless it does not exist or was deleted.
+
+    Its status is not checked: status describes the customer's lifecycle (prospect, active,
+    inactive, suspended), and a prospect must reach the API to price a cart, a suspended one to pay.
+    Access is the member's user and membership. ``Customer.objects`` hides soft-deleted customers.
+    """
     try:
         customer_id = int(customer_id)
-        customer = Customer.objects.get(id=customer_id, status="active")
+        customer = Customer.objects.get(id=customer_id)
         return customer, None
 
     except (ValueError, TypeError):
@@ -119,7 +124,7 @@ def _validate_customer_exists(customer_id: str | int) -> tuple[Customer | None, 
         return None, _uniform_error_response()
 
     except Customer.DoesNotExist:
-        logger.warning(f"🚨 [API Security] Customer not found or inactive: {customer_id}")
+        logger.warning(f"🚨 [API Security] Customer not found or deleted: {customer_id}")
         return None, _uniform_error_response()
 
 
