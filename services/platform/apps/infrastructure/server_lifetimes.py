@@ -6,6 +6,7 @@ as the owner's row write beside it, and after it: a worker that lost its lease r
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +28,12 @@ def _model() -> type[NodeServerLifetime]:
 
 def _new(deployment: NodeDeployment, size: NodeSize, started_at: datetime, **fields: Any) -> NodeServerLifetime:
     return _model().objects.create(
-        deployment=deployment, node_size=size, monthly_cost_eur=size.monthly_cost_eur, started_at=started_at, **fields
+        deployment=deployment,
+        correlation_id=deployment.correlation_id,
+        node_size=size,
+        monthly_cost_eur=size.monthly_cost_eur,
+        started_at=started_at,
+        **fields,
     )
 
 
@@ -114,7 +120,7 @@ def close_server_lifetimes(
         return open_rows.update(ended_at=now, updated_at=now)
 
 
-def open_lifetime_id(deployment: NodeDeployment, server_id: str) -> Any:
+def open_lifetime_id(deployment: NodeDeployment, server_id: str) -> uuid.UUID | None:
     """The open lifetime of ``server_id``, or None (a row whose window predates lifetimes)."""
     return (
         _model()
@@ -124,7 +130,7 @@ def open_lifetime_id(deployment: NodeDeployment, server_id: str) -> Any:
     )
 
 
-def split_lifetime_for_resize(lifetime_id: Any, server_id: str, new_size: NodeSize) -> bool:
+def split_lifetime_for_resize(lifetime_id: uuid.UUID | None, server_id: str, new_size: NodeSize) -> bool:
     """A resize finished: close the lifetime at the old rate and open its successor at the new one.
 
     Only while that lifetime is still open for that server: a teardown or re-deploy that closed it meanwhile is
@@ -175,6 +181,9 @@ def start_lifetimes_at_resize(
 
 
 def delete_unconfirmed_lifetimes(deployment: NodeDeployment) -> int:
-    """A never-created attestation: open lifetimes with no confirmed server billed nothing."""
-    deleted, _ = _model().objects.filter(deployment=deployment, ended_at__isnull=True, server_id="").delete()
+    """A never-created attestation: the attested attempt's unconfirmed windows, open or already closed by a teardown,
+    billed nothing. Windows of earlier attempts stay."""
+    deleted, _ = (
+        _model().objects.filter(deployment=deployment, correlation_id=deployment.correlation_id, server_id="").delete()
+    )
     return int(deleted)

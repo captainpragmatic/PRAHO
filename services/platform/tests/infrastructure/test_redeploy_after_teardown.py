@@ -70,7 +70,7 @@ class RedeployAfterTeardownTests(TestCase):
     def test_an_open_lifetime_refuses(self) -> None:
         deployment = torn_down()
         NodeServerLifetime.objects.create(
-            deployment=deployment, server_id="srv-1", node_size=deployment.node_size, monthly_cost_eur=3,
+            deployment=deployment, correlation_id=deployment.correlation_id, server_id="srv-1", node_size=deployment.node_size, monthly_cost_eur=3,
             started_at=STARTED,
         )
         result, gateway = redeploy(deployment, new_size(deployment, "cpx22"))

@@ -7,6 +7,7 @@ current attempt, which re-deploy needs.
 
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -73,7 +74,7 @@ class NeverCreatedAttestationTests(TestCase):
         h = Harness()
         deployment = staging_002()
         NodeServerLifetime.objects.create(
-            deployment=deployment, server_id="", node_size=deployment.node_size, monthly_cost_eur=3,
+            deployment=deployment, correlation_id=deployment.correlation_id, server_id="", node_size=deployment.node_size, monthly_cost_eur=3,
             started_at=LONG_AGO,
         )
         self.assertTrue(h.run(deployment, attest_never_created=True, attest_no_resources=True).is_ok())
@@ -96,7 +97,7 @@ class AbsenceProofTests(TestCase):
         h = Harness()
         deployment = staging_001()
         NodeServerLifetime.objects.create(
-            deployment=deployment, server_id="srv-1", node_size=deployment.node_size, monthly_cost_eur=3,
+            deployment=deployment, correlation_id=deployment.correlation_id, server_id="srv-1", node_size=deployment.node_size, monthly_cost_eur=3,
             started_at=LONG_AGO,
         )
         self.assertTrue(h.run(deployment, evidence="").is_ok())
@@ -172,7 +173,7 @@ class AttestationCostTests(TestCase):
         h = Harness()
         deployment = staging_002()
         NodeServerLifetime.objects.create(
-            deployment=deployment, server_id="", node_size=deployment.node_size, monthly_cost_eur=Decimal("7.30"),
+            deployment=deployment, correlation_id=deployment.correlation_id, server_id="", node_size=deployment.node_size, monthly_cost_eur=Decimal("7.30"),
             started_at=LONG_AGO - timedelta(days=3),
         )
         service = CostTrackingService()
@@ -205,3 +206,21 @@ class TeardownProofNeedsASearchTests(TestCase):
         h.deployment.refresh_from_db()
         self.assertTrue(h.destroy().is_ok())
         self.assertIsNone(h.row().resources_proved_absent_for)
+
+
+class AttestationAfterTeardownTests(TestCase):
+    def test_an_unconfirmed_window_a_teardown_closed_is_removed_by_the_attestation(self) -> None:
+        h = Harness()
+        deployment = staging_002()
+        earlier_attempt = uuid.uuid4()
+        for attempt, ended in ((deployment.correlation_id, LONG_AGO), (earlier_attempt, LONG_AGO)):
+            NodeServerLifetime.objects.create(
+                deployment=deployment, server_id="", node_size=deployment.node_size, monthly_cost_eur=3,
+                started_at=LONG_AGO - timedelta(hours=1), ended_at=ended, correlation_id=attempt,
+            )
+        self.assertTrue(h.run(deployment, attest_never_created=True, attest_no_resources=True).is_ok())
+        # Only the attested attempt's windows go; an earlier attempt's (already settled) window stays.
+        self.assertEqual(
+            list(NodeServerLifetime.objects.filter(deployment=deployment).values_list("correlation_id", flat=True)),
+            [earlier_attempt],
+        )

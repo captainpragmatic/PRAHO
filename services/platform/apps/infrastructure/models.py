@@ -933,6 +933,8 @@ class NodeServerLifetime(models.Model):
         NodeDeployment, on_delete=models.CASCADE, related_name="server_lifetimes", verbose_name=_("Deployment")
     )
     server_id = models.CharField(max_length=100, blank=True, default="", verbose_name=_("Provider Server ID"))
+    # The attempt that opened the window: a never-created attestation removes only its own attempt's windows.
+    correlation_id = models.UUIDField(verbose_name=_("Attempt"))
     node_size = models.ForeignKey(NodeSize, on_delete=models.PROTECT, related_name="+", verbose_name=_("Size"))
     monthly_cost_eur = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Monthly Cost (EUR)"))
     started_at = models.DateTimeField(verbose_name=_("Started At"))

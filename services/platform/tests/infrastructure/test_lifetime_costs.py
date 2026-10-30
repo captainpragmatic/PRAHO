@@ -21,7 +21,7 @@ def at(day: int, hour: int = 0) -> datetime:
 
 def lifetime(deployment: NodeDeployment, rate: str, start: datetime, end: datetime | None, sid: str = "s") -> None:
     NodeServerLifetime.objects.create(
-        deployment=deployment, server_id=sid, node_size=deployment.node_size, monthly_cost_eur=Decimal(rate),
+        deployment=deployment, correlation_id=deployment.correlation_id, server_id=sid, node_size=deployment.node_size, monthly_cost_eur=Decimal(rate),
         started_at=start, ended_at=end,
     )
 

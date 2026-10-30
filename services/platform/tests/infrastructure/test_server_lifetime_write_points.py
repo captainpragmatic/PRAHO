@@ -93,11 +93,11 @@ class TeardownWritePointTests(TestCase):
     def test_teardown_closes_every_open_lifetime_including_an_unconfirmed_one(self) -> None:
         h = Harness()
         NodeServerLifetime.objects.create(
-            deployment=h.deployment, server_id="srv-1", node_size=h.deployment.node_size, monthly_cost_eur=3,
+            deployment=h.deployment, correlation_id=h.deployment.correlation_id, server_id="srv-1", node_size=h.deployment.node_size, monthly_cost_eur=3,
             started_at=timezone.now() - timedelta(hours=2),
         )
         NodeServerLifetime.objects.create(
-            deployment=h.deployment, server_id="", node_size=h.deployment.node_size, monthly_cost_eur=3,
+            deployment=h.deployment, correlation_id=h.deployment.correlation_id, server_id="", node_size=h.deployment.node_size, monthly_cost_eur=3,
             started_at=timezone.now() - timedelta(hours=1),
         )
         self.assertTrue(h.destroy().is_ok())
@@ -109,7 +109,7 @@ class ResizeWritePointTests(TestCase):
     def setUp(self) -> None:
         self.deployment = _create_deployment("completed", external_node_id="srv-1")
         self.lifetime = NodeServerLifetime.objects.create(
-            deployment=self.deployment, server_id="srv-1", node_size=self.deployment.node_size,
+            deployment=self.deployment, correlation_id=self.deployment.correlation_id, server_id="srv-1", node_size=self.deployment.node_size,
             monthly_cost_eur=Decimal("3.29"), started_at=timezone.now() - timedelta(days=3),
         )
         self.bigger = NodeSize.objects.create(
