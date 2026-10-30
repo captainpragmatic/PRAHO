@@ -65,7 +65,7 @@ def backfill_lifecycle_metadata(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('infrastructure', '0003_ssh_transport_state'),
+        ('infrastructure', '0004_node_size_available_regions'),
     ]
 
     operations = [

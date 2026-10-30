@@ -15,7 +15,7 @@ from django.test import TestCase
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
 from tests.infrastructure.test_deployment_state_machine import _create_deployment
 
-backfill_module = importlib.import_module("apps.infrastructure.migrations.0004_deployment_lifecycle_metadata")
+backfill_module = importlib.import_module("apps.infrastructure.migrations.0005_deployment_lifecycle_metadata")
 
 
 def _log(deployment: NodeDeployment, message: str, phase: str, level: str = "INFO") -> None:
