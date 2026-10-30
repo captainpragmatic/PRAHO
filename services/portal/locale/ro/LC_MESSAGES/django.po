@@ -7033,6 +7033,18 @@ msgstr "Înregistrați-vă din nou"
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
 
+#: templates/users/customer_view_ended.html
+msgid "Customer view ended"
+msgstr "Vizualizarea clientului s-a încheiat"
+
+#: templates/users/customer_view_ended.html
+msgid "Taking you back to the staff console."
+msgstr "Vă întoarcem la consola personalului."
+
+#: templates/users/customer_view_ended.html
+msgid "Back to the staff console"
+msgstr "Înapoi la consola personalului"
+
 #~ msgid "Romanian phone number (+40.XX.XXX.XXXX)"
 #~ msgstr "Număr de telefon din România (+40.XX.XXX.XXXX)"
 

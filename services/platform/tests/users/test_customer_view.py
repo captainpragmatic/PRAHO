@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import URLPattern, URLResolver, get_resolver, reverse
 from django.utils import timezone
 
@@ -58,6 +58,13 @@ class CustomerViewFixture(TestCase):
         match = re.search(rb'name="code" value="([A-Za-z0-9_-]{43})"', response.content)
         assert match is not None, "the handoff page carries the one-time code"
         return match.group(1).decode()
+
+
+class PortalReturnPathTests(SimpleTestCase):
+    def test_the_customer_page_is_where_the_portal_sends_an_ended_view(self) -> None:
+        # The portal builds this path itself (apps/users/customer_view_views.PLATFORM_CUSTOMER_PATH);
+        # moving the page here breaks the way back from every customer view.
+        self.assertEqual(reverse("customers:detail", args=[42]), "/customers/42/")
 
 
 @override_settings(PORTAL_PUBLIC_ORIGIN=PORTAL, CUSTOMER_VIEW_ENABLED=True)

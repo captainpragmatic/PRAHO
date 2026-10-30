@@ -74,6 +74,20 @@ class TestButtonAttributeParity(TestCase):
         )
 
 
+class TestCustomerViewReturnPath(TestCase):
+    """An ended customer view sends its tab to the customer's Platform page, a path the portal builds itself."""
+
+    def test_the_portal_s_path_is_platform_s_customer_page(self) -> None:
+        portal = (REPO_ROOT / "services/portal/apps/users/customer_view_views.py").read_text()
+        found = re.search(r'^PLATFORM_CUSTOMER_PATH = "([^"]+)"$', portal, re.M)
+        assert found is not None, "the portal names Platform's customer page"
+        root_urls = (REPO_ROOT / "services/platform/config/urls.py").read_text()
+        customer_urls = (REPO_ROOT / "services/platform/apps/customers/urls.py").read_text()
+        self.assertIn('path("customers/", include("apps.customers.urls"))', root_urls)
+        self.assertIn('path("<int:customer_id>/", views.customer_detail, name="detail")', customer_urls)
+        self.assertEqual(found.group(1), "/customers/{id}/")
+
+
 class TestMaintenanceMarkerParity(TestCase):
     """The platform writes a machine-readable maintenance marker; the portal reads it.
 

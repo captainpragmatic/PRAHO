@@ -232,7 +232,9 @@ class GateTests(TestCase):
         request = self.request("GET", "/dashboard/")
         with override_settings(CUSTOMER_VIEW_ENABLED=False):
             response, view = self.through(request)
-        self.assertEqual(response.status_code, 302)
+        # The tab goes back to the customer's Platform page (tests/users/test_customer_view_return.py).
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{PLATFORM}/customers/7/"', response.content.decode())
         view.assert_not_called()
         self.assertNotIn("customer_view", request.session)
 
@@ -274,8 +276,9 @@ class LeaveAndBannerTests(TestCase):
         with patch("apps.users.customer_view_views.api_client.end_session") as end:
             response = self.client.post(reverse("users:customer_view_leave"))
         end.assert_called_once_with(42, SESSION_ID)
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response["Location"], "/login/")
+        # Back to the customer's Platform page, by a page rather than a redirect (CSP form-action 'self').
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{PLATFORM}/customers/7/"', response.content.decode())
         self.assertIn("cache", response["Clear-Site-Data"])
         self.assertNotIn("user_id", self.client.session)
 

@@ -10,11 +10,13 @@ import logging
 import re
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.db import DatabaseError, InterfaceError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import rotate_token
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.translation import get_language
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
@@ -33,6 +35,8 @@ logger = logging.getLogger(__name__)
 CODE = re.compile(r"[A-Za-z0-9_-]{43}")
 MAX_REDEEM_BYTES = 2048
 REDEEM_LIMIT = 10  # per client address per minute, as on Platform
+# Platform's staff page for one customer (Platform pins the same path in its customer-view tests).
+PLATFORM_CUSTOMER_PATH = "/customers/{id}/"
 
 
 def _answer(request: HttpRequest, status: int, error: str, message: str) -> HttpResponse:
@@ -64,6 +68,43 @@ def _unavailable(request: HttpRequest) -> HttpResponse:
         _("The customer view could not be opened just now. Try again shortly."),
     )
     response["Retry-After"] = "5"
+    return response
+
+
+def platform_return_url(session: SessionBase) -> str | None:
+    """Where a customer view's tab goes when the view ends: the customer's page on Platform.
+
+    None for any session that is not a customer view. Built from settings and a positive integer only,
+    so nothing a request carries can choose where the browser goes.
+    """
+    if not session.get("customer_view"):
+        return None
+    origin = str(settings.PLATFORM_PUBLIC_ORIGIN).rstrip("/")
+    customer_id = session.get("customer_view_customer_id")
+    if type(customer_id) is int and customer_id > 0:
+        return origin + PLATFORM_CUSTOMER_PATH.format(id=customer_id)
+    logger.warning("⚠️ [CustomerView] No usable customer id in the view's session; returning to Platform's home page")
+    return origin + "/"
+
+
+def ended(request: HttpRequest, platform_url: str) -> HttpResponse:
+    """A page that takes the tab to Platform by script, with a link in case scripts do not run.
+
+    Not a redirect: the portal's CSP `form-action 'self'` covers the redirect after a form POST, and
+    Chromium blocks a cross-origin one, stranding the tab after the view has already ended.
+    """
+    # Rendered without the request (render(None, ...)): the session is flushed, and no context processor
+    # may reach the cache or Platform on the way out.
+    page = render(
+        None, "users/customer_view_ended.html", {"platform_url": platform_url, "language_code": get_language()}
+    )
+    page["Cache-Control"] = "no-store"
+    return clear_cache(page)
+
+
+def clear_cache(response: HttpResponse) -> HttpResponse:
+    """Every way out of a customer view tells the browser to drop the customer's pages."""
+    response["Clear-Site-Data"] = '"cache"'
     return response
 
 
@@ -156,13 +197,10 @@ def redeem(request: HttpRequest) -> HttpResponse:
 @require_POST
 def leave(request: HttpRequest) -> HttpResponse:
     """Leave the customer view: end the scoped session on Platform and forget it here."""
-    if not request.session.get("customer_view"):
+    platform_url = platform_return_url(request.session)
+    if platform_url is None:
         return _refused(request)
     _end_current_platform_session(request)
     request.session.flush()
     rotate_token(request)
-    left = redirect("/login/")
-    left.status_code = 303
-    left["Cache-Control"] = "no-store"
-    left["Clear-Site-Data"] = '"cache"'
-    return left
+    return ended(request, platform_url)

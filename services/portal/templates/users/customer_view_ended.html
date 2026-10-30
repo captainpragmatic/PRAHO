@@ -1,0 +1,19 @@
+{% load i18n static %}<!DOCTYPE html>
+{# Standalone (ADR-0065): drawn after the session is flushed, so it reads no session, user or portal chrome. #}
+{# Django marks a translated template literal safe, so catalog text is escaped where it is shown. #}
+<html lang="{{ language_code|default:'en' }}" class="h-full bg-slate-900">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% trans 'Customer view ended' as t1 %}{{ t1|force_escape }}</title>
+  <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
+</head>
+<body class="h-full bg-slate-900 text-slate-100">
+  <main class="max-w-xl mx-auto px-4 py-16 text-center" data-platform-url="{{ platform_url }}">
+    <h1 class="text-xl font-semibold text-white">{% trans 'Customer view ended' as t2 %}{{ t2|force_escape }}</h1>
+    <p class="mt-3 text-slate-300">{% trans 'Taking you back to the staff console.' as t3 %}{{ t3|force_escape }}</p>
+    <a href="{{ platform_url }}" class="inline-block mt-6 text-primary-400 hover:text-primary-300">{% trans 'Back to the staff console' as t4 %}{{ t4|force_escape }} →</a>
+  </main>
+  <script src="{% static 'js/customer-view-ended.js' %}"></script>
+</body>
+</html>
