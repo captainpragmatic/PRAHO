@@ -32,9 +32,13 @@ from apps.infrastructure.audit_service import InfrastructureAuditContext, Infras
 from apps.infrastructure.cloud_gateway import get_cloud_gateway
 from apps.infrastructure.deployment_lifecycle import (
     OperationOwnershipLostError,
+    attempt_resource_names,
     claim_operation,
+    legacy_resource_names,
     owned_transition,
     provider_token_fingerprint,
+    recorded_provider_resources,
+    unique_dns_owner_tag,
 )
 from apps.infrastructure.dns_gateway import get_dns_gateway
 from apps.infrastructure.permissions import can_destroy_nodes
@@ -163,10 +167,17 @@ def _operator(email: str) -> Any:
 
 def _search_provider(deployment: NodeDeployment, api_token: str, ssh_manager: Any) -> list[str]:
     """Look for anything the deployment may own in the token's project; raise _RefusalError on any find or error."""
-    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
-
     gateway = get_cloud_gateway(deployment.provider.provider_type, api_token)
     corr, host = deployment.correlation_id, deployment.hostname
+    recorded = recorded_provider_resources(deployment)
+    # Every name the deployment's resources may carry: this attempt's, the legacy ones, and any an
+    # earlier attempt recorded (a re-deploy rotates the attempt).
+    key_names = {attempt_resource_names(host, corr)[0], legacy_resource_names(host)[0], *recorded["ssh_key_names"]}
+    firewall_names = {
+        attempt_resource_names(host, corr)[1],
+        legacy_resource_names(host)[1],
+        *recorded["firewall_names"],
+    }
     lookups: list[tuple[str, Any]] = [
         (
             f"servers labelled praho-deployment={corr}",
@@ -174,13 +185,13 @@ def _search_provider(deployment: NodeDeployment, api_token: str, ssh_manager: An
         ),
         (f"servers named {host}", lambda: gateway.find_servers_by_name(host)),
         (f"firewalls labelled deployment-id={corr}", lambda: gateway.find_firewalls_by_label(f"deployment-id={corr}")),
-        (f"firewalls named praho-fw-{host}", lambda: gateway.find_firewalls_by_name(f"praho-fw-{host}")),
         (
             f"SSH keys labelled praho-deployment={corr}",
             lambda: gateway.find_ssh_keys_by_label(f"praho-deployment={corr}"),
         ),
-        (f"SSH keys named praho-{host}", lambda: gateway.find_ssh_keys_by_name(f"praho-{host}")),
     ]
+    lookups += [(f"firewalls named {n}", lambda n=n: gateway.find_firewalls_by_name(n)) for n in sorted(firewall_names)]
+    lookups += [(f"SSH keys named {n}", lambda n=n: gateway.find_ssh_keys_by_name(n)) for n in sorted(key_names)]
     if deployment.ssh_key_credential_id:
         key = ssh_manager.get_deployment_key(deployment)
         if key.is_err():
@@ -197,13 +208,7 @@ def _search_provider(deployment: NodeDeployment, api_token: str, ssh_manager: An
         if found.unwrap():
             raise _RefusalError(f"Found {label}: {found.unwrap()}")
         searched.append(label)
-    recorded = NodeDeploymentLog.objects.filter(
-        deployment=deployment, message__startswith="Firewall resource recorded:"
-    )
-    for details in recorded.values_list("details", flat=True):
-        firewall_id = str(details.get("firewall_id", "")) if isinstance(details, dict) else ""
-        if not firewall_id:
-            continue
+    for firewall_id in recorded["firewall_ids"]:
         exists = gateway.firewall_exists(firewall_id)
         if exists.is_err() or exists.unwrap():
             raise _RefusalError(f"Recorded firewall {firewall_id} still exists or could not be checked")
@@ -227,7 +232,7 @@ def _prove_dns_absent(deployment: NodeDeployment) -> list[str]:
     except ValueError as exc:
         raise _RefusalError(f"DNS provider unavailable: {exc}") from exc
     names = {str(e["name"]) for e in entries} | {deployment.fqdn}
-    own_tag = f"praho:node-deploy:{deployment.correlation_id}"
+    own_tag = unique_dns_owner_tag(deployment.correlation_id)
     searched = []
     for zone in sorted(zones):
         if gateway.get_zone_name(zone).is_err():

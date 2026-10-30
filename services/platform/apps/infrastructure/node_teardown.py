@@ -30,6 +30,7 @@ from apps.infrastructure.deployment_lifecycle import (
     owned_transition,
     owned_update,
     provider_token_fingerprint,
+    recorded_provider_resources,
 )
 
 if TYPE_CHECKING:
@@ -245,12 +246,7 @@ class NodeTeardown:
 
     def _recorded_firewall_ids(self) -> list[str]:
         """Firewall ids recorded in the deployment log before firewalls were labelled for discovery."""
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred import
-
-        recorded = NodeDeploymentLog.objects.filter(
-            deployment=self.deployment, message__startswith="Firewall resource recorded:"
-        ).values_list("details", flat=True)
-        return [str(d["firewall_id"]) for d in recorded if isinstance(d, dict) and d.get("firewall_id")]
+        return recorded_provider_resources(self.deployment)["firewall_ids"]
 
     def _delete_firewalls(self, gateway: CloudProviderGateway) -> Result[bool, str]:
         found = gateway.find_firewalls_by_label(f"deployment-id={self.deployment.correlation_id}")

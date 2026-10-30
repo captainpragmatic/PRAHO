@@ -42,6 +42,45 @@ class OperationLease:
     kind: str
 
 
+# The deployment-log message that records a firewall the deploy created (and the key it uploaded).
+FIREWALL_RECORD_PREFIX = "Firewall resource recorded:"
+
+
+def attempt_resource_names(hostname: str, correlation_id: Any) -> tuple[str, str]:
+    """The SSH key and firewall names a deploy attempt uses: (key, firewall)."""
+    attempt = str(correlation_id)[:8]
+    return f"praho-{hostname}-{attempt}", f"praho-fw-{hostname}-{attempt}"
+
+
+def legacy_resource_names(hostname: str) -> tuple[str, str]:
+    """The names used before resources were named per attempt: (key, firewall)."""
+    return f"praho-{hostname}", f"praho-fw-{hostname}"
+
+
+def unique_dns_owner_tag(correlation_id: Any) -> str:
+    """The DNS owner tag unique to one deploy attempt, across PRAHO databases sharing a zone."""
+    return f"praho:node-deploy:{correlation_id}"
+
+
+def recorded_provider_resources(deployment: NodeDeployment) -> dict[str, list[str]]:
+    """Firewall ids, firewall names and SSH key names the deployment log recorded, for every attempt."""
+    from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred: avoids circular import
+
+    found: dict[str, list[str]] = {"firewall_ids": [], "firewall_names": [], "ssh_key_names": []}
+    entries = NodeDeploymentLog.objects.filter(deployment=deployment, message__startswith=FIREWALL_RECORD_PREFIX)
+    for details in entries.values_list("details", flat=True):
+        if not isinstance(details, dict):
+            continue
+        for key, field_name in (
+            ("firewall_ids", "firewall_id"),
+            ("firewall_names", "firewall_name"),
+            ("ssh_key_names", "ssh_key_name"),
+        ):
+            if details.get(field_name):
+                found[key].append(str(details[field_name]))
+    return found
+
+
 def provider_token_fingerprint(api_token: str) -> str:
     """A one-way identifier for the provider token that created a deployment's resources."""
     return hashlib.sha256(api_token.encode()).hexdigest()[:32]

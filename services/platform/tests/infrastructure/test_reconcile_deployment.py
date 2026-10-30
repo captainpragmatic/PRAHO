@@ -374,3 +374,30 @@ class CommandTests(TestCase):
         request = reconcile.call_args.args[0]
         self.assertEqual(request.operator_email, h.operator.email)
         self.assertTrue(request.invoker["os_user"])
+
+
+class PerAttemptNameTests(TestCase):
+    def test_a_per_attempt_firewall_whose_label_was_removed_is_found_by_name(self) -> None:
+        h = Harness()
+        deployment = legacy_row()
+        attempt_name = f"praho-fw-{deployment.hostname}-{str(deployment.correlation_id)[:8]}"
+        h.cloud.find_firewalls_by_name.side_effect = lambda name: Ok(["9"]) if name == attempt_name else Ok([])
+
+        self.assertTrue(h.run(deployment, attest_no_resources=True).is_err())
+        unchanged(self, deployment)
+
+    def test_names_recorded_by_an_earlier_attempt_are_searched(self) -> None:
+        h = Harness()
+        deployment = legacy_row()
+        NodeDeploymentLog.objects.create(
+            deployment=deployment, level="INFO", phase="provision_server",
+            message="Firewall resource recorded: praho-fw-old-attempt",
+            details={"firewall_id": "", "firewall_name": "praho-fw-old-attempt", "ssh_key_name": "praho-old-attempt"},
+        )
+
+        self.assertTrue(h.run(deployment, attest_no_resources=True).is_ok())
+
+        searched_keys = {call.args[0] for call in h.cloud.find_ssh_keys_by_name.call_args_list}
+        searched_firewalls = {call.args[0] for call in h.cloud.find_firewalls_by_name.call_args_list}
+        self.assertIn("praho-old-attempt", searched_keys)
+        self.assertIn("praho-fw-old-attempt", searched_firewalls)

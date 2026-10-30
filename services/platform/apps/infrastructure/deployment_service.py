@@ -38,13 +38,17 @@ from apps.infrastructure.cloud_gateway import (
     node_firewall_rules,
 )
 from apps.infrastructure.deployment_lifecycle import (
+    FIREWALL_RECORD_PREFIX,
     OperationLease,
     OperationOwnershipLostError,
+    attempt_resource_names,
     claim_operation,
     owned_transition,
     owned_update,
     provider_token_fingerprint,
+    recorded_provider_resources,
     still_owns,
+    unique_dns_owner_tag,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, ExpectedDnsRecord, get_dns_gateway
@@ -550,8 +554,7 @@ class NodeDeploymentService:
                 # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
                 # Named per attempt: a re-deploy keeps the hostname, and a key or firewall left under an
                 # older attempt's name (or an unlabelled legacy key) can never collide with this one.
-                attempt = str(deployment.correlation_id)[:8]
-                ssh_key_name = f"praho-{deployment.hostname}-{attempt}"
+                ssh_key_name, firewall_name = attempt_resource_names(deployment.hostname, deployment.correlation_id)
                 key_upload_result = gateway.upload_owned_ssh_key(
                     ssh_key_name,
                     ssh_public_key,
@@ -576,7 +579,6 @@ class NodeDeploymentService:
                 log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
 
                 # Create firewall before server — attach during provisioning
-                firewall_name = f"praho-fw-{deployment.hostname}-{attempt}"
                 log_deployment("info", f"Creating firewall '{firewall_name}'")
                 firewall_result = gateway.create_firewall(
                     name=firewall_name,
@@ -613,9 +615,9 @@ class NodeDeploymentService:
                 NodeDeploymentLog.objects.create(
                     deployment=deployment,
                     level="INFO",
-                    message=f"Firewall resource recorded: {firewall_name}",
+                    message=f"{FIREWALL_RECORD_PREFIX} {firewall_name}",
                     phase="provision_server",
-                    details={"firewall_id": firewall_id, "firewall_name": firewall_name},
+                    details={"firewall_id": firewall_id, "firewall_name": firewall_name, "ssh_key_name": ssh_key_name},
                 )
 
                 # Create the server via gateway
@@ -1088,7 +1090,6 @@ class NodeDeploymentService:
         """Why this row cannot be re-deployed with this size, or "" when it can."""
         from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             DriftRemediationRequest,
-            NodeDeploymentLog,
         )
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
 
@@ -1100,11 +1101,9 @@ class NodeDeploymentService:
             return "This deployment had a server; re-deploying it needs costs that track separate server lifetimes"
         if deployment.external_node_id or deployment.dns_record_ids or deployment.virtualmin_server_id:
             return "The deployment still holds a server id, DNS records or a registered node; destroy it first"
-        reached_provider = (
-            bool(deployment.provider_token_fingerprint)
-            or NodeDeploymentLog.objects.filter(
-                deployment=deployment, message__startswith="Firewall resource recorded:"
-            ).exists()
+        recorded = recorded_provider_resources(deployment)
+        reached_provider = bool(
+            deployment.provider_token_fingerprint or recorded["firewall_names"] or recorded["firewall_ids"]
         )
         if deployment.status == "failed" and reached_provider:
             return "This failed deployment reached the provider; destroy it before re-deploying"
@@ -1923,7 +1922,7 @@ class NodeDeploymentService:
 
     @staticmethod
     def _unique_dns_owner_tag(deployment: NodeDeployment) -> str:
-        return f"praho:node-deploy:{deployment.correlation_id}"
+        return unique_dns_owner_tag(deployment.correlation_id)
 
     def _resolve_dns_config(
         self, deployment: NodeDeployment, token_override: str | None
