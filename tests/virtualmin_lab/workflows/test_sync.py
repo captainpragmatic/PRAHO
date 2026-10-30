@@ -1,6 +1,8 @@
 """Workflow: PRAHO's views of a node converge on the node's truth, and the Service's truth converges on the node.
 
 - The private collector measures files/DB independently and publishes through the hourly node task.
+  Installation runs virtualmin_usage.yml (including virtualmin_usage_tasks.yml); the real worker
+  reads its snapshot through virtualmin_usage_read.yml.
 - The server health and statistics tasks stamp the server from what the node answers.
 - The divergence backstop finds a Service and an account that disagree (a lost reconcile enqueue) and the
   reconciler it queues repairs the node. The backstop looks at PRAHO's rows only: a domain someone changes on
@@ -12,18 +14,16 @@ The lab has no filesystem quotas. Allocated bytes and Apache response bytes do n
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Iterator
 from datetime import timedelta
-from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.infrastructure.ansible_service import AnsibleService
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_gateway import listing_enabled
 from apps.provisioning.virtualmin_models import VirtualminAccount
@@ -61,15 +61,15 @@ def account(bench: Bench) -> Iterator[VirtualminAccount]:
 def test_usage_measures_independent_file_database_growth_and_real_http(bench: Bench, account: VirtualminAccount) -> None:
     lab = bench.lab_of(account)
     data = DomainData(lab, account)
-    assets = Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files"
-    lab.exec("install", "-d", "-m", "0700", "/var/lib/praho/usage", "/var/log/praho")
-    lab.exec("install", "-d", "-m", "0755", "/usr/local/libexec")
-    for name in ("praho_usage.py", "praho-usage-metadata.pl", "praho-usage-hook"):
-        target = f"{lab.node.container}:/usr/local/libexec/{name}"
-        subprocess.run(["docker", "cp", str(assets / name), target], check=True, capture_output=True, timeout=60)  # noqa: S603, S607  # Fixed lab container and repository asset.
-        lab.exec("chmod", "0700", f"/usr/local/libexec/{name}")
-    lab.exec("/usr/bin/python3", "/usr/local/libexec/praho_usage.py", "init")
-    lab.exec("perl", "/usr/local/libexec/praho-usage-metadata.pl", "reconcile")
+    installed = AnsibleService().run_playbook(
+        account.server.node_deployment, "virtualmin_usage.yml", timeout_seconds=600
+    )
+    assert installed.is_ok(), installed.unwrap_err()
+    outcome = installed.unwrap()
+    assert outcome.success, outcome.stdout[-4000:] + outcome.stderr[-1000:]
+    for timer in ("praho-usage.timer", "praho-usage-retention.timer"):
+        assert lab.exec("systemctl", "is-enabled", timer).strip() == "enabled"
+        assert lab.exec("systemctl", "is-active", timer).strip() == "active"
 
     # Creation must inherit the literal account ID before any collector/repair
     # runs. This exercises Virtualmin's real ${ID} template substitution.
