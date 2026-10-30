@@ -29,7 +29,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -125,24 +125,51 @@ NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
 NIGHTLY_FULL_JOB = "nightly-full"
 
 
+NIGHTLY_ACTIVITY_JOB = "check-activity"
+# A skipped full lab is a quiet night only when the selection itself ran clean or did not run (a drift run).
+_QUIET_SELECTION = frozenset({"success", "skipped"})
+_MAX_PAGES = 20  # 600 runs: months of nightly and drift runs
+
+
+def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, Any]]:
+    """Completed nightly lab runs on master, newest first, page by page until the history ends."""
+    for page in range(1, _MAX_PAGES + 1):
+        listed = gh(
+            f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs"
+            f"?branch=master&status=completed&per_page=30&page={page}"
+        )["workflow_runs"]
+        if not listed:
+            return
+        yield from sorted(listed, key=lambda run: int(run["id"]), reverse=True)
+
+
 def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
     """The latest completed full Virtualmin lab run on master, which must have passed.
 
-    A run whose full job was skipped (no change that day) is passed over: the last run that ran it
-    decides. A run on any other branch never counts.
+    A run that skipped the full lab is passed over only when its selection ran clean (no change that
+    day) or did not run (a drift run). A failed or cancelled selection is an interrupted night and
+    refuses. A run on any other branch never counts.
     """
-    runs = gh(f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs?branch=master&status=completed&per_page=30")
-    for run in sorted(runs["workflow_runs"], key=lambda run: int(run["id"]), reverse=True):
+    for run in _master_lab_runs(repo, gh):
         if run.get("head_branch") != "master":
             continue
-        jobs = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
-        full = [job for job in jobs if job["name"] == NIGHTLY_FULL_JOB]
-        if not full or full[0].get("conclusion") == "skipped":
-            continue
-        if full[0].get("conclusion") != "success":
+        jobs = {
+            job["name"]: job.get("conclusion")
+            for job in gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+        }
+        full = jobs.get(NIGHTLY_FULL_JOB)
+        if full is None or full == "skipped":
+            selection = jobs.get(NIGHTLY_ACTIVITY_JOB, "skipped")
+            if selection in _QUIET_SELECTION:
+                continue
             raise VerificationError(
-                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: "
-                f"{full[0].get('conclusion')}. Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite full, first."
+                f"The nightly lab on master (run {run['id']}) could not decide whether to run the full "
+                f"Virtualmin lab: {selection}. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+            )
+        if full != "success":
+            raise VerificationError(
+                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: {full}. "
+                f"Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite full, first."
             )
         return f"the latest full Virtualmin lab on master passed (run {run['id']})"
     raise VerificationError(
